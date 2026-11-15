@@ -26,7 +26,6 @@ function setup(options: { on?: boolean; every?: number } = {}) {
         box.calls.push(`update ${plugin} ${tools.join(',')}`);
         return { reports: tools.map(tool => report(plugin, tool)) };
       },
-      parts: async (_source, _market, plugin, tool, mode) => { box.calls.push(`parts ${mode} ${plugin} ${tool}`); return { reports: [{ ...report(plugin, tool), outcome: 'installed', partsUpdated: true, partsRun: 'r1', message: 'Parts updated.' }] }; },
       items: async (_source, _market, plugin, tools) => { box.calls.push(`items ${plugin} ${tools.join(',')}`); return { reports: tools.map(tool => report(plugin, tool)) }; },
     },
     load: async () => box.saved, save: async records => { box.saved = structuredClone(records); },
@@ -37,18 +36,17 @@ function setup(options: { on?: boolean; every?: number } = {}) {
 
 test('A check runs what Update all would choose and keeps a plain note of it: the plugin, the version and the tools', async () => {
   const { box, updates } = setup();
-  box.due = [due('document-tools', 'claude-cli'), due('document-tools', 'codex-cli'), due('issue-tracker', 'pi-cli', 'install-parts')];
+  box.due = [due('document-tools', 'claude-cli'), due('document-tools', 'codex-cli')];
   box.unread = ['private-market'];
   const view = await updates.check();
-  assert.deepEqual(box.calls, ['update document-tools claude-cli,codex-cli', 'parts install issue-tracker pi-cli']);
+  assert.deepEqual(box.calls, ['update document-tools claude-cli,codex-cli']);
   assert.deepEqual(view.updated.map(line => [line.plugin, line.text, line.at]), [
-    ['document-tools', 'updated to 2.0.0 in Claude Code and Codex', 1_000_000],
-    ['issue-tracker', 'parts updated in Pi', 1_000_000]]);
-  assert.deepEqual([view.failed, view.checked, view.checking], [[], { at: 1_000_000, updated: 3, failed: 0, unread: ['private-market'] }, false]);
+    ['document-tools', 'updated to 2.0.0 in Claude Code and Codex', 1_000_000]]);
+  assert.deepEqual([view.failed, view.checked, view.checking], [[], { at: 1_000_000, updated: 2, failed: 0, unread: ['private-market'] }, false]);
   assert.equal(box.said.some(said => said.news), true, 'the page and the menu bar hear there is news');
   assert.equal(box.said[0]!.view.checking, true, 'and first that a check is under way');
-  assert.match(box.logs.join('\n'), /plugin updates: checked \(couldn’t read private-market\): 3 due/);
-  assert.deepEqual(box.record()?.updated.length, 2, 'the note is saved, so it is still there after a restart');
+  assert.match(box.logs.join('\n'), /plugin updates: checked \(couldn’t read private-market\): 2 due/);
+  assert.deepEqual(box.record()?.updated.length, 1, 'the note is saved, so it is still there after a restart');
 });
 
 test('The schedule checks when the last check is long enough ago, and not at all while the switch is off', async () => {
@@ -164,19 +162,19 @@ test('A home where nothing may be changed is checked and left alone, saying why;
   assert.equal((await updates.check()).checked, undefined, 'no home open: nothing to check');
 });
 
-test('A part left alone by a parts update is in the note as a line to read; a second check asked for meanwhile waits for the first', async () => {
+test('A note on an update (a server it couldn’t turn off again) is in the note as a line to read; a second check asked for meanwhile waits for the first', async () => {
   const { box, updates } = setup();
-  box.due = [due('issue-tracker', 'pi-cli', 'install-parts')];
+  box.due = [due('issue-tracker', 'claude-cli')];
   const first = updates.check(true), second = updates.check(true);
   assert.equal(first, second);
   await first;
-  assert.deepEqual(box.calls, ['parts install issue-tracker pi-cli']);
-  // The parts engine's answer when a part was edited since it went in.
+  assert.deepEqual(box.calls, ['update issue-tracker claude-cli']);
+  // The update's answer when it turned on a server that was off there and couldn't turn it off again (plugins.ts).
   const again = setup();
-  again.box.due = [due('issue-tracker', 'pi-cli', 'install-parts')];
-  again.box.answers.set('issue-tracker pi-cli', { notes: ['The skill triage was edited since it went in, so it was left as it is.'] });
+  again.box.due = [due('issue-tracker', 'claude-cli')];
+  again.box.answers.set('issue-tracker claude-cli', { notes: ['Its MCP server issues was off in Claude Code, and the update turned it on.'] });
   const view = await again.updates.check();
-  assert.deepEqual(view.updated.map(line => [line.text, line.warn]), [['only some parts updated in Pi', undefined], ['Pi: The skill triage was edited since it went in, so it was left as it is.', true]]);
+  assert.deepEqual(view.updated.map(line => [line.text, line.warn]), [['updated to 2.0.0 in Claude Code', undefined], ['Claude Code: Its MCP server issues was off in Claude Code, and the update turned it on.', true]]);
   assert.deepEqual(view.failed, []);
 });
 
@@ -309,16 +307,16 @@ test('A failure whose marketplace was taken off the list is settled at the next 
 });
 
 /** An install a plugin's table owes a tool new here (pluginrecord.ts `background`). */
-const owed = (plugin: string, tool: HarnessId, action: DueUpdate['action'] = 'install'): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action, newHere: true });
+const owed = (plugin: string, tool: HarnessId): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action: 'install', newHere: true });
 
 test('A tool new here gets each install it is owed at the check, said with why, and is new for that one check: an install that failed is said as not tried again by itself', async () => {
   const { box, updates } = setup();
   box.newTools = ['codex-cli', 'pi-cli'];
-  box.due = [owed('issue-tracker', 'codex-cli'), owed('spark', 'codex-cli'), owed('issue-tracker', 'pi-cli', 'install-parts')];
+  box.due = [owed('issue-tracker', 'codex-cli'), owed('spark', 'codex-cli')];
   box.answers.set('spark codex-cli', { outcome: 'failed', changed: false, message: 'Codex is not signed in.' });
   const view = await updates.check();
-  assert.deepEqual(box.calls, ['install issue-tracker codex-cli', 'parts install issue-tracker pi-cli', 'install spark codex-cli']);
-  assert.deepEqual(view.updated.map(line => [line.plugin, line.text]), [['issue-tracker', 'installed in Codex; parts updated in Pi (new here; the plugin is on)']]);
+  assert.deepEqual(box.calls, ['install issue-tracker codex-cli', 'install spark codex-cli']);
+  assert.deepEqual(view.updated.map(line => [line.plugin, line.text]), [['issue-tracker', 'installed in Codex (new here; the plugin is on)']]);
   assert.deepEqual(box.joined, [['codex-cli', 'pi-cli']], 'both join, whatever each install came to');
   assert.deepEqual(view.failed.map(failure => [failure.plugin, failure.text, failure.again]), [['spark', 'Codex is not signed in. It isn’t tried again by itself: Install there on the plugin’s page puts it in.', undefined]]);
 });

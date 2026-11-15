@@ -4,7 +4,6 @@
 import { installedContents } from './catalogdetail.ts';
 import { installedCopies, installedPlugins, registeredMarketplaces, type PluginContext } from './plugins.ts';
 import { samePart } from './pluginstatus.ts';
-import { readParts } from './share.ts';
 import { takesPlugins } from './presence.ts';
 import type { HarnessId, InstalledPlugin, PartKind, PluginItem } from './types.ts';
 
@@ -18,12 +17,10 @@ export const UNREADABLE = 'Its files couldn’t be read.';
  */
 export async function readPluginItems(context: PluginContext, tools: HarnessId[]): Promise<InstalledPlugin[]> {
   const read = { ...context, reads: context.reads ?? new Map() };
-  // A marketplace whose plugins' parts are in some tool stays listed on the Plugins page, added in a tool or not.
-  const parts = await readParts(context.home);
   const perTool = await Promise.all(tools.filter(takesPlugins).map(async tool => {
     const [plugins, markets] = await Promise.all([installedCopies(read, tool).catch(() => []), registeredMarketplaces(read, tool).catch(() => [])]);
     return plugins.map(({ plugin, marketplace, state, off, contents, serversOff, agentsOff, serversHeld }): InstalledPlugin => {
-      const source = markets.find(market => market.name === marketplace)?.source ?? parts.find(install => install.marketName === marketplace)?.source;
+      const source = markets.find(market => market.name === marketplace)?.source;
       const base: InstalledPlugin = { tool, plugin, marketName: marketplace, ...(off ? { off } : {}), items: [], listed: !!source, ...(source ? { source } : {}) };
       if (state.state !== 'installed') return { ...base, problem: state.state === 'not-known' ? state.reason : UNREADABLE };
       if (!contents) return { ...base, problem: UNREADABLE };

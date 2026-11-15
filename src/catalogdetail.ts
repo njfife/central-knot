@@ -272,7 +272,7 @@ export async function installedContents(tool: HarnessId, path: string, entry: Re
   return pluginContents(path, entry, path, { codex: tool === 'codex-cli' ? await codexManifest(path) : undefined, skillsListReplaces: tool === 'copilot-cli', atMarketplaceRoot });
 }
 
-/** The files behind a plugin's skills, agents and MCP servers, for installing them as separate items (plugin parts). */
+/** The files behind a plugin's skills, agents and MCP servers, read as its items in Pi and OpenCode (pluginlibrary.ts readPlugin). */
 export interface PluginFiles {
   /** The plugin's folder: a server's relative paths are checked against it. */
   folder: string;

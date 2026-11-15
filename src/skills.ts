@@ -209,13 +209,13 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
 }
 
 /**
- * The plugin a tool has this skill through, if it does: a plugin skill of that name is this one when Central Knot installed it
- * elsewhere as that plugin's part, or when its SKILL.md is the skill's; another one that only shares the name is not.
+ * The plugin a tool has this skill through, if it does: a plugin skill of that name is this one when its SKILL.md is the
+ * skill's; another one that only shares the name is not.
  */
 function pluginFor(disk: SkillDisk, key: string, tool: HarnessId): ThroughPlugin | undefined {
   const given = disk.through.get(tool)?.get(key), shape = disk.shapes.get(key);
-  if (!given || !(given.asParts || (given.text !== undefined && shape && comparableText(given.text) === comparableText(shape.content)))) return undefined;
-  const { asParts: _asParts, text: _text, ...plugin } = given;
+  if (!given || given.text === undefined || !shape || comparableText(given.text) !== comparableText(shape.content)) return undefined;
+  const { text: _text, ...plugin } = given;
   return plugin;
 }
 
@@ -451,12 +451,6 @@ export async function skillVersion(context: ShareContext, key: string, hash: str
   if (!version) return undefined;
   const tree = await readTree(version.directory);
   return { skill: await readFile(join(version.directory, 'SKILL.md'), 'utf8').catch(() => ''), files: [...tree.files.keys()].filter(name => name !== 'SKILL.md').sort() };
-}
-
-/** The skills that are On in the library, by key (plugin parts ask which skills Central Knot keeps in step: parts.ts). */
-export async function skillsOn(context: ShareContext): Promise<Map<string, LibraryItem>> {
-  const { library } = await skillKind.open(context);
-  return new Map(Object.values(library.items).filter(item => item.on && !item.deleted).map(item => [item.key, item]));
 }
 
 /**

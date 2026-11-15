@@ -10,7 +10,7 @@ import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { resultLines, pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, partsOf, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
+import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
@@ -72,8 +72,7 @@ function marketList(view: PluginsView, shown: MarketplaceView) {
   const item = (entry: MarketplaceView) => {
     const count = (test: (plugin: PluginView) => boolean) => entry.plugins.filter(test).length;
     const installedCount = count(plugin => view.tools.some(tool => installed(entry, plugin.name, tool)));
-    const partsCount = count(plugin => view.tools.some(tool => !!partsOf(entry, plugin.name, tool)));
-    const meta = entry.problem && !entry.plugins.length ? 'Couldn’t be read' : [entry.bundled ? 'Built in' : '', plural(entry.plugins.length, 'plugin'), installedCount ? `${installedCount} installed` : '', partsCount ? `${partsCount} with parts` : ''].filter(Boolean).join(' · ');
+    const meta = entry.problem && !entry.plugins.length ? 'Couldn’t be read' : [entry.bundled ? 'Built in' : '', plural(entry.plugins.length, 'plugin'), installedCount ? `${installedCount} installed` : ''].filter(Boolean).join(' · ');
     return h('li', {}, h(`button.market-item${entry === shown ? '.selected' : ''}`, { type: 'button', title: `${marketTitle(entry)} · ${meta}`, 'aria-current': entry === shown ? 'true' : undefined, onclick: () => browse({ source: entry.source, plugin: undefined, tab: 'plugins', find: '', category: undefined }) },
       h('span.market-item-name', {}, marketLogo(entry), marketTitle(entry)), h('span.market-item-meta', {}, meta)));
   };
@@ -97,10 +96,8 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
   const compareTo = versionToCompare(plugin, detail);
   const others = otherVersions(view, entry, plugin.name, compareTo);
   const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
-  const partsBehind = [...new Set(updates.filter(op => op.action === 'install-parts').map(op => names[op.tool]))];
   const differing = view.tools.filter(tool => copyStale(entry, plugin.name, tool, compareTo, detail)).map(tool => names[tool]);
-  const behind = [others.length ? otherVersionsLine(others) : '', differing.length ? `${andList(differing)} ${differing.length > 1 ? 'differ' : 'differs'} from the marketplace’s copy` : '',
-    partsBehind.length ? `parts out of date in ${andList(partsBehind)}` : ''].filter(Boolean).join(', ');
+  const behind = [others.length ? otherVersionsLine(others) : '', differing.length ? `${andList(differing)} ${differing.length > 1 ? 'differ' : 'differs'} from the marketplace’s copy` : ''].filter(Boolean).join(', ');
   const open = () => browse({ plugin: plugin.name });
   return h('div.ov-row.plugin-row', { role: 'row', 'data-plugin': plugin.name, onclick: open },
     h('div.ov-managed.plugin-row-switch', { role: 'cell' }, pluginSwitch(view, entry, plugin, `pswitch-${marketIndex}-${plugin.name}`)),
@@ -183,7 +180,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
 
 /**
  * Update all's tooltip, before the click: each plugin with the tools it updates in (counted past five), the plugins the filter
- * hides, those whose differing copy it replaces, that an update can't be undone, and that parts it brings up to date can.
+ * hides, those whose differing copy it replaces, and that an update can't be undone.
  */
 function updateAllTitle(view: PluginsView, entry: MarketplaceView, behind: PluginView[], shown: PluginView[]): string {
   const opsOf = (plugin: PluginView) => updateOps(view, entry, plugin);
@@ -195,19 +192,18 @@ function updateAllTitle(view: PluginsView, entry: MarketplaceView, behind: Plugi
     return view.tools.some(tool => copyStale(entry, plugin.name, tool, versionToCompare(plugin, detail), detail));
   };
   const replaced = behind.filter(differs).map(plugin => plugin.name);
-  const partsIn = tools(behind.flatMap(opsOf).filter(op => op.action === 'install-parts'));
   return [`Updates ${runs}.`, hidden ? `${plural(hidden, 'of them is', 'of them are')} hidden by the filter.` : '',
     replaced.length ? `It replaces the copies that differ from the marketplace’s: ${replaced.length > 5 ? plural(replaced.length, 'plugin') : andList(replaced)}.` : '',
-    'Runs now. An update can’t be undone.', partsIn ? `Undo puts back the parts it brings up to date in ${partsIn}.` : ''].filter(Boolean).join(' ');
+    'Runs now. An update can’t be undone.'].filter(Boolean).join(' ');
 }
 
 /** About a marketplace: every fact about it (who, where it comes from, when it was read), Remove, then its README. */
 function aboutTab(view: PluginsView, entry: MarketplaceView, marketIndex: number) {
   const read = market.readmes.get(entry.source);
-  // Parts are removed together from their plugin's page, so a marketplace stays listed while any of its plugins' parts are in a tool.
-  const holdsParts = Object.keys(entry.parts ?? {}).length > 0;
-  const remove = entry.origins.includes('central-knot') && !entry.bundled ? button({ variant: 'outline', size: 'small', icon: 'circle-minus', label: 'Remove from this list', name: `Remove ${marketTitle(entry)} from this list. Installed plugins stay installed.`, id: `forget-${marketIndex}`, disabled: !!app.busy || holdsParts, onclick: () => void forgetMarketplace(entry.source) }) : null;
-  if (remove) remove.title = holdsParts ? 'Some of its plugins’ parts are in your tools. Remove those parts first; they are removed together from each plugin’s page.' : 'Removes it from this list only. Installed plugins stay installed.';
+  // The move of a waiting plugin's parts reads this marketplace's copy (partsmigrate.ts), which Remove would delete.
+  const waits = !!entry.waiting?.length;
+  const remove = entry.origins.includes('central-knot') && !entry.bundled ? button({ variant: 'outline', size: 'small', icon: 'circle-minus', label: 'Remove from this list', name: `Remove ${marketTitle(entry)} from this list. Installed plugins stay installed.`, id: `forget-${marketIndex}`, disabled: !!app.busy || waits, onclick: () => void forgetMarketplace(entry.source) }) : null;
+  if (remove) remove.title = waits ? 'Parts of its plugins from an earlier version wait to be moved to the library, which reads this marketplace’s copy. It can be removed once they are moved.' : 'Removes it from this list only. Installed plugins stay installed.';
   const source = entry.page ? button({ variant: 'link', size: 'micro', label: entry.sourceLabel, id: `market-page-${marketIndex}`, onclick: () => openLink(entry.page!) }) : h('span', { title: entry.source }, entry.sourceLabel);
   return [
     // In narrow content the description is said here only (style.css), so the plugins get the height on their tab.
@@ -315,9 +311,9 @@ function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: numb
 function legend(view: PluginsView, entry: MarketplaceView) {
   const marks = new Set<ToolMark>(entry.plugins.flatMap(plugin => view.tools.map(tool => markOf(view, entry, plugin, tool, versionToCompare(plugin, shownDetail(pluginKey(entry.source, plugin.name)))).mark)));
   const keyed: [ToolMark[], string, string, Parameters<typeof icon>[0]][] = [
-    [['outdated', 'parts-changed'], 'Out of date: Update on its row', 'cell-differs.cell-on', 'refresh-cw'],
-    [['parts'], 'Its parts are in, as separate items', 'cell-synced.cell-on', 'blocks'],
+    [['outdated'], 'Out of date: Update on its row', 'cell-differs.cell-on', 'refresh-cw'],
     [['waits'], 'Goes in at the next automatic check', 'cell-waiting', 'clock'],
+    [['parts-waiting'], 'Waits to be moved: parts from an earlier version', 'cell-waiting', 'clock'],
     [['not-brought'], 'Not brought by itself: off in a tool’s own settings', 'cell-kept', 'circle-off'],
     [['missing'], 'Not in that tool: Install there, on its page', 'cell-differs', 'circle-alert'],
     [['stays'], 'Still there, though off or kept out', 'cell-differs.cell-on', 'circle-alert'],
@@ -343,7 +339,7 @@ function undoButton(): HTMLElement | null {
 
 /** What each kind of step an Undo runs does, in Undo's tooltip, before the tools it runs in. */
 const UNDO_WORDS: [PluginOp['action'][], string][] = [[['remove'], 'uninstalls it from'], [['install'], 'reinstalls it in'],
-  [['skill-on', 'skill-off', 'part-on', 'part-off', 'plugin-on', 'plugin-off'], 'turns each switch back as it was in'], [['undo-parts'], 'puts the parts back as they were in']];
+  [['skill-on', 'skill-off', 'part-on', 'part-off', 'plugin-on', 'plugin-off'], 'turns each switch back as it was in']];
 
 /** Undo's tooltip, from what it will run (`back`): what it reverses where, that an update in the same run stays, and what a switch's Undo can't put back. */
 function undoTitle(back: PluginOp[]): string {

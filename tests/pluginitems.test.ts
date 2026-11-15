@@ -7,7 +7,7 @@ import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
 import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords } from '../src/pluginrows.ts';
 import type { PluginContext } from '../src/plugins.ts';
 import { kindSource } from '../src/itemrow.ts';
-import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, PartsInstall } from '../src/types.ts';
+import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts } from '../src/types.ts';
 
 const put = async (path: string, text: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, text); };
 
@@ -104,26 +104,18 @@ test('a copy that can’t be read is said, and neither it nor broken records sto
 
 const fact = (key: string, copies: Partial<Record<HarnessId, true>>, extra: Partial<LibraryFacts> = {}): LibraryFacts => ({ key, name: key, description: '', copies: Object.fromEntries(Object.keys(copies).map(tool => [tool, { hash: 'h', directory: '', rootLabel: '', lines: 1, modified: '', summary: '', writable: true, folder: key }])), on: false, except: [], cannot: {}, edited: [], ...extra });
 const install = (tool: HarnessId, extra: Partial<InstalledPlugin> = {}): InstalledPlugin => ({ tool, plugin: 'issue-tracker', marketName: 'm', version: '2.0.0', listed: true, items: [{ kind: 'skill', name: 'triage', description: 'Sorts issues.' }, { kind: 'mcp', name: 'issues', description: '', runs: 'npx -y issues' }], ...extra });
-const piPart: PartsInstall = { source: '/m', marketName: 'm', plugin: 'issue-tracker', tool: 'pi-cli', at: '', digest: '', items: [{ kind: 'skill', name: 'triage', hash: '' }] };
 /** A home's view with these skills (as the Skills page's view gives them: types.ts LibraryFacts). */
-const homeOf = (skills: LibraryFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({
+const homeOf = (skills: LibraryFacts[], pluginItems: InstalledPlugin[]) => ({
   skills: { tools: [], items: skills, library: {} },
-  mcp: { items: [], library: {} }, agents: { items: [], library: {} }, parts, pluginItems }) as unknown as HomeView;
+  mcp: { items: [], library: {} }, agents: { items: [], library: {} }, pluginItems }) as unknown as HomeView;
 
-test('a plugin’s skill the person also has (its part in Pi, shown there as through the plugin elsewhere) is that one row, not a second', () => {
+test('a plugin’s skill the person also has (in Pi, shown there as through the plugin elsewhere) is that one row, not a second', () => {
   const through = { plugin: 'issue-tracker', marketplace: 'm' };
-  const home = homeOf([fact('triage', { 'pi-cli': true }, { plugin: { 'claude-cli': through, 'copilot-cli': through } })], [install('claude-cli'), install('copilot-cli')], [piPart]);
+  const home = homeOf([fact('triage', { 'pi-cli': true }, { plugin: { 'claude-cli': through, 'copilot-cli': through } })], [install('claude-cli'), install('copilot-cli')]);
   assert.deepEqual([pageRows(home, 'skills').rows.length, pluginItemCount(home, 'skills'), pluginItemCount(home, 'skills', 'claude-cli')], [0, 0, 0]);
   // That row is the tools' too: each one's page draws it and each one's count has it (one rule, inTool).
   const [triage] = kindSource(home, 'skills').facts;
   assert.deepEqual((['claude-cli', 'copilot-cli', 'pi-cli', 'codex-cli'] as const).map(tool => inTool(triage!, tool)), [true, true, true, false]);
-});
-
-test('a Codex plugin’s MCP server that is also the plugin’s part in Pi is that one row (no box shows Codex has it through the plugin)', () => {
-  const part: PartsInstall = { ...piPart, items: [{ kind: 'mcp', name: 'issues', hash: '' }] };
-  // Pi's entry is the plugin's part there: the servers page shows it as a row that can't be taken in (servers.ts), with no copy.
-  const home = { ...homeOf([], [install('codex-cli')], [part]), mcp: { items: [{ key: 'issues', name: 'issues', description: '', copies: {}, on: false, except: [], cannot: {}, edited: [], unseen: { 'pi-cli': 'the plugin’s' } }], library: {} } } as unknown as HomeView;
-  assert.deepEqual([pageRows(home, 'mcp').rows.length, pageRows(homeOf([], [install('codex-cli')]), 'mcp').rows.map(row => row.name)], [0, ['issues']]);
 });
 
 test('a personal skill that only shares the name stays its own row beside the plugin’s', () => {

@@ -12,11 +12,11 @@ import { componentsFrom } from './pluginoutcomes.ts';
 import { editTomlArray, readTomlTables, type TomlValue } from './textedit.ts';
 import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
 import { partOff, serverHeld, withPartSwitch } from './partswitch.ts';
-import { DIRECTORY, INLINE_SKILLS_CONFIG, hasPartSwitch, heldReason, noCli, offByBareName, noSwitchReason, samePart } from './pluginstatus.ts';
+import { DIRECTORY, INLINE_SKILLS_CONFIG, hasPartSwitch, heldReason, noCli, offByBareName, noSwitchReason } from './pluginstatus.ts';
 import { takesPlugins, type PluginTool } from './presence.ts';
 import type { LibraryItem } from './library.ts';
 import { readPluginRecord } from './pluginrecord.ts';
-import { errorCode, itemKey, readParts, writeFileChecked } from './share.ts';
+import { errorCode, itemKey, writeFileChecked } from './share.ts';
 import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 
 /** Names the tools accept (values.ts holds it, so the page can check a skill's name too). */
@@ -660,12 +660,12 @@ export async function pluginParts(context: PluginContext, tool: PluginTool): Pro
   return given;
 }
 
-/** What a tool has through a plugin, as the pages ask: `asParts`, the item is on record as that plugin's part in some tool; a skill comes with its SKILL.md. */
-export type GivenByPlugin = ThroughPlugin & { asParts: boolean; text?: string };
+/** What a tool has through a plugin, as the pages ask: a skill comes with its SKILL.md. */
+export type GivenByPlugin = ThroughPlugin & { text?: string };
 
 /**
  * Whether the library's item of a key (`items`, one kind's) is linked to the plugin a tool has it through (library.ts A PLUGIN):
- * the plugin's own item, which servers.ts and agents.ts count as a part on record is counted (`asParts`).
+ * the plugin's own item, the only one servers.ts and agents.ts count as through the plugin.
  */
 export async function linkedToPlugin(home: string, items: Record<string, Pick<LibraryItem, 'source' | 'deleted'>>) {
   const entries = (await readPluginRecord(home)).record?.plugins ?? [];
@@ -675,24 +675,22 @@ export async function linkedToPlugin(home: string, items: Record<string, Pick<Li
 
 /**
  * What each of `tools` has through its installed plugins, of one kind: by tool, then by the item's key on its page
- * (share.ts itemKey of its name). A name alone doesn't make two items one: the caller counts an item as the plugin's when it is
- * `asParts` (Central Knot installed it elsewhere as that plugin's part) or, for a skill, when its SKILL.md is the same.
- * A name two plugins hold goes by the one it is a part of, else the first listed. Read once where `home` carries `reads`
- * (one pass or one view), since the Skills, MCP servers and Agents pages all ask.
+ * (share.ts itemKey of its name). A name alone doesn't make two items one: the caller counts an item as the plugin's when the
+ * library's item is linked to that plugin (linkedToPlugin) or, for a skill, when its SKILL.md is the same. A name two plugins
+ * hold goes by the first listed. Read once where `home` carries `reads` (one pass or one view), since the Skills, MCP servers
+ * and Agents pages all ask.
  */
 export async function throughPlugins(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[], kind: PartKind): Promise<Map<HarnessId, Map<string, GivenByPlugin>>> {
   const context: PluginContext = { home: home.home, dataDir: '', binaries: {}, overrides: home.overrides, reads: home.reads ?? new Map() };
   const found = new Map<HarnessId, Map<string, GivenByPlugin>>();
-  const installs = await once(context, 'plugin-parts-record', () => readParts(home.home));
   for (const tool of tools.filter(takesPlugins)) {
     // Records that can't be read give nothing: the tool then shows what its own folders hold, as before.
     const parts = await once(context, `plugin-parts:${tool}`, () => pluginParts(context, tool).catch((): PluginPart[] => []));
     const byKey = new Map<string, GivenByPlugin>();
     for (const { kind: partKind, name, ...plugin } of parts) {
       if (partKind !== kind) continue;
-      const asParts = installs.some(install => install.plugin === plugin.plugin && (!plugin.source || sameSource(install.source, plugin.source)) && install.items.some(item => !item.removed && samePart(item, { kind, name })));
       const key = itemKey(name);
-      if (!byKey.has(key) || (asParts && !byKey.get(key)!.asParts)) byKey.set(key, { ...plugin, name, asParts });
+      if (!byKey.has(key)) byKey.set(key, { ...plugin, name });
     }
     if (byKey.size) found.set(tool, byKey);
   }
@@ -707,8 +705,7 @@ export type PluginHold = { why: string; anotherWay?: true };
  * it, with why: its record of its plugins can't be read now, the plugin is off or kept out of it, or it isn't installed there.
  * Each kind asks it before its own reasons (skills.ts, agents.ts and servers.ts readDisk), the can't-take answer through
  * Disk.refuses too, so a copy of that name the tool has stays as it is. Read once per pass or view; undefined for an item
- * linked to no recorded plugin, and in Pi and OpenCode, where a plugin's item is the library's like any other. For a part on
- * record (parts.ts) throughPlugins' `asParts` still answers, until those plugins move to the library.
+ * linked to no recorded plugin, and in Pi and OpenCode, where a plugin's item is the library's like any other.
  */
 export async function pluginHolds(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[]): Promise<(item: { source?: string }, tool: HarnessId) => PluginHold | undefined> {
   const entries = (await readPluginRecord(home.home)).record?.plugins ?? [];

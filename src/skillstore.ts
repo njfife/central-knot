@@ -4,7 +4,7 @@
 //   sync.v1.json                               sync.json as it was before the library (skillmigrate.ts made skills.json from it)
 //   items/skills/<folder>/versions/<hash>/     one version: the skill's whole folder, byte for byte (share.ts readTree)
 //   items/<folder>/<hash>/                     revisions kept before the library: read once by the migration, never deleted
-//                                              here (plugin parts still keep the skills they place there: parts.ts)
+//                                              (the move of plugin parts reads alpha 1's there: partsmigrate.ts keptOf)
 //
 // `<folder>` is the skill's key as share.ts storeFolder writes it, so a skill keyed `agents` or `mcp` never lands among the
 // agents' or MCP servers' files. Every version is named by its content, so a second never replaces a first. Versions are kept

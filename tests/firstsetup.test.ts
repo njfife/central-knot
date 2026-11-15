@@ -16,7 +16,8 @@ import { entriesNow, everythingAction, everythingDone, everythingPlan, everythin
 import { rowClicks } from '../src/libraryrow.ts';
 import { applyServers, restoreServer, serversView } from '../src/servers.ts';
 import { asksNow, latestDone, takenOutEarlier, waitingForChoice, walkPlace, wayBackIn, whatYesDoes, type Waiting } from '../src/setupcounts.ts';
-import { newRecord, partsRecordPath, readRecord, remember, saveRecord, syncGate, writeAccess, type ShareContext } from '../src/share.ts';
+import { newRecord, readRecord, remember, saveRecord, syncGate, writeAccess, type ShareContext } from '../src/share.ts';
+import { partsRecordPath } from '../src/partsmigrate.ts';
 import { applySkills, restoreSkill, skillsView, takeOver } from '../src/skills.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { inUse, liveItems } from '../src/profileplan.ts';

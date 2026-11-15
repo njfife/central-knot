@@ -11,24 +11,22 @@
 // kept out of the tool. Rows, first match:
 //   1. its record can't be read            → nothing: unknown.          Codex's config.toml half-written: Codex owes nothing.
 //   2. no entry for the plugin             → nothing (found, or never on). Installed by hand in Codex alone: its row offers Add.
-//   3. wanted, has it (whole, parts, items) → nothing.                   On, in Claude Code: in line there.
+//   3. wanted, has it (whole, items)       → nothing.                    On, in Claude Code: in line there.
 //   4. wanted, lacks it, its installer     → install.                    On, Codex lacks it: `codex plugin add`.
-//   5. wanted, lacks it, items or parts    → install-items, or           On, Pi lacks it: its items On there (pluginlibrary.ts);
-//      can go in                              install-parts.             a plugin with parts on record: its parts written there.
+//   5. wanted, lacks it, items can go in   → install-items.              On, Pi lacks it: its items On there (pluginlibrary.ts).
 //   6. wanted, lacks it, no way in         → held, with why.             On, Copilot CLI refuses the marketplace: said.
 //   7. not wanted, lacks it                → nothing.                    Off, nowhere: in line.
 //   8. not wanted, has it, can't take out  → held, with why.             Off, Claude Code's copy is the Anthropic Directory's.
 //   9. not wanted, has it whole            → uninstall.                  Kept out of Codex, Codex has it: `codex plugin remove`.
-//  10. not wanted, has its items or parts  → remove-items, or            Off, Pi has its items: they turn Off there. Parts on
-//                                             remove-parts.              record: they are taken out.
+//  10. not wanted, has its items           → remove-items.               Off, Pi has its items: they turn Off there.
 // An install (rows 4, 5) is also owed to the automatic updates where the tool is not on the home's `tools` (it is new here,
 // or managed again): `background`; but not while some tool has the plugin off by its own switch (`offElsewhere`: one turned
 // off somewhere is not wanted everywhere, read from the tools at each look). Nothing else is: an uninstall runs only at the
 // plugin's own click (its switch, a tool kept out, Take out there), and an install in a tool already on `tools` (one that
-// failed, one removed there by hand) waits for Install there on the plugin's page. "Has it" is installed whole, any parts on
-// record, or (in Pi and OpenCode, which have no plugin installer) some item linked to the plugin wanted in that tool (`items`).
-// Which of parts and items a plugin takes is pluginstatus.ts routeOf: parts while any of its parts are on record, else items.
-// An item's own `except` decides where it is; the entry's only seeds a new item's (pluginlibrary.ts), and a click on one tool
+// failed, one removed there by hand) waits for Install there on the plugin's page. "Has it" is installed whole, or (in Pi and
+// OpenCode, which have no plugin installer) some item linked to the plugin wanted in that tool (`items`). In Pi and OpenCode a
+// plugin whose parts from before the library wait to be moved has none and can't go in (rows 7 and 6: pluginstatus.ts toolNow,
+// waitsToMove), so nothing is owed there until partsmigrate.ts has moved them. An item's own `except` decides where it is; the entry's only seeds a new item's (pluginlibrary.ts), and a click on one tool
 // changes that tool in each item's `except` alone. A tool new here gets the items already On by the library's own rule; the
 // automatic updates' install there only makes the items the library lacks.
 //
@@ -42,7 +40,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { harnessIds } from './harnesses.ts';
 import { sameSource } from './plugins.ts';
-import { NOTHING_CHANGED, errorCode, partsRecordPath, storeDirectory, writeDurably } from './share.ts';
+import { NOTHING_CHANGED, errorCode, storeDirectory, writeDurably } from './share.ts';
 import type { HarnessId, PluginTurn } from './types.ts';
 import { onlyAllowed } from './values.ts';
 // "Wanted" means what it means for a library item (On, and not kept out of the tool): one rule, library.ts's.
@@ -69,10 +67,10 @@ export interface PluginRecord {
 
 /** What one managed tool has of a plugin now, and how it could take it in or out (marketplaces.ts toolsNow reads it). */
 export interface ToolNow {
-  /** Installed whole, its parts on record, some item linked to it wanted there (Pi, OpenCode), none, or its record can't be read now. */
-  has: 'whole' | 'parts' | 'items' | 'none' | 'unknown';
-  /** How it would go in: the tool's own installer, as parts, as library items, or why it can't (pluginstatus.ts says it). */
-  route: 'whole' | 'parts' | 'items' | { cannot: string };
+  /** Installed whole, some item linked to it wanted there (Pi, OpenCode), none, or its record can't be read now. */
+  has: 'whole' | 'items' | 'none' | 'unknown';
+  /** How it would go in: the tool's own installer, as library items, or why it can't (pluginstatus.ts says it). */
+  route: 'whole' | 'items' | { cannot: string };
   /** Why its copy can't be taken out here, if it can't (pluginstatus.ts cantUninstall). */
   stuck?: string;
 }
@@ -80,10 +78,10 @@ export interface ToolNow {
 export interface Owed {
   wanted: boolean;
   has: ToolNow['has'];
-  /** It could take the plugin: by its installer, as parts or as items (a tool that can't is never what makes a plugin partial). */
+  /** It could take the plugin: by its installer or as items (a tool that can't is never what makes a plugin partial). */
   takes: boolean;
   /** What brings the tool into line; none when it is in line, held (`held`) or unknown. */
-  act?: 'install' | 'install-parts' | 'install-items' | 'uninstall' | 'remove-parts' | 'remove-items';
+  act?: 'install' | 'install-items' | 'uninstall' | 'remove-items';
   /** Why it can't be brought into line here. */
   held?: string;
   /** The install is the automatic updates' to make too: the tool is not on the home's `tools`. */
@@ -106,20 +104,20 @@ export function owedTo(entry: Pick<PluginEntry, 'on' | 'except'> | undefined, to
   if (is.wanted) {
     if (is.has !== 'none') return is;
     if (typeof now.route === 'object') return { ...is, held: now.route.cannot };
-    const owes = { ...is, act: ({ whole: 'install', parts: 'install-parts', items: 'install-items' } as const)[now.route] };
+    const owes = { ...is, act: now.route === 'whole' ? 'install' as const : 'install-items' as const };
     if (seen.includes(tool)) return owes;
     return offSomewhere ? { ...owes, offElsewhere: true } : { ...owes, background: true };
   }
   if (is.has === 'none') return is;
   if (is.has === 'whole') return now.stuck ? { ...is, held: now.stuck } : { ...is, act: 'uninstall' };
-  return { ...is, act: is.has === 'items' ? 'remove-items' : 'remove-parts' };
+  return { ...is, act: 'remove-items' };
 }
 
 /** Which way a click on a plugin goes: On, Add and Let in put it in; Off and Keep out take it out; Install there and Take out there bring one tool into line either way. */
 export const clickGoes = (what: PluginTurn): 'in' | 'out' | 'any' => (what === 'on' || what === 'add' || what === 'let-in' ? 'in' : what === 'fix' ? 'any' : 'out');
 /** What a click runs in one tool: what the table owes there, only where it goes the click's way (On never uninstalls, Off never installs). */
 export function clickRuns(what: PluginTurn, owed: Owed): Owed['act'] {
-  const goes = clickGoes(what), inward = owed.act === 'install' || owed.act === 'install-parts' || owed.act === 'install-items';
+  const goes = clickGoes(what), inward = owed.act === 'install' || owed.act === 'install-items';
   return owed.act && (goes === 'any' || inward === (goes === 'in')) ? owed.act : undefined;
 }
 /** Why a click can do nothing in one tool, as the table holds it, where that hold is the click's way. */
@@ -200,9 +198,3 @@ export async function readPluginRecord(home: string): Promise<{ record?: PluginR
 
 export const savePluginRecord = (home: string, record: PluginRecord) =>
   writeDurably(recordPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, tools: record.tools, plugins: record.plugins }, null, 2)}\n`);
-
-/** Whether the parts record can be read: absent counts (no parts anywhere); present and not the shape parts.ts writes does not. */
-export async function partsReadable(home: string): Promise<boolean> {
-  try { return Array.isArray(JSON.parse(await readFile(partsRecordPath(home), 'utf8'))?.installs); }
-  catch (error) { return errorCode(error) === 'ENOENT'; }
-}

@@ -1594,7 +1594,7 @@ async function practiceFlow() {
   check('issue-tracker’s page lists its items, recorded by the move', /Its items[\s\S]*skill triage[\s\S]*MCP server issues/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-page'));
   await a.click('#nav-skills');
   // Claude Code has the plugin itself: on Skills its mark says the skill comes through it (never "No copy" or "Can't load
-  // it"), and its row in the details opens the plugin's page, where the plugin and its parts are updated together.
+  // it"), and its row in the details opens the plugin's page, where the plugin itself is handled.
   const installRecord = join(practice, '.claude/plugins/installed_plugins.json');
   const installsBefore = existsSync(installRecord) ? readFileSync(installRecord, 'utf8') : undefined;
   writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '9.9.9', { 'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8'), '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } }) });
@@ -2845,7 +2845,7 @@ async function fewToolsFlow() {
     check(`at ${width}×${height} the line about Cowork is whole, inside the tools panel`, await a.run(`(() => { const note = document.querySelector('#plugin-cowork-note'); if (!note) return false; const box = note.getBoundingClientRect(), panel = note.closest('.plugin-panel').getBoundingClientRect(); return box.width > 0 && note.scrollWidth <= note.clientWidth + 1 && box.right <= panel.right && box.bottom <= panel.bottom; })()`));
   }
   await a.send('Emulation.clearDeviceMetricsOverride');
-  check('with only Claude desktop, the plugin box names its route, its Code tab, and offers no parts instead', box.includes('Claude CodePlugin not installedThrough Claude desktop’s Code tab 2.1.317') && !box.includes('Only Claude desktop'), box);
+  check('with only Claude desktop, the plugin box names its route, its Code tab', box.includes('Claude CodePlugin not installedThrough Claude desktop’s Code tab 2.1.317') && !box.includes('Only Claude desktop'), box);
   check('and says once that Cowork uses the Claude account’s plugins, with no box for it', box.includes('Cowork in Claude desktop uses the plugins in your Claude account, so Central Knot doesn’t install there.') && (await a.all('.plugin-tool-name')).every(name => !name.includes('Cowork')), box);
   same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
@@ -4006,7 +4006,7 @@ async function draftFlow() {
  */
 /**
  * A plugin's one switch, on the list and on its page (pluginrecord.ts): On puts issue-tracker into Claude Code by its own
- * installer (a stand-in that writes its record as the real one does) and into Pi as its parts; Keep out takes it out of Pi
+ * installer (a stand-in that writes its record as the real one does) and into Pi as its items; Keep out takes it out of Pi
  * alone; Off uninstalls it, and Undo installs it again where it was. Each step reads what the page shows and the files.
  */
 async function pluginSwitchFlow() {

@@ -40,7 +40,6 @@ import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { addSource, checkDue, checkSource, previewSource, removeSource, rowClick, sourcesView } from './sources.ts';
 import { linkLabel } from './sourcelink.ts';
-import { readParts } from './parts.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { homePass, passTells } from './homepass.ts';
@@ -48,7 +47,7 @@ import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoS
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { joinedWords, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
@@ -513,6 +512,8 @@ interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAg
 
 /** Each reason the move of plugin parts waited that the log has had this launch (pass). */
 const partsWaitsLogged = new Set<string>();
+/** Why the move of plugin parts waits, as the last pass gave it (homepass.ts partsWait); none when it doesn't. The Plugins page says it (MarketplaceHost partsWait). */
+let partsWaiting: string | undefined;
 /**
  * One pass on the open home: writes only with Sync on (or when asked explicitly); with Sync off nothing is done in the
  * background, and an edit or a deletion waits for Sync or a click on its item. `snapshots`: the caller's read of the home,
@@ -526,6 +527,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   // alpha 1 waited for read from pluginUpdates, made before any pass), and the move may read a plugin (homepass.ts step 2).
   const pluginNow = await carriedMarket?.beforeParts().catch((error: unknown) => { logFailure('plugins record', error); return undefined; });
   const { synced, profilesFailed, partsFailed, partsWait } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
+  partsWaiting = partsWait;
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
   if (partsFailed !== undefined) logFailure('moving plugin parts', partsFailed);
   // Why the move of plugin parts waits, once per launch and reason (a home can wait for good: its rows say only "waiting").
@@ -575,7 +577,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: 
   const syncEverything = (await readRecord(current!.home)).record?.syncEverything;
   const readId = handoff.id + 1;
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home), ...(tookOver ? { tookOver } : {}),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, ...(tookOver ? { tookOver } : {}),
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything === true), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
@@ -1040,13 +1042,11 @@ function logged(channel: string, args: unknown[], result: unknown) {
   if (!result || typeof result !== 'object') return;
   const { stopped, reports, results, done } = result as { stopped?: unknown; reports?: unknown; results?: unknown; done?: unknown };
   if (typeof stopped === 'string') log(`${channel} stopped: ${stopped}`);
-  // A plugin step's request names the marketplace and the plugin second and third; a pick of single parts names them last.
-  const pick = channel === 'plugins:parts' ? args[7] as PartsPick | null : null;
-  const picked = pick ? ` (${[pick.on.length ? `on: ${pick.on.map(part => `${part.kind} ${part.name}`).join(', ')}` : '', pick.off.length ? `off: ${pick.off.map(part => `${part.kind} ${part.name}`).join(', ')}` : ''].filter(Boolean).join('; ')})` : '';
+  // A plugin step's request names the marketplace and the plugin second and third.
   // One item's switch names the item fourth: a skill by its name, an MCP server or agent as a part.
   const part = channel === 'plugins:part' ? args[3] as PartRef | null : null;
   const switched = part ? ` (${part.kind} ${part.name})` : channel === 'plugins:skill' && typeof args[3] === 'string' ? ` (skill ${args[3]})` : '';
-  const plugin = channel.startsWith('plugins:') && typeof args[1] === 'string' && typeof args[2] === 'string' ? ` ${args[2]}@${args[1]}${picked}${switched}` : '';
+  const plugin = channel.startsWith('plugins:') && typeof args[1] === 'string' && typeof args[2] === 'string' ? ` ${args[2]}@${args[1]}${switched}` : '';
   for (const report of Array.isArray(reports) ? reports as ActionReport[] : []) {
     log(`${channel}${plugin} in ${report.tool}: ${report.outcome}${report.changed ? '' : ', nothing changed'}: ${[report.message, ...(report.notes ?? [])].join(' ')}`);
     for (const run of report.runs.filter(run => !run.ok)) log(`${channel}${plugin} in ${report.tool}: \`${run.command}\` failed: ${run.output.trim().slice(0, 2000)}`);
@@ -1273,7 +1273,8 @@ app.whenReady().then(async () => {
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
     share: () => context(),
-    // A change to a plugin that worked (an update, an uninstall, its parts) settles what failed there by itself before.
+    partsWait: () => partsWaiting,
+    // A change to a plugin that worked (an update, an uninstall) settles what failed there by itself before.
     changed: (source, plugin, tools) => void pluginUpdates?.settled(source, plugin, tools).catch(error => logFailure('plugin updates', error)),
     waitedBefore: async () => pluginUpdates?.waitedBefore() ?? [],
     notices: (kind, told) => { (kind === 'skill' ? pendingNotices : kind === 'mcp' ? pendingServerNotices : pendingAgentNotices).push(...told); },
@@ -1318,7 +1319,6 @@ app.whenReady().then(async () => {
         // An install a tool new here is owed runs as the page's own install does.
         install: (source, marketName, plugin, tools, home) => step('plugins:install', [source, marketName, plugin, tools, home], () => markets.install(source, marketName, plugin, onlyAllowed(tools, pluginTools), home)),
         update: (source, marketName, plugin, tools, home) => step('plugins:update', [source, marketName, plugin, tools, home], () => markets.update(source, marketName, plugin, onlyAllowed(tools, pluginTools), home, { reinstall: false })),
-        parts: (source, marketName, plugin, tool, mode, run, home, pick) => step('plugins:parts', [source, marketName, plugin, tool, mode, run, home, pick], () => markets.parts(source, marketName, plugin, tool, mode, run, home, pick)),
         items: (source, marketName, plugin, tools, home, bring) => step('plugins:items', [source, marketName, plugin, tools, home, bring], () => markets.items(source, marketName, plugin, tools, home, bring)),
       },
       noteJoined: (tools, home) => queued(() => markets.noteJoined(tools, home)),

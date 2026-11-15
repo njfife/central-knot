@@ -1,6 +1,6 @@
 // What plugins installed whole bring, as rows of the Skills, MCP servers and Agents pages (no DOM): one row per item of a
 // plugin across every tool that has the plugin. An item the person also has as their own (the same skill, or the plugin's
-// part in another tool) stays on that row, whose box says "Through a plugin" (types.ts LibraryFacts plugin); one that only shares a
+// item linked to it in Pi and OpenCode) stays on that row, whose box says "Through a plugin" (types.ts LibraryFacts plugin); one that only shares a
 // name is a row of its own here. These rows are never managed: no sync, no profile, no repo; a box turns the item on or
 // off in that tool (pluginswitch.ts), and the plugin's page is where the plugin itself is handled.
 import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts';
@@ -44,16 +44,11 @@ export const inTool = (fact: Pick<LibraryFacts, 'copies' | 'plugin'>, tool: Harn
 
 /**
  * Whether a row of the person's own is this plugin's item already: some tool has that row's item through this plugin (its
- * box says so), the row's item is linked to this plugin (library.ts A PLUGIN: its row says "from the plugin"), or, while a home's
- * parts wait to be moved to the library (partsmigrate.ts), the row's copy in some tool is on record as this plugin's part (a
- * Codex plugin's MCP server put into Pi, which no box shows as through the plugin, since Codex may not start a plugin's
- * servers). Such a copy is no copy of the row's: its line says it waits (`unseen`, partsmigrate.ts hideParts), so it counts too.
+ * box says so), or the row's item is linked to this plugin (library.ts A PLUGIN: its row says "from the plugin").
  */
-const onOwnRow = (home: HomeView, fact: LibraryFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
+const onOwnRow = (fact: LibraryFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
   && (Object.values(fact.plugin ?? {}).some(given => given.plugin === row.plugin && given.marketplace === row.marketName)
-    || fact.fromSource?.link === pluginLink(row.plugin, row.marketName)
-    || (home.parts ?? []).some(install => install.plugin === row.plugin && install.marketName === row.marketName && (fact.copies[install.tool] !== undefined || fact.unseen?.[install.tool] !== undefined)
-      && install.items.some(item => !item.removed && samePart(item, row))));
+    || fact.fromSource?.link === pluginLink(row.plugin, row.marketName));
 
 const memo = new WeakMap<HomeView, Partial<Record<Page, PageRows>>>();
 
@@ -78,7 +73,7 @@ export function pageRows(home: HomeView, page: Page): PageRows {
   // Every tool with the plugin, so a copy without this item (Codex and an agent, another version) says so in its cell.
   for (const row of byKey.values()) for (const install of home.pluginItems ?? []) if (install.plugin === row.plugin && install.marketName === row.marketName) row.installs[install.tool] = install;
   // One row, not two: an item that is already a row of the person's own stays that row's.
-  const rows = [...byKey.values()].filter(row => !facts.some(fact => onOwnRow(home, fact, row))).sort((first, second) => first.name.localeCompare(second.name));
+  const rows = [...byKey.values()].filter(row => !facts.some(fact => onOwnRow(fact, row))).sort((first, second) => first.name.localeCompare(second.name));
   const unread = (home.pluginItems ?? []).filter(install => install.problem);
   const made = { rows, unread };
   memo.set(home, { ...known, [page]: made });

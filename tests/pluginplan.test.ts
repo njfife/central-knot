@@ -15,12 +15,12 @@ test('A run does each plugin’s installs as one command, then its removals tool
 });
 
 test('Updates run after a plugin’s installs as one command, are never undone, and the result names the new version and says so', () => {
-  assert.deepEqual(batches([op('pdf', 'claude-cli', 'update'), op('pdf', 'pi-cli', 'install-parts'), op('pdf', 'copilot-cli'), op('pdf', 'codex-cli', 'update')]).map(step => [step.action, step.tools]),
-    [['install', ['copilot-cli']], ['update', ['claude-cli', 'codex-cli']], ['install-parts', ['pi-cli']]]);
+  assert.deepEqual(batches([op('pdf', 'claude-cli', 'update'), op('pdf', 'copilot-cli'), op('pdf', 'codex-cli', 'update')]).map(step => [step.action, step.tools]),
+    [['install', ['copilot-cli']], ['update', ['claude-cli', 'codex-cli']]]);
   const updated = (tool: HarnessId, version: string, changed = true): PluginDone => ({ ...op('pdf', tool, 'update'), report: { tool, outcome: 'updated', message: '', runs: [], version, ...(changed ? { changed } : {}) } });
-  const done = [updated('codex-cli', '2.0.0'), updated('claude-cli', '2.0.0'), updated('copilot-cli', '2.0.0', false), { ...op('pdf', 'pi-cli', 'install-parts'), report: { tool: 'pi-cli' as const, outcome: 'installed' as const, message: '', runs: [], changed: true, partsUpdated: true, partsRun: 'run-1' } }];
-  assert.deepEqual(reverse(done).map(entry => [entry.tool, entry.action]), [['pi-cli', 'undo-parts']], 'only the parts come back out');
-  assert.equal(resultLines(done)[0]?.text, 'updated to 2.0.0 in Claude Code and Codex, which can’t be undone; already up to date in Copilot CLI; parts updated in Pi');
+  const done = [updated('codex-cli', '2.0.0'), updated('claude-cli', '2.0.0'), updated('copilot-cli', '2.0.0', false)];
+  assert.deepEqual(reverse(done), [], 'an update has no way back');
+  assert.equal(resultLines(done)[0]?.text, 'updated to 2.0.0 in Claude Code and Codex, which can’t be undone; already up to date in Copilot CLI');
   assert.equal(resultLines([updated('codex-cli', '2.0.0'), updated('claude-cli', '1.9.5')])[0]?.text, 'updated to 1.9.5 in Claude Code; to 2.0.0 in Codex, which can’t be undone');
   // A copy that differed at the same version says how it was brought up to date.
   const byContent = (tool: HarnessId, how: 'update' | 'reinstall'): PluginDone => ({ ...updated(tool, '1.2.0'), report: { ...updated(tool, '1.2.0').report, byContent: how } });
@@ -37,15 +37,6 @@ test('Undo reverses only what really changed, and the report names each plugin o
     { ...op('pdf', 'claude-cli'), source: 'other/market', report: { tool: 'claude-cli', outcome: 'installed', message: 'Already installed in Claude Code.', runs: [] } },
   ];
   assert.deepEqual(reverse(done).map(entry => [entry.plugin, entry.tool, entry.action]), [['docx', 'copilot-cli', 'install'], ['pdf', 'claude-cli', 'remove']], 'last first');
-  // A parts step is undone by its own run; one with no run to undo (it changed nothing it could undo) is left alone.
-  const parts: PluginDone[] = [
-    { ...op('figma', 'pi-cli', 'install-parts'), report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: true, partsRun: 'run-1' } },
-    { ...op('figma', 'codex-cli', 'install-parts'), report: { tool: 'codex-cli', outcome: 'installed', message: '', runs: [], changed: true } },
-  ];
-  assert.deepEqual(reverse(parts).map(entry => [entry.tool, entry.action, entry.run]), [['pi-cli', 'undo-parts', 'run-1']]);
-  // An update that had nothing to write still says so.
-  const quiet: PluginDone[] = [{ ...op('figma', 'pi-cli', 'install-parts'), report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: false, partsUpdated: true } }];
-  assert.equal(resultLines(quiet)[0]?.text, 'parts already up to date in Pi');
   assert.deepEqual(resultLines(done), [
     { source: 'anthropics/skills', plugin: 'pdf', ok: true, text: 'installed in Claude Code', short: 'installed in Claude Code' },
     { source: 'anthropics/skills', plugin: 'pdf', ok: false, text: 'Codex: It stopped with exit code 1.', short: 'Codex: It stopped with exit code 1.' },
@@ -113,35 +104,16 @@ const engine = (answer: (action: string, tool: HarnessId) => Omit<ActionReport, 
   const api: PlanApi = {
     install: async (_s, _m, _p, tools) => reply('install', tools), uninstall: async (_s, _m, _p, tool) => reply('remove', [tool]),
     setSkill: async (_s, _m, _p, _skill, tool, on) => reply(on ? 'skill-on' : 'skill-off', [tool]),
-    update: async (_s, _m, _p, tools) => reply('update', tools), parts: async (_s, _m, _p, tool, mode) => reply(`parts-${mode}`, [tool]),
+    update: async (_s, _m, _p, tools) => reply('update', tools),
   };
   return { api, calls };
 };
 
-test('A part’s switch runs one pick alone, says the part by name, and its Undo is the parts run’s own record', async () => {
-  const part = (name: string) => ({ kind: 'skill' as const, name });
-  const pick: PluginOp = { ...op('pdf', 'pi-cli', 'pick-parts'), pick: { on: [], off: [part('tdd')] } };
-  assert.deepEqual(batches([pick]).map(step => [step.action, step.tools, step.pick]), [['pick-parts', ['pi-cli'], { on: [], off: [part('tdd')] }]]);
-  const { api, calls } = engine(() => ({ outcome: 'installed', message: '', changed: true, partsRun: 'r' }));
-  const { done } = await runPlan([pick], api, '/h');
-  assert.deepEqual(calls, ['parts-install pi-cli'], 'one step, the pick');
-  assert.equal(resultSentence(resultLines(done), false), 'pdf: skill tdd taken out of Pi.');
-  // Its Undo carries no pick (the log would name parts the Undo never chose).
-  assert.deepEqual(reverse(done).map(back => [back.action, back.run, back.pick]), [['undo-parts', 'r', undefined]]);
-  // A tool where a part was left alone got only some of its parts, and a skill written over a broken link says so.
-  const some: PluginDone[] = [
-    { ...op('pdf', 'pi-cli'), action: 'install-parts', report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: true, partsRun: 'r', notes: ['Didn’t put in the skill “tdd”: Pi already has one of that name.'], replacedLinks: ['qa'] } },
-    { ...op('pdf', 'codex-cli'), action: 'install-parts', report: { tool: 'codex-cli', outcome: 'installed', message: '', runs: [], changed: true, partsRun: 's' } }];
-  assert.equal(resultLines(some).find(line => line.ok)?.text, 'parts installed in Codex; only some parts installed in Pi; a broken link replaced in Pi');
-});
-
-test('Update runs at once: alone it offers no Undo; with parts brought up to date in the same click, Undo is for those parts only', async () => {
-  const { api } = engine(action => (action === 'update' ? { outcome: 'updated', message: '', changed: true, version: '2.0.0' } : { outcome: 'installed', message: '', changed: true, partsUpdated: true, partsRun: 'r' }));
+test('Update runs at once and offers no Undo', async () => {
+  const { api } = engine(() => ({ outcome: 'updated', message: '', changed: true, version: '2.0.0' }));
   const alone = await runPlan([op('pdf', 'claude-cli', 'update')], api, '/h');
   assert.deepEqual(reverse(alone.done), [], 'an update has no way back');
-  const both = await runPlan([op('pdf', 'claude-cli', 'update'), op('pdf', 'pi-cli', 'install-parts')], api, '/h');
-  assert.deepEqual(reverse(both.done).map(back => [back.tool, back.action, back.run]), [['pi-cli', 'undo-parts', 'r']]);
-  assert.equal(resultLines(both.done)[0]?.text, 'updated to 2.0.0 in Claude Code, which can’t be undone; parts updated in Pi');
+  assert.equal(resultLines(alone.done)[0]?.text, 'updated to 2.0.0 in Claude Code, which can’t be undone');
 });
 
 test('A click on a view out of date: what the tool already has, or no longer has, is said as the tool said it, and nothing is offered to undo', async () => {
@@ -166,16 +138,3 @@ test('An update the automatic check made first is made once: the click’s own u
   assert.deepEqual(calls, ['update claude-cli', 'update claude-cli']);
 });
 
-test('An Undo of a parts run says each tool once: its parts are back as they were, never "only some"', () => {
-  for (const partsUpdated of [false, true]) {
-    const undone: PluginDone[] = [{ ...op('kit', 'pi-cli', 'undo-parts'), run: 'r1', report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: true, ...(partsUpdated ? { partsUpdated } : {}) } }];
-    assert.equal(resultSentence(resultLines(undone, true), true), 'Undone: kit parts back as they were in Pi.', `partsUpdated ${partsUpdated}`);
-  }
-});
-
-test('A part’s switch that changed nothing says the part already was so, not that parts are up to date', () => {
-  const part = (name: string) => ({ kind: 'skill' as const, name });
-  const stale = (pick: { on: { kind: 'skill'; name: string }[]; off: { kind: 'skill'; name: string }[] }): PluginDone[] => [{ ...op('kit', 'pi-cli', 'pick-parts'), pick, report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: false } }];
-  assert.equal(resultSentence(resultLines(stale({ on: [], off: [part('gamma')] })), false), 'kit: skill gamma already out of Pi.');
-  assert.equal(resultSentence(resultLines(stale({ on: [part('gamma')], off: [] })), false), 'kit: skill gamma already in Pi.');
-});

@@ -191,7 +191,6 @@ check('every listed plugin has a row', JSON.stringify(rows) === JSON.stringify([
 check('a packed plugin says what it holds, read with the source gone', await a.run(`document.querySelector('[data-plugin="document-tools"] .plugin-row-holds')?.textContent`) === '2 skills');
 check('the plugin that couldn’t be packed can’t be chosen, and says why', await a.run(`(() => { const box = document.querySelector('[data-plugin="npm-thing"] .ov-cell button, [data-plugin="npm-thing"] .ov-cell [title]'); return (box?.getAttribute('title') ?? '') + '|' + (box?.getAttribute('aria-label') ?? ''); })()`).then(text => text.includes(`${NAME} doesn’t include this plugin’s files`)), await a.run(`document.querySelector('[data-plugin="npm-thing"]').outerHTML.slice(0, 900)`));
 check('its row says it is not in this build, and leads to About', await a.run(`document.querySelector('[data-plugin="npm-thing"] .plugin-row-left')?.textContent`) === `Can’t be installed from ${NAME}·see why`);
-check('nor are its parts offered in any tool', await a.run(`document.querySelectorAll('[data-plugin="npm-thing"] .cell-parts-offer').length`) === 0);
 check('the Plugins page fits at 1280', await a.fits());
 await a.shot('plugins-1280');
 

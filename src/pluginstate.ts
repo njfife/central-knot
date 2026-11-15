@@ -1,8 +1,8 @@
 // Plugins: the page's state and actions. Marketplaces, what the last run did, and where the person is browsing all live
 // here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 // Every click acts at once, by one of two routes, split by whether the plugin's record changes: the switch and each tool's
-// links go through turnPlugin (main records first, marketplaces.ts turn); Update, Update all, Update parts, a skill's switch,
-// a part's switch and their Undo go through applyPluginOps. Both set market.lastRun, which the toolbar says with one Undo.
+// links go through turnPlugin (main records first, marketplaces.ts turn); Update, Update all, a skill's switch and their Undo
+// go through applyPluginOps. Both set market.lastRun, which the toolbar says with one Undo.
 // One page action at a time: while app.ts busy has `app.busy` set, every plugin control is drawn disabled (a control added
 // here takes `disabled: !!app.busy` too), so a click during a run lands on a disabled control and is dropped, never run twice.
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
@@ -10,9 +10,9 @@ import { announce, busy, rerender, setHome, state as app, tell } from './app.ts'
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
 import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
-import { FIND_FROM, categoriesOf, copiesToCompare, marketTitle, matches, partsTools, pluginPlace, undoLimits } from './pluginstatus.ts';
+import { FIND_FROM, categoriesOf, copiesToCompare, marketTitle, matches, pluginPlace, undoLimits } from './pluginstatus.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
-import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginTurn, PluginsView } from './types.ts';
+import type { HarnessId, MarketplaceView, PluginDetail, PluginTurn, PluginsView } from './types.ts';
 import { andList, toolNames } from './words.ts';
 
 const api = () => window.centralKnot;
@@ -53,8 +53,6 @@ export const market = {
   readmes: new Map<string, Read<string | undefined>>(),
   /** Each plugin's contents and README, by plugin key; null when its files couldn't be found. */
   details: new Map<string, Read<PluginDetail | null>>(),
-  /** For each plugin, what each tool without it would get as parts (parts.ts), read when its page opens. */
-  partsPlans: new Map<string, Read<Partial<Record<HarnessId, PartPlan[]>> | null>>(),
   /** The last contents read of each plugin, shown while it is read again after a new view (see markDetailsStale, shownDetail, forgetDetails). */
   previous: new Map<string, PluginDetail>(),
   /** Part descriptions opened with "Show more" and part files opened, by plugin key and part, so a redraw keeps them open (see toggleOpened). */
@@ -74,7 +72,7 @@ export function toggleOpened(key: string): void {
 /** A different home has other tools and other installs: nothing done or read in the last one carries over. */
 export function resetMarket(): void {
   resetPageData(market.read); market.problem = undefined; market.lastRun = undefined; market.working = undefined; market.addOpen = false;
-  market.readmes.clear(); forgetDetails(); market.partsPlans.clear(); market.opened.clear(); market.nav = startNav();
+  market.readmes.clear(); forgetDetails(); market.opened.clear(); market.nav = startNav();
 }
 
 /** The marketplace on screen: the one chosen, or the first listed. The page and the reads both use this. */
@@ -131,7 +129,6 @@ function readShown(): void {
     const last = market.details.get(key);
     if (last && (last.reading ? last.quiet : !last.value || last.value.problem)) market.details.delete(key);
     readPlugin(market.nav.plugin);
-    if (market.view?.tools.some(tool => partsTools.includes(tool))) readInto(market.partsPlans, key, () => api().partsPlan(source, market.nav.plugin!).catch(() => null), rerender);
   }
   else if (market.nav.tab === 'about') readInto(market.readmes, source, () => api().marketplaceReadme(source).catch(() => null).then(text => text ?? undefined), rerender);
   // Plugins kept in other repositories say what they hold once read; the first few rows on screen are read ahead.
@@ -231,7 +228,7 @@ export async function loadPlugins(fresh = false, readId?: number): Promise<void>
   if (result === 'ready') {
     // Refresh all reads every README and every plugin's files again, and tries again those that couldn't be read (see
     // markDetailsStale); a folder marketplace is read from disk every time, so its README may have changed.
-    if (fresh) { market.readmes.clear(); forgetDetails(); market.partsPlans.clear(); }
+    if (fresh) { market.readmes.clear(); forgetDetails(); }
     else for (const entry of market.view?.marketplaces ?? []) if (entry.kind === 'folder') market.readmes.delete(entry.source);
     settleView();
     // Only a Refresh the person clicked: the app's own reads after a change (the home read again, a background pass that
@@ -270,7 +267,6 @@ export const addMarketplace = (source: string) => act('adding', async () => {
 function dropReads(source: string): void {
   market.readmes.delete(source);
   for (const key of [...market.details.keys()]) if (forSource(key, source)) market.details.delete(key);
-  for (const key of [...market.partsPlans.keys()]) if (forSource(key, source)) market.partsPlans.delete(key);
 }
 
 export const forgetMarketplace = (source: string) => act('removing', async () => {
@@ -323,14 +319,14 @@ export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
 export const openLink = (url: string) => void api().openExternal(url);
 
 /**
- * One click's plugin steps (Update, Update all, Update parts, a skill's or a part's switch), or the Undo of one, run at once
+ * One click's plugin steps (Update, Update all, a skill's switch), or the Undo of one, run at once
  * through each tool's own command. The run replaces market.lastRun. A run that stops leaves the rest unrun; the page, read
  * again, still offers their buttons.
  */
 export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'undoing' : 'applying', async () => {
   const home = app.home!.home;
   market.problem = undefined;
-  const planApi = { install: api().installPlugin, update: api().updatePlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, parts: api().pluginParts, items: api().pluginItems };
+  const planApi = { install: api().installPlugin, update: api().updatePlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, items: api().pluginItems };
   let result: Awaited<ReturnType<typeof runPlan>> = { done: [] };
   try {
     result = await runPlan(ops, planApi, home, step => { market.working = { source: step.source, plugin: step.plugin, tools: step.tools }; rerender(); });
@@ -346,13 +342,12 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), !market.problem && undoOps().length > 0);
 });
 
-/** What each tool now has changed: the page and the item pages read again, and every plugin's parts plan when shown. */
+/** What each tool now has changed: the page and the item pages read again. */
 async function readAgain(): Promise<void> {
   showView(await api().plugins().catch(() => null));
-  // The item pages show what plugins bring, each with its switch in each tool, and parts are ordinary skills, MCP servers and
-  // agents: every plugin change is seen there (and where it came from) at once.
+  // The item pages show what plugins bring, each with its switch in each tool, and a plugin's items in Pi and OpenCode: every
+  // plugin change is seen there (and where it came from) at once.
   setHome(await api().refresh().catch(() => null));
-  market.partsPlans.clear();
   readShown();
 }
 
@@ -409,11 +404,11 @@ export function undoLast(): void {
 
 /**
  * Closes the problem band: the stop reason and the problem lines go, and the run itself stays, so the toolbar keeps its
- * result line and Undo (including a failed parts run's, for what it did change).
+ * result line and Undo (for what a run that partly failed did change).
  */
 export function dismissProblems(): void {
   market.problem = undefined;
-  // Closed, not dropped: a failed run that still changed something (part of a parts run) keeps its Undo.
+  // Closed, not dropped: a run that partly failed keeps its Undo for what it did change.
   if (market.lastRun) market.lastRun = { ...market.lastRun, problemsClosed: true };
 }
 

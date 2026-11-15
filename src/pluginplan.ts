@@ -5,24 +5,17 @@
 import { partWords } from './pluginstatus.ts';
 import type { ItemState } from './pluginlibrary.ts';
 import type { PluginEntry } from './pluginrecord.ts';
-import type { ActionReport, HarnessId, PartRef, PartsPick, PluginActionResult } from './types.ts';
+import type { ActionReport, HarnessId, PartRef, PluginActionResult } from './types.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 
 /**
  * Install, update or uninstall a plugin, turn one of its skills (ENB-06: skill-off, skill-on) or one of its MCP servers or
  * agents (part-off, part-on) off or back on, or turn the whole plugin off or back on in the tool's own settings (plugin-off,
- * plugin-on), in one tool. install-parts: its parts as separate items in a tool that can't take the plugin (installed, or
- * brought up to date); remove-parts: those parts out again; pick-parts: single parts of it put in or taken out there
- * (`pick`); undo-parts: an Undo of a parts run (`run`), which only an Undo makes. The Plugins page's clicks run update,
- * install-parts (as the parts' update), a skill's switch and pick-parts; install, remove and remove-parts come from a
- * plugin's switch and an Undo. The four items actions (isItems) are a plugin's items in Pi and OpenCode (pluginlibrary.ts).
+ * plugin-on), in one tool. The Plugins page's clicks run update and a skill's switch; install and remove come from a plugin's
+ * switch and an Undo. The four items actions (isItems) are a plugin's items in Pi and OpenCode (pluginlibrary.ts).
  */
-export type PluginAction = 'install' | 'update' | 'remove' | 'skill-off' | 'skill-on' | 'part-off' | 'part-on' | 'plugin-off' | 'plugin-on' | 'install-parts' | 'remove-parts' | 'pick-parts' | 'undo-parts'
+export type PluginAction = 'install' | 'update' | 'remove' | 'skill-off' | 'skill-on' | 'part-off' | 'part-on' | 'plugin-off' | 'plugin-on'
   | 'install-items' | 'remove-items' | 'update-items' | 'items-back';
-/** The parts engine's mode for a parts action (installing also brings parts up to date; a pick installs only the parts it names); undefined for any other action. */
-const PARTS_MODES: Partial<Record<PluginAction, 'install' | 'remove' | 'undo'>> = { 'install-parts': 'install', 'remove-parts': 'remove', 'pick-parts': 'install', 'undo-parts': 'undo' };
-export const partsMode = (action: PluginAction) => PARTS_MODES[action];
-export const isParts = (action: PluginAction) => partsMode(action) !== undefined;
 /** A run on a plugin's items in Pi and OpenCode (pluginlibrary.ts), which an Undo reverses by their states (items-back), never by an opposite step. */
 export const isItems = (action: PluginAction) => action === 'install-items' || action === 'remove-items' || action === 'update-items' || action === 'items-back';
 /** One tool's change for one plugin from one marketplace. */
@@ -43,10 +36,6 @@ export interface PluginOp {
    * not by a click on something that takes the whole plugin. Once those items are all off again the choice has no reason left.
    */
   forItems?: true;
-  /** For undo-parts: the parts run it reverses. */
-  run?: string;
-  /** For pick-parts: the single parts to put in and to take out. */
-  pick?: PartsPick;
   /** For items-back: each item as it was before the switch (pluginlibrary.ts ItemState). */
   items?: ItemState[];
 }
@@ -104,25 +93,24 @@ export function choose(draft: PluginDraft, op: PluginOp): void {
 }
 
 /** One step of a run: one tool command, apart from an install or update, which runs for every tool chosen at once. */
-export interface Step { source: string; marketName: string; plugin: string; action: PluginAction; tools: HarnessId[]; skill?: string; part?: PartRef; run?: string; pick?: PartsPick }
+export interface Step { source: string; marketName: string; plugin: string; action: PluginAction; tools: HarnessId[]; skill?: string; part?: PartRef }
 
 /**
  * Runs in a fixed, readable order: per plugin, installs first, then updates (each one command per tool set), then each
  * item's own switch (a skill's, an MCP server's, an agent's), then the whole plugin's switches (so a plugin turned on for one
- * item has its other items off before it loads), then removals, tool by tool, then parts, tool by tool.
+ * item has its other items off before it loads), then removals, tool by tool.
  */
 export function batches(ops: PluginOp[]): Step[] {
   const out: Step[] = [];
   const plugins = [...new Map(ops.map(op => [pluginKey(op.source, op.plugin), op])).values()];
-  const one = (op: PluginOp): Step => ({ source: op.source, marketName: op.marketName, plugin: op.plugin, action: op.action, tools: [op.tool], ...(op.skill ? { skill: op.skill } : {}), ...(op.part ? { part: op.part } : {}), ...(op.run ? { run: op.run } : {}), ...(op.pick ? { pick: op.pick } : {}) });
+  const one = (op: PluginOp): Step => ({ source: op.source, marketName: op.marketName, plugin: op.plugin, action: op.action, tools: [op.tool], ...(op.skill ? { skill: op.skill } : {}), ...(op.part ? { part: op.part } : {}) });
   for (const first of plugins) {
     const mine = ops.filter(op => op.source === first.source && op.plugin === first.plugin);
     for (const action of ['install', 'update', 'install-items', 'update-items'] as const) {
       const tools = mine.filter(op => op.action === action).map(op => op.tool);
       if (tools.length) out.push({ source: first.source, marketName: first.marketName, plugin: first.plugin, action, tools });
     }
-    out.push(...mine.filter(op => isItemSwitch(op.action)).map(one), ...mine.filter(op => isWhole(op.action)).map(one), ...mine.filter(op => op.action === 'remove').map(one),
-      ...mine.filter(op => isParts(op.action)).map(one));
+    out.push(...mine.filter(op => isItemSwitch(op.action)).map(one), ...mine.filter(op => isWhole(op.action)).map(one), ...mine.filter(op => op.action === 'remove').map(one));
   }
   return out;
 }
@@ -134,13 +122,12 @@ const OPPOSITE: Partial<Record<PluginAction, PluginAction>> = { install: 'remove
 
 /**
  * The way back: only what this run really changed, reversed, last first (so each Codex skill switch is undone onto the
- * file it wrote, and its earlier bytes come back). "Already installed", failures and unknowns are left alone. A
- * parts run is undone by its own record (undo-parts), so a later step that took what an earlier one freed, such as a
- * skill name, is undone first. An update has no way back (the tools keep no earlier copy to return to), so it is left out.
+ * file it wrote, and its earlier bytes come back). "Already installed", failures and unknowns are left alone. An update has
+ * no way back (the tools keep no earlier copy to return to), so it is left out; a plugin's items have theirs (items-back).
  */
 export const reverse = (done: PluginDone[]): PluginOp[] => done
-  .filter(entry => entry.report.changed && entry.action !== 'update' && !isItems(entry.action) && (!isParts(entry.action) || entry.report.partsRun))
-  .map(({ report, pick: _picked, ...op }): PluginOp => (isParts(op.action) ? { ...op, action: 'undo-parts', run: report.partsRun } : { ...op, action: OPPOSITE[op.action]! }))
+  .filter(entry => entry.report.changed && entry.action !== 'update' && !isItems(entry.action))
+  .map(({ report: _report, ...op }): PluginOp => ({ ...op, action: OPPOSITE[op.action]! }))
   .reverse();
 
 /**
@@ -180,30 +167,10 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
     // A switch's line starts with the item it switched: the skill's name, or "MCP server" or "agent" and its name.
     const item = part ? `${partWords[part.kind][0]} ${part.name}` : skill;
     const named = { ...(skill ? { skill } : {}), ...(part ? { part } : {}) };
-    // Tools in the page's column order, so "Codex and Pi" never reads "Pi and Codex" the next time. An unchanged parts
-    // result is one group whatever kind of run it was: only a change tells an update from an install. In an Undo every
-    // changed parts step is one group too: its parts are back as they were.
-    // A pick of single parts is said as such, changed or not (singleGroups).
-    const picked = (entry: PluginDone) => entry.action === 'pick-parts';
-    // A tool where a part was left alone (its note says which) got only some of them.
-    const tools = (outcome: ActionReport['outcome'], changed: boolean, { parts = false, updated = false, single = false, some = false } = {}) => mine
-      .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && !isItems(entry.action)
-        && (!parts || (picked(entry) === single && (!changed || single || (undo ? !updated && !some : !!entry.report.partsUpdated === updated && !!entry.report.notes?.length === some)))))
+    // Tools in the page's column order, so "Codex and Pi" never reads "Pi and Codex" the next time.
+    const tools = (outcome: ActionReport['outcome'], changed: boolean) => mine
+      .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && !isItems(entry.action))
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
-    const partsGroups: Group[] = [
-      [tools('installed', true, { parts: true }), undo ? 'parts back as they were in' : 'parts installed in'],
-      [tools('installed', true, { parts: true, updated: true }), 'parts updated in'],
-      [tools('installed', true, { parts: true, some: true }), 'only some parts installed in'],
-      [tools('installed', true, { parts: true, updated: true, some: true }), 'only some parts updated in'],
-      ...singleGroups(mine.filter(entry => picked(entry) && entry.report.changed && succeeded(entry.report)).sort((first, second) => byToolOrder(first.tool, second.tool))),
-      ...singleGroups(mine.filter(entry => picked(entry) && !entry.report.changed && succeeded(entry.report)).sort((first, second) => byToolOrder(first.tool, second.tool)), false),
-      [tools('uninstalled', true, { parts: true }), 'parts removed from'],
-      ...(undo
-        ? [[[...tools('installed', false, { parts: true }), ...tools('uninstalled', false, { parts: true })], 'nothing left to undo in'] as [string[], string]]
-        : [[tools('installed', false, { parts: true }), 'parts already up to date in'], [tools('uninstalled', false, { parts: true }), 'had no parts in']] as [string[], string][]),
-      // A skill that went in where a link led nowhere: said, since something in the person's folder was replaced.
-      [mine.filter(entry => isParts(entry.action) && entry.report.replacedLinks?.length).map(entry => names[entry.tool]), 'a broken link replaced in'],
-    ];
     const [off, on] = part ? ['part-off', 'part-on'] as const : ['skill-off', 'skill-on'] as const;
     const onWith = undo ? [] : mine.filter(entry => heldWith(entry).length);
     // A plugin's items in Pi and OpenCode (pluginlibrary.ts): what each tool has of them now, said apart from installs.
@@ -219,7 +186,7 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
         [tools('plugin-off', true), undo ? 'off again in' : 'turned off in'], [tools('plugin-on', true).filter(tool => !onWith.some(entry => names[entry.tool] === tool)), undo ? 'back on in' : 'turned on in'],
         // Past three, the items left off are counted, not named.
         ...onWith.map((entry): Group => { const held = heldWith(entry); return [[names[entry.tool]], 'turned on in', ` with ${held.length > 3 ? `${held.length} items` : andList(held.map(itemSaid))} left off`]; }),
-        [tools('plugin-off', false), 'already off in'], [tools('plugin-on', false), 'already on in'], ...partsGroups, ...itemGroups];
+        [tools('plugin-off', false), 'already off in'], [tools('plugin-on', false), 'already on in'], ...itemGroups];
     // An item's switch only ever reaches the few tools that have one, so its tools are always named.
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb, after = '']) => `${verb} ${counted && !item && list.length > 2 ? `${list.length} tools` : andList(list)}${after}`).join('; ');
     if (said(false)) lines.push({ source, plugin, ...named, ok: true, text: said(false), short: said(true) });
@@ -227,25 +194,13 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
       const text = `${names[entry.tool]}${item ? `, ${item}` : ''}: ${entry.report.message}`;
       lines.push({ source, plugin, ...named, ok: false, text, short: text });
     }
-    // A part left alone (edited since, or a same-named item already there) needs reading, like a failure.
+    // A note on a step that worked (an update that couldn't turn a server off again, plugins.ts) needs reading, like a failure.
     for (const entry of mine.filter(candidate => succeeded(candidate.report) && candidate.report.notes?.length)) {
       const text = `${names[entry.tool]}: ${entry.report.notes!.join(' ')}`;
       lines.push({ source, plugin, ok: false, text, short: text });
     }
   }
   return lines;
-}
-
-/**
- * Single parts picked, tool by tool, in the parts' own names: "skill triage put into Pi", "MCP server issues taken out of
- * Codex", or for a pick that `changed` nothing, "skill triage already out of Pi". A run that left a part alone (its note
- * says which) only says its parts changed.
- */
-function singleGroups(done: PluginDone[], changed = true): Group[] {
-  const named = (parts: PartRef[]) => andList(parts.map(part => `${partWords[part.kind][0]} ${part.name}`));
-  const [into, outOf] = changed ? ['put into', 'taken out of'] : ['already in', 'already out of'];
-  return done.flatMap((entry): Group[] => (changed && entry.report.notes?.length ? [[[names[entry.tool]], 'parts changed in']]
-    : [[entry.pick!.on.length ? [names[entry.tool]] : [], `${named(entry.pick!.on)} ${into}`], [entry.pick!.off.length ? [names[entry.tool]] : [], `${named(entry.pick!.off)} ${outOf}`]]));
 }
 
 /** A result group: its tools, the words before them, and any after. */
@@ -318,7 +273,6 @@ export interface PlanApi {
   setPart?(source: string, marketName: string, plugin: string, part: PartRef, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   setWhole?(source: string, marketName: string, plugin: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   update?(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
-  parts?(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string, pick?: PartsPick): Promise<PluginActionResult>;
   /** A plugin read and its items brought up to date (marketplaces.ts items): Update, or with `bring` a tool new here's install, `tools` then counted as where it is. */
   items?(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string, bring?: boolean): Promise<PluginActionResult>;
 }
@@ -338,14 +292,13 @@ export async function runPlan(ops: PluginOp[], api: PlanApi, home: string, onSte
         : step.action === 'update' ? (api.update ? await api.update(step.source, step.marketName, step.plugin, step.tools, home) : { reports: failedFor(step.tools, 'Plugins can’t be updated here.') })
         : step.action === 'remove' ? await api.uninstall(step.source, step.marketName, step.plugin, step.tools[0]!, home)
         : isItems(step.action) ? (api.items ? await api.items(step.source, step.marketName, step.plugin, step.tools, home, step.action === 'install-items') : { reports: failedFor(step.tools, 'Its items can’t be read here.') })
-        : isParts(step.action) ? (api.parts ? await api.parts(step.source, step.marketName, step.plugin, step.tools[0]!, partsMode(step.action)!, step.run, home, step.pick) : { reports: failedFor(step.tools, 'Parts can’t be installed here.') })
         : isWhole(step.action) ? (api.setWhole ? await api.setWhole(step.source, step.marketName, step.plugin, step.tools[0]!, step.action === 'plugin-on', home) : { reports: failedFor(step.tools, 'Plugins can’t be turned on or off here.') })
         : step.part ? (api.setPart ? await api.setPart(step.source, step.marketName, step.plugin, step.part, step.tools[0]!, step.action === 'part-on', home) : { reports: failedFor(step.tools, 'That can’t be turned on or off here.') })
         : step.skill ? await api.setSkill(step.source, step.marketName, step.plugin, step.skill, step.tools[0]!, step.action === 'skill-on', home)
         : { reports: failedFor(step.tools, 'That choice named no skill, so nothing ran.') };
     } catch { result = { reports: failedFor(step.tools, 'It stopped unexpectedly. Refresh to see where it stands.') }; }
     if (result.stopped) return { done, stopped: result.stopped };
-    for (const report of result.reports) done.push({ source: step.source, marketName: step.marketName, plugin: step.plugin, tool: report.tool, action: step.action, ...(step.skill ? { skill: step.skill } : {}), ...(step.part ? { part: step.part } : {}), ...(step.run ? { run: step.run } : {}), ...(step.pick ? { pick: step.pick } : {}), report });
+    for (const report of result.reports) done.push({ source: step.source, marketName: step.marketName, plugin: step.plugin, tool: report.tool, action: step.action, ...(step.skill ? { skill: step.skill } : {}), ...(step.part ? { part: step.part } : {}), report });
   }
   return { done };
 }

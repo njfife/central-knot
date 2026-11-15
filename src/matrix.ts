@@ -8,7 +8,7 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, dayAndTime, defaultHistoryDays, groupBy } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
+import { andList, kindNouns, toolNames, toolsPhrase } from './words.ts';
 import { walkthroughBand } from './firstsetup.ts';
 import { leftOutTools, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
@@ -19,41 +19,19 @@ import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary,
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
-import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, SyncNotice, HarnessId, PartsInstall, TakenInNotice, ThroughPlugin } from './types.ts';
+import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, SyncNotice, HarnessId, TakenInNotice, ThroughPlugin } from './types.ts';
 import { pluginOf } from './sourcelink.ts';
 import { market } from './pluginstate.ts';
-import { pluginKey, type PluginDraft } from './pluginplan.ts';
+import type { PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, type PluginItemAt } from './pluginswitch.ts';
-import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
+import { partOfPage, samePart } from './pluginstatus.ts';
 import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
 
 const names = toolNames as Record<Tool, string>;
 
 /**
- * The plugins this item came from as a part (parts.ts): each plugin once, with the tools it went into as a separate item
- * because they can't take the plugin. Empty for an ordinary item.
- */
-function fromPlugins(skill: ItemRow, page: PageKind): { install: PartsInstall; tools: HarnessId[] }[] {
-  const partKind = partOfPage[page];
-  const named = [skill.key, skill.name].filter((name): name is string => !!name).map(name => ({ kind: partKind, name }) as const);
-  const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
-  for (const install of state.home?.parts ?? []) {
-    // A copy removed from that tool by hand is no longer a part installed there (an MCP server's part is no copy: its line says
-    // the tool has it as the plugin's, `unseen`).
-    const gone = skill.copies[install.tool] === undefined && skill.unseen?.[install.tool] === undefined;
-    if ((toolList().includes(install.tool) && gone) || !install.items.some(item => !item.removed && named.some(name => samePart(item, name)))) continue;
-    const key = pluginKey(install.source, install.plugin);
-    const entry = found.get(key) ?? { install, tools: [] };
-    entry.tools.push(install.tool);
-    found.set(key, entry);
-  }
-  // Tools in column order, as everywhere else ("Codex and Pi").
-  return [...found.values()].map(entry => ({ ...entry, tools: entry.tools.sort(byToolOrder) }));
-}
-
-/**
- * Opens a plugin's page on Plugins, where the plugin and its parts are updated or removed together. `marketplace`: its
+ * Opens a plugin's page on Plugins, where the plugin itself is handled. `marketplace`: its
  * marketplace's name, to find it by when the page lists that marketplace under another spelling of its address.
  */
 function openPlugin({ source, plugin, marketplace }: { source?: string; plugin: string; marketplace?: string }) {
@@ -63,42 +41,14 @@ function openPlugin({ source, plugin, marketplace }: { source?: string; plugin: 
   showPage('plugins');
 }
 
-/** The tools that have this item through `plugin` itself (not as a separate item), in column order. */
-const throughPluginIn = (skill: ItemRow, plugin: string) => toolList().filter(tool => skill.plugin?.[tool]?.plugin === plugin && skill.copies[tool] === undefined);
-
-/** The note in an item's details: which plugin it is a part of, where, and where its parts are managed together. */
-function partNote(skill: ItemRow) {
-  // Once read, the Plugins page knows whether the plugin is still listed; a page that can't show it isn't linked to.
-  const unlisted = (install: PartsInstall) => !!market.view && !market.view.marketplaces.some(entry => entry.source === install.source && entry.plugins.some(plugin => plugin.name === install.plugin));
-  return fromPlugins(skill, kind).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('puzzle', 12, 'tone-muted'),
-    h('span', {}, `From the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item. `,
-      throughPluginIn(skill, install.plugin).length ? `${andList(throughPluginIn(skill, install.plugin).map(tool => names[tool]))} ${throughPluginIn(skill, install.plugin).length > 1 ? 'have' : 'has'} it through the plugin itself. ` : '',
-      ...(unlisted(install) ? ['Its marketplace no longer lists the plugin, so this is now an ordinary item.']
-        : ['Update or remove its parts on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '. ',
-          reach(skill, install.plugin)]))));
-}
-
-/**
- * What the row's own controls reach on an item that is a plugin's part: its switch also turns it on or off where a tool has it
- * through the plugin itself; Delete removes only the separate item.
- */
-function reach(skill: ItemRow, plugin: string) {
-  const through = throughPluginIn(skill, plugin);
-  return through.length ? `Its switch also turns it on or off in ${andList(through.map(tool => names[tool]))}, through the plugin. Deleting here removes only this separate item.`
-    : 'Its switch and Delete act on this separate item, never on the plugin itself.';
-}
-
-/** The one mark of a plugin's item on its row, a part's or one inside the installed plugin: the plugin's glyph and "from <plugin>"; its title says which. */
+/** The one mark of a plugin's item on its row: the plugin's glyph and "from <plugin>"; its title says which. */
 const pluginTag = (plugin: string, title: string) => h('span.row-tag.row-part', { title }, icon('puzzle', 12, 'tone-faint'), `from ${plugin}`);
-/** A part's tag on its row, titled with the version and the tools it went into. */
-const partTags = (skill: ItemRow) => fromPlugins(skill, kind).map(({ install, tools }) =>
-  pluginTag(install.plugin, `Part of the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item`));
 
 // ---------- What a plugin installed whole brings (pluginrows.ts) ----------
 /** This page's plugin rows for the home on screen. */
 const plugged = () => (!state.home ? { rows: [] as PluginRow[], unread: [] } : pageRows(state.home, kind));
-/** A row of a plugin's: one of its parts, or an item some tool has through the plugin itself. */
-const fromAPlugin = (skill: ItemRow) => fromPlugins(skill, kind).length > 0 || Object.keys(skill.plugin ?? {}).length > 0;
+/** A row of a plugin's: an item some tool has through the plugin itself. */
+const fromAPlugin = (skill: ItemRow) => Object.keys(skill.plugin ?? {}).length > 0;
 
 /** The item a tool has through a plugin on a row of the person's own, with that plugin as the tool has it installed. */
 function itemThrough(skill: ItemRow, tool: Tool): PluginItemAt | undefined {
@@ -678,7 +628,6 @@ function nameCell(skill: ItemRow, attention: boolean) {
       attention ? h('span.row-tag.row-tag-differs', { id: `decide-${skill.key}` }, 'Copies differ') : null),
     libraryTag(skill),
     sourceTag(skill),
-    partTags(skill),
     skill.description ? h('span.ov-name-about', { title: skill.description }, skill.description) : null);
 }
 
@@ -1505,7 +1454,6 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
       inFiles ? null : h('p.details-status', {}, switchStatus(skill)),
       // Its description whole: the closed row cuts it.
       skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
-      partNote(skill),
       files ? h('div.details-actions', {}, files) : null),
     // What every tool shares of it, and what stays each harness's own, said where it is true: an item in Central Knot, or a
     // found one that can be taken in.

@@ -104,7 +104,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, its record's gate and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Other builds of Central Knot on this Mac (otherbuilds.ts): while one is found this build is held (model.ts holdingBuild) and the window shows only the held screen. Unset where they aren't looked for (main.ts buildsContext: only an installed app on a Mac, or a test with its stand-ins) and where an Applications folder can't be read. */ otherBuilds?: OtherBuild[]; /** Where this copy of the app runs from, when that is not the top of an Applications folder (otherbuilds.ts runsOutside): it replaces no build from there. */ runsOutside?: string; /** What this build said on taking the home's record over at this view's look, where it carried the other build's choices (main.ts lookForOthers, takeOverHome): the page says it once. */ tookOver?: string; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, its record's gate and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Other builds of Central Knot on this Mac (otherbuilds.ts): while one is found this build is held (model.ts holdingBuild) and the window shows only the held screen. Unset where they aren't looked for (main.ts buildsContext: only an installed app on a Mac, or a test with its stand-ins) and where an Applications folder can't be read. */ otherBuilds?: OtherBuild[]; /** Where this copy of the app runs from, when that is not the top of an Applications folder (otherbuilds.ts runsOutside): it replaces no build from there. */ runsOutside?: string; /** What this build said on taking the home's record over at this view's look, where it carried the other build's choices (main.ts lookForOthers, takeOverHome): the page says it once. */ tookOver?: string; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -261,10 +261,6 @@ export interface DesktopApi {
   setPluginPart(source: string, marketName: string, plugin: string, part: PartRef, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   /** Turns a whole installed plugin off (`on` false) or back on in one tool, with that tool's own switch. */
   setPluginOn(source: string, marketName: string, plugin: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
-  /** What each tool without the plugin would get as its parts, and why each other part wouldn't go in. */
-  partsPlan(source: string, plugin: string): Promise<Partial<Record<HarnessId, PartPlan[]>> | null>;
-  /** Installs (or updates), removes or undoes a plugin's parts in one tool; `run` names the parts run an Undo reverses; `pick` installs or takes out only the parts it names. */
-  pluginParts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string, pick?: PartsPick): Promise<PluginActionResult>;
   /** A plugin's items in Pi and OpenCode brought up to date from its marketplace's copy (marketplaces.ts items). */
   pluginItems(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   /** One skill's or agent's file as each tool's installed copy of a plugin has it, read when its row is opened. */
@@ -588,7 +584,7 @@ export interface CatalogPlugin {
   remote?: { url: string; path: string; ref?: string; sha?: string };
   /** Its entry in marketplace.json as written, for the paths it lists (main process only; not sent to the page). */
   entry?: Record<string, unknown>;
-  /** No longer in the catalog, listed only because its parts are still in a tool, so they can be removed together. */
+  /** No longer in the catalog, listed only because a tool still has it, or the home records it while its marketplace can't be read. */
   gone?: boolean;
 }
 
@@ -646,25 +642,12 @@ export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninsta
   /** An update: the version the tool records now. */ version?: string;
   /** An update of a copy that differed at the same version: done by the tool's own update, or by uninstalling and installing again. */ byContent?: 'update' | 'reinstall';
   /** A failed update with nobody watching: the tool's own update kept its copy, and only a reinstall (never made unasked) would change that. */ kept?: true;
-  /** Parts already there were brought up to date, not installed new. */ partsUpdated?: boolean; /** The parts run to undo, when it changed something. */ partsRun?: string;
-  /** Parts left alone this run, each saying why (edited since, a same-named item already there): shown to be read. */ notes?: string[];
-  /** Skills this run wrote in place of a link that led nowhere, by name. */ replacedLinks?: string[] }
+  /** Said beside what a step did, to be read (an update that turned a server on and couldn't turn it off again: plugins.ts). */ notes?: string[] }
 
-// ---------- A plugin's parts in a tool without plugins (parts.ts) ----------
+// ---------- A plugin's parts: the skills, MCP servers and agents it holds, installed with it ----------
 export type PartKind = 'skill' | 'mcp' | 'agent';
-/** One part put in a tool: a skill folder, an MCP entry or an agent file, by name, with the hash it had when it went in. */
-export interface PartItem { kind: PartKind; name: string; hash: string; /** What it was on disk once written (for an MCP entry, with the tool's own settings), to tell a later edit. */ seen?: string;
-  /** Out by the person's choice (turned off, or removed from the tool by hand): updates leave it out while the plugin still has it. */ removed?: true }
-/** A plugin's parts in one tool: from which plugin and version, when, and which items. `digest` identifies the parts' content then. */
-export interface PartsInstall { source: string; marketName: string; plugin: string; version?: string; tool: HarnessId; at: string; digest: string; items: PartItem[] }
-/** One part of a plugin for one tool: it can go in (with a limit, maybe), or `why` not. `out`: the person turned it off or removed it there, so it stays out until chosen. */
-export interface PartPlan { kind: PartKind; name: string; why?: string; /** `why` holds for every part of this kind in this tool (Pi has no agents). */ wholeKind?: true; limit?: string; out?: true; /** It is in and can stay, but can't be taken out or rewritten there now, and why. */ fixed?: string }
 /** A part by kind and name. */
-export type PartRef = Pick<PartItem, 'kind' | 'name'>;
-/** Single parts chosen for one tool: those to put in and those to take out and leave out. The tool's other parts stay as they are. */
-export interface PartsPick { on: PartRef[]; off: PartRef[] }
-/** A plugin's parts in one tool, as the Plugins page shows them. `changed`: the plugin's parts differ now from what went in. */
-export interface PartsState { version?: string; at: string; items: Pick<PartItem, 'kind' | 'name'>[]; changed?: boolean; /** The catalog's version now, when it differs. */ now?: string }
+export interface PartRef { kind: PartKind; name: string }
 
 // ---------- What a plugin installed whole brings (pluginitems.ts) ----------
 /** One skill, MCP server or agent inside a tool's installed copy of a plugin, by its real name (the tool calls it `plugin:name`). */
@@ -723,8 +706,11 @@ export interface MarketplaceView {
   copilotRefuses?: string;
   /** Why only Codex can take this marketplace's plugins (it is in Codex's own format), if so. */
   codexOnly?: string;
-  /** Plugins whose parts are in tools that can't take the plugin itself, by plugin and tool. */
-  parts?: Record<string, Partial<Record<HarnessId, PartsState>>>;
+  /**
+   * The plugins of this marketplace with a part on the record of the parts written before the library, while that record waits to
+   * be moved (partsmigrate.ts): such a plugin waits in Pi and OpenCode until it is (pluginstatus.ts partsWaitFor).
+   */
+  waiting?: string[];
   /** Each listed plugin's one switch, by plugin (pluginrecord.ts PluginSwitch). */
   switches?: Record<string, PluginSwitch>;
   /** The plugins with items in the library (pluginlibrary.ts itemsView), by plugin: "Its items" and "has it" in Pi and OpenCode. */
@@ -795,6 +781,8 @@ export interface PluginsView {
   suggested?: { source: string; name: string; tools: HarnessId[] }[];
   /** Why no plugin's switch can be used now (the plugins record can't be read, or before it is first made, a tool's record can't be). */
   switchProblem?: string;
+  /** Why the move of the parts written before the library waits, as the last pass gave it (homepass.ts partsWait), while it does. */
+  partsWait?: string;
 }
 
 // ---------- A kind on Central Knot's library (library.ts): its page's view ----------
@@ -997,7 +985,7 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
 /** Central Knot's own settings, shown on its Settings page. `pluginUpdates`: plugins are updated automatically (pluginupdates.ts). */
 export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
-/** One line of what automatic plugin updates did: when, which plugin of which marketplace, and the words. `warn`: it needs reading (a part was left alone). */
+/** One line of what automatic plugin updates did: when, which plugin of which marketplace, and the words. `warn`: it needs reading (a step failed, or has a note). */
 export interface PluginUpdateLine { at: number; source: string; plugin: string; text: string; warn?: true; /** A failed update that is tried again by itself. */ again?: true }
 /**
  * Automatic plugin updates as the main process has them, for the open home. `on`: the switch in Settings; `paused`:

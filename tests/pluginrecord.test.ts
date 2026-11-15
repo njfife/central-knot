@@ -25,9 +25,9 @@ test('Row 2: a plugin with no entry (found in a tool, or never turned on) owes n
 
 test('Rows 3 to 6: wanted (On, not kept out): in line where it is; installed by its route where it lacks it; held where it can’t go', () => {
   assert.deepEqual(codex(on, now('whole')), { wanted: true, has: 'whole', takes: true });
-  assert.deepEqual(owedTo(on, 'pi-cli', now('parts', 'parts'), ['pi-cli']), { wanted: true, has: 'parts', takes: true });
+  assert.deepEqual(owedTo(on, 'pi-cli', now('items', 'items'), ['pi-cli']), { wanted: true, has: 'items', takes: true });
   assert.deepEqual(codex(on, now('none')), { wanted: true, has: 'none', takes: true, act: 'install' });
-  assert.deepEqual(owedTo(on, 'pi-cli', now('none', 'parts'), ['pi-cli']), { wanted: true, has: 'none', takes: true, act: 'install-parts' });
+  assert.deepEqual(owedTo(on, 'pi-cli', now('none', 'items'), ['pi-cli']), { wanted: true, has: 'none', takes: true, act: 'install-items' });
   assert.deepEqual(owedTo(on, 'copilot-cli', now('none', { cannot: 'Copilot CLI refuses this marketplace.' }), ['copilot-cli']), { wanted: true, has: 'none', takes: false, held: 'Copilot CLI refuses this marketplace.' });
 });
 
@@ -39,12 +39,12 @@ test('An install is owed to the automatic updates only in a tool not on the home
   assert.deepEqual(owedTo(on, 'codex-cli', now('none'), ['claude-cli'], true), { wanted: true, has: 'none', takes: true, act: 'install', offElsewhere: true });
 });
 
-test('Rows 7 to 10: not wanted (Off, or kept out): in line where it lacks it; uninstalled or its parts taken out where it has it; held where it can’t be taken out', () => {
+test('Rows 7 to 10: not wanted (Off, or kept out): in line where it lacks it; uninstalled or its items turned off where it has it; held where it can’t be taken out', () => {
   const kept = { on: true, except: ['codex-cli' as const] };
   assert.deepEqual(codex(off, now('none')), { wanted: false, has: 'none', takes: true });
   assert.deepEqual(owedTo(off, 'claude-cli', now('whole', 'whole', 'Claude Code has its copy from the Anthropic Directory.'), []), { wanted: false, has: 'whole', takes: true, held: 'Claude Code has its copy from the Anthropic Directory.' });
   assert.deepEqual(codex(kept, now('whole')), { wanted: false, has: 'whole', takes: true, act: 'uninstall' });
-  assert.deepEqual(owedTo(off, 'pi-cli', now('parts', 'parts'), ['pi-cli']), { wanted: false, has: 'parts', takes: true, act: 'remove-parts' });
+  assert.deepEqual(owedTo(off, 'pi-cli', now('items', 'items'), ['pi-cli']), { wanted: false, has: 'items', takes: true, act: 'remove-items' });
 });
 
 const team = '/markets/team';

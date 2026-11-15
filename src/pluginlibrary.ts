@@ -9,8 +9,8 @@
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool).
 // When a plugin is read: at a click that brings it into Pi or OpenCode (On, Add, Let in, Install there), at its Update and
 // Update all, and at the automatic updates' check, for a plugin with items (withItemsOf) or a tool new here (marketplaces.ts);
-// Off, Keep out and Take out there only click. Which plugins take this route and which keep their parts is pluginstatus.ts
-// routeOf. Kept elsewhere: the table (library.ts), the held answer in the tools with an installer (plugins.ts pluginHolds),
+// Off, Keep out and Take out there only click. A plugin whose parts from before the library wait to be moved takes this route only
+// once they are (pluginstatus.ts waitsToMove). Kept elsewhere: the table (library.ts), the held answer in the tools with an installer (plugins.ts pluginHolds),
 // the switch's table (pluginrecord.ts owedTo), and the let-go of an item changed here, in every pass (librarypass.ts letGo).
 // Known miss: a skill whose folder's name and SKILL.md name differ (folder pdf-tools, name pdf) is the item pdf-tools, as every
 // tool's copy is named; Pi and OpenCode load it as pdf, so it can meet a skill of that name there unmarked, and the same

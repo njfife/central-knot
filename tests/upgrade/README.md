@@ -43,4 +43,5 @@ git worktree remove --force ../ck-preview-9 && git worktree remove --force ../ck
 ```
 
 `start.ts` is one start of this version on a home, in a process of its own; the test runs it. These homes are kept as files
-because the code that made them is gone from this version (parts.ts goes after the move).
+because the code that made them is gone from this version (alpha 1's parts engine included); they are never deleted, as a home
+last opened by alpha 1 may first be opened by a much later version (`src/partsmigrate.ts`'s header).

@@ -1,5 +1,5 @@
 // Plugin parts from before the library becoming items linked to their plugin (partsmigrate.ts), one worked example per row of its
-// header's table, on real files in a temp home with Pi and OpenCode. Each home is written as parts.ts left one: plugin-parts.json,
+// header's table, on real files in a temp home with Pi and OpenCode. Each home is written as alpha 1's engine left one: plugin-parts.json,
 // each part's content kept in the store, the copies in the tools, and the plugins record its first read made. The same over a
 // whole home alpha 1 made is tests/upgrade.test.ts.
 import { test } from 'node:test';
@@ -14,22 +14,22 @@ import { setSyncEverything } from '../src/everything.ts';
 import { readHistory } from '../src/history.ts';
 import { itemKey, type ItemKind, type LibraryItem } from '../src/library.ts';
 import { serverHash } from '../src/mcp.ts';
-import { hideParts, migrateParts } from '../src/partsmigrate.ts';
+import { hideParts, migrateParts, type PartItem } from '../src/partsmigrate.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
 import { readPluginRecord, savePluginRecord, type PluginEntry } from '../src/pluginrecord.ts';
 import { readLibraries, saveProfile, switchProfile } from '../src/profiles.ts';
 import { inUse, liveItems } from '../src/profileplan.ts';
 import { applyServers, serverKind } from '../src/servers.ts';
-import { importRevision, libraryGate, readTree, type ShareContext } from '../src/share.ts';
+import { copyTree, exists, libraryGate, readTree, storeFolder, type ShareContext } from '../src/share.ts';
 import { applySkills, skillKind } from '../src/skills.ts';
-import type { HarnessId, PartItem } from '../src/types.ts';
+import type { HarnessId } from '../src/types.ts';
 
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
 const skill = (name: string, body = `Use ${name}.`) => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\n${body}\n`;
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const ROOTS: Record<HarnessId, string> = { 'pi-cli': '.pi/agent', 'opencode-cli': '.config/opencode', 'claude-cli': '.claude', 'copilot-cli': '.copilot', 'codex-cli': '.codex' };
 
-/** A part on the record, as parts.ts wrote it. */
+/** A part on the record, as alpha 1 wrote it. */
 type Part = { tool: HarnessId; plugin?: string; version?: string; at?: string; item: PartItem };
 
 /**
@@ -48,12 +48,12 @@ async function partsHome(options: { tools?: HarnessId[]; identity?: boolean } = 
   return {
     base, home, context, managed, entries, at,
     cleanup: () => rm(base, { recursive: true, force: true }),
-    /** A skill's content kept as parts.ts kept it: its hash. */
+    /** A skill's content kept as alpha 1 kept it, in the Skills store of its time: its hash. */
     keep: async (name: string, body?: string) => {
       const folder = join(base, 'keep', sha(`${name}${body}`), name);
       await put(join(folder, 'SKILL.md'), skill(name, body));
-      const tree = await readTree(folder);
-      await importRevision(context, itemKey(name), folder, tree);
+      const tree = await readTree(folder), kept = join(home, '.central-knot/items', storeFolder(itemKey(name)), tree.hash);
+      if (!(await exists(kept))) { await mkdir(dirname(kept), { recursive: true }); await copyTree(folder, kept, tree); }
       return tree.hash;
     },
     copy: (tool: HarnessId, name: string, body?: string) => put(at(tool, `skills/${name}/SKILL.md`), skill(name, body)),
