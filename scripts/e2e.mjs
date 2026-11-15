@@ -1758,6 +1758,8 @@ async function practiceFlow() {
   same('Undo puts that one part back as it was', [existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8'), readFileSync(piMcp, 'utf8').includes('issues')], [triageText, false]);
   await a.click(partSwitch('skill-triage'));
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
+  // The parts record given above goes too: a marketplace whose plugin has parts on record stays listed until they are removed.
+  rmSync(join(practice, '.central-knot/plugin-parts.json'), { force: true });
   await a.run('window.centralKnot.refresh()');
   // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
   // document-tools:pdf-reader in config.toml. Codex has it installed as its record says.
