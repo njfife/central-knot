@@ -63,8 +63,8 @@ export const saveProfiles = (home: string, profiles: Profile[]) =>
   writeDurably(profilesPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, profiles }, null, 2)}\n`);
 
 /**
- * The home's profiles, ready to change, or why they can't be changed here: a preview-only home, another build owning sync (the
- * page's whyReadOnly in app.ts says the same), a profiles file that can't be read, or one from before profiles were sets of
+ * The home's profiles, ready to change, or why they can't be changed here: a preview-only home, a record that stops every write
+ * (the page's whyReadOnly in app.ts says the same), a profiles file that can't be read, or one from before profiles were sets of
  * items, which the next pass moves first (profilemigrate.ts, once nothing waits for Resume). Editing a profile writes Central
  * Knot's own file alone, so a record waiting for Resume does not stop it (share.ts libraryGate `ownFile`).
  */

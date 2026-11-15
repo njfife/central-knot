@@ -301,7 +301,7 @@ async function harnessFlow() {
 /**
  * A tool's Manage switch on its Harnesses card (toolchoice.ts), in the Practice copy: Codex left out, then managed again, with
  * what the line said before each click, the band after it, Codex's files byte for byte, and what the other pages show
- * meanwhile; then every tool left out; then another build's home, where no switch can be turned.
+ * meanwhile; then every tool left out.
  */
 async function manageFlow() {
   const a = await launch(join(scratch, 'manage-data'), ['--practice-copy']);
@@ -380,12 +380,6 @@ async function manageFlow() {
   await a.click('#overview-open-harnesses');
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
   same('every tool managed again', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
-  // Another build syncs this home: every switch is disabled, and the list's note says why, once.
-  const record = join(practice, '.central-knot/sync.json');
-  writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, 'utf8')), owner: 'another-build', ownerName: 'Central Knot Alpha' }));
-  await a.click('#header-refresh');
-  same('in another build’s home no Manage switch can be turned', await a.all('[id^="manage-"][role="switch"]', 'e.disabled'), [true, true, true]);
-  check('and the note says why, once', ((await a.text('.tools-note')) ?? '').includes('Central Knot Alpha syncs this home, so which tools it manages can’t change from here.') && !(await a.exists('.harness-manage-line')), await a.text('.tools-note'));
   same('no page errors, manage', a.pageErrors, []);
   await a.quit();
 }
@@ -3131,6 +3125,7 @@ const treeOf = dir => Object.fromEntries(readdirSync(dir, { recursive: true, wit
  * A home as the alpha left it, opened next by this build: release-notes On in every tool by the alpha's own code, then edited in
  * Claude Code; History holding an entry 60 days old; the alpha's settings (History kept 90 days, Automatic sync off) beside this
  * build's data folder, as every build's are; the alpha installed in a stand-in /Applications. `tag` keeps each one's folders apart.
+ * `open` opens it as another folder (this build's saved home), or with `asThisMac` as this Mac's own home (its HOME).
  */
 async function alphaSyncedHome(tag) {
   const mac = standInMac(join(scratch, `mac-${tag}`));
@@ -3154,18 +3149,23 @@ async function alphaSyncedHome(tag) {
   mac.bundle(mac.applications, 'Central Knot Alpha', ALPHA_ID);
   const saved = name => { try { return JSON.parse(readFileSync(join(data, name), 'utf8')); } catch { return {}; } };
   const settings = () => [saved('sync-settings.json').syncOn, saved('app-settings.json').historyDays];
-  const owner = () => JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8')).owner;
+  const record = () => JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8')), owner = () => record().owner;
   const aged = () => JSON.parse(readFileSync(historyFile, 'utf8')).events.some(event => event.id === 'aged-60');
-  const open = () => launch(data, [], HOME, { CK_TEST_APPS: mac.root, CK_TEST_OWN_BUNDLE: join(mac.applications, 'Central Knot.app') });
-  return { mac, ALPHA_ID, alphaPath, inTrash, home, data, notes, edited, historyFile, settings, owner, aged, open };
+  const open = (asThisMac = false) => launch(data, [], asThisMac ? home : HOME, { CK_TEST_APPS: mac.root, CK_TEST_OWN_BUNDLE: join(mac.applications, 'Central Knot.app') });
+  return { mac, ALPHA_ID, alphaPath, alphaData, inTrash, home, data, notes, edited, historyFile, settings, record, owner, aged, open };
 }
 
+/** The tools' own folders in a home (not Central Knot's, nor what the browser engine keeps in a HOME): what "nothing in the tools changed" is checked against. */
+const toolFiles = home => Object.fromEntries(['.claude', '.copilot', '.codex', '.agents'].filter(folder => existsSync(join(home, folder))).flatMap(folder => Object.entries(treeOf(join(home, folder))).map(([path, hash]) => [join(folder, path), hash])));
+
 /**
- * The record changes hands however the build that held this one went, with that build's settings kept: moved to the Trash by
- * hand, then Refresh, or Replace on the screen still showing it; two builds replaced in turn, the first's result shown on the
- * second's screen; and Take over syncing. Each ends with this build syncing the home, Automatic sync off and 90 days of History
- * kept, so a History write after it keeps the entry from 60 days ago. Where the alpha's settings folder is missing, the screen
- * and the result say this build's own settings stay.
+ * The record changes hands at the look, by itself. Freed of the build the record names, however it went (moved to the Trash by
+ * hand, then Refresh, or Replace on the screen still showing it), its choices are kept, and History's days are the longer of the
+ * two. Freed of another build than the one the record names (two replaced in turn): re-recorded, the home waits for Resume,
+ * and only the longer History comes with it. The alpha's settings folder missing: this build's own settings, said so. Another
+ * folder whose record names the alpha, gone before this build opened: the same as two replaced in turn, and nothing in its tools
+ * written before Resume; remembered here, no Resume, and History isn't trimmed below the longer of the two. A record that can't
+ * be written: the page shows, the record stays, and the log says why.
  */
 async function freedOtherWaysFlow() {
   for (const how of ['Refresh', 'Replace']) {
@@ -3180,21 +3180,38 @@ async function freedOtherWaysFlow() {
     same(`no page errors, freed by ${how}`, a.pageErrors, []);
     await a.quit();
   }
+  // History's days are this build's for every home it opens: a take-over keeps the longer of the two, never a shorter one.
+  const longer = await alphaSyncedHome('longer');
+  writeFileSync(join(longer.alphaData, 'app-settings.json'), JSON.stringify({ historyDays: 30 }));
+  writeFileSync(join(longer.data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: longer.home }, historyDays: 90 }));
+  const d = await longer.open();
+  mkdirSync(longer.mac.trash, { recursive: true });
+  renameSync(longer.alphaPath, join(longer.mac.trash, 'Central Knot Alpha.app'));
+  await d.click('#header-refresh');
+  same('freed by Refresh, this build at 90 days and the alpha at 30: still 90', [await d.exists('#held'), longer.owner(), longer.settings()], [false, 'com.centralknot.firstlook', [false, 90]]);
+  await d.run(`window.centralKnot.syncNow(${JSON.stringify(longer.home)})`);
+  check('and a History write after it keeps the entry from 60 days ago', readFileSync(longer.notes('.copilot'), 'utf8') === longer.edited && longer.aged());
+  same('no page errors, the longer of the two', d.pageErrors, []);
+  await d.quit();
+  // Two builds replaced in turn, the record naming the first: the look that frees this build is Zed Knot's, so the alpha's
+  // Automatic sync and plugin updates don't come with the record, only History's days, the longer of the two.
   const held = await alphaSyncedHome('two-builds');
   held.mac.bundle(held.mac.applications, 'Zed Knot', 'com.centralknot.custom.zed');
   const a = await held.open();
   await a.click('#held-replace');
   same('two builds: after the alpha is replaced, the next screen names Zed Knot and says what came of the alpha', [await a.text('#held-title'), (await a.text('#held-said') ?? '').startsWith('Central Knot Alpha is in the Trash')], [`Zed Knot is installed in ${held.mac.applications}`, true]);
   await a.click('#held-replace');
-  same('then Zed Knot: both in the Trash, and this build syncs the home, with the alpha’s settings kept', [held.inTrash().sort(), await a.exists('#held'), held.owner(), held.settings()], [['Central Knot Alpha.app', 'Zed Knot.app'], false, 'com.centralknot.firstlook', [false, 90]]);
-  check('the band says first that this build syncs the home now', (await a.text('[data-outcome] .band-text') ?? '').startsWith('Central Knot syncs this home now'), await a.text('[data-outcome] .band-text'));
-  await a.run(`window.centralKnot.syncNow(${JSON.stringify(held.home)})`);
-  check('Sync once then spreads the edit, and the entry from 60 days ago stays', readFileSync(held.notes('.copilot'), 'utf8') === held.edited && held.aged());
+  same('then Zed Knot: both in the Trash, and the record names this build, with its own Automatic sync and the alpha’s 90 days of History', [held.inTrash().sort(), await a.exists('#held'), held.owner(), held.settings()], [['Central Knot Alpha.app', 'Zed Knot.app'], false, 'com.centralknot.firstlook', [undefined, 90]]);
+  check('the band says what came of Zed Knot, and nothing of the alpha’s choices', /^Zed Knot is in the Trash/.test(await a.text('[data-outcome] .band-text') ?? ''), await a.text('[data-outcome] .band-text'));
+  await a.click('#nav-skills');
+  check('Skills asks Resume: this build has no memory of the record', await a.exists('#resume'), await a.text('.bands'));
+  await a.click('#resume');
+  check('Resume, with this build’s Automatic sync on, spreads the edit, and the entry from 60 days ago stays', readFileSync(held.notes('.copilot'), 'utf8') === held.edited && held.aged());
   same('no page errors, two builds', a.pageErrors, []);
   await a.quit();
   // The alpha's settings folder isn't there: the screen and the result say this build's own settings stay, and they do.
   const bare = await alphaSyncedHome('no-folder');
-  rmSync(join(dirname(bare.data), 'com.centralknot.alpha'), { recursive: true });
+  rmSync(bare.alphaData, { recursive: true });
   writeFileSync(join(bare.data, 'sync-settings.json'), JSON.stringify({ syncOn: false }));
   const b = await bare.open();
   same('without the alpha’s settings folder, the screen promises nothing of it: this build’s own settings, History’s days among them', await b.text('#held > p:nth-of-type(3)'),
@@ -3203,30 +3220,107 @@ async function freedOtherWaysFlow() {
   check('and the result says the same, with this build’s settings as they were', (await b.text('[data-outcome] .band-text') ?? '').startsWith('Central Knot syncs this home now, with its own settings: Central Knot Alpha’s settings folder wasn’t found') && bare.owner() === 'com.centralknot.firstlook' && JSON.stringify(bare.settings()) === JSON.stringify([false, undefined]), [await b.text('[data-outcome] .band-text'), bare.settings()]);
   same('no page errors, no settings folder', b.pageErrors, []);
   await b.quit();
-  // The alpha gone before this build ever opened: nothing holds it, the record waits for Take over syncing, and that keeps the
-  // alpha's settings too.
-  const before = await alphaSyncedHome('take-over');
-  rmSync(before.alphaPath, { recursive: true });
-  const c = await before.open();
+  // Another folder whose record names the alpha, gone before this build ever opened (Automatic sync off, 90 days, plugin updates
+  // off, This Mac's home to open), with this build at On and 30 days: the record is this build's at the first look, by name; of
+  // the alpha's choices only History's days come with it; the folder waits for Resume, and nothing in its tools is written before.
+  const other = await alphaSyncedHome('other-folder');
+  rmSync(other.alphaPath, { recursive: true });
+  writeFileSync(join(other.alphaData, 'app-settings.json'), JSON.stringify({ historyDays: 90, pluginUpdates: false, home: { mode: 'actual' } }));
+  writeFileSync(join(other.data, 'sync-settings.json'), JSON.stringify({ syncOn: true }));
+  const ownSync = readFileSync(join(other.data, 'sync-settings.json'), 'utf8'), ownApp = JSON.parse(readFileSync(join(other.data, 'app-settings.json'), 'utf8'));
+  const files = toolFiles(other.home);
+  const c = await other.open();
   await c.click('#nav-skills');
-  same('opened with the alpha gone, nothing is taken over by itself: Skills offers Take over syncing', [await c.exists('#held'), before.owner(), await c.exists('#take-over-sync')], [false, 'com.centralknot.alpha', true]);
-  await c.click('#take-over-sync');
-  same('Take over syncing keeps the alpha’s Automatic sync (off) and History days (90), and says so first', [before.owner(), before.settings(), (await c.text('#announcement') ?? '').startsWith('Central Knot syncs this home now, and keeps Central Knot Alpha’s choices')], ['com.centralknot.firstlook', [false, 90], true]);
-  same('no page errors, Take over syncing', c.pageErrors, []);
+  same('opened with the alpha gone: nothing holds this build, and the record names it, by its name', [await c.exists('#held'), other.record().owner, other.record().ownerName], [false, 'com.centralknot.firstlook', 'Central Knot']);
+  same('of the alpha’s choices only History’s days are this build’s now (the longer): Automatic sync, plugin updates and the home it opens are as they were',
+    [readFileSync(join(other.data, 'sync-settings.json'), 'utf8'), JSON.parse(readFileSync(join(other.data, 'app-settings.json'), 'utf8'))], [ownSync, { ...ownApp, historyDays: 90 }]);
+  check('Skills asks Resume, and nothing on the page names the alpha', await c.exists('#resume') && !(await c.run('document.body.innerText')).includes('Central Knot Alpha'), await c.text('.bands'));
+  same('nothing in its tools changed before Resume', toolFiles(other.home), files);
+  await c.click('#resume');
+  check('Resume spreads the edit, and History, written at 90 days, keeps the entry from 60 days ago', readFileSync(other.notes('.copilot'), 'utf8') === other.edited && other.aged());
+  same('no page errors, another folder', c.pageErrors, []);
   await c.quit();
-  // History's days are this build's for every home it opens: a take-over keeps the longer of the two, never a shorter one.
-  const longer = await alphaSyncedHome('longer');
-  rmSync(longer.alphaPath, { recursive: true });
-  writeFileSync(join(dirname(longer.data), 'com.centralknot.alpha', 'app-settings.json'), JSON.stringify({ historyDays: 30 }));
-  writeFileSync(join(longer.data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: longer.home }, historyDays: 90 }));
-  const d = await longer.open();
-  await d.click('#nav-skills');
-  await d.click('#take-over-sync');
-  same('this build at 90 days, the alpha at 30: after Take over syncing, still 90', [longer.owner(), longer.settings()[1]], ['com.centralknot.firstlook', 90]);
-  await d.run(`window.centralKnot.syncNow(${JSON.stringify(longer.home)})`);
-  check('and a History write after it keeps the entry from 60 days ago', readFileSync(longer.notes('.copilot'), 'utf8') === longer.edited && longer.aged());
-  same('no page errors, the longer of the two', d.pageErrors, []);
-  await d.quit();
+  // The same, in a folder this build remembers (it synced it before): no Resume, so the first view's pass writes, at 90 days.
+  const known = await alphaSyncedHome('remembered');
+  rmSync(known.alphaPath, { recursive: true });
+  writeFileSync(join(known.data, 'sharing-settings.json'), JSON.stringify({ homes: { [known.home]: { generation: known.record().generation } } }));
+  const e = await known.open();
+  await e.click('#nav-skills');
+  same('a folder this build remembers, taken over without its choices: no Resume, the first pass spreads the edit, and History at 90 days keeps the entry from 60 days ago',
+    [known.owner(), await e.exists('#resume'), readFileSync(known.notes('.copilot'), 'utf8') === known.edited, known.aged(), known.settings()], ['com.centralknot.firstlook', false, true, true, [undefined, 90]]);
+  same('no page errors, a folder remembered', e.pageErrors, []);
+  await e.quit();
+  // A record that can't be written (its folder read-only): the page shows as it would have, the record stays, and the log says why.
+  const locked = await alphaSyncedHome('read-only');
+  rmSync(locked.alphaPath, { recursive: true });
+  const store = join(locked.home, '.central-knot'), unchanged = readFileSync(join(store, 'sync.json'), 'utf8');
+  chmodSync(store, 0o555);
+  const f = await locked.open();
+  await f.click('#nav-skills');
+  const after = [await f.exists('#nav-skills'), readFileSync(join(store, 'sync.json'), 'utf8') === unchanged, readNow(join(locked.data, 'central-knot.log'))];
+  chmodSync(store, 0o755);
+  check('a record that can’t be written: the page shows, sync.json is as it was, and the log says why', after[0] && after[1] && after[2].includes('record names com.centralknot.alpha, and it wasn’t taken over:'), after[2].split('\n').filter(line => line.includes('sync:')));
+  same('no page errors, a record that can’t be written', f.pageErrors, []);
+  await f.quit();
+  // A look that can't answer (an Applications folder that can't be read) takes nothing over: whether another build is here isn't known.
+  const blind = await alphaSyncedHome('unanswered');
+  rmSync(blind.alphaPath, { recursive: true });
+  chmodSync(blind.mac.applications, 0o000);
+  const g = await blind.open();
+  const named = blind.owner();
+  chmodSync(blind.mac.applications, 0o755);
+  same('a look that can’t answer takes nothing over: the record still names the alpha, and the pages show', [named, await g.exists('#nav-skills'), g.pageErrors], ['com.centralknot.alpha', true, []]);
+  await g.quit();
+}
+
+/**
+ * This Mac's own home whose record names the alpha, gone before this build opened (only where the real home can be written: the
+ * Mac run). The first look carries the alpha's choices: its Automatic sync off is in force before the first pass, so with an edit
+ * waiting no tool file changes, the status bar says so once, and nothing else names the alpha; History's days are the longer of
+ * the two; and a build that still remembers the home writes at its first pass with the alpha's days already in force.
+ */
+async function thisMacTakeOverFlow() {
+  if (!canWriteRealHome) return;
+  const asThisMac = async (tag, settings) => {
+    const held = await alphaSyncedHome(tag);
+    rmSync(held.alphaPath, { recursive: true });
+    mkdirSync(join(held.home, '.local/bin'), { recursive: true });
+    for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.'], ['codex', 'codex-cli 0.142.3']]) {
+      writeFileSync(join(held.home, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
+      chmodSync(join(held.home, '.local/bin', name), 0o755);
+    }
+    writeFileSync(join(held.data, 'app-settings.json'), JSON.stringify({ home: { mode: 'actual' }, ...settings }));
+    return held;
+  };
+  // This build at its default 30 days, the alpha at 90 with Automatic sync off; an edit waits in Claude Code.
+  const mine = await asThisMac('this-mac', {}), files = toolFiles(mine.home);
+  const a = await mine.open(true);
+  same('this Mac’s home at launch: the record names this build by its name, the alpha’s Automatic sync (off) and 90 days are this build’s, and no tool file changed',
+    [mine.record().owner, mine.record().ownerName, mine.settings(), JSON.stringify(toolFiles(mine.home)) === JSON.stringify(files)], ['com.centralknot.firstlook', 'Central Knot', [false, 90], true]);
+  check('the status bar says so, once', (await a.text('#announcement') ?? '').startsWith('Central Knot syncs this home now, and keeps Central Knot Alpha’s choices') && (await a.run('window.centralKnot.refresh()')).tookOver === undefined, await a.text('#announcement'));
+  await a.click('#nav-skills');
+  check('no band names the alpha, and nothing asks Resume', !(await a.exists('#resume')) && !(await a.text('.bands') ?? '').includes('Central Knot Alpha'), await a.text('.bands'));
+  await a.run(`window.centralKnot.syncNow(${JSON.stringify(mine.home)})`);
+  check('Sync once spreads the edit, and History, written at 90 days, keeps the entry from 60 days ago', readFileSync(mine.notes('.copilot'), 'utf8') === mine.edited && mine.aged());
+  same('no page errors, this Mac’s home', a.pageErrors, []);
+  await a.quit();
+  // This build at 90, the alpha at 30: still 90.
+  const longer = await asThisMac('this-mac-longer', { historyDays: 90 });
+  writeFileSync(join(longer.alphaData, 'app-settings.json'), JSON.stringify({ historyDays: 30 }));
+  const b = await longer.open(true);
+  same('this Mac’s home, this build at 90 days and the alpha at 30: still 90', [longer.owner(), longer.settings()[1]], ['com.centralknot.firstlook', 90]);
+  same('no page errors, this Mac’s home at 90', b.pageErrors, []);
+  await b.quit();
+  // A build reinstalled that still remembers this Mac's home, at 30 days; the alpha at 90 with Automatic sync on: the first view's
+  // pass writes, with the alpha's days already in force.
+  const again = await asThisMac('this-mac-remembered', {});
+  writeFileSync(join(again.alphaData, 'sync-settings.json'), JSON.stringify({ syncOn: true }));
+  writeFileSync(join(again.data, 'sharing-settings.json'), JSON.stringify({ homes: { [again.home]: { generation: again.record().generation } } }));
+  const c = await again.open(true);
+  same('reinstalled, still remembering this Mac’s home: the first pass spreads the edit, and History, written at the alpha’s 90 days, keeps the entry from 60 days ago',
+    [again.owner(), readFileSync(again.notes('.copilot'), 'utf8') === again.edited, again.aged(), again.settings()], ['com.centralknot.firstlook', true, true, [true, 90]]);
+  same('no page errors, reinstalled', c.pageErrors, []);
+  await c.quit();
 }
 
 /**
@@ -3248,7 +3342,7 @@ async function otherBuildFlow() {
     'Only one build of Central Knot works at a time, so Central Knot changes nothing in this home or your tools until one of the two is gone: Replace moves Central Knot Alpha to the Trash and Central Knot carries on, and Quit Central Knot closes this app and leaves both installed.',
     'Replace Central Knot AlphaQuit Central Knot',
     'Your skills, MCP servers and agents, which of them are kept in step, and History stay whichever build you keep: they’re saved in this home, not in an app.',
-    'Central Knot Alpha syncs this home, so Replace keeps its choices here: whether Automatic sync is on, whether plugins update by themselves, how many days of History are kept (the longer of the two) and which folder it opens when it starts. Its other settings, and any marketplace added only in it, don’t carry over.',
+    'Central Knot Alpha syncs this home, so Replace keeps its choices here: whether Automatic sync is on, whether plugins update by themselves and how many days of History are kept (the longer of the two). Its other settings, and any marketplace added only in it, don’t carry over.',
     `Replace asks every running copy of Central Knot Alpha to quit and waits up to 20 seconds, then moves ${alphaPath} to the Trash, where it stays until you empty the Trash. Central Knot Alpha’s own settings folder stays.`,
     'To keep Central Knot Alpha instead, quit Central Knot and move it to the Trash.',
   ]);
@@ -3262,7 +3356,7 @@ async function otherBuildFlow() {
   await a.click('#held-replace');
   const said = await a.text('[data-outcome] .band-text') ?? '';
   check('Replace: the alpha is in the stand-in Trash, the held screen is gone and the pages are back', !existsSync(alphaPath) && inTrash().join() === 'Central Knot Alpha.app' && !(await a.exists('#held')) && await a.exists('#nav-skills'), inTrash());
-  check('the band says first that this build syncs the home now and keeps the alpha’s choices, then where the alpha went', said.startsWith('Central Knot syncs this home now, and keeps Central Knot Alpha’s choices: whether Automatic sync is on, whether plugins update by themselves, how many days of History are kept (the longer of the two) and which folder it opens when it starts. Central Knot Alpha is in the Trash, where it stays until you empty the Trash.'), said);
+  check('the band says first that this build syncs the home now and keeps the alpha’s choices, then where the alpha went', said.startsWith('Central Knot syncs this home now, and keeps Central Knot Alpha’s choices: whether Automatic sync is on, whether plugins update by themselves and how many days of History are kept (the longer of the two). Central Knot Alpha is in the Trash, where it stays until you empty the Trash.'), said);
   same('the record is this build’s now', JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8')).owner, 'com.centralknot.firstlook');
   same('the alpha’s Automatic sync (off) and History’s days (90) are this build’s', [JSON.parse(readFileSync(join(data, 'sync-settings.json'), 'utf8')).syncOn, JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).historyDays, await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`)], [false, 90, 'false']);
   check('with Automatic sync off, no pass wrote: the edit waits in Claude Code', readFileSync(notes('.claude'), 'utf8') === edited && readFileSync(notes('.copilot'), 'utf8') !== edited);
@@ -3378,9 +3472,9 @@ async function realHomeFlow() {
     await a.click('#history-shorten');
     for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
     const previewNote = (await a.text('#setting-history-message') ?? '').trim();
-    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window, and the row says another copy removes the older History later rather than that it was removed',
-      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).events.length, (await a.run('window.centralKnot.getSettings()')).historyDays, previewNote],
-      [7, true, 0, 7, 'Saved. Older History in this home is removed the next time Central Knot records a change in it.']);
+    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window, and the row says the older History goes at the home’s next change rather than that it was removed',
+      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).events.length, (await a.run('window.centralKnot.getSettings()')).historyDays, previewNote.startsWith('Saved. History before ') && previewNote.endsWith(' will be removed the next time this home records a change.')],
+      [7, true, 0, 7, true]);
     await a.run('window.centralKnot.setHistoryDays(30)');
     rmSync(join(HOME, '.central-knot'), { recursive: true });
     await a.quit();
@@ -3630,7 +3724,7 @@ async function syncEverythingFlow() {
 /**
  * First setup on the page (firstsetup.ts): a folder home never asked shows the question on the Overview; Yes opens the walkthrough of
  * the copies that differ, at the latest copy; Go on, no dates to go by, leaving half way and the Overview's way back in; the
- * switch-on's one Undo in History and its Restore. Then a second home: Resume first, another build's home not asked, and No.
+ * switch-on's one Undo in History and its Restore. Then a second home: Resume first, and No.
  */
 async function firstSetupFlow() {
   const homeFor = name => {
@@ -3714,8 +3808,8 @@ async function firstSetupFlow() {
   same('no page errors, first setup', a.pageErrors, []);
   await a.quit();
 
-  // A second home: a record made by a tool's Manage switch, then opened with no memory of it (Resume first); another build's home;
-  // and No, which changes no file.
+  // A second home: a record made by a tool's Manage switch, then opened with no memory of it (Resume first); and No, which
+  // changes no file.
   const other = homeFor('home-setup-two');
   saved(skill(other.claude, 'tidy', text('tidy', 'Tidy up.')), 5);
   saved(skill(other.codex, 'plan', text('plan', 'Plan ahead.')), 5);
@@ -3733,12 +3827,7 @@ async function firstSetupFlow() {
   same('a home this app has no memory of: Resume comes first, and the question after it', [await c.exists('#setup-resume'), await c.exists('#setup-question')], [true, false]);
   await c.click('#setup-resume-button');
   check('resumed: the question', await c.exists('#setup-question'), await c.text('.overview-scroll'));
-  const sync = join(other.home, '.central-knot/sync.json'), mine = readNow(sync);
-  writeFileSync(sync, JSON.stringify({ ...JSON.parse(mine), owner: 'another-build', ownerName: 'Central Knot Alpha' }));
-  await c.click('#header-refresh');
-  same('another build’s home is not asked', await c.exists('#setup-question'), false);
-  writeFileSync(sync, mine);
-  await c.click('#header-refresh');
+  const sync = join(other.home, '.central-knot/sync.json');
   const before = tree(other.home);
   await c.click('#setup-no');
   same('No stores the rule off, changes no file in the tools, and the question goes for good', [JSON.parse(readNow(sync)).syncEverything, Object.fromEntries(Object.entries(tree(other.home)).filter(([path]) => !path.startsWith('.central-knot'))), await c.exists('#setup-question')],
@@ -4193,7 +4282,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, otherBuildFlow, freedOtherWaysFlow, listDiffersFlow, pluginSwitchFlow, pluginUpdatesFlow, repoBaseFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, firstSetupFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, otherBuildFlow, freedOtherWaysFlow, thisMacTakeOverFlow, listDiffersFlow, pluginSwitchFlow, pluginUpdatesFlow, repoBaseFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, firstSetupFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();

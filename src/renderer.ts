@@ -157,9 +157,7 @@ function renderPage() {
 /** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */
 function writeFact(sync: SyncView): { glyph: IconName; text: string; short?: string; tone: string } {
   if (heldBy(state.home)) return { glyph: 'lock', text: 'Paused: another build is here', short: 'Paused', tone: 'tone-warning' };
-  // Another build syncing this home stops only this build's syncing (the switch beside this says whose it is): plugins and
-  // instruction files are still written from here.
-  if (sync.gate.state === 'stopped' && !sync.gate.owner) return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
+  if (sync.gate.state === 'stopped') return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
   if (!sync.access.allowed) return { glyph: 'lock', text: 'Preview only', tone: '' };
   if (state.home?.mode === 'actual') return { glyph: 'pencil-line', text: 'Writes to your real tools', short: 'Real tools', tone: '' };
   if (state.home?.mode === 'fixture') return { glyph: 'pencil-line', text: 'Changes stay here', short: 'Stays here', tone: '' };
@@ -182,11 +180,6 @@ function syncSwitch(home: HomeView) {
   if (!home.sync.access.allowed) {
     return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: home.sync.access.reason ?? 'Preview only: nothing is written here' },
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'));
-  }
-  // Another build syncs this home (ORG-08): this one's switch is shown, not offered, and says whose it is.
-  if (home.sync.gate.state === 'stopped' && home.sync.gate.owner) {
-    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: `${home.sync.gate.owner.name} syncs this home. Take over syncing, on Skills, MCP servers or Agents, to have Central Knot sync it instead.` },
-      label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, home.sync.gate.owner.running === false ? `${home.sync.gate.owner.name}’s, not open` : `By ${home.sync.gate.owner.name}`));
   }
   const idle = home.syncOn && !anythingOn();
   const title = idle ? `Automatic sync is on: it starts once ${home.sync.syncEverything ? 'something turns up in one of your tools (Synchronize everything takes it in)' : 'you turn something on'}. Click to turn it off.`

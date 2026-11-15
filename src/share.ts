@@ -1,12 +1,12 @@
 // What every engine stands on (MAP.md, "The store and safe writes"):
-// - the home's store, `.central-knot/` (storeDirectory), and its sync record, sync.json (SyncRecord: which build syncs the
-//   home, the tools left out, Synchronize everything), read and saved (readRecord, saveRecord); only takeOverSync changes its
-//   owner, and work the build that owned it had under way stops at its next item or save (stillOwned);
+// - the home's store, `.central-knot/` (storeDirectory), and its sync record, sync.json (SyncRecord: the build it names, the
+//   tools left out, Synchronize everything), read and saved (readRecord, saveRecord); only takeOverSync changes the build it
+//   names, and only main.ts takeOverHome calls it;
 // - two gates: writeAccess, whether this window may write this home at all (the real home only when chosen; nothing while this
 //   build is held by another: ShareContext held), and the gate for
 //   library writes (libraryGate), the one answer to "may this write of the library happen now", which asks writeAccess and
-//   syncGate (which build syncs the home, and whether it waits for Resume). A write of the library asks libraryGate, never the
-//   two apart; the views read them apart, to say why on the page;
+//   syncGate (whether the record can be read, is the one this build remembers, or waits for Resume). A write of the library
+//   asks libraryGate, never the two apart; the views read them apart, to say why on the page;
 // - checked writes: a tool's file written or removed only while it holds what was read (writeFileChecked, removeFileChecked,
 //   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably);
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
@@ -16,15 +16,15 @@
 // (skillfiles.ts, mcp.ts, agentfiles.ts), and which tools are managed (presence.ts managedTools).
 //
 // Who enters the gate for library writes. A click that writes the library, the home's sync record or a tool's own switch for a
-// library item by its own hand (a profile switch and its Undo, a Manage switch, Synchronize everything's switch, Take over,
-// Clear the switch and its Undo, a source's Add and Check now: sources.ts) enters it once its own refusals are past. A
+// library item by its own hand (a profile switch and its Undo, a Manage switch, Synchronize everything's switch, a skill's Take
+// over, Clear the switch and its Undo, a source's Add and Check now: sources.ts) enters it once its own refusals are past. A
 // pass enters it before it reads its clicks (librarypass.ts runPass), so an item page's click that the pass then refuses has
 // still made the record of a home with none, or resumed one that waited. What checks before such a write starts (Pull, Push,
 // Synchronize everything's Undo and Restore, the Undo of a Pull's change to Claude Code's settings, the profiles migration)
 // only asks it; what writes a file of Central Knot's own alone asks it for that (`ownFile`: profiles.json, a source's Look and
-// Remove). Writes that are not the library's ask writeAccess alone: taking over syncing (takeOverSync, which changes the
-// owner), another build of the app, the Git repo's connection, instructions and plugins; syncsHere is whether this build syncs
-// the home at all (the background pass, History kept tidy).
+// Remove). Writes that are not the library's ask writeAccess alone: the record taken over (takeOverSync, which changes the
+// build it names), another build of the app, the Git repo's connection, instructions and plugins; syncsHere is whether this
+// build syncs the home at all (the background pass, History kept tidy).
 import { createHash, randomUUID } from 'node:crypto';
 import { STANDARD_BUILD, PRODUCT } from './values.ts';
 import { createReadStream } from 'node:fs';
@@ -81,7 +81,8 @@ export interface ShareContext {
 }
 
 /**
- * The home's sync record (sync.json): which build syncs this home (`owner`, ORG-08), the generation it remembers, the tools
+ * The home's sync record (sync.json): the build it names (`owner`: the one that made it or last took it over; older builds
+ * stop where it names another, this one only rewrites it, main.ts takeOverHome), the generation it remembers, the tools
  * left out of Central Knot's care here (`leftOut`), and whether its standing rule is on (`syncEverything`). Format 2. Format 1
  * also held the skills, with `items`, `roots` and more: skillstore.ts moves them into the library and writes format 2
  * (sync.v1.json keeps the earlier file); until it has, those fields are carried through every save as they are.
@@ -138,8 +139,6 @@ export function plainError(error: unknown): string {
   if (code === 'ENAMETOOLONG') return 'A file name is too long for this disk.';
   if (code === 'EXDEV') return 'That folder is on a different disk from its parent.';
   if (code === 'CK_EXISTS') return 'Something appeared at the destination, so it was left alone.';
-  // Another build took over syncing meanwhile (stillOwned): its own words say what happened.
-  if (code === 'CK_TAKEN') return (error as Error).message;
   return 'It could not finish.';
 }
 
@@ -402,22 +401,11 @@ export async function managedNow(context: ShareContext, snapshots: Snapshot[]): 
 /** The tools the sync record leaves out (SyncRecord leftOut); none where there is no record, or it can't be read. */
 export const leftOutNow = async (context: ShareContext): Promise<HarnessId[]> => (await readRecord(context.home)).record?.leftOut ?? [];
 
-/** A home's first sync record, owned by this build. */
+/** A home's first sync record, naming this build. */
 export const newRecord = (context: ShareContext): SyncRecord => ({ formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, ownerName: context.buildName });
 
-/**
- * Stops work under way once another build has taken over syncing this home (takeOverSync): the record on disk is then
- * under another owner than `owner`, the one this work began with. Asked before each save of the record and before each
- * item of a pass, so a pass that was already running writes nothing more and never takes ownership back by finishing.
- */
-export async function stillOwned(home: string, owner: string): Promise<void> {
-  const onDisk = await readFile(recordPath(home), 'utf8').then(text => JSON.parse(text) as Partial<SyncRecord>).catch(() => undefined);
-  if (typeof onDisk?.owner === 'string' && onDisk.owner !== owner) throw Object.assign(new Error(`${ownerName(onDisk as SyncRecord)} took over syncing this home meanwhile, so this stopped there.`), { code: 'CK_TAKEN' });
-}
-
-/** Saves a home's sync record, unless another build has taken over since (stillOwned). `takingOver` is the one save that changes the owner. */
-export async function saveRecord(home: string, record: SyncRecord, takingOver = false) {
-  if (!takingOver) await stillOwned(home, record.owner);
+/** Saves a home's sync record whole. */
+export async function saveRecord(home: string, record: SyncRecord) {
   await writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
 }
 
@@ -445,8 +433,8 @@ export interface Entering {
 
 /**
  * The gate for library writes: whether one may happen now, else why not in plain words: a preview-only home (writeAccess),
- * another build's record or one that can't be read (syncGate `stopped`), or one waiting for Resume (unless `resume` or
- * `ownFile`). Let in, it has already done what entering needs before anything is written: the record made (`start`), the
+ * a record that can't be read or isn't the one this build remembers (syncGate `stopped`), or one waiting for Resume (unless
+ * `resume` or `ownFile`). Let in, it has already done what entering needs before anything is written: the record made (`start`), the
  * home remembered (`start`, `resume`), so a click that writes before its own pass never finds that pass refused. Answers the
  * home's record, where it has one (with `start`, always). A click that writes by its own hand runs its own refusals before it,
  * and enters it only to write; a pass enters it first (this file's header).
@@ -464,32 +452,30 @@ export async function libraryGate(context: ShareContext, asked: Entering = {}): 
   return { record };
 }
 
-/** Section 3's stops: none of these turns into first setup or adopts a stale record. */
+/**
+ * Section 3's stops: none of these turns into first setup or adopts a stale record. A record is read by its generation alone,
+ * whichever build it names: one install at a time keeps two builds on this Mac apart (main.ts heldReason), and where builds
+ * are looked for, the look takes a record naming another build over (main.ts takeOverHome).
+ */
 export async function syncGate(context: ShareContext): Promise<SyncGate> {
   const { record, problem } = await readRecord(context.home);
   if (problem) return { state: 'stopped', reason: `${problem} ${NOTHING_CHANGED}` };
   const remembered = (await readSettings(context.settingsPath)).homes?.[context.home]?.generation;
   if (!record) return remembered ? { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` } : { state: 'first-setup' };
-  // One build syncs a home at a time (ORG-08). Another build's home is left alone until this one is told to take over.
-  if (record.owner !== context.build) {
-    const name = ownerName(record);
-    return { state: 'stopped', reason: `${name} syncs this home, so nothing was written or deleted. Take over syncing to have ${context.buildName ?? 'this app'} sync it instead.`, owner: { build: record.owner, name } };
-  }
   if (!remembered) return { state: 'needs-resume', reason: 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.' };
   if (remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
   return { state: 'ready' };
 }
 
-/** The build that owns a record, by the name people know it by: the one it recorded, the standard app's, or failing both, its identity. */
+/** The build a record names, by the name people know it by: the one it recorded, the standard app's, or failing both, its identity. */
 const ownerName = (record: SyncRecord) => record.ownerName || (record.owner === STANDARD_BUILD ? PRODUCT : `Another ${PRODUCT} build (${record.owner})`);
 
 /**
- * Takes over syncing a home from the build that owns its record (ORG-08): this build becomes the owner and carries on
- * from the record as it is, every managed item, choice and baseline with it, since the record and what it keeps live in
- * the home, not in either build. The build that owned it finds another owner at its next pass and stops; it changes
- * nothing more there until it is told to take over in turn: a pass it had under way stops before its next item and at
- * its next save of the record (stillOwned), so it can't take the home back by finishing. Ownership never moves any other way. A record that can't be
- * read, or a home that can't be written, stays as it is, with the reason.
+ * Re-records a home as this build's (main.ts takeOverHome, its one caller): the record names this build, by its id and its
+ * name, and keeps everything else as it is, its generation, every managed item, choice and baseline with it, since the record
+ * and what it keeps live in the home, not in either build. An older build, which obeys the record, stops by itself on finding
+ * that it names this one. Whether this build remembers the record, so it needn't Resume, is the caller's to decide. A record that can't be read,
+ * or a home that can't be written, stays as it is, with the reason. `from`: the build it named.
  */
 export async function takeOverSync(context: ShareContext): Promise<{ stopped?: string; from?: string }> {
   const access = await writeAccess(context);
@@ -498,8 +484,7 @@ export async function takeOverSync(context: ShareContext): Promise<{ stopped?: s
   if (problem) return { stopped: `${problem} ${NOTHING_CHANGED}` };
   if (!record) return { stopped: 'Nothing is synced in this home yet, so there is nothing to take over.' };
   if (record.owner === context.build) return {};
-  await saveRecord(context.home, { ...record, owner: context.build, ownerName: context.buildName }, true);
-  await remember(context, record.generation);
+  await saveRecord(context.home, { ...record, owner: context.build, ownerName: context.buildName });
   return { from: ownerName(record) };
 }
 

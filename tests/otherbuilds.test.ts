@@ -100,11 +100,11 @@ test('A name with “&” reads as written, and the look says whether each build
   ]);
 }));
 
-test('A custom build running from elsewhere is found only where the open home’s record names it, the one other id looked for running', () => aMac(async ({ stand, downloads, context, runs }) => {
+test('A custom build running from elsewhere is found only where the open home’s record names it, the one other id looked for running, and says the record names it', () => aMac(async ({ stand, downloads, context, runs }) => {
   const acme = stand.bundle(downloads, ACME, ACME_BUILD);
   await runs([{ bundleId: ACME_BUILD, path: acme, quits: true }]);
   assert.deepEqual(await lookForBuilds(context), []);
-  assert.deepEqual(await lookForBuilds(context, ACME_BUILD), [{ build: ACME_BUILD, name: ACME, running: [acme] }]);
+  assert.deepEqual(await lookForBuilds(context, ACME_BUILD), [{ build: ACME_BUILD, name: ACME, running: [acme], ownsRecord: true }]);
   assert.deepEqual(await lookForBuilds(context, STANDARD_BUILD), [], 'this build’s own id, named by the record, is not another build');
 }));
 

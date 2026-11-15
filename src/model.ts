@@ -1,10 +1,9 @@
 // Small helpers both the main process and the page use: times in words (dayAndTime, timesApart), History's days (the choices
-// and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, which build syncs a home
-// (syncOwner), one install at a time (what holds this build: holdingBuild, holdsUntil, QUIT_WAIT_MS), a notice's names, what
-// the Caught up band names (caughtUpNames), the notices a view set aside brought, carried into the next view (withSetAside), and
-// grouping.
+// and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, one install at a time (what
+// holds this build: holdingBuild, holdsUntil, QUIT_WAIT_MS), a notice's names, what the Caught up band names (caughtUpNames),
+// the notices a view set aside brought, carried into the next view (withSetAside), and grouping.
 // Pure: no DOM, no files. Tools' and kinds' names and lists in words are words.ts's.
-import type { HarnessId, HistoryDays, HomeView, OtherBuild, Snapshot, SyncGate, SyncNotice } from './types.ts';
+import type { HarnessId, HistoryDays, HomeView, OtherBuild, Snapshot, SyncNotice } from './types.ts';
 
 const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc' };
 export { toolName } from './words.ts';
@@ -12,8 +11,6 @@ export const toolMonogram = (tool: HarnessId) => monograms[tool];
 export const fullToolName = (snapshot: Snapshot) => `${snapshot.harnessName} ${snapshot.surface}`;
 /** A clock time in the person's own format: "9:20 AM". */
 export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-/** The build that syncs a home in this one's place, where its record names another (share.ts syncGate); undefined otherwise. */
-export const syncOwner = (gate: SyncGate) => (gate.state === 'stopped' ? gate.owner : undefined);
 /**
  * One install at a time: what holds this build, from what the looks have found so far (main.ts others, types.ts HomeView
  * otherBuilds): 'unlooked' until the first look answers, so nothing is written before it; else the first other build the last

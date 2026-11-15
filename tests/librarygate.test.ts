@@ -1,10 +1,10 @@
 // The gate for library writes (src/share.ts libraryGate), on real folders in a temp home. First its own table: each state a
 // home can be in, against each way of asking (only asking, `start`, `resume`, `ownFile`): what it answers, and what it made or
 // remembered. Then the clicks that write before their own pass runs (a skill's Take over, a tool's own switch cleared and its
-// Undo), in a home waiting for Resume (refused, unless the click is a Resume, which the gate remembers
-// before anything is written) and in another build's home (refused, and nothing written); and clicks refused for a reason of
-// their own, which make no record and resume no home. The pass's own gate: tests/agents.test.ts; a tool's Manage switch:
-// tests/managetool.test.ts; Synchronize everything: tests/firstsetup.test.ts; a profile switch: tests/profiles.test.ts.
+// Undo), in a home waiting for Resume (refused, unless the click is a Resume, which the gate remembers before anything is
+// written); and clicks refused for a reason of their own, which make no record and resume no home. The pass's own gate:
+// tests/agents.test.ts; a tool's Manage switch: tests/managetool.test.ts; Synchronize everything: tests/firstsetup.test.ts; a
+// profile switch: tests/profiles.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -23,19 +23,16 @@ async function forget(box: Box) {
   await rm(box.context.settingsPath);
   assert.equal((await syncGate(box.context)).state, 'needs-resume');
 }
-/** The same home as another build sees it: the record names this one as its owner. */
-const otherBuild = (box: Box): ShareContext => ({ ...box.context, build: 'com.example.other', settingsPath: join(box.base, 'other.json') });
 const inBox = (name: string, body: (box: Box) => Promise<void>) => test(name, async () => { const box = await sandbox(); try { await body(box); } finally { await box.cleanup(); } });
 
 // ---------- The gate's own table ----------
 
-type HomeState = 'no record' | 'ready' | 'waiting for Resume' | 'another build’s' | 'a record that can’t be read' | 'a home that can’t be written';
+type HomeState = 'no record' | 'ready' | 'waiting for Resume' | 'a record that can’t be read' | 'a home that can’t be written';
 /** A home in `state`, made with share.ts's own steps (the record saved, this app remembering it or not). */
 async function homeIn(box: Box, state: HomeState): Promise<ShareContext> {
   const record = join(box.home, '.central-knot/sync.json');
   if (state === 'ready' || state === 'waiting for Resume') await saveRecord(box.home, newRecord(box.context));
   if (state === 'ready') await remember(box.context, JSON.parse(await readFile(record, 'utf8')).generation);
-  if (state === 'another build’s') await saveRecord(box.home, newRecord(otherBuild(box)));
   if (state === 'a record that can’t be read') { await mkdir(join(box.home, '.central-knot'), { recursive: true }); await writeFile(record, '{ damaged'); }
   return state === 'a home that can’t be written' ? { ...box.context, mode: 'actual', realHome: box.home, allowActualWrites: false } : box.context;
 }
@@ -67,8 +64,7 @@ test('The gate in a home waiting for Resume: refuses, unless the click is a Resu
   for (const way of ['only asked', 'start']) assert.match(said[way], /^refused: This app has an intact sync record but no memory of it\./, way);
   assert.deepEqual([said.resume, said.ownFile], ['let in, with its record, remembered', 'let in, with its record']);
 });
-test('The gate in another build’s home, a home whose record can’t be read, and a home that can’t be written: refuses every way, in plain words', async () => {
-  refusedEveryWay(await row('another build’s'), /^refused: Another Central Knot build \(com\.example\.other\) syncs this home, so nothing was written or deleted\./);
+test('The gate in a home whose record can’t be read, and a home that can’t be written: refuses every way, in plain words', async () => {
   refusedEveryWay(await row('a record that can’t be read'), /^refused: The sync record is damaged\. Nothing was written or deleted\./);
   refusedEveryWay(await row('a home that can’t be written'), /^refused: Preview only:/);
 });
@@ -97,13 +93,6 @@ inBox('Take over in a home waiting for Resume is refused unless the click is a R
   assert.equal((await syncGate(box.context)).state, 'ready', 'the home is resumed');
 });
 
-inBox('Take over in another build’s home is refused, and the shared copy stays', async box => {
-  const shared = await sharedCopy(box);
-  assert.match((await takeOver(otherBuild(box), box.tools, 'notes', 'codex-cli', true)).stopped ?? '', /syncs this home/);
-  assert.ok(await bytes(shared));
-  assert.deepEqual((await historyOf(box)).filter(event => event.kind === 'took-over'), []);
-});
-
 // ---------- A tool's own switch cleared ----------
 
 /** "notes" On in every tool, with Codex's own switch turning it off there. The switch's target. */
@@ -126,20 +115,13 @@ inBox('Clearing a tool’s own switch in a home waiting for Resume is refused un
   assert.deepEqual([await offInCodex(box, target), (await syncGate(box.context)).state], [false, 'ready']);
 });
 
-inBox('Clearing a tool’s own switch in another build’s home is refused: the switch stays, and History says nothing', async box => {
-  const target = await switchedOff(box);
-  assert.match((await clearSwitch(otherBuild(box), box.tools, 'notes', 'codex-cli', true)).stopped ?? '', /syncs this home/);
-  assert.deepEqual([await offInCodex(box, target), (await historyOf(box)).filter(event => event.kind === 'switched')], [true, []]);
-});
-
-inBox('The Undo of Clearing a tool’s own switch is refused in another build’s home and while the home waits for Resume; after a Resume it sets the switch again', async box => {
+inBox('The Undo of Clearing a tool’s own switch is refused while the home waits for Resume; after a Resume it sets the switch again', async box => {
   const target = await switchedOff(box);
   assert.equal((await clearSwitch(box.context, box.tools, 'notes', 'codex-cli')).stopped, undefined);
   const cleared = (await historyOf(box)).filter(event => event.kind === 'switched').at(-1)!;
-  assert.match((await restoreSkill(otherBuild(box), box.tools, cleared.id)).stopped ?? '', /syncs this home/);
   await forget(box);
   assert.match((await restoreSkill(box.context, box.tools, cleared.id)).stopped ?? '', /no memory of it/);
-  assert.equal(await offInCodex(box, target), false, 'refused twice, the switch stays cleared');
+  assert.equal(await offInCodex(box, target), false, 'refused, the switch stays cleared');
   assert.equal((await applySkills(box.context, box.tools, [], { resume: true })).stopped, undefined, 'Resume');
   assert.equal((await restoreSkill(box.context, box.tools, cleared.id)).stopped, undefined);
   assert.equal(await offInCodex(box, target), true);

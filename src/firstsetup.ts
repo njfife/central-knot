@@ -23,7 +23,7 @@ import { andList, kindNouns, toolName } from './words.ts';
 /**
  * The Overview's one place for first setup: the question, in a home never asked (Resume first, in one that waits for it); after
  * it, while Synchronize everything is on and found items wait for a choice of copy, the way into the walkthrough. Nothing where no
- * tool is managed (the Overview points to Harnesses instead), or where the home can't be written or another build syncs it.
+ * tool is managed (the Overview points to Harnesses instead), or where the home can't be written or its record stops every write.
  */
 export function setupLead(home: HomeView): HTMLElement | null {
   const asks = asksNow(home), { gate } = home.sync;

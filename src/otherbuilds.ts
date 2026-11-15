@@ -4,17 +4,17 @@
 // - The look (lookForBuilds): the bundles at the top of the two Applications folders (platform.ts macPlaces) that Replace may
 //   take (whyNot: a folder of its own whose Info.plist names another build), each by the name its Info.plist gives; and the
 //   copies running of those builds, of the standard app and the alpha, and of the build the open home's record names, by
-//   bundle id, wherever they run from (runningCopies: the one meaning of "running" here, also what the take-over band says of
-//   the build that syncs a home). Each with whether its settings folder is there (settingsFound: whether they can be kept
-//   when the home's record passes from it). A bundle in a subfolder of Applications is not looked at.
+//   bundle id, wherever they run from (runningCopies: the one meaning of "running" here). Each with whether its settings folder
+//   is there (settingsFound: whether they can be kept when the home's record passes from it) and whether the open home's record
+//   names it (ownsRecord). A bundle in a subfolder of Applications is not looked at.
 // - Replace (removeBuild): only from a copy of this build that runs at the top of an Applications folder (runsOutside); the
 //   same check at the click and again just before the Trash; every running copy is asked to quit first and waited for. Quit
 //   (quitBuild) only asks. Where anything isn't known for sure, nothing is quit or removed. Each says in plain words what came
 //   of it.
 // Elsewhere: main.ts looks first in each view and holds this build while another is found (heldReason, model.ts holdingBuild:
-// share.ts writeAccess refuses), answers builds:replace and builds:quit (carryOn), and once this build is free takes over a
-// home's record that names a build no longer found, keeping that build's settings first (lookForOthers, takeOverHome); the page
-// draws the held screen (otherbuildview.ts). The shapes are types.ts OtherBuild and BuildOutcome. Tests stand in for the Mac
+// share.ts writeAccess refuses), answers builds:replace and builds:quit (carryOn), and at each look that leaves this build free
+// takes over a home's record that names another build, keeping some of that build's settings first (lookForOthers,
+// takeOverHome); the page draws the held screen (otherbuildview.ts). The shapes are types.ts OtherBuild and BuildOutcome. Tests stand in for the Mac
 // with tests/macstandins.ts.
 import { execFile } from 'node:child_process';
 import { access, lstat, mkdir, readdir, readFile, realpath, rename } from 'node:fs/promises';
@@ -132,18 +132,12 @@ export async function runningCopies(lsappinfo: string, build: string): Promise<{
   return copies;
 }
 
-/** Whether any copy of a build is running (runningCopies); undefined when that can't be told. */
-export async function isRunning(context: BuildsContext, build: string): Promise<boolean | undefined> {
-  const copies = await runningCopies(context.places.lsappinfo, build);
-  return copies === undefined ? undefined : copies.length > 0;
-}
-
 /**
  * Other builds of Central Knot on this Mac: each bundle in an Applications folder, with where its build's copies run, and a
  * build none of whose bundles is there but which is running, from wherever it runs, by the name its running bundle gives.
  * Running copies are looked for by id: the builds found installed, the standard app, the alpha, and `owner`, the build the open
- * home's record names (a custom build running from elsewhere is found only so). Undefined where an Applications folder that is
- * there can't be read: whether another build is here can't be told then.
+ * home's record names (a custom build running from elsewhere is found only so), which says so of itself (ownsRecord).
+ * Undefined where an Applications folder that is there can't be read: whether another build is here can't be told then.
  */
 export async function lookForBuilds(context: BuildsContext, owner?: string): Promise<OtherBuild[] | undefined> {
   const bundles = await installedBuilds(context);
@@ -154,8 +148,9 @@ export async function lookForBuilds(context: BuildsContext, owner?: string): Pro
     const running = (await runningCopies(context.places.lsappinfo, build))?.map(copy => copy.bundle);
     const installed = bundles.filter(each => each.build === build);
     const settings = await access(context.settingsFolder(build)).then(() => ({ settingsFound: true as const }), () => ({}));
-    for (const each of installed) found.push({ ...each, ...(running ? { running } : {}), ...settings });
-    if (!installed.length && running?.length) found.push({ build, name: (await plistOf(running[0])).name ?? `Another ${PRODUCT} build (${build})`, running, ...settings });
+    const facts = { ...settings, ...(build === owner ? { ownsRecord: true as const } : {}) };
+    for (const each of installed) found.push({ ...each, ...(running ? { running } : {}), ...facts });
+    if (!installed.length && running?.length) found.push({ build, name: (await plistOf(running[0])).name ?? `Another ${PRODUCT} build (${build})`, running, ...facts });
   }
   return found;
 }

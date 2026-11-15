@@ -13,13 +13,13 @@ import type { DestinationResult, HarnessId, HomeView } from './types.ts';
 import { toolNames as names } from './words.ts';
 
 /**
- * Why no switch can be turned in this home, if so: preview only, another build syncs it, or its record stops every write. Said
+ * Why no switch can be turned in this home, if so: preview only, or its record stops every write. Said
  * once, in the list's note (harnesspage.ts), and as each disabled switch's tooltip.
  */
 export function manageLocked(home: HomeView): string | undefined {
   if (!home.sync.access.allowed) return 'Preview only: nothing is written here, so which tools are managed can’t change.';
   const gate = home.sync.gate;
-  if (gate.state === 'stopped') return gate.owner ? `${gate.owner.name} syncs this home, so which tools it manages can’t change from here. Take over syncing first.` : gate.reason;
+  if (gate.state === 'stopped') return gate.reason;
   return undefined;
 }
 

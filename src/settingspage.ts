@@ -214,8 +214,6 @@ const shortenQuestion = (days: HistoryDays) =>
 const pruneNotes: Record<HistoryPrune, (before: string) => Pick<RowMessage, 'text' | 'detail' | 'tone'>> = {
   done: before => ({ text: `Saved. History before ${before} was removed.`, tone: 'done' }),
   later: before => ({ text: `Saved. History before ${before} will be removed the next time this home records a change.`, tone: 'info' }),
-  // Whichever copy records a change there applies its own window, so this one's date isn't promised.
-  elsewhere: () => ({ text: 'Saved. Older History in this home is removed the next time Central Knot records a change in it.', tone: 'info' }),
   'no-home': () => ({ text: 'Saved.', tone: 'info' }),
   failed: before => ({ text: `Saved, but History before ${before} couldn’t be removed.`, detail: 'Central Knot will try again the next time this home records a change. The log file says why.', tone: 'failure' }),
 };

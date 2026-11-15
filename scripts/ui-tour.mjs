@@ -894,13 +894,6 @@ if (wanted('sync-everything')) {
   await a.click('#sync-everything-on');
   await waitFor(a, `document.querySelector('#sync-everything-on')?.getAttribute('aria-checked') === 'false'`, 15000);
   await atEverySize('settings-off-again', 'Clicked its switch again: off; its line says what turning it on would add now (notes, undone, would not be)', false, '#setting-sync-everything');
-  // Another build syncs this home: the row can't be switched here, and says why in place of its hint.
-  const record = join(practice, '.central-knot/sync.json');
-  edit(record, text => JSON.stringify({ ...JSON.parse(text), owner: 'another-build', ownerName: 'Central Knot Alpha' }));
-  await refresh();
-  await a.click('#nav-settings');
-  for (const [width, height] of SIZES.slice(0, 2)) { await a.size(width, height); await show('#setting-sync-everything'); await shot(a, `settings-disabled-${width}`, `Another build (Central Knot Alpha) syncs this home: the switch is disabled and the row says why, in place of its hint (${width}×${height})`); }
-  await a.size(1280, 800);
 }
 
 if (wanted('plugin-skills')) {
@@ -2219,10 +2212,6 @@ if (wanted('manage')) {
   await atEverySize('overview-none-managed', 'The Overview with no tool managed: it names the tools left out and points to Harnesses; the sidebar holds only the pages that need no tool', true);
   await a.click('#overview-open-harnesses');
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
-  // Another build syncs this home: every switch is off with the reason.
-  edit(join(practice, '.central-knot/sync.json'), text => JSON.stringify({ ...JSON.parse(text), owner: 'another-build', ownerName: 'Central Knot Alpha' }));
-  await refresh();
-  await atEverySize('another-build', 'Another build (Central Knot Alpha) syncs this home: every Manage switch is disabled, and the note at the top says why', true);
 }
 
 // ---------- Git repo ----------
