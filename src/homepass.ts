@@ -20,8 +20,8 @@ import type { DestinationResult, HarnessId, PassResult } from './types.ts';
 
 /**
  * What one pass did. `synced`: absent when step 3 did not run (Sync off, or this build doesn't sync the home); a kind's result
- * is absent when it crashed, and the crash is in `crashes`. `profilesFailed`, `partsFailed`: why step 1 or 2 failed; `partsWait`:
- * why step 2 waits; each for the log.
+ * is absent when it crashed, and the crash is in `crashes`. `profilesFailed`, `partsFailed`: why step 1 or 2 failed, for the log;
+ * `partsWait`: why step 2 waits, for the log and the Plugins page (main.ts keeps it: MarketplaceHost partsWait).
  */
 export interface HomePass {
   synced?: { skills?: PassResult; servers?: PassResult; agents?: PassResult; crashes: DestinationResult[] };

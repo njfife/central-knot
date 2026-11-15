@@ -14,7 +14,6 @@
 // - Writing and removing, each checked: a copy is written over (swapFolder) or removed (removeFolder) only while it still
 //   holds what was read, and the folder moved aside for it is named beside its target (`.ck-parked-*` with a note of where it
 //   goes) until the step is done, so recoverFolders puts it back after a crash and a copy moved aside is never read as gone.
-// Plugin parts (parts.ts) use swapFolder and removeFolder for the skills they place.
 import { randomUUID } from 'node:crypto';
 import { access, constants, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';

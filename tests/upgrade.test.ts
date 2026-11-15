@@ -26,19 +26,21 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { agentsFolder } from '../src/agentfiles.ts';
-import { applyAgents } from '../src/agents.ts';
+import { agentKind, applyAgents } from '../src/agents.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { libraryEntry } from '../src/historyactions.ts';
 import { itemKey, type ItemKind, type LibraryItem } from '../src/library.ts';
 import { homeItems, inUse, switchPlan } from '../src/profileplan.ts';
+import { homePass } from '../src/homepass.ts';
+import { toolMark } from '../src/pluginstatus.ts';
 import { readProfiles } from '../src/profiles.ts';
 import { readTool, serverHash } from '../src/mcp.ts';
 import type { PluginEntry } from '../src/pluginrecord.ts';
-import { applyServers, serversView } from '../src/servers.ts';
+import { applyServers, serverKind, serversView } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
 import { managedNow, readRecord, syncGate, writeAccess } from '../src/share.ts';
 import { asksNow } from '../src/setupcounts.ts';
-import { applySkills } from '../src/skills.ts';
+import { applySkills, skillKind } from '../src/skills.ts';
 import type { HarnessId, HistoryEvent, HomeView } from '../src/types.ts';
 import { appContext, filesIn, type AfterPass, type Files } from './upgrade/start.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
@@ -410,7 +412,7 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
       const was = await filesIn(box.home);
       let clock = 1_000_000;
       const updates = autoUpdates({ home: () => box.home, on: () => true, paused: () => sync === 'off', pending: home => markets.pendingUpdates(home), log: () => {}, now: () => clock, every: 60_000,
-        api: { install: markets.install, update: markets.update, parts: markets.parts, items: markets.items }, noteJoined: markets.noteJoined, load: async () => undefined, save: async () => {}, changed: () => {} });
+        api: { install: markets.install, update: markets.update, items: markets.items }, noteJoined: markets.noteJoined, load: async () => undefined, save: async () => {}, changed: () => {} });
       await updates.check();
       clock += 120_000;
       await updates.check();
@@ -513,13 +515,118 @@ describe('Upgrading alpha-1-parts while Claude Code’s record of its plugins ca
   });
 });
 
-/** This version's plugins for the home: the real engine but for each tool's commands, which only note what was asked. */
-function plugins(box: Box) {
+/**
+ * docs, whose parts wait to be moved, as the page and the automatic updates meet it in a waiting home: Pi's line, then On, Install
+ * there in Pi, two automatic checks (what Update all would run: Update has nothing more, as a waiting plugin has no Its items),
+ * and Off, then Pi's line again. `partsWait` is why the move waits, as the pass gives it to main.ts (homepass.ts partsWait).
+ */
+async function docsWhileWaiting(box: Box) {
+  const context = { ...appContext(box.home, box.appData), reads: new Map() }, market = join(box.home, 'market');
+  const { partsWait } = await homePass(context, await managedNow(context, await context.read()), false);
+  const { markets, asked } = plugins(box, partsWait);
+  const piLine = async () => {
+    const shown = await markets.view(), entry = shown.marketplaces.find(each => each.name === 'team')!;
+    return { ...toolMark(shown, entry, 'docs', 'pi-cli', entry.switches?.docs?.tools['pi-cli']), waiting: entry.waiting, items: entry.items?.docs };
+  };
+  const before = await piLine();
+  for (const [what, tool] of [['on', undefined], ['fix', 'pi-cli']] as const) await markets.turn(market, 'docs', what, tool, box.home);
+  let clock = 1_000_000;
+  const updates = autoUpdates({ home: () => box.home, on: () => true, paused: () => false, pending: home => markets.pendingUpdates(home), log: () => {}, now: () => clock, every: 60_000,
+    api: { install: markets.install, update: markets.update, items: markets.items }, noteJoined: markets.noteJoined, load: async () => undefined, save: async () => {}, changed: () => {} });
+  await updates.check();
+  clock += 120_000;
+  await updates.check();
+  await markets.turn(market, 'docs', 'off', undefined, box.home);
+  // The library's live items after them, each as kind:key.
+  const live = (await Promise.all(([['skill', skillKind], ['mcp', serverKind], ['agent', agentKind]] as const).map(async ([kind, of]) =>
+    Object.values((await of.open(context)).library.items).filter(item => !item.deleted).map(item => `${kind}:${item.key}`)))).flat();
+  return { partsWait, before, after: await piLine(), asked, live };
+}
+const WAITS = 'Pi: parts of it from an earlier version wait to be moved to the library, so nothing changes there until they are.';
+
+// The realistic wait: alpha 1 used only for Plugins, so first setup was never answered: there is no sync record, and the app
+// remembers none. The move waits, and so does each plugin with a part on record in Pi and OpenCode (pluginstatus.ts waitsToMove).
+describe('Upgrading alpha-1-parts with no sync record: docs waits in Pi and OpenCode, and its Off made meanwhile reaches them at the move', () => {
+  let box: Box, made: Files, names: Record<ItemKind, string[]>, entries: Record<string, string>, waited: Files, waitedEntries: Record<string, string>,
+    waitStart: AfterPass[], clicked: Awaited<ReturnType<typeof docsWhileWaiting>>, moved: AfterPass[];
+  before(async () => {
+    box = await place('alpha-1-parts');
+    await rm(join(box.home, 'gone-market'), { recursive: true });
+    await rm(join(box.store, 'sync.json'));
+    await writeFile(appContext(box.home, box.appData).settingsPath, '{}\n');
+    made = await filesIn(box.home);
+    names = await partNames(box);
+    entries = await partEntries(box, names.mcp);
+    waitStart = start(box, 'on', 1);
+    clicked = await docsWhileWaiting(box);
+    waited = await filesIn(box.home);
+    waitedEntries = await partEntries(box, names.mcp);
+    assert.deepEqual(await setSyncEverything(appContext(box.home, box.appData), true, true), {});
+    moved = start(box, 'on', 2);
+  });
+  after(() => rm(box.base, { recursive: true, force: true }));
+
+  test('while it waits, Pi’s line says so and why, and On, Install there, the checks and Off write and take in nothing of a part’s name, anywhere', () => {
+    const why = 'This home has no sync record yet: answer the question on the Overview, and they are moved at the next look.';
+    assert.equal(clicked.partsWait, why);
+    assert.deepEqual([clicked.before.mark, clicked.before.words, clicked.before.items, clicked.before.waiting?.includes('docs')],
+      ['parts-waiting', `${WAITS} ${why} Turning the plugin off reaches Pi when they are moved.`, undefined, true]);
+    assert.equal(clicked.after.words, `${WAITS} ${why} The plugin is off, so they turn off in Pi when they are moved, apart from any you edited there, which stay as they are.`);
+    assert.deepEqual([clicked.asked, changedInTools(made, waited).filter(ofPartName(names)), waitedEntries, waited.sha256['.central-knot/plugin-parts.json']],
+      [[], [], entries, made.sha256['.central-knot/plugin-parts.json']]);
+    // one was his own item before the upgrade (taken in with Add in alpha 1).
+    const parts = (['skill', 'agent', 'mcp'] as const).flatMap(kind => names[kind].filter(name => name !== 'one').map(name => `${kind}:${itemKey(name)}`));
+    assert.deepEqual([parts.filter(id => !!libraryOf(waitStart[0], id.split(':')[0] as ItemKind)[id.slice(id.indexOf(':') + 1)]), parts.filter(id => clicked.live.includes(id))], [[], []], 'none taken in by the pass or the clicks');
+  });
+
+  test('once first setup is answered, the next start moves every part’s name; docs’ items are Off, its unedited copies taken out, his edited ones left byte for byte', () => {
+    for (const kind of ['skill', 'agent', 'mcp'] as const) for (const name of names[kind]) assert.ok(libraryOf(moved[1], kind)[itemKey(name)] && !libraryOf(moved[1], kind)[itemKey(name)].deleted, `${kind}:${name}`);
+    const docs = [['skill', 'forms'], ['skill', 'pdf'], ['skill', 'review'], ['agent', 'writer'], ['mcp', 'lookup']] as const;
+    assert.deepEqual(docs.map(([kind, name]) => libraryOf(moved[1], kind)[itemKey(name)].on), [false, false, false, false, false]);
+    const now = moved[1].files.sha256, gone = ['.pi/agent/skills/forms/SKILL.md', '.config/opencode/skills/pdf/SKILL.md', '.config/opencode/skills/review/SKILL.md'];
+    assert.deepEqual(gone.map(path => [made.sha256[path] !== undefined, now[path]]), gone.map(() => [true, undefined]), 'unedited: taken out');
+    const kept = ['.pi/agent/skills/pdf/SKILL.md', '.config/opencode/agents/writer.md'];
+    assert.deepEqual(kept.map(path => now[path]), kept.map(path => made.sha256[path]), 'edited: his, byte for byte');
+    assert.deepEqual([moved[1].files.sha256['.central-knot/plugin-parts.json'], [...moved].flatMap(pass => pass.problems)], [undefined, []]);
+  });
+
+  test('the edited server copy in Pi stays his, byte for byte, and OpenCode’s unedited one is taken out', async () => {
+    const now = await partEntries(box, names.mcp);
+    assert.deepEqual([now['pi-cli lookup'], now['opencode-cli lookup']], [entries['pi-cli lookup'], undefined]);
+  });
+});
+
+describe('Upgrading alpha-1-parts while Claude Code’s record of its plugins can’t be read: docs’ clicks and the checks change nothing', () => {
+  let box: Box, made: Files, names: Record<ItemKind, string[]>, clicked: Awaited<ReturnType<typeof docsWhileWaiting>>, waited: Files;
+  before(async () => {
+    box = await placeParts(true);
+    names = await partNames(box);
+    const installed = join(box.home, '.claude/plugins/installed_plugins.json');
+    await writeFile(installed, (await readFile(installed, 'utf8')).slice(0, 40));
+    made = await filesIn(box.home);
+    start(box, 'on', 1);
+    clicked = await docsWhileWaiting(box);
+    waited = await filesIn(box.home);
+  });
+  after(() => rm(box.base, { recursive: true, force: true }));
+
+  test('Pi’s line says it waits and why; nothing of a part’s name is written or taken in, and no plugins record is made', () => {
+    assert.deepEqual([clicked.before.mark, clicked.before.words], ['parts-waiting', `${WAITS} The plugins record isn’t made yet: it is made once every tool’s record of its plugins can be read. Turning the plugin off reaches Pi when they are moved.`]);
+    const taken = (['skill', 'agent', 'mcp'] as const).flatMap(kind => names[kind].filter(name => name !== 'one').map(name => `${kind}:${itemKey(name)}`)).filter(id => clicked.live.includes(id));
+    assert.deepEqual([clicked.asked, changedInTools(made, waited).filter(ofPartName(names)), taken, waited.sha256['.central-knot/plugins.json']], [[], [], [], undefined]);
+  });
+});
+
+/**
+ * This version's plugins for the home: the real engine but for each tool's commands, which only note what was asked. `partsWait`:
+ * why the move of parts waits, as main.ts keeps it from the last pass.
+ */
+function plugins(box: Box, partsWait?: string) {
   const context = appContext(box.home, box.appData), asked: string[] = [];
   const host: MarketplaceHost = {
     home: () => ({ home: box.home }), dataDir: join(box.appData, 'data'), pickFolder: async () => undefined, openExternal: async () => {},
     read: async () => ({ tools: await managedNow(context, await context.read()), snapshots: [] }),
-    leftOut: async () => (await readRecord(box.home)).record?.leftOut ?? [], writeAccess: () => writeAccess(context), share: () => context,
+    leftOut: async () => (await readRecord(box.home)).record?.leftOut ?? [], writeAccess: () => writeAccess(context), share: () => context, partsWait: () => partsWait,
   };
   const noted = (what: string) => async (...args: unknown[]) => { asked.push(`${what} ${args.slice(2, 4).join(' ')}`); return { tool: args[3], outcome: 'failed', message: 'Not in this test.', runs: [] } as never; };
   const use: MarketplaceEngine = { findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', 'copilot-cli': '/bin/true' }, apps: {} }), checkAccess: noted('check'), addMarketplace: noted('add marketplace'),

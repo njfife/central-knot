@@ -1,18 +1,11 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, toolNames as names } from './words.ts';
 import { takesPlugins } from './presence.ts';
-import { kindSource } from './itemrow.ts';
 import type { Owed, PluginSwitch, ToolNow } from './pluginrecord.ts';
-
-/**
- * Tools that can take a plugin's parts as separate items (parts.ts) where the plugin itself can't go: Pi always, Codex and
- * Copilot CLI when their plugin route is blocked here, Claude Code only with no plugin route at all (its desktop app alone, before its Code tab is there).
- */
-export const partsTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
@@ -51,7 +44,7 @@ export function blocked(view: PluginsView, entry: MarketplaceView, tool: Harness
 
 /**
  * Whether a plugin is marked "No longer offered": its marketplace's catalog was read and no longer lists it, while a tool
- * still has it or its parts. (A plugin listed only because its marketplace can't be read now is `gone` too, without the mark.)
+ * still has it. (A plugin listed only because its marketplace can't be read now is `gone` too, without the mark.)
  */
 export const noLongerOffered = (entry: MarketplaceView, plugin: PluginView) => (!!plugin.gone && !!entry.fetchedAt) || !!entry.bundled?.kept?.includes(plugin.name);
 
@@ -92,14 +85,23 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
 /** Why nothing can go in from a marketplace whose catalog can't be read now. */
 export const MARKET_UNREAD = 'Its marketplace can’t be read now.';
 
-/** Why a tool takes none of a plugin's parts: it takes no plugins, and no part of this one fits it (Pi takes no agents). */
-export const noPartsFit = (tool: HarnessId) => `None of its parts can go into ${names[tool]}.`;
+/**
+ * Whether this plugin's parts, written before the library, wait to be moved there (types.ts MarketplaceView waiting). Two places
+ * hold such a plugin back in Pi and OpenCode until they are: toolNow (nothing is owed there, so no click and no automatic check
+ * writes) and marketplaces.ts withItems (no Its items, so Update and Update all have nothing to bring); toolMark says it.
+ */
+export const waitsToMove = (entry: MarketplaceView, plugin: string) => !!entry.waiting?.includes(plugin);
+
+/** Why nothing changes in Pi or OpenCode for a plugin whose parts wait to be moved (waitsToMove). */
+export const WAITS_TO_MOVE = 'Parts of it from an earlier version wait to be moved to the library, so nothing changes there until they are.';
 
 /**
  * What one managed tool has of a plugin now, and how it could take it in or out, from the view: the table's input
- * (pluginrecord.ts ToolNow). `unknown`: the tool's record of its plugins, or the parts record, can't be read now.
+ * (pluginrecord.ts ToolNow). `unknown`: the tool's record of its plugins, or the record of parts from before the library, can't
+ * be read now.
  */
 export function toolNow(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components: Components | undefined, unknown: boolean): ToolNow {
+  if (!takesPlugins(tool) && waitsToMove(entry, plugin)) return { has: 'none', route: { cannot: WAITS_TO_MOVE } };
   const state = stateOf(entry, plugin, tool);
   const whole = state.state === 'installed' || state.state === 'not-known';
   const why = unavailable(view, entry, plugin, tool);
@@ -109,12 +111,11 @@ export function toolNow(view: PluginsView, entry: MarketplaceView, plugin: strin
   // Read, and every name it has is his own, another source's, removed or unreadable: nothing a click could bring in.
   const brings = entry.items?.[plugin]?.lines.some(line => line.state !== 'not-brought' && line.state !== 'removed') ?? true;
   const route: ToolNow['route'] = takesPlugins(tool) && !why ? 'whole'
-    : routeOf(entry, plugin) === 'parts' ? (partsOffer(view, entry, plugin, tool, components) ? 'parts' : { cannot: elsewhere ?? noPartsFit(tool) })
     : items && !elsewhere && brings ? 'items'
     : { cannot: elsewhere ?? (items ? `${names[tool]} gets none of its items: Its items, below, says why each isn’t brought in.` : `${names[tool]} takes no plugins, and this one has no skill, agent or MCP server to put there.`) };
-  // What is installed whole is known from the tool's own record; parts and items only from the parts record.
+  // What is installed whole is known from the tool's own record; items only once the record of parts from before is read.
   if (unknown && !(whole && takesPlugins(tool))) return { has: 'unknown', route };
-  return { has: whole ? 'whole' : partsOf(entry, plugin, tool) ? 'parts' : itemsIn(entry, plugin, tool) ? 'items' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool) } : {}) };
+  return { has: whole ? 'whole' : itemsIn(entry, plugin, tool) ? 'items' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool) } : {}) };
 }
 
 /**
@@ -129,10 +130,10 @@ export const recordUnread = (tool: HarnessId) => `${names[tool]}’s record of i
 
 /**
  * A plugin's place among its marketplace's: 0 when every tool that can take it has it, 1 when some tool has it, 2 when no
- * tool has it. Having it means installed whole or as parts; a tool that can't take the plugin doesn't hold it back from 0.
+ * tool has it. Having it means installed whole; a tool that can't take the plugin doesn't hold it back from 0.
  */
 export function pluginPlace(view: PluginsView, entry: MarketplaceView, plugin: string): 0 | 1 | 2 {
-  const has = (tool: HarnessId) => installed(entry, plugin, tool) || !!partsOf(entry, plugin, tool);
+  const has = (tool: HarnessId) => installed(entry, plugin, tool);
   if (!view.tools.some(has)) return 2;
   return view.tools.every(tool => has(tool) || !!unavailable(view, entry, plugin, tool)) ? 0 : 1;
 }
@@ -154,13 +155,6 @@ export const DIRECTORY = 'anthropic-plugin-directory';
 /** Why Central Knot leaves Claude Code's copy from the Anthropic Directory to Claude Code. */
 export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).';
 
-/**
- * Which way a plugin reaches the tools with no plugin installer (Pi, OpenCode), the one place it is decided: as parts while any
- * of its parts not taken out are on record in any tool (parts.ts; the parts record unreadable reads as `unknown` before this is
- * asked: toolNow), else as library items (pluginlibrary.ts). No plugin is ever half on each.
- */
-export const routeOf = (entry: MarketplaceView, plugin: string): 'parts' | 'items' => (Object.values(entry.parts?.[plugin] ?? {}).some(parts => !!parts?.items.length) ? 'parts' : 'items');
-
 /** Whether the tool has the plugin's items: "has it" for Pi and OpenCode, as pluginlibrary.ts onIn counted it for the view. */
 export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => !!entry.items?.[plugin]?.on[tool];
 /** "2 of its 3 items are on", in one tool. */
@@ -169,61 +163,11 @@ export const itemsOnWords = (entry: MarketplaceView, plugin: string, tool: Harne
   return `${on} of its ${entry.items?.[plugin]?.of ?? 0} items ${on === 1 ? 'is' : 'are'} on`;
 };
 
-/** This plugin's parts in a tool, when they were installed there as separate items (parts.ts). */
-export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];
-
-/**
- * Whether a tool is one that would take this plugin's parts, whatever they are: the plugin has parts on record (routeOf), the
- * tool takes parts, has none of this plugin's yet, and the plugin itself is not installed and can't be installed there (Pi always; Codex or Copilot CLI with their
- * plugin route blocked), the plugin is still listed, and the tool holds no other marketplace of this name.
- */
-export function partsEligible(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
-  // No new parts: a plugin with none on record goes as library items (routeOf).
-  if (routeOf(entry, plugin) !== 'parts' || !partsTools.includes(tool) || (tool === 'claude-cli' && view.clis[tool]) || partsOf(entry, plugin, tool) || installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
-  return !!unavailable(view, entry, plugin, tool) && stateOf(entry, plugin, tool).state === 'not-installed';
-}
-
-/**
- * Whether single parts of this plugin can be chosen for this tool: the plugin's switch wants it there (On, not kept out:
- * pluginrecord.ts), so a pick never disagrees with the switch, and the tool takes parts and has some of this plugin's
- * already, or can't take the plugin itself. Where the plugin itself is installed, only while parts of it are on record
- * there too (they can still come out).
- */
-export function partsPickable(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
-  if (routeOf(entry, plugin) !== 'parts' || !partsTools.includes(tool) || !view.tools.includes(tool) || !entry.switches?.[plugin]?.tools[tool]?.wanted) return false;
-  if (partsOf(entry, plugin, tool)) return true;
-  if (stateOf(entry, plugin, tool).state !== 'not-installed' || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
-  return !!unavailable(view, entry, plugin, tool);
-}
-
-/** Whether a plugin holding these components has a part this tool can take (Pi takes no agents, Claude Code no MCP servers as parts). Unknown counts as yes. */
-export const partsFit = (tool: HarnessId, components?: Components) => !components || !!(components.skills || (components.mcp && tool !== 'claude-cli') || (components.agents && tool !== 'pi-cli'));
-
-/**
- * Whether this plugin's parts can go into this tool as separate items, or are there already (then they can always be
- * updated or removed, even once the plugin could go there itself).
- */
-export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): boolean {
-  // A plugin the build carries no files for has no parts to give either.
-  return (partsTools.includes(tool) && !!partsOf(entry, plugin, tool)) || (!whyNotCarried(entry, plugin) && partsEligible(view, entry, plugin, tool) && partsFit(tool, components));
-}
-
-/**
- * Why a tool takes this plugin's parts rather than the plugin, short, for one sentence about several tools: [one tool,
- * several tools]. "Pi takes no plugins", "Copilot CLI and Codex have no command-line tool here".
- */
-export function partsWhy(view: PluginsView, entry: MarketplaceView, tool: HarnessId): [string, string] {
-  if (!takesPlugins(tool)) return ['takes no plugins', 'take no plugins'];
-  if (!view.clis[tool]) return view.desktopOnly?.[tool] ? ['is only the desktop app here', 'are only desktop apps here'] : ['command-line tool not found', 'command-line tools not found'];
-  // Parts kept in a tool that can take the plugin again (its CLI is back): nothing to explain.
-  return (tool === 'copilot-cli' && entry.copilotRefuses) || (tool !== 'codex-cli' && entry.codexOnly) ? ['refuses this marketplace', 'refuse this marketplace'] : ['', ''];
-}
-
 /**
  * The same part, by each kind's own rule: skill folders ignore case (as macOS and Windows do), agents match as the Agents
  * page keys them (NFC, ignoring case), MCP servers are keys in a settings file and match exactly.
  */
-export function samePart(first: Pick<PartItem, 'kind' | 'name'>, second: Pick<PartItem, 'kind' | 'name'>): boolean {
+export function samePart(first: PartRef, second: PartRef): boolean {
   if (first.kind !== second.kind) return false;
   if (first.kind === 'mcp') return first.name === second.name;
   return first.name.normalize('NFC').toLowerCase() === second.name.normalize('NFC').toLowerCase();
@@ -233,35 +177,8 @@ export function samePart(first: Pick<PartItem, 'kind' | 'name'>, second: Pick<Pa
 export const pageOfPart = { skill: 'skills', mcp: 'mcp', agent: 'agents' } as const;
 export const partOfPage = { skills: 'skill', mcp: 'mcp', agents: 'agent' } as const;
 
-/**
- * Whether the home, as last read, still has this part in the tool: a copy removed by hand since is no longer installed there.
- * An MCP server's part is no copy of the servers page's: its row says the tool has it as the plugin's (`unseen`, servers.ts).
- */
-export function partStillIn(home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>, tool: HarnessId, part: Pick<PartItem, 'kind' | 'name'>): boolean {
-  const { tools, facts } = kindSource(home, pageOfPart[part.kind]);
-  // A kind the home doesn't read in that tool can't be checked: the part counts as there.
-  return !tools.includes(tool) || facts.some(fact => (fact.copies[tool] !== undefined || fact.unseen?.[tool] !== undefined)
-    && [fact.key, fact.name].some(name => !!name && samePart(part, { kind: part.kind, name })));
-}
-
 /** Each kind of part in words: [one, several]. */
 export const partWords: Record<PartKind, [string, string]> = { skill: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agent: ['agent', 'agents'] };
-
-/**
- * Where a tool stands with this plugin's parts, for Update and the parts section alike: they can go in
- * (`offer`), they are there (`installed`), or they are there and the plugin has changed since (`changed`). Undefined
- * when parts aren't a matter for this tool.
- */
-export function partsMark(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): 'offer' | 'installed' | 'changed' | undefined {
-  if (!partsOffer(view, entry, plugin, tool, components)) return undefined;
-  const parts = partsOf(entry, plugin, tool);
-  return parts?.changed ? 'changed' : parts ? 'installed' : 'offer';
-}
-
-/** "2 skills · 1 MCP server", from parts as recorded. */
-export function partsSummary(items: PartsState['items'], separator = ' · '): string {
-  return (['skill', 'mcp', 'agent'] as const).map(kind => { const n = items.filter(item => item.kind === kind).length; return n ? `${n} ${partWords[kind][n > 1 ? 1 : 0]}` : ''; }).filter(Boolean).join(separator);
-}
 
 /** "version 1.2", or nothing when the catalog gave none. */
 export const versionWord = (version?: string) => (version ? `version ${version}` : '');
@@ -454,27 +371,25 @@ export function outdated(entry: MarketplaceView, plugin: string, tool: HarnessId
 }
 
 /**
- * The tools Update brings up to date for one plugin: those whose installed copy is out of date (`outdated`) and can be changed
- * here (as for an uninstall: not held, a CLI, a home that can be written), and those holding its parts out of date.
+ * The tools Update brings up to date for one plugin by their own update: those whose installed copy is out of date
+ * (`outdated`) and can be changed here (as for an uninstall: not held, a CLI, a home that can be written). Its items in Pi and
+ * OpenCode come up to date apart (pluginlibrary.ts itemsView `ready`).
  */
-export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined, components?: Components, detail?: PluginDetail | null): { plugin: HarnessId[]; parts: HarnessId[] } {
-  return {
-    plugin: view.tools.filter(tool => outdated(entry, plugin, tool, offered, detail) && !cantUninstall(view, entry, plugin, tool)),
-    parts: view.canWrite ? view.tools.filter(tool => partsMark(view, entry, plugin, tool, components) === 'changed') : [],
-  };
+export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined, detail?: PluginDetail | null): HarnessId[] {
+  return view.tools.filter(tool => outdated(entry, plugin, tool, offered, detail) && !cantUninstall(view, entry, plugin, tool));
 }
 
 // ---------- A whole plugin's one switch, as the pages say it (the answer is pluginrecord.ts owedTo's, in the view) ----------
 
 /**
  * One managed tool's mark for a plugin, from the table's answer (`owed`) and the tool's copy: installed (`outdated` when an
- * Update is offered), its parts in (`parts-changed` when out of date), its items on there (`items`: Pi, OpenCode), installed though not wanted (`stays`: Off, or kept out
- * of it), not in it though wanted (`waits` for the automatic updates' check; `not-brought`, new here while some tool has it off
- * in its own settings; `missing` for Install there), wanted where it
- * can't go (`cannot`), `kept-out`, not in it (`absent`), its record unreadable (`unknown`), or listed with its files gone
- * (`not-known`).
+ * Update is offered), its items on there (`items`: Pi, OpenCode), installed though not wanted (`stays`: Off, or kept out of
+ * it), not in it though wanted (`waits` for the automatic updates' check; `not-brought`, new here while some tool has it off
+ * in its own settings; `missing` for Install there), its parts from before the library waiting to be moved (`parts-waiting`:
+ * Pi, OpenCode), wanted where it can't go (`cannot`), `kept-out`, not in it (`absent`), its record unreadable (`unknown`), or
+ * listed with its files gone (`not-known`).
  */
-export type ToolMark = 'installed' | 'outdated' | 'parts' | 'parts-changed' | 'items' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'cannot' | 'kept-out' | 'absent' | 'unknown' | 'not-known';
+export type ToolMark = 'installed' | 'outdated' | 'items' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'parts-waiting' | 'cannot' | 'kept-out' | 'absent' | 'unknown' | 'not-known';
 
 /**
  * A tool's mark and the sentence its tooltip and the plugin page's line say. `outdated`: an Update is offered there
@@ -482,9 +397,10 @@ export type ToolMark = 'installed' | 'outdated' | 'parts' | 'parts-changed' | 'i
  * install owed to the check is made at its next turn.
  */
 export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, owed: Owed | undefined, { outdated = false, auto = false, stale = false } = {}): { mark: ToolMark; words: string } {
-  const name = names[tool], state = stateOf(entry, plugin, tool), parts = partsOf(entry, plugin, tool);
+  const name = names[tool], state = stateOf(entry, plugin, tool);
   const recorded = !!entry.switches?.[plugin]?.entry;
   if (!owed || owed.has === 'unknown') return { mark: 'unknown', words: recordUnread(tool) };
+  if (!takesPlugins(tool) && waitsToMove(entry, plugin)) return { mark: 'parts-waiting', words: waitingWords(view, entry, plugin, [tool]) };
   const kept = entry.switches?.[plugin]?.entry?.except.includes(tool);
   // Installed though the person doesn't want it there: said with what takes it out, or why nothing can here.
   const unwanted = recorded && !owed.wanted ? ` ${kept ? `It is kept out of ${name}` : 'The plugin is off'}; ${owed.held ? owed.held : 'Take out there takes it out.'}` : '';
@@ -496,11 +412,6 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
     if (unwanted) return { mark: 'stays', words: `${words}${unwanted}` };
     return { mark: outdated ? 'outdated' : 'installed', words: outdated ? `${words} An update is offered: Update on its row.` : words };
   }
-  if (parts) {
-    const words = parts.changed ? `${name}: ${changedPartsWords(parts)}.` : `${name}: its parts are in as separate items (${[partsSummary(parts.items, ', '), versionWord(parts.version) && `from ${versionWord(parts.version)}`].filter(Boolean).join(', ')}).`;
-    if (unwanted) return { mark: 'stays', words: `${words}${unwanted}` };
-    return { mark: parts.changed ? 'parts-changed' : 'parts', words };
-  }
   if (owed.has === 'items') {
     const ready = entry.items?.[plugin]?.ready ? ' An update is ready: Update.' : '';
     const words = `${name}: ${itemsOnWords(entry, plugin, tool)} there, as items of Central Knot’s that follow the plugin.${ready}`;
@@ -508,7 +419,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   }
   if (owed.wanted && owed.held) return { mark: 'cannot', words: `${name}: ${owed.held}` };
   if (owed.wanted && owed.act) {
-    const [what, goes, them] = owed.act === 'install' ? ['it', 'goes', 'it'] : owed.act === 'install-items' ? ['its items', 'go', 'them'] : ['its parts', 'go', 'them'];
+    const [what, goes, them] = owed.act === 'install' ? ['it', 'goes', 'it'] : ['its items', 'go', 'them'];
     const when = auto ? 'at the next automatic check' : 'once plugins update by themselves again (Settings, and Automatic sync)';
     if (owed.background) return { mark: 'waits', words: `Not in ${name} yet: ${what} ${goes} in ${when}. Install there puts ${them} in now.` };
     const offIn = view.tools.filter(other => { const there = stateOf(entry, plugin, other); return there.state === 'installed' && !!there.off; }).map(other => names[other]);
@@ -520,14 +431,23 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   return why && !owed.takes ? { mark: 'cannot', words: `${name}: ${why}` } : { mark: 'absent', words: `Not installed in ${name}.` };
 }
 
-/** "Parts are from version 1.1; the plugin is now 1.2", or the same without versions, for parts whose plugin has changed. */
-export const changedPartsWords = (parts: { version?: string; now?: string }) => (parts.now && parts.version ? `Parts are from version ${parts.version}; the plugin is now ${parts.now}` : 'The plugin’s parts have changed since they were installed');
+/**
+ * What a waiting plugin (waitsToMove) says of `tools` (Pi, OpenCode): its line's tooltip, and the hint on its page. Its parts wait
+ * to be moved, why (the last pass's reason, PluginsView partsWait), and what its Off does there once they are moved
+ * (partsmigrate.ts: the item is On as the entry is, and a copy edited there stays as it is).
+ */
+export function waitingWords(view: PluginsView, entry: MarketplaceView, plugin: string, tools: HarnessId[]): string {
+  const recorded = entry.switches?.[plugin]?.entry, where = andList(tools.map(tool => names[tool]));
+  const then = recorded && !recorded.on ? `The plugin is off, so they turn off in ${where} when they are moved, apart from any you edited there, which stay as they are.`
+    : `Turning the plugin off reaches ${where} when they are moved.`;
+  return [`${where}: ${WAITS_TO_MOVE.charAt(0).toLowerCase()}${WAITS_TO_MOVE.slice(1)}`, view.partsWait, then].filter(Boolean).join(' ');
+}
 
 /** Whether a plugin's switch shows partial: On, and kept out of some tool here that could take it (a tool that can't take it never counts). */
 export const switchPartial = (view: PluginsView, sw: PluginSwitch | undefined) => !!sw?.entry?.on && view.tools.some(tool => sw.entry!.except.includes(tool) && !!sw.tools[tool]?.takes);
 
-/** The tools a plugin with no entry is installed in, whole or as parts: it is found there, and its row offers Add. */
-export const foundIn = (view: PluginsView, sw: PluginSwitch | undefined) => (sw && !sw.entry ? view.tools.filter(tool => sw.tools[tool]?.has === 'whole' || sw.tools[tool]?.has === 'parts') : []);
+/** The tools a plugin with no entry is installed in whole: it is found there, and its row offers Add. */
+export const foundIn = (view: PluginsView, sw: PluginSwitch | undefined) => (sw && !sw.entry ? view.tools.filter(tool => sw.tools[tool]?.has === 'whole') : []);
 
 /** What a plugin's switch says it is and what a click does, for its label and tooltip. */
 export function switchWords(view: PluginsView, entry: MarketplaceView, plugin: string): string {

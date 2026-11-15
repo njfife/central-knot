@@ -7,20 +7,19 @@ import { join } from 'node:path';
 import { installedContents, marketplacePage, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
 import { searchPath } from './platform.ts';
 import { failedFor, reverse, runPlan, succeeded, type PlanApi, type PluginDone, type PluginOp } from './pluginplan.ts';
-import { clickGoes, clickHeld, clickRuns, entryOf, firstRecord, newEntry, owedTo, partsReadable, readPluginRecord, savePluginRecord, withEntry, type Holding, type Owed, type PluginEntry, type PluginRecord, type PluginSwitch, type WaitedBefore } from './pluginrecord.ts';
+import { clickGoes, clickHeld, clickRuns, entryOf, firstRecord, newEntry, owedTo, readPluginRecord, savePluginRecord, withEntry, type Holding, type Owed, type PluginEntry, type PluginRecord, type PluginSwitch, type WaitedBefore } from './pluginrecord.ts';
 import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
-import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts';
 import { itemTools, itemsBack, itemsView, readPlugin, runItems, withItemsOf, type ItemsAsk, type ItemState } from './pluginlibrary.ts';
 import { recordedIds } from './sourcestore.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ItemKind } from './library.ts';
-import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartRef, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice } from './types.ts';
 import { harnessIds } from './harnesses.ts';
-import { exists, partsRecordPath, writeDurably, type ShareContext } from './share.ts';
-import type { PluginNow } from './partsmigrate.ts';
-import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, partsTools, recordUnread, routeOf, toolNow, updateTools, versionToCompare } from './pluginstatus.ts';
+import { writeDurably, type ShareContext } from './share.ts';
+import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
+import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, recordUnread, toolNow, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 import { leftOutSentence } from './words.ts';
 
@@ -45,9 +44,14 @@ export interface MarketplaceHost {
   dataDir: string;
   pickFolder(): Promise<string | undefined>;
   openExternal(url: string): Promise<void>;
-  /** The skills, MCP and agents engines' context for the home on screen, for a plugin's parts (parts.ts). Without it, parts aren't offered. */
+  /**
+   * The skills, MCP and agents engines' context for the home on screen, for a plugin's items in Pi and OpenCode (pluginlibrary.ts)
+   * and the record of parts from before the library (partsmigrate.ts). Without it, Pi and OpenCode are no columns.
+   */
   share?(): ShareContext;
-  /** A plugin was installed, updated or uninstalled in these tools, or its parts were changed there, and it worked. */
+  /** Why the move of parts from before the library waits, as the last pass gave it (main.ts pass); none when it doesn't. */
+  partsWait?(): string | undefined;
+  /** A plugin was installed, updated or uninstalled in these tools, and it worked. */
   changed?(source: string, plugin: string, tools: HarnessId[]): void;
   /** A bundled build's own marketplace (bundle.ts): the folder it is unpacked in, and how the page shows it. Always listed, first. */
   bundled?(): { source: string; view: BundledView } | undefined;
@@ -217,7 +221,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { folder: copy.folder, entry: listed, root: copy.root };
   }
 
-  /** A plugin's skill folders, agent files and MCP servers, for its parts. */
+  /** A plugin's skill folders, agent files and MCP servers, for its items (pluginlibrary.ts) and the move of its parts (beforeParts). */
   async function filesOf(ctx: engine.PluginContext, catalog: Catalog, plugin: string): Promise<{ files?: PluginFiles; problem?: string }> {
     const item = catalog.plugins.find(entry => entry.name === plugin);
     if (!item || !catalog.root) return { problem: 'It is no longer in the marketplace as last read. Refresh the marketplace.' };
@@ -230,33 +234,6 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     const read = catalog?.root ? await filesOf(ctx, catalog, plugin).catch(() => ({ problem: 'Its files can’t be read.' })) : { problem: MARKET_UNREAD };
     return { ...read, commitAt: catalog?.fetchedAt ?? '' };
-  }
-
-  /**
-   * This marketplace's plugins whose parts are in a tool, each saying whether the plugin has changed since: what that tool
-   * would get from it now, or its version. Each plugin's files are read once, however many tools hold its parts.
-   */
-  async function partsStates(ctx: engine.PluginContext, catalog: Catalog | undefined, source: string, records: PartsInstall[]): Promise<{ parts?: MarketplaceView['parts']; recordedName?: string }> {
-    const share = host.share?.();
-    if (!share) return {};
-    const states: NonNullable<MarketplaceView['parts']> = {};
-    const files = new Map<string, Promise<PluginFiles | undefined>>();
-    const filesOnce = (plugin: string) => {
-      if (!files.has(plugin)) files.set(plugin, catalog ? filesOf(ctx, catalog, plugin).then(read => read.files, () => undefined) : Promise.resolve(undefined));
-      return files.get(plugin)!;
-    };
-    // By source alone, as the record keys them: a marketplace renamed, or not readable now, still shows its parts.
-    const installs = records.filter(entry => engine.sameSource(entry.source, source));
-    for (const install of installs) {
-      const item = catalog?.plugins.find(entry => entry.name === install.plugin);
-      const read = item ? await filesOnce(install.plugin) : undefined;
-      const current = read ? await partsCurrent(share, read, install).catch(() => undefined) : undefined;
-      const state: PartsState = { version: install.version, at: install.at, items: install.items.filter(item => !item.removed).map(({ kind, name }) => ({ kind, name })) };
-      const newVersion = !!item?.version && !!install.version && item.version !== install.version;
-      if (current === false || newVersion) { state.changed = true; if (newVersion) state.now = item!.version; }
-      (states[install.plugin] ??= {})[install.tool] = state;
-    }
-    return { parts: states, recordedName: installs[0]?.marketName };
   }
 
   /**
@@ -296,21 +273,18 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * One marketplace on the page. A catalog that can't be read becomes a problem on its entry, never a broken page.
-   * `records`: the parts record as read once for the whole view; `recorded`: the plugins record's entries.
+   * `recorded`: the plugins record's entries.
    */
-  async function entryView(ctx: engine.PluginContext, tools: HarnessId[], source: string, origins: MarketplaceView['origins'], fresh: boolean, records: PartsInstall[], recorded: PluginEntry[]): Promise<MarketplaceView> {
+  async function entryView(ctx: engine.PluginContext, tools: HarnessId[], source: string, origins: MarketplaceView['origins'], fresh: boolean, recorded: PluginEntry[]): Promise<MarketplaceView> {
     const bundled = carriedAs(source);
     const base: MarketplaceView = { source, origins, name: '', kind: isFolder(source) ? 'folder' : 'git', plugins: [], states: {}, page: marketplacePage(source), sourceLabel: bundled ? `Comes with ${bundled.app}` : sourceLabel(source), ...(bundled ? { bundled } : {}) };
     try {
       const { catalog: read, stale, problem } = await catalogFor(ctx, source, { fresh });
-      // A catalog that couldn't be read (no name) lists nothing; its plugins' parts still show, to be removed together.
+      // A catalog that couldn't be read (no name) lists nothing but the plugins the home records from it (unreadEntry).
       const catalog = read?.name ? read : undefined;
       // The raw entry and remote address stay here; the page gets what it shows.
       const shown: PluginView[] = (catalog?.plugins ?? []).map(({ entry: _entry, remote: _remote, ...plugin }) => plugin);
-      const { parts, recordedName } = await partsStates(ctx, catalog, source, records);
-      // A plugin the catalog dropped stays listed while its parts are in a tool, so they can still be removed together.
-      for (const name of Object.keys(parts ?? {})) if (!shown.some(plugin => plugin.name === name)) shown.push({ name, description: catalog ? 'Its parts stay as they are, and can still be removed together.' : 'Its marketplace can’t be read now. Its parts can still be removed together.', gone: true });
-      if (!catalog) return { ...base, ...await unreadEntry(ctx, tools, source, recorded.filter(entry => engine.sameSource(entry.source, source)), shown), name: recordedName ?? recorded.find(entry => engine.sameSource(entry.source, source))?.marketName ?? '', problem: problem ?? read?.problem, parts };
+      if (!catalog) return { ...base, ...await unreadEntry(ctx, tools, source, recorded.filter(entry => engine.sameSource(entry.source, source)), shown), name: recorded.find(entry => engine.sameSource(entry.source, source))?.marketName ?? '', problem: problem ?? read?.problem };
       // A plugin the catalog dropped stays listed while a tool still has it installed: kept as it is, marked, until it is uninstalled (PLG-08).
       const dropped = await droppedPlugins(ctx, tools.filter(takesPlugins), catalog, source);
       for (const name of dropped) {
@@ -320,7 +294,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       }
       const states = await statesFor(ctx, tools.filter(takesPlugins), catalog, source, [...catalog.plugins, ...dropped.map(name => ({ name, description: '' }))]);
       if (base.bundled) base.bundled = { ...base.bundled, addedTo: (await readAdded(catalog.name))[ctx.home] ?? [] };
-      return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, codexOnly: catalog.codexOnly, plugins: shown, states, parts };
+      return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, codexOnly: catalog.codexOnly, plugins: shown, states };
     } catch { return { ...base, problem: 'It could not be read.' }; }
   }
 
@@ -342,16 +316,17 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * The home's plugins record (pluginrecord.ts), made by its first read when there is none and saved where writing is allowed.
-   * `unknown`: the tools whose own record of their plugins can't be read now, and `partsKnown`, whether the parts record can
-   * be. While one can't, a home with no record yet gets none (`problem` says why), so nothing is decided from a read that isn't whole.
+   * `unknown`: the tools whose own record of their plugins can't be read now, and `partsKnown`, whether the record of parts from
+   * before the library (`parts`, partsmigrate.ts readRecord) can be. While one can't, a home with no record yet gets none
+   * (`problem` says why), so nothing is decided from a read that isn't whole.
    */
-  async function recordFor(ctx: engine.PluginContext, tools: HarnessId[], writable: boolean): Promise<RecordRead> {
+  async function recordFor(ctx: engine.PluginContext, tools: HarnessId[], writable: boolean, parts: PartsRecord): Promise<RecordRead> {
     const unknown = (await Promise.all(tools.filter(takesPlugins).map(async tool => ((await engine.recordReadable(ctx, tool)) ? [] : [tool])))).flat();
-    const partsKnown = !host.share || await partsReadable(ctx.home);
+    const partsKnown = parts !== 'unreadable';
     const read = await readPluginRecord(ctx.home);
     if (read.problem || read.record) return { ...read, unknown, partsKnown };
     if (unknown.length || !partsKnown) return { problem: firstReadWaits(unknown, partsKnown), unknown, partsKnown };
-    const record = firstRecord(tools, await holdingsIn(ctx, tools), await host.waitedBefore?.() ?? []);
+    const record = firstRecord(tools, await holdingsIn(ctx, tools, parts), await host.waitedBefore?.() ?? []);
     if (writable) await savePluginRecord(ctx.home, record);
     return { record, unknown, partsKnown };
   }
@@ -361,10 +336,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * (recordFor), and how the migration reads a plugin, from its marketplace's copy on disk only (no fetch). None after.
    */
   async function beforeParts(): Promise<PluginNow | undefined> {
-    const share = host.share?.();
-    if (!share || !(await exists(partsRecordPath(share.home)))) return undefined;
+    const share = host.share?.(), parts = share ? await readPartsRecord(share.home) : 'absent';
+    if (parts === 'absent') return undefined;
     const ctx = await context();
-    await recordFor(ctx, columns((await host.read()).tools), (await host.writeAccess()).allowed);
+    await recordFor(ctx, columns((await host.read()).tools), (await host.writeAccess()).allowed, parts);
     return async entry => {
       const { catalog } = await catalogFor(ctx, entry.source, { counts: false, local: true });
       const listed = catalog?.root ? catalog.plugins.find(each => each.name === entry.plugin) : undefined;
@@ -376,9 +351,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * The plugins the managed tools hold now, for the first read: installed whole from a marketplace the tool's record names, and
-   * parts on record, in a managed tool or in Pi or OpenCode left out (the move decides those as the record knew them: partsmigrate.ts).
+   * parts on record (`parts`), in a managed tool or in Pi or OpenCode left out (the move decides those as the record knew them:
+   * partsmigrate.ts).
    */
-  async function holdingsIn(ctx: engine.PluginContext, tools: HarnessId[]): Promise<Holding[]> {
+  async function holdingsIn(ctx: engine.PluginContext, tools: HarnessId[], parts: PartsRecord): Promise<Holding[]> {
     const holdings: Holding[] = [];
     for (const tool of tools.filter(takesPlugins)) {
       const registered = await engine.registeredMarketplaces(ctx, tool);
@@ -388,7 +364,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       }
     }
     const counted = (tool: HarnessId) => tools.includes(tool) || !takesPlugins(tool);
-    if (host.share) for (const { tool, source, marketName, plugin } of await readParts(ctx.home)) if (counted(tool)) holdings.push({ tool, source, marketName, plugin });
+    if (typeof parts === 'object') for (const { install: { tool, source, marketName, plugin } } of parts) if (counted(tool)) holdings.push({ tool, source, marketName, plugin });
     return holdings;
   }
 
@@ -401,22 +377,23 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /**
-   * Each listed plugin with items (pluginlibrary.ts withItemsOf), read from its marketplace's copy as the table reads it (itemsView): its page's "Its items", and what Pi and OpenCode have of it (pluginstatus.ts toolNow). A plugin with parts on
-   * record keeps its parts (routeOf) and is not read.
+   * Each listed plugin with items (pluginlibrary.ts withItemsOf), read from its marketplace's copy as the table reads it
+   * (itemsView): its page's "Its items", and what Pi and OpenCode have of it (pluginstatus.ts toolNow). A plugin whose parts wait
+   * to be moved (pluginstatus.ts waitsToMove) is not read: it has no Its items, so Update and Update all bring it nothing.
    */
   async function withItems(ctx: engine.PluginContext, share: ShareContext, tools: HarnessId[], marketplaces: MarketplaceView[], entries: PluginEntry[]) {
     const read = await withItemsOf(share, entries), recorded = (await recordedIds(share.home)).ids;
     for (const market of marketplaces) for (const plugin of market.plugins) {
       const entry = entryOf({ tools: [], plugins: read }, market.source, plugin.name);
-      if (!entry || routeOf(market, plugin.name) === 'parts') continue;
+      if (!entry || waitsToMove(market, plugin.name)) continue;
       const at: Awaited<ReturnType<typeof itemFiles>> = plugin.gone ? { commitAt: '', problem: MARKET_UNREAD } : await itemFiles(ctx, market.source, plugin.name);
       const reads = at.files && await readPlugin(at.files, entry, at.commitAt, recorded, []);
       (market.items ??= {})[plugin.name] = await itemsView(share, tools, entry, reads || undefined, at.problem);
     }
   }
 
-  /** The page's tools: Pi takes no plugins, only their parts, so it is a column only where parts can go in. */
-  const columns = (tools: HarnessId[]) => tools.filter(tool => takesPlugins(tool) || (!!host.share && partsTools.includes(tool)));
+  /** The page's tools: Pi and OpenCode take no plugins, only their items (pluginlibrary.ts), so each is a column only where those can go in. */
+  const columns = (tools: HarnessId[]) => tools.filter(tool => takesPlugins(tool) || !!host.share);
 
   /** Every marketplace: added here, or already added in a tool. `fresh`: every Git source fetched again. */
   const view = async (fresh = false, readId?: number): Promise<PluginsView> => (await look(fresh, readId)).view;
@@ -441,16 +418,21 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     for (const source of await added()) note(source, 'central-knot');
     // A source that could read as an option is never passed on to a tool or to Git.
     for (const tool of tools.filter(candidate => takesPlugins(candidate))) for (const entry of await engine.registeredMarketplaces(ctx, tool)) if (!entry.source.startsWith('-')) note(entry.source, tool);
-    // A marketplace whose plugins' parts are still in a tool stays listed (after the tools', so "Added in Codex" still shows),
-    // so its parts can still be updated or removed together.
+    // A marketplace a plugin waiting to be moved comes from stays listed (after the tools', so "Added in Codex" still shows), and
+    // so does its copy, which the move reads (Remove is not offered for it: pluginspage.ts).
     const share = host.share?.();
-    const records = share ? await readParts(share.home) : [];
-    for (const install of records) if (!known.some(item => engine.sameSource(item.source, install.source))) note(install.source, 'central-knot');
-    const recordRead = await recordFor(ctx, tools, writing.allowed);
+    const parts = share ? await readPartsRecord(share.home) : 'absent', onRecord = typeof parts === 'object' ? parts.map(({ install }) => install) : [];
+    for (const install of onRecord) if (!known.some(item => engine.sameSource(item.source, install.source))) note(install.source, 'central-knot');
+    const recordRead = await recordFor(ctx, tools, writing.allowed, parts);
     const marketplaces: MarketplaceView[] = [];
     // All at once: one unreachable source doesn't hold up the others.
     const listed = only ? known.filter(item => engine.sameSource(item.source, only)) : known;
-    marketplaces.push(...await Promise.all(listed.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh, records, recordRead.record?.plugins ?? []))));
+    marketplaces.push(...await Promise.all(listed.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh, recordRead.record?.plugins ?? []))));
+    for (const market of marketplaces) {
+      const waiting = [...new Set(onRecord.filter(install => engine.sameSource(install.source, market.source)).map(install => install.plugin))];
+      if (waiting.length) market.waiting = waiting;
+    }
+    const partsWait = host.partsWait?.();
     const desktopOnly = Object.fromEntries(tools.flatMap(tool => { const app = read.snapshots.find(snapshot => snapshot.harness === tool)?.app; return !ctx.binaries[tool] && app ? [[tool, app.name]] : []; }));
     // The app's own copy, named with the version it answers (the Copilot runtime may run a newer Copilot CLI it updated to).
     const via = Object.fromEntries(await Promise.all(Object.entries(ctx.apps ?? {}).filter(([tool]) => tools.includes(tool as HarnessId)).map(async ([tool, app]) => [tool, viaLabel(app, await cliVersion(ctx.binaries[tool as HarnessId]))] as const)));
@@ -462,8 +444,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const suggested = host.bundled?.() || only ? [] : offers
       .map(offer => ({ source: offer.source, name: offer.name, tools: offer.tools.filter(tool => read.tools.includes(tool)) }))
       .filter(offer => offer.tools.length && ![...known.map(item => item.source), ...no].some(source => engine.sameSource(source, offer.source)));
-    const shown: PluginsView = { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, via, versions, suggested, ...(recordRead.problem ? { switchProblem: recordRead.problem } : {}) };
-    // The parts record unreadable: no plugin is read as items (pluginstatus.ts routeOf), and Pi and OpenCode read as unknown.
+    const shown: PluginsView = { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, via, versions, suggested,
+      ...(recordRead.problem ? { switchProblem: recordRead.problem } : {}), ...(partsWait ? { partsWait } : {}) };
+    // The record of parts from before the library unreadable: no plugin is read as items, and Pi and OpenCode read as unknown.
     if (share && recordRead.record && recordRead.partsKnown) await withItems(ctx, share, read.tools, marketplaces, recordRead.record.plugins);
     for (const entry of marketplaces) entry.switches = Object.fromEntries(entry.plugins.map(plugin => [plugin.name, switchOf(shown, entry, plugin, recordRead)]));
     return { view: shown, known: recordRead };
@@ -613,9 +596,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * What is due now, with each Git marketplace fetched again first (as Refresh does). Nothing here writes to a tool.
-   * - The updates Update all would choose: for each plugin some tool has, installed or as parts, an update in each tool whose
-   *   copy is behind and its parts brought up to date in each tool holding them out of date (pluginstatus.updateTools, as the
-   *   page asks it). A plugin's files are read first, as its page reads them (from the repository it is kept in, too), so a copy
+   * - The updates Update all would choose: for each plugin some tool has installed, an update in each tool whose copy is
+   *   behind (pluginstatus.updateTools, as the page asks it), and its items read again where it has something for them
+   *   (pluginlibrary.ts itemsView `ready`). A plugin's files are read first, as its page reads them (from the repository it is kept in, too), so a copy
    *   that differs at the same version counts. Each op carries the version offered. One turned off in a tool is still updated
    *   there, and update() keeps it off. A plugin its catalog dropped is left as it is.
    * - The installs the plugins' table owes the automatic updates (pluginrecord.ts `background`: an On plugin a managed tool
@@ -640,18 +623,17 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       for (const plugin of entry.plugins) {
         if (plugin.gone) continue;
         for (const [tool, owed] of Object.entries(entry.switches?.[plugin.name]?.tools ?? {}) as [HarnessId, Owed][]) {
-          if (owed.background && (owed.act === 'install' || owed.act === 'install-parts' || owed.act === 'install-items')) ops.push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: owed.act, newHere: true });
+          if (owed.background && (owed.act === 'install' || owed.act === 'install-items')) ops.push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: owed.act, newHere: true });
         }
         // A plugin with items whose read has something for them (pluginlibrary.ts itemsView `ready`): read and carried out once.
         const itemsTool = itemTools(shown.tools)[0];
         if (entry.items?.[plugin.name]?.ready && itemsTool) ops.push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool: itemsTool, action: 'update-items' });
         const copied = shown.tools.some(tool => { const state = entry.states[plugin.name]?.[tool]; return state?.state === 'installed' && !state.live && !state.directory; });
-        if (!copied && !entry.parts?.[plugin.name]) continue;
-        const files = copied ? await detail(entry.source, plugin.name).catch(() => null) : undefined;
+        if (!copied) continue;
+        const files = await detail(entry.source, plugin.name).catch(() => null);
         const offered = versionToCompare(plugin, files);
-        const behind = updateTools(shown, entry, plugin.name, offered, plugin.components, files);
-        const op = (tool: HarnessId, action: PluginOp['action']) => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action, ...(offered || plugin.version ? { offered: offered ?? plugin.version } : {}) });
-        ops.push(...behind.plugin.map(tool => op(tool, 'update')), ...behind.parts.map(tool => op(tool, 'install-parts')));
+        const op = (tool: HarnessId) => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'update' as const, ...(offered || plugin.version ? { offered: offered ?? plugin.version } : {}) });
+        ops.push(...updateTools(shown, entry, plugin.name, offered, files).map(op));
       }
     }
     // Every Git marketplace failed to read: most likely this computer is offline just now.
@@ -703,7 +685,6 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     uninstall: (source, marketName, plugin, tool, home) => (takesPlugins(tool) ? uninstall(source, marketName, plugin, tool, home) : Promise.resolve({ reports: failedFor([tool], 'It takes no plugins.') })),
     setSkill: async () => ({ stopped: 'A whole plugin’s switch turns no single skill.', reports: [] }),
     setWhole: (source, marketName, plugin, tool, on, home) => (takesPlugins(tool) ? setWhole(source, marketName, plugin, tool, on, home) : Promise.resolve({ reports: failedFor([tool], 'It takes no plugins.') })),
-    parts: (source, marketName, plugin, tool, mode, run, home, pick) => parts(source, marketName, plugin, tool, mode, run, home, pick),
   };
 
   /** The entry a turn records: On or Off, Add's On, a tool kept out or let in; Install there and Take out there change none. */
@@ -743,7 +724,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       if (tool && each !== tool) continue;
       const act = clickRuns(what, owed);
       if (act === 'install-items' || act === 'remove-items') itemsIn.push(each);
-      else if (act) ops.push({ source: entry.source, marketName, plugin, tool: each, action: ({ install: 'install', 'install-parts': 'install-parts', uninstall: 'remove', 'remove-parts': 'remove-parts' } as const)[act] });
+      else if (act) ops.push({ source: entry.source, marketName, plugin, tool: each, action: act === 'install' ? 'install' : 'remove' });
       // Said on the result, and nothing run there: a record that can't be read; held in this click's way; and for Off and Keep
       // out, a tool holding another marketplace under this name (read from its state: its plugins are not this one's).
       const other = entry.states[plugin]?.[each];
@@ -798,41 +779,6 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (stopped) return { stopped, reports: [] };
     return told(source, plugin, { reports: withoutFileBytes([await use.uninstall(await context({ clis: true }), marketName, plugin, tool, source)]) });
   }
-
-  /** What each tool without the plugin would get as parts, and why each other part wouldn't go in. */
-  async function partsPlan(source: string, plugin: string): Promise<Partial<Record<HarnessId, PartPlan[]>> | null> {
-    const share = host.share?.();
-    if (!share) return null;
-    const ctx = await context();
-    const { catalog } = await catalogFor(ctx, source, { counts: false });
-    if (!catalog) return null;
-    const { files } = await filesOf(ctx, catalog, plugin);
-    const installs = (await readParts(share.home)).filter(install => engine.sameSource(install.source, source) && install.plugin === plugin);
-    // Every tool that takes parts, present or not: one that turns up later in the session finds its plan already there.
-    return files ? planParts(share, files, partsTools, installs) : null;
-  }
-
-  /** Installs, updates, removes or undoes one plugin's parts in one tool (parts.ts). `run`: the parts run an Undo reverses; `pick`: only these parts change. */
-  async function parts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: unknown, pick?: PartsPick): Promise<PluginActionResult> {
-    const stopped = await guard(home, [tool]);
-    if (stopped) return { stopped, reports: [] };
-    const share = host.share?.();
-    if (!share) return { reports: failedFor([tool], 'Parts can’t be installed here.') };
-    if (mode === 'undo') {
-      // A run with nothing kept for it was undone already: done, so "Undo the rest" isn't offered for it again.
-      const undone = run ? await undoParts(share, run) : undefined;
-      return { reports: [undone ?? { tool, outcome: 'uninstalled', message: 'That change was undone already.', runs: [], changed: false }] };
-    }
-    if (mode === 'remove') return told(source, plugin, { reports: [await removeParts(share, { source, plugin, tool })] });
-    const ctx = await context();
-    const { catalog } = await catalogFor(ctx, source, { counts: false });
-    if (!catalog || catalog.name !== marketName) return { reports: failedFor([tool], 'Its marketplace changed. Refresh, then choose it again.') };
-    const read = await filesOf(ctx, catalog, plugin);
-    if (!read.files) return { reports: failedFor([tool], read.problem ?? 'Its files can’t be read.') };
-    const version = catalog.plugins.find(entry => entry.name === plugin)?.version;
-    return told(source, plugin, { reports: [await installParts(share, { source, marketName, plugin, version, tool }, read.files, pick)] });
-  }
-
 
   /** One tool's own switch for one skill of an installed plugin (ENB-06). `marketName` and `source` as for uninstall. */
   async function setSkill(source: string, marketName: string, plugin: string, skill: string, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
@@ -933,18 +879,13 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { report, view: await view() };
   }
 
-  return { view, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, partsPlan, parts, items, pendingUpdates, noteJoined, toolManaged, turn, undoTurn, addCarried, addCarriedTo, beforeParts };
+  return { view, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, items, pendingUpdates, noteJoined, toolManaged, turn, undoTurn, addCarried, addCarriedTo, beforeParts };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
 const isText = (value: unknown, max = 2000): value is string => typeof value === 'string' && !!value.trim() && value.length <= max;
 /** Where a tool has a plugin's marketplace from, for a switch of something installed: '' where the tool lists no marketplace of that name now. */
 const isSource = (value: unknown): value is string => value === '' || isText(value);
-/** Single parts picked for a tool, each a kind and a name (a name is only ever matched against the plugin's own parts). */
-const isPick = (value: unknown): value is PartsPick => {
-  const refs = (list: unknown) => Array.isArray(list) && list.length <= 500 && list.every(ref => ['skill', 'mcp', 'agent'].includes(ref?.kind) && isText(ref?.name, 300));
-  return !!value && typeof value === 'object' && refs((value as PartsPick).on) && refs((value as PartsPick).off);
-};
 /** One item's state an Undo of a plugin's switch puts back (pluginlibrary.ts ItemState), as the page sent it back. */
 const isItemState = (value: unknown): value is ItemState => {
   const state = record(value);
@@ -975,14 +916,6 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   const refused = (tools: unknown) => ({ reports: failedFor(toolIds(Array.isArray(tools) ? tools : [tools]), 'That request was malformed, so nothing ran.') });
   handle('plugins:install', async (source, marketName, plugin, tools, home) => (open() && isText(source) && isName(marketName) && isName(plugin) ? markets.install(source, marketName, plugin, toolIds(tools), home) : refused(tools)));
   handle('plugins:update', async (source, marketName, plugin, tools, home) => (open() && isText(source) && isName(marketName) && isName(plugin) ? markets.update(source, marketName, plugin, toolIds(tools), home) : refused(tools)));
-  handleNow('plugins:parts-plan', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.partsPlan(source, plugin) : null));
-  handle('plugins:parts', async (source, marketName, plugin, tool, mode, run, home, pick) => {
-    const ids = onlyAllowed([tool], partsTools);
-    const okMode = mode === 'install' || mode === 'remove' || mode === 'undo';
-    return open() && isText(source) && isName(marketName) && isName(plugin) && ids.length && okMode && (run === undefined || run === null || isText(run, 64)) && (pick === undefined || pick === null || isPick(pick))
-      ? markets.parts(source, marketName, plugin, ids[0]!, mode, (run ?? undefined) as string | undefined, home, (pick ?? undefined) as PartsPick | undefined)
-      : { reports: failedFor(ids, 'That request was malformed, so nothing ran.') };
-  });
   handle('plugins:items', async (source, marketName, plugin, tools, home) => {
     const ids = itemTools(onlyAllowed(tools, harnessIds));
     return open() && isText(source) && isName(marketName) && isName(plugin) && ids.length ? markets.items(source, marketName, plugin, ids, home, false, true) : { reports: failedFor(ids, 'That request was malformed, so nothing ran.') };
@@ -1009,7 +942,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   const isBack = (source: string, plugin: string) => (op: unknown): op is PluginOp => {
     const step = record(op);
     return !!step && step.source === source && step.plugin === plugin && isName(step.marketName) && harnessIds.includes(step.tool as HarnessId)
-      && ['install', 'remove', 'remove-parts', 'undo-parts', 'plugin-off', 'items-back'].includes(step.action as string) && (step.run === undefined || isText(step.run, 64))
+      && ['install', 'remove', 'plugin-off', 'items-back'].includes(step.action as string)
       && (step.items === undefined || (step.action === 'items-back' && Array.isArray(step.items) && step.items.length <= 5000 && step.items.every(isItemState)));
   };
   const isEntry = (source: string, plugin: string) => (value: unknown): value is PluginEntry => {

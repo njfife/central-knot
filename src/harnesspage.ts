@@ -306,7 +306,7 @@ function pluginsTab(tool: HarnessId) {
   if (plugins.state === 'reading') return page(h('p.empty', {}, 'Reading marketplaces…'));
   if (plugins.state === 'failed') return page(emptyState('circle-alert', 'Marketplaces could not be read', 'Nothing changed.', button({ label: 'Try again', id: 'harness-plugins-retry', onclick: () => void loadPlugins(false, state.home?.readId) })));
   if (plugins.state === 'unsupported') {
-    // Only the tools that take a plugin whole are named as where plugins install; this one takes a plugin's parts.
+    // Only the tools that take a plugin whole are named as where plugins install; this one takes a plugin's items.
     const takers = (market.view?.tools ?? []).filter(takesPlugins);
     return page(emptyState('puzzle', pluginsNotHandled(tool), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on Plugins puts its skills, agents and MCP servers in ${names[tool]} as items of Central Knot’s that follow the plugin. ` : ''}${names[tool]}’s own packages stay as they are.`));
   }

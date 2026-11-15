@@ -1,15 +1,28 @@
 // Plugin parts already in a home become library items linked to their plugin (library.ts A PLUGIN), once. Up to 0.6.0 alpha 1 a
 // plugin went into Pi and OpenCode (and into Claude Code, Copilot CLI or Codex where its installer couldn't run) as its parts: its
 // skills, agents and MCP servers written as separate copies, recorded per plugin and tool in .central-knot/plugin-parts.json
-// (parts.ts), each content kept in the store before it was written. This module owns two things, both only while that file is
-// there; once the migration has renamed it to plugin-parts.v1.json neither does anything, and the code stays, as the other
-// migrations' does.
+// (PartsInstall), each content kept in the store before it was written (keptOf). The engine that wrote them is gone; this module
+// owns what is left of it, only while that file is there: once the migration has renamed it to plugin-parts.v1.json nothing here
+// does anything.
+//
+// NEVER DELETED, by a later cleanup either: a home last opened with alpha 1 may first be opened by a much later version. The
+// migration and the guard below; the one reader of the record (readRecord) and its readers: the plugins record's first read
+// (marketplaces.ts recordFor, holdingsIn), marketplaces.ts beforeParts, and the Plugins page's list of plugins that wait
+// (marketplaces.ts look: MarketplaceView waiting, read by pluginstatus.ts waitsToMove); the store folders keptOf reads
+// (items/<storeFolder(key)>/<hash>, items/plugin-parts/agent and mcp, items/mcp/<name>/), which no store cleanup may touch; and
+// the fixture homes made by alpha 1's own engine (tests/upgrade/alpha-1-parts).
 //
 // THE GUARD (hideParts, asked by librarypass.ts lookAt: the one read every pass, view, join count and take-in goes through). Each
 // key the record has a part of that he hasn't removed is unseen in every managed tool of its kind, "waiting to be moved to the
 // library": no part is taken in as a found item (Synchronize everything would turn it On in every tool), and an item of that name
 // pauses. A record that is there and can't be read makes every copy of the kind unseen. Only the migration sees those copies,
 // through the kind's own read (librarypass.ts Kind.read).
+//
+// WHILE IT WAITS a plugin with any part on the record (one he removed included) waits in Pi and OpenCode, held in two places
+// (pluginstatus.ts waitsToMove): nothing is owed there (pluginstatus.ts toolNow), so no click or check brings its items in or out,
+// and it has no Its items (marketplaces.ts withItems), so Update and Update all bring it nothing; its line says why. In Claude
+// Code, Copilot CLI and Codex it is as any plugin, and a copy alpha 1 wrote there as a part is that tool's own (it reads as not
+// installed there).
 //
 // THE MIGRATION (migrateParts: homepass.ts step 2, with Sync on or off, behind share.ts libraryGate). Each key on the record, and
 // each name a plugin on the record holds that was no part anywhere (an agent, which Pi took no part of), ends as a live item linked
@@ -23,11 +36,12 @@
 //
 //   the tool (Pi, OpenCode) holds                     the item there
 //   the plugin's part, its copy as the part wrote it  applied: that content
-//   the plugin's part, its copy edited                applied at the part's kept content where the tool is managed and the
-//                                                     kind's record holds its folder identity, so the first pass lets the item
-//                                                     go as his own and takes the edit in (librarypass.ts letGo); else (no
-//                                                     identity: a pass would read A back from the copy, librarypass.ts
-//                                                     cameBack; not managed; or nothing kept) kept out, the edit that tool's own
+//   the plugin's part, its copy edited                applied at the part's kept content where the plugin is On, the tool is
+//                                                     managed and the kind's record holds its folder identity, so the first
+//                                                     pass lets the item go as his own and takes the edit in (librarypass.ts
+//                                                     letGo); else (Off: the item Off would take the copy out; no identity: a
+//                                                     pass would read A back from the copy, librarypass.ts cameBack; not
+//                                                     managed; or nothing kept) kept out, the edit that tool's own
 //   the plugin's part, no copy, deleted by hand       kept out
 //   the plugin's part, no copy, never written         nothing: where the item is On, the first pass writes it, as the old
 //                                                     engine's next run would have
@@ -36,6 +50,8 @@
 // In Claude Code, Copilot CLI and Codex a part's copy, or any copy of that name, is kept out as that tool's own, and the item is
 // held there by the plugin's installer anyway (plugins.ts pluginHolds). Every tool the entry keeps the plugin out of is kept out
 // too, so a tool that appears later gets none of it. Any other tool not managed now: joining decides when it is managed.
+// For example, the plugin turned Off while its parts waited, with skill a unedited and skill b edited in Pi: a is applied there
+// and Off, so the first pass that writes takes it out; b is kept out of Pi, and his edit stays there byte for byte.
 //
 // "As the part wrote it" compares the copy with the part's kept content as the kind reads both now (keptOf), never the recorded
 // hash: alpha 1 kept a server's `args: []`, and an agent's recorded hash is its whole file's. With nothing kept, a server can't
@@ -63,16 +79,29 @@ import { entryOf, firstEntry, readPluginRecord, savePluginRecord, withEntry, typ
 import { sameSource } from './plugins.ts';
 import { harnessIds } from './harnesses.ts';
 import { takesPlugins, type AgentTool } from './presence.ts';
-import { errorCode, exists, libraryGate, partsRecordPath, readTree, storeDirectory, storedRevision, type ShareContext } from './share.ts';
+import { errorCode, exists, libraryGate, readTree, storeDirectory, storeFolder, type ShareContext } from './share.ts';
 import { pluginLink } from './sourcelink.ts';
-import type { HarnessId, PartItem, PartsInstall } from './types.ts';
+import type { HarnessId, PartKind } from './types.ts';
 import { byToolOrder } from './words.ts';
 
+// ---------- The record ----------
+
+/** Where alpha 1 recorded the parts it wrote: which plugin's parts went into which tool as separate items. */
+export const partsRecordPath = (home: string) => join(storeDirectory(home), 'plugin-parts.json');
+/** One part put in a tool: a skill folder, an MCP entry or an agent file, by name, with the hash it had when it went in. */
+export interface PartItem { kind: PartKind; name: string; hash: string; /** What it was on disk once written (for an MCP entry, with the tool's own settings), to tell a later edit. */ seen?: string;
+  /** Out by the person's choice (turned off, or removed from the tool by hand): updates left it out while the plugin still had it. */ removed?: true }
+/** A plugin's parts in one tool: from which plugin and version, when, and which items. `digest` identified the parts' content then. */
+interface PartsInstall { source: string; marketName: string; plugin: string; version?: string; tool: HarnessId; at: string; digest: string; items: PartItem[] }
 /** One part on the record, with the plugin and tool it went into. */
 interface OnRecord { install: PartsInstall; part: PartItem }
+/** The record as read: each part with its install; absent (no parts anywhere), or unreadable. */
+export type PartsRecord = OnRecord[] | 'absent' | 'unreadable';
+/** Where alpha 1 kept a skill part's content: the Skills store of its time, by the skill's key and its content hash. */
+const keptSkill = (context: ShareContext, key: string, hash: string) => join(storeDirectory(context.home), 'items', storeFolder(key), hash);
 
-/** The record as parts.ts wrote it, each part with its install; absent (no parts anywhere), or unreadable. */
-async function readRecord(home: string): Promise<OnRecord[] | 'absent' | 'unreadable'> {
+/** The record as alpha 1 wrote it, the only code that opens it (the header names its readers). */
+export async function readRecord(home: string): Promise<PartsRecord> {
   let installs: unknown;
   try { installs = JSON.parse(await readFile(partsRecordPath(home), 'utf8'))?.installs; } catch (error) { return errorCode(error) === 'ENOENT' ? 'absent' : 'unreadable'; }
   if (!Array.isArray(installs)) return 'unreadable';
@@ -103,10 +132,10 @@ export type PluginNow = (entry: PluginEntry) => Promise<{ reads: SourceRead<unkn
 /** One content an item may be made from: its hash, its content as the kind stores it, the version on record and when it was made. */
 interface Content { hash: string; content: unknown; version?: string; at: string }
 
-/** Each kind's kept content of a part (parts.ts kept it before writing), as the kind reads it now; none when it is not kept. */
+/** Each kind's kept content of a part (alpha 1 kept it before writing), as the kind reads it now; none when it is not kept. */
 const keptOf: Record<ItemKind, (context: ShareContext, at: OnRecord) => Promise<Omit<Content, 'install' | 'at'> | undefined>> = {
   skill: async (context, { part }) => {
-    const directory = storedRevision(context, itemKey(part.name), part.hash), tree = await readTree(directory).catch(() => undefined);
+    const directory = keptSkill(context, itemKey(part.name), part.hash), tree = await readTree(directory).catch(() => undefined);
     return tree && !tree.held ? { hash: tree.hash, content: { directory, hash: tree.hash } } : undefined;
   },
   agent: async (context, { install, part }) => {
@@ -114,7 +143,7 @@ const keptOf: Record<ItemKind, (context: ShareContext, at: OnRecord) => Promise<
     const agent = text === undefined ? undefined : parseAgent(install.tool as AgentTool, part.name, text);
     return agent && { hash: agentHash(agent), content: agent };
   },
-  // Alpha 1 kept a server in the MCP store of its time; later builds beside the agents (parts.ts serverPaths).
+  // Alpha 1 kept a server in the MCP store of its time, or beside the agents.
   mcp: async (context, { part }) => {
     for (const path of [`items/plugin-parts/mcp/${part.hash}.json`, `items/mcp/${encodeURIComponent(part.name)}/${part.hash}.json`]) {
       const server = await readFile(join(storeDirectory(context.home), path), 'utf8').then(text => asRead(JSON.parse(text)), () => undefined);
@@ -145,9 +174,9 @@ export async function migrateParts(context: ShareContext, managed: HarnessId[], 
   if (parts === 'absent') return {};
   if (parts === 'unreadable') return { waits: 'The record of plugins’ parts can’t be read.' };
   const gate = await libraryGate(context);
-  if ('refused' in gate || !gate.record) return { waits: 'refused' in gate ? gate.refused : 'This home has no sync record yet.' };
+  if ('refused' in gate || !gate.record) return { waits: 'refused' in gate ? gate.refused : 'This home has no sync record yet: answer the question on the Overview, and they are moved at the next look.' };
   const plugins = await readPluginRecord(context.home);
-  if (!plugins.record) return { waits: plugins.problem ?? 'The plugins record isn’t made yet.' };
+  if (!plugins.record) return { waits: plugins.problem ?? 'The plugins record isn’t made yet: it is made once every tool’s record of its plugins can be read.' };
   const moving: KindRead[] = [];
   for (const kind of kinds) {
     const { library, problem } = await kind.open(context, true);
@@ -222,7 +251,8 @@ async function itemFor(context: ShareContext, { kind, library, tools, managed, d
     if (kept ? copy.hash === kept.hash : unchangedByRecord[kind.kind](copy, at.part)) { applied.set(tool, content); unedited.push(content); }
     // Never in a tool not managed, though its identity may be on record (the MCP record's migration notes every tool's file; alpha 1
     // let a left-out tool's go only at its next pass): its edit stays its own whatever order the first pass takes (letGo, cameBack).
-    else if (kept && managed.includes(tool) && library.folders[tool]) applied.set(tool, { ...kept, ...keptAt(at) });
+    // Nor for a plugin that is Off: the item Off would take his edited copy out, where a plugin's Off leaves his own.
+    else if (kept && entry.on && managed.includes(tool) && library.folders[tool]) applied.set(tool, { ...kept, ...keptAt(at) });
     else except.push(tool);
   }
   // A tool the plugin is kept out of gets none of its items, whenever it appears (pluginlibrary.ts pluginOutOf, the same).

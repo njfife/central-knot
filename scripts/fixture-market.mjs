@@ -3,7 +3,7 @@
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fromJson, serverHash } from '../src/mcp.ts';
-import { importRevision, itemKey, readTree } from '../src/share.ts';
+import { copyTree, itemKey, readTree, storeFolder } from '../src/share.ts';
 
 const file = (root, path, text) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), text); };
 const skill = (root, path, name, description) => file(root, `${path}/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\nFollow the steps.\n`);
@@ -83,7 +83,7 @@ export function writeClaudeInstall(home, marketName, plugin, version, files) {
 }
 
 /**
- * A plugin's skills and MCP servers as parts an earlier version put into one tool (`tool`: Pi or OpenCode), as its parts.ts left
+ * A plugin's skills and MCP servers as parts an earlier version put into one tool (`tool`: Pi or OpenCode), as alpha 1's engine left
  * them in `home`: each written in with its content kept in the store, and recorded in plugin-parts.json. A skill's `edited`: text
  * added to its copy by hand since; `removed`: left out there (no copy, nothing kept). `servers`: each entry as the plugin's
  * .mcp.json has it, written into Pi's mcp.json. partsmigrate.ts moves them to the library at the next look.
@@ -94,7 +94,8 @@ export async function writeOldParts(home, market, marketName, plugin, tool, { sk
   for (const [name, { edited, removed }] of Object.entries(skills)) {
     const folder = join(market, 'plugins', plugin, 'skills', name), tree = await readTree(folder);
     if (removed) { items.push({ kind: 'skill', name, hash: tree.hash, removed: true }); continue; }
-    await importRevision({ home }, itemKey(name), folder, tree);
+    const kept = join(home, '.central-knot/items', storeFolder(itemKey(name)), tree.hash);
+    if (!existsSync(kept)) { mkdirSync(dirname(kept), { recursive: true }); await copyTree(folder, kept, tree); }
     cpSync(folder, join(root, 'skills', name), { recursive: true });
     if (edited) appendFileSync(join(root, 'skills', name, 'SKILL.md'), edited);
     items.push({ kind: 'skill', name, hash: tree.hash, seen: tree.hash });

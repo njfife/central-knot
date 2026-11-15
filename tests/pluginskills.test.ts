@@ -65,7 +65,7 @@ test('a tool that has a skill through an installed plugin has it another way, an
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
-test('an MCP server or agent a tool has through a plugin is said so there; while a part of its name waits to be moved to the library, nothing of that name is taken in or written', async () => {
+test('an MCP server or agent a tool has through a plugin is not claimed by its name alone, nor by a part of its name waiting to be moved to the library, and while one waits nothing of that name is taken in or written', async () => {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-plugin-parts-')));
   const home = join(base, 'home');
   const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -83,21 +83,19 @@ test('an MCP server or agent a tool has through a plugin is said so there; while
     await put(join(copy, 'agents/triager.md'), '---\nname: triager\ndescription: Sorts issues\n---\n\nSort new issues.\n');
     await put(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'issue-tracker@team': [{ scope: 'user', installPath: copy, version: '1.2.0' }] } }));
     const context: ShareContext = { home, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') };
-    const from = { plugin: 'issue-tracker', marketplace: 'team', version: '1.2.0' };
-
-    // A name alone could be another server or agent: nothing is claimed until they are on record as that plugin's parts.
+    // A name alone could be another server or agent: nothing is claimed until the library's item is linked to that plugin
+    // (plugins.ts linkedToPlugin), which for a part from before the library is at its move.
     assert.equal((await serversView(context, tools)).items.find(item => item.key === 'issues')!.plugin, undefined);
     assert.equal((await agentsView(context, tools)).items.find(item => item.key === 'triager')!.plugin, undefined);
     await put(join(home, '.central-knot/plugin-parts.json'), JSON.stringify({ installs: [{ source: '/markets/team', marketName: 'team', plugin: 'issue-tracker', version: '1.2.0', tool: 'codex-cli', at: '2026-11-10T00:00:00.000Z', digest: 'd',
       items: [{ kind: 'mcp', name: 'issues', hash: 'h' }, { kind: 'agent', name: 'triager', hash: 'h' }] }] }));
 
     const server = (await serversView(context, tools)).items.find(item => item.key === 'issues')!;
-    assert.deepEqual([server.plugin, server.cannot['claude-cli']], [{ 'claude-cli': { ...from, name: 'issues' } }, 'Claude Code has this MCP server through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
     // Codex's entry is the plugin's part there, and Copilot CLI's of that name his own: both wait (partsmigrate.ts hideParts).
     const waiting = 'A plugin’s part of this name is waiting to be moved to the library, so nothing changes here until it is.';
-    assert.deepEqual([server.unseen?.['codex-cli'], server.unseen?.['copilot-cli']], [waiting, waiting]);
+    assert.deepEqual([server.plugin, server.unseen?.['codex-cli'], server.unseen?.['copilot-cli']], [undefined, waiting, waiting]);
     const agent = (await agentsView(context, tools)).items.find(item => item.key === 'triager')!;
-    assert.deepEqual([agent.plugin, agent.cannot['claude-cli']], [{ 'claude-cli': { ...from, name: 'triager' } }, 'Claude Code has this agent through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
+    assert.deepEqual([agent.plugin, agent.unseen?.['codex-cli']], [undefined, waiting]);
     const before = [await readFile(join(home, '.claude.json'), 'utf8'), await readFile(join(home, '.codex/config.toml'), 'utf8'), await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')];
     const served = await applyServers(context, tools, [{ key: 'issues', on: true, except: [] }]);
     const sorted = await applyAgents(context, tools, [{ key: 'triager', on: true, except: [] }]);

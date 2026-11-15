@@ -109,13 +109,13 @@ async function skillsLoaded(context: ShareContext, managed: HarnessId[]): Promis
 /**
  * The agents each harness has through its installed plugins, by key: such a harness gets no file of its own beside the
  * plugin's. Only the plugin's own agent counts (a name alone could be another agent): one the library holds linked to that
- * plugin (`items`: the agents' record), or while a home's parts wait to be moved (partsmigrate.ts), one on record as its part.
+ * plugin (`items`: the agents' record).
  */
 async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ThroughPlugins> {
   const found: ThroughPlugins = new Map(), linked = await linkedToPlugin(context.home, items);
   for (const [tool, given] of await throughPlugins(context, tools, 'agent')) {
-    const asParts = [...given].flatMap(([key, { asParts: isPart, text: _text, ...plugin }]) => (isPart || linked(key, plugin) ? [[key, plugin] as const] : []));
-    found.set(tool, new Map(asParts));
+    const own = [...given].flatMap(([key, { text: _text, ...plugin }]) => (linked(key, plugin) ? [[key, plugin] as const] : []));
+    found.set(tool, new Map(own));
   }
   return found;
 }
@@ -225,12 +225,6 @@ export const restoreAgent = (context: ShareContext, tools: HarnessId[], eventId:
 
 /** One version's content, for the Agents page to show: undefined when the store no longer has it. */
 export const agentVersion = (context: ShareContext, key: string, hash: string) => readVersion(context, key, hash);
-
-/** The agents that are On in the library, by key (plugin parts ask which agents Central Knot keeps in step: parts.ts). */
-export async function agentsOn(context: ShareContext): Promise<Map<string, LibraryItem>> {
-  const { library } = await openLibrary(context);
-  return new Map(Object.values(library.items).filter(item => item.on && !item.deleted).map(item => [item.key, item]));
-}
 
 /**
  * What the Git repo holds for each agent in the library, On or Off (gitrepo.ts Push): its current version, or the edit a tool

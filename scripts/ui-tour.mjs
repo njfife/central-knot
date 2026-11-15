@@ -959,17 +959,6 @@ if (wanted('plugin-skills')) {
   await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there, locked, and can’t be turned on for this plugin alone (its row says why).');
   await at860('skill-held-860', 'The held state at 860×560, scrolled to the skills.');
   await a.theme('light'); await at860('skill-held-860-light', 'The held state at 860×560, light.'); await a.theme('dark');
-  // Pi joins the home: it takes no plugins, so its column's switches put single skills in as separate items, beside the
-  // installed plugin's own switches under Copilot CLI and Codex.
-  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
-  await a.click('#plugin-back'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-pi-cli')`, 15000);
-  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#ppart-0-document-tools-skill-pdf-reader-pi-cli')`, 15000);
-  await flip('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
-  await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
-  await shot(a, 'mixed-switches', 'Pi was added to the home. One list now has both kinds of switch, each column saying which: the installed plugin’s skill switches under Copilot CLI and Codex, and under Pi a switch that puts one skill in as a separate item (clicked for pdf-reader, which went in at once).');
-  await at860('mixed-switches-860', 'The same at 860×560.');
-  await a.theme('light'); await shot(a, 'mixed-switches-light', 'The same, in the light appearance.'); await a.theme('dark');
-  await flip('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
 }
 
 // ---------- Plugin updates that arrive by themselves ----------
@@ -1134,8 +1123,8 @@ if (wanted('plugin-items')) {
   writeMarket(market);
   const copyOf = (plugin, folder) => { cpSync(join(market, 'plugins', plugin), folder, { recursive: true }); return folder; };
   // As each tool records them: document-tools and release-helper in Claude Code (its marketplace added there), document-tools
-  // in Copilot CLI with pdf-reader switched off, issue-tracker in Codex turned off (its marketplace added nowhere), and
-  // issue-tracker's triage also in Pi as a separate part.
+  // in Copilot CLI with pdf-reader switched off, issue-tracker in Codex turned off (its marketplace added nowhere), and in Pi a
+  // skill triage the same as issue-tracker's.
   const installs = Object.fromEntries(['document-tools', 'release-helper'].map(plugin => [`${plugin}@team-tools`, [{ scope: 'user', installPath: copyOf(plugin, join(practice, `.claude/plugins/cache/team-tools/${plugin}/1.0.0`)), version: plugin === 'document-tools' ? '1.2.0' : '0.4.1' }]]));
   writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: installs }));
   writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'team-tools': { source: { source: 'github', repo: 'example/team-tools' }, installLocation: market } }));
@@ -1156,12 +1145,10 @@ if (wanted('plugin-items')) {
   writeFileSync(join(HOME, '.local/bin/claude'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0\ncase "$*" in\n  "plugin disable document-tools@team-tools --scope user") printf '{"enabledPlugins":{"document-tools@team-tools":false}}' > "${claudeSettings}" ;;\n  "plugin enable document-tools@team-tools --scope user") printf '%s' '${claudeSettingsAt}' > "${claudeSettings}" ;;\n  *) exit 9 ;;\nesac\n`, { mode: 0o755 });
   mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
   cpSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), join(practice, '.pi/agent/skills/triage/SKILL.md'));
-  mkdirSync(join(practice, '.central-knot'), { recursive: true });
-  writeFileSync(join(practice, '.central-knot/plugin-parts.json'), JSON.stringify({ installs: [{ source: market, marketName: 'team-tools', plugin: 'issue-tracker', version: '2.0.0', tool: 'pi-cli', at: new Date().toISOString(), digest: 'tour', items: [{ kind: 'skill', name: 'triage', hash: 'tour' }] }] }));
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
   const toPlugins = async () => { await a.run(`document.querySelector('.ov-section-plugins')?.scrollIntoView({ block: 'center' })`); await wait(150); };
   await a.click('#nav-skills'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.ov-section-plugins')`, 15000);
-  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “Only through a plugin” (the From plugins chip counts every row from a plugin, triage too), each marked “from <plugin>”, with its switch and a mark in each tool that has it (pdf-reader off in Copilot CLI and Codex, issue-tracker’s whole plugin off in Codex); triage is one row with its Pi part.');
+  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “Only through a plugin” (the From plugins chip counts every row from a plugin, triage too), each marked “from <plugin>”, with its switch and a mark in each tool that has it (pdf-reader off in Copilot CLI and Codex, issue-tracker’s whole plugin off in Codex); triage is one row with the copy in Pi.');
   await a.theme('light'); await shot(a, 'skills-light', 'The same, light.'); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
     await size(width, height); await toPlugins();
@@ -1200,7 +1187,7 @@ if (wanted('plugin-items')) {
   await a.click('#outcome-undo-plugin'); await a.settle();
   await shot(a, 'main-switch-changed-undone', 'Clicked Undo: “Undone: spreadsheet is back on in Copilot CLI and Codex.”');
   if (await a.has('#open-triage')) {
-    await a.click('#open-triage'); await shot(a, 'part-and-plugin', 'Opened triage: its Pi part and the plugin installed in Codex share the row. The note says its switch also turns it on or off in Codex, through the plugin, and that deleting here removes only the separate item; Codex’s line has its switch.');
+    await a.click('#open-triage'); await shot(a, 'copy-and-plugin', 'Opened triage: the copy in Pi and the plugin installed in Codex share the row, its SKILL.md being the same; Codex’s line has its switch.');
     // Each tool's switch for the item is in its opened row, and applies at once. issue-tracker is off in Codex: its switch
     // turns the plugin on there for triage alone.
     if (await a.has('#enable-triage-codex-cli')) {
@@ -2602,11 +2589,22 @@ if (wanted('plugin-library')) {
 if (wanted('parts-migration')) {
   await fresh();
   begin('parts-migration');
-  // Pi's skills folder seen once by a pass (as an earlier version's noted it; the sync record first setup's answer makes lets it
-  // run), then parts.ts's record as alpha 1 left it: document-tools' pdf-reader in Pi, edited there since; spreadsheet left out of
-  // Pi; issue-tracker's triage and issues in Pi.
   const market = join(scratch, 'migration-market');
   writeMarket(market);
+  // Before first setup is answered the home has no sync record, so the move waits: document-tools, its parts as alpha 1 left
+  // them in Pi, waits there, and its marketplace is listed by the record of its parts.
+  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  await writeOldParts(practice, market, 'team-tools', 'document-tools', 'pi-cli', { skills: { 'pdf-reader': { edited: '\nMy own way of reading PDFs.\n' }, spreadsheet: { removed: true } } });
+  await a.click('#nav-plugins'); await refresh();
+  await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`, 20000);
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-tool[data-tool="pi-cli"] [data-state="parts-waiting"]')`, 15000);
+  await atEverySize('waiting-page', 'Before first setup is answered: document-tools’ parts from alpha 1 wait to be moved, so Pi’s line says “Waits to be moved” with the clock and offers nothing there, and the hint under Your tools says why and what ends it (answer the question on the Overview); the tools with an installer are as for any plugin', true, '.plugin-panel', 'start');
+  await a.click('#plugin-back'); await waitFor(a, `!!document.querySelector('.plugin-legend')`, 15000);
+  await atEverySize('waiting-row', 'The Plugins list while document-tools waits: its row’s Pi cell has the clock, and the key under the list says “Waits to be moved: parts from an earlier version”', true, '.plugin-legend', 'end');
+  await fresh();
+  // Pi's skills folder seen once by a pass (as an earlier version's noted it; the sync record first setup's answer makes lets it
+  // run), then alpha 1's record of its parts: document-tools' pdf-reader in Pi, edited there since; spreadsheet left out of Pi;
+  // issue-tracker's triage and issues in Pi.
   mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
   await a.run(`window.centralKnot.setSyncEverything(false, ${JSON.stringify(practice)}, true)`);
   await refresh();

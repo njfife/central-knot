@@ -78,7 +78,7 @@ const list = (value: unknown): string[] | undefined => (Array.isArray(value) ? v
 // An empty map or list is read as none: OpenCode can't hold an empty argument list (its command is one list), so `"args": []`
 // read back as none there, and the server read as edited in OpenCode.
 const nonEmpty = <T extends object>(value: T | undefined) => (value && Object.keys(value).length ? value : undefined);
-/** A server kept in the neutral shape as the readers above read an entry: an empty list or map is none (partsmigrate.ts reads parts.ts's kept servers so). */
+/** A server kept in the neutral shape as the readers above read an entry: an empty list or map is none (partsmigrate.ts reads the servers alpha 1 kept so). */
 export const asRead = (server: NeutralServer): NeutralServer => ({ ...server, args: nonEmpty(server.args), env: nonEmpty(server.env), headers: nonEmpty(server.headers) });
 
 /** Belongs to the app that wrote it: ChatGPT desktop's own servers, or a command inside an app bundle (said as a sentence). */
@@ -220,10 +220,10 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
 }
 
 /**
- * Whether an entry can run only from the folder it sits in (`folder`: a plugin's, or a source's at its link), which isn't
- * copied: it names that folder's own settings, which only Claude Code fills in for a plugin (`settings`: ${CLAUDE_PLUGIN_ROOT},
- * ${CLAUDE_PLUGIN_DATA}, ${user_config.…}), or runs files from it (`files`: a path starting ./ or ../, a relative `cwd`, or a
- * relative name that is there; a program on PATH, a package name or a URL is not). Each caller words it (parts.ts, atlink.ts).
+ * Whether an entry can run only from the folder it sits in (`folder`: a source's, at its link), which isn't copied: it names a
+ * plugin's own settings, which only Claude Code fills in for a plugin (`settings`: ${CLAUDE_PLUGIN_ROOT}, ${CLAUDE_PLUGIN_DATA},
+ * ${user_config.…}), or runs files from it (`files`: a path starting ./ or ../, a relative `cwd`, or a relative name that is
+ * there; a program on PATH, a package name or a URL is not). Its caller words it (atlink.ts serversAt).
  * Known miss: a `cwd` of `~/…` counts as relative.
  */
 export async function runsFrom(raw: Record<string, unknown>, folder: string): Promise<'settings' | 'files' | undefined> {

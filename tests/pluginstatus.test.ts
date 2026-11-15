@@ -1,24 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FROM_DIRECTORY, blocked, cantUninstall, partsOffer, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, partStillIn, pluginPlace, otherVersions, otherVersionsLine, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
-import type { HomeView, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
+import type { MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
 const entry: MarketplaceView = { source: 'a/b', origins: ['central-knot'], name: 'm', kind: 'git', sourceLabel: 'GitHub: a/b', plugins: [{ name: 'p', description: '' }],
   states: { p: { 'claude-cli': { state: 'installed', path: '/x' }, 'codex-cli': { state: 'held', reason: 'other' } } } };
 const view: PluginsView = { home: '/h', tools: ['claude-cli', 'copilot-cli', 'codex-cli'], clis: { 'claude-cli': true, 'copilot-cli': true, 'codex-cli': true }, canWrite: true, marketplaces: [entry] };
 
-test('A tool takes a plugin by its own installer only when its CLI is there and it is not held or refused; otherwise not at all, and the table is told why; Pi takes its items, and parts only where the plugin has parts on record', () => {
+test('A tool takes a plugin by its own installer only when its CLI is there and it is not held or refused; otherwise not at all, and the table is told why; Pi takes its items, but none while the plugin’s parts from before wait to be moved', () => {
   const route = (tool: Parameters<typeof toolNow>[3], at = entry) => toolNow(view, at, 'p', tool, undefined, false).route;
   assert.deepEqual([route('claude-cli'), route('copilot-cli'), route('codex-cli')], ['whole', 'whole', { cannot: 'other' }]);
   assert.match(blocked({ ...view, clis: {} }, entry, 'claude-cli') ?? '', /command-line tool wasn’t found/);
   assert.match(blocked({ ...view, clis: {}, desktopOnly: { 'claude-cli': 'Claude desktop' } }, entry, 'claude-cli') ?? '', /^Only Claude desktop was found here, and the copy of Claude Code it carries isn’t there yet \(the app adds it once it has run\). Claude Code’s command-line tool wasn’t found either.$/);
   assert.equal(blocked(view, { ...entry, copilotRefuses: 'Copilot refuses npm.' }, 'copilot-cli'), 'Copilot refuses npm.');
-  assert.deepEqual(route('copilot-cli', { ...entry, copilotRefuses: 'x' }), { cannot: 'x' }, 'Copilot CLI refusing the marketplace takes nothing of it: no new parts');
-  const withParts: MarketplaceView = { ...entry, copilotRefuses: 'x', parts: { p: { 'pi-cli': { at: '', items: [{ kind: 'skill', name: 's' }] } } } };
-  assert.equal(route('copilot-cli', withParts), 'parts', 'a plugin with parts on record keeps its parts route, in every tool');
-  assert.equal(toolNow({ ...view, tools: [...view.tools, 'pi-cli'] }, entry, 'p', 'pi-cli', undefined, false).route, 'items', 'Pi takes a plugin with no parts as library items');
-  assert.equal(toolNow({ ...view, tools: [...view.tools, 'pi-cli'] }, withParts, 'p', 'pi-cli', undefined, false).route, 'parts');
+  assert.deepEqual(route('copilot-cli', { ...entry, copilotRefuses: 'x' }), { cannot: 'x' }, 'Copilot CLI refusing the marketplace takes nothing of it');
+  assert.equal(toolNow({ ...view, tools: [...view.tools, 'pi-cli'] }, entry, 'p', 'pi-cli', undefined, false).route, 'items', 'Pi takes a plugin as library items');
+  // Parts of it from before the library wait to be moved: Pi and OpenCode have none of it and can take none, so nothing is owed
+  // there; the tools with an installer are as for any plugin.
+  const waiting: MarketplaceView = { ...entry, waiting: ['p'] };
+  assert.deepEqual(['pi-cli', 'opencode-cli'].map(tool => toolNow({ ...view, tools: [...view.tools, 'pi-cli', 'opencode-cli'] }, waiting, 'p', tool as 'pi-cli', undefined, false)),
+    [{ has: 'none', route: { cannot: WAITS_TO_MOVE } }, { has: 'none', route: { cannot: WAITS_TO_MOVE } }]);
+  assert.deepEqual([route('claude-cli', waiting), route('copilot-cli', waiting)], ['whole', 'whole']);
   // Its items On in Pi: Pi has it; Copilot CLI, with no copy of the plugin, has nothing of it (its items come only with the plugin).
   const withItems: MarketplaceView = { ...entry, items: { p: { lines: [{ kind: 'skill', key: 's', name: 's', state: 'linked', on: true, except: [] }], on: { 'pi-cli': 1 }, of: 1 } } };
   assert.deepEqual(['pi-cli', 'copilot-cli'].map(tool => toolNow({ ...view, tools: [...view.tools, 'pi-cli'] }, withItems, 'p', tool as 'pi-cli', undefined, false).has), ['items', 'none']);
@@ -48,12 +51,12 @@ test('Update is offered only where a tool’s copy is older and can be changed h
   const at = (states: MarketplaceView['states']['p']): MarketplaceView => ({ ...entry, states: { p: states } });
   const copies = at({ 'claude-cli': { state: 'installed', path: '/x', version: '1.9.0' }, 'copilot-cli': { state: 'installed', path: '/y', version: '2.1.0' }, 'codex-cli': { state: 'installed', path: '/z', version: '1.0.0', live: true } });
   // Claude Code is behind; Copilot CLI is ahead of the marketplace; Codex loads it live from the folder.
-  assert.deepEqual(updateTools(view, copies, 'p', '2.0.0').plugin, ['claude-cli']);
-  assert.deepEqual(updateTools({ ...view, clis: { 'copilot-cli': true } }, copies, 'p', '2.0.0').plugin, [], 'no CLI to run it');
-  assert.deepEqual(updateTools(view, copies, 'p', undefined).plugin, [], 'nothing to compare with');
+  assert.deepEqual(updateTools(view, copies, 'p', '2.0.0'), ['claude-cli']);
+  assert.deepEqual(updateTools({ ...view, clis: { 'copilot-cli': true } }, copies, 'p', '2.0.0'), [], 'no CLI to run it');
+  assert.deepEqual(updateTools(view, copies, 'p', undefined), [], 'nothing to compare with');
   // Claude Code's copy from the Anthropic Directory is installed, and left to Claude Code: behind or not, no Update, no Uninstall.
   const directory = at({ 'claude-cli': { state: 'installed', path: '/x', version: '1.9.0', directory: 'p@anthropic-plugin-directory' } });
-  assert.deepEqual([updateTools(view, directory, 'p', '2.0.0').plugin, toolNow(view, directory, 'p', 'claude-cli', undefined, false)], [[], { has: 'whole', route: 'whole', stuck: FROM_DIRECTORY }]);
+  assert.deepEqual([updateTools(view, directory, 'p', '2.0.0'), toolNow(view, directory, 'p', 'claude-cli', undefined, false)], [[], { has: 'whole', route: 'whole', stuck: FROM_DIRECTORY }]);
   assert.equal(cantUninstall(view, directory, 'p', 'claude-cli'), FROM_DIRECTORY);
   assert.deepEqual(copiesToCompare(view, directory), [], 'its files aren’t compared with the marketplace’s');
 });
@@ -65,10 +68,10 @@ test('A copy at the marketplace’s version whose text differs is offered Update
     installed: { 'claude-cli': { skills: [part('---\nname: one\n---\nA\n')], commands: [], agents: [], version: '1.2.0' }, 'copilot-cli': { skills: [part('---\r\nname: one\r\n---\r\nB\r\n'), part('extra', 'skills/two')], commands: [], agents: [], version: '1.2.0' },
       'codex-cli': { skills: [part('A')], commands: [], agents: [], version: '1.2.0' } } } as PluginDetail;
   // Claude Code's text differs; Copilot CLI's differs only in line endings and holds an extra part; Codex loads it live.
-  assert.deepEqual(updateTools(view, copies, 'p', '1.2.0', undefined, detail).plugin, ['claude-cli']);
+  assert.deepEqual(updateTools(view, copies, 'p', '1.2.0', detail), ['claude-cli']);
   assert.equal(copyStale(copies, 'p', 'claude-cli', '1.2.0', detail), true);
-  assert.deepEqual(updateTools(view, copies, 'p', '1.2.0').plugin, [], 'not known before its files are read');
-  assert.deepEqual(updateTools(view, copies, 'p', '1.2.0', undefined, { ...detail, offered: false }).plugin, [], 'nor without the marketplace’s own copy');
+  assert.deepEqual(updateTools(view, copies, 'p', '1.2.0'), [], 'not known before its files are read');
+  assert.deepEqual(updateTools(view, copies, 'p', '1.2.0', { ...detail, offered: false }), [], 'nor without the marketplace’s own copy');
   assert.equal(copyStale(copies, 'p', 'claude-cli', '1.3.0', detail), false, 'another version is told by its version, not its content');
 });
 
@@ -136,25 +139,6 @@ test('A tool\'s installs say what is installed, what could not be checked and wh
   assert.equal(installsIn(view, 'pi-cli'), null, 'a tool that takes no marketplace plugins');
 });
 
-test('A part removed from a tool by hand is no longer installed there; a kind the home does not read there still counts', () => {
-  const facts = (key: string, tools: string[]) => ({ key, copies: Object.fromEntries(tools.map(tool => [tool, {}])) });
-  const home = { skills: { tools: ['codex-cli', 'pi-cli'], items: [{ ...facts('triage', ['codex-cli']), on: false, except: [] }], library: {} }, mcp: { tools: ['codex-cli', 'pi-cli'], items: [{ key: 'issues', copies: {}, unseen: { 'codex-cli': 'the plugin’s' }, on: false, except: [] }], library: {} }, agents: { tools: [], items: [], library: {} } } as unknown as HomeView;
-  assert.equal(partStillIn(home, 'codex-cli', { kind: 'skill', name: 'Triage' }), true);
-  assert.equal(partStillIn(home, 'pi-cli', { kind: 'skill', name: 'triage' }), false);
-  // An MCP server's part is never one of the servers page's copies: its row says the tool has it as the plugin's.
-  assert.deepEqual([partStillIn(home, 'codex-cli', { kind: 'mcp', name: 'issues' }), partStillIn(home, 'pi-cli', { kind: 'mcp', name: 'issues' })], [true, false]);
-  assert.equal(partStillIn(home, 'codex-cli', { kind: 'agent', name: 'helper' }), true);
-});
-
-test('Claude Code is offered a plugin’s parts only when it has no CLI and the plugin has parts on record; any other plugin is never offered as parts', () => {
-  const fresh: MarketplaceView = { ...entry, states: {}, parts: { p: { 'pi-cli': { at: '', items: [{ kind: 'skill', name: 's' }] } } } };
-  assert.equal(partsOffer(view, fresh, 'p', 'claude-cli'), false);
-  assert.equal(partsOffer({ ...view, clis: { ...view.clis, 'claude-cli': false }, desktopOnly: { 'claude-cli': 'Claude desktop' } }, fresh, 'p', 'claude-cli'), true);
-  assert.equal(partsOffer({ ...view, clis: { ...view.clis, 'claude-cli': false } }, { ...fresh, parts: {} }, 'p', 'claude-cli'), false, 'no parts on record: no new parts');
-  // A plugin with only MCP servers has nothing Claude Code takes as parts.
-  assert.equal(partsOffer({ ...view, clis: {} }, fresh, 'p', 'claude-cli', { skills: 0, commands: 0, agents: 0, hooks: false, mcp: 1, mcpRootVariable: false, bin: false }), false);
-});
-
 test('A plugin every tool that can take it has comes first, one some tool has next, one no tool has last', () => {
   const at = (states: MarketplaceView['states']['p'], more: Partial<MarketplaceView> = {}): MarketplaceView => ({ ...entry, ...more, states: { p: states } });
   const here = { state: 'installed', path: '/x' } as const;
@@ -164,8 +148,7 @@ test('A plugin every tool that can take it has comes first, one some tool has ne
   // A tool that can't take it (Copilot refuses the marketplace, or holds another of this name) doesn't keep it from the top.
   assert.equal(pluginPlace(view, at({ 'claude-cli': here, 'codex-cli': here }, { copilotRefuses: 'Copilot refuses npm.' }), 'p'), 0);
   assert.equal(pluginPlace(view, at({ 'claude-cli': here, 'copilot-cli': here, 'codex-cli': { state: 'held', reason: 'other' } }), 'p'), 0);
-  // Parts in a tool that takes no plugins count as having it; without them that tool is no reason to wait.
+  // A tool that takes no plugins is no reason to wait.
   const withPi: PluginsView = { ...view, tools: [...view.tools, 'pi-cli'] };
   assert.equal(pluginPlace(withPi, at({ 'claude-cli': here, 'copilot-cli': here, 'codex-cli': here }), 'p'), 0);
-  assert.equal(pluginPlace(withPi, at({}, { parts: { p: { 'pi-cli': { at: '2026-11-10T00:00:00Z', items: [] } } } }), 'p'), 1);
 });

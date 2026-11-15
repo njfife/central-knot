@@ -10,8 +10,7 @@
 // - checked writes: a tool's file written or removed only while it holds what was read (writeFileChecked, removeFileChecked,
 //   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably);
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
-//   place (stagingFolder, placeCopy);
-// - plugin parts on record, read only (readParts; parts.ts writes them, partsmigrate.ts moves them to the library).
+//   place (stagingFolder, placeCopy).
 // Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
 // (skillfiles.ts, mcp.ts, agentfiles.ts), and which tools are managed (presence.ts managedTools).
 //
@@ -34,7 +33,7 @@ import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { instructionFiles } from './instructions.ts';
 import { mcpFile } from './mcp.ts';
 import { managedTools } from './presence.ts';
-import type { HarnessId, HistoryDays, HomeMode, PartsInstall, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
+import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 /** sync.json's format (SyncRecord); format 1 is read until the skills migration (skillstore.ts) writes format 2. */
 export const FORMAT_VERSION = 2;
@@ -101,15 +100,6 @@ export interface SyncRecord { formatVersion: number; generation: string; owner: 
   syncEverything?: boolean }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
-/** Where the plugins' parts are recorded (parts.ts writes it): which plugin's parts went into which tool as separate items. */
-export const partsRecordPath = (home: string) => join(storeDirectory(home), 'plugin-parts.json');
-/** Every plugin's parts on record, by plugin and tool; none when there is no record or it can't be read. */
-export async function readParts(home: string): Promise<PartsInstall[]> {
-  try {
-    const parsed = JSON.parse(await readFile(partsRecordPath(home), 'utf8'));
-    return Array.isArray(parsed?.installs) ? parsed.installs : [];
-  } catch { return []; }
-}
 const recordPath = (home: string) => join(storeDirectory(home), 'sync.json');
 
 export { itemKey } from './library.ts';
@@ -530,20 +520,6 @@ export function storeFolder(key: string): string {
   if (/^[a-z0-9._-]{1,100}$/.test(key) && !/^\.+$/.test(key)) return key;
   const readable = key.replace(/[^a-z0-9._-]+/g, '-').replace(/^[.-]+/, '').slice(0, 40);
   return `${readable || 'skill'}-${createHash('sha256').update(key).digest('hex').slice(0, 16)}`;
-}
-
-/** Where a skill revision is kept in Central Knot's store, by the skill's key and its content hash. */
-export const storedRevision = (context: ShareContext, key: string, hash: string) => join(storeDirectory(context.home), 'items', storeFolder(key), hash);
-
-export async function importRevision(context: ShareContext, key: string, source: string, tree: Tree) {
-  const target = storedRevision(context, key, tree.hash);
-  try { if ((await readTree(target)).hash === tree.hash) return; await removeTree(target); }
-  catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
-  await mkdir(dirname(target), { recursive: true });
-  const staging = `${target}.${randomUUID()}.tmp`;
-  await copyTree(source, staging, tree);
-  await rename(staging, target);
-  await finishCopy(source, target);
 }
 
 /** Beside the skills folder, on the same volume. A folder inside it would load as a skill: Claude Code lists dot-folders too. */
