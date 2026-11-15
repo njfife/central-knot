@@ -19,19 +19,20 @@
 // A PLUGIN's `make` makes one (over a deleted item of its name, keeping its versions): linked to the entry, On as it is, its `seen`
 // the current version. Each managed tool of the kind is decided by what it holds, first match:
 //
-//   the tool holds                                    the item there
-//   the plugin's part, removed (by him, or by hand)   kept out
-//   a part, in Claude Code, Copilot CLI or Codex      kept out: the copy is that tool's own (plugins.ts pluginHolds)
-//   another plugin's part of that name                kept out: that tool's own copy
+//   the tool (Pi, OpenCode) holds                     the item there
 //   the plugin's part, its copy as the part wrote it  applied: that content
 //   the plugin's part, its copy edited                applied at the part's content where the kind's record holds that tool's
 //                                                     folder identity, so the first pass lets the item go as his own and takes
 //                                                     the edit in (librarypass.ts letGo); elsewhere kept out (a pass would read
 //                                                     A back from the copy: librarypass.ts cameBack), the edit that tool's own
-//   the plugin's part, never written, no copy         nothing: where the item is On, the first pass writes it, as the old
+//   the plugin's part, no copy, deleted by hand       kept out
+//   the plugin's part, no copy, never written         nothing: where the item is On, the first pass writes it, as the old
 //                                                     engine's next run would have
-//   no part: Pi or OpenCode, or a copy of that name   kept out
-// A tool not managed now is neither: when it is managed again, joining decides there (its Harnesses card counts it first).
+//   anything else: the part removed by him, another   kept out
+//     plugin's part, no part
+// In Claude Code, Copilot CLI and Codex a part's copy, or any copy of that name, is kept out as that tool's own, and the item is
+// held there by the plugin's installer anyway (plugins.ts pluginHolds). A tool not managed now is neither applied nor kept out:
+// when it is managed again, joining decides there (its Harnesses card counts it first).
 //
 // "As the part wrote it" compares the copy with the part's kept content as the kind reads both now (a skill's folder, an agent's
 // file parsed in that tool's form, a server as mcp.ts asRead reads it: alpha 1 kept `args: []`), never the recorded hash. With
@@ -193,36 +194,39 @@ async function entriesFirst(home: string, record: PluginRecord, parts: OnRecord[
 async function itemFor(context: ShareContext, { kind, library, tools, disk }: KindRead, key: string, ofKey: OnRecord[], entry: PluginEntry,
   atPlugin: () => Promise<{ hash: string; content: unknown; at: string } | undefined>): Promise<LibraryItem | undefined> {
   const owner = ofKey[0].install, ours = ofKey.filter(({ install }) => install.plugin === owner.plugin && sameSource(install.source, owner.source));
-  const except: HarnessId[] = [], applied = new Map<HarnessId, Content>(), unedited: Content[] = [], copies: Seen[] = [];
+  const except: HarnessId[] = [], applied = new Map<HarnessId, Content>(), unedited: Content[] = [], partCopies: Seen[] = [];
   for (const tool of tools) {
     const at = ofKey.find(({ install }) => install.tool === tool), copy = disk.byKey.get(key)?.[tool];
     const mine = at && ours.includes(at) && !at.part.removed && !takesPlugins(tool);
-    if (!mine) { if (at || !takesPlugins(tool) || copy || unseenIn(disk, tool, key)) except.push(tool); continue; }
+    if (!mine) { if (!takesPlugins(tool) || copy || unseenIn(disk, tool, key)) except.push(tool); continue; }
     if (!copy) { if (at.part.seen) except.push(tool); continue; }
-    copies.push(copy);
+    partCopies.push(copy);
     const kept = await keptOf[kind.kind](context, at);
     const content: Content = { hash: copy.hash, content: kind.contentOf(copy), install: at.install, at: at.install.at };
     if (kept ? copy.hash === kept.hash : unchangedByRecord[kind.kind](copy, at.part)) { applied.set(tool, content); unedited.push(content); }
     else if (kept && library.folders[tool]) applied.set(tool, { ...kept, install: at.install, at: at.install.at });
     else except.push(tool);
   }
-  const keptAll = async () => (await Promise.all(ours.map(async at => { const kept = await keptOf[kind.kind](context, at); return kept && { ...kept, install: at.install, at: at.install.at }; }))).filter(each => !!each);
+  const keptAll = async () => (await Promise.all(ours.map(async at => {
+    const kept = await keptOf[kind.kind](context, at);
+    return kept && { ...kept, install: at.install, at: at.install.at };
+  }))).filter(each => !!each);
   const pool = unedited.length ? unedited : await keptAll();
   // The plugin's files are read only where they decide: no content, or contents that differ.
   const now = new Set(pool.map(each => each.hash)).size === 1 ? undefined : await atPlugin();
   const fromPlugin = now && { ...now, install: owner, at: now.at || owner.at };
   const higher = (one: Content, other: Content) => (other.install.version ?? '').localeCompare(one.install.version ?? '', undefined, { numeric: true });
   const current = pool.find(each => each.hash === fromPlugin?.hash) ?? [...pool].sort(higher)[0] ?? fromPlugin;
+  if (!current) return partCopies.length ? ownFromCopy(context, kind, library.items[key] ?? newItem(key, partCopies[0].name), partCopies[0], tools) : undefined;
   const item = library.items[key] ?? newItem(key, ofKey[0].part.name);
   delete item.deleted;
-  if (!current) return copies.length ? ownFromCopy(context, kind, item, copies[0], tools) : undefined;
   const link = pluginLink(entry.plugin, entry.marketName), contents = [...new Map([...applied.values(), current].map(each => [each.hash, each])).values()];
   for (const each of contents) await kind.store(context, item, each.hash, each.content);
   const made: Version[] = contents.filter(each => each !== current).map(each => ({ hash: each.hash, at: each.at, from: { how: 'source', link } }));
   Object.assign(item, { name: ofKey[0].part.name, on: entry.on, hash: current.hash, source: entry.id, seen: current.hash, except: except.sort(byToolOrder),
     versions: [{ hash: current.hash, at: current.at, from: { how: 'source', link } }, ...made, ...item.versions],
     applied: Object.fromEntries([...applied].map(([tool, each]) => [tool, each.hash])) } satisfies Partial<LibraryItem>);
-  for (const copy of copies) if (applied.has(copy.tool)) { const text = kind.ownOf(copy); if (text !== undefined) await kind.keepOwn(context, item, copy.tool, text); }
+  for (const copy of partCopies) if (applied.has(copy.tool)) { const text = kind.ownOf(copy); if (text !== undefined) await kind.keepOwn(context, item, copy.tool, text); }
   return item;
 }
 
@@ -231,7 +235,7 @@ async function ownFromCopy(context: ShareContext, kind: Kind<unknown, Seen>, ite
   await kind.store(context, item, copy.hash, kind.contentOf(copy));
   Object.assign(item, { name: copy.name, on: true, hash: copy.hash, except: tools.filter(tool => tool !== copy.tool), applied: { [copy.tool]: copy.hash },
     versions: [{ hash: copy.hash, at: versionAt(copy.at), from: { how: 'found', harness: copy.tool } }, ...item.versions] } satisfies Partial<LibraryItem>);
-  delete item.source; delete item.seen;
+  delete item.deleted; delete item.source; delete item.seen;
   const text = kind.ownOf(copy);
   if (text !== undefined) await kind.keepOwn(context, item, copy.tool, text);
   return item;

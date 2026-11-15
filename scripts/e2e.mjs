@@ -7,7 +7,7 @@ import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtem
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
+import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
@@ -1583,29 +1583,22 @@ async function practiceFlow() {
   await fitsAtMinimum(a, 'the plugin table with its switches, one on and in no tool');
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
-  // A plugin's parts in a tool without plugins (Pi): its skill and MCP server go in as ordinary items, marked as from it, and Undo takes them out.
-  // Only a plugin with parts on record keeps that route (pluginstatus.ts routeOf): issue-tracker has them in OpenCode, as an earlier
-  // version left them, in a tool this home doesn't manage; any other plugin's items go in as library items (pluginSwitchFlow).
-  writeFileSync(join(practice, '.central-knot/plugin-parts.json'), JSON.stringify({ installs: [{ source: market, marketName: 'ck-test-market', plugin: 'issue-tracker', tool: 'opencode-cli', at: '2026-11-01T00:00:00.000Z', digest: 'earlier',
-    items: [{ kind: 'skill', name: 'triage', hash: 'earlier' }, { kind: 'mcp', name: 'issues', hash: 'earlier' }] }] }));
-  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
-  await a.run('window.centralKnot.refresh()');
+  // Plugin parts an earlier version put into Pi become items linked to their plugin at one look (partsmigrate.ts): issue-tracker's
+  // skill triage and MCP server issues.
+  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  await writeOldParts(practice, market, 'ck-test-market', 'issue-tracker', 'pi-cli', { skills: { triage: {} }, servers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } });
+  const partsRecord = readFileSync(join(practice, '.central-knot/plugin-parts.json'), 'utf8');
   await a.click('#nav-skills');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && existsSync(join(practice, '.central-knot/plugin-parts.json')); tries++) await wait(100);
+  same('after one look the parts record is moved aside, as it was', [existsSync(join(practice, '.central-knot/plugin-parts.json')), readNow(join(practice, '.central-knot/plugin-parts.v1.json'))], [false, partsRecord]);
+  check('Skills shows triage from the plugin, in Pi', /from the plugin issue-tracker/.test(await a.text('.ov-row[data-key="triage"]') ?? '') && await cellState(a, 'triage', 'pi-cli') === 'current', await a.text('.ov-row[data-key="triage"]'));
   await a.click('#nav-plugins');
-  await a.click('#plugin-back');
-  same('Pi is a column; the plugin, off, is in none of the tools', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'absent');
+  if (await a.exists('#plugin-back')) await a.click('#plugin-back');
   await a.click('#popen-0-issue-tracker');
-  for (let tries = 0; tries < 40 && !/Can go in/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
-  check('its page says what goes into Pi', /takes no plugins[\s\S]*Can go in: skill triage · MCP server issues/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
-  // Its switch On: the plugin's parts go into Pi (the other tools' installers are stand-ins that refuse, and say so).
-  const turnIssueTracker = async () => { await a.click('#pswitch-page-0-issue-tracker'); for (let tries = 0; tries < 80 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
-  await turnIssueTracker();
-  const piMcp = join(practice, '.pi/agent/mcp.json');
-  check('the skill and MCP server are in Pi, values as they are', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && existsSync(piMcp) && JSON.parse(readFileSync(piMcp, 'utf8')).mcpServers?.issues?.args?.[1] === '@example/issues-mcp', existsSync(piMcp) ? readFileSync(piMcp, 'utf8') : await a.text('.bands'));
-  same('Pi’s mark shows its parts', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'parts');
-  await a.shot('practice-plugin-parts');
+  for (let tries = 0; tries < 50 && !/Its items/.test(await a.text('.plugin-page') ?? ''); tries++) await wait(100);
+  check('issue-tracker’s page lists its items, recorded by the move', /Its items[\s\S]*skill triage[\s\S]*MCP server issues/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-page'));
   await a.click('#nav-skills');
-  check('the skill says which plugin it came from', /from issue-tracker/.test(await a.text('[data-key="triage"]') ?? ''), await a.text('[data-key="triage"]'));
   // Claude Code has the plugin itself: on Skills its mark says the skill comes through it (never "No copy" or "Can't load
   // it"), and its row in the details opens the plugin's page, where the plugin and its parts are updated together.
   const installRecord = join(practice, '.claude/plugins/installed_plugins.json');
@@ -1613,9 +1606,9 @@ async function practiceFlow() {
   writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '9.9.9', { 'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8'), '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } }) });
   await a.click('#header-refresh');
   for (let tries = 0; tries < 30 && (await a.run(`document.querySelector('#cell-triage-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
-  same('a tool with the plugin itself has the skill through it', await a.run(`[document.querySelector('#cell-triage-claude-cli')?.dataset.state, document.querySelector('#cell-triage-pi-cli')?.dataset.state]`), ['plugin', 'own-copy']);
+  same('a tool with the plugin itself has the skill through it', await a.run(`[document.querySelector('#cell-triage-claude-cli')?.dataset.state, document.querySelector('#cell-triage-pi-cli')?.dataset.state]`), ['plugin', 'current']);
   const throughTitle = await a.run(`document.querySelector('#cell-triage-claude-cli')?.title`);
-  check('its mark says which plugin, and is drawn on', /^Claude Code has this skill through the plugin issue-tracker \(version 9\.9\.9\), so no separate copy is placed there\.$/.test(throughTitle ?? '') && await a.exists('#cell-triage-claude-cli[data-look="on"]'), [throughTitle, await a.text('.legend')]);
+  check('its mark says which plugin, and is drawn on', /^Claude Code has it with the plugin issue-tracker, so no separate copy is placed there\.$/.test(throughTitle ?? '') && await a.exists('#cell-triage-claude-cli[data-look="on"]'), [throughTitle, await a.text('.legend')]);
   await fitsAtMinimum(a, 'a skill a tool has through a plugin');
   await a.shot('skill-through-plugin');
   // Its opened row has the item's switch in Claude Code. Claude Code has none for one skill of a plugin, so it is the whole
@@ -1672,39 +1665,14 @@ async function practiceFlow() {
   rmSync(join(practice, '.codex/plugins'), { recursive: true, force: true });
   if (codexTomlBefore === undefined) rmSync(codexToml, { force: true }); else writeFileSync(codexToml, codexTomlBefore);
   await a.click('#header-refresh');
-  // Its MCP server has a switch of its own in Claude Code: the opened row's switch turns that one server off at once, by the
-  // name Claude Code gives a plugin's server; the row's mark only shows it.
+  // Its MCP server, moved to the library from its part too, is one row from the plugin; Claude Code, which has the plugin, gets
+  // no separate copy and says why (plugins.ts pluginHolds).
   await a.click('#nav-mcp');
-  same('so does its MCP server, on MCP servers, and its mark is no button', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /through the plugin issue-tracker/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? ''), document.querySelector('#cell-issues-claude-cli')?.tagName]`), ['plugin', true, 'SPAN']);
-  if (!(await a.exists('#enable-issues-claude-cli'))) await a.click('#open-issues');
-  same('the opened row has its switch in Claude Code, on', [await a.run(`document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-checked')`), /Click to turn it off in Claude Code\.$/.test(await a.run(`document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-label')`) ?? '')], ['true', true]);
-  await a.click('#enable-issues-claude-cli');
-  for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin-off'; tries++) await wait(100);
-  check('a click turns that one server off at once with Claude Code’s own switch, and the page says so, with Undo', JSON.stringify(JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers) === '[{"serverName":"plugin:issue-tracker:issues"}]'
-    && await cellState(a, 'issues', 'claude-cli') === 'plugin-off' && /issues is off in Claude Code\./.test(await a.text('.bands') ?? '') && await a.exists('#outcome-undo-plugin'), [pluginSettingsNow(), await a.text('.bands')]);
-  await a.click('#nav-skills');
-  same('the plugin’s skill is still on there', await cellState(a, 'triage', 'claude-cli'), 'plugin');
-  await a.click('#nav-mcp');
-  if (!(await a.exists('#enable-issues-claude-cli'))) await a.click('#open-issues');
-  same('the opened row shows it off in Claude Code', await a.run(`[document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-checked'), document.querySelector('#enable-issues-claude-cli')?.closest('.tool-switch')?.textContent]`), ['false', 'Off']);
-  await fitsAtMinimum(a, 'a server a tool has through a plugin, opened');
-  await a.shot('server-through-plugin-off');
-  await a.click('#enable-issues-claude-cli');
-  for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin'; tries++) await wait(100);
-  check('its switch turns it back on: the settings are as they were', (pluginSettingsNow() === pluginSettingsBefore || JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers === undefined) && await cellState(a, 'issues', 'claude-cli') === 'plugin', pluginSettingsNow());
-  await a.click('#outcome-undo-plugin');
-  for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin-off'; tries++) await wait(100);
-  same('Undo turns it off again', [await cellState(a, 'issues', 'claude-cli'), JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers?.length], ['plugin-off', 1]);
-  await a.settle();
+  same('issues is one row on MCP servers, from the plugin, and Claude Code has it with the plugin', [/from the plugin issue-tracker/.test(await a.text('.ov-row[data-key="issues"]') ?? ''), await cellState(a, 'issues', 'claude-cli'),
+    /has it with the plugin issue-tracker, so no separate copy is placed there\.$/.test(await a.run(`document.querySelector('#cell-issues-claude-cli')?.title`) ?? '')], [true, 'cannot', true]);
   if (pluginSettingsBefore === undefined) rmSync(pluginSettings, { force: true }); else writeFileSync(pluginSettings, pluginSettingsBefore);
-  await a.click('#header-refresh');
-  for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
-  if (!(await a.exists('#enable-issues-claude-cli-page'))) await a.click('#open-issues');
-  await a.click('#enable-issues-claude-cli-page');
-  for (let tries = 0; tries < 30 && !(await a.exists('#plugin-back')); tries++) await wait(100);
-  check('and its opened row leads to the plugin’s page', await a.exists('#plugin-back') && /issue[- ]tracker/i.test(await a.text('.plugin-page h2') ?? ''), await a.text('.plugin-page h2'));
-  // Taken in above, triage is no plugin part in Pi any more (parts.ts leaves a managed one to its page): Delete from Central
-  // Knot takes Pi's copy out again, and leaves the plugin's own skill in Claude Code.
+  // triage, moved to the library from its part above: Delete from Central Knot takes Pi's copy out, and leaves the plugin's own
+  // skill in Claude Code.
   await a.click('#nav-skills');
   if (await a.run(`document.querySelector('#open-triage')?.getAttribute('aria-expanded')`) !== 'true') await a.click('#open-triage');
   await a.click('#delete-triage');
@@ -1713,58 +1681,9 @@ async function practiceFlow() {
   if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
   rmSync(join(practice, '.claude/plugins/cache/ck-test-market/issue-tracker/9.9.9'), { recursive: true, force: true });
   await a.click('#header-refresh');
-  await a.click('#nav-plugins');
-  await a.click('#plugins-undo');
-  check('Undo takes the parts out of Pi', !readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
-  // A part left out because its name was taken goes in with Update parts once the name is free.
-  mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
-  writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: Mine.\n---\nMine.\n');
-  await a.click('#header-refresh');
-  for (let tries = 0; tries < 40 && !/Can’t go in: skill triage/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
-  await turnIssueTracker();
-  check('a taken name leaves that part out', readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.') && readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
-  rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
-  await a.click('#header-refresh');
-  for (let tries = 0; tries < 40 && !/Can go in now/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
-  check('once the name is free, the page offers it with Update parts', /Can go in now: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Update parts in Pi/.test(await a.text('#pparts-issue-tracker') ?? ''), await a.text('.plugin-parts-section'));
-  await a.click('#pparts-issue-tracker');
-  check('Update parts adds it at once', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.'), await a.text('.bands'));
-  same('its Undo says it puts those parts back, and does: the skill goes again', [await a.run(`document.querySelector('#plugins-undo')?.title`), await (async () => { await a.click('#plugins-undo'); return existsSync(join(practice, '.pi/agent/skills/triage')); })()],
-    ['Reverses what changed, through each tool’s own command or switch: puts the parts back as they were in Pi.', false]);
-  await turnIssueTracker();
-  check('Off takes its parts out of Pi', !existsSync(join(practice, '.pi/agent/skills/triage')) && !readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
-  // Single parts: On over a link in triage's place that leads nowhere puts the skill in its place; then a switch under Pi takes
-  // one part out alone.
-  rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
-  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
-  symlinkSync(join(practice, 'gone/triage'), join(practice, '.pi/agent/skills/triage'));
-  await a.click('#header-refresh');
-  for (let tries = 0; tries < 40 && !/would replace a broken link/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
-  check('a broken link in a part’s place is said, not a reason to leave the part out', /The skill triage: it would replace a broken link there, which led to .*gone\/triage/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
-  const partSwitch = part => `#ppart-0-issue-tracker-${part}-pi-cli`;
-  const standOf = part => a.run(`(() => { const s = document.querySelector('${partSwitch(part)}'); return s ? s.closest('.skill-switch').dataset.state + ' ' + s.getAttribute('aria-checked') : 'missing'; })()`);
-  same('Off, no part has a switch under Pi: picks are offered only where the switch wants the plugin', [await standOf('skill-triage'), await standOf('mcp-issues')], ['missing', 'missing']);
-  await turnIssueTracker();
-  check('On puts its parts in, the skill in place of the broken link', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !lstatSync(join(practice, '.pi/agent/skills/triage')).isSymbolicLink() && readFileSync(piMcp, 'utf8').includes('issues'), await a.text('.bands'));
-  const logged = readFileSync(join(scratch, 'data', 'central-knot.log'), 'utf8');
-  check('the log file says what that switch came to: the plugin, the step, the tool, and the broken link replaced',
-    /plugins:turn issue-tracker@[\w-]+ install-parts in pi-cli: installed: .*A broken link named “triage” in Pi’s skills folder was replaced/.test(logged), logged.split('\n').filter(line => line.includes('plugins:turn')).slice(-3).join('\n'));
-  for (let tries = 0; tries < 40 && await standOf('mcp-issues') === 'missing'; tries++) await wait(100);
-  same('each part has a switch under Pi, on', [await standOf('skill-triage'), await standOf('mcp-issues')], ['in true', 'in true']);
-  await a.click(partSwitch('mcp-issues'));
-  check('a part’s switch takes only that part out, at once', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(piMcp, 'utf8').includes('issues') && /MCP server issues taken out of Pi/i.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
-  for (let tries = 0; tries < 40 && !/Left out by you/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
-  check('the part left out is said, with its switch off', /Installed[^:]*: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Left out by you: MCP server issues/.test(await a.text('.plugin-parts-section') ?? '') && await standOf('mcp-issues') === 'out false' && await standOf('skill-triage') === 'in true', await a.text('.plugin-parts-section'));
-  const triageText = readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8');
-  await a.click(partSwitch('skill-triage'));
-  check('turning its switch off takes it out again', !existsSync(join(practice, '.pi/agent/skills/triage')), await a.text('.bands'));
-  await a.click('#plugins-undo');
-  same('Undo puts that one part back as it was', [existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8'), readFileSync(piMcp, 'utf8').includes('issues')], [triageText, false]);
-  await a.click(partSwitch('skill-triage'));
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
-  // The parts record given above goes too: a marketplace whose plugin has parts on record stays listed until they are removed.
-  rmSync(join(practice, '.central-knot/plugin-parts.json'), { force: true });
-  await a.run('window.centralKnot.refresh()');
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-issue-tracker');
   // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
   // document-tools:pdf-reader in config.toml. Codex has it installed as its record says.
   const codexConfig = join(practice, '.codex/config.toml');
@@ -1791,6 +1710,23 @@ async function practiceFlow() {
   same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
   same('nothing on the plugin pages waited for a later click: no Apply, no Discard, no chosen switch', await a.run('window.ckWaiting'), []);
   writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));
+  // document-tools' parts from an earlier version, moved at one look too: pdf-reader, edited in Pi since (Pi's skills folder known
+  // first, as an earlier version's pass noted it), is his own now, said once; spreadsheet, left out of Pi, stays out of it.
+  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  await a.click('#header-refresh');
+  await writeOldParts(practice, market, 'ck-test-market', 'document-tools', 'pi-cli', { skills: { 'pdf-reader': { edited: '\nMy own way of reading PDFs.\n' }, spreadsheet: { removed: true } } });
+  await a.click('#nav-skills');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !/is your own now/.test(await a.text('.bands') ?? ''); tries++) await wait(100);
+  check('pdf-reader, edited in Pi before the move, is his own now, said once', /pdf-reader is your own now/.test(await a.text('.bands') ?? '') && !/from the plugin/.test(await a.text('.ov-row[data-key="pdf-reader"]') ?? ''), [await a.text('.bands'), await a.text('.ov-row[data-key="pdf-reader"]')]);
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-document-tools');
+  for (let tries = 0; tries < 50 && !/Its items/.test(await a.text('.plugin-page') ?? ''); tries++) await wait(100);
+  const migrated = await a.text('.plugin-items-section') ?? '';
+  check('the migrated plugin’s page lists Its items: pdf-reader his own, spreadsheet kept out of Pi', /skill pdf-reader\s*Not brought in: you have your own/.test(migrated) && /skill spreadsheet/.test(migrated), migrated);
+  await fitsAtMinimum(a, 'a migrated plugin’s page, with Its items');
+  await a.shot('practice-plugin-migrated');
+  rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.click('#plugin-back');
   // About has every fact about the marketplace, and Remove.
   await a.click('#market-tab-about');

@@ -6,21 +6,22 @@
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
 // Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
-// plugin-versions, parts, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
+// plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
 // tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo,
 // remove-build (one install at a time: the held screen while another build of Central Knot is on this Mac, as made-up
 // bundles), sources (a Git link read on a click, made-up repositories standing in for GitHub), source-agents (agents from a
 // link, beside a skill), source-servers (MCP servers from a link, and Claude Code's wait for Write to Claude Code), plugin-library
-// (a plugin's items in Pi as library items) and sort (the item pages sorted by last updated).
+// (a plugin's items in Pi as library items), parts-migration (a plugin's parts an earlier version put into Pi, moved to the
+// library at one look) and sort (the item pages sorted by last updated).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
+import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
@@ -1130,101 +1131,6 @@ if (wanted('plugin-versions')) {
   }
   await a.click('#plugin-back');
   await size(1280, 800); await a.theme('dark');
-}
-
-// ---------- A plugin's parts in tools without plugins ----------
-if (wanted('parts')) {
-  await fresh();
-  begin('parts');
-  // Pi is in the home (it takes no plugins), and no tool's CLI is on this tour's PATH, so Codex and Copilot CLI can't
-  // take plugins here either: each can take a plugin's parts instead.
-  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
-  await a.run('window.centralKnot.refresh()');
-  const market = join(scratch, 'parts-market');
-  writeMarket(market);
-  await a.click('#nav-skills'); await a.click('#nav-plugins');
-  if (!(await a.has('#popen-0-issue-tracker'))) await addMarketplace(a, market);
-  if (await a.has('#plugin-back')) await a.click('#plugin-back');
-  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
-  await shot(a, 'list-offers', 'Plugins, team-tools: Pi takes no plugins, and no tool’s command-line tool is on this computer, so a plugin’s switch puts its parts into each tool instead.');
-  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
-  await shot(a, 'page-offer', 'Opened issue-tracker: "Its parts" says which tools take them and what goes in.');
-  const settled = async () => { await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); };
-  const turn = async () => { await a.click('#pswitch-page-0-issue-tracker'); await settled(); };
-  await turn();
-  await shot(a, 'page-on', 'Turned issue-tracker on with its switch: its skill and MCP server went into each tool as ordinary items, at once.');
-  // Single parts: under "What it holds", a switch per part for each tool holding the plugin's parts.
-  const atParts = async (name, caption) => { await a.run(`document.querySelector('.plugin-switched')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, name, caption); };
-  await waitFor(a, `!!document.querySelector('#ppart-0-issue-tracker-skill-triage-pi-cli')`);
-  await atParts('pick-switches', 'Scrolled to "What it holds": each skill and MCP server has a switch under each tool holding the plugin’s parts.');
-  const codexToo = await a.has('#ppart-0-issue-tracker-mcp-issues-codex-cli');
-  await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli'); await settled(); if (codexToo) { await a.click('#ppart-0-issue-tracker-mcp-issues-codex-cli'); await settled(); }
-  await atParts('pick-done', `Clicked triage’s switch under Pi${codexToo ? ', then the issues server’s under Codex: each came out at once' : ': it came out at once'}.`);
-  await a.theme('light'); await atParts('pick-done-light', 'The same, in the light appearance.'); await a.theme('dark');
-  await size(860, 560); await atParts('pick-done-860', 'The same at 860×560.');
-  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, 'pick-done-860-top', 'The top of the page at 860×560: the last click’s result with its Undo, and each tool’s line.');
-  await size(1728, 1117); await atParts('pick-done-1728', 'The same at 1728×1117.');
-  await size(1280, 800);
-  await shot(a, 'pick-applied', `Pi no longer has the triage skill${codexToo ? ', nor Codex the issues server' : ''}; each tool’s row says what was left out.`);
-  await a.click('#plugins-undo'); await settled(); if (codexToo) { await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli'); await settled(); }
-  // What is in a part's place when it can't go in: a file there is named, with what to do; a link that leads nowhere is replaced.
-  await turn();
-  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
-  writeFileSync(join(practice, '.pi/agent/skills/triage'), 'not a folder');
-  await a.click('#header-refresh'); await waitFor(a, `/Can’t go in: skill triage/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`, 30000);
-  await a.run(`document.querySelector('.plugin-parts-section')?.scrollIntoView({ block: 'start' })`); await wait(150);
-  await shot(a, 'place-file-parts', 'Turned it off, and put a file named triage in Pi’s skills folder where the skill’s folder would go: Pi’s row in "Its parts" says it can’t go in.');
-  rmSync(join(practice, '.pi/agent/skills/triage'), { force: true });
-  symlinkSync(join(practice, 'gone/triage'), join(practice, '.pi/agent/skills/triage'));
-  await a.click('#header-refresh'); await waitFor(a, `/would replace a broken link/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`, 30000);
-  await shot(a, 'broken-link', 'Replaced the file with a link that leads nowhere (what an uninstalled skills manager leaves behind): the skill can go in, and Pi’s row says it replaces the broken link.');
-  await turn();
-  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
-  await shot(a, 'broken-link-replaced', 'Turned it on: the skill went in, in place of the broken link, and the result says so.');
-  await a.click('#plugins-undo'); await settled();
-  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
-  // Pi has a skill of its own named triage, so the plugin's triage is left out of Pi at first.
-  mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
-  writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: My own triage.\n---\nMine.\n');
-  await a.click('#header-refresh'); await waitFor(a, `/Can’t go in: skill triage/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
-  await turn();
-  await shot(a, 'page-installed', 'Turned it on: the skill and MCP server went into each tool as ordinary items; Pi got the MCP server, its own triage skill kept the name.');
-  rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
-  await a.click('#header-refresh'); await waitFor(a, `/Can go in now/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
-  await shot(a, 'page-can-go-in-now', 'Removed Pi’s own triage skill and clicked Refresh: the plugin’s triage can go in now, with Update parts.');
-  await a.click('#pparts-issue-tracker'); await settled();
-  await a.click('#plugin-back');
-  await a.click('#popen-0-release-helper'); await waitFor(a, `/(Can go in|Nothing in it)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
-  await shot(a, 'page-left-behind', 'Opened release-helper (a command, an agent and hooks): what goes in where, and what stays with the plugin.');
-  await a.click('#plugin-back'); await shot(a, 'list-installed', 'Back to the list: Pi and Codex show the parts mark.');
-  await a.click('#nav-skills'); if (await a.has('#open-triage')) await a.click('#open-triage');
-  await shot(a, 'skills-provenance', 'Skills page, triage opened: it says which plugin it came from, with a way to its page.');
-  await a.click('#nav-mcp'); if (await a.has('#open-issues')) await a.click('#open-issues');
-  await shot(a, 'mcp-provenance', 'MCP page, issues opened: the server in Pi’s and Codex’s own formats, from issue-tracker.');
-  // The marketplace publishes a new version: the triage skill changed.
-  edit(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), text => text.replace('Follow the steps.', 'Follow the steps, then label it.'));
-  edit(join(market, '.claude-plugin/marketplace.json'), text => text.replace('"version": "2.0.0"', '"version": "2.1.0"'));
-  await a.click('#nav-plugins'); if (await a.has('#plugin-back')) await a.click('#plugin-back');
-  await a.click('#header-refresh'); await waitFor(a, `document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state === 'parts-changed'`, 60000);
-  await shot(a, 'list-out-of-date', 'The marketplace published 2.1.0 and Refresh read it again: the parts show as out of date.');
-  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
-  await shot(a, 'page-out-of-date', 'issue-tracker’s page: "Parts out of date" with Update parts.');
-  await a.click('#pparts-issue-tracker'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
-  await shot(a, 'page-updated', `Clicked Update parts: the parts were brought up to date at once. Undo’s tooltip: “${await a.run(`document.querySelector('#plugins-undo')?.title ?? 'no Undo'`)}”`);
-  await size(860, 560); await shot(a, 'page-updated-860', 'The same at 860×560.'); await size(1280, 800);
-  await a.click('#pkeep-0-issue-tracker-pi-cli'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
-  await shot(a, 'page-removed', 'Clicked Keep out on Pi’s line: Pi’s parts were taken out together, at once, and Pi stays out.');
-  if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'page-undone', 'Clicked Undo: Pi’s parts are back, and Pi is let in again.'); }
-  await a.theme('light'); await shot(a, 'page-light', 'The same page in the light appearance.');
-  await a.click('#plugin-back'); await shot(a, 'list-light', 'The list in the light appearance.'); await a.theme('dark');
-  for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
-    await size(width, height);
-    await shot(a, `list-${width}`, `The list at ${width}×${height}.`);
-    await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
-    await shot(a, `page-${width}`, `issue-tracker’s page at ${width}×${height}.`);
-    await a.click('#plugin-back');
-  }
-  await size(1280, 800);
 }
 
 // ---------- What plugins installed whole bring, on Skills, MCP servers and Agents ----------
@@ -2695,6 +2601,29 @@ if (wanted('plugin-library')) {
   await atEverySize('own-and-deleted', 'document-tools’ page: Its items lists skill charts (plain: on in Pi), skill pdf-reader “Not brought in: you have your own”, and skill spreadsheet, deleted from Central Knot, “Not brought in: you deleted it; History’s Restore, or the plugin’s next On, brings it back”', true, '.plugin-items-section');
   await a.click('#nav-mcp'); await openRow('issues');
   await atEverySize('item-row', 'On MCP servers, issues is on in Pi with “from the plugin issue-tracker” after its name; opened, Claude Code’s, Copilot CLI’s and Codex’s lines say it comes only with the plugin, which isn’t installed there, and the line at the end says it is from the plugin issue-tracker, follows it in the tools that take no plugins, and that a change made here makes it yours, with a link to Plugins', true, '.ov-row[data-key="issues"]', 'start');
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
+// ---------- A plugin's parts from an earlier version, moved to the library at one look (partsmigrate.ts) ----------
+if (wanted('parts-migration')) {
+  await fresh();
+  begin('parts-migration');
+  // Pi's skills folder seen once (as an earlier version's pass noted it), then parts.ts's record as alpha 1 left it: document-tools'
+  // pdf-reader in Pi, edited there since; spreadsheet left out of Pi; issue-tracker's triage and issues in Pi.
+  const market = join(scratch, 'migration-market');
+  writeMarket(market);
+  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  await refresh();
+  await writeOldParts(practice, market, 'team-tools', 'document-tools', 'pi-cli', { skills: { 'pdf-reader': { edited: '\nMy own way of reading PDFs.\n' }, spreadsheet: { removed: true } } });
+  await writeOldParts(practice, market, 'team-tools', 'issue-tracker', 'pi-cli', { skills: { triage: {} }, servers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } });
+  await a.click('#nav-plugins');
+  await addMarketplace(a, market);
+  await refresh();
+  await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`, 20000);
+  await a.click('#popen-0-document-tools'); await waitFor(a, `/Its items/.test(document.querySelector('.plugin-page')?.textContent ?? '')`, 15000);
+  await atEverySize('migrated-page', 'One look after the upgrade: document-tools’ parts are its items. Its items lists skill pdf-reader, edited in Pi, “Not brought in: you have your own”, and skill spreadsheet, left out of Pi, kept out there; Pi’s line counts its items on', true, '.plugin-items-section', 'start');
+  await a.click('#nav-skills'); await openRow('triage');
+  await atEverySize('migrated-row', 'On Skills, triage, a part in Pi before, is an item “from the plugin issue-tracker”, on in Pi, opened: its tools’ lines and the line saying it follows the plugin', true, '.ov-row[data-key="triage"]', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 

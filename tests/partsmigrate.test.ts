@@ -194,16 +194,20 @@ test('Left out by him, or deleted by hand: kept out there and applied nowhere; t
   } finally { await box.cleanup(); }
 });
 
-test('Left out on a first pick, never written or kept: its content from the plugin’s files now; with those unreadable, no item (the known miss)', async () => {
+test('Left out on a first pick, never written or kept: its content from the plugin’s files now; with those unreadable, no item (the known miss), and a deleted one stays deleted', async () => {
   for (const readable of [true, false]) {
     const box = await partsHome();
     try {
       const plugin = join(box.base, 'market/plugins/kit');
       await put(join(plugin, 'skills/two/SKILL.md'), skill('two'));
-      await box.record([{ tool: 'pi-cli', item: part('two', 'never-kept', { removed: true, seen: undefined }) }]);
+      await box.copy('pi-cli', 'old');
+      await applySkills(box.context, box.managed, [{ key: 'old', on: true, except: [] }]);
+      await applySkills(box.context, box.managed, [{ key: 'old', on: true, except: [], deleted: true }]);
+      await box.record([{ tool: 'pi-cli', item: part('two', 'never-kept', { removed: true, seen: undefined }) }, { tool: 'pi-cli', item: part('old', 'never-kept', { removed: true, seen: undefined }) }]);
       await box.migrate(readable ? plugin : undefined);
-      const two = (await box.library()).two;
+      const { two, old } = await box.library();
       assert.deepEqual(two && [two.source, two.except, two.applied], readable ? ['kit-id', ['pi-cli', 'opencode-cli'], {}] : undefined);
+      if (!readable) assert.ok(old.deleted, 'a deleted item of a name with no content anywhere stays deleted');
     } finally { await box.cleanup(); }
   }
 });

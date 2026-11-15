@@ -1,7 +1,9 @@
 // A realistic marketplace folder for the e2e run and the UI tour: a README, plugins with skills, commands, agents, hooks
 // and an MCP server, a root-level entry that lists its own skills ("strict": false), and one whose files live on GitHub.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fromJson, serverHash } from '../src/mcp.ts';
+import { importRevision, itemKey, readTree } from '../src/share.ts';
 
 const file = (root, path, text) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), text); };
 const skill = (root, path, name, description) => file(root, `${path}/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\nFollow the steps.\n`);
@@ -78,4 +80,31 @@ export function writeClaudeInstall(home, marketName, plugin, version, files) {
   const record = join(home, '.claude/plugins/installed_plugins.json');
   const plugins = existsSync(record) ? JSON.parse(readFileSync(record, 'utf8')).plugins : {};
   file(home, '.claude/plugins/installed_plugins.json', JSON.stringify({ version: 2, plugins: { ...plugins, [`${plugin}@${marketName}`]: [{ scope: 'user', installPath, version }] } }, null, 2));
+}
+
+/**
+ * A plugin's skills and MCP servers as parts an earlier version put into one tool (`tool`: Pi or OpenCode), as its parts.ts left
+ * them in `home`: each written in with its content kept in the store, and recorded in plugin-parts.json. A skill's `edited`: text
+ * added to its copy by hand since; `removed`: left out there (no copy, nothing kept). `servers`: each entry as the plugin's
+ * .mcp.json has it, written into Pi's mcp.json. partsmigrate.ts moves them to the library at the next look.
+ */
+export async function writeOldParts(home, market, marketName, plugin, tool, { skills = {}, servers = {} }) {
+  const root = join(home, { 'pi-cli': '.pi/agent', 'opencode-cli': '.config/opencode' }[tool]), record = join(home, '.central-knot/plugin-parts.json');
+  const items = [];
+  for (const [name, { edited, removed }] of Object.entries(skills)) {
+    const folder = join(market, 'plugins', plugin, 'skills', name), tree = await readTree(folder);
+    if (removed) { items.push({ kind: 'skill', name, hash: tree.hash, removed: true }); continue; }
+    await importRevision({ home }, itemKey(name), folder, tree);
+    cpSync(folder, join(root, 'skills', name), { recursive: true });
+    if (edited) appendFileSync(join(root, 'skills', name, 'SKILL.md'), edited);
+    items.push({ kind: 'skill', name, hash: tree.hash, seen: tree.hash });
+  }
+  for (const [name, raw] of Object.entries(servers)) {
+    const { server } = fromJson(name, tool, '', raw), hash = serverHash(server), settings = join(root, 'mcp.json');
+    file(home, `.central-knot/items/plugin-parts/mcp/${hash}.json`, JSON.stringify(server, null, 2));
+    file(root, 'mcp.json', JSON.stringify({ mcpServers: { ...(existsSync(settings) ? JSON.parse(readFileSync(settings, 'utf8')).mcpServers : {}), [name]: raw } }, null, 2));
+    items.push({ kind: 'mcp', name, hash, seen: 'written' });
+  }
+  const installs = existsSync(record) ? JSON.parse(readFileSync(record, 'utf8')).installs : [];
+  file(home, '.central-knot/plugin-parts.json', JSON.stringify({ installs: [...installs, { source: market, marketName, plugin, version: '1.0.0', tool, at: new Date().toISOString(), digest: 'earlier', items }] }, null, 2));
 }
