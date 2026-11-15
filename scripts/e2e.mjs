@@ -3991,8 +3991,10 @@ esac
   for (let tries = 0; tries < 50 && !/is your own now/.test(await a.text('.bands') ?? ''); tries++) await wait(100);
   check('changed in Pi, triage is his own now, said once', /triage is your own now: you changed it here, so it no longer follows the plugin issue-tracker/.test(await a.text('.bands') ?? '') && !/from the plugin/.test(await a.text('.ov-row[data-key="triage"]') ?? ''), await a.text('.bands'));
   writeFileSync(join(market, 'plugins/issue-tracker/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp', '--v2'] } } }));
+  // Plugins opens again on the page last shown there, issue-tracker's; Refresh reads the marketplace's change.
   await a.click('#nav-plugins');
-  await a.click('#popen-0-issue-tracker');
+  if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-issue-tracker');
+  await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && !(await a.exists('#pupdate-0-issue-tracker')); tries++) await wait(100);
   check('its page says an update is ready for issues, and that triage is his own', /MCP server issues\s*An update is ready/.test(await a.text('.plugin-items-section') ?? '') && /skill triage\s*Not brought in: you have your own/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-items-section'));
   await pictures('plugin-items-page');
