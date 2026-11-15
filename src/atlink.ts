@@ -103,14 +103,15 @@ const usableName = (name: string) => !!name && name.length <= 200 && !/[/\\:\0]/
 /**
  * One skill's folder at a link: its name (its SKILL.md's, else its folder's, `folderName`), its files and its content, or why it
  * is unreadable. Its files are listed whatever else, so a later kind never reads one of them as its own (heldEarlier).
+ * `byFolder`: named by its folder alone, as every tool's copy is (a plugin's skill: pluginlibrary.ts), its SKILL.md still read.
  */
-async function skillAt(root: string, folder: string, folderName: string): Promise<ItemThere<SkillContent>> {
+export async function skillAt(root: string, folder: string, folderName: string, byFolder = false): Promise<ItemThere<SkillContent>> {
   const directory = join(root, folder), file = join(directory, 'SKILL.md'), tree = await readTree(directory), files = [...tree.files.keys()].sort();
   const unreadable = (why: string, name?: string, leftOut = false): ItemThere<SkillContent> =>
     ({ folder, folderName, key: itemKey(name ?? folderName), ...(name ? { name } : {}), files, unreadable: why, ...(leftOut ? { leftOut } : {}) });
   if (!(await lstat(file).then(info => info.isFile(), () => false))) return unreadable('its SKILL.md is not a plain file');
   let name: string;
-  try { name = parseSkill(await readFile(file, 'utf8'), folderName).name.trim(); }
+  try { name = parseSkill(await readFile(file, 'utf8'), folderName).name.trim(); if (byFolder) name = folderName; }
   catch (error) { return unreadable(`its SKILL.md can’t be read as a skill (${error instanceof Error ? error.message.replace(/\.$/, '') : 'its frontmatter'})`); }
   if (!usableName(name)) return unreadable(`its name “${name}” can’t be a folder’s name`, name, true);
   if (tree.held) return unreadable(`it can’t be copied as it is: ${tree.held.split('. ')[0].replace(/^It /, 'it ')}`, name, true);
@@ -157,14 +158,18 @@ const baseName = (file: string) => file.replace(/(\.agent\.md|\.md|\.toml)$/, ''
 const parentOf = (path: string) => path.slice(0, Math.max(path.lastIndexOf('/'), 0));
 
 /** One file at a link read as an agent: its form's tool, and its agent and text, or why it is unreadable. */
-type AgentFile = { path: string; tool: AgentTool; name: string } & ({ agent: SharedAgent; text: string } | { unreadable: string });
+export type AgentFile = { path: string; tool: AgentTool; name: string } & ({ agent: SharedAgent; text: string } | { unreadable: string });
 
 /** One file at a link (`path`, from the repository's root), read as an agent: none when it is no agent (a document; loose, a page that doesn't name both fields). */
 async function agentFileAt(root: string, path: string, loose: boolean): Promise<AgentFile | undefined> {
-  const tool = formOf(path), name = baseName(basename(path)), file = { path, tool, name };
+  const file = { path, tool: formOf(path), name: baseName(basename(path)) };
   if (!(await lstat(join(root, path)).then(info => info.isFile(), () => false))) return loose ? undefined : { ...file, unreadable: `${path} is not a plain file` };
   const text = await readFile(join(root, path), 'utf8').catch(() => undefined);
-  if (text === undefined) return { ...file, unreadable: `${path} can’t be read` };
+  return text === undefined ? { ...file, unreadable: `${path} can’t be read` } : agentInText(file, text, loose);
+}
+/** An agent file's text read as an agent (agentFileAt's parse; a plugin's agent file: pluginlibrary.ts), none when it is no agent. */
+export function agentInText(file: Pick<AgentFile, 'path' | 'tool' | 'name'>, text: string, loose: boolean): AgentFile | undefined {
+  const { path, tool, name } = file;
   if (tool !== 'codex-cli') {
     const front = frontMatter(text);
     if (front === 'none') return undefined;
@@ -237,8 +242,11 @@ export async function serversAt(root: string, folder: string, rootName: string, 
   return Promise.all(Object.entries(servers).map(([name, raw]) => serverAt({ ...where, key: itemKey(name), name }, raw, keys.filter(key => key === itemKey(name)).length > 1, join(root, folder))));
 }
 
-/** One entry of a .mcp.json at a link (serversAt's header): its server and Claude Code's own part, or why it is unreadable or left out. */
-async function serverAt(where: { folder: string; folderName: string; files: string[]; key: string; name: string }, raw: unknown, twin: boolean, at: string): Promise<ItemThere<NeutralServer>> {
+/**
+ * One entry of a .mcp.json at a link (serversAt's header), or of a plugin's servers (pluginlibrary.ts), `at` the folder it runs
+ * from: its server and Claude Code's own part, or why it is unreadable or left out.
+ */
+export async function serverAt(where: { folder: string; folderName: string; files: string[]; key: string; name: string }, raw: unknown, twin: boolean, at: string): Promise<ItemThere<NeutralServer>> {
   const unreadable = (why: string, leftOut = false): ItemThere<NeutralServer> => ({ ...where, unreadable: why, ...(leftOut ? { leftOut } : {}) });
   const clause = (sentence: string) => sentence.replace(/\.$/, '').replace(/^It /, 'it ');
   const fields = record(raw);

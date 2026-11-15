@@ -27,6 +27,7 @@ function setup(options: { on?: boolean; every?: number } = {}) {
         return { reports: tools.map(tool => report(plugin, tool)) };
       },
       parts: async (_source, _market, plugin, tool, mode) => { box.calls.push(`parts ${mode} ${plugin} ${tool}`); return { reports: [{ ...report(plugin, tool), outcome: 'installed', partsUpdated: true, partsRun: 'r1', message: 'Parts updated.' }] }; },
+      items: async (_source, _market, plugin, tools) => { box.calls.push(`items ${plugin} ${tools.join(',')}`); return { reports: tools.map(tool => report(plugin, tool)) }; },
     },
     load: async () => box.saved, save: async records => { box.saved = structuredClone(records); },
     changed: (view, news) => box.said.push({ view: structuredClone(view), news }),

@@ -763,7 +763,7 @@ test('The check once a day drops a skill with the window closed: its row says th
     assert.deepEqual(fromSourceWords({ link, removed: true }), {
       tag: { text: 'removed at its source', title: 'github.com/team/notes no longer has it: it is Off, and no longer from that source. Turn it on to use it again.' },
       before: 'github.com/team/notes no longer has it: it is Off, and no longer from that source. Turn it on to use it again. Should github.com/team/notes have it again, it follows the source if unchanged here, and stays as you have it if you changed it. See ',
-      after: '.' });
+      after: '.', page: 'sources' });
     // A hundred days on, History holds nothing of it; nothing else was kept about it, and a fresh look says the same.
     await pruneHistory({ ...box.context, now: () => Date.now() + 100 * DAY_MS });
     assert.deepEqual((await readHistory(box.context)).filter(event => event.cause === 'source-dropped'), []);

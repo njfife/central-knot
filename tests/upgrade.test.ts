@@ -343,7 +343,7 @@ describe('Upgrading alpha-1 with plugins in its tools', () => {
     await markets.view();
     let clock = 1_000_000;
     const updates = autoUpdates({ home: () => box.home, on: () => true, paused: () => false, pending: home => markets.pendingUpdates(home), log: () => {}, now: () => clock, every: 60_000,
-      api: { install: markets.install, update: markets.update, parts: markets.parts }, noteJoined: markets.noteJoined, load: async () => undefined, save: async () => {}, changed: () => {} });
+      api: { install: markets.install, update: markets.update, parts: markets.parts, items: markets.items }, noteJoined: markets.noteJoined, load: async () => undefined, save: async () => {}, changed: () => {} });
     await updates.check();
     clock += 120_000;
     await updates.check();

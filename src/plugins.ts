@@ -14,6 +14,7 @@ import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
 import { partOff, serverHeld, withPartSwitch } from './partswitch.ts';
 import { DIRECTORY, INLINE_SKILLS_CONFIG, hasPartSwitch, heldReason, noCli, offByBareName, noSwitchReason, samePart } from './pluginstatus.ts';
 import { takesPlugins, type PluginTool } from './presence.ts';
+import { readPluginRecord } from './pluginrecord.ts';
 import { errorCode, itemKey, readParts, writeFileChecked } from './share.ts';
 import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 
@@ -685,6 +686,38 @@ export async function throughPlugins(home: { home: string; overrides?: Partial<R
     if (byKey.size) found.set(tool, byKey);
   }
   return found;
+}
+
+/** An item a plugin's switch holds in a tool with the plugin's own installer, as Disk.held answers (library.ts THE RULE's held notes). */
+export type PluginHold = { why: string; anotherWay?: true };
+/**
+ * The one answer for an item linked to a plugin (library.ts A PLUGIN) in Claude Code, Copilot CLI or Codex, which take the plugin
+ * itself: the tool has the item another way where it has the plugin installed (on or turned off there); else it can't be given
+ * it, with why: its record of its plugins can't be read now, the plugin is off or kept out of it, or it isn't installed there.
+ * Each kind asks it before its own reasons (skills.ts, agents.ts and servers.ts readDisk), the can't-take answer through
+ * Disk.refuses too, so a copy of that name the tool has stays as it is. Read once per pass or view; undefined for an item
+ * linked to no recorded plugin, and in Pi and OpenCode, where a plugin's item is the library's like any other. For a part on
+ * record (parts.ts) throughPlugins' `asParts` still answers, until those plugins move to the library.
+ */
+export async function pluginHolds(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[]): Promise<(item: { source?: string }, tool: HarnessId) => PluginHold | undefined> {
+  const entries = (await readPluginRecord(home.home)).record?.plugins ?? [];
+  if (!entries.length) return () => undefined;
+  const context: PluginContext = { home: home.home, dataDir: '', binaries: {}, overrides: home.overrides, reads: home.reads ?? new Map() };
+  const now = new Map<HarnessId, { readable: boolean; has: ToolPlugin[] }>();
+  for (const tool of tools.filter(takesPlugins)) {
+    const readable = await recordReadable(context, tool);
+    now.set(tool, { readable, has: readable ? (await installedOnce(context, tool).catch(() => undefined)) ?? [] : [] });
+  }
+  return (item, tool) => {
+    const entry = item.source ? entries.find(each => each.id === item.source) : undefined, there = now.get(tool);
+    if (!entry || !there) return undefined;
+    const name = toolNames[tool], plugin = entry.plugin;
+    if (!there.readable) return { why: `${name}’s record of its plugins can’t be read now, so nothing of the plugin ${plugin} is written there.` };
+    const installed = there.has.find(found => found.plugin === plugin && found.marketplace === entry.marketName && found.state.state !== 'not-installed');
+    if (installed) return { why: `${name} has it with the plugin ${plugin}${installed.off ? ', turned off there' : ''}, so no separate copy is placed there.`, anotherWay: true };
+    const why = !entry.on ? `the plugin is off` : entry.except.includes(tool) ? `the plugin is kept out of ${name}` : `it isn’t installed there (its line on the plugin’s page says why)`;
+    return { why: `${name} gets it only with the plugin ${plugin}, and ${why}.` };
+  };
 }
 
 /**

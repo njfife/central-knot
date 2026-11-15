@@ -64,8 +64,8 @@ export interface AutoUpdateHost {
   paused(): boolean;
   /** What is due now: reads every marketplace again; `stopped` when nothing may be changed in this home. */
   pending(home: string): Promise<Pending>;
-  /** The calls an update makes, as the Plugins page makes them (an update without the reinstall route: see plugins.update), and the install a tool new here is owed. */
-  api: Required<Pick<PlanApi, 'update' | 'parts' | 'install'>>;
+  /** The calls an update makes, as the Plugins page makes them (an update without the reinstall route: see plugins.update; a plugin's items read again), and the install a tool new here is owed. */
+  api: Required<Pick<PlanApi, 'update' | 'parts' | 'install' | 'items'>>;
   /** These tools are no longer new here: on the plugins record's `tools` from now on (marketplaces.ts noteJoined). */
   noteJoined(tools: HarnessId[], home: string): Promise<void>;
   /** Every home's record as last saved, if the file is there and can be read. */

@@ -521,26 +521,29 @@ test('A source: Keep mine on its row keeps the current version, whatever a tool 
 
 /** A source's last read of skills as removedBy reads it: its id, its link, its kind and the names it holds. */
 const lastRead = (names: [string, { hash: string } | { unreadable: string }][], id = 'src', link = 'team/notes') => ({ id, link, kind: 'skill' as const, names: new Map(names) });
+/** The ids the home records, here those of the reads alone (sourcestore.ts recordedIds gives a plugin's too). */
+const ids = (reads: readonly { id: string }[]) => new Set(reads.map(read => read.id));
 
 test('Removed at its source: Off, linked to none, a version from a recorded source’s link, and that source’s last read without its name; any of these not so, and nothing says it', () => {
   const dropped = { ...linked('l', 'l'), source: undefined, seen: undefined };
   const reads = [lastRead([['jottings', { hash: 'j' }]])];
-  assert.equal(removedBy(dropped, 'skill', reads), reads[0]);
-  assert.equal(removedBy({ ...dropped, on: true }, 'skill', reads), undefined, 'turned On: the revert');
-  assert.equal(removedBy({ ...dropped, deleted: { at: '2026-11-05T10:00:00.000Z' } }, 'skill', reads), undefined, 'deleted');
-  assert.equal(removedBy({ ...dropped, source: 'src' }, 'skill', reads), undefined, 'linked to it again');
-  assert.equal(removedBy({ ...dropped, source: 'gone' }, 'skill', reads), reads[0], 'linked to a source no longer recorded is linked to none');
-  assert.equal(removedBy(dropped, 'skill', []), undefined, 'its source removed');
-  assert.equal(removedBy(dropped, 'skill', [lastRead([['notes', { hash: 's' }]])]), undefined, 'the name back');
-  assert.equal(removedBy(dropped, 'skill', [lastRead([['notes', { unreadable: 'its SKILL.md can’t be read' }]])]), undefined, 'the name back, unreadable: that line says why');
+  assert.equal(removedBy(dropped, 'skill', reads, ids(reads)), reads[0]);
+  assert.equal(removedBy({ ...dropped, on: true }, 'skill', reads, ids(reads)), undefined, 'turned On: the revert');
+  assert.equal(removedBy({ ...dropped, deleted: { at: '2026-11-05T10:00:00.000Z' } }, 'skill', reads, ids(reads)), undefined, 'deleted');
+  assert.equal(removedBy({ ...dropped, source: 'src' }, 'skill', reads, ids(reads)), undefined, 'linked to it again');
+  assert.equal(removedBy({ ...dropped, source: 'gone' }, 'skill', reads, ids(reads)), reads[0], 'linked to a source no longer recorded is linked to none');
+  assert.equal(removedBy(dropped, 'skill', [], ids([])), undefined, 'its source removed');
+  assert.equal(removedBy(dropped, 'skill', [lastRead([['notes', { hash: 's' }]])], ids(reads)), undefined, 'the name back');
+  assert.equal(removedBy(dropped, 'skill', [lastRead([['notes', { unreadable: 'its SKILL.md can’t be read' }]])], ids(reads)), undefined, 'the name back, unreadable: that line says why');
   const empty = [lastRead([])];
-  assert.equal(removedBy(dropped, 'skill', empty), empty[0], 'a read with no skill at all, not whole, leaves it');
-  assert.equal(removedBy(dropped, 'skill', [lastRead([['jottings', { hash: 'j' }]], 'src', 'team/other')]), undefined, 'no version from that link');
+  assert.equal(removedBy(dropped, 'skill', empty, ids(empty)), empty[0], 'a read with no skill at all, not whole, leaves it');
+  assert.equal(removedBy(dropped, 'skill', [lastRead([['jottings', { hash: 'j' }]], 'src', 'team/other')], ids(reads)), undefined, 'no version from that link');
+  assert.equal(removedBy({ ...dropped, source: 'plugin-id' }, 'skill', reads, new Set(['src', 'plugin-id'])), undefined, 'linked to a plugin the home records: never removed by a source');
   const merged = { ...dropped, versions: [{ hash: 'l', at: '2026-11-04T10:00:00.000Z', from: { how: 'merged' as const, link: 'team/notes' } }] };
-  assert.equal(removedBy(merged, 'skill', reads), reads[0], 'a version Merge made, with that link, counts too');
+  assert.equal(removedBy(merged, 'skill', reads, ids(reads)), reads[0], 'a version Merge made, with that link, counts too');
   const takenIn = { hash: 'own', at: '2026-11-06T10:00:00.000Z', from: { how: 'found' as const, harness: 'claude-cli' as const } };
-  assert.equal(removedBy({ ...dropped, hash: 'own', versions: [takenIn, ...dropped.versions] }, 'skill', reads), undefined, 'taken in from a tool since: only versions after that count');
-  assert.equal(removedBy({ ...dropped, versions: [...dropped.versions, takenIn] }, 'skill', reads), reads[0], 'taken in first, then from the source');
+  assert.equal(removedBy({ ...dropped, hash: 'own', versions: [takenIn, ...dropped.versions] }, 'skill', reads, ids(reads)), undefined, 'taken in from a tool since: only versions after that count');
+  assert.equal(removedBy({ ...dropped, versions: [...dropped.versions, takenIn] }, 'skill', reads, ids(reads)), reads[0], 'taken in first, then from the source');
 });
 
 test('Removed at its source, within its kind: a skill and an agent of one name are read apart; the agent is removed though the source still holds a skill of that name, and the skill is not removed for the agent gone', () => {
@@ -548,8 +551,8 @@ test('Removed at its source, within its kind: a skill and an agent of one name a
   const dropped = { ...linked('l', 'l'), source: undefined, seen: undefined };
   const skills = { id: 'src', link: 'team/notes', kind: 'skill' as const, names: new Map([['notes', { hash: 's' }]]) };
   const agents = { id: 'src', link: 'team/notes', kind: 'agent' as const, names: new Map<string, { hash: string }>() };
-  assert.equal(removedBy(dropped, 'agent', [skills, agents]), agents, 'the agent: the agents’ read doesn’t hold it, whatever the skills’ read holds');
-  assert.equal(removedBy(dropped, 'skill', [skills, agents]), undefined, 'the skill: the skills’ read holds it, and the agents’ read is never the skill’s');
+  assert.equal(removedBy(dropped, 'agent', [skills, agents], ids([skills])), agents, 'the agent: the agents’ read doesn’t hold it, whatever the skills’ read holds');
+  assert.equal(removedBy(dropped, 'skill', [skills, agents], ids([skills])), undefined, 'the skill: the skills’ read holds it, and the agents’ read is never the skill’s');
 });
 
 // ---------- Merge's table (library.ts's header, MERGE), one row each ----------

@@ -203,8 +203,9 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
     case 'make': return { text: preview ? 'Comes in, Off: in no tool until you turn it on' : 'Comes in, Off, at the next Check now' };
     case 'link': return { text: `Already in Central Knot, the same: ${next} links it to this source` };
     case 'update': return { text: preview ? 'Came from this link before and is unchanged: Add links it again, and the source’s version becomes current' : `Changed at the source: ${next} makes that the current version` };
-    // The type check needs `merge` and `keep` here: SourceNameState holds every SourceAnswer, and these are a click's own, never a row's.
-    case 'wait': case 'merge': case 'keep': return { warns: true, text: 'Changed at the source. Yours stays current until you merge, replace or keep it,'
+    // The type check needs `merge`, `keep` and `let-go` here: SourceNameState holds every SourceAnswer, and the first two are a
+    // click's own and the third a plugin's (library.ts A PLUGIN), never a Git source's row.
+    case 'wait': case 'merge': case 'keep': case 'let-go': return { warns: true, text: 'Changed at the source. Yours stays current until you merge, replace or keep it,'
       + ' since it was changed here or a tool’s copy can’t be read just now. Merge puts the source’s changes into yours if they don’t clash;'
       + ' Replace takes the source’s and keeps yours as a version; Keep mine keeps yours current, and the source’s as a version, so it no longer waits.' };
     case 'drop': return { text: `No longer at the source: ${next} turns it off`, warns: true };

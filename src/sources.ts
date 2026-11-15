@@ -49,7 +49,7 @@ import { exists, libraryGate, removeTree, writeAccess, writeDurably, type ShareC
 import { applyServers, serverKind } from './servers.ts';
 import { applySkills, skillKind } from './skills.ts';
 import type { SkillContent } from './skillstore.ts';
-import { copyOf, lookOf, readSources, saveSources, sourcesFolder, stageOf, type SourceRecord } from './sourcestore.ts';
+import { copyOf, lookOf, readSources, recordedIds, saveSources, sourcesFolder, stageOf, type Recorded, type SourceRecord } from './sourcestore.ts';
 import { linkLabel, readLink, splitRef } from './sourcelink.ts';
 import type { Change, DestinationResult, HarnessId, LibraryFacts, PassResult, SourceFound, SourceName, SourcePreview, SourceResult, SourceRowClick, SourcesView, SourceView } from './types.ts';
 
@@ -58,8 +58,6 @@ type Resolved = Pick<SourceRecord, 'link' | 'repository' | 'ref' | 'folder'>;
 /** The source a link resolves to already, if one does: one repository however it is spelt, one branch, one folder. */
 const twinOf = (sources: SourceRecord[], where: Resolved) =>
   sources.find(source => sameSource(source.repository, where.repository) && source.ref === where.ref && source.folder === where.folder);
-/** The ids of the sources the home records: the set library.ts linkedTo reads links against. */
-const recordedOf = (sources: SourceRecord[]) => new Set(sources.map(source => source.id));
 
 // ---------- The kinds a source brings ----------
 
@@ -79,7 +77,7 @@ export interface SourceKind<Content = unknown> {
  * kinds before it found). Made when asked, not as the module loads: a kind's module imports this one back (its view asks
  * sourceFacts), so its Kind may not be made yet then.
  */
-const sourceKinds = (): readonly SourceKind[] => [skillSource(), agentSource(), serverSource()];
+export const sourceKinds = (): readonly SourceKind[] => [skillSource(), agentSource(), serverSource()];
 const skillSource = (): SourceKind<SkillContent> =>
   ({ kind: skillKind, apply: applySkills, at: skillsAt, noneThere: 'no SKILL.md there, in a folder inside it, or in skills/' });
 const agentSource = (): SourceKind<SharedAgent> =>
@@ -121,8 +119,8 @@ const librariesNow = (context: ShareContext, tools: readonly HarnessId[]) =>
  * hold, is that item (its file stopped parsing): one line. A deleted item the read doesn't hold is none of the source's
  * business, and has no line. The Sources page words each one.
  */
-function namesOf(source: SourceRecord, found: Holds, entry: SourceKind, { items, copies }: Awaited<ReturnType<typeof libraryNow>>, sources: SourceRecord[]): SourceName[] {
-  const there = itemsOf(found, entry), read = readOf(source, found, entry, recordedOf(sources)), kind = entry.kind.kind;
+function namesOf(source: SourceRecord, found: Holds, entry: SourceKind, { items, copies }: Awaited<ReturnType<typeof libraryNow>>, recorded: Recorded): SourceName[] {
+  const there = itemsOf(found, entry), read = readOf(source, found, entry, recorded.ids), kind = entry.kind.kind;
   const answers = [...sourceAnswers(items, read, read.recorded, { copies })].filter(([key]) => there.some(one => one.key === key) || !items[key]?.deleted);
   // An item whose name can't be read is keyed by its folder's name; where no item has that name, it may be the one item missing.
   const absent = answers.filter(([key]) => !there.some(one => one.key === key)), nameless = there.filter(one => 'unreadable' in one && !one.name && !items[one.key]);
@@ -133,13 +131,13 @@ function namesOf(source: SourceRecord, found: Holds, entry: SourceKind, { items,
     const base = { kind, key, ...(name ? { name } : {}), ...(one ? { there: { folder: one.folder, folderName: one.folderName, files: one.files } } : {}) };
     const on = item && !item.deleted ? { on: item.on } : {};
     if (one && 'unreadable' in one) return { ...base, ...on, state: one.leftOut ? 'leftOut' : 'unreadable', why: one.unreadable };
-    const other = answer === 'another' ? sources.find(each => each.id === linkedSource(item, read.recorded))?.link : undefined;
+    const other = answer === 'another' ? recorded.links.get(linkedSource(item, read.recorded) ?? '') : undefined;
     return { ...base, ...on, state: answer, ...(other ? { why: other } : {}) };
   });
 }
 /** Every line of what is at a source, kind by kind in the table's order (namesOf). */
-const linesOf = (source: SourceRecord, found: Holds, libraries: Awaited<ReturnType<typeof librariesNow>>, sources: SourceRecord[]) =>
-  libraries.flatMap(({ entry, library }) => namesOf(source, found, entry, library, sources));
+const linesOf = (source: SourceRecord, found: Holds, libraries: Awaited<ReturnType<typeof librariesNow>>, recorded: Recorded) =>
+  libraries.flatMap(({ entry, library }) => namesOf(source, found, entry, library, recorded));
 
 /**
  * The pass for one source's last read: one per kind in the table, each given its kind's read (a row's click only to its own
@@ -148,10 +146,11 @@ const linesOf = (source: SourceRecord, found: Holds, libraries: Awaited<ReturnTy
  * the person's own (from that kind's own results, by its name), every result, and the kinds whose read wasn't whole. A pass
  * that stops stops the rest.
  */
-async function runSource(context: ShareContext, tools: HarnessId[], source: SourceRecord, sources: SourceRecord[], clicked?: { kind: ItemKind; asked: RowClick }) {
+async function runSource(context: ShareContext, tools: HarnessId[], source: SourceRecord, clicked?: { kind: ItemKind; asked: RowClick }) {
   const found = await lastFound(context, source), done: Omit<SourceResult, 'view'> & { results: DestinationResult[] } = { results: [] };
+  const { ids } = await recordedIds(context.home);
   for (const entry of sourceKinds()) {
-    const read = readOf(source, found, entry, recordedOf(sources), clicked?.kind === entry.kind.kind ? clicked.asked : {});
+    const read = readOf(source, found, entry, ids, clicked?.kind === entry.kind.kind ? clicked.asked : {});
     const passed = await entry.apply(context, tools, [], { source: read });
     const toolsOf = (name: string, outcome: 'written' | 'removed' | 'waits') =>
       passed.results.filter(each => each.item === name && (outcome === 'waits' ? each.waits : each.outcome === outcome) && each.harness).map(each => each.harness!);
@@ -237,7 +236,7 @@ export async function previewSource(context: ShareContext, tools: HarnessId[], l
   await writeDurably(`${look}.json`, JSON.stringify(resolved));
   const found = await holdsAt(look, resolved.folder, resolved.repository, sourceKinds());
   // Read as Add will record it: a source of this look's own id, among those the home records.
-  const names = linesOf({ ...resolved, id: token, readAt: '', addedAt: '' }, found, await librariesNow(context, tools), sources);
+  const names = linesOf({ ...resolved, id: token, readAt: '', addedAt: '' }, found, await librariesNow(context, tools), await recordedIds(context.home));
   const refused = nothingToAddWhy(found, resolved);
   return { ...foundOf(resolved, found, names), token, ...(refused ? { refused } : {}) };
 }
@@ -279,7 +278,7 @@ export async function addSource(context: ShareContext, tools: HarnessId[], token
   await rename(look, copyOf(context.home, source.id));
   await rm(`${look}.json`, { force: true });
   await saveSources(context.home, [...sources, source]);
-  return answer(context, tools, await runSource(context, tools, source, [...sources, source]));
+  return answer(context, tools, await runSource(context, tools, source));
 }
 
 /**
@@ -311,7 +310,7 @@ export async function checkSource(context: ShareContext, toolsNow: () => Promise
     delete read.problem;
     const now = sources.map(each => (each.id === id ? read : each)), tools = await toolsNow();
     await saveSources(context.home, now);
-    return answer(context, tools, await runSource(context, tools, read, now));
+    return answer(context, tools, await runSource(context, tools, read));
   });
 }
 
@@ -333,7 +332,7 @@ export async function rowClick(context: ShareContext, tools: HarnessId[], id: st
   if (!(await exists(copyOf(context.home, id)))) return answer(context, tools, { stopped: 'Its last read is no longer kept. Check it now first.' });
   const first = click === 'merge' && await entry.apply(context, tools, [], { only: new Set([key]) });
   if (first && first.stopped) return answer(context, tools, { stopped: first.stopped });
-  return answer(context, tools, await runSource(context, tools, source, sources, { kind: entry.kind.kind, asked: { [click]: new Set([key]) } }));
+  return answer(context, tools, await runSource(context, tools, source, { kind: entry.kind.kind, asked: { [click]: new Set([key]) } }));
 }
 /** The clicks a source's line has (types.ts SourceRowClick), each a key set its kind's read carries (atlink.ts RowClick). */
 const ROW_CLICKS: readonly SourceRowClick[] = ['bringBack', 'replace', 'merge', 'keep'];
@@ -388,10 +387,10 @@ export async function checkDue(context: ShareContext, toolsNow: () => Promise<Ha
 export async function sourcesView(context: ShareContext, tools: HarnessId[]): Promise<SourcesView> {
   const access = await writeAccess(context);
   const { sources, problem } = await readSources(context.home);
-  const libraries = await librariesNow(context, tools);
+  const libraries = await librariesNow(context, tools), recorded = await recordedIds(context.home);
   const views = await Promise.all(sources.map(async (source): Promise<SourceView> => {
     const { id, addedAt, readAt } = source, found = await lastFound(context, source);
-    return { ...foundOf(source, found, linesOf(source, found, libraries, sources)), id, addedAt, readAt, ...(source.problem ? { problem: source.problem } : {}) };
+    return { ...foundOf(source, found, linesOf(source, found, libraries, recorded)), id, addedAt, readAt, ...(source.problem ? { problem: source.problem } : {}) };
   }));
   return { sources: views, kinds: sourceKinds().map(entry => entry.kind.kind), access, ...(problem ? { problem } : {}) };
 }
@@ -400,14 +399,19 @@ export async function sourcesView(context: ShareContext, tools: HarnessId[]): Pr
  * Each item of one kind linked to a source the home records, as its row on its kind's page says it (types.ts LibraryFacts
  * fromSource): the source's link, and whether that source's last read has a version that waits (the table's `wait`, from the
  * same answers as the Sources page), or else whether it is changed here (library.ts changedHere), so the source's next change
- * will meet it; and each item a source removed (`removed`: library.ts removedBy), with that source's link. `items` and
+ * will meet it; each item linked to a plugin, with the plugin's link alone (no read of a plugin is kept, and none waits:
+ * library.ts A PLUGIN); and each item a source removed (`removed`: library.ts removedBy), with that source's link. `items` and
  * `copies`: the kind's view's own look (skills.ts skillsView, agents.ts agentsView and servers.ts serversView ask it). A kind
  * the table has no entry for has no source.
  */
 export async function sourceFacts(context: ShareContext, kind: ItemKind, items: Record<string, LibraryItem>, copies: (item: LibraryItem) => Copies) {
   const facts = new Map<string, NonNullable<LibraryFacts['fromSource']>>(), entry = sourceKinds().find(each => each.kind.kind === kind);
   if (!entry) return facts;
-  const { sources } = await readSources(context.home), recorded = recordedOf(sources);
+  const { sources } = await readSources(context.home), { ids: recorded, links, plugins } = await recordedIds(context.home);
+  for (const item of Object.values(items)) {
+    const plugin = !item.deleted && plugins.find(each => each.id === item.source);
+    if (plugin) facts.set(item.key, { link: links.get(plugin.id)! });
+  }
   const reads = await Promise.all(sources.map(async source => readOf(source, await lastFound(context, source), entry, recorded)));
   for (const [index, source] of sources.entries()) {
     const linked = Object.values(items).filter(item => !item.deleted && linkedSource(item, recorded) === source.id);
@@ -419,7 +423,7 @@ export async function sourceFacts(context: ShareContext, kind: ItemKind, items: 
     }
   }
   for (const item of Object.values(items)) {
-    const by = removedBy(item, entry.kind.kind, reads);
+    const by = removedBy(item, entry.kind.kind, reads, recorded);
     if (by) facts.set(item.key, { link: by.link, removed: true });
   }
   return facts;

@@ -19,7 +19,8 @@ import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary,
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
-import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, SyncNotice, HarnessId, PartsInstall, TakenInNotice, ThroughPlugin } from './types.ts';
+import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, SyncNotice, HarnessId, PartsInstall, TakenInNotice, ThroughPlugin } from './types.ts';
+import { pluginOf } from './sourcelink.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, type PluginItemAt } from './pluginswitch.ts';
@@ -654,14 +655,14 @@ function libraryTag(skill: ItemRow) {
 }
 /** The tag after an item's name while a version waits at the source it is linked to, or once its source removed it (libraryrow.ts fromSourceWords). */
 function sourceTag(skill: ItemRow) {
-  const tag = skill.fromSource && fromSourceWords(skill.fromSource).tag;
-  return tag ? h('span.row-tag.row-tag-source', { title: tag.title }, icon('link-2', 12, 'tone-warning'), tag.text) : null;
+  const tag = skill.fromSource && fromSourceWords(skill.fromSource).tag, plugin = skill.fromSource && pluginOf(skill.fromSource.link);
+  return tag ? h('span.row-tag.row-tag-source', { title: tag.title }, icon('link-2', 12, plugin ? 'tone-muted' : 'tone-warning'), tag.text) : null;
 }
 /** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to Sources. */
 function fromSourceLine(key: string, from: NonNullable<ItemRow['fromSource']>) {
   const said = fromSourceWords(from);
   return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits || from.removed ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
-    h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage('sources') }, 'Sources'), said.after));
+    h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage(said.page) }, said.page === 'plugins' ? 'Plugins' : 'Sources'), said.after));
 }
 
 /**
@@ -953,9 +954,10 @@ const age = (key: string) => {
 type NoticeLook = [IconName, string, string, HTMLElement | null];
 
 /** A library item's notice (libraryrow.ts noticeWords), with its button: Undo, or Turn on after a copy deleted by hand turned it off. */
-function libraryNotice(lib: LibraryPage, notice: ItemNotice, undo: (title: string) => HTMLElement): NoticeLook {
+function libraryNotice(lib: LibraryPage, notice: ItemNotice | PluginItemNotice, undo: (title: string) => HTMLElement): NoticeLook {
   const { text, action, help } = lib.say.noticeWords(notice);
   if (action === 'undo') return [notice.kind === 'conflict' ? 'diff' : 'check', notice.kind === 'conflict' ? 'tone-warning' : 'tone-success', text, undo(help)];
+  if (!action) return ['link-2-off', 'tone-muted', text, null];
   const on = button({ variant: 'outline', size: 'small', label: 'Turn on', id: `notice-restore-${notice.history}`, onclick: () => void restoreEvent(notice.history) });
   on.title = help;
   return ['trash-2', 'tone-muted', text, on];

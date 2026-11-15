@@ -54,6 +54,7 @@
 //     wrote over): copies that gave way
 //   switched: a skill's tool switch          Undo: sets that        some tool still loads it (`loads`)
 //     cleared (isClearedSwitch)              switch again
+//   a plugin's item let go (edit, `own-now`) none: no version changed, and the item is the person's own
 //
 // Synchronize everything's own entries (a switch on or off, and the one Undo of a switch-on: everything.ts, whose header has
 // their table) are worded and decided at the end of this file: everythingPlan reads what that Undo takes back from History,
@@ -65,7 +66,7 @@
 // in libraryAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
 import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library.ts';
-import { linkLabel } from './sourcelink.ts';
+import { linkLabel, pluginOf } from './sourcelink.ts';
 import { asItIs, noTimeTells, versionClock, writesWait, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts } from './types.ts';
 import { andList, sentence, toolName, toolsPhrase } from './words.ts';
@@ -102,7 +103,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   const also = (words: string) => (tools ? `${words} ${tools}` : '');
   const where = event.only ? toolName(event.only) : '', from = event.winner ? toolName(event.winner.tool) : '';
   // What made it happen is the entry's `cause` alone (types.ts HistoryEvent); none is the person's own switch or click.
-  const pulled = event.cause === 'pulled', keeps = 'Central Knot keeps it.', source = event.link ? linkLabel(event.link) : 'Its source';
+  const pulled = event.cause === 'pulled', keeps = 'Central Knot keeps it.', source = event.link ? linkLabel(event.link) : 'Its source', plugin = event.link && pluginOf(event.link);
   // An Undo that gave tools their own copies back instead of removing what was there (types.ts HistoryEvent gaveBack).
   const gave = (event.gaveBack ?? []).map(toolName);
   const gaveSaid = gave.length ? ` ${andList(gave)} ${gave.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before.` : '';
@@ -116,6 +117,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       // A pass no click asked wrote the current version over copies there (a tool managed again, a folder writable again).
       if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
       if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}` };
+      // A plugin's read brought it in with the plugin's On (library.ts A PLUGIN).
+      if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}${also(': put in')}.` };
       const said = {
         switch: { glyph: 'circle-check', text: `Turned on${also(': put in')}.` },
         found: { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` },
@@ -133,6 +136,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}${named(event.only) ? ': its copy there was removed' : ''}. ${keeps}${gaveSaid}` };
       if (event.cause === 'deleted-by-hand') return { glyph: 'trash-2', text: `Its copy was deleted in ${from}, so it was turned off${also(' and removed from')}. ${keeps}` };
       if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}: in Central Knot, Off, until you turn it on.` };
+      if (event.cause === 'source-dropped' && plugin) return { glyph: 'link-2-off', text: `The plugin ${plugin} no longer has it, so it is off${also(' and removed from')}, and no longer follows it. ${keeps}` };
       if (event.cause === 'source-dropped') return { glyph: 'link-2-off', text: `${source} no longer has it, so it is off${also(' and removed from')}, and no longer from that source. ${keeps}` };
       // A pass no click asked took its copies out where it is off (or kept out): a tool managed again, a folder writable again.
       if (event.cause === 'in-line') return { glyph: 'circle-off', text: `Off in ${tools}, so its ${words.copy} there was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}. ${keeps}` };
@@ -176,6 +180,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.cause === 'source-kept') {
         return { glyph: 'link-2', text: `Yours stays current over ${source}’s version, which no longer waits: it is kept as a version, and the source’s next change is compared with it.` };
       }
+      if (event.cause === 'own-now') return { glyph: 'link-2-off', text: `Yours now: it was changed here, so it no longer follows ${source}, which never writes over it. Its versions stay.` };
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'switched': {
       // Clear the switch's Undo turns the tool's switch off again (`cause` 'switch'); any other that turned a switch off is
@@ -288,6 +293,8 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     return asLeft ? { label: 'Undo', help, change: { ...now, version: item.hash, seen: event.seen } } : undefined;
   }
   if (event.kind === 'current' && event.previous !== undefined && event.previous === event.version) return undefined;
+  // A plugin's item let go as the person's own changed no version: nothing to take back.
+  if (event.cause === 'own-now') return undefined;
   // Copies an earlier engine added, removed, switched or took over: there is no earlier version to go back to.
   if (['added', 'removed', 'switched', 'took-over'].includes(event.kind) || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.

@@ -7,6 +7,8 @@
 //   lookAt         each managed harness's copies, read once through the kind (Disk); a copy that can't be read for sure is
 //                  unseen, never missing
 //   deletionsTold  a deleted item that History has no standing entry for gets one, so it has its Restore for History's days
+//   letGo          each item linked to a plugin that was changed here is let go (library.ts A PLUGIN, through
+//                  fromSourceStep), so a plugin's click on it below no longer takes it
 //   pull, source   what Pull brings, and what a source holds (library.ts A SOURCE, through fromSourceStep), recorded on
 //                  the items before any click
 //   click          what the person asked (On, Off, a harness kept out, a version made current, Delete, Restore, a found item
@@ -73,7 +75,8 @@ import type { ItemNow } from './historyactions.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Origin, Shelf, SourceSeen, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
 import { errorCode, libraryGate, stillOwned } from './share.ts';
-import { readSources } from './sourcestore.ts';
+import { pluginLink } from './sourcelink.ts';
+import { recordedIds, type Recorded } from './sourcestore.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, JoinCounts, MergeDone, PassResult, SyncNotice, TakenInNotice } from './types.ts';
 import { byToolOrder, notManagedHere, toolName } from './words.ts';
@@ -146,9 +149,10 @@ export interface Disk<Entry extends Seen> {
 /**
  * An item as Disk.held is told of it: its name, where it is wanted (library.ts wantedIn), what was applied where, and its
  * current version as this pass's clicks left it (none for a found item, which is asked about as taking it in would leave it),
- * and each harness's own part where the record keeps one.
+ * each harness's own part where the record keeps one, and the source it is linked to (a plugin's item is held by plugins.ts
+ * pluginHolds in the tools that take the plugin).
  */
-export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'> & Partial<Pick<LibraryItem, 'hash' | 'own'>>;
+export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'> & Partial<Pick<LibraryItem, 'hash' | 'own' | 'source'>>;
 
 /** One kind's part of the library as its record holds it: its items, and each harness's folder as a pass last saw it. */
 export interface KindLibrary { items: Record<string, LibraryItem>; folders: Partial<Record<HarnessId, FolderSeen>> }
@@ -572,6 +576,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [] };
   try {
     await deletionsTold(pass);
+    await letGo(pass, await recordedIds(context.home));
     for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
     const sourceScope = options.source ? await fromSourceStep(pass, options.source) : undefined;
     for (const asked of clicks) await click(pass, asked);
@@ -582,6 +587,8 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
     await guardFolders(pass, items, pass.shelf);
     for (const item of items) { await stillOwned(context.home, context.build); await syncItem(pass, item); }
     if (pass.takenIn.length) pass.notices.push(takenInNotice(pass.takenIn));
+    // A plugin's update that dropped an item says so on its page once (library.ts A PLUGIN): History holds its Turn on.
+    if (options.source?.plugin) for (const [key, said] of pass.sourced) if (said.answer === 'drop' && said.history) pass.notices.push({ kind: 'dropped', key, item: said.name, link: options.source.link, history: said.history });
     // A file noted away that this pass made (a kind of files: Kind.folderSeen) is noted as it is now, so the next pass doesn't
     // take Central Knot's own write for a file made again (keepFolders: a click's pass still moves no known identity on).
     if (kind.folderSeen) for (const tool of managed) if (pass.foldersNow[tool] && 'away' in pass.foldersNow[tool]) pass.foldersNow[tool] = await kind.folderSeen(context, tool);
@@ -861,7 +868,7 @@ async function untell(pass: Pass, told: Told, held: HarnessId[]) {
  * pendingEdits). A History entry names its item by key (an MCP server's entries from before the library: its name as written).
  */
 export async function itemsNow<C, E extends Seen, D extends Disk<E>>(kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[]) {
-  const { look, problem } = await lookFor(kind, context, tools), recorded = new Set((await readSources(context.home)).sources.map(source => source.id));
+  const { look, problem } = await lookFor(kind, context, tools), recorded = (await recordedIds(context.home)).ids;
   const of = (entry: HistoryEvent) => {
     const item = look.library.items[itemKey(entry.key.slice(kind.historyPrefix.length))];
     const linked = linkedSource(item, recorded) ? { linked: true as const } : {};
@@ -925,6 +932,8 @@ async function click(pass: Pass, asked: Change) {
   const item = known && !known.deleted ? known : undefined;
   const name = known?.name ?? asked.key;
   const refuse: Refuse = (message, more = {}) => { pass.results.push({ item: name, outcome: 'held', unchanged: true, message, ...more }); };
+  // A plugin's click on its item is taken only while the item is linked to that plugin: one let go is the person's own.
+  if (asked.forPlugin && known?.source !== asked.forPlugin) return;
   const stale = asked.seenOn !== undefined && !!item?.on !== asked.seenOn;
   if (stale) return refuse(`${name} changed since the page was read. Nothing was changed; read again.`);
   if (asked.giveBack) pass.giveBack.set(asked.key, asked.giveBack);
@@ -1053,6 +1062,19 @@ async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refus
 }
 
 /**
+ * The let-go row (library.ts A PLUGIN) for every item of this kind linked to a recorded plugin, in every pass: each such plugin's
+ * table, carried out by fromSourceStep, with a read that holds nothing, so only an item changed here is answered (`let-go`) and
+ * the rest wait for the plugin's own reads. Nothing joins the pass's scope: letting go writes no tool.
+ */
+async function letGo(pass: Pass, { ids, plugins }: Recorded) {
+  for (const entry of plugins) {
+    if (!Object.values(pass.library.items).some(item => item.source === entry.id && !item.deleted)) continue;
+    await fromSourceStep(pass, { id: entry.id, link: pluginLink(entry.plugin, entry.marketName), commitAt: '', whole: false, names: new Map(),
+      plugin: { on: entry.on, outOf: [] }, kind: pass.kind.kind, mergeWith: pass.kind.merge, recorded: ids });
+  }
+}
+
+/**
  * A source read on a click or by the daily check (library.ts A SOURCE: sourceAnswers, a fromSource answer for every name it holds
  * and every item linked to it, told what the managed tools hold of each item now: copiesOf), carried out: made Off (`make`),
  * linked (`link`, its content recorded as a version from the source where it has none; `same` only moves `seen` on), its
@@ -1068,6 +1090,8 @@ async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refus
  */
 async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Set<string>> {
   const clicked = { bringBack: read.bringBack, replace: read.replace, merge: read.merge, keep: read.keep };
+  // A name a plugin makes arrives with its On, kept out of each tool it is not in now and each with a copy of that name (A PLUGIN).
+  const outOf = (key: string) => read.plugin && [...new Set([...read.plugin.outOf, ...pass.managed.filter(tool => pass.disk.byKey.get(key)?.[tool] || unseenIn(pass.disk, tool, key))])].sort(byToolOrder);
   const answers = sourceAnswers(pass.library.items, read, read.recorded, { ...clicked, copies: item => copiesOf(pass, item) });
   const origin: Origin = { how: 'source', link: read.link }, link = read.link;
   for (const [key, answer] of answers) {
@@ -1080,15 +1104,22 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
       delete item.source; delete item.seen;
       pass.asked.set(key, { kind: 'off', cause: 'source-dropped', link, fill: 'removed' });
     }
+    // Told here, not by the item's own pass: an item let go may be outside this pass's scope (letGo), and nothing is written.
+    if (answer === 'let-go' && item) {
+      delete item.source; delete item.seen;
+      const history = randomUUID();
+      await appendHistory(pass.context, [{ id: history, at: now(), key: `${pass.kind.historyPrefix}${key}`, item: item.name, kind: 'edit', cause: 'own-now', previous: item.hash, version: item.hash, link, losers: [], orderProved: true }]);
+      pass.notices.push({ kind: 'let-go', key, item: item.name, link, history });
+    }
     // Only a name with content is made, linked or made current.
     if (!entry || !('hash' in entry)) continue;
     if (answer === 'make') {
-      const made = item ?? newItem(key, entry.name);
-      Object.assign(made, { on: false, name: entry.name, source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
+      const made = item ?? newItem(key, entry.name), except = outOf(key);
+      Object.assign(made, { on: !!read.plugin?.on, name: entry.name, source: read.id, seen: entry.hash, ...(except ? { except } : {}) } satisfies Partial<LibraryItem>);
       delete made.deleted;
       pass.library.items[key] = made;
       if (made.hash !== entry.hash) await setCurrent(pass.shelf, made, { hash: entry.hash, at: read.commitAt, from: origin }, entry.content);
-      pass.asked.set(key, { kind: 'off', cause: 'source', link });
+      pass.asked.set(key, made.on ? { kind: 'on', cause: 'source', link, fill: 'written' } : { kind: 'off', cause: 'source', link });
       await keepSourceOwn(pass, made, entry);
     } else if (answer === 'link' || answer === 'same') {
       Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);

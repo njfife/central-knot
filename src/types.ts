@@ -264,6 +264,8 @@ export interface DesktopApi {
   partsPlan(source: string, plugin: string): Promise<Partial<Record<HarnessId, PartPlan[]>> | null>;
   /** Installs (or updates), removes or undoes a plugin's parts in one tool; `run` names the parts run an Undo reverses; `pick` installs or takes out only the parts it names. */
   pluginParts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string, pick?: PartsPick): Promise<PluginActionResult>;
+  /** A plugin's items in Pi and OpenCode brought up to date from its marketplace's copy (marketplaces.ts items). */
+  pluginItems(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   /** One skill's or agent's file as each tool's installed copy of a plugin has it, read when its row is opened. */
   pluginItemTexts(plugin: string, marketName: string, kind: PartKind, name: string): Promise<{ tool: HarnessId; text: string }[]>;
 }
@@ -386,15 +388,25 @@ export interface Change {
    * again. Made by History's action in main alone (librarypass.ts restoreAll), never sent by the page.
    */
   seen?: string;
+  /**
+   * A click a plugin's switch makes on its item (pluginlibrary.ts), the plugin's id: taken only while the item is linked to that
+   * plugin (library.ts A PLUGIN). Made in main alone, never sent by the page.
+   */
+  forPlugin?: string;
 }
 
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, and the MCP servers that wait for Write to Claude Code. */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'waits'>; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
- * What sync did on its own, told once on its kind's page: to one item (ItemNotice), or the found items Synchronize everything
- * took in, in one pass (TakenInNotice). Both are keyed by `history`.
+ * What sync did on its own, told once on its kind's page: to one item (ItemNotice), the found items Synchronize everything
+ * took in, in one pass (TakenInNotice), or what a plugin did to one of its items (PluginItemNotice). Each is keyed by `history`.
  */
-export type SyncNotice = ItemNotice | TakenInNotice;
+export type SyncNotice = ItemNotice | TakenInNotice | PluginItemNotice;
+/**
+ * An item a plugin brought (library.ts A PLUGIN) that is the person's own now, changed here (`let-go`), or that the plugin's update
+ * no longer has, so it is Off (`dropped`; History's entry turns it on again, as the person's own). `link`: the plugin's.
+ */
+export interface PluginItemNotice { kind: 'let-go' | 'dropped'; key: string; item: string; link: string; history: string }
 
 /** What sync did to one item on its own: an edit spread, competing edits resolved, or a copy deleted by hand that turned it off. */
 export interface ItemNotice {
@@ -480,17 +492,18 @@ export interface HistoryEvent {
    * A library item's: what made it happen, read by historyactions.ts alone. `switch`: the person's switch ('on' / 'off'). `found`:
    * a found item taken in by a click on Add ('on'; `winner`: where it was found). `sync-everything`: the same, taken in by the
    * home's standing rule, Synchronize everything, with no click. `pulled`: Pull did it ('on' for an item new here, 'edit',
-   * 'deleted'). `source`: a source's read did it (`link`): 'off' for an item it brought in, Off; 'edit' for its content made
-   * current (by itself, or by Replace: `seen`). `source-merged`: Merge made the source's version merged into the current one
+   * 'deleted'). `source`: a source's read did it (`link`): 'off' for an item it brought in, Off ('on' for one a plugin brought in
+   * with its On: library.ts A PLUGIN); 'edit' for its content made current (by itself, or by Replace: `seen`). `source-merged`: Merge made the source's version merged into the current one
    * current ('edit'; `link`, `seen`). `source-kept`: Keep mine, or a Merge whose result was exactly the current version, kept
    * the source's version beside it and moved only `seen` on ('edit', `previous` = `version`; `link`, `seen`). `source-dropped`: the source no longer
-   * has it, so it was turned Off and is no longer linked ('off'). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
+   * has it, so it was turned Off and is no longer linked ('off'). `own-now`: an item a plugin brought, changed here, was let go:
+   * the person's own from then on, no longer linked ('edit', `previous` = `version`; `link`: the plugin's). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
    * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    * `own-copy`: a harness's own copy, which Central Knot had never put there and no click took over, gave way to the current
    * version ('kept-edit'; `losers`). `in-line`: a pass no click asked brought harnesses into line with the item: copies written
    * over ('on'; `losers`, each with what it held), or removed ('off', or 'deleted' for a deleted item) (librarypass.ts logItem).
    */
-  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'source' | 'source-merged' | 'source-kept' | 'source-dropped' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
+  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'source' | 'source-merged' | 'source-kept' | 'source-dropped' | 'own-now' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
   /** A source's entry (`cause` 'source', 'source-merged', 'source-kept' or 'source-dropped'): its link as the person gave it, kept here since the source may be removed later. */
   link?: string;
   /**
@@ -713,7 +726,17 @@ export interface MarketplaceView {
   parts?: Record<string, Partial<Record<HarnessId, PartsState>>>;
   /** Each listed plugin's one switch, by plugin (pluginrecord.ts PluginSwitch). */
   switches?: Record<string, PluginSwitch>;
+  /** The plugins with items in the library (pluginlibrary.ts itemsView), by plugin: "Its items" and "has it" in Pi and OpenCode. */
+  items?: Record<string, PluginItemsView>;
 }
+/**
+ * One line of a plugin's "Its items" (pluginlibrary.ts itemsView): an item linked to it (`linked`; its update ready: `update`;
+ * no longer in the plugin, so its Update turns it Off: `going`), a name Update brings in (`new`), one its update removed, Off
+ * and no longer linked (`removed`), or one not brought in, with why (`not-brought`).
+ */
+export interface PluginItemLine { kind: ItemKind; key: string; name: string; state: 'linked' | 'update' | 'going' | 'new' | 'removed' | 'not-brought'; on?: boolean; except?: HarnessId[]; why?: string }
+/** A plugin's items as its page shows them: its lines, whether Update has something to do, and why the plugin can't be read now. */
+export interface PluginItemsView { lines: PluginItemLine[]; ready?: true; problem?: string }
 
 /**
  * One named part of a plugin (a skill, command or agent): what it says it does, its whole file (SKILL.md or NAME.md) as

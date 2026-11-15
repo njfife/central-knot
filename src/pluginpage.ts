@@ -13,7 +13,7 @@ import { pluginKey, type PluginOp } from './pluginplan.ts';
 import { cantSwitchSkill, comparableText, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsOf, partsOffer, partsPickable, partStillIn, partsWhy, partWords, PREVIEW_ONLY, samePart, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, versionWord, whyNotCarried, changedPartsWords, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened, turnPlugin } from './pluginstate.ts';
-import type { Components, HarnessId, MarketplaceView, Outcome, PartKind, PartPlan, PartRef, PartsState, PluginDetail, PluginTurn, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, MarketplaceView, Outcome, PartKind, PartPlan, PartRef, PartsState, PluginDetail, PluginItemLine, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 import { andList, byToolOrder, coworkWords, toolNames as names } from './words.ts';
 import { openItem } from './matrix.ts';
@@ -58,7 +58,7 @@ function installedLine(version: string | undefined, offered: string | undefined,
 
 /** Each mark's short words on a tool's line (the whole sentence is its tooltip: pluginstatus.ts toolMark). */
 const MARK_WORDS: Record<ToolMark, string> = {
-  installed: 'Installed', outdated: 'Installed', parts: 'Parts installed', 'parts-changed': 'Parts out of date', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
+  installed: 'Installed', outdated: 'Installed', parts: 'Parts installed', 'parts-changed': 'Parts out of date', items: 'Its items are on', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
   missing: 'Not in it, though on', cannot: 'Not available', 'kept-out': 'Kept out', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
 };
 
@@ -94,7 +94,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const act = (label: string, what: PluginTurn, id: string, title: string) => button({ variant: 'link', size: 'micro', label, id: `${id}-${marketIndex}-${plugin.name}-${tool}`, disabled: !!app.busy || !!stopped,
       attrs: { title: stopped ?? title }, onclick: () => void turnPlugin(entry, plugin.name, what, tool) });
     const fix = owed?.act && (mark === 'missing' || mark === 'waits' || mark === 'not-brought' || mark === 'stays')
-      ? (owed.act === 'install' || owed.act === 'install-parts' ? act('Install there', 'fix', 'pfix', `Puts it in ${names[tool]} now${owed.act === 'install-parts' ? ', as separate items' : ''}. Undo takes it out again.`)
+      ? (owed.act === 'install' || owed.act === 'install-parts' || owed.act === 'install-items' ? act('Install there', 'fix', 'pfix', `Puts it in ${names[tool]} now${owed.act === 'install' ? '' : ', as separate items'}. Undo takes it out again.`)
         : act('Take out there', 'fix', 'pfix', `Takes it out of ${names[tool]} now; the result says what Undo can put back.`)) : null;
     const keep = !sw?.entry || !owed?.takes ? null : kept ? act('Let in', 'let-in', 'pkeep', `Lets it into ${names[tool]} again${sw.entry.on ? ', and puts it in there now' : ''}. Undo keeps it out again.`)
       : act('Keep out', 'keep-out', 'pkeep', `Keeps it out of ${names[tool]}${owed.has !== 'none' ? ', and takes it out there now' : ''}; the automatic updates leave it out too. Undo lets it back in.`);
@@ -212,6 +212,34 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
         partsWhy(view, entry, group[0]!)[0] ? h('span.plugin-parts-why', {}, partsWhy(view, entry, group[0]!)[group.length > 1 ? 1 : 0]) : null),
       h('span.plugin-outcome-what', {}, partsLine(partsIn(group[0]!), plans?.[group[0]!], !read || read.reading || (!!read.value && !plans?.[group[0]!])))))),
     behind.length ? h('p.plugin-muted', {}, `Stays with the plugin: ${andList(behind)}.`) : null);
+}
+
+/**
+ * Its items: in Pi and OpenCode, which take no plugins, the plugin's skills, agents and MCP servers are items of Central Knot's
+ * linked to it (pluginlibrary.ts itemsView, from the table the pass carries out). One line each, by kind, its name opening its
+ * row, with its state where it isn't plain (On in each of those tools), or why a name of the plugin's is not brought in.
+ */
+function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginView) {
+  const items = entry.items?.[plugin.name], tools = view.tools.filter(tool => !takesPlugins(tool));
+  if (!items || !tools.length) return null;
+  const state = (line: PluginItemLine): string => {
+    const out = tools.filter(tool => line.except?.includes(tool)).map(tool => names[tool]);
+    const where = line.on === false ? 'Off' : out.length ? `Kept out of ${andList(out)}` : '';
+    const said = { linked: where, update: 'An update is ready: Update brings it in', going: 'No longer in the plugin: Update turns it off', new: 'New in the plugin: Update brings it in',
+      removed: 'Removed by the plugin’s update, so it is off. Turning it on keeps it as yours', 'not-brought': `Not brought in: ${line.why ?? ''}` }[line.state];
+    return [said, line.state === 'update' ? where : ''].filter(Boolean).join(' · ');
+  };
+  const linked = (line: PluginItemLine) => line.state !== 'new' && line.state !== 'not-brought';
+  const lines = (['skill', 'agent', 'mcp'] as const).flatMap(kind => items.lines.filter(line => line.kind === kind));
+  return h('section.plugin-section.plugin-items-section', { 'aria-label': 'Its items' },
+    h('div.plugin-section-head', {}, h('h3', {}, 'Its items')),
+    h('p.plugin-parts-about', {}, `In ${andList(tools.map(tool => names[tool]))}, its skills, agents and MCP servers are items of Central Knot’s that follow the plugin: its switch turns them on or off there, and one you change here becomes your own.`),
+    items.problem ? h('p.plugin-muted', {}, `${items.problem} Its items stay as they are.`) : null,
+    h('ul.plugin-outcome-list.plugin-items-list', {}, lines.map(line => h('li.plugin-outcome-row', { 'data-key': `${line.kind}:${line.key}` },
+      h('span.plugin-items-name', {}, `${partWords[line.kind][0]} `, linked(line)
+        ? h('button.inline-link.plugin-part-link', { type: 'button', title: `Open ${line.name} on the ${line.kind === 'skill' ? 'Skills' : line.kind === 'mcp' ? 'MCP servers' : 'Agents'} page`, onclick: () => openItem(pageOfPart[line.kind], line.name) }, h('code.plugin-name', {}, line.name))
+        : h('code.plugin-name', {}, line.name)),
+      h('span.plugin-outcome-what', {}, state(line))))));
 }
 
 /**
@@ -539,6 +567,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
       facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),
     installPanel(view, entry, plugin, marketIndex, versionToCompare(plugin, detail), components),
     partsSection(view, entry, plugin, components, detail),
+    itemsSection(view, entry, plugin),
     // What it holds and how each tool takes it, beside the README on a wide page (style.css), one above the other otherwise.
     h('div.plugin-columns', {},
       h('div.plugin-column', {},

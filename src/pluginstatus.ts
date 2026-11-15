@@ -103,12 +103,15 @@ export function toolNow(view: PluginsView, entry: MarketplaceView, plugin: strin
   const state = stateOf(entry, plugin, tool);
   const whole = state.state === 'installed' || state.state === 'not-known';
   const why = unavailable(view, entry, plugin, tool);
-  // A tool with no installer (Pi) is held back by its parts not fitting, unless the plugin can go nowhere new at all.
-  const cannot = (takesPlugins(tool) || why !== blocked(view, entry, tool) ? why : undefined) ?? noPartsFit(tool);
-  const route: ToolNow['route'] = takesPlugins(tool) && !why ? 'whole' : partsOffer(view, entry, plugin, tool, components) ? 'parts' : { cannot };
-  // What is installed whole is known from the tool's own record; parts only from the parts record.
+  // A tool with no installer (Pi) is held back only by what it can't hold of the plugin, unless the plugin can go nowhere new at all.
+  const elsewhere = takesPlugins(tool) || why !== blocked(view, entry, tool) ? why : undefined;
+  const items = !takesPlugins(tool) && (!components || !!(components.skills || components.agents || components.mcp));
+  const route: ToolNow['route'] = takesPlugins(tool) && !why ? 'whole'
+    : routeOf(entry, plugin) === 'parts' ? (partsOffer(view, entry, plugin, tool, components) ? 'parts' : { cannot: elsewhere ?? noPartsFit(tool) })
+    : items && !elsewhere ? 'items' : { cannot: elsewhere ?? `${names[tool]} takes no plugins, and this one has no skill, agent or MCP server to put there.` };
+  // What is installed whole is known from the tool's own record; parts and items only from the parts record.
   if (unknown && !(whole && takesPlugins(tool))) return { has: 'unknown', route };
-  return { has: whole ? 'whole' : partsOf(entry, plugin, tool) ? 'parts' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool) } : {}) };
+  return { has: whole ? 'whole' : partsOf(entry, plugin, tool) ? 'parts' : itemsIn(entry, plugin, tool) ? 'items' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool) } : {}) };
 }
 
 /**
@@ -148,16 +151,28 @@ export const DIRECTORY = 'anthropic-plugin-directory';
 /** Why Central Knot leaves Claude Code's copy from the Anthropic Directory to Claude Code. */
 export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).';
 
+/**
+ * Which way a plugin reaches the tools with no plugin installer (Pi, OpenCode), the one place it is decided: as parts while any
+ * of its parts not taken out are on record in any tool (parts.ts; the parts record unreadable reads as `unknown` before this is
+ * asked: toolNow), else as library items (pluginlibrary.ts). No plugin is ever half on each.
+ */
+export const routeOf = (entry: MarketplaceView, plugin: string): 'parts' | 'items' => (Object.values(entry.parts?.[plugin] ?? {}).some(parts => !!parts?.items.length) ? 'parts' : 'items');
+
+/** Whether some item linked to the plugin is wanted in this tool (pluginlibrary.ts itemsView): "has it" for Pi and OpenCode. */
+export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) =>
+  !!entry.items?.[plugin]?.lines.some(line => line.on && !line.except?.includes(tool) && (line.state === 'linked' || line.state === 'update' || line.state === 'going'));
+
 /** This plugin's parts in a tool, when they were installed there as separate items (parts.ts). */
 export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];
 
 /**
- * Whether a tool is one that would take this plugin's parts, whatever they are: it takes parts, has none of this plugin's
- * yet, and the plugin itself is not installed and can't be installed there (Pi always; Codex or Copilot CLI with their
+ * Whether a tool is one that would take this plugin's parts, whatever they are: the plugin has parts on record (routeOf), the
+ * tool takes parts, has none of this plugin's yet, and the plugin itself is not installed and can't be installed there (Pi always; Codex or Copilot CLI with their
  * plugin route blocked), the plugin is still listed, and the tool holds no other marketplace of this name.
  */
 export function partsEligible(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
-  if (!partsTools.includes(tool) || (tool === 'claude-cli' && view.clis[tool]) || partsOf(entry, plugin, tool) || installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
+  // No new parts: a plugin with none on record goes as library items (routeOf).
+  if (routeOf(entry, plugin) !== 'parts' || !partsTools.includes(tool) || (tool === 'claude-cli' && view.clis[tool]) || partsOf(entry, plugin, tool) || installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
   return !!unavailable(view, entry, plugin, tool) && stateOf(entry, plugin, tool).state === 'not-installed';
 }
 
@@ -168,7 +183,7 @@ export function partsEligible(view: PluginsView, entry: MarketplaceView, plugin:
  * there too (they can still come out).
  */
 export function partsPickable(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
-  if (!partsTools.includes(tool) || !view.tools.includes(tool) || !entry.switches?.[plugin]?.tools[tool]?.wanted) return false;
+  if (routeOf(entry, plugin) !== 'parts' || !partsTools.includes(tool) || !view.tools.includes(tool) || !entry.switches?.[plugin]?.tools[tool]?.wanted) return false;
   if (partsOf(entry, plugin, tool)) return true;
   if (stateOf(entry, plugin, tool).state !== 'not-installed' || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
   return !!unavailable(view, entry, plugin, tool);
@@ -446,13 +461,13 @@ export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: s
 
 /**
  * One managed tool's mark for a plugin, from the table's answer (`owed`) and the tool's copy: installed (`outdated` when an
- * Update is offered), its parts in (`parts-changed` when out of date), installed though not wanted (`stays`: Off, or kept out
+ * Update is offered), its parts in (`parts-changed` when out of date), its items on there (`items`: Pi, OpenCode), installed though not wanted (`stays`: Off, or kept out
  * of it), not in it though wanted (`waits` for the automatic updates' check; `not-brought`, new here while some tool has it off
  * in its own settings; `missing` for Install there), wanted where it
  * can't go (`cannot`), `kept-out`, not in it (`absent`), its record unreadable (`unknown`), or listed with its files gone
  * (`not-known`).
  */
-export type ToolMark = 'installed' | 'outdated' | 'parts' | 'parts-changed' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'cannot' | 'kept-out' | 'absent' | 'unknown' | 'not-known';
+export type ToolMark = 'installed' | 'outdated' | 'parts' | 'parts-changed' | 'items' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'cannot' | 'kept-out' | 'absent' | 'unknown' | 'not-known';
 
 /**
  * A tool's mark and the sentence its tooltip and the plugin page's line say. `outdated`: an Update is offered there
@@ -479,9 +494,14 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
     if (unwanted) return { mark: 'stays', words: `${words}${unwanted}` };
     return { mark: parts.changed ? 'parts-changed' : 'parts', words };
   }
+  if (owed.has === 'items') {
+    const ready = entry.items?.[plugin]?.ready ? ' An update is ready: Update.' : '';
+    const words = `${name}: its items are on there, as items of Central Knot’s that follow the plugin.${ready}`;
+    return unwanted ? { mark: 'stays', words: `${words}${unwanted.replace('Take out there takes it out.', 'Take out there turns them off there.')}` } : { mark: 'items', words };
+  }
   if (owed.wanted && owed.held) return { mark: 'cannot', words: `${name}: ${owed.held}` };
   if (owed.wanted && owed.act) {
-    const [what, goes, them] = owed.act === 'install' ? ['it', 'goes', 'it'] : ['its parts', 'go', 'them'];
+    const [what, goes, them] = owed.act === 'install' ? ['it', 'goes', 'it'] : owed.act === 'install-items' ? ['its items', 'go', 'them'] : ['its parts', 'go', 'them'];
     const when = auto ? 'at the next automatic check' : 'once plugins update by themselves again (Settings, and Automatic sync)';
     if (owed.background) return { mark: 'waits', words: `Not in ${name} yet: ${what} ${goes} in ${when}. Install there puts ${them} in now.` };
     const offIn = view.tools.filter(other => { const there = stateOf(entry, plugin, other); return there.state === 'installed' && !!there.off; }).map(other => names[other]);

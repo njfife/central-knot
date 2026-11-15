@@ -2,7 +2,8 @@
 // `/tree/` or GitLab's `/-/tree/` (or `/blob/`, a file's link, read as the folder that holds the file) that says a branch or
 // tag and a folder in it. A branch name may hold a slash, so that text
 // is split only once the repository's own branches and tags are known (splitRef, given what `git ls-remote` lists); this
-// module never guesses it. Also the short way a page names a source (linkLabel). Pure: no Node, so the page uses it too.
+// module never guesses it. Also the short way a page names a source (linkLabel), and a plugin's link (pluginLink: a plugin is the
+// other kind of source, pluginlibrary.ts), which is no Git link. Pure: no Node, so the page uses it too.
 import { githubRepo } from './values.ts';
 
 /**
@@ -70,8 +71,20 @@ export function splitRef(rest: readonly string[], refs: readonly string[]): { re
  * split here. The link as given is its tooltip.
  */
 export function linkLabel(link: string): string {
+  const plugin = pluginOf(link);
+  if (plugin) return `the plugin ${plugin}`;
   const read = readLink(link);
   if ('refused' in read) return link;
   const where = read.repository.replace(/^[a-z]+:\/\/(?:[^@/]+@)?/, '').replace(/^[^@/]+@([^:]+):/, '$1/').replace(/\.git$/, '');
   return read.rest ? `${where} (${read.rest.join('/')})` : where;
 }
+
+/**
+ * A plugin's link, which its items' versions record as a Git source's record theirs (library.ts Origin `link`): `plugin:` and the
+ * name the tools write (plugin@marketplace). It stays the same across launches and updates, and readLink refuses it, so it is
+ * never fetched or read as a Git link; linkLabel words it "the plugin pdf".
+ */
+export const pluginLink = (plugin: string, marketName: string) => `${PLUGIN}${plugin}@${marketName}`;
+/** The plugin a link names (pluginLink), if it is a plugin's. */
+export const pluginOf = (link: string) => (link.startsWith(PLUGIN) ? link.slice(PLUGIN.length, link.lastIndexOf('@')) : undefined);
+const PLUGIN = 'plugin:';

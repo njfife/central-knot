@@ -25,7 +25,7 @@ import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { comparableText } from './pluginstatus.ts';
-import { throughPlugins, type GivenByPlugin } from './plugins.ts';
+import { pluginHolds, throughPlugins, type GivenByPlugin, type PluginHold } from './plugins.ts';
 import { errorCode, itemKey, landingOf, libraryGate, partsIn, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recoverFolders, removeFolder, rootOf, rootProblem, sharedFolder, swapFolder, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
@@ -68,6 +68,8 @@ export interface SkillDisk extends Disk<SkillCopy> {
   switchedOff: Map<string, HarnessId[]>;
   /** How a tool has the skill another way, if it does (library.ts held `anotherWay`), On or Off. */
   anotherWay(item: Wanted, tool: HarnessId): string | undefined;
+  /** For an item linked to a plugin, in a tool that takes the plugin: plugins.ts pluginHolds, asked before every other reason. */
+  linked(item: Wanted, tool: HarnessId): PluginHold | undefined;
   /** Why a tool can't be given the skill, if it can't. */
   cannotTake(item: Wanted, tool: HarnessId): string | undefined;
 }
@@ -81,6 +83,7 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
   const disk: SkillDisk = {
     byKey: new Map(), unseen: new Map(), uncopied: new Set(), locked: new Map(), problems: [], outside: new Map(), ways: new Map(), readsFrom: {},
     through: await throughPlugins(context, managed, 'skill'), parts: await partsIn(context.home, 'skill'), shapes: new Map(), switches: new Map(), switchedOff: new Map(),
+    linked: await pluginHolds(context, managed),
     anotherWay: (item, tool) => anotherWay(disk, managed, item, tool),
     cannotTake: (item, tool) => cannotTake(context, disk, item, tool),
     held: (item, tool) => {
@@ -186,6 +189,9 @@ async function readAlsoRead(context: ShareContext, disk: SkillDisk, managed: Har
  * tool the skill is kept out of, whose copy there is Central Knot's and leaves this pass, has it no other way.
  */
 function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: HarnessId, depth = 0): string | undefined {
+  // A plugin's item, in a tool that takes the plugin, has no other way than the plugin (cannotTake says the rest).
+  const linked = disk.linked(item, tool);
+  if (linked) return linked.anotherWay ? linked.why : undefined;
   const given = pluginFor(disk, item.key, tool);
   if (given) return throughPlugin(tool, given);
   const way = disk.ways.get(item.key)?.[tool];
@@ -213,8 +219,10 @@ function pluginFor(disk: SkillDisk, key: string, tool: HarnessId): ThroughPlugin
   return plugin;
 }
 
-/** Why a tool can't be given a skill (librarypass.ts Disk.held, without `anotherWay`): its name, or its shape. */
+/** Why a tool can't be given a skill (librarypass.ts Disk.held, without `anotherWay`): a plugin's item where the plugin isn't, its name, or its shape. */
 function cannotTake(context: ShareContext, disk: SkillDisk, item: Wanted, tool: HarnessId): string | undefined {
+  const linked = disk.linked(item, tool);
+  if (linked && !linked.anotherWay) return linked.why;
   if (harnesses[tool].reservedSkills.includes(item.name)) return `${nameOf(tool)} reserves the name “${item.name}”.`;
   const shape = disk.shapes.get(item.key);
   return shape ? wontLoad(context, tool, item.name, shape) : undefined;
