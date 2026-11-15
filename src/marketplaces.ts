@@ -733,14 +733,26 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const offBefore = (each: HarnessId) => { const state = entry.states[plugin]?.[each]; return state?.state === 'installed' && !!state.off; };
     const back = reverse(ran.done).flatMap(op => (op.action === 'install' && offBefore(op.tool) ? [op, { ...op, action: 'plugin-off' as const }] : [op]));
     // Pi and OpenCode: its items (pluginlibrary.ts), one pass per kind, with their states before for the Undo.
-    const goes = clickGoes(what) === 'in' || (what === 'fix' && itemsIn.some(each => switchOf(shown, entry, listed, known, record).tools[each]?.wanted));
-    const ask: ItemsAsk = goes ? { into: itemsIn, ...(what === 'on' || what === 'add' ? { on: true as const } : {}) } : { outOf: itemsIn, ...(what === 'off' ? { off: true as const } : {}) };
-    const items = itemsIn.length && host.share && !ran.stopped
-      ? await runItems(host.share(), (await host.read()).tools, after, ask, goes ? await itemFiles(await context(), entry.source, plugin) : { commitAt: '' }, { source: entry.source, marketName, plugin, action: goes ? 'install-items' : 'remove-items' }) : undefined;
+    const wanted = itemsIn.some(each => switchOf(shown, entry, listed, known, record).tools[each]?.wanted);
+    const items = itemsIn.length && !ran.stopped ? await turnItems(entry.source, marketName, after, what, itemsIn, wanted) : undefined;
     if (items?.back) back.push({ source: entry.source, marketName, plugin, tool: itemsIn[0]!, action: 'items-back', items: items.back });
-    for (const told of items?.notices ?? []) host.notices?.(told.kind, told.notices);
     const ended = ran.stopped ?? items?.stopped;
     return { done: [...ran.done, ...(items?.done ?? []), ...held], before: before ?? null, back, ...(ended ? { stopped: ended } : {}) };
+  }
+
+  /**
+   * A turn's part in the tools that take no plugins (`tools`, owed install-items or remove-items there): On and Add turn each item
+   * On, Off each Off, the others change those tools in each item's `except` (pluginlibrary.ts ItemsAsk); a click that brings the
+   * plugin in (`wanted` there, for Install there and Take out there) reads it first. Its notices go to their pages.
+   */
+  async function turnItems(source: string, marketName: string, entry: PluginEntry, what: PluginTurn, tools: HarnessId[], wanted: boolean) {
+    const share = host.share?.();
+    if (!share) return undefined;
+    const goes = clickGoes(what) === 'in' || (what === 'fix' && wanted), op = { source, marketName, plugin: entry.plugin, action: goes ? 'install-items' as const : 'remove-items' as const };
+    const ask: ItemsAsk = goes ? { into: tools, ...(what === 'on' || what === 'add' ? { on: true as const } : {}) } : { outOf: tools, ...(what === 'off' ? { off: true as const } : {}) };
+    const ran = await runItems(share, (await host.read()).tools, entry, ask, goes ? await itemFiles(await context(), source, entry.plugin) : { commitAt: '' }, op);
+    for (const told of ran.notices) host.notices?.(told.kind, told.notices);
+    return ran;
   }
 
   /** The Undo of a turn: the plugin's entry put back as it was (`before`; null: none), then `back` run as a turn runs. */
