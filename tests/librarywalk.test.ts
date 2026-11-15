@@ -279,7 +279,8 @@ async function walk(seed: number): Promise<Finding[]> {
             const byHand = told.some(event => event.cause === 'deleted-by-hand');
             if (told.some(event => event.cause === 'source-dropped')) fail('a source’s SKILL.md that stopped parsing was read as the skill gone');
             if ((await seen(box, context())).item?.on !== before && (quiet || !byHand)) fail('a source’s SKILL.md that stopped parsing turned the skill Off');
-            if (quiet && done.results?.some(entry => entry.outcome === 'removed')) fail('a source’s SKILL.md that stopped parsing had a copy removed');
+            // The same check reads the source's agent and server too, which it may drop by their own reads: only the skill's copies count.
+            if (quiet && done.results?.some(entry => entry.outcome === 'removed' && entry.item === 'notes')) fail('a source’s SKILL.md that stopped parsing had a copy removed');
           } finally { await source.commit({ 'notes/SKILL.md': skillText(`Source ${++marker}.`) }); }
         } });
       }
