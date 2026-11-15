@@ -9,15 +9,15 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, rm, stat, unlink } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
-import { isAbsolute, join, sep } from 'node:path';
+import { join, sep } from 'node:path';
 import { agentText, fileFor, fromMarkdown, isAgentTool, safeName } from './agentfiles.ts';
 import { agentsOn } from './agents.ts';
-import { PLUGIN_ONLY, type PluginFiles } from './catalogdetail.ts';
+import type { PluginFiles } from './catalogdetail.ts';
 import { loadProblems, parseSkill } from './discovery.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { removeFolder, rootProblem, swapFolder } from './skillfiles.ts';
 import { skillsOn } from './skills.ts';
-import { canonical, cannotHold, editEntry, fromJson, readTool, serverHash, type NeutralServer } from './mcp.ts';
+import { canonical, cannotHold, editEntry, fromJson, readTool, runsFrom, serverHash, type NeutralServer } from './mcp.ts';
 import { serversOn } from './servers.ts';
 import { partsSummary, partsTools, partWords, samePart } from './pluginstatus.ts';
 import {
@@ -71,27 +71,6 @@ const unreadKey = (kind: PartKind, name: string) => `${kind}\0${name}`;
 interface Ready extends PartItem { store: () => Promise<void> }
 
 /**
- * A server that can't run as a separate item: it needs the plugin's own folder or settings (only Claude Code fills those
- * in), or runs a program or folder named relative to the plugin, which isn't copied (CD §5, Unsupported).
- */
-async function needsPlugin(raw: Record<string, unknown>, folder: string): Promise<string | undefined> {
-  if (PLUGIN_ONLY.test(JSON.stringify(raw))) return 'It runs from the plugin’s own folder or settings, which only Claude Code fills in.';
-  const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
-  // Something in the plugin's folder: a path starting ./ or ../, or a relative name that is there. A program on PATH, a
-  // package name or a URL is not.
-  const inPlugin = async (value: string) => !isAbsolute(value) && (/^\.\.?([\\/]|$)/.test(value) || await exists(join(folder, value)));
-  const command = text(raw.command);
-  const cwd = text(raw.cwd);
-  // An option's value counts too (`--config=./server.json`); a bare flag doesn't.
-  const args = (Array.isArray(raw.args) ? raw.args.map(text) : []).map(arg => (arg?.startsWith('-') ? arg.split('=').slice(1).join('=') || undefined : arg))
-    .filter((arg): arg is string => !!arg && !/^[a-z][\w+.-]*:/i.test(arg));
-  const relativeCommand = !!command && !isAbsolute(command) && (/[\\/]/.test(command) || await inPlugin(command));
-  const pluginArg = (await Promise.all(args.map(inPlugin))).some(Boolean);
-  if ((cwd !== undefined && !isAbsolute(cwd)) || relativeCommand || pluginArg) return 'It runs files from the plugin’s own folder, which aren’t copied.';
-  return undefined;
-}
-
-/**
  * What a plugin's parts are for one tool: each one that can go in (with the hash it has), why each other part can't, and
  * the parts there that can't be read or parsed now, as `kind\0name` (an update keeps those as installed rather than
  * reading them as dropped).
@@ -120,8 +99,8 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
     // Claude Code rewrites its MCP file while running, so its servers are written only with Write to Claude Code (MCP-02).
     if (tool === 'claude-cli') { plan.push({ kind: 'mcp', name: server, why: 'Claude Code’s MCP servers are added with “Write to Claude Code” on the MCP servers page, so parts leave them out.', wholeKind: true }); continue; }
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { unread.add(unreadKey('mcp', server)); plan.push({ kind: 'mcp', name: server, why: 'It isn’t a server entry.' }); continue; }
-    const why = await needsPlugin(raw as Record<string, unknown>, files.folder);
-    if (why) { plan.push({ kind: 'mcp', name: server, why }); continue; }
+    const runs = await runsFrom(raw as Record<string, unknown>, files.folder);
+    if (runs) { plan.push({ kind: 'mcp', name: server, why: runs === 'settings' ? 'It runs from the plugin’s own folder or settings, which only Claude Code fills in.' : 'It runs files from the plugin’s own folder, which aren’t copied.' }); continue; }
     const { server: neutral, extras } = fromJson(server, tool, '', raw as Record<string, unknown>);
     const cannot = cannotHold(tool, neutral);
     if (cannot) { plan.push({ kind: 'mcp', name: server, why: cannot }); continue; }
