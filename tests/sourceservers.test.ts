@@ -177,11 +177,11 @@ test('A .mcp.json that stops parsing, whose mcpServers turns null, or that becom
   } finally { await box.cleanup(); }
 });
 
-test('Left out is not unreadable: a server that runs files from the repository, two skills of one name and two agents in one form hold back no drop; a server with no command holds back the servers’', async () => {
+test('Left out is not unreadable: a server that runs files from the repository, two skills of one name, a skill named so no tool can store it and two agents in one form hold back no drop; a server with no command holds back the servers’', async () => {
   const repo = await repository(hosts, 'https://github.com/team/mixed');
   await repo.commit({
     '.mcp.json': mcpJson({ docs: { command: 'npx' }, search: { command: 'search' }, local: { command: './run.sh' } }),
-    'one/SKILL.md': skillMd('twin'), 'two/SKILL.md': skillMd('twin'), 'notes/SKILL.md': skillMd('notes'), 'keep/SKILL.md': skillMd('keep'),
+    'one/SKILL.md': skillMd('twin'), 'two/SKILL.md': skillMd('twin'), 'odd/SKILL.md': skillMd('my:skill'), 'notes/SKILL.md': skillMd('notes'), 'keep/SKILL.md': skillMd('keep'),
     'agents/x.md': '---\nname: x\ndescription: X.\n---\nX.\n', 'x.md': '---\nname: x\ndescription: X.\n---\nOther.\n', 'agents/y.md': '---\nname: y\ndescription: Y.\n---\nY.\n',
   });
   const box = await sandbox(['copilot-cli', 'codex-cli']);
@@ -232,24 +232,25 @@ test('No false change after On: an empty argument list, numbers, streamable-http
 });
 
 test('A server taken in before this version with "args": [] is taken in once more as edited in a tool, once, and no file changes', async () => {
-  const box = await sandbox(['claude-cli', 'copilot-cli']);
+  const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'], box = await sandbox(tools);
   try {
     await writeFile(box.path('claude-cli'), mcpJson({ docs: { type: 'stdio', command: 'npx', args: [] } }));
     await writeFile(box.path('copilot-cli'), mcpJson({ docs: { type: 'local', command: 'npx', args: [], tools: ['*'] } }));
+    await writeFile(box.path('codex-cli'), '[mcp_servers.docs]\ncommand = "npx"\nargs = []\n');
     await turn(box, 'docs', true);
     // The record as a version before this one left it: the version holds the empty list, and so does what was applied.
     const old: NeutralServer = { transport: 'stdio', command: 'npx', args: [] }, oldHash = serverHash(old);
     const { library } = await openLibrary(box.context, true), item = library.items.docs;
     await storeVersion(box.context, 'docs', old);
-    Object.assign(item, { hash: oldHash, versions: [{ ...item.versions[0], hash: oldHash }], applied: { 'claude-cli': oldHash, 'copilot-cli': oldHash } });
+    Object.assign(item, { hash: oldHash, versions: [{ ...item.versions[0], hash: oldHash }], applied: { 'claude-cli': oldHash, 'copilot-cli': oldHash, 'codex-cli': oldHash } });
     await saveLibrary(box.context.home, library);
-    const files = await Promise.all(['claude-cli', 'copilot-cli'].map(tool => readFile(box.path(tool as HarnessId), 'utf8')));
+    const files = await Promise.all(tools.map(tool => readFile(box.path(tool), 'utf8')));
     const edits = async () => (await readHistory(box.context)).filter(event => event.key === 'mcp:docs' && event.kind === 'edit').length;
     await applyServers(box.context, box.tools, []);
     assert.equal(await edits(), 1);
     await applyServers(box.context, box.tools, []);
     assert.equal(await edits(), 1, 'once');
-    assert.deepEqual(await Promise.all(['claude-cli', 'copilot-cli'].map(tool => readFile(box.path(tool as HarnessId), 'utf8'))), files);
+    assert.deepEqual(await Promise.all(tools.map(tool => readFile(box.path(tool), 'utf8'))), files, 'every tool reads the empty list as none, Codex too: nothing is written');
   } finally { await box.cleanup(); }
 });
 

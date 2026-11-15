@@ -12,9 +12,11 @@
 // removed (library.ts REMOVED AT ITS SOURCE: the Skills view's fromSource `removed`), and removed. The source holds an agent
 // too, "critic" in its agents/ folder: changed there (its prompt, or its description), dropped and back there, turned On and
 // Off, deleted, edited by hand in Claude Code (alone, or with a change at the source and a Check now), and Add, Merge, Replace
-// and Keep mine on its line. Odd
-// seeds start with notes made by hand in Claude Code (a folder with a script, a file of mode 0600 and an empty folder), so the
-// source's notes differs and is not brought in; even seeds start with notes and critic from the source, turned On.
+// and Keep mine on its line. And an MCP server, "relay" in its .mcp.json: changed there (an environment variable, or its
+// arguments), dropped and back there, turned On and Off, deleted, edited by hand in Copilot CLI (alone, or with a change at the
+// source and a Check now), Write to Claude Code (whose writes wait for it), and Add, Merge, Replace and Keep mine on its line.
+// Odd seeds start with notes made by hand in Claude Code (a folder with a script, a file of mode 0600 and an empty folder), so
+// the source's notes differs and is not brought in; even seeds start with notes, critic and relay from the source, turned On.
 // After every step:
 //   (a) nothing is lost: each folder Central Knot wrote over or removed held a content that is a version of the skill, or is
 //       still in a tool or the shared folder. Checked for the step, and for every such content since the walk began;
@@ -28,7 +30,10 @@
 //   (h) the agent's files are as they were in every managed tool, but for its own Off and On, which puts them back byte for byte;
 //   (i) the source's agent: each file of it Central Knot wrote over or removed held a version of it, or is still in a tool;
 //       and in a copy of the home put back after, a second plain pass over the agents writes nothing, then an On critic is
-//       current in every managed tool, an Off or deleted one has nothing applied. Its line's clicks are among (c)'s.
+//       current in every managed tool, an Off or deleted one has nothing applied. Its line's clicks are among (c)'s;
+//   (j) the source's server, the same: each entry of it Central Knot wrote over or removed held a version of it, or is still in
+//       a tool; and in a copy put back after, a second plain pass over the servers writes nothing, then after Write to Claude
+//       Code an On relay is current in every managed tool, an Off or deleted one has nothing applied. Its line's clicks too.
 // A step that makes a copy unseeable (a link inside, a SKILL.md that can't be parsed, its tool's folder made again) is made
 // from a settled home, and asserts that the pass turns nothing Off and removes nothing; one more deletes a folder by hand and
 // runs passes inside a settle window of 2 s, which must change nothing; and one makes the source's SKILL.md unparseable for a
@@ -44,6 +49,8 @@ import { agentHash, parseAgent } from '../src/agentfiles.ts';
 import { agentsView, applyAgents } from '../src/agents.ts';
 import type { AgentTool } from '../src/presence.ts';
 import { pruneHistory, readHistory } from '../src/history.ts';
+import { readTool } from '../src/mcp.ts';
+import { applyServers, serversView, writeToClaude } from '../src/servers.ts';
 import { wantedIn } from '../src/library.ts';
 import { asItIs, asksWhichCopy, harnessIs, placeOf, rowClicks } from '../src/libraryrow.ts';
 import { DAY_MS } from '../src/model.ts';
@@ -92,6 +99,9 @@ const agentFiles = { 'claude-cli': '.claude/agents/writer.md', 'copilot-cli': '.
 const criticFiles = { 'claude-cli': '.claude/agents/critic.md', 'copilot-cli': '.copilot/agents/critic.agent.md', 'codex-cli': '.codex/agents/critic.toml', 'pi-cli': '.pi/agent/skills/critic.md' } as const;
 const criticMd = (prompt: string, description = 'Critiques.') => `---\nname: critic\ndescription: ${description}\n---\n\n${prompt}\n`;
 const sharedHash = (tool: string, text: string | undefined) => { const read = text === undefined ? undefined : parseAgent(tool as AgentTool, 'critic', text); return read && agentHash(read); };
+/** The source's MCP server, relay, in its .mcp.json (with a field of Claude Code's own), or none there. */
+const relayJson = (relay?: { A: string; B: string; args: string[] }) =>
+  `${JSON.stringify({ mcpServers: relay ? { relay: { command: 'relay', args: relay.args, env: { A: relay.A, B: relay.B }, timeout: 30 } } : {} }, null, 2)}\n`;
 /** Each tool's own switch file, which only Clear the switch may write. */
 const switchFiles = { 'claude-cli': '.claude/settings.json', 'copilot-cli': '.copilot/settings.json', 'codex-cli': '.codex/config.toml', 'pi-cli': '.pi/agent/settings.json' } as const;
 
@@ -101,8 +111,8 @@ async function walk(seed: number): Promise<Finding[]> {
   const box = await sandbox(allTools), tools = box.tools;
   const manage = (managed: HarnessId[]) => { tools.splice(0, tools.length, ...allTools.filter(tool => managed.includes(tool))); };
   const shared = join(box.home, '.agents/skills/notes');
-  /** The skills' record and the agents' (the source's agent is one), as text. */
-  const recordText = async () => (await Promise.all(['skills.json', 'agents.json'].map(file => readFile(join(box.home, '.central-knot', file), 'utf8').catch(() => '')))).join('\n');
+  /** The skills' record, the agents' and the servers' (the source's agent and server are in them), as text. */
+  const recordText = async () => (await Promise.all(['skills.json', 'agents.json', 'mcp.json'].map(file => readFile(join(box.home, '.central-knot', file), 'utf8').catch(() => '')))).join('\n');
   let days: HistoryDays = 30, marker = 0, syncOn = true, settled = true, last: PassResult | undefined;
   const context = (more: Partial<ShareContext> = {}): ShareContext => ({ ...box.context, historyDays: days, ...more });
   const trace = [`seed ${seed}`];
@@ -122,15 +132,18 @@ async function walk(seed: number): Promise<Finding[]> {
   const contents = async () => Object.fromEntries(await Promise.all([...allTools.map(tool => [tool, folderOf(box, tool as Tool)]), ['shared', shared]].map(async ([where, path]) => [where, await contentAt(path)] as const)));
   const versionsNow = async () => new Set(((await seen(box, context())).item?.versions ?? []).map(version => version.hash));
   const agentNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, agentFiles[tool as keyof typeof agentFiles]), 'utf8').catch(() => undefined)] as const)));
-  const switchesNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, switchFiles[tool as keyof typeof switchFiles]), 'utf8').catch(() => undefined)] as const)));
+  // Codex keeps its MCP servers in that same file: their tables are the servers' to write, not the switch.
+  const switchesNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, switchFiles[tool as keyof typeof switchFiles]), 'utf8')
+    .then(text => (tool === 'codex-cli' ? text.replace(/^\[mcp_servers[^\n]*\n(?:(?!\[)[^\n]*\n?)*/gm, '').trimEnd() || undefined : text), () => undefined)] as const)));
   const historyCount = async () => (await readHistory(context())).filter(event => event.key === 'notes').length;
   const readOnly = (tool: Tool, on: boolean) => chmod(join(box.home, roots[tool]), on ? 0o555 : 0o755).catch(() => undefined);
   let agentAsWritten: Record<string, string | undefined> = {};
   let clock = Date.now() + 1e9;
   // The source: a repository of this walk's own, whose root is a notes skill until it drops it (renamed jottings there).
   const sourceLink = `https://github.com/walk/notes-${seed}`, source = await repository(hosts, sourceLink);
-  await source.commit({ 'notes/SKILL.md': skillText('From the source.'), 'agents/critic.md': criticMd('You critique.') });
-  let sourceHasNotes = true, sourceHasCritic = true;
+  const relayAt = { A: '1', B: '1', args: ['--relay'] };
+  await source.commit({ 'notes/SKILL.md': skillText('From the source.'), 'agents/critic.md': criticMd('You critique.'), '.mcp.json': relayJson(relayAt) });
+  let sourceHasNotes = true, sourceHasCritic = true, sourceHasRelay = true;
   const criticTaken = new Set<string>();
   const critic = async () => (await agentsView(context(), tools)).library.critic as LibraryItem | undefined;
   const criticNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, criticFiles[tool as keyof typeof criticFiles]), 'utf8').catch(() => undefined)] as const)));
@@ -143,6 +156,22 @@ async function walk(seed: number): Promise<Finding[]> {
     for (const tool of item ? tools : []) {
       if (item!.on && !item!.deleted && sharedHash(tool, files[tool]) !== item!.hash) fail(`(i) after quiet passes the source’s agent, On, is not current in ${tool}`);
       if ((!item!.on || item!.deleted) && item!.applied[tool] !== undefined) fail(`(i) after quiet passes the source’s agent, Off, still has a copy applied in ${tool}`);
+    }
+  });
+  const relayTaken = new Set<string>();
+  const relay = async () => (await serversView(context(), tools)).library.relay as LibraryItem | undefined;
+  /** Each tool's entry for relay, by the hash of its shared part (none where it has none). */
+  const relayNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, (await readTool(context(), tool)).entries.find(entry => entry.name === 'relay')?.hash] as const)));
+  /** (j) on the home as it is, in a trial: two plain passes over the servers, the second writing nothing; Write to Claude Code; then the source's server, On, is current in every managed tool, and Off or deleted has nothing applied. */
+  const serversSettle = () => trial(box, async () => {
+    await applyServers(context(), tools, []);
+    const second = await applyServers(context(), tools, []);
+    if (second.writes) fail(`(j) a second plain pass over the servers writes: ${second.results.map(entry => entry.message).join(' | ').slice(0, 120)}`);
+    await writeToClaude(context(), tools, ['relay']);
+    const item = await relay(), hashes = await relayNow();
+    for (const tool of item ? tools : []) {
+      if (item!.on && !item!.deleted && hashes[tool] !== item!.hash) fail(`(j) after quiet passes and Write to Claude Code the source’s server, On, is not current in ${tool}`);
+      if ((!item!.on || item!.deleted) && item!.applied[tool] !== undefined) fail(`(j) after quiet passes and Write to Claude Code the source’s server, Off, still has an entry applied in ${tool}`);
     }
   });
   const sourceNow = async () => (await sourcesView(context(), tools)).sources[0];
@@ -187,6 +216,7 @@ async function walk(seed: number): Promise<Finding[]> {
     await applyAgents(context(), tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
     // Even seeds: the source's agent, added with it, turned On too, so its changes and its line's clicks come within the walk.
     if (!(seed % 2)) await applyAgents(context(), tools, [{ key: 'critic', on: true, except: [], seenOn: false }]);
+    if (!(seed % 2)) { await applyServers(context(), tools, [{ key: 'relay', on: true, except: [], seenOn: false }]); await writeToClaude(context(), tools, ['relay']); }
     agentAsWritten = await agentNow();
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen(box, context());
@@ -295,6 +325,35 @@ async function walk(seed: number): Promise<Finding[]> {
       if (recorded && critLine?.state === 'wait') for (const click of ['merge', 'replace', 'keep'] as const) {
         add(4, { name: `${click} on critic’s line`, app: true, run: async more => asPass(await rowClick(context(more), tools, recorded.id, 'agent', 'critic', click)) });
       }
+      // The source's server: changed there (an environment variable, or its arguments), dropped and back there; On, Off, Delete,
+      // edited by hand in Copilot CLI; Write to Claude Code; and its line's Add, Merge, Replace and Keep mine.
+      const relayItem = await relay(), relayLive = relayItem && !relayItem.deleted ? relayItem : undefined;
+      const relayLine = recorded?.names.find(name => name.kind === 'mcp' && name.key === 'relay');
+      if (sourceHasRelay) add(2, { name: 'the source changes relay’s B', run: () => { relayAt.B = `${++marker}`; return source.commit({ '.mcp.json': relayJson(relayAt) }); } });
+      if (sourceHasRelay) add(1, { name: 'the source changes relay’s arguments', run: () => { relayAt.args = ['--relay', `${++marker}`]; return source.commit({ '.mcp.json': relayJson(relayAt) }); } });
+      add(1, { name: sourceHasRelay ? 'the source drops relay' : 'the source has relay again', run: async () => {
+        sourceHasRelay = !sourceHasRelay;
+        await source.commit({ '.mcp.json': relayJson(sourceHasRelay ? relayAt : undefined) });
+      } });
+      if (relayLive) add(2, { name: `relay ${relayLive.on ? 'Off' : 'On'}`, app: true, run: more => applyServers(context(more), tools, [{ key: 'relay', on: !relayLive.on, except: [], seenOn: relayLive.on }]) });
+      if (relayLive) add(1, { name: 'relay deleted', app: true, run: more => applyServers(context(more), tools, [{ key: 'relay', on: relayLive.on, except: [], seenOn: relayLive.on, deleted: true }]) });
+      if (tools.includes('claude-cli')) add(2, { name: 'Write to Claude Code', app: true, run: more => writeToClaude(context(more), tools, ['relay']) });
+      const inCopilot = join(box.home, '.copilot/mcp-config.json');
+      const editRelay = async () => {
+        const parsed = JSON.parse(await readFile(inCopilot, 'utf8').catch(() => '{}'));
+        if (parsed.mcpServers?.relay) { parsed.mcpServers.relay.env = { ...parsed.mcpServers.relay.env, A: `mine ${++marker}` }; await writeFile(inCopilot, JSON.stringify(parsed, null, 2)); }
+      };
+      if (relayLive?.on && tools.includes('copilot-cli')) add(2, { name: 'hand edit relay in Copilot CLI', run: editRelay });
+      if (recorded && relayLive?.on && sourceHasRelay && tools.includes('copilot-cli')) add(3, { name: 'relay changed in Copilot CLI and at the source, then Check now', app: true, byHand: true, run: async () => {
+        await editRelay();
+        relayAt.B = `${++marker}`;
+        await source.commit({ '.mcp.json': relayJson(relayAt) });
+        return checkNow(recorded.id);
+      } });
+      if (recorded && relayLine?.state === 'deleted') add(3, { name: 'Add on relay’s line', app: true, run: more => rowClick(context(more), tools, recorded.id, 'mcp', 'relay', 'bringBack') });
+      if (recorded && relayLine?.state === 'wait') for (const click of ['merge', 'replace', 'keep'] as const) {
+        add(4, { name: `${click} on relay’s line`, app: true, run: async more => asPass(await rowClick(context(more), tools, recorded.id, 'mcp', 'relay', click)) });
+      }
       add(1, { name: `Automatic sync ${syncOn ? 'off' : 'on'}`, run: async () => { syncOn = !syncOn; } });
       add(1, { name: 'the agent Off then On', app: true, writes: 'agent', run: async () => {
         const off = await applyAgents(context(), tools, [{ key: 'writer', on: false, except: [], seenOn: true }]);
@@ -344,7 +403,7 @@ async function walk(seed: number): Promise<Finding[]> {
       const crash = act.app && !act.byHand && !blocked && next() < 0.1 ? pick(['before-remove', 'before-rename', 'mid-replace'] as const) : undefined;
       trace.push(`${act.name}${blocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       const before = await folders(), contentsBefore = await contents(), managedBefore = [...tools], entriesBefore = await historyCount(), settledBefore = settled;
-      const switchesBefore = await switchesNow(), criticBefore = await criticNow();
+      const switchesBefore = await switchesNow(), criticBefore = await criticNow(), relayBefore = await relayNow();
       let done: unknown, crashed = false;
       if (blocked) await readOnly(blocked, true);
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
@@ -374,6 +433,11 @@ async function walk(seed: number): Promise<Finding[]> {
       if (act.app && !act.byHand) for (const tool of managedBefore) if (criticBefore[tool] !== undefined && criticBefore[tool] !== criticAfter[tool]) criticTaken.add(sharedHash(tool, criticBefore[tool]) ?? '');
       const criticVersions = new Set((await critic())?.versions.map(version => version.hash)), criticHere = new Set(allTools.map(tool => sharedHash(tool, criticAfter[tool])));
       for (const hash of criticTaken) if (hash && !criticVersions.has(hash) && !criticHere.has(hash)) { criticTaken.delete(hash); fail('(i) a file of the source’s agent Central Knot wrote over or removed is neither a version nor in any tool'); }
+      // (j) An entry of the source's server that Central Knot wrote over or removed held a version of it, or is still in a tool.
+      const relayAfter = await relayNow();
+      if (act.app && !act.byHand) for (const tool of managedBefore) if (relayBefore[tool] !== undefined && relayBefore[tool] !== relayAfter[tool]) relayTaken.add(relayBefore[tool]!);
+      const relayVersions = new Set((await relay())?.versions.map(version => version.hash)), relayHere = new Set(Object.values(relayAfter));
+      for (const hash of relayTaken) if (!relayVersions.has(hash) && !relayHere.has(hash)) { relayTaken.delete(hash); fail('(j) an entry of the source’s server Central Knot wrote over or removed is neither a version nor in any tool'); }
       // (f) Every click has its History entry, a crashed one too.
       const answer = act.click && !crashed ? done as PassResult : undefined;
       const refused = !!answer && (!!answer.stopped || answer.results.some(entry => entry.unchanged || entry.differs));
@@ -389,6 +453,7 @@ async function walk(seed: number): Promise<Finding[]> {
       }
       settled = await settles();
       await agentsSettle();
+      await serversSettle();
       // (c) Every action offered now does something.
       const offered: { name: string; run: () => Promise<PassResult | PassResult[]> }[] = (await historyActions(box, context())).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run }));
       const now = await seen(box, context()), live = now.item && !now.item.deleted ? now.item : undefined;
@@ -407,6 +472,9 @@ async function walk(seed: number): Promise<Finding[]> {
       const criticLine = sourceRow?.names.find(name => name.kind === 'agent' && name.key === 'critic');
       if (criticLine?.state === 'wait') for (const click of ['merge', 'replace', 'keep'] as const) offered.push({ name: `the Sources page’s ${click} on critic`, run: async () => asPass(await rowClick(context(), tools, sourceRow!.id, 'agent', 'critic', click)) });
       if (criticLine?.state === 'deleted') offered.push({ name: 'the Sources page’s Add on critic', run: async () => asPass(await rowClick(context(), tools, sourceRow!.id, 'agent', 'critic', 'bringBack')) });
+      const relayLineNow = sourceRow?.names.find(name => name.kind === 'mcp' && name.key === 'relay');
+      if (relayLineNow?.state === 'wait') for (const click of ['merge', 'replace', 'keep'] as const) offered.push({ name: `the Sources page’s ${click} on relay`, run: async () => asPass(await rowClick(context(), tools, sourceRow!.id, 'mcp', 'relay', click)) });
+      if (relayLineNow?.state === 'deleted') offered.push({ name: 'the Sources page’s Add on relay', run: async () => asPass(await rowClick(context(), tools, sourceRow!.id, 'mcp', 'relay', 'bringBack')) });
       for (const action of offered) await trial(box, async () => {
         const record = await recordText(), switches = await switchesNow(), answers = [await action.run()].flat();
         const refusal = answers.map(answer => answer.stopped ?? answer.results.find(entry => entry.unchanged)?.message).find(Boolean);
@@ -428,7 +496,7 @@ async function walk(seed: number): Promise<Finding[]> {
 const extra = Number(process.env.CK_WALKS ?? 0), from = Number(process.env.CK_SEED ?? 5000);
 const only = process.env.CK_ONLY;
 const walks = only ? [Number(only)] : [...SEEDS, ...Array.from({ length: extra }, (_, index) => from + index)];
-test(`A random walk of ${STEPS} steps over a skill and an agent in one home, ${walks.length} times: nothing Central Knot removes or writes over is lost, passes settle, every action offered does something, Off then On is byte for byte, an unseeable copy turns nothing Off, and the agent is never touched`, async () => {
+test(`A random walk of ${STEPS} steps over a skill, an agent and a source’s agent and MCP server in one home, ${walks.length} times: nothing Central Knot removes or writes over is lost, passes settle, every action offered does something, Off then On is byte for byte, an unseeable copy turns nothing Off, and the agent is never touched`, async () => {
   const findings = new Map<string, { count: number; trace: string }>();
   const waiting = [...walks];
   await Promise.all(Array.from({ length: only ? 1 : 6 }, async () => {
