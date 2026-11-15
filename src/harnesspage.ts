@@ -308,7 +308,7 @@ function pluginsTab(tool: HarnessId) {
   if (plugins.state === 'unsupported') {
     // Only the tools that take a plugin whole are named as where plugins install; this one takes a plugin's parts.
     const takers = (market.view?.tools ?? []).filter(takesPlugins);
-    return page(emptyState('puzzle', pluginsNotHandled(tool), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on Plugins can put its parts in ${names[tool]} as separate items. ` : ''}${names[tool]}’s own packages stay as they are.`));
+    return page(emptyState('puzzle', pluginsNotHandled(tool), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on Plugins puts its skills, agents and MCP servers in ${names[tool]} as items of Central Knot’s that follow the plugin. ` : ''}${names[tool]}’s own packages stay as they are.`));
   }
   // What could not be checked is said, so the list is never taken for everything installed.
   const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${pluginTitle(plugin)}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];
