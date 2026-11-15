@@ -63,7 +63,7 @@ export function whyNoLine(tag: string): string | undefined {
 /** The lines a build of each line is offered: an alpha only newer alphas, a preview newer previews and finals, a final only finals. */
 const OFFERED: Record<ReleaseLine, readonly ReleaseLine[]> = { alpha: ['alpha'], preview: ['preview', 'final'], final: ['final'] };
 
-/** The alpha's bundle id: the system's name for it, its settings folder's name, and its name as a home's sync owner. */
+/** The alpha's bundle id: the system's name for it, its settings folder's name, and its name where a home's record names it. */
 export const ALPHA_BUILD = 'com.centralknot.alpha';
 
 /**

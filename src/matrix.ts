@@ -6,11 +6,11 @@
 // kept or folded once its page shows it (toldNotices); until then it lives across reads in app.ts keepUnshown. First setup's
 // walkthrough (firstsetup.ts) is a band among a table's bands, given copyQuestion to hold the question of the item it is at.
 import { brandMark } from './brand.ts';
-import { caughtUpNames, dayAndTime, defaultHistoryDays, groupBy, syncOwner } from './model.ts';
+import { caughtUpNames, dayAndTime, defaultHistoryDays, groupBy } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { leftOutTools, otherOwnerSaid, takeOverButton, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { leftOutTools, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
@@ -788,27 +788,14 @@ function writeStepBand(waiting: ItemRow[]) {
       h('span.notice-text', {}, 'Claude Code’s settings wait for Write to Claude Code, to ', ...what, '.', quitFirst), h('span.notice-actions', {}, write))));
 }
 
-/**
- * Another build syncs this home (ORG-08): who, whether it is open now, and Take over syncing. Only one build syncs a home at a
- * time; this one changes no skill, MCP server or agent here until it is told to take over.
- */
-function otherOwnerBand(): HTMLElement | null {
-  const home = state.home, owner = home && syncOwner(home.sync.gate);
-  if (!owner) return null;
-  return h('div.band', { role: 'status', id: 'other-owner' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, otherOwnerSaid(owner)),
-    h('span.band-actions', {}, takeOverButton(owner, { variant: 'outline', size: 'small' }, 'take-over-sync', !!state.busy || !home.sync.access.allowed)));
-}
-
 /** The bands above a table, from its kind's view (listView). */
 function listNotices() {
   const mcp = listView()!;
   const bands: HTMLElement[] = [];
   for (const band of [syncOffBand(), outcomeBand(), walkthroughBand(kind, copyQuestion)]) if (band) bands.push(band);
   if (!mcp.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, mcp.access.reason)));
-  const owned = otherOwnerBand();
-  if (owned) bands.push(owned);
   // A record that stops every write (damaged, newer, another generation): said once, unless a problem below says it already.
-  else if (mcp.gate.state === 'stopped' && !mcp.problems.includes(mcp.gate.reason)) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, mcp.gate.reason)));
+  if (mcp.gate.state === 'stopped' && !mcp.problems.includes(mcp.gate.reason)) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, mcp.gate.reason)));
   const resume = resumeBand();
   if (resume) bands.push(resume);
   for (const problem of mcp.problems) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));

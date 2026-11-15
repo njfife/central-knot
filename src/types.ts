@@ -39,8 +39,10 @@ export interface OtherApp { name: string; version?: string; says: string }
  * build with none there, the build running from somewhere else (no `installed`: Quit). `running`: where each running copy of
  * that build runs from (otherbuilds.ts runningCopies, every copy by its bundle id); empty when none runs, unset when that can't
  * be told. `settingsFound`: its settings folder is there, so its settings are kept when the home's record passes from it.
+ * `ownsRecord`: the open home's sync record names it. `carries`: Replace or Quit of it carries its Automatic sync and plugin
+ * updates here (main.ts carriesChoices, asked ahead by the look); History's days are kept, the longer of the two, either way.
  */
-export interface OtherBuild { build: string; name: string; installed?: string; running?: string[]; settingsFound?: true }
+export interface OtherBuild { build: string; name: string; installed?: string; running?: string[]; settingsFound?: true; ownsRecord?: true; carries?: true }
 
 /**
  * What a click on another build came to (otherbuilds.ts removeBuild and quitBuild, then main.ts carryOn): its words, whether it
@@ -98,11 +100,11 @@ export interface WriteAccess { allowed: boolean; reason: string }
 export type SyncGate =
   | { state: 'first-setup' | 'ready' }
   | { state: 'needs-resume'; reason: string }
-  | { state: 'stopped'; reason: string; /** Set when another build syncs this home: its identity, its name, and whether it is open now (where that can be told). */ owner?: { build: string; name: string; running?: boolean } };
+  | { state: 'stopped'; reason: string };
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, owner and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Other builds of Central Knot on this Mac (otherbuilds.ts): while one is found this build is held (model.ts holdingBuild) and the window shows only the held screen. Unset where they aren't looked for (main.ts buildsContext: only an installed app on a Mac, or a test with its stand-ins) and where an Applications folder can't be read. */ otherBuilds?: OtherBuild[]; /** Where this copy of the app runs from, when that is not the top of an Applications folder (otherbuilds.ts runsOutside): it replaces no build from there. */ runsOutside?: string; /** What this build said on taking the home's record over at this view's look (main.ts lookForOthers, takeOverHome): the page says it once. */ tookOver?: string; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, its record's gate and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Other builds of Central Knot on this Mac (otherbuilds.ts): while one is found this build is held (model.ts holdingBuild) and the window shows only the held screen. Unset where they aren't looked for (main.ts buildsContext: only an installed app on a Mac, or a test with its stand-ins) and where an Applications folder can't be read. */ otherBuilds?: OtherBuild[]; /** Where this copy of the app runs from, when that is not the top of an Applications folder (otherbuilds.ts runsOutside): it replaces no build from there. */ runsOutside?: string; /** What this build said on taking the home's record over at this view's look, where it carried the other build's choices (main.ts lookForOthers, takeOverHome): the page says it once. */ tookOver?: string; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -136,11 +138,6 @@ export interface DesktopApi {
    * the tool (its results there), which the band after the click says.
    */
   manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null; did: DestinationResult[] }>;
-  /**
-   * Makes this build the home's sync owner, in place of the build that syncs it now; every item in Central Knot and every choice
-   * stays, and that build's settings are kept first where its folder is found (main.ts takeOverHome). `said`: what it did.
-   */
-  takeOverSync(home: string): Promise<{ stopped?: string; from?: string; said?: string; view: HomeView | null }>;
   /** Replace: the build the held screen names, its bundle at `path`, quit and moved to the Trash (main.ts builds:replace, otherbuilds.ts removeBuild). */
   replaceOtherBuild(path: string, build: string): Promise<BuildOutcome & { view: HomeView | null }>;
   /** Asks every running copy of the build the held screen names to quit (otherbuilds.ts quitBuild). */
@@ -1011,11 +1008,11 @@ export interface UpdateView {
 export type HistoryDays = 7 | 30 | 90;
 /**
  * What a shorter History window did to the History already recorded. The window is saved in every case. `done`: removed from
- * the open home at once. `later`: this build doesn't sync the open home yet, and applies the window there with its next History
- * write. `elsewhere`: the open home is preview-only here, or another Central Knot build syncs it; whichever copy next records a
- * change there removes its older History, by its own window. `no-home`: no home is open. `failed`: tried and couldn't (the log says why).
+ * the open home at once. `later`: this build doesn't sync the open home now (share.ts syncsHere: preview only, held, or waiting
+ * for Resume, say), and its next History write there applies the window. `no-home`: no home is open. `failed`: tried and couldn't
+ * (the log says why).
  */
-export type HistoryPrune = 'done' | 'later' | 'elsewhere' | 'no-home' | 'failed';
+export type HistoryPrune = 'done' | 'later' | 'no-home' | 'failed';
 /** History as main reads it: the events the window covers, and the window, read together so they always agree. */
 export interface HistoryList { events: HistoryEvent[]; days: HistoryDays }
 /** A saved History window: the settings as saved, and `pruned` when it was shorter; none when nothing was shorter or a newer request overtook it. */
