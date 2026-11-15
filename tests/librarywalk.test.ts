@@ -11,9 +11,10 @@
 // and Keep mine on its row for a notes whose version waits there (changed here too), Turn on on its line for a notes it
 // removed (library.ts REMOVED AT ITS SOURCE: the Skills view's fromSource `removed`), and removed. The source holds an agent
 // too, "critic" in its agents/ folder: changed there (its prompt, or its description), dropped and back there, turned On and
-// Off, deleted, edited by hand in Claude Code, and Add, Merge, Replace and Keep mine on its line. Odd
+// Off, deleted, edited by hand in Claude Code (alone, or with a change at the source and a Check now), and Add, Merge, Replace
+// and Keep mine on its line. Odd
 // seeds start with notes made by hand in Claude Code (a folder with a script, a file of mode 0600 and an empty folder), so the
-// source's notes differs and is not brought in; even seeds start with notes from the source, turned On.
+// source's notes differs and is not brought in; even seeds start with notes and critic from the source, turned On.
 // After every step:
 //   (a) nothing is lost: each folder Central Knot wrote over or removed held a content that is a version of the skill, or is
 //       still in a tool or the shared folder. Checked for the step, and for every such content since the walk began;
@@ -184,6 +185,8 @@ async function walk(seed: number): Promise<Finding[]> {
     for (const tool of allTools) await mkdir(join(box.home, agentFiles[tool as keyof typeof agentFiles], '..'), { recursive: true });
     await writeFile(join(box.home, agentFiles['claude-cli']), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
     await applyAgents(context(), tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
+    // Even seeds: the source's agent, added with it, turned On too, so its changes and its line's clicks come within the walk.
+    if (!(seed % 2)) await applyAgents(context(), tools, [{ key: 'critic', on: true, except: [], seenOn: false }]);
     agentAsWritten = await agentNow();
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen(box, context());
@@ -279,6 +282,14 @@ async function walk(seed: number): Promise<Finding[]> {
       if (critLive?.on && tools.includes('claude-cli')) add(2, { name: 'hand edit critic in Claude Code', run: async () => {
         const text = await readFile(inClaude, 'utf8').catch(() => undefined);
         if (text) await writeFile(inClaude, text.replace(/\n\n[\s\S]*$/, `\n\nMine ${++marker}.\n`));
+      } });
+      // Changed here and at the source, then read: what the agent's Merge, Replace and Keep mine meet (the prompt here, the
+      // description there, so Merge can put them together).
+      if (recorded && critLive?.on && sourceHasCritic && tools.includes('claude-cli')) add(3, { name: 'critic changed in Claude Code and at the source, then Check now', app: true, byHand: true, run: async () => {
+        const text = await readFile(inClaude, 'utf8').catch(() => undefined), there = await readFile(join(source.dir, 'agents/critic.md'), 'utf8');
+        if (text) await writeFile(inClaude, text.replace(/\n\n[\s\S]*$/, `\n\nMine ${++marker}.\n`));
+        await source.commit({ 'agents/critic.md': there.replace(/^description: .*$/m, `description: Critiques ${++marker}.`) });
+        return checkNow(recorded.id);
       } });
       if (recorded && critLine?.state === 'deleted') add(3, { name: 'Add on critic’s line', app: true, run: more => rowClick(context(more), tools, recorded.id, 'agent', 'critic', 'bringBack') });
       if (recorded && critLine?.state === 'wait') for (const click of ['merge', 'replace', 'keep'] as const) {
