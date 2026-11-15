@@ -10,7 +10,11 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
-import { standInMac } from '../tests/macstandins.ts';
+import { standInApp, standInMac } from '../tests/macstandins.ts';
+import { discover } from '../src/discovery.ts';
+import { harnessIds } from '../src/harnesses.ts';
+import { managedNow } from '../src/share.ts';
+import { applySkills } from '../src/skills.ts';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -3089,59 +3093,123 @@ async function otherAppsFlow() {
  * the Overview and in Settings, removed into the stand-in's Trash, gone from both pages after; an app of another id under the
  * product's name is offered nowhere. Where the build syncs the home, Take over syncing is two choices, and the first removes it.
  */
+/** Every file under a folder, by its path inside, with a hash of its bytes: what "nothing changed" is checked against. */
+const treeOf = dir => Object.fromEntries(readdirSync(dir, { recursive: true, withFileTypes: true }).filter(entry => entry.isFile())
+  .map(entry => [relative(dir, join(entry.parentPath, entry.name)), createHash('sha256').update(readFileSync(join(entry.parentPath, entry.name))).digest('hex')]));
+
+/**
+ * One install at a time (otherbuilds.ts, otherbuildview.ts): a home the alpha synced, with an edit waiting and History older
+ * than 30 days, opened while the alpha is installed in the stand-in /Applications. This build is held from the first view
+ * (nothing written, before or after the screen shows), then Replace: the alpha in the stand-in Trash, its Automatic sync (off)
+ * and History's days (90) kept, the record taken over, the pages back. Then a custom build found and replaced under its own
+ * name, a refusal, and Quit on a build running only from Downloads.
+ */
 async function otherBuildFlow() {
   const mac = standInMac(join(scratch, 'mac-builds'));
-  const alpha = () => mac.bundle(mac.applications, 'Central Knot Alpha', 'com.centralknot.alpha');
-  const helper = mac.bundle(mac.applications, 'Central Knot Helper', 'com.example.helper');
-  alpha();
+  const ALPHA_ID = 'com.centralknot.alpha', alphaPath = join(mac.applications, 'Central Knot Alpha.app');
+  mac.bundle(mac.applications, 'Central Knot Helper', 'com.example.helper');
   const inTrash = () => (existsSync(mac.trash) ? readdirSync(mac.trash) : []);
-  const a = await launch(join(scratch, 'builds-data'), ['--practice-copy'], HOME, { CK_TEST_APPS: mac.root });
-  const practice = await a.run(`document.querySelector('.status-home').title`);
-  const bandText = () => a.text('#other-build-com-centralknot-alpha .band-text');
-  const band = await bandText() ?? '';
-  const path = `${mac.applications}/Central Knot Alpha.app`;
-  check('the Overview names the other build, where it is, that one build syncs a home, which app Remove takes and what stays', band === `Central Knot Alpha is installed here too, in ${mac.applications}. Only one build of Central Knot syncs a home at a time. Removing quits every running copy of Central Knot Alpha, then moves ${path} to the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, the record of them and History stay: they’re kept in this home, not in an app. Central Knot Alpha’s own settings folder stays too, and Central Knot itself is not touched.`, band);
-  check('with Remove and Keep both beside it', await a.text('#other-build-action-com-centralknot-alpha') === 'Remove Central Knot Alpha' && await a.text('#other-build-hide-com-centralknot-alpha') === 'Keep both');
-  check('an app of another id under the product’s name is offered nowhere', !(await a.run('document.body.innerText')).includes('Helper'));
-  await fitsAtMinimum(a, 'the Overview with another build’s band');
-  await a.click('#nav-settings');
-  const rowId = `#setting-other-build-${`${mac.applications}/Central Knot Alpha.app`.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
-  const row = await a.text(rowId) ?? '', rowAction = rowId.replace('#setting-other-build-', '#other-build-row-');
-  check('Settings has a row for it: what it is, where, that one build syncs a home, which app Remove takes, and Remove', row.startsWith(`Central Knot AlphaInstalled in ${mac.applications}. Only one build of Central Knot syncs a home at a time. Removing quits every running copy of Central Knot Alpha, then moves ${path} to the Trash`) && row.endsWith('Remove Central Knot Alpha'), row);
-  check('and nothing for the other app', !(await a.run('document.body.innerText')).includes('Helper'));
-  await fitsAtMinimum(a, 'Settings with another build’s row');
-  await a.click('#nav-overview');
-  await a.click('#other-build-action-com-centralknot-alpha');
-  check('Remove moves the bundle to the Trash: gone from the folder, in the stand-in’s Trash', !existsSync(join(mac.applications, 'Central Knot Alpha.app')) && inTrash().join() === 'Central Knot Alpha.app', inTrash());
-  const said = await a.text('[data-outcome] .band-text') ?? '';
-  check('the band says where it went and what stays, and is gone', said.startsWith('Central Knot Alpha is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents') && said.endsWith('turn it off in System Settings › General › Login Items.') && !(await a.exists('#other-build-com-centralknot-alpha')), said);
-  await a.click('#nav-settings');
-  check('Settings has no row for it after', !(await a.exists(rowId)));
-  check('the other app is where it was', existsSync(join(helper, 'Contents/Info.plist')));
-  // Put back from the Trash: found again. The home's record now names it as the one that syncs this home.
-  alpha();
-  mkdirSync(join(practice, '.central-knot'), { recursive: true });
-  writeFileSync(join(practice, '.central-knot/sync.json'), `${JSON.stringify({ formatVersion: 2, generation: 'from-the-alpha', owner: 'com.centralknot.alpha', ownerName: 'Central Knot Alpha' })}\n`);
-  await a.click('#nav-skills');
+  // The home, as the alpha left it: release-notes On in every tool, by the alpha's own code, then edited in Claude Code.
+  const home = join(scratch, 'held-home'), data = join(scratch, 'builds-data'), alphaData = join(scratch, ALPHA_ID);
+  cpSync(join(root, 'fixtures/home'), home, { recursive: true });
+  mkdirSync(alphaData, { recursive: true });
+  const asAlpha = { home, mode: 'custom', read: () => Promise.all(harnessIds.map(harness => discover({ home, mode: 'custom', harness }))), build: ALPHA_ID, buildName: 'Central Knot Alpha', settingsPath: join(alphaData, 'sharing-settings.json'), realHome: join(scratch, 'elsewhere'), settleMs: 0 };
+  const managed = await applySkills(asAlpha, await managedNow(asAlpha, await asAlpha.read()), [{ key: 'release-notes', on: true, except: [] }]);
+  check('the alpha syncs the home first', !managed.stopped && managed.writes > 0, managed.stopped);
+  const notes = tool => join(home, tool, 'skills/release-notes/SKILL.md'), edited = `${readFileSync(notes('.claude'), 'utf8')}\nEdited while another build is here.\n`;
+  writeFileSync(notes('.claude'), edited);
+  const historyFile = join(home, '.central-knot/history.json');
+  writeFileSync(historyFile, JSON.stringify({ events: [...JSON.parse(readFileSync(historyFile, 'utf8')).events,
+    { id: 'aged-60', at: new Date(Date.now() - 60 * DAY).toISOString(), key: 'aged-60', item: 'aged-60-days', kind: 'edit', winner: { tool: 'claude-cli', hash: '0'.repeat(64) }, losers: [], orderProved: true }] }));
+  // The alpha's own settings, beside this build's data folder as every build's is: History kept 90 days, Automatic sync off.
+  writeFileSync(join(alphaData, 'app-settings.json'), JSON.stringify({ historyDays: 90, home: { mode: 'custom', path: home } }));
+  writeFileSync(join(alphaData, 'sync-settings.json'), JSON.stringify({ syncOn: false }));
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  mac.bundle(mac.applications, 'Central Knot Alpha', ALPHA_ID);
+  const before = treeOf(home);
+
+  const a = await launch(data, [], HOME, { CK_TEST_APPS: mac.root, CK_TEST_OWN_BUNDLE: join(mac.applications, 'Central Knot.app') });
+  const HELD = 'Central Knot Alpha is also installed on this Mac, and only one build of Central Knot works at a time, so Central Knot changes nothing in this home or your tools until one of the two is gone.';
+  same('opened while the alpha is installed, the window shows the held screen in place of the pages, saying which build, where, why nothing changes, what stays, what doesn’t carry over and what Replace does', await a.all('#held > *', 'e.textContent'), [
+    `Central Knot Alpha is installed in ${mac.applications}`,
+    'Only one build of Central Knot works at a time, so Central Knot changes nothing in this home or your tools until one of the two is gone.',
+    'Your skills, MCP servers and agents, the record of them and History stay whichever you keep: they’re kept in this home, not in an app.',
+    'This home’s record names Central Knot Alpha as the build that syncs it, so Replace carries its Automatic sync, plugin updates, History’s days and open home over here. Its other settings, and any marketplace added only in it, don’t carry over.',
+    `Replace asks every running copy of Central Knot Alpha to quit and waits up to 20 seconds, then moves ${alphaPath} to the Trash, where it stays until you empty the Trash. Central Knot Alpha’s own settings folder stays. To keep Central Knot Alpha instead, quit this app and move it to the Trash.`,
+    'Replace Central Knot AlphaQuit Central Knot',
+  ]);
+  check('no page, no home and no other build’s name in the sidebar; the header says one build at a time', await a.all('#nav > *, #homes > *').then(rows => rows.length === 0) && await a.text('.page-title') === 'One build at a time' && !(await a.run('document.body.innerText')).includes('Helper'));
+  same('the status bar says writing is paused, and the switch why', [await a.text('#status-facts .tone-warning .fact-long'), await a.run(`document.querySelector('#sync-switch').title`)], ['Paused: another build is here', HELD]);
+  same('a write the page asks for is refused, in that sentence', (await a.run(`window.centralKnot.setSyncEverything(true, ${JSON.stringify(home)}, true)`)).stopped, HELD);
   await a.click('#header-refresh');
-  const owner = await a.text('#other-owner') ?? '';
-  check('where it syncs the home, Take over syncing is two choices, each saying what it does', owner.includes('Central Knot Alpha is installed here too: take over and remove it, or take over and keep both. Removing quits every running copy')
-    && await a.text('#take-over-remove') === 'Take over and remove Central Knot Alpha' && await a.text('#take-over-sync') === 'Take over, keep both', owner);
-  await a.click('#nav-settings');
-  const synced = await a.text(rowId) ?? '';
-  check('its Settings row says it synced this home last, and offers the same two choices', synced.includes('Central Knot Alpha synced this home last and isn’t open, so removing it takes over syncing first.')
-    && await a.text(rowAction) === 'Take over and remove Central Knot Alpha' && await a.text(`${rowAction}-keep`) === 'Take over, keep both', synced);
-  await a.click('#nav-overview');
-  check('and the Overview offers the same two choices, with no band of its own for it', !(await a.exists('#other-build-com-centralknot-alpha')) && await a.exists('#overview-take-over-remove'));
-  await fitsAtMinimum(a, 'the Overview with the two take-over choices');
-  await a.click('#nav-skills');
-  await fitsAtMinimum(a, 'Skills with the two take-over choices');
-  await a.click('#take-over-remove');
-  const record = JSON.parse(readFileSync(join(practice, '.central-knot/sync.json'), 'utf8'));
-  check('Take over and remove: this build syncs the home, and the other is in the Trash', record.owner !== 'com.centralknot.alpha' && !existsSync(join(mac.applications, 'Central Knot Alpha.app')) && inTrash().length === 2, { owner: record.owner, trash: inTrash() });
-  check('said in that order, where the click was', (await a.text('[data-outcome] .band-text') ?? '').startsWith('Central Knot now syncs this home. Central Knot Alpha is in the Trash'), await a.text('[data-outcome] .band-text'));
+  same('nothing in the home or its tools changed, before or after the screen showed (the look comes before the first pass)', treeOf(home), before);
+  await fitsAtMinimum(a, 'the held screen');
+
+  await a.click('#held-replace');
+  const said = await a.text('[data-outcome] .band-text') ?? '';
+  check('Replace: the alpha is in the stand-in Trash, the held screen is gone and the pages are back', !existsSync(alphaPath) && inTrash().join() === 'Central Knot Alpha.app' && !(await a.exists('#held')) && await a.exists('#nav-skills'), inTrash());
+  check('the band says where it went, that its settings are kept and that this build syncs the home now', said.startsWith('Central Knot Alpha is in the Trash, where it stays until you empty the Trash.') && said.includes('Central Knot Alpha’s Automatic sync, plugin updates, History’s days and open home are kept here.') && said.endsWith('Central Knot syncs this home now.'), said);
+  same('the record is this build’s now', JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8')).owner, 'com.centralknot.firstlook');
+  same('the alpha’s Automatic sync (off) and History’s days (90) are this build’s', [JSON.parse(readFileSync(join(data, 'sync-settings.json'), 'utf8')).syncOn, JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).historyDays, await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`)], [false, 90, 'false']);
+  check('with Automatic sync off, no pass wrote: the edit waits in Claude Code', readFileSync(notes('.claude'), 'utf8') === edited && readFileSync(notes('.copilot'), 'utf8') !== edited);
+  await a.click('#overview-sync-now');
+  check('Sync once spreads the edit, and History, written with 90 days, keeps the entry from 60 days ago', readFileSync(notes('.copilot'), 'utf8') === edited && JSON.parse(readFileSync(historyFile, 'utf8')).events.some(event => event.id === 'aged-60'));
+
+  // A custom build, found and replaced under its own name; the record is this build's, so nothing is carried over. Found at a
+  // view's start, before its pass: Sync once, asked the moment it is installed with an edit waiting, spreads nothing.
+  const editedAgain = `${edited}Edited again.\n`;
+  writeFileSync(notes('.claude'), editedAgain);
+  const acme = mac.bundle(mac.applications, 'Acme Knot', 'com.centralknot.custom.acme');
+  await a.run(`window.centralKnot.syncNow(${JSON.stringify(home)})`);
+  check('a view looks before its pass: Sync once, asked the moment another build is installed, spreads nothing', readFileSync(notes('.copilot'), 'utf8') === edited);
+  await a.click('#header-refresh');
+  same('a custom build is found by its own name', await a.text('#held-title'), `Acme Knot is installed in ${mac.applications}`);
+  same('and what carries over is only its own business', await a.text('#held > p:nth-of-type(3)'), 'Acme Knot’s own settings, and any marketplace added only in it, don’t carry over.');
+  // Refused first: the stand-in Trash can't be written, as macOS refusing to move it. Still held, with the words and Show in Finder.
+  mkdirSync(mac.trash, { recursive: true }); chmodSync(mac.trash, 0o555);
+  await a.click('#held-replace');
+  chmodSync(mac.trash, 0o755);
+  check('a refusal leaves the build held, says why, and offers Show in Finder', await a.exists('#held') && (await a.text('#held-said') ?? '').startsWith(`macOS didn’t let Central Knot move Acme Knot to the Trash, so it is still in ${mac.applications}.`) && await a.text('#held-show') === 'Show in Finder', await a.text('#held-said'));
+  await a.click('#held-replace');
+  check('then Replace takes it: in the Trash, the pages back', !existsSync(acme) && inTrash().includes('Acme Knot.app') && !(await a.exists('#held')), inTrash());
+
+  // A build running only from Downloads: Quit it in place of Replace.
+  const stray = await standInApp(true);
+  const downloaded = mac.bundle(join(HOME, 'Downloads'), 'Central Knot Alpha', ALPHA_ID);
+  mac.running([{ bundleId: ALPHA_ID, pid: stray.pid, path: downloaded }]);
+  await a.click('#header-refresh');
+  same('a build running only from Downloads is said so, with Quit in place of Replace', [await a.text('#held-title'), await a.text('#held-quit-other'), await a.exists('#held-replace')],
+    [`Central Knot Alpha is running from ${downloaded}, not from an Applications folder`, 'Quit Central Knot Alpha', false]);
+  await a.click('#held-quit-other');
+  await wait(100);
+  check('Quit: it quit, and the pages are back', (stray.exitCode !== null || stray.signalCode !== null) && !(await a.exists('#held')), { exit: stray.exitCode, signal: stray.signalCode });
+  stray.kill('SIGKILL');
+  mac.running([]);
   same('no page errors, another build', a.pageErrors, []);
-  await a.quit();
+  // The menus and the login item while held, then held and closed: a Linux development run, whose main process the checks can
+  // reach and stand in as an installed Mac app with its login items (cdp.mjs standIn).
+  if (!a.main || process.platform !== 'linux') { await a.quit(); return; }
+  const main = await a.main();
+  await standIn(main, 'darwin');
+  const heldAgain = async () => { mac.bundle(mac.applications, 'Central Knot Alpha', ALPHA_ID); await a.click('#header-refresh'); };
+  const menuItems = () => main.run(`ck.menus.slice(-2).flat().flatMap(item => [item, ...(Array.isArray(item.submenu) ? item.submenu : [])]).filter(item => /sync|sign-in/i.test(item.label ?? '')).map(({ label, enabled, visible }) => ({ label, enabled: enabled !== false, visible: visible !== false }))`);
+  await heldAgain();
+  const menus = await menuItems();
+  check('held, the menus’ Automatic sync, Sync once and sign-in items can’t be used, and none says preview only', menus.length >= 4 && menus.every(item => !item.enabled || !item.visible) && !menus.some(item => /preview only/.test(item.label)) && menus.filter(item => item.label.startsWith('Automatic sync')).every(item => item.label === 'Automatic sync'), menus);
+  same('and no login item is added while held', await main.run('ck.asked'), []);
+  await a.click('#held-replace');
+  same('freed by Replace, the build adds its login item, as at a first open', await main.run('ck.asked'), [true]);
+  await heldAgain();
+  check('held before the window closes', await a.exists('#held'));
+  // The checks' own inspector session would keep a quitting dev run waiting for it, so it is closed once the window is asked to close.
+  const exited = new Promise(done => a.child.once('exit', () => done(true)));
+  void main.run('electron.BrowserWindow.getAllWindows()[0].close()').catch(() => undefined);
+  await wait(300);
+  main.close();
+  const quit = await Promise.race([exited, wait(8000).then(() => false)]);
+  check('held, closing the window quits the app instead of leaving it in the menu bar', quit, readFileSync(join(data, 'central-knot.log'), 'utf8').split('\n').filter(line => /window|quit/.test(line)).slice(-4));
+  if (!quit) a.child.kill('SIGKILL');
 }
 
 async function realHomeFlow() {

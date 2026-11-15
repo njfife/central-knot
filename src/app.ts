@@ -14,7 +14,7 @@ import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice } from './types.ts';
 import { anyOn, kindSource } from './itemrow.ts';
 import { caughtUpNames, noticeNames, plural, withSetAside } from './model.ts';
-import { h } from './dom.ts';
+import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, keptBack } from './clickplan.ts';
@@ -1167,6 +1167,10 @@ export const otherOwnerSaid = (owner: { name: string; running?: boolean }) =>
 export const ownerSyncs = (owner: { running?: boolean }) => (owner.running === false ? 'synced this home last and isn’t open' : owner.running ? 'is open and syncs this home' : 'syncs this home');
 /** What Take over syncing does, for its button's tooltip. */
 export const takeOverTitle = (owner: { name: string }) => `Central Knot syncs this home from now on, from where ${owner.name} left it, and anything waiting is synced straight away. ${owner.name} stops syncing here until you take over from it again.`;
+
+/** Take over syncing's button, wherever another build's record names it the home's owner (pages.ts ownerLine, matrix.ts otherOwnerBand). */
+export const takeOverButton = (owner: { name: string }, look: { variant: 'outline' | 'link'; size: 'small' | 'micro' }, id: string, disabled: boolean) =>
+  button({ ...look, label: 'Take over syncing', id, disabled, onclick: () => void takeOverSync(), attrs: { title: takeOverTitle(owner) } });
 
 /** Take over syncing: Central Knot syncs the home from now on, in place of the build that did; nothing is reset. */
 export const takeOverSync = () => busy('Taking over syncing…', async () => {

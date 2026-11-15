@@ -10,7 +10,7 @@
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
 // tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo,
-// remove-build (another build of Central Knot on this Mac, as made-up bundles), sources (a Git link read on a click, made-up
+// remove-build (one install at a time: the held screen while another build of Central Knot is on this Mac, as made-up bundles), sources (a Git link read on a click, made-up
 // repositories standing in for GitHub), source-agents (agents from a link, beside a skill) and sort (the item pages sorted by
 // last updated).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
@@ -2376,82 +2376,64 @@ if (wanted('repo')) {
   await a.click('#repo-disconnect-confirm'); await shot(a, 'repo-disconnected', 'Clicked "Disconnect": back to the start page; the tools are unchanged.');
 }
 
-// ---------- Another build of Central Knot on this Mac (otherbuilds.ts): made-up bundles in the stand-in for /Applications ----------
+// ---------- One install at a time (otherbuilds.ts, otherbuildview.ts): made-up bundles in the stand-in for /Applications ----------
 if (wanted('remove-build')) {
   begin('remove-build');
   await fresh();
-  const ALPHA_ID = 'com.centralknot.alpha', id = 'com-centralknot-alpha';
+  const ALPHA_ID = 'com.centralknot.alpha';
   const installed = join(MAC.applications, 'Central Knot Alpha.app');
   const putBack = () => MAC.bundle(MAC.applications, 'Central Knot Alpha', ALPHA_ID);
   const apps = [];
-  /** Stand-in copies of the alpha running from `paths` (one that quits when asked, or not), listed as running. */
-  const running = async (paths, quits = true) => { const started = await Promise.all(paths.map(() => standInApp(quits))); apps.push(...started); MAC.running(paths.map((path, at) => ({ bundleId: ALPHA_ID, pid: started[at].pid, path }))); };
+  /** Stand-in copies of a build running from `paths` (one that quits when asked, or not), listed as running. */
+  const running = async (paths, quits = true, id = ALPHA_ID) => { const started = await Promise.all(paths.map(() => standInApp(quits))); apps.push(...started); MAC.running(paths.map((path, at) => ({ bundleId: id, pid: started[at].pid, path }))); };
   const idle = `document.body.dataset.busy !== 'true'`;
-  const look = async page => { await a.click(`#nav-${page}`); await refresh(); };
-  putBack();
-  await look('overview');
-  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  await atEverySize('overview-band', 'Central Knot Alpha is installed in the Applications folder and doesn’t sync this home: the Overview’s band says where it is, that one build syncs a home at a time, which app Remove moves to the Trash and what stays, with Remove and Keep both', true);
-  await shot(a, 'overview-band-hover', 'The pointer on "Remove Central Knot Alpha": its hover look (a tooltip doesn’t show in a picture).', await middleOf(`#other-build-action-${id}`));
-  await focusOn(`#other-build-action-${id}`); await shot(a, 'overview-band-focus', 'Keyboard focus on "Remove Central Knot Alpha", with its ring.');
-  await a.click('#nav-settings');
-  await atEverySize('settings-row', 'Settings › Other builds of Central Knot: a row for it, saying what it is, where, that one build syncs a home at a time, which app Remove moves to the Trash and what stays', true, '#settings-other-builds', 'start');
-  await a.click('#nav-overview'); await a.click(`#other-build-hide-${id}`);
-  await shot(a, 'overview-band-hidden', 'Clicked Keep both: the Overview no longer shows the band; both stay installed.');
-  await a.click('#nav-settings'); await show('#settings-other-builds', 'start');
-  await shot(a, 'settings-row-after-hiding', 'Settings still lists it while it is installed.');
-  await a.run(`localStorage.removeItem('ck-other-build-hidden-${ALPHA_ID}')`);
-  // Running: from its bundle, and a second copy from Downloads.
-  await running([installed, join(HOME, 'Downloads/Central Knot Alpha.app')]);
-  await look('settings'); await show('#settings-other-builds', 'start');
-  await atEverySize('settings-row-running', 'It is running, from its bundle and as a second copy from Downloads: the row says so, and that the Downloads copy quits too but stays where it is', false, '#settings-other-builds', 'start');
-  await a.click('#nav-overview');
-  await shot(a, 'overview-band-running', 'The Overview’s band, with it running.');
-  await a.click('#nav-settings'); await a.click(`[id^="other-build-row-"]`); await waitFor(a, idle, 20000); await a.settle(); await show('#settings-other-builds', 'start');
-  await atEverySize('settings-removed', 'Clicked Remove in Settings: both copies quit, the bundle went to the Trash, the row is gone and the section says where it went and what stays', false, '#settings-other-builds', 'start');
-  // Running only, from the Trash (as a sign-in might start it again): Quit, and where it runs from.
-  await running([join(HOME, '.Trash/Central Knot Alpha.app')]);
-  await look('overview');
-  await atEverySize('overview-band-from-trash', 'Removed, then running again from the Trash: the band says where it runs from and offers Quit, with what to do about sign-in');
-  await a.click('#nav-settings'); await show('#settings-other-builds', 'start');
-  await atEverySize('settings-row-from-trash', 'Its Settings row: running from the Trash, not from an Applications folder, with Quit', false, '#settings-other-builds', 'start');
-  await a.click('#nav-overview'); await a.click(`#other-build-action-${id}`); await waitFor(a, idle, 20000); await a.settle();
-  await shot(a, 'overview-quit', 'Clicked Quit: it quit; the band says so and that a sign-in start is turned off in Login Items.');
-  // Refused: macOS won't move it to the Trash (the stand-in's Trash can't be written), and a copy that won't quit.
-  putBack(); MAC.running([]);
-  mkdirSync(MAC.trash, { recursive: true }); chmodSync(MAC.trash, 0o555);
-  await look('overview'); await a.click(`#other-build-action-${id}`); await waitFor(a, idle, 20000); await a.settle();
-  await atEverySize('refused-trash', 'Clicked Remove where macOS refuses to move it to the Trash: nothing else was tried, the band says so, with Show in Finder; the build’s band is still there');
-  chmodSync(MAC.trash, 0o755);
-  await running([installed], false);
-  await look('overview'); await a.click(`#other-build-action-${id}`); await waitFor(a, idle, 20000); await a.settle();
-  await atEverySize('refused-running', 'Clicked Remove while it stays running (its window asking about unsaved work): after a few seconds nothing is removed, and the band says to quit it first');
-  for (const app of apps.splice(0)) app.kill('SIGKILL');
-  MAC.running([]);
-  await look('overview'); await a.click(`#other-build-action-${id}`); await waitFor(a, idle, 20000); await a.settle();
-  await atEverySize('overview-removed', 'Clicked Remove on the Overview: it is in the Trash; the band says what stays, and that a sign-in start is turned off in Login Items');
-  // A home a custom build syncs, with that build installed: no other build is offered, and Take over syncing is as before.
-  const acme = MAC.bundle(MAC.applications, 'Central Knot for Acme', 'com.centralknot.custom.acme');
-  mkdirSync(join(practice, '.central-knot'), { recursive: true });
-  writeFileSync(join(practice, '.central-knot/sync.json'), `${JSON.stringify({ formatVersion: 2, generation: 'tour-acme', owner: 'com.centralknot.custom.acme', ownerName: 'Acme Knot' })}\n`);
-  await look('skills');
-  await atEverySize('skills-custom-owner', 'A custom build (Acme Knot) synced this home last and is installed here: only the standard app and the alpha are ever offered, so this is Take over syncing as before, with no choice to remove it', false, '#other-owner', 'start');
-  await a.click('#nav-settings'); await show('#settings-home', 'start');
-  await shot(a, 'settings-custom-owner', 'Settings in that home: no Other builds section, since neither the standard app nor the alpha is here.');
-  rmSync(acme, { recursive: true });
-  // Where the alpha synced this home last: Take over syncing is two choices.
-  putBack();
+  const look = async () => { await refresh(); await waitFor(a, idle, 30000); };
+  // The alpha synced this home last, and kept History for 90 days there: Replace carries that over.
   mkdirSync(join(practice, '.central-knot'), { recursive: true });
   writeFileSync(join(practice, '.central-knot/sync.json'), `${JSON.stringify({ formatVersion: 2, generation: 'tour-alpha', owner: ALPHA_ID, ownerName: 'Central Knot Alpha' })}\n`);
-  await look('skills');
-  await atEverySize('skills-two-choices', 'Central Knot Alpha synced this home last, isn’t open, and is installed here: Take over syncing is two choices, Take over and remove Central Knot Alpha (the band names the app that goes and what stays), or Take over, keep both', true, '#other-owner', 'start');
-  await shot(a, 'skills-two-choices-hover', 'The pointer on "Take over and remove Central Knot Alpha": its hover look.', await middleOf('#take-over-remove'));
-  await a.click('#nav-overview');
-  await atEverySize('overview-two-choices', 'The Overview says the same, with the same two choices and no band of its own for it; below, History’s line is about changes in your tools');
-  await a.click('#nav-settings'); await show('#settings-other-builds', 'start');
-  await atEverySize('settings-row-syncs-here', 'Its Settings row: it synced this home last and isn’t open, so removing it takes over syncing first; the same two choices', false, '#settings-other-builds', 'start');
-  await a.click('#nav-skills'); await a.click('#take-over-remove'); await waitFor(a, idle, 20000); await a.settle();
-  await atEverySize('skills-taken-over-removed', 'Clicked "Take over and remove Central Knot Alpha": this app syncs the home now, said first, and the alpha is in the Trash');
+  mkdirSync(join(scratch, ALPHA_ID), { recursive: true });
+  writeFileSync(join(scratch, ALPHA_ID, 'app-settings.json'), JSON.stringify({ historyDays: 90 }));
+  putBack();
+  await look();
+  await atEverySize('held-installed', 'Central Knot Alpha is installed in the Applications folder and synced this home last: the window shows only the held screen, which says where it is, that nothing changes until one of the two is gone, what stays, what Replace carries over and what it does, with Replace and Quit; the sidebar keeps only the update control', true);
+  await shot(a, 'held-installed-hover', 'The pointer on "Replace Central Knot Alpha": its hover look (a tooltip doesn’t show in a picture).', await middleOf('#held-replace'));
+  await focusOn('#held-replace'); await shot(a, 'held-installed-focus', 'Keyboard focus on "Replace Central Knot Alpha", with its ring.');
+  // Refused: macOS won't move it to the Trash (the stand-in's Trash can't be written), then a copy that won't quit.
+  mkdirSync(MAC.trash, { recursive: true }); chmodSync(MAC.trash, 0o555);
+  await a.click('#held-replace'); await waitFor(a, idle, 30000); await a.settle();
+  await atEverySize('held-refused-trash', 'Clicked Replace where macOS refuses to move it to the Trash: still held; the screen says nothing else was tried, with Show in Finder');
+  chmodSync(MAC.trash, 0o755);
+  await running([installed], false);
+  await look(); await a.click('#held-replace'); await waitFor(a, idle, 40000); await a.settle();
+  await shot(a, 'held-refused-running', 'Clicked Replace while it won’t quit: after 20 seconds nothing is removed, and the screen says to quit it yourself.');
+  for (const app of apps.splice(0)) app.kill('SIGKILL');
+  MAC.running([]);
+  await look(); await a.click('#held-replace'); await waitFor(a, idle, 30000); await a.settle();
+  await atEverySize('replaced', 'Clicked Replace: the alpha is in the Trash, its History days are kept here, this build syncs the home now, and the pages are back with the band');
+  // Running only, from Downloads, then from the Trash (as a sign-in might start it again): Quit it in place of Replace.
+  await running([MAC.bundle(join(HOME, 'Downloads'), 'Central Knot Alpha', ALPHA_ID)]);
+  await look();
+  await atEverySize('held-running-only', 'Running only, from Downloads: the screen says where it runs from and offers Quit Central Knot Alpha in place of Replace');
+  await running([MAC.bundle(join(HOME, '.Trash'), 'Central Knot Alpha', ALPHA_ID)]);
+  await look();
+  await shot(a, 'held-other-from-trash', 'Running only, from the Trash: the same, with where it runs from.');
+  await a.click('#held-quit-other'); await waitFor(a, idle, 30000); await a.settle();
+  await shot(a, 'quit-other', 'Clicked Quit Central Knot Alpha: it quit, and the pages are back with the band, which says to turn off a sign-in start in Login Items.');
+  // A custom build with a long name (60 characters).
+  const long = MAC.bundle(MAC.applications, 'Acme Corporation Platform Engineering Knot for Developers 22', 'com.centralknot.custom.acme');
+  await look();
+  await atEverySize('held-long-name', 'A custom build with a 60-character name: found by its own name, the screen and both buttons fit', true);
+  // This copy itself runs from the Trash, then from a disk image: only Quit.
+  await fresh({ CK_TEST_OWN_BUNDLE: join(HOME, '.Trash/Central Knot.app') }, true);
+  await look();
+  await atEverySize('held-self-from-trash', 'This copy runs from the Trash: it can’t replace the other build, so it offers only Quit, and says to turn off a sign-in start');
+  await fresh({ CK_TEST_OWN_BUNDLE: '/Volumes/Central Knot/Central Knot.app' }, true);
+  await look();
+  await shot(a, 'held-self-from-disk-image', 'This copy runs from its disk image: only Quit, and it says to move it to Applications and open it from there.');
+  rmSync(long, { recursive: true });
+  for (const app of apps.splice(0)) app.kill('SIGKILL');
+  MAC.running([]);
+  await fresh();
 }
 
 // ---------- Sources: a Git link read on a click (sourcespage.ts), with made-up repositories standing in for GitHub ----------

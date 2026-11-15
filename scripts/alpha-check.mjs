@@ -1,9 +1,10 @@
 // Checks the alpha (src/updates.ts lineApp) as packaged, beside the standard app the Mac run packaged just before it. The
 // documented command packages it from an alpha tag. It must be its own app: its name on the bundle, the window and the disk
 // image, its own bundle id, downloads and settings folder, and release/ must then hold its two downloads and no other. Opened
-// side by side with the standard app on one throwaway home, it must be offered only a newer alpha while the standard app is
-// offered only a newer preview, and the two must name each other through Take over syncing, both ways. Nothing is
-// published. Both apps run in the throwaway home: HOME, and CFFIXED_USER_HOME so that their settings folders are inside it too.
+// side by side with the standard app on one throwaway home, each is held by the other (one install at a time: the held
+// screen names the other build) and keeps its update control: the alpha must be offered only a newer alpha while the standard
+// app is offered only a newer preview. Then the alpha's Quit Central Knot quits the standard app and frees the alpha, which
+// takes over the home's record. Nothing is published. Both apps run in the throwaway home: HOME, and CFFIXED_USER_HOME so that their settings folders are inside it too.
 // Usage (a Mac, after `npm run package:mac`): node scripts/alpha-check.mjs
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -132,7 +133,7 @@ async function launch(name, env) {
   const text = selector => page.run(`document.querySelector(${JSON.stringify(selector)})?.textContent.trim() ?? ''`);
   const click = async selector => { await page.run(`document.querySelector(${JSON.stringify(selector)}).click()`); await wait(200); await ready(); };
   const control = () => page.run(`(b => b && { look: b.dataset.look, name: b.getAttribute('aria-label') })(document.getElementById('update-control'))`);
-  return { run: page.run, ready, until, text, click, control, errors };
+  return { run: page.run, ready, until, text, click, control, errors, child };
 }
 
 // The standard app first, so the alpha finds it open.
@@ -149,23 +150,22 @@ for (const app of [alpha, plain]) await app.run('window.centralKnot.checkForUpda
 check('the alpha is offered the newer alpha, never the newer preview', await alpha.until(`document.getElementById('update-control')?.dataset.look === 'elsewhere'`) && (await alpha.control()).name === '0.6.0 alpha 99 is available. Open Settings', await alpha.control());
 check('the standard app is offered the newer preview, never the newer alpha', await plain.until(`document.getElementById('update-control')?.dataset.look === 'available'`) && (await plain.control()).name === 'Update to 0.5.0 preview 99', await plain.control());
 
-// Two apps, one home: each names the other as the person knows it, both ways.
-const band = '#other-owner .band-text';
-await alpha.click('#nav-skills');
-check('the alpha names the standard app as the one that syncs the home, open now', await alpha.until(`!!document.querySelector('${band}')`) && /^Central Knot is open and syncs/.test(await alpha.text(band)), await alpha.text(band));
-check('and offers to take over in its own name', await alpha.run(`document.querySelector('#take-over-sync').title`) === 'Central Knot Alpha syncs this home from now on, from where Central Knot left it, and anything waiting is synced straight away. Central Knot stops syncing here until you take over from it again.', await alpha.run(`document.querySelector('#take-over-sync')?.title`));
-await alpha.click('#take-over-sync');
-check('taking over, the alpha says so and names the way back', await alpha.until(`!document.querySelector('#other-owner')`) && /^Central Knot Alpha now syncs this home( \(automatic sync is off here\))?\. To go back, take over in Central Knot\.$/.test(await alpha.text('#announcement')), await alpha.text('#announcement'));
+// One install at a time: the alpha, opened while the standard app runs, was held from its first view and names it; the standard
+// app, reading the home again, is held too and names the alpha. Both run from release/, outside an Applications folder, so each
+// offers Quit of the other (a build found only running), never Replace.
+const heldTitle = app => app.text('#held-title');
+check('the alpha is held, naming the standard app running from release/', /^Central Knot is running from .*\/release\/Central Knot-darwin-arm64\/Central Knot\.app, not from an Applications folder$/.test(await heldTitle(alpha)), await heldTitle(alpha));
+check('it offers Quit Central Knot and Quit Central Knot Alpha, and no Replace', await alpha.text('#held-quit-other') === 'Quit Central Knot' && await alpha.text('#held-quit') === 'Quit Central Knot Alpha' && !(await alpha.run(`!!document.querySelector('#held-replace')`)));
+await plain.click('#header-refresh');
+check('the standard app, reading the home again, is held too and names the alpha', await plain.until(`!!document.querySelector('#held-title')`) && /^Central Knot Alpha is running from .*\/release\/Central Knot Alpha-darwin-arm64\/Central Knot Alpha\.app, not from an Applications folder$/.test(await heldTitle(plain)), await heldTitle(plain));
+check('and neither took the home over meanwhile', (await readRecord(HOME)).record?.owner === STANDARD_BUILD);
+const exited = new Promise(done => plain.child.once('exit', () => done(true)));
+await alpha.click('#held-quit-other');
+check('Quit Central Knot, in the alpha: the standard app quits', await Promise.race([exited, wait(30000).then(() => false)]));
+check('and the alpha is freed: its pages are back, saying the standard app quit and that the alpha syncs this home now', await alpha.until(`!document.querySelector('#held')`) && /^Central Knot has quit\..* Central Knot Alpha syncs this home now\.$/.test(await alpha.text('[data-outcome] .band-text')), await alpha.text('[data-outcome] .band-text'));
 const taken = (await readRecord(HOME)).record;
 check('the record is under the alpha, by its name', taken?.owner === ALPHA_BUILD && taken?.ownerName === 'Central Knot Alpha', taken && { owner: taken.owner, ownerName: taken.ownerName });
 check('the alpha keeps its settings in a folder of its own', existsSync(join(appData, ALPHA_BUILD, 'sharing-settings.json')) && readFileSync(join(appData, ALPHA_BUILD, 'sharing-settings.json'), 'utf8').includes(taken?.generation ?? '-'), appData);
-// The standard app, open all along, reads the home again (its Refresh, as a person would).
-await plain.click('#nav-skills');
-await plain.click('#header-refresh');
-check('the standard app then names the alpha, open now', await plain.until(`!!document.querySelector('${band}')`) && /^Central Knot Alpha is open and syncs/.test(await plain.text(band)), await plain.text(band));
-check('and offers to take it back in its own name', await plain.run(`document.querySelector('#take-over-sync').title`) === 'Central Knot syncs this home from now on, from where Central Knot Alpha left it, and anything waiting is synced straight away. Central Knot Alpha stops syncing here until you take over from it again.', await plain.run(`document.querySelector('#take-over-sync')?.title`));
-await plain.click('#take-over-sync');
-check('taking it back, the standard app names the alpha as the way back', await plain.until(`!document.querySelector('#other-owner')`) && /^Central Knot now syncs this home( \(automatic sync is off here\))?\. To go back, take over in Central Knot Alpha\.$/.test(await plain.text('#announcement')), await plain.text('#announcement'));
 check('no page error in either app', alpha.errors.length === 0 && plain.errors.length === 0, [...alpha.errors, ...plain.errors]);
 
 await forAlpha.close();

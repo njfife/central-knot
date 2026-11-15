@@ -236,7 +236,7 @@ export function buildReport(build: CustomBuild, release: BundleRelease | undefin
   const lines = [
     `${build.name}: a custom build of ${STANDARD_NAME}`,
     '',
-    `Identity: ${build.id} (${build.bundleId}). Its settings are its own: it installs beside the standard app and never shares its settings.`,
+    `Identity: ${build.id} (${build.bundleId}). Its settings are its own: installed, it replaces the standard app, and it never shares its settings.`,
     `App name: ${build.name}`,
     `App icon: ${inputs.appIcon ? basename(inputs.appIcon) : 'the standard icon'}`,
   ];

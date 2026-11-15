@@ -1,6 +1,6 @@
 // A stand-in for this Mac's places (platform.ts macPlaces, named by CK_TEST_APPS): a folder whose Applications holds made-up
 // app bundles, whose lsappinfo answers as macOS's does for the copies a test says are running, and whose Trash receives what
-// Remove takes. Every test and script that opens the app sets CK_TEST_APPS to one (scripts/e2e.mjs, ui-tour.mjs,
+// Replace takes. Every test and script that opens the app sets CK_TEST_APPS to one (scripts/e2e.mjs, ui-tour.mjs,
 // alpha-check.mjs, bundled-check.mjs), so none looks at or changes the real Applications folders, apps or Trash.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -28,7 +28,7 @@ export interface StandInMac {
   root: string;
   /** Stands in for /Applications. */
   applications: string;
-  /** What Remove moved to the Trash lands here. */
+  /** What Replace moved to the Trash lands here. */
   trash: string;
   /** Writes a made-up app bundle: `<folder>/<name>.app` with an Info.plist naming its bundle id. Returns its path. */
   bundle(folder: string, name: string, bundleId: string): string;
@@ -54,10 +54,11 @@ export function standInMac(root: string): StandInMac {
 
 /**
  * A process standing in for a running app, once it is ready to be asked: one that quits when asked (a signal to stop, as
- * Central Knot takes Quit), or one that stays, as an app does while its window asks about unsaved work. The caller kills it.
+ * Central Knot takes Quit), `afterMs` later where it finishes something first (a plugin step: main.ts before-quit), or one that
+ * stays, as an app does that won't quit. The caller kills it.
  */
-export function standInApp(quits: boolean): Promise<ChildProcess> {
-  const code = `process.on('SIGTERM', () => { ${quits ? 'process.exit(0);' : ''} }); setInterval(() => {}, 1e9); console.log('ready');`;
+export function standInApp(quits: boolean, afterMs = 0): Promise<ChildProcess> {
+  const code = `process.on('SIGTERM', () => { ${quits ? `setTimeout(() => process.exit(0), ${afterMs});` : ''} }); setInterval(() => {}, 1e9); console.log('ready');`;
   const child = spawn(process.execPath, ['-e', code], { stdio: ['ignore', 'pipe', 'ignore'] });
   return new Promise((done, fail) => { child.stdout!.once('data', () => done(child)); child.once('error', fail); });
 }
