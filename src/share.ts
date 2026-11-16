@@ -271,8 +271,10 @@ const occupiedError = () => Object.assign(new Error('Something that is not reada
 /**
  * Writes a tool's file only if it still holds `expected` (undefined: only if nothing is there), keeping its mode. The current file is
  * moved aside and checked there, then the new one is put in place exclusively: a save that lands meanwhile is never overwritten.
+ * `inPlace`, for a file written under its tool's own lock, which the tool also reads outside it (Claude Code's: mcp.ts editEntry):
+ * the file is never missing for a moment; it is checked where it is, then replaced in one rename, as the tool's own saves do.
  */
-export async function writeFileChecked(path: string, text: string, expected: string | undefined) {
+export async function writeFileChecked(path: string, text: string, expected: string | undefined, inPlace = false) {
   // A settings file that is a link (dotfiles) is written where it points, so the link and its target stay as they are.
   try { if ((await lstat(path)).isSymbolicLink()) path = await realpath(path); } catch { /* new file */ }
   await mkdir(dirname(path), { recursive: true });
@@ -282,6 +284,13 @@ export async function writeFileChecked(path: string, text: string, expected: str
   const parked = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.old`);
   let replaced = false;
   await writeFile(temporary, text, { mode });
+  if (inPlace) {
+    try {
+      const now = await readFile(path, 'utf8').catch(error => { if (errorCode(error) === 'ENOENT') return undefined; throw error; });
+      if (now !== expected) throw expected === undefined ? occupiedError() : changedWhileSyncing();
+      return await rename(temporary, path);
+    } finally { await unlink(temporary).catch(() => undefined); }
+  }
   try {
     if (expected !== undefined) {
       try { await rename(path, parked); } catch (error) { if (errorCode(error) === 'ENOENT') throw changedWhileSyncing(); throw error; }
