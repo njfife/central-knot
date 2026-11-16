@@ -2,13 +2,13 @@
 // as worked examples. Every session file here is made up by the test, in each tool's own record shapes: a use is a call (or a
 // skill the person typed), and the lists of what was available that every session holds are written in too, to be ignored.
 // The reading is made at noon on 16 November 2026; "N days ago" counts back from it.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, realpath, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { readUsage } from '../src/usage.ts';
+import { readers, readUsage } from '../src/usage.ts';
 import { leftToItsRow, noUseSeen, onIn, rowFigure, toolSays, USAGE_DAYS } from '../src/usagerow.ts';
 import { newItem, type LibraryItem } from '../src/library.ts';
 import type { HarnessId, LibraryFacts, ToolCopy, UsageReading } from '../src/types.ts';
@@ -17,7 +17,10 @@ const NOW = Date.parse('2026-11-16T12:00:00Z');
 const DAY = 86_400_000;
 const daysAgo = (days: number) => new Date(NOW - days * DAY).toISOString();
 
-const newHome = async () => realpath(await mkdtemp(join(tmpdir(), 'ck-usage-')));
+/** A made-up home, removed when the tests end. */
+const homes: string[] = [];
+const newHome = async () => { const home = await realpath(await mkdtemp(join(tmpdir(), 'ck-usagetest-'))); homes.push(home); return home; };
+after(() => Promise.all(homes.map(home => rm(home, { recursive: true, force: true }))));
 async function put(path: string, records: object[]) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, records.map(record => JSON.stringify(record)).join('\n') + '\n');
@@ -54,7 +57,7 @@ test('Claude Code: a Skill, Agent or mcp__ call and a typed /command are uses, a
   assert.equal(historyOf(reading, 'claude-cli').sessions, 2);
 });
 
-test('Codex: an MCP call done, a SKILL.md read, an agent spawned and a typed <skill> are uses; world_state is not', async () => {
+test('Codex: an MCP call done, a SKILL.md read (parsed, or named in any command form), an agent spawned and a typed <skill> are uses; world_state is not', async () => {
   const home = await newHome();
   await put(join(home, '.codex/sessions/2026/11/14/rollout-a.jsonl'), [
     { type: 'session_meta', payload: { id: 'a' }, timestamp: daysAgo(2) },
@@ -63,6 +66,10 @@ test('Codex: an MCP call done, a SKILL.md read, an agent spawned and a typed <sk
     { type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', cwd: '/h/.agents/skills/notes', parsed_cmd: [
       { type: 'read', name: 'SKILL.md', path: '/h/.codex/skills/release/SKILL.md' }, { type: 'read', name: 'SKILL.md', path: 'SKILL.md' }, { type: 'read', name: 'x.md', path: '/h/x.md' }] } }, timestamp: daysAgo(2) },
     { type: 'response_item', payload: { type: 'function_call', name: 'spawn_agent', arguments: '{"agent_type":"reviewer"}' }, timestamp: daysAgo(2) },
+    // The same read through Codex's other command forms, which its parser leaves unparsed: named in the command's own text.
+    { type: 'response_item', payload: { type: 'custom_tool_call', name: 'exec', input: "const text = await read('/h/.codex/skills/digest/SKILL.md');" }, timestamp: daysAgo(3) },
+    { type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: '{"cmd":"sed -n 1,40p /h/.agents/skills/triage/SKILL.md"}' }, timestamp: daysAgo(3) },
+    { type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', command: 'nl -ba /h/s/lint/SKILL.md | head', parsed_cmd: [{ type: 'unknown', cmd: 'nl' }] } }, timestamp: daysAgo(3) },
     { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<skill>\n<name>standup</name>\n<path>/h/s/SKILL.md</path>\n</skill>' }] }, timestamp: daysAgo(2) },
   ]);
   await put(join(home, '.codex/archived_sessions/rollout-b.jsonl'), [
@@ -71,6 +78,7 @@ test('Codex: an MCP call done, a SKILL.md read, an agent spawned and a typed <sk
   const reading = await readUsage({ home }, NOW);
   assert.deepEqual(usedIn(reading, 'codex-cli'), {
     'mcp:github': [2, daysAgo(2)], 'skill:release': [1, daysAgo(2)], 'skill:notes': [1, daysAgo(2)], 'agent:reviewer': [1, daysAgo(2)], 'skill:standup': [1, daysAgo(2)],
+    'skill:digest': [1, daysAgo(3)], 'skill:triage': [1, daysAgo(3)], 'skill:lint': [1, daysAgo(3)],
   });
   assert.equal(historyOf(reading, 'codex-cli').from, daysAgo(12), 'its history starts at its oldest session');
 });
@@ -138,6 +146,36 @@ test('Claude Code\'s history is whole for its cleanup period (30 days, or its se
   assert.deepEqual([await fromWith(40), await fromWith(50, { cleanupPeriodDays: 60 }), await fromWith(3)], [daysAgo(30), daysAgo(50), daysAgo(3)]);
 });
 
+test('An agent in Pi, kept there as a loose skill file: /skill:<name> typed and <name>.md read are uses of the agent', async () => {
+  const home = await newHome();
+  await put(join(home, '.pi/agent/sessions/--work-app--/2026-11-14_a.jsonl'), [
+    { type: 'message', message: { role: 'user', content: [{ type: 'text', text: '<skill name="helper" location="/h/.pi/agent/skills/helper.md">' }] }, timestamp: daysAgo(2) },
+    { type: 'message', message: { role: 'assistant', content: [{ type: 'toolCall', name: 'read', arguments: { path: '/h/.pi/agent/skills/helper.md' } }] }, timestamp: daysAgo(1) },
+  ]);
+  const says = toolSays(await readUsage({ home }, NOW), 'agent', facts('helper', { 'pi-cli': copy('helper.md') }), 'pi-cli')!;
+  assert.deepEqual([says.sessions, says.last, says.cantSay], [1, daysAgo(1), undefined]);
+});
+
+test('A session file that can\'t be read is skipped and counted as such; the rest are read, and one gone since the listing is simply skipped', { skip: process.getuid?.() === 0 }, async () => {
+  const home = await newHome(), project = join(home, '.claude/projects/-work');
+  const call = (name: string) => [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: name } }] }, timestamp: daysAgo(2) }];
+  await put(join(project, 'ok.jsonl'), call('alpha'));
+  await put(join(project, 'locked.jsonl'), call('beta'));
+  await chmod(join(project, 'locked.jsonl'), 0o000);
+  await symlink(join(project, 'nowhere.jsonl'), join(project, 'gone.jsonl'));
+  const reading = await readUsage({ home }, NOW), history = historyOf(reading, 'claude-cli');
+  await chmod(join(project, 'locked.jsonl'), 0o644);
+  assert.deepEqual([history.sessions, history.skipped, history.unread, Object.keys(usedIn(reading, 'claude-cli')), toolSays(reading, 'skill', facts('gamma', {}), 'claude-cli')!.cantSay],
+    [1, 1, undefined, ['skill:alpha'], 'unread']);
+});
+
+test('A record dated after the reading (a wrong clock) is dated by its file\'s time instead', async () => {
+  const home = await newHome(), file = join(home, '.claude/projects/-work/later.jsonl');
+  await put(file, [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'later' } }] }, timestamp: daysAgo(-400) }]);
+  await utimes(file, new Date(NOW - 3 * DAY), new Date(NOW - 3 * DAY));
+  assert.deepEqual(usedIn(await readUsage({ home }, NOW), 'claude-cli'), { 'skill:later': [1, daysAgo(3)] });
+});
+
 test('A home with no session folder: every tool keeps no sessions, has no start and used nothing', async () => {
   const reading = await readUsage({ home: await newHome() }, NOW);
   assert.deepEqual(reading.tools.map(each => [each.tool, each.sessions, each.from, each.used, each.unread]), reading.tools.map(each => [each.tool, 0, undefined, [], undefined]));
@@ -167,8 +205,7 @@ const facts = (key: string, copies: Partial<Record<HarnessId, ToolCopy>>, more: 
   ({ key, name: key, description: '', copies, on: true, except: [], cannot: {}, edited: [], ...more });
 /** A reading of every tool, made by hand: `used` per tool, as `kind:name` with the session numbers that used it, and when each history starts. */
 function readingOf(used: Partial<Record<HarnessId, Record<string, number[]>>>, from: Partial<Record<HarnessId, string>> = {}): UsageReading {
-  const tells = { 'claude-cli': { skill: 'sure', agent: 'sure', mcp: 'sure' }, 'codex-cli': { skill: 'sure', agent: 'seen', mcp: 'sure' }, 'copilot-cli': { skill: 'sure', mcp: 'seen' }, 'pi-cli': { skill: 'sure', mcp: 'sure' }, 'opencode-cli': { skill: 'sure', agent: 'sure' } } as const;
-  return { at: daysAgo(0), tookMs: 5, tools: (Object.keys(tells) as HarnessId[]).map(tool => ({ tool, tells: tells[tool], sessions: 10, from: from[tool] ?? daysAgo(90),
+  return { at: daysAgo(0), tookMs: 5, tools: (Object.keys(readers) as HarnessId[]).map(tool => ({ tool, tells: readers[tool].tells, sessions: 10, from: from[tool] ?? daysAgo(90),
     used: Object.entries(used[tool] ?? {}).map(([id, sessions]) => ({ kind: id.split(':')[0] as 'skill', name: id.slice(id.indexOf(':') + 1), sessions, last: daysAgo(sessions.length ? 2 : 45) })) })) };
 }
 const sessionsIn = (reading: UsageReading, kind: 'skill' | 'agent' | 'mcp', row: LibraryFacts, tool: HarnessId) => toolSays(reading, kind, row, tool)!.sessions;
@@ -188,18 +225,18 @@ test('A use of another copy of the same name counts, in any case; two spellings 
   assert.equal(sessionsIn(reading, 'skill', notes, 'codex-cli'), 3);
 });
 
-test('Can\'t say, by kind: no record (an agent in Copilot CLI or Pi, a server in OpenCode) or not sure (an agent in Codex, a server in Copilot CLI), whose hits still count', () => {
-  const says = (kind: 'agent' | 'mcp', tool: HarnessId, used = {}) => { const got = toolSays(readingOf({ [tool]: used }), kind, facts('reviewer', {}), tool)!; return [got.cantSay, got.sessions]; };
-  assert.deepEqual([says('agent', 'copilot-cli'), says('agent', 'pi-cli'), says('mcp', 'opencode-cli'), says('agent', 'codex-cli'), says('agent', 'codex-cli', { 'agent:reviewer': [1] }), says('mcp', 'copilot-cli'), says('agent', 'claude-cli')],
-    [['no-record', 0], ['no-record', 0], ['no-record', 0], ['not-sure', 0], ['not-sure', 1], ['not-sure', 0], [undefined, 0]]);
+test('Can\'t say, by kind, as the readers\' table has it: no record (an agent in Copilot CLI, a server in OpenCode) or not sure (an agent or a skill in Codex, a server in Copilot CLI), whose hits still count', () => {
+  const says = (kind: 'skill' | 'agent' | 'mcp', tool: HarnessId, used = {}) => { const got = toolSays(readingOf({ [tool]: used }), kind, facts('reviewer', {}), tool)!; return [got.cantSay, got.sessions]; };
+  assert.deepEqual([says('agent', 'copilot-cli'), says('mcp', 'opencode-cli'), says('agent', 'codex-cli'), says('agent', 'codex-cli', { 'agent:reviewer': [1] }), says('skill', 'codex-cli'), says('mcp', 'copilot-cli'), says('agent', 'claude-cli'), says('agent', 'pi-cli')],
+    [['no-record', 0], ['no-record', 0], ['not-sure', 0], ['not-sure', 1], ['not-sure', 0], ['not-sure', 0], [undefined, 0], [undefined, 0]]);
 });
 
 test('Can\'t say, by reach: a tool with no session can\'t; one whose history starts 12 days ago can, as far back as it goes', () => {
-  const reading = readingOf({}, { 'codex-cli': daysAgo(12) });
-  reading.tools.find(each => each.tool === 'pi-cli')!.sessions = 0;
-  const notes = facts('notes', { 'codex-cli': copy('notes'), 'pi-cli': copy('notes') });
-  assert.deepEqual([toolSays(reading, 'skill', notes, 'codex-cli'), toolSays(reading, 'skill', notes, 'pi-cli')],
-    [{ tool: 'codex-cli', sessions: 0, since: daysAgo(12) }, { tool: 'pi-cli', sessions: 0, cantSay: 'no-sessions' }]);
+  const reading = readingOf({}, { 'pi-cli': daysAgo(12) });
+  reading.tools.find(each => each.tool === 'claude-cli')!.sessions = 0;
+  const notes = facts('notes', { 'pi-cli': copy('notes'), 'claude-cli': copy('notes') });
+  assert.deepEqual([toolSays(reading, 'skill', notes, 'pi-cli'), toolSays(reading, 'skill', notes, 'claude-cli')],
+    [{ tool: 'pi-cli', sessions: 0, since: daysAgo(12) }, { tool: 'claude-cli', sessions: 0, cantSay: 'no-sessions' }]);
 });
 
 test('A row\'s figure: used, with its newest use; no use seen, when a tool that has it on can tell; nothing when none can', () => {
@@ -232,9 +269,10 @@ test('In: On, no use seen in 30 days, Claude Code (which can tell) has it on, an
   assert.equal(standing(kept('reviewer', 40), inClaude, ['claude-cli', 'copilot-cli']), 'in');
 });
 
-test('A history shorter than 30 days counts as far back as it goes: Codex since 12 days ago, no use there, is in', () => {
-  const row = facts('notes', { 'codex-cli': copy('notes') }), reading = readingOf({}, { 'codex-cli': daysAgo(12) });
-  assert.equal(noUseSeen(kept('notes', 40), rowFigure([toolSays(reading, 'skill', row, 'codex-cli')!], onIn(row, ['codex-cli'])), reading.at), 'in');
+test('A history shorter than 30 days counts as far back as it goes: Pi since 12 days ago, no use there, is in, and the row says since when', () => {
+  const row = facts('notes', { 'pi-cli': copy('notes') }), reading = readingOf({}, { 'pi-cli': daysAgo(12) });
+  const figure = rowFigure([toolSays(reading, 'skill', row, 'pi-cli')!], onIn(row, ['pi-cli']));
+  assert.deepEqual([figure, noUseSeen(kept('notes', 40), figure, reading.at)], [{ noneSeen: true, since: daysAgo(12) }, 'in']);
 });
 
 test('No tool that has it on can tell (Copilot CLI has no record of an agent, Codex\'s may not show one): can\'t say, never in', () => {

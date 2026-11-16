@@ -328,7 +328,7 @@ function filterBar() {
     { type: 'button', 'aria-pressed': String(view.filter === id), 'aria-label': count !== undefined ? `${label} ${count}` : label, 'data-tip': label, onclick: () => { view.filter = id; rerender(); } },
     icon(glyph, 13, 'chip-icon'), h('span.chip-label', {}, label), count !== undefined ? h('span.chip-count', {}, String(count)) : null);
   const narrowing = [copiesDifferChipShown() ? chip('attention', 'Copies differ', 'diff', attention, true) : null, pluginChipShown() ? chip('plugins', 'From plugins', 'puzzle', pluginCount()) : null,
-    reading() ? chip('unused', `No use seen in ${USAGE_DAYS} days`, 'history', list.filter(skill => unusedNow(skill) === 'in').length) : null].filter(Boolean);
+    unusedCount() ? chip('unused', `No use seen in ${USAGE_DAYS} days`, 'history', unusedCount()) : null].filter(Boolean);
   // All alone narrows nothing: no chips then.
   return narrowing.length ? h('div.chips', { role: 'group', 'aria-label': 'Show' }, chip('all', 'All', 'list'), narrowing) : null;
 }
@@ -960,7 +960,7 @@ function useTable(which: PageKind, harness?: Tool) {
   if (view.shownFor !== harness) startFresh(view, harness);
   if (view.filter === 'attention' && !copiesDifferChipShown()) view.filter = 'all';
   if (view.filter === 'plugins' && !pluginChipShown()) view.filter = 'all';
-  if (view.filter === 'unused' && !reading()) view.filter = 'all';
+  if (view.filter === 'unused' && !unusedCount()) view.filter = 'all';
 }
 
 /** How many rows here are a plugin's (its own rows, and the person's own items that are a plugin's part or come through one): the From plugins chip's count. */
@@ -1286,14 +1286,14 @@ function row(skill: ItemRow) {
 
 // ---------- Usage, read on a click (app.ts readUsage; usagerow.ts says what it means for a row) ----------
 
-/** The reading on show: on a kind's own page, once Read usage was clicked for this home. */
-const reading = () => (focus ? undefined : state.usage.data);
+/** The reading on show: on a kind's own page, once Read usage was clicked for this home; none after a reading that failed. */
+const reading = () => (focus || state.usage.state === 'failed' ? undefined : state.usage.data);
 /** A row's item as its kind's view has it (types.ts LibraryFacts), whose names in each tool usagerow.ts matches. */
 const factsOf = (skill: ItemRow) => (state.home ? kindSource(state.home, kind).facts.find(facts => facts.key === skill.key) : undefined);
-/** What each of this page's tools says of a row's item in the reading (usagerow.ts toolSays). */
+/** What each tool the reading read says of a row's item (usagerow.ts toolSays): a use in a tool not managed here counts too. */
 function usageOf(skill: ItemRow): ToolSays[] {
   const read = reading(), facts = factsOf(skill);
-  return read && facts ? toolList().flatMap(tool => toolSays(read, partOfPage[kind], facts, tool as HarnessId) ?? []) : [];
+  return read && facts ? read.tools.flatMap(each => toolSays(read, partOfPage[kind], facts, each.tool) ?? []) : [];
 }
 
 /** Read usage, at the toolbar's end of a kind's own page until the first reading (after it, the line under the toolbar reads again). */
@@ -1312,50 +1312,66 @@ function usageBand() {
   return h('div.band.band-quiet.usage-line', { role: 'status', id: 'usage-line' }, icon('history', 14, 'tone-muted'), h('span.band-text', {}, words), again);
 }
 
-/** When the reading was made, how long it took, and how far back each of this page's tools goes ("Claude Code: 30 days or more; Codex: since Nov 2"). */
+/**
+ * When the reading was made (and how long it took, when that was over 2 s), and how far back each tool goes: this page's tools,
+ * and any other with sessions ("Claude Code: 30 days or more; Codex: history from Nov 2"). A tool's phrase never wraps inside.
+ */
 function usageRead(read: UsageReading) {
-  const took = read.tookMs < 1000 ? `${read.tookMs} ms` : `${(read.tookMs / 1000).toFixed(1)} s`;
-  const reach = (each: ToolUsage) => (each.unread ? 'couldn’t be read' : !each.sessions ? 'no sessions' : startsLate(read, each.from) ? `since ${dayWords(each.from!)}` : `${USAGE_DAYS} days or more`);
-  return `Usage read ${dayAndTime(read.at)}, in ${took}. ${read.tools.filter(each => toolList().includes(each.tool)).map(each => `${names[each.tool]}: ${reach(each)}`).join('; ')}.`;
+  const took = read.tookMs > 2000 ? `, in ${(read.tookMs / 1000).toFixed(1)} s` : '';
+  const back = (each: ToolUsage) => (each.unread ? 'couldn’t be read' : !each.sessions ? 'no sessions'
+    : startsLate(read, each.from) ? `history from ${dayWords(each.from!)}` : `${USAGE_DAYS} days or more`);
+  const reach = (each: ToolUsage) => back(each) + (each.skipped ? `, ${plural(each.skipped, 'file')} couldn’t be read` : '');
+  const tools = read.tools.filter(each => toolList().includes(each.tool) || each.sessions).map(each => `${names[each.tool]}: ${reach(each)}`.replace(/ /g, '\u00a0'));
+  return `Usage read ${dayAndTime(read.at)}${took}. ${tools.join('; ')}.`;
 }
 
-/** A row's figure: used how long ago, no use seen in USAGE_DAYS days, or empty when no tool that has it on can tell (usagerow.ts rowFigure). */
+/**
+ * A row's figure (usagerow.ts rowFigure): used how long ago, no use seen in USAGE_DAYS days (or since when every tool that has
+ * it on starts), or a faint "can't say" when none of them can tell.
+ */
 const figureOf = (skill: ItemRow) => { const facts = factsOf(skill); return facts && rowFigure(usageOf(skill), onIn(facts, toolList() as HarnessId[])); };
 function usedCell(skill: ItemRow) {
   const figure = figureOf(skill);
-  const words = !figure ? '' : 'used' in figure ? `used ${sinceThen(Date.parse(figure.used))}` : `No use seen in ${USAGE_DAYS} days`;
-  return h('div.ov-used', { role: 'cell', title: figure ? `${words}. Open the row for each tool’s figure.` : '' }, words);
+  const words = !figure ? 'can’t say' : 'used' in figure ? `used ${sinceThen(Date.parse(figure.used))}`
+    : figure.since ? `no use seen since ${dayWords(figure.since)}` : `no use seen in ${USAGE_DAYS} days`;
+  const title = figure ? `${sentence(words)}. Open the row for each tool’s figure.` : 'No tool that has it on can tell whether it was used. Open the row for why.';
+  return h(`div.ov-used${figure ? '' : '.ov-used-faint'}`, { role: 'cell', title }, words);
 }
 
-/** Where a row stands for the "No use seen in 30 days" chip, in the reading on show (usagerow.ts noUseSeen). */
+/** Where a row stands for the "No use seen in 30 days" chip, in the reading on show (usagerow.ts noUseSeen), and how many it holds (no chip at 0). */
 const unusedNow = (skill: ItemRow) => { const read = reading(); return read ? noUseSeen(itemOf(skill), figureOf(skill), read.at) : undefined; };
+const unusedCount = () => committedList().filter(skill => unusedNow(skill) === 'in').length;
 
 /**
- * The chip's band: how many it holds, which tools were read (a use anywhere else isn't seen), which can't tell for this kind,
- * a history that starts later than USAGE_DAYS ago, what it left out and why, a profile Turn these off stops being in use, and
- * Turn these off, which leaves a plugin's items, and items linked to a plugin, to their own rows.
+ * The chip's band: how many it holds, that a use elsewhere isn't seen, which of this page's tools never or not always record
+ * this kind, what it left out and why (new, found, a plugin's), a profile Turn these off stops being in use, and Turn these off
+ * with what it does, which skips a plugin's items and items linked to a plugin. The line above gives each tool's dates.
  */
 function unusedBand(shown: ItemRow[]) {
   const read = reading(), home = state.home;
   if (!read || !home) return null;
-  const { one, many } = kindNouns[kind], tools = read.tools.filter(each => toolList().includes(each.tool));
+  const { one, many } = kindNouns[kind], tools = read.tools.filter(each => toolList().includes(each.tool) && each.sessions && !each.unread);
   const off = shown.filter(skill => !leftToItsRow(factsOf(skill)!)), kept = shown.length - off.length;
   const fresh = committedList().filter(skill => unusedNow(skill) === 'new').length;
-  const readHere = tools.filter(each => each.sessions && !each.unread), cant = readHere.filter(each => each.tells[partOfPage[kind]] !== 'sure').map(each => each.tool);
+  const found = committedList().filter(skill => { const figure = figureOf(skill); return standingOf(skill) === 1 && !!figure && 'noneSeen' in figure; }).length;
+  // The page's tools that record this kind only sometimes ('seen'), or never (no entry).
+  const record = (how: 'seen' | undefined, word: string) => {
+    const list = tools.filter(each => each.tells[partOfPage[kind]] === how).map(each => each.tool);
+    return list.length ? `${toolsInWords(list)} ${list.length === 1 ? 'doesn’t' : 'don’t'}${word} record which ${one} was used.` : '';
+  };
   const live = homeItems(home), ids = new Set(off.map(skill => itemId(partOfPage[kind], skill.key))), before = inUse(home.profiles.profiles, live);
   const ending = before.filter(profile => !inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item))).includes(profile));
   const words = [
-    `${shown.length ? plural(shown.length, one, many) : `No ${many}`} with no use seen in the last ${USAGE_DAYS} days.`,
-    `Read from ${toolsInWords(readHere.map(each => each.tool)) || 'no tool'}: a use anywhere else (another computer, the web, a tool Central Knot doesn’t read) isn’t seen.`,
-    cant.length ? `${toolsInWords(cant)} can’t always tell which ${one} was used.` : '',
-    ...tools.filter(each => each.sessions && startsLate(read, each.from)).map(each => `${names[each.tool]}’s history starts ${dayWords(each.from!)}.`),
-    fresh ? `Left out: ${plural(fresh, one, many)} under ${USAGE_DAYS} days old.` : '',
-    kept ? `${plural(kept, `${one} that comes from a plugin or is linked to one`, `${many} that come from a plugin or are linked to one`)}: Turn these off leaves ${kept === 1 ? 'it to its own row' : 'them to their own rows'}.` : '',
+    `${plural(shown.length, one, many)} with no use seen in the last ${USAGE_DAYS} days. A use on another computer or in a tool not read isn’t seen.`,
+    record('seen', ' always'), record(undefined, ''),
+    fresh ? `Left out: ${plural(fresh, one, many)} under ${USAGE_DAYS} days old.` : '', found ? `Left out: ${plural(found, one, many)} found, not yet in Central Knot.` : '',
+    kept ? `${plural(kept, one, many)} from a plugin skipped: turn each off on its own row.` : '',
     ending.length ? `With these off, ${andList(ending.map(profile => profile.name))} ${ending.length === 1 ? 'stops' : 'stop'} being the profile in use.` : '',
   ].filter(Boolean).join(' ');
-  const turn = off.length ? button({ variant: 'outline', size: 'micro', label: 'Turn these off', id: 'turn-unused-off', disabled: !canWrite(), onclick: () => turnTheseOff(off) }) : null;
-  if (turn) turn.title = `Turns off the ${plural(off.length, one, many)} listed here, in every tool. Central Knot keeps them, and Undo turns them all back on.`;
-  return h('div.band.usage-band', { role: 'status', id: 'unused-band' }, icon('history', 14, 'tone-muted'), h('span.band-text', {}, words), turn);
+  const turn = off.length ? button({ variant: 'outline', size: 'micro', label: 'Turn these off', id: 'turn-unused-off',
+    disabled: !canWrite() || state.usage.state === 'reading', onclick: () => turnTheseOff(off) }) : null;
+  const does = turn ? h('span.usage-turn-note', {}, ` Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on.`) : null;
+  return h('div.band.usage-band', { role: 'status', id: 'unused-band' }, icon('history', 14, 'tone-muted'), h('span.band-text', {}, words, does), turn);
 }
 
 /** Turn these off: one click with each row's own Off (libraryrow.ts rowClicks.off), so the page's one Undo puts them all back. */
@@ -1366,11 +1382,11 @@ function turnTheseOff(list: ItemRow[]) {
 }
 
 /** Why a tool can't say an item wasn't used, in an opened row. */
-const cantSayWords: Record<CantSay, (nouns: { one: string; a: string }) => string> = {
+const cantSayWords: Record<CantSay, (nouns: { one: string }) => string> = {
   'no-record': ({ one }) => `can’t say: its sessions don’t record which ${one} was used`,
-  'not-sure': ({ a }) => `can’t say: a use of ${a} may leave no record it reads`,
+  'not-sure': ({ one }) => `can’t say: it doesn’t always record which ${one} was used`,
   'no-sessions': () => 'can’t say: it keeps no sessions here',
-  'unread': () => 'can’t say: its sessions couldn’t be read',
+  'unread': () => 'can’t say: not all its sessions could be read',
 };
 /** One tool's figure for a row in its opened details, once usage is read: its sessions and last use, or no use seen (since when its history starts), or why it can't say. */
 function usageLine(skill: ItemRow, tool: Tool) {
@@ -1381,6 +1397,10 @@ function usageLine(skill: ItemRow, tool: Tool) {
     : [says.cantSay ? sentence(cantSayWords[says.cantSay](kindNouns[kind])) : `No use seen ${says.since ? `since ${dayWords(says.since)}, where its history starts` : `in the last ${USAGE_DAYS} days`}`, last].filter(Boolean).join('; ');
   return h('p.details-usage', { id: `usage-${skill.key}-${tool}` }, icon('history', 12, 'tone-muted'), `${words}.`);
 }
+/** In an opened row, a use seen in a tool this page doesn't show (not managed here), which counts in the row's figure too. */
+const usageElsewhere = (skill: ItemRow) => usageOf(skill).filter(each => !toolList().includes(each.tool) && each.sessions).map(each =>
+  h('p.details-usage', { id: `usage-${skill.key}-${each.tool}` }, icon('history', 12, 'tone-muted'),
+    `${names[each.tool]}, not managed here: used in ${plural(each.sessions, 'session')} in the last ${USAGE_DAYS} days, last used ${sinceThen(Date.parse(each.last!))}.`));
 
 // ---------- The order of the rows under each heading ----------
 
@@ -1568,7 +1588,7 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
     // What every tool shares of it, and what stays each harness's own, said where it is true: an item in Central Knot, or a
     // found one that can be taken in.
     toolList().length > 1 && (inLibrary(itemOf(skill)) || canAdd(skill)) ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), lib.words.shared) : null,
-    h('div.details-tools', {}, toolList().map(toolRow)),
+    h('div.details-tools', {}, toolList().map(toolRow), usageElsewhere(skill)),
     libraryVersions(lib, skill),
     inFiles || kind === 'mcp' ? null : wherePaths(skill),
     lib.own?.(skill) ?? null,

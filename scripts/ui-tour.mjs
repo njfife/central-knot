@@ -2740,14 +2740,14 @@ if (wanted('usage')) {
   await shot(a, 'before', 'Skills before any reading: the page as it was, but for Read usage at the toolbar’s end');
   await a.click('#read-usage');
   await waitFor(a, `/^Usage read/.test(document.querySelector('#usage-line .band-text')?.textContent ?? '')`);
-  await atEverySize('read', 'Clicked Read usage: the line under the toolbar says when it was read, how long it took and how far back each tool goes; each row says used how long ago, or No use seen in 30 days', true);
+  await atEverySize('read', 'Clicked Read usage: the line under the toolbar says when it was read and how far back each tool goes; each row says used how long ago, or no use seen since the date its tools’ history starts (release-notes)', true);
   await openRow('release-notes');
-  await atEverySize('opened', 'Opened release-notes: each tool’s line says its figure, a history that starts 20 days ago, or that it keeps no sessions here', false, '.details-usage');
+  await atEverySize('opened', 'Opened release-notes, docked beside the table from 1728: each tool’s line says its figure, a history that starts 20 days ago, or that it keeps no sessions here', false, '.details-usage');
   await closeRow('release-notes');
   await a.click('.chip[data-tip="No use seen in 30 days"]');
-  await atEverySize('chip', 'Clicked the chip No use seen in 30 days: the rows it holds, and its band: how many, the tools read, Copilot CLI’s late start, and Turn these off', true);
+  await atEverySize('chip', 'Clicked the chip No use seen in 30 days: the rows it holds, and its short band: how many, what it left out, and beside Turn these off what it does', true);
   await a.click('#nav-agents');
-  await shot(a, 'agents', 'Agents after the same reading: each agent’s figure, or nothing where no tool that has it on can tell');
+  await shot(a, 'agents', 'Agents after the same reading: each agent’s figure, or a faint can’t say where no tool that has it on can tell (release-notes, only in Codex, which keeps no sessions here); no chip, as none is in it');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 

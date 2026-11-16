@@ -788,8 +788,6 @@ export interface PluginsView {
   partsWait?: string;
 }
 
-// ---------- A kind on Central Knot's library (library.ts): its page's view ----------
-
 // ---------- Usage, read from the tools' session history (usage.ts) ----------
 
 /**
@@ -804,11 +802,17 @@ export type UsageTells = Partial<Record<ItemKind, 'sure' | 'seen'>>;
 export interface UsedName { kind: ItemKind; name: string; sessions: number[]; last: string }
 /**
  * One tool's history as read: what it can tell, how many sessions it keeps, when its history starts (none: no session), each
- * name used, and `unread` when its sessions are there and couldn't be read.
+ * name used, and `unread` when its history is there and couldn't be read at all.
  */
-export interface ToolUsage { tool: HarnessId; tells: UsageTells; sessions: number; from?: string; used: UsedName[]; unread?: true }
+export interface ToolUsage {
+  tool: HarnessId; tells: UsageTells; sessions: number; from?: string; used: UsedName[]; unread?: true;
+  /** Its session files that are there and couldn't be read: skipped, the rest counted. */
+  skipped?: number;
+}
 /** One reading of a home's session history, made on a click: when, how long it took, and every tool's. */
 export interface UsageReading { at: string; tookMs: number; tools: ToolUsage[] }
+
+// ---------- A kind on Central Knot's library (library.ts): its page's view ----------
 
 /**
  * A library kind's page (agents.ts agentsView): every item in the library and every one found in a managed harness, read

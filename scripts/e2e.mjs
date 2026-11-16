@@ -4356,6 +4356,8 @@ async function usageFlow() {
   // Claude Code: notes called 2 days ago; standup typed 40 days ago; a listing that names idle, which is no use.
   lines(join(home, '.claude/projects/-work/s1.jsonl'), [{ type: 'attachment', attachment: { type: 'skill_listing', content: '- idle: x' }, timestamp: ago(2).toISOString() }, skillCall('notes', 2)]);
   lines(join(home, '.claude/projects/-work/s2.jsonl'), [{ type: 'user', message: { content: '<command-name>/standup</command-name>' }, timestamp: ago(40).toISOString() }]);
+  // Copilot CLI, not installed here so not managed: idle invoked 3 days ago, which counts all the same.
+  lines(join(home, '.copilot/session-state/c1/events.jsonl'), [{ type: 'skill.invoked', data: { name: 'idle' }, timestamp: ago(3).toISOString() }]);
   // Codex: its history starts 12 days ago; notes's SKILL.md read 5 days ago.
   lines(join(home, '.codex/sessions/2026/11/01/rollout-a.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(12).toISOString() },
     { type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', parsed_cmd: [{ type: 'read', name: 'SKILL.md', path: join(claude, 'notes/SKILL.md') }] } }, timestamp: ago(5).toISOString() }]);
@@ -4373,47 +4375,64 @@ async function usageFlow() {
   await a.click('#nav-skills');
   for (let tries = 0; tries < 50 && (await sectionsNow(a))[0]?.[1]?.length !== 4; tries++) { await wait(100); await a.settle(); }
   same('the four skills are On, taken in by Synchronize everything', await sectionsNow(a), [['on', ['fresh', 'idle', 'notes', 'standup']]]);
+  // Copilot CLI left out with its Manage switch: its sessions are still read, and a use there still counts.
+  await a.click('#nav-harnesses');
+  await a.click('#manage-copilot-cli');
+  for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#manage-copilot-cli')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(100);
+  await a.click('#nav-skills');
   same('before a reading: the one click, and no line, figure, chip or Last used', [await a.text('#read-usage'), await a.exists('#usage-line'), await a.exists('.ov-used'), await a.all('.chip', 'e.dataset.tip'), await a.all('#item-order option', 'e.value')],
     ['Read usage', false, false, [], ['name', 'updated']]);
   await a.click('#read-usage');
   for (let tries = 0; tries < 50 && !/^Usage read/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
-  const line = await a.text('#usage-line .band-text') ?? '';
-  check('the line says when it was read, how long it took and how far back each tool goes (Claude Code keeps 30 days; Codex began 12 days ago), with Read again',
-    /^Usage read today at .+, in [\d.]+ m?s\. Claude Code: 30 days or more; Codex: since \w+ \d+\.$/.test(line) && (await a.text('#read-usage-again')) === 'Read again', line);
+  const line = (await a.text('#usage-line .band-text') ?? '').replace(/\u00a0/g, ' ');
+  check('the line says when it was read (a quick reading says no time) and how far back each tool goes, Copilot CLI too, with Read again',
+    /^Usage read today at [^,]+\. Claude Code: 30 days or more; Copilot CLI: history from \w+ \d+; Codex: history from \w+ \d+\.$/.test(line) && (await a.text('#read-usage-again')) === 'Read again', line);
   const figures = () => a.run(`Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => [row.dataset.key, row.querySelector('.ov-used')?.textContent]))`);
-  same('each row says its figure: used, or no use seen in 30 days (a listing is no use, nor a use 40 days ago)', await figures(),
-    { fresh: 'No use seen in 30 days', idle: 'No use seen in 30 days', notes: 'used 2 days ago', standup: 'No use seen in 30 days' });
+  same('each row says its figure: used (in Copilot CLI too, not managed here), or no use seen in 30 days (a listing is no use, nor a use 40 days ago)', await figures(),
+    { fresh: 'no use seen in 30 days', idle: 'used 3 days ago', notes: 'used 2 days ago', standup: 'no use seen in 30 days' });
   await a.click('#open-standup');
-  same('an opened row says each tool’s figure: its last use beyond the 30 days, and a history that starts 12 days ago',
-    await a.all('.details-usage', 'e.textContent.trim()'), ['No use seen in the last 30 days; last used 5 weeks ago.', `No use seen since ${await a.run(`new Date(${ago(12).getTime()}).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })`)}, where its history starts.`]);
+  same('an opened row says each tool’s figure: its last use beyond the 30 days, and that Codex doesn’t always record a skill',
+    await a.all('.details-usage', 'e.textContent.trim()'), ['No use seen in the last 30 days; last used 5 weeks ago.', 'Can’t say: it doesn’t always record which skill was used.']);
   await a.click('#open-standup');
+  await a.click('#open-idle');
+  same('and a use in a tool not managed here has its own line', (await a.text('#usage-idle-copilot-cli'))?.trim(), 'Copilot CLI, not managed here: used in 1 session in the last 30 days, last used 3 days ago.');
+  await a.click('#open-idle');
   await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = 'used'; select.dispatchEvent(new Event('change')); })()`);
   await a.settle();
-  same('Sort by Last used: the newest use first, then the one used 40 days ago, then those never seen, by name', (await sectionsNow(a))[0][1], ['notes', 'standup', 'fresh', 'idle']);
+  same('Sort by Last used: the newest use first, then the one used 40 days ago, then the one never seen', (await sectionsNow(a))[0][1], ['notes', 'idle', 'standup', 'fresh']);
   await a.click('#read-usage-again');
   for (let tries = 0; tries < 50 && !/^Usage read/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
-  same('Read again reads afresh and keeps the order chosen', [(await sectionsNow(a))[0][1], (await figures()).notes], [['notes', 'standup', 'fresh', 'idle'], 'used 2 days ago']);
+  same('Read again reads afresh and keeps the order chosen', [(await sectionsNow(a))[0][1], (await figures()).notes], [['notes', 'idle', 'standup', 'fresh'], 'used 2 days ago']);
   await fitsAtMinimum(a, 'Skills with usage read and its figures');
   await a.shot('usage-read');
-  // The chip: the two old enough with no use seen; fresh, 2 days old, left out and counted.
-  same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['All', null], ['No use seen in 30 days', '2']]);
+  // The chip: standup, old enough with no use seen; fresh, 2 days old, left out and counted; idle, used in Copilot CLI, not in it.
+  same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['All', null], ['No use seen in 30 days', '1']]);
   await a.click('.chip[data-tip="No use seen in 30 days"]');
-  same('with the chip on, the table holds those two', await sectionsNow(a), [['on', ['standup', 'idle']]]);
-  const band = await a.text('#unused-band .band-text') ?? '';
-  check('its band says how many, which tools were read and that a use elsewhere isn’t seen, Codex’s late start, the new one left out, and the profile it ends',
-    /^2 skills with no use seen in the last 30 days\. Read from Claude Code and Codex: a use anywhere else \(another computer, the web, a tool Central Knot doesn’t read\) isn’t seen\. Codex’s history starts \w+ \d+\. Left out: 1 skill under 30 days old\. With these off, Everyday stops being the profile in use\.$/.test(band), band);
+  same('with the chip on, the table holds standup', await sectionsNow(a), [['on', ['standup']]]);
+  same('its band says how many, that a use elsewhere isn’t seen, what Codex doesn’t always record, the new one left out, the profile it ends, and beside the button what it does',
+    await a.text('#unused-band .band-text'), '1 skill with no use seen in the last 30 days. A use on another computer or in a tool not read isn’t seen. Codex doesn’t always record which skill was used. Left out: 1 skill under 30 days old. With these off, Everyday stops being the profile in use. Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on.');
   await fitsAtMinimum(a, 'Skills with the No use seen chip on and its band');
   await a.shot('usage-chip');
   const filesOf = names => Object.fromEntries(names.flatMap(name => [claude, codex].map(root => [join(root, name), readNow(join(root, name, 'SKILL.md'))])));
-  const before = filesOf(['standup', 'idle']);
+  const before = filesOf(['standup']);
   await a.click('#turn-unused-off');
   for (let tries = 0; tries < 50 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
-  same('Turn these off: one click turns both off, in every tool, and says so with one Undo', [await a.text('.outcome-text, [data-outcome] .band-text'), Object.values(filesOf(['standup', 'idle'])).every(text => text === ''), await sectionsNow(a)],
-    ['Turned off 2 skills with no use seen in the last 30 days: idle and standup. Central Knot keeps them, and turning one on puts it back as it was.', true, []]);
+  same('Turn these off: one click turns it off, in every tool, and says so with one Undo; the chip, now at 0, is gone', [await a.text('.outcome-text, [data-outcome] .band-text'), Object.values(filesOf(['standup'])).every(text => text === ''), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
+    ['Turned off 1 skill with no use seen in the last 30 days: standup. Central Knot keeps them, and turning one on puts it back as it was.', true, false]);
   await a.click('#outcome-undo');
-  for (let tries = 0; tries < 50 && Object.values(filesOf(['standup', 'idle'])).some(text => text === ''); tries++) await wait(100);
-  await a.click('.chip[data-tip="All"]');
-  same('its Undo puts both back On, every file byte for byte', [filesOf(['standup', 'idle']), (await sectionsNow(a))[0][1]], [before, ['notes', 'standup', 'fresh', 'idle']]);
+  for (let tries = 0; tries < 50 && Object.values(filesOf(['standup'])).some(text => text === ''); tries++) await wait(100);
+  same('its Undo puts it back On, every file byte for byte', [filesOf(['standup']), (await sectionsNow(a))[0][1]], [before, ['notes', 'idle', 'standup', 'fresh']]);
+  // A reading that fails shows nothing from the one before (a dev run only: it reaches main to make the request fail).
+  const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
+  if (main) {
+    await main.failRequest('usage:read');
+    await a.click('#read-usage-again');
+    for (let tries = 0; tries < 50 && !/couldn’t be read/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
+    same('a reading that fails: the line says so, and no figure or chip from the reading before stays', [await a.text('#usage-line .band-text'), await a.exists('.ov-used'), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
+      ['The tools’ session history couldn’t be read.', false, false]);
+    await main.restore('usage:read');
+    main.close();
+  }
   same('no page errors, usage', a.pageErrors, []);
   await a.quit();
 }

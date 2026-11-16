@@ -37,13 +37,17 @@ export const spelledIn: Record<HarnessId, (names: ItemNames, kind: ItemKind) => 
   'opencode-cli': ({ own }) => own,
 };
 
+/** The names a tool's own copy goes by: its folder and name, each also without a file's `.md` (Pi keeps an agent as `<name>.md`). */
+const copyNames = (facts: LibraryFacts, tool: HarnessId) =>
+  [facts.copies[tool]?.folder, facts.copies[tool]?.name].flatMap(name => (name ? [name, name.replace(/\.md$/i, '')] : []));
+
 /** A row's names in one tool (spelledIn's input). */
 function namesOf(facts: LibraryFacts, tool: HarnessId): ItemNames {
-  const copy = facts.copies[tool], through = facts.plugin?.[tool];
-  return { own: [facts.key, facts.name, copy?.folder, copy?.name].filter(name => !!name) as string[], ...(through ? { plugin: { plugin: through.plugin, name: through.name ?? facts.name } } : {}) };
+  const through = facts.plugin?.[tool];
+  return { own: [facts.key, facts.name, ...copyNames(facts, tool)], ...(through ? { plugin: { plugin: through.plugin, name: through.name ?? facts.name } } : {}) };
 }
 
-/** Why a tool can't say that an item was not used: no record of its kind, a record a use may not leave, no session kept, or sessions that couldn't be read. */
+/** Why a tool can't say that an item was not used: no record of its kind, a record a use may not leave, no session kept, or sessions that couldn't all be read. */
 export type CantSay = 'no-record' | 'not-sure' | 'no-sessions' | 'unread';
 
 /** What one tool's history says of one item. */
@@ -61,17 +65,20 @@ export interface ToolSays {
 
 /** Why a tool's history can't say an item of this kind wasn't used, if it can't. */
 export const cantSayFor = (history: ToolUsage, kind: ItemKind): CantSay | undefined =>
-  history.unread ? 'unread' : !history.tells[kind] ? 'no-record' : history.tells[kind] === 'seen' ? 'not-sure' : !history.sessions ? 'no-sessions' : undefined;
+  history.unread || history.skipped ? 'unread' : !history.tells[kind] ? 'no-record' : history.tells[kind] === 'seen' ? 'not-sure' : !history.sessions ? 'no-sessions' : undefined;
 
 /** Whether a tool's history starts later than USAGE_DAYS before the reading: it counts as far back as it goes. */
 export const startsLate = (reading: Pick<UsageReading, 'at'>, from: string | undefined) => !!from && Date.parse(from) > Date.parse(reading.at) - USAGE_DAYS * DAY_MS;
 
-/** What one tool's history in a reading says of a row's item (none: that tool wasn't read). */
+/**
+ * What one tool's history in a reading says of a row's item (none: that tool wasn't read). A use counts by the kind's spelling,
+ * or, whatever kind the tool's record gave it, when it names the row's own copy in that tool (an agent Pi keeps as a skill).
+ */
 export function toolSays(reading: UsageReading, kind: ItemKind, facts: LibraryFacts, tool: HarnessId): ToolSays | undefined {
   const history = reading.tools.find(each => each.tool === tool);
   if (!history) return undefined;
-  const names = new Set(spelledIn[tool](namesOf(facts, tool), kind).map(name => name.toLowerCase()));
-  const hits = history.used.filter(used => used.kind === kind && names.has(used.name.toLowerCase()));
+  const names = new Set(spelledIn[tool](namesOf(facts, tool), kind).map(name => name.toLowerCase())), copy = new Set(copyNames(facts, tool).map(name => name.toLowerCase()));
+  const hits = history.used.filter(used => (used.kind === kind ? names : copy).has(used.name.toLowerCase()));
   const last = hits.map(hit => hit.last).sort().at(-1), cantSay = cantSayFor(history, kind);
   return { tool, sessions: new Set(hits.flatMap(hit => hit.sessions)).size, ...(last ? { last } : {}), ...(cantSay ? { cantSay } : {}), ...(startsLate(reading, history.from) ? { since: history.from } : {}) };
 }
@@ -82,12 +89,14 @@ export const onIn = (facts: LibraryFacts, tools: readonly HarnessId[]) => tools.
 
 /**
  * A row's one figure: `used`, the newest use where a tool saw one within USAGE_DAYS; `noneSeen`, none seen, and a tool that has
- * it on can say so; undefined, nothing to say (no tool that has it on can tell).
+ * it on can say so, `since` the earliest start among those tools when every one starts later than USAGE_DAYS ago; undefined,
+ * nothing to say (no tool that has it on can tell).
  */
-export type RowFigure = { used: string } | { noneSeen: true } | undefined;
+export type RowFigure = { used: string } | { noneSeen: true; since?: string } | undefined;
 export function rowFigure(says: readonly ToolSays[], on: readonly HarnessId[]): RowFigure {
-  const used = says.filter(each => each.sessions > 0).map(each => each.last!).sort().at(-1);
-  return used ? { used } : says.some(each => !each.cantSay && on.includes(each.tool)) ? { noneSeen: true } : undefined;
+  const used = says.filter(each => each.sessions > 0).map(each => each.last!).sort().at(-1), telling = says.filter(each => !each.cantSay && on.includes(each.tool));
+  if (used || !telling.length) return used ? { used } : undefined;
+  return telling.every(each => each.since) ? { noneSeen: true, since: telling.map(each => each.since!).sort()[0] } : { noneSeen: true };
 }
 
 /** An item's newest use in any tool (ms), for the "Last used" order; undefined: none seen. */

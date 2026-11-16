@@ -154,7 +154,7 @@ How each is run: `AGENTS.md` ("Checking a change") and README ("For developers")
 
 ## To add or change
 - **A kind of item onto the library:** every place it is wired in is the recipe in `librarypass.ts`'s header.
-- **A tool:** its definition in `harnesses.ts`, its id in `types.ts HarnessId`, its name in `words.ts toolNames`, where it keeps an agent (`presence.ts agentsKeptIn`), and each kind's reader and writer for it (`agentfiles.ts`, `mcp.ts`, `mcpswitch.ts`, `skillswitch.ts`, `discovery.ts`).
+- **A tool:** its definition in `harnesses.ts`, its id in `types.ts HarnessId`, its name in `words.ts toolNames`, where it keeps an agent (`presence.ts agentsKeptIn`), each kind's reader and writer for it (`agentfiles.ts`, `mcp.ts`, `mcpswitch.ts`, `skillswitch.ts`, `discovery.ts`), and its row in each of the usage reading's two tables (`usage.ts readers`, `usagerow.ts spelledIn`).
 - **A field the page sends on a click (`types.ts Change`):** `main.ts changes` must copy it too, or the packaged app drops it while the unit tests pass (a field History's action builds in main, such as `Change seen`, doesn't pass through it).
 - **A History entry or action:** for skills, MCP servers and agents (the library's kinds), the recipe at the end of `historyactions.ts`'s header; for profiles, instructions and a tool's Manage switch, a case in `historypage.ts describe`.
 - **A skill folder name a tool keeps for itself:** `harnesses.ts HarnessDefinition.reservedSkills` (that tool's definition); its three readers are `discovery.ts`, `skillfiles.ts readSkillsFolder` and `skills.ts cannotTake`; tests in `tests/skills.test.ts` (a name a tool keeps for itself) and `tests/discovery.test.ts`.

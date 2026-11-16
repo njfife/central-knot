@@ -32,17 +32,27 @@ interface Session { start?: number; uses: Use[] }
 /** One parsed line of a session file, as JSON: every reader looks only at the fields it names. */
 type JsonRecord = Record<string, any>;
 
+/** A tool's sessions as read, and how many of its session files are there and couldn't be read (skipped, the rest counted). */
+interface Read { sessions: Session[]; skipped: number }
+
 interface Reader {
   tells: UsageTells;
-  /** Every session this tool keeps in the home; undefined when it has no session folder there. */
-  read(at: UsageWhere): Promise<Session[] | undefined>;
+  /** Every session this tool keeps in the home; undefined when it has no session folder there. A record dated after `now`
+   * (a wrong clock) is dated by its file's time. */
+  read(at: UsageWhere, now: number): Promise<Read | undefined>;
   /** When its history starts, where that is not its oldest session's start (`oldest`). */
   reach?(at: UsageWhere, now: number, oldest: number | undefined): Promise<number | undefined>;
 }
 
-/** The skill folder a `.../<skill>/SKILL.md` path names, resolved against the folder a command ran in; none for another file. */
-export const skillFolder = (path: unknown, cwd?: unknown) =>
-  typeof path === 'string' && basename(path) === 'SKILL.md' ? basename(dirname(isAbsolute(path) || typeof cwd !== 'string' ? path : join(cwd, path))) : undefined;
+/**
+ * The skill a read file is, resolved against the folder a command ran in: the folder of a `.../<skill>/SKILL.md`, or the name of
+ * a loose `.../skills/<name>.md` (how Pi keeps an agent: presence.ts agentsKeptIn); none for another file.
+ */
+export function skillFolder(path: unknown, cwd?: unknown) {
+  if (typeof path !== 'string') return undefined;
+  const whole = isAbsolute(path) || typeof cwd !== 'string' ? path : join(cwd, path), folder = basename(dirname(whole));
+  return basename(whole) === 'SKILL.md' ? folder : folder === 'skills' && whole.endsWith('.md') ? basename(whole, '.md') : undefined;
+}
 
 const use = (kind: ItemKind, name: unknown): Omit<Use, 'at'>[] => (typeof name === 'string' && name ? [{ kind, name }] : []);
 /** A message's text: a string, or its text parts. */
@@ -62,15 +72,21 @@ function claudeUses(record: JsonRecord): Omit<Use, 'at'>[] {
     call.name === 'Skill' ? use('skill', call.input?.skill) : call.name === 'Agent' || call.name === 'Task' ? use('agent', call.input?.subagent_type) : use('mcp', serverIn(call.name)));
 }
 
-// Codex: an MCP call done (item_completed's McpToolCall), a skill's SKILL.md read through a command Codex parsed, an agent
-// spawned (spawn_agent's agent_type), and a skill the person typed (`<skill>` with its `<name>` in a user message).
+// Codex: an MCP call done (item_completed's McpToolCall); a skill's SKILL.md in a command, as Codex parsed it (a read) or in
+// the command's own text, for each way a command is run (a command item, its exec tool, exec_command), since Codex's parser
+// leaves most of its exec tool's reads unparsed; an agent spawned (spawn_agent's agent_type); and a skill the person typed
+// (`<skill>` with its `<name>` in a user message).
+const skillsNamed = (command: unknown) => (typeof command === 'string' ? each(command, /([^\s/'"`]+)\/SKILL\.md/g).flatMap(name => use('skill', name)) : []);
 function codexUses(record: JsonRecord): Omit<Use, 'at'>[] {
   const payload = record.payload ?? {}, item = payload.item ?? {};
   if (record.type === 'event_msg' && payload.type === 'item_completed') {
     if (item.type === 'McpToolCall') return use('mcp', item.server);
-    if (item.type === 'CommandExecution' && Array.isArray(item.parsed_cmd)) return item.parsed_cmd.flatMap((command: JsonRecord) => (command?.type === 'read' ? use('skill', skillFolder(command.path, item.cwd)) : []));
+    const parsed: JsonRecord[] = item.type === 'CommandExecution' && Array.isArray(item.parsed_cmd) ? item.parsed_cmd : [];
+    if (item.type === 'CommandExecution') return [...skillsNamed(item.command), ...parsed.flatMap(command => (command?.type === 'read' ? use('skill', skillFolder(command.path, item.cwd)) : []))];
   }
   if (record.type !== 'response_item') return [];
+  if (payload.type === 'custom_tool_call' && payload.name === 'exec') return skillsNamed(payload.input);
+  if (payload.type === 'function_call' && payload.name === 'exec_command') return skillsNamed(payload.arguments);
   if (payload.type === 'function_call' && payload.name === 'spawn_agent') { try { return use('agent', JSON.parse(payload.arguments).agent_type); } catch { return []; } }
   if (payload.type === 'message' && payload.role === 'user') return each(textOf(payload.content), /<skill>\s*<name>([^<]+)<\/name>/g).flatMap(name => use('skill', name.trim()));
   return [];
@@ -101,29 +117,40 @@ const timeOf = (record: JsonRecord) => { const at = typeof record.timestamp === 
  * its first record with a time. After that, a line is parsed only if it holds one of `marks`, the text every line with a use
  * holds; a use whose record has no time is not counted.
  */
-async function jsonlSessions(roots: string[], sessionOf: (path: string) => string, marks: string[], usesIn: (record: JsonRecord) => Omit<Use, 'at'>[]): Promise<Session[] | undefined> {
-  const found = await Promise.all(roots.map(root => readdir(root, { recursive: true }).then(names => names.filter(name => name.endsWith('.jsonl')).map(name => ({ root, name })), () => undefined)));
+async function jsonlSessions(roots: string[], sessionOf: (path: string) => string, marks: string[], usesIn: (record: JsonRecord) => Omit<Use, 'at'>[], now: number): Promise<Read | undefined> {
+  const listed = (root: string) => readdir(root, { recursive: true }).then(names => names.filter(name => name.endsWith('.jsonl')).map(name => ({ root, name })),
+    (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
+  const found = await Promise.all(roots.map(listed));
   if (found.every(list => list === undefined)) return undefined;
   const sessions = new Map<string, Session>();
+  let skipped = 0;
   for (const { root, name } of found.flat().filter(file => file !== undefined)) {
+    const file = join(root, name), uses: Use[] = [];
+    let started: number | undefined, fileTime: number | undefined;
+    try {
+      for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
+        const marked = marks.some(mark => line.includes(mark));
+        if (!marked && started !== undefined) continue;
+        let record: JsonRecord;
+        try { record = JSON.parse(line); } catch { continue; }
+        let at = timeOf(record);
+        if (at !== undefined && at > now) at = fileTime ??= (await stat(file)).mtimeMs;
+        started ??= at;
+        if (marked && at !== undefined) for (const each of usesIn(record)) uses.push({ ...each, at });
+      }
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') skipped++; continue; }
     const key = join(root, sessionOf(name)), session = sessions.get(key) ?? { uses: [] };
     sessions.set(key, session);
-    let started: number | undefined;
-    for await (const line of createInterface({ input: createReadStream(join(root, name)), crlfDelay: Infinity })) {
-      const marked = marks.some(mark => line.includes(mark));
-      if (!marked && started !== undefined) continue;
-      let record: JsonRecord;
-      try { record = JSON.parse(line); } catch { continue; }
-      const at = timeOf(record);
-      started ??= at;
-      if (marked && at !== undefined) for (const each of usesIn(record)) session.uses.push({ ...each, at });
-    }
-    if (started !== undefined && !(session.start! <= started)) session.start = started;
+    session.uses.push(...uses);
+    if (started !== undefined) session.start = Math.min(session.start ?? started, started);
   }
-  return [...sessions.values()];
+  return { sessions: [...sessions.values()], skipped };
 }
 
-/** The first folder of a path under a root: Claude Code's session id for `<id>.jsonl` and `<id>/subagents/agent-*.jsonl`. */
+/**
+ * The second part of a path under Claude Code's projects folder, after the project's own folder: the session id of
+ * `<project>/<id>.jsonl` and of `<project>/<id>/subagents/agent-*.jsonl`.
+ */
 const firstPart = (path: string) => path.split(sep)[1]?.replace(/\.jsonl$/, '') ?? path;
 
 /**
@@ -131,25 +158,29 @@ const firstPart = (path: string) => path.split(sep)[1]?.replace(/\.jsonl$/, '') 
  * and its write-ahead log are read from a copy in a temporary folder, since SQLite opening a database in WAL mode, even read
  * only, would leave files of its own beside OpenCode's.
  */
-async function openCodeSessions(at: UsageWhere): Promise<Session[] | undefined> {
+async function openCodeSessions(at: UsageWhere, now: number): Promise<Read | undefined> {
   const file = join(at.dataHome ?? join(at.home, '.local/share'), 'opencode', 'opencode.db');
   if (!existsSync(file)) return undefined;
   const { DatabaseSync } = await import('node:sqlite');
-  const copy = await mkdtemp(join(tmpdir(), 'ck-usage-'));
-  await copyFile(file, join(copy, 'opencode.db'));
-  await copyFile(`${file}-wal`, join(copy, 'opencode.db-wal')).catch(() => undefined);
-  const db = new DatabaseSync(join(copy, 'opencode.db'));
+  const copy = await mkdtemp(join(tmpdir(), 'ck-opencode-copy-'));
+  let db: InstanceType<typeof DatabaseSync> | undefined;
   try {
+    await copyFile(file, join(copy, 'opencode.db'));
+    await copyFile(`${file}-wal`, join(copy, 'opencode.db-wal')).catch(() => undefined);
+    db = new DatabaseSync(join(copy, 'opencode.db'));
+    const fileTime = (await stat(file)).mtimeMs, when = (time: number) => (time > now ? fileTime : time);
     const sessions = new Map<string, Session>();
-    for (const row of db.prepare('SELECT * FROM session').all() as JsonRecord[]) sessions.set(row.id, { start: row.time_created, uses: use('agent', row.agent).map(found => ({ ...found, at: row.time_created })) });
+    for (const row of db.prepare('SELECT * FROM session').all() as JsonRecord[]) {
+      sessions.set(row.id, { start: when(row.time_created), uses: use('agent', row.agent).map(found => ({ ...found, at: when(row.time_created) })) });
+    }
     for (const row of db.prepare(`SELECT session_id, time_created, data FROM part WHERE data LIKE '%"tool":"skill"%' OR data LIKE '%"tool":"task"%'`).iterate() as Iterable<JsonRecord>) {
       let part: JsonRecord;
       try { part = JSON.parse(row.data); } catch { continue; }
       const found = part.tool === 'skill' ? use('skill', part.state?.input?.name) : part.tool === 'task' ? use('agent', part.state?.input?.subagent_type) : [];
-      sessions.get(row.session_id)?.uses.push(...found.map(each => ({ ...each, at: row.time_created })));
+      sessions.get(row.session_id)?.uses.push(...found.map(each => ({ ...each, at: when(row.time_created) })));
     }
-    return [...sessions.values()];
-  } finally { db.close(); await rm(copy, { recursive: true, force: true }); }
+    return { sessions: [...sessions.values()], skipped: 0 };
+  } finally { db?.close(); await rm(copy, { recursive: true, force: true }); }
 }
 
 /**
@@ -171,22 +202,27 @@ async function claudeReach(at: UsageWhere, now: number, oldest: number | undefin
  */
 export const readers: Record<HarnessId, Reader> = {
   'claude-cli': { tells: { skill: 'sure', agent: 'sure', mcp: 'sure' }, reach: claudeReach,
-    read: at => jsonlSessions([join(toolConfigRoot(at, 'claude-cli'), 'projects')], firstPart, ['"tool_use"', '<command-name>/'], claudeUses) },
-  'codex-cli': { tells: { skill: 'sure', agent: 'seen', mcp: 'sure' },
-    read: at => jsonlSessions(['sessions', 'archived_sessions'].map(folder => join(toolConfigRoot(at, 'codex-cli'), folder)), path => path, ['McpToolCall', 'SKILL.md', 'spawn_agent', '<skill>'], codexUses) },
+    read: (at, now) => jsonlSessions([join(toolConfigRoot(at, 'claude-cli'), 'projects')], firstPart, ['"tool_use"', '<command-name>/'], claudeUses, now) },
+  // Codex's skills: seen only. Even with every command form read, a bare SKILL.md read from the skill's own folder names no
+  // skill (3 of 39 sessions with a read, measured on 507 real sessions, 2026-11-16).
+  'codex-cli': { tells: { skill: 'seen', agent: 'seen', mcp: 'sure' },
+    read: (at, now) => jsonlSessions(['sessions', 'archived_sessions'].map(folder => join(toolConfigRoot(at, 'codex-cli'), folder)), path => path,
+      ['McpToolCall', 'SKILL.md', 'spawn_agent', '<skill>'], codexUses, now) },
   'copilot-cli': { tells: { skill: 'sure', mcp: 'seen' },
-    read: at => jsonlSessions([join(toolConfigRoot(at, 'copilot-cli'), 'session-state')], path => path.split(sep)[0], ['skill.invoked', 'mcpServerName'], copilotUses) },
-  'pi-cli': { tells: { skill: 'sure', mcp: 'sure' },
-    read: at => jsonlSessions([join(toolConfigRoot(at, 'pi-cli'), 'sessions')], path => path, ['"toolCall"', '<skill name='], piUses) },
+    read: (at, now) => jsonlSessions([join(toolConfigRoot(at, 'copilot-cli'), 'session-state')], path => path.split(sep)[0], ['skill.invoked', 'mcpServerName'], copilotUses, now) },
+  // An agent in Pi is a loose skill file (presence.ts agentsKeptIn): its uses are a skill's records, as sure as a skill's.
+  'pi-cli': { tells: { skill: 'sure', agent: 'sure', mcp: 'sure' },
+    read: (at, now) => jsonlSessions([join(toolConfigRoot(at, 'pi-cli'), 'sessions')], path => path, ['"toolCall"', '<skill name='], piUses, now) },
   'opencode-cli': { tells: { skill: 'sure', agent: 'sure' }, read: openCodeSessions },
 };
 
 /** One tool's sessions, read and counted: per name, the sessions since `since` that used it (by number) and its newest use. */
 async function readTool(tool: HarnessId, at: UsageWhere, now: number): Promise<ToolUsage> {
   const reader = readers[tool], since = now - USAGE_DAYS * DAY_MS;
-  let sessions: Session[] | undefined;
-  try { sessions = await reader.read(at); }
+  let read: Read | undefined;
+  try { read = await reader.read(at, now); }
   catch { return { tool, tells: reader.tells, sessions: 0, used: [], unread: true }; }
+  const sessions = read?.sessions;
   const used = new Map<string, UsedName & { newest: number }>();
   sessions?.forEach((session, index) => {
     for (const { kind, name, at: when } of session.uses) {
@@ -200,7 +236,7 @@ async function readTool(tool: HarnessId, at: UsageWhere, now: number): Promise<T
   const oldest = starts.length ? Math.min(...starts) : undefined;
   const from = sessions?.length ? (reader.reach ? await reader.reach(at, now, oldest) : oldest) : undefined;
   return {
-    tool, tells: reader.tells, sessions: sessions?.length ?? 0, ...(from !== undefined ? { from: new Date(from).toISOString() } : {}),
+    tool, tells: reader.tells, sessions: sessions?.length ?? 0, ...(from !== undefined ? { from: new Date(from).toISOString() } : {}), ...(read?.skipped ? { skipped: read.skipped } : {}),
     used: [...used.values()].map(({ newest, ...entry }) => ({ ...entry, last: new Date(newest).toISOString() })),
   };
 }
