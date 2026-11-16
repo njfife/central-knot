@@ -3,7 +3,7 @@ name: Linux package
 # nothing here is released or uploaded but the light tour's pictures.
 on:
   push:
-    branches: [next, feature/linux-writes-package-ci]
+    branches: [next]
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,7 +14,8 @@ concurrency:
 jobs:
   linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A run takes about 12½ minutes, most of it the end-to-end checks (about 8, their crash rounds 1½); the limit leaves room.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
