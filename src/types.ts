@@ -228,7 +228,7 @@ export interface DesktopApi {
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
   updatePlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
-  /** A whole plugin's switch (`on`, `off`), Add, a tool kept out or let in, or one tool brought into line (`fix`): recorded first, then run as its table owes (marketplaces.ts turn). */
+  /** A whole plugin's switch (`on`, `off`), Add, or one tool's box on its page (`keep-out`, `let-in`): recorded first, then run as its table owes (marketplaces.ts turn). */
   turnPlugin(source: string, plugin: string, what: PluginTurn, tool: HarnessId | undefined, home: string): Promise<PluginTurnResult>;
   /** The Undo of a turn: its record put back, then `back` run (marketplaces.ts undoTurn). */
   undoPluginTurn(source: string, plugin: string, before: PluginEntry | null, back: PluginOp[], home: string): Promise<{ stopped?: string; done: PluginDone[] }>;
@@ -270,8 +270,8 @@ export interface DesktopApi {
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
-/** What a click on a whole plugin asks (DesktopApi.turnPlugin). */
-export type PluginTurn = 'on' | 'off' | 'add' | 'keep-out' | 'let-in' | 'fix';
+/** What a click on a whole plugin asks (DesktopApi.turnPlugin): its switch On or Off, Add, or one tool's box on its page unticked (`keep-out`: uninstalled there, and kept out) or ticked (`let-in`: let in, and installed there). */
+export type PluginTurn = 'on' | 'off' | 'add' | 'keep-out' | 'let-in';
 /** What a turn did: each tool's report (`done`), the plugin's entry before it (`before`, null: none), and its Undo (`back`). */
 export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before?: PluginEntry | null; back?: PluginOp[] }
 

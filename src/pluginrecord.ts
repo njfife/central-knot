@@ -1,7 +1,7 @@
 // A whole plugin's one switch: what the home records of it, and the one table that decides what each managed tool is owed.
 //
 //   .central-knot/plugins.json   per plugin: `id`, the marketplace as added (`source`, `marketName`), `plugin`, `on` and
-//                                `except` (the tools the person keeps it out of); per home: `tools`, the managed tools that
+//                                `except` (the tools it is kept out of); per home: `tools`, the managed tools that
 //                                are not new here (the first read puts every managed tool there but one an install waited
 //                                for; the automatic updates add a new tool after their first check for it; a tool managed
 //                                again leaves it). Nothing else: what each tool has (installed or not, its version, its own
@@ -22,8 +22,8 @@
 // An install (rows 4, 5) is also owed to the automatic updates where the tool is not on the home's `tools` (it is new here,
 // or managed again): `background`; but not while some tool has the plugin off by its own switch (`offElsewhere`: one turned
 // off somewhere is not wanted everywhere, read from the tools at each look). Nothing else is: an uninstall runs only at the
-// plugin's own click (its switch, a tool kept out, Take out there), and an install in a tool already on `tools` (one that
-// failed, one removed there by hand) waits for Install there on the plugin's page. "Has it" is installed whole, or (in Pi and
+// plugin's own click (its switch, a tool's box unticked), and an install in a tool already on `tools` (one that failed, one
+// removed there by hand) waits for its box to be ticked on the plugin's page. "Has it" is installed whole, or (in Pi and
 // OpenCode, which have no plugin installer) some item linked to the plugin wanted in that tool (`items`). In Pi and OpenCode a
 // plugin whose parts from before the library wait to be moved has none and can't go in (rows 7 and 6: pluginstatus.ts toolNow,
 // waitsToMove), so nothing is owed there until partsmigrate.ts has moved them. An item's own `except` decides where it is; the
@@ -34,6 +34,10 @@
 // The first read (firstRecord) makes plugins.json for a home that has none, from what the tools hold now, writing nothing to
 // any tool: each plugin some managed tool has is On, kept out of every tool that lacks it while some managed tool lacks it.
 // What a click runs of the table's answer is clickRuns (On only installs, Off only uninstalls), beside it.
+// A TOOL'S BOX on the plugin's page (marketplaces.ts turnedEntry) changes the entry, then the table answers for that tool alone:
+// unticked, the tool joins `except` (row 9 or 10 then uninstalls); ticked, it leaves `except` (row 4 or 5 then installs). A tick
+// on a plugin that is Off makes it On in that tool alone (every other HarnessId in `except`), and a box of a plugin with no entry
+// starts from what the first read would record (below); an explicit destination is never widened.
 // Who reads what: marketplaces.ts gathers what the tools have (pluginstatus.ts toolNow) and carries out a click (turn, undoTurn); the
 // automatic updates carry out the background's installs (pluginupdates.ts); the pages and pluginstatus.ts say the answer.
 import { randomUUID } from 'node:crypto';
@@ -56,7 +60,7 @@ export interface PluginEntry {
   marketName: string;
   plugin: string;
   on: boolean;
-  /** The tools the person keeps it out of. */
+  /** The tools it is kept out of: by his unticking their box, by the first read (the tools that lacked it), or by his ticking one tool of a plugin that was Off. */
   except: HarnessId[];
 }
 /** plugins.json. */
@@ -114,15 +118,15 @@ export function owedTo(entry: Pick<PluginEntry, 'on' | 'except'> | undefined, to
   return { ...is, act: 'remove-items' };
 }
 
-/** Which way a click on a plugin goes: On, Add and Let in put it in; Off and Keep out take it out; Install there and Take out there bring one tool into line either way. */
-export const clickGoes = (what: PluginTurn): 'in' | 'out' | 'any' => (what === 'on' || what === 'add' || what === 'let-in' ? 'in' : what === 'fix' ? 'any' : 'out');
+/** Which way a click on a plugin goes: On, Add and a tool's box ticked (`let-in`) put it in; Off and a box unticked (`keep-out`) take it out. */
+export const clickGoes = (what: PluginTurn): 'in' | 'out' => (what === 'on' || what === 'add' || what === 'let-in' ? 'in' : 'out');
 /** What a click runs in one tool: what the table owes there, only where it goes the click's way (On never uninstalls, Off never installs). */
 export function clickRuns(what: PluginTurn, owed: Owed): Owed['act'] {
-  const goes = clickGoes(what), inward = owed.act === 'install' || owed.act === 'install-items';
-  return owed.act && (goes === 'any' || inward === (goes === 'in')) ? owed.act : undefined;
+  const inward = owed.act === 'install' || owed.act === 'install-items';
+  return owed.act && inward === (clickGoes(what) === 'in') ? owed.act : undefined;
 }
 /** Why a click can do nothing in one tool, as the table holds it, where that hold is the click's way. */
-export const clickHeld = (what: PluginTurn, owed: Owed) => (owed.held && (clickGoes(what) === 'any' || owed.wanted === (clickGoes(what) === 'in')) ? owed.held : undefined);
+export const clickHeld = (what: PluginTurn, owed: Owed) => (owed.held && owed.wanted === (clickGoes(what) === 'in') ? owed.held : undefined);
 
 /** A plugin of the home's record by its marketplace (one address however it is spelt) and name. */
 export const entryOf = (record: PluginRecord | undefined, source: string, plugin: string) =>

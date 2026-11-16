@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
-import type { MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
+import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
 const entry: MarketplaceView = { source: 'a/b', origins: ['central-knot'], name: 'm', kind: 'git', sourceLabel: 'GitHub: a/b', plugins: [{ name: 'p', description: '' }],
   states: { p: { 'claude-cli': { state: 'installed', path: '/x' }, 'codex-cli': { state: 'held', reason: 'other' } } } };
@@ -29,6 +30,13 @@ test('A tool takes a plugin by its own installer only when its CLI is there and 
   assert.equal(unavailable(view, entry, 'p', 'codex-cli'), 'other');
   assert.equal(unavailable({ ...view, clis: {} }, entry, 'p', 'claude-cli'), undefined);
   assert.match(unavailable({ ...view, clis: {} }, entry, 'p', 'copilot-cli') ?? '', /wasn’t found/);
+});
+
+test('A tool the plugin is kept out of is said as not installed there, kept out; one that can’t take it says why, kept out of it or not', () => {
+  const except: HarnessId[] = ['copilot-cli', 'codex-cli'], kept: MarketplaceView = { ...entry, switches: { p: { entry: { on: true, except }, tools: {} } } };
+  const mark = (tool: HarnessId) => toolMark(view, kept, 'p', tool, owedTo({ on: true, except }, tool, toolNow(view, kept, 'p', tool, undefined, false), view.tools));
+  assert.deepEqual(mark('copilot-cli'), { mark: 'absent', words: 'Not installed in Copilot CLI, and kept out of it: nothing puts it there by itself.' });
+  assert.deepEqual(mark('codex-cli'), { mark: 'cannot', words: 'Codex: other' }, 'Codex holds another marketplace of this name: its box is off, saying why');
 });
 
 test('Only a known version that names another release is a difference', () => {

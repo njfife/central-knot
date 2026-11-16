@@ -1,12 +1,12 @@
 // Plugins: the page's state and actions. Marketplaces, what the last run did, and where the person is browsing all live
 // here, apart from the other features; app.ts only routes to it and resets it when the home changes.
-// Clicks go by one of two routes, split by whether the plugin's record changes: the switch and each tool's links go through
+// Clicks go by one of two routes, split by whether the plugin's record changes: the switch and each tool's box go through
 // turnPlugin (main records first, marketplaces.ts turn); Update, Update all, a skill's switch and their Undo go through
 // applyPluginOps. Both set market.lastRun, which the toolbar says with one Undo.
 // Which clicks wait their turn and which lock, in one place:
-// - A switch or a tool's link joins the page's list (market.clicks), and one runner sends the list to main one click at a
+// - A switch or a tool's box joins the page's list (market.clicks), and one runner sends the list to main one click at a
 //   time, in the order clicked (runClicks); each row says its own click's state (pluginparts.ts clickNote). That plugin's
-//   switch and links stay off from its click until the view is read back after it (pluginBusy); every other plugin's switch,
+//   switch and boxes stay off from its click until the view is read back after it (pluginBusy); every other plugin's switch,
 //   and the rest of the app, stay usable meanwhile. The home is read once, when the list empties.
 // - Every other action here runs under app.ts busy, and is off while the page acts (app.ts acting: busy, or the list running,
 //   which also says why), so a click on one lands on a disabled control and is dropped, never run twice. A switch is off under
@@ -366,7 +366,7 @@ async function readAgain(): Promise<void> {
 }
 
 /**
- * One click in the page's list: the plugin, what was clicked (in one tool, for a tool's link), what its row says while it waits
+ * One click in the page's list: the plugin, what was clicked (in one tool, for a tool's box), what its row says while it waits
  * and while it runs (`said`: aimWords), and where it is: waiting, running (main has it), reading (main returned `ran`, and the
  * view is read back) or ended.
  */
@@ -375,7 +375,7 @@ export interface PluginClick { source: string; plugin: string; what: PluginTurn;
 const waits = (click: PluginClick) => click.state === 'waiting';
 /** The latest click on this plugin in the page's list, if one is there. */
 export const clickOn = (source: string, plugin: string) => market.clicks.findLast(click => click.source === source && click.plugin === plugin);
-/** A plugin's switch and links are off: under busy, and from a click on it until the view is read back after it. */
+/** A plugin's switch and boxes are off: under busy, and from a click on it until the view is read back after it. */
 export const pluginBusy = (source: string, plugin: string) => !!app.busy || (clickOn(source, plugin)?.state ?? 'ended') !== 'ended';
 
 /**
@@ -386,13 +386,13 @@ export const pluginBusy = (source: string, plugin: string) => !!app.busy || (cli
 export function endListNews(): void { if (!market.clicking) market.clicks = []; }
 
 /**
- * A plugin's one switch (pluginrecord.ts), clicked: On or Off, Add for one found in a tool, one tool kept out or let in, or one
- * tool brought into line (`fix`). The click joins the page's list and waits its turn there; the first click after a list has
- * ended starts a new one.
+ * A plugin's one switch (pluginrecord.ts), clicked: On or Off, Add for one found in a tool, or one tool's box on its page
+ * unticked or ticked (`tool`). The click joins the page's list and waits its turn there; the first click after a list has ended
+ * starts a new one.
  */
 export function turnPlugin(entry: MarketplaceView, plugin: string, what: PluginTurn, tool?: HarnessId): void {
   if (!market.clicking) { endListNews(); market.problem = undefined; clearNotice(); }
-  market.clicks.push({ source: entry.source, plugin, what, tool, said: aimWords(entry, plugin, what, tool), state: 'waiting' });
+  market.clicks.push({ source: entry.source, plugin, what, tool, said: aimWords(what, tool), state: 'waiting' });
   // The control clicked is off until it is read back, which gives it focus again if nothing else took it (as busy does).
   clickedLast = document.activeElement?.id;
   if (!market.clicking) void runClicks(market.clicks, app.home!.home);
@@ -400,14 +400,10 @@ export function turnPlugin(entry: MarketplaceView, plugin: string, what: PluginT
 }
 let clickedLast: string | undefined;
 
-/**
- * What a row says of its click while it waits and while it runs, as the control clicked said it: a tool's link names its tool,
- * and Install there or Take out there goes the way that tool's table owed it (pluginpage.ts, its links).
- */
-function aimWords(entry: MarketplaceView, plugin: string, what: PluginTurn, tool?: HarnessId): PluginClick['said'] {
-  const name = tool ? ` ${toolNames[tool]}` : '', fixIn = !!entry.switches?.[plugin]?.tools[tool!]?.act?.startsWith('install');
-  const [to, doing] = what === 'fix' ? (fixIn ? ['install in', 'Installing in'] : ['take it out of', 'Taking it out of'])
-    : { on: ['install', 'Installing'], off: ['uninstall', 'Uninstalling'], add: ['add', 'Adding'], 'keep-out': ['keep it out of', 'Keeping it out of'], 'let-in': ['let it into', 'Letting it into'] }[what];
+/** What a row says of its click while it waits and while it runs: a tool's box names its tool ("Waiting to install in Codex"). */
+function aimWords(what: PluginTurn, tool?: HarnessId): PluginClick['said'] {
+  const name = tool ? ` ${toolNames[tool]}` : '';
+  const [to, doing] = { on: ['install', 'Installing'], off: ['uninstall', 'Uninstalling'], add: ['add', 'Adding'], 'keep-out': ['uninstall from', 'Uninstalling from'], 'let-in': ['install in', 'Installing in'] }[what];
   return { waiting: `Waiting to ${to}${name}`, running: `${doing}${name}…` };
 }
 

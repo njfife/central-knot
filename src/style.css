@@ -1116,16 +1116,13 @@ span.ins-confirm { margin-top: 0; }
 .plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
 .market-hint > span { max-width: 110ch; }
 .plugin-row { cursor: pointer; }
-/* A plugin's one switch heads its row; each tool's mark only says what it has (no click: the switch and the plugin's page act). */
+/* A plugin's one switch heads its row; each tool's mark only says what it has, drawn plain, with no box and no hover look (no
+   click: the switch and the boxes on the plugin's page act). */
 .plugin-row-switch { justify-content: flex-start; padding-left: 8px; }
-.cell-button.cell-mark { cursor: inherit; }
-.cell-button.cell-mark:hover { border-color: var(--cell-line); background: transparent; }
-.cell-button.cell-mark.cell-on:hover { border-color: transparent; filter: none; }
-.cell-synced.cell-on.cell-mark:hover { background: var(--cell-on); }
-.cell-differs.cell-on.cell-mark:hover { background: var(--cell-warn); }
+.cell-button.cell-plain, .cell-button.cell-plain:hover { cursor: inherit; border-color: transparent; background: transparent; filter: none; }
 .cell-kept { color: var(--ink-soft); border-style: dotted; }
-.plugin-tool-actions { display: inline-flex; flex-wrap: wrap; gap: 0 12px; }
-.plugin-tool-actions > .btn { padding-inline: 0; }
+/* A tool's box on a plugin's page that can't act now keeps its outline, faded: its tooltip says why. */
+.cell-button.cell-box:disabled { border-color: var(--cell-line); opacity: .6; }
 .plugin-panel-switch { display: inline-flex; align-items: center; gap: 10px; }
 .toolbar-result-more { color: var(--ink-soft); }
 .plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 12px 8px 0; text-align: left; }
@@ -1164,7 +1161,8 @@ span.ins-confirm { margin-top: 0; }
 .plugin-legend { padding: 10px 16px 0; }
 /* The description repeated under About is for narrow content only, where the Plugins tab leaves it out. */
 .about-only-narrow { display: none; margin: 0 0 10px; }
-.plugin-legend .legend-cell.cell-absent { border-style: solid; }
+/* The key draws each mark as the list does: plain, with no box. */
+.plugin-legend .legend-cell { border-color: transparent; background: transparent; }
 /* A plugin's own page */
 .plugin-head h2 { display: inline; margin: 0 8px 0 0; font-size: 18px; font-weight: 650; }
 .plugin-id { font-size: 12px; color: var(--ink-soft); }

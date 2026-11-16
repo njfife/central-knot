@@ -311,8 +311,8 @@ function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: numb
 }
 
 /**
- * What the marks mean, only for marks on screen that need saying: a check, a plus-less empty box and a striped one explain
- * themselves with their tooltips, so the key names the rest.
+ * What the marks mean, only for marks on screen that need saying: a check, nothing and a striped one explain themselves with
+ * their tooltips, so the key names the rest.
  */
 function legend(view: PluginsView, entry: MarketplaceView) {
   const marks = new Set<ToolMark>(entry.plugins.flatMap(plugin => view.tools.map(tool => markOf(view, entry, plugin, tool, versionToCompare(plugin, shownDetail(pluginKey(entry.source, plugin.name)))).mark)));
@@ -321,9 +321,8 @@ function legend(view: PluginsView, entry: MarketplaceView) {
     [['waits'], 'Goes in at the next automatic check', 'cell-waiting', 'clock'],
     [['parts-waiting'], 'Waits to be moved: parts from an earlier version', 'cell-waiting', 'clock'],
     [['not-brought'], 'Not brought by itself: off in a tool’s own settings', 'cell-kept', 'circle-off'],
-    [['missing'], 'Not in that tool: Install there, on its page', 'cell-differs', 'circle-alert'],
+    [['missing'], 'Not in that tool, though on: tick it on its page', 'cell-differs', 'circle-alert'],
     [['stays'], 'Still there, though off or kept out', 'cell-differs.cell-on', 'circle-alert'],
-    [['kept-out'], 'Kept out', 'cell-kept', 'circle-minus'],
     [['unknown', 'not-known'], 'Unknown: its record can’t be read', 'cell-differs', 'circle-question-mark'],
   ];
   const shown = keyed.filter(([which]) => which.some(mark => marks.has(mark)));

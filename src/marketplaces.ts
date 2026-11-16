@@ -687,20 +687,24 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     setWhole: (source, marketName, plugin, tool, on, home) => (takesPlugins(tool) ? setWhole(source, marketName, plugin, tool, on, home) : Promise.resolve({ reports: failedFor([tool], 'It takes no plugins.') })),
   };
 
-  /** The entry a turn records: On or Off, Add's On, a tool kept out or let in; Install there and Take out there change none. */
-  function turnedEntry(before: PluginEntry | undefined, what: PluginTurn, tool: HarnessId | undefined, fresh: () => PluginEntry): PluginEntry | undefined {
+  /**
+   * The entry a turn records: On or Off, Add's On, or one tool's box (pluginrecord.ts A TOOL'S BOX). A plugin with no entry
+   * starts from what the first read would record (On, kept out of every tool that lacks it; `has`: the tools that have it now).
+   */
+  function turnedEntry(before: PluginEntry | undefined, what: PluginTurn, tool: HarnessId | undefined, fresh: () => PluginEntry, has: HarnessId[]): PluginEntry | undefined {
     if (what === 'on' || what === 'off') return { ...(before ?? fresh()), on: what === 'on' };
     if (what === 'add') return before ? undefined : { ...fresh(), on: true };
-    if (!before || !tool) return undefined;
-    if (what === 'keep-out' || what === 'let-in') return { ...before, except: harnessIds.filter(each => (each === tool ? what === 'keep-out' : before.except.includes(each))) };
-    return before;
+    if (!tool) return undefined;
+    const base = before ?? { ...fresh(), on: true, except: harnessIds.filter(each => !has.includes(each)) };
+    const out = base.on || what === 'keep-out' ? base.except : harnessIds;
+    return { ...base, on: base.on || what === 'let-in', except: harnessIds.filter(each => (each === tool ? what === 'keep-out' : out.includes(each))) };
   }
 
   /**
-   * A click on a whole plugin (`what`): its switch On or Off, Add for a plugin found in a tool, one tool kept out or let in,
-   * or one tool brought into line (`fix`: Install there, Take out there). The entry is recorded first; then the table
-   * (pluginrecord.ts owedTo) is asked once with it, and what it owes runs by each tool's own route: On and Add run only its
-   * installs, Off only its uninstalls, the others only that tool's. A tool where nothing can run (held, or its record can't be
+   * A click on a whole plugin (`what`): its switch On or Off, Add for a plugin found in a tool, or one tool's box unticked or
+   * ticked. The entry is recorded first; then the table (pluginrecord.ts owedTo) is asked once with it, and what it owes runs by
+   * each tool's own route: On, Add and a tick run only installs, Off and an untick only uninstalls, a box only in its tool. A
+   * tool where nothing can run (held, or its record can't be
    * read) is a report saying why. `back` is the Undo: what changed, reversed (pluginplan.ts reverse), with a tool's own switch
    * for the whole plugin turned off again where an uninstall took a copy that was off there.
    */
@@ -713,7 +717,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (shown.switchProblem || !known.record) return { stopped: shown.switchProblem ?? 'The plugins record isn’t there. Nothing was changed.', done: [] };
     if (!entry || !listed || (tool && !shown.tools.includes(tool))) return { stopped: 'It is no longer listed here, so nothing was changed. Read the page again.', done: [] };
     const before = entryOf(known.record, source, plugin);
-    const after = turnedEntry(before, what, tool, () => newEntry(entry.source, entry.name || before?.marketName || '', plugin, false));
+    const has = (Object.entries(switchOf(shown, entry, listed, known, known.record).tools) as [HarnessId, Owed][]).filter(([, owed]) => owed.has === 'whole' || owed.has === 'items').map(([each]) => each);
+    const after = turnedEntry(before, what, tool, () => newEntry(entry.source, entry.name || before?.marketName || '', plugin, false), has);
     if (!after) return { stopped: 'That doesn’t apply to this plugin now, so nothing was changed. Read the page again.', done: [] };
     const record = withEntry(known.record, source, plugin, after);
     // Written onto the record as it is then, so what a check wrote while this click was reading (a tool joining) stays.
@@ -737,23 +742,18 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const offBefore = (each: HarnessId) => { const state = entry.states[plugin]?.[each]; return state?.state === 'installed' && !!state.off; };
     const back = reverse(ran.done).flatMap(op => (op.action === 'install' && offBefore(op.tool) ? [op, { ...op, action: 'plugin-off' as const }] : [op]));
     // Pi and OpenCode: its items (pluginlibrary.ts).
-    const wanted = itemsIn.some(each => switchOf(shown, entry, listed, known, record).tools[each]?.wanted);
-    const items = itemsIn.length && !ran.stopped ? await turnItems(entry.source, marketName, after, what, itemsIn, wanted) : undefined;
+    const items = itemsIn.length && !ran.stopped ? await turnItems(entry.source, marketName, after, what, itemsIn) : undefined;
     if (items?.back) back.push({ source: entry.source, marketName, plugin, tool: itemsIn[0]!, action: 'items-back', items: items.back });
     const ended = ran.stopped ?? items?.stopped;
     return { done: [...ran.done, ...(items?.done ?? []), ...held], before: before ?? null, back, ...(ended ? { stopped: ended } : {}) };
   }
 
-  /**
-   * A turn's part in the tools that take no plugins (`tools`), as pluginlibrary.ts ItemsAsk says; `wanted`: a `fix` there is
-   * Install there, not Take out there. Its notices go to their pages.
-   */
-  async function turnItems(source: string, marketName: string, entry: PluginEntry, what: PluginTurn, tools: HarnessId[], wanted: boolean) {
+  /** A turn's part in the tools that take no plugins (`tools`), as pluginlibrary.ts ItemsAsk says. Its notices go to their pages. */
+  async function turnItems(source: string, marketName: string, entry: PluginEntry, what: PluginTurn, tools: HarnessId[]) {
     const share = host.share?.();
     if (!share) return undefined;
-    const goes = clickGoes(what) === 'in' || (what === 'fix' && wanted), op = { source, marketName, plugin: entry.plugin, action: goes ? 'install-items' as const : 'remove-items' as const };
-    const ask: ItemsAsk = goes ? { into: tools, ...(what === 'let-in' ? {} : { on: true as const }), ...(what === 'let-in' || what === 'fix' ? { letIn: true as const } : {}) }
-      : { outOf: tools, ...(what === 'off' ? { off: true as const } : {}) };
+    const goes = clickGoes(what) === 'in', op = { source, marketName, plugin: entry.plugin, action: goes ? 'install-items' as const : 'remove-items' as const };
+    const ask: ItemsAsk = goes ? { into: tools, on: true, ...(what === 'let-in' ? { letIn: true as const } : {}) } : { outOf: tools, ...(what === 'off' ? { off: true as const } : {}) };
     const ran = await runItems(share, (await host.read()).tools, entry, ask, goes ? await itemFiles(await context(), source, entry.plugin) : { commitAt: '' }, op);
     for (const told of ran.notices) host.notices?.(told.kind, told.notices);
     return ran;
@@ -936,7 +936,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   });
   // A whole plugin's switch and its Undo (turn, undoTurn). An Undo's steps come back from the page as the turn gave them: each is
   // checked to be one a turn makes, for this plugin, before any runs.
-  const TURNS: PluginTurn[] = ['on', 'off', 'add', 'keep-out', 'let-in', 'fix'];
+  const TURNS: PluginTurn[] = ['on', 'off', 'add', 'keep-out', 'let-in'];
   handle('plugins:turn', async (source, plugin, what, tool, home) => (open() && isText(source) && isName(plugin) && TURNS.includes(what as PluginTurn) && (tool == null || harnessIds.includes(tool as HarnessId))
     ? markets.turn(source, plugin, what as PluginTurn, (tool ?? undefined) as HarnessId | undefined, home) : { stopped: 'That request was malformed, so nothing ran.', done: [] }));
   const isBack = (source: string, plugin: string) => (op: unknown): op is PluginOp => {

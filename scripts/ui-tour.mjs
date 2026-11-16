@@ -735,7 +735,7 @@ esac
   await sizeNow(1280, 800);
   await themeNow('light'); await shot(a, 'running-light', 'The same, light: the held switches beside the free ones.'); await themeNow('dark');
   await pageOf('release-helper');
-  await shot(a, 'waiting-page', 'Opened release-helper’s page meanwhile: its panel says Waiting to install, and its switch and links are held.');
+  await shot(a, 'waiting-page', 'Opened release-helper’s page meanwhile: its panel says Waiting to install, and its switch and boxes are held.');
   await a.run(`document.querySelector('#plugin-back').click()`);
   rmSync(slow);
   await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
@@ -751,6 +751,27 @@ esac
   await shot(a, 'uninstalling', 'Turned document-tools off: its row says Uninstalling… while Claude Code’s stand-in takes its time; the earlier list’s rows are gone, as a new list starts.');
   rmSync(slow);
   await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  // A tool's box on a plugin's page joins the same list: ticked while issue-tracker's install runs, it waits its turn, then runs.
+  await a.run(`document.querySelector('#pswitch-0-issue-tracker').click()`);
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  writeFileSync(slow, '');
+  await a.run(`document.querySelector('#pswitch-0-issue-tracker').click()`);
+  await rowIs('issue-tracker', 'running');
+  await pageOf('document-tools');
+  await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli').click()`);
+  const panelIs = state => waitFor(a, `document.querySelector('.plugin-panel .plugin-click')?.dataset.click === '${state}'`, 30000);
+  await panelIs('waiting');
+  for (const [width, height] of [[1280, 800], [860, 560]]) { await sizeNow(width, height); await shot(a, `box-waiting-${width}`, `At ${width}×${height}: document-tools is Off; ticked Claude Code’s box on its page while issue-tracker’s install runs: the panel says Waiting to install in Claude Code, and the box and the switch are held.`); }
+  await sizeNow(1280, 800);
+  await panelIs('ended'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'box-ticked', 'Its turn came: document-tools is On in Claude Code alone (its switch striped, as partial: kept out of the tools it wasn’t ticked in), its box ticked, and the panel says Installed in Claude Code.');
+  await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli').click()`);
+  await panelIs('running');
+  for (const [width, height] of [[1280, 800], [860, 560]]) { await sizeNow(width, height); await shot(a, `box-running-${width}`, `At ${width}×${height}: unticked Claude Code’s box: the panel says Uninstalling from Claude Code… while the stand-in takes its time, and the box shows it working.`); }
+  await sizeNow(1280, 800);
+  rmSync(slow);
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'box-unticked', 'It ended: the box is empty, and the panel says Uninstalled from Claude Code, with Undo.');
 }
 
 // ---------- Profiles ----------
@@ -2696,7 +2717,7 @@ if (wanted('plugin-library')) {
   await a.click('#nav-skills'); await openRow('charts'); await a.click('#delete-charts'); await a.click('#delete-confirm-charts'); await a.settle();
   await a.click('#nav-plugins'); await refresh(); await waitFor(a, `(document.querySelector('.plugin-items-section')?.textContent.match(/Not brought in/g) ?? []).length === 3`, 15000);
   await show('.plugin-items-section');
-  await shot(a, 'none-linked-1280', 'charts deleted too, so no item of document-tools is linked any more: its page still lists all three under Its items (charts and spreadsheet deleted, pdf-reader your own), and Pi’s line says “Not in it, though on” with Install there, which brings back the two you deleted (1280×800)');
+  await shot(a, 'none-linked-1280', 'charts deleted too, so no item of document-tools is linked any more: its page still lists all three under Its items (charts and spreadsheet deleted, pdf-reader your own), and Pi’s line says “Not in it, though on”, its box empty: a tick brings back the two you deleted (1280×800)');
   await a.click('#nav-mcp'); await openRow('issues');
   await atEverySize('item-row', 'On MCP servers, issues is on in Pi with “from the plugin issue-tracker” after its name; opened, Claude Code’s, Copilot CLI’s and Codex’s lines say it comes only with the plugin, which isn’t installed there, and the line at the end says it is from the plugin issue-tracker, follows it in the tools that take no plugins, and that a change made here makes it yours, with a link to Plugins', true, '.ov-row[data-key="issues"]', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);

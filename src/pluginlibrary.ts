@@ -7,9 +7,9 @@
 //   its items, one pass per kind, as a profile switch makes them; and its Undo (itemsBack);
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool), from one look at the home that every
 //   plugin of a view shares (lookAtKinds).
-// When a plugin is read: at a click that brings it into Pi or OpenCode (On, Add, Let in, Install there), at its Update and
+// When a plugin is read: at a click that brings it into Pi or OpenCode (On, Add, a tool's box ticked), at its Update and
 // Update all, and at the automatic updates' check, for a plugin with items (withItemsOf) or a tool new here (marketplaces.ts);
-// Off, Keep out and Take out there only click. A plugin whose parts from before the library wait to be moved takes this route
+// Off and a box unticked only click. A plugin whose parts from before the library wait to be moved takes this route
 // only once they are (pluginstatus.ts waitsToMove). Kept elsewhere: the table (library.ts), the held answer in the tools with an
 // installer (plugins.ts pluginHolds), the switch's table (pluginrecord.ts owedTo), and the let-go of an item changed here, in
 // every pass (librarypass.ts letGo).
@@ -92,9 +92,10 @@ const pluginOutOf = (entry: PluginEntry, tools: readonly HarnessId[], linked: Li
 // ---------- Running it ----------
 
 /**
- * What a plugin's switch asks of its items: every item On (`on`: its On and Add) or Off (`off`: its Off); one tool let in
- * (`letIn`: Let in) or kept out (Keep out, Take out there) in each item's `except` alone; Install there, a click on one tool,
- * both lets it in and turns each item On. Or a read alone: the page's Update (`click`, which brings back a name of its own he
+ * What a plugin's switch asks of its items: every item On (`on`: its On and Add) or Off (`off`: its Off); a tool's box ticked
+ * lets that tool in, in each item's `except` alone, and turns each item On (`on` and `letIn`; an item that comes On from Off is
+ * kept out of the tools the entry keeps the plugin out of, so a tick on an Off plugin reaches that tool alone); a box unticked
+ * keeps that tool out (`outOf`). Or a read alone: the page's Update (`click`, which brings back a name of its own he
  * deleted), the automatic check, and its install in a tool new here (`bring`, which counts as where the plugin is).
  * `into`, `outOf` and `read` name the tools its result reports on.
  */
@@ -110,7 +111,7 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   const brought = 'into' in ask || ('read' in ask && ask.bring) ? named : [];
   const outOf = pluginOutOf(entry, tools, before, brought), recorded = (await recordedIds(context.home)).ids;
   const read = files.files && !('outOf' in ask) ? await readPlugin(files.files, entry, files.commitAt, recorded, outOf) : [];
-  // A click that turns its items On brings back a name of its own he deleted; Let in and the background never do (library.ts A PLUGIN).
+  // A click that turns its items On (its On, Add, a box ticked) brings back a name of its own he deleted; the background never does (library.ts A PLUGIN).
   const reads = ('into' in ask && ask.on) || ('read' in ask && ask.click) ? read.map(each => ({ ...each, bringBack: new Set(each.names.keys()) })) : read;
   const results: Passed[] = [];
   for (const kind of sourceKinds()) {
@@ -122,7 +123,7 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
     const disk = 'into' in ask && ask.letIn ? (await lookFor(kind.kind, context, tools)).look.disk.byKey : undefined;
     const own = (item: LibraryItem) => (tool: HarnessId) => !!disk?.get(item.key)?.[tool] && item.applied[tool] === undefined;
     const linked = 'read' in ask ? [] : (await linkedItems(context, entry.id)).filter(each => each.kind === kind.kind.kind);
-    if (linked.length) passed(await kind.apply(context, tools, linked.map(({ item }) => clickOn(ask, item, own(item), entry.id)), { only: new Set() }));
+    if (linked.length) passed(await kind.apply(context, tools, linked.map(({ item }) => clickOn(ask, item, own(item), entry)), { only: new Set() }));
     if (results.at(-1)?.result.stopped) break;
   }
   const after = await linkedItems(context, entry.id);
@@ -146,11 +147,12 @@ const ran = (done: PluginDone[], results: Passed[]): Ran => {
 };
 
 /** The click a plugin's switch makes on one item linked to it (ItemsAsk); `own`: whether a tool has a copy of its own of it. */
-function clickOn(ask: ItemsAsk, item: LibraryItem, own: (tool: HarnessId) => boolean, id: string): Change {
+function clickOn(ask: ItemsAsk, item: LibraryItem, own: (tool: HarnessId) => boolean, entry: PluginEntry): Change {
   const on = 'on' in ask ? true : 'off' in ask ? false : item.on;
-  const except = 'into' in ask && ask.letIn ? item.except.filter(tool => !ask.into.includes(tool) || own(tool))
+  const reach = item.on ? item.except : [...new Set([...item.except, ...itemTools(entry.except)])];
+  const except = 'into' in ask && ask.letIn ? reach.filter(tool => !ask.into.includes(tool) || own(tool))
     : 'outOf' in ask && !ask.off ? [...new Set([...item.except, ...ask.outOf])] : item.except;
-  return { key: item.key, on, except, forPlugin: id };
+  return { key: item.key, on, except, forPlugin: entry.id };
 }
 
 /** One tool's report of a run on a plugin's items: what it has of them now, and whether the run changed what it has. */

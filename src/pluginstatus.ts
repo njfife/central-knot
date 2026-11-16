@@ -385,11 +385,11 @@ export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: s
  * One managed tool's mark for a plugin, from the table's answer (`owed`) and the tool's copy: installed (`outdated` when an
  * Update is offered), its items on there (`items`: Pi, OpenCode), installed though not wanted (`stays`: Off, or kept out of
  * it), not in it though wanted (`waits` for the automatic updates' check; `not-brought`, new here while some tool has it off
- * in its own settings; `missing` for Install there), its parts from before the library waiting to be moved (`parts-waiting`:
- * Pi, OpenCode), wanted where it can't go (`cannot`), `kept-out`, not in it (`absent`), its record unreadable (`unknown`), or
- * listed with its files gone (`not-known`).
+ * in its own settings; `missing`), its parts from before the library waiting to be moved (`parts-waiting`: Pi, OpenCode), a
+ * tool that can't take it (`cannot`), not in it (`absent`, kept out of it or not), its record unreadable (`unknown`), or
+ * listed with its files gone (`not-known`). The plugin's page draws each as its tool's box (pluginparts.ts boxOf).
  */
-export type ToolMark = 'installed' | 'outdated' | 'items' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'parts-waiting' | 'cannot' | 'kept-out' | 'absent' | 'unknown' | 'not-known';
+export type ToolMark = 'installed' | 'outdated' | 'items' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'parts-waiting' | 'cannot' | 'absent' | 'unknown' | 'not-known';
 
 /**
  * A tool's mark and the sentence its tooltip and the plugin page's line say. `outdated`: an Update is offered there
@@ -403,7 +403,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   if (!takesPlugins(tool) && waitsToMove(entry, plugin)) return { mark: 'parts-waiting', words: waitingWords(view, entry, plugin, [tool]) };
   const kept = entry.switches?.[plugin]?.entry?.except.includes(tool);
   // Installed though the person doesn't want it there: said with what takes it out, or why nothing can here.
-  const unwanted = recorded && !owed.wanted ? ` ${kept ? `It is kept out of ${name}` : 'The plugin is off'}; ${owed.held ? owed.held : 'Take out there takes it out.'}` : '';
+  const unwanted = recorded && !owed.wanted ? ` ${kept ? `It is kept out of ${name}` : 'The plugin is off'}${owed.held ? `; ${owed.held}` : '.'}` : '';
   if (state.state === 'not-known') return { mark: 'not-known', words: `${state.reason}${unwanted}` };
   if (state.state === 'installed') {
     const version = state.version ? ` ${state.version}` : '';
@@ -415,20 +415,21 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   if (owed.has === 'items') {
     const ready = entry.items?.[plugin]?.ready ? ' An update is ready: Update.' : '';
     const words = `${name}: ${itemsOnWords(entry, plugin, tool)} there, as items of Central Knot’s that follow the plugin.${ready}`;
-    return unwanted ? { mark: 'stays', words: `${words}${unwanted.replace('Take out there takes it out.', 'Take out there turns them off there.')}` } : { mark: 'items', words };
+    return unwanted ? { mark: 'stays', words: `${words}${unwanted}` } : { mark: 'items', words };
   }
   if (owed.wanted && owed.held) return { mark: 'cannot', words: `${name}: ${owed.held}` };
   if (owed.wanted && owed.act) {
-    const [what, goes, them] = owed.act === 'install' ? ['it', 'goes', 'it'] : ['its items', 'go', 'them'];
+    const [what, goes] = owed.act === 'install' ? ['it', 'goes'] : ['its items', 'go'];
     const when = auto ? 'at the next automatic check' : 'once plugins update by themselves again (Settings, and Automatic sync)';
-    if (owed.background) return { mark: 'waits', words: `Not in ${name} yet: ${what} ${goes} in ${when}. Install there puts ${them} in now.` };
+    if (owed.background) return { mark: 'waits', words: `Not in ${name} yet: ${what} ${goes} in ${when}.` };
     const offIn = view.tools.filter(other => { const there = stateOf(entry, plugin, other); return there.state === 'installed' && !!there.off; }).map(other => names[other]);
-    if (owed.offElsewhere) return { mark: 'not-brought', words: `Not in ${name}: the plugin is off in ${andList(offIn)}’s own settings, so it isn’t brought to a tool new here by itself. Install there puts ${them} in.` };
-    return { mark: 'missing', words: `Not in ${name}, though the plugin is on. Install there puts ${what} in.` };
+    if (owed.offElsewhere) return { mark: 'not-brought', words: `Not in ${name}: the plugin is off in ${andList(offIn)}’s own settings, so it isn’t brought to a tool new here by itself.` };
+    return { mark: 'missing', words: `Not in ${name}, though the plugin is on.` };
   }
-  if (kept) return { mark: 'kept-out', words: `Kept out of ${name}.` };
+  // A tool that can't take it says why, kept out of it or not.
   const why = unavailable(view, entry, plugin, tool);
-  return why && !owed.takes ? { mark: 'cannot', words: `${name}: ${why}` } : { mark: 'absent', words: `Not installed in ${name}.` };
+  if (why && !owed.takes) return { mark: 'cannot', words: `${name}: ${why}` };
+  return { mark: 'absent', words: kept ? `Not installed in ${name}, and kept out of it: nothing puts it there by itself.` : `Not installed in ${name}.` };
 }
 
 /**

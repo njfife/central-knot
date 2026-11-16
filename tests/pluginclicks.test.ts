@@ -40,8 +40,7 @@ const plugin = (name: string) => ({ name, description: '' });
 const view = {
   home: '/home', tools: ['claude-cli'] as HarnessId[], clis: {}, canWrite: true, desktopOnly: {}, via: {}, versions: {}, suggested: [],
   marketplaces: [{ source: '/market', name: 'team', origins: ['central-knot'], sourceLabel: 'team', kind: 'folder', plugins: ['alpha', 'beta', 'gamma'].map(plugin), states: {},
-    // gamma is owed an install in Claude Code: its line there offers Install there.
-    switches: { gamma: { tools: { 'claude-cli': { act: 'install' } } } } }],
+    switches: {} }],
 } as unknown as PluginsView;
 const entry = view.marketplaces[0]!;
 const report = (outcome: 'installed' | 'failed', message: string) => ({ tool: 'claude-cli' as const, outcome, changed: outcome === 'installed', message, runs: [] });
@@ -99,11 +98,11 @@ test('A row says its click’s aim while it waits and runs, then what main retur
   start();
   turnPlugin(entry, 'alpha', 'on');
   turnPlugin(entry, 'beta', 'keep-out', 'claude-cli');
-  turnPlugin(entry, 'gamma', 'fix', 'claude-cli');
+  turnPlugin(entry, 'gamma', 'let-in', 'claude-cli');
   await settled();
-  assert.deepEqual([words('alpha'), words('beta'), words('gamma')], ['Installing…', 'Waiting to keep it out of Claude Code', 'Waiting to install in Claude Code']);
+  assert.deepEqual([words('alpha'), words('beta'), words('gamma')], ['Installing…', 'Waiting to uninstall from Claude Code', 'Waiting to install in Claude Code']);
   await main.answer(installed('alpha'));
-  assert.deepEqual([words('alpha'), words('beta')], ['Installed in Claude Code', 'Keeping it out of Claude Code…']);
+  assert.deepEqual([words('alpha'), words('beta')], ['Installed in Claude Code', 'Uninstalling from Claude Code…']);
   await main.answer({ stopped, done: [] });
   await main.answer(refused('gamma'));
   assert.deepEqual([words('beta'), words('gamma')], [stopped, 'Claude Code: Not installed. Plugin "gamma" not found.']);
