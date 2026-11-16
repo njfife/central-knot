@@ -123,11 +123,10 @@ const connect = () => busy('Connecting to the repo…', async () => {
 const pull = (byKeyboard: boolean) => void pullNow().then(() => { if (byKeyboard) keepFocus('repo-pull'); });
 /**
  * What a Pull did, for its band: what came in, what it left (one left is named; ones waiting for Automatic sync were foreseen by
- * their rows, any other is a surprise and warns), what a tool didn't take, and Claude Code's own step. `names` are the items named.
+ * their rows, any other is a surprise and warns), and what a tool didn't take. `names` are the items named.
  */
-function pullSummary(result: RepoResult): { text: string; note?: string; warn: boolean; names: string[]; claudeWaits: string[] } {
+function pullSummary(result: RepoResult): { text: string; note?: string; warn: boolean; names: string[] } {
   const count = result.pulled ?? 0;
-  const claudeWaits = result.waitsForClaude ?? [];
   const leftRows = result.view.connected ? result.view.incoming.filter(change => change.retry) : [];
   const surprise = leftRows.some(change => change.sync !== 'waits');
   const lone = leftRows.length === 1 ? leftRows[0] : undefined;
@@ -141,17 +140,15 @@ function pullSummary(result: RepoResult): { text: string; note?: string; warn: b
     : !surprise ? (lone ? `${lone.name} still waits for Automatic sync.` : `${leftRows.length} items still wait for Automatic sync.`)
     : lone ? `${lone.name} ${lone.change === 'removed' ? 'wasn’t deleted here yet' : 'didn’t come in yet'}; its row says why.`
     : `${leftRows.length} items didn’t come in yet; their rows say why.`;
-  // Claude Code's MCP settings wait for Write to Claude Code on purpose (the MCP servers page offers it); anything else a tool
-  // didn't take is said, by tool.
+  // What a tool didn't take is said, by tool.
   const missed = result.results.filter(entry => entry.harness && (entry.outcome === 'failed' || entry.outcome === 'held'))
     .map(entry => `${entry.item} didn’t reach ${toolName(entry.harness!)} (${entry.message.replace(/\.$/, '')})`);
   const missedText = missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '';
-  const claudeText = claudeWaits.length ? `${andList(claudeWaits)} ${claudeWaits.length === 1 ? 'waits' : 'wait'} for Claude Code: close it, then click Write to Claude Code on MCP servers.` : '';
   return {
-    text: [opening, leftText, missedText, claudeText].filter(Boolean).join(' '),
+    text: [opening, leftText, missedText].filter(Boolean).join(' '),
     // One wording for the promise, always with History one click away.
     note: count ? `Undo ${count === 1 ? 'it' : `any of the ${count}`} in History.` : undefined,
-    warn: surprise, names: [...(lone ? [lone.name] : []), ...claudeWaits], claudeWaits,
+    warn: surprise, names: lone ? [lone.name] : [],
   };
 }
 
@@ -161,7 +158,6 @@ const pullNow = () => busy('Pulling from the repo…', async () => {
   await settle(result, said.text, said.note, said.warn);
   if (!state.outcome) return;
   state.outcome.items = said.names;
-  if (said.claudeWaits.length) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
 });
 
 const push = (byKeyboard: boolean) => void pushNow().then(() => { if (byKeyboard) keepFocus('repo-push'); });

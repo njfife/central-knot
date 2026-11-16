@@ -156,7 +156,7 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
 /** History keys every profile entry with this. */
 const SWITCH_KEY = 'profiles:switch';
 const named = (items: LiveItem[]) => items.map(({ id, name }) => ({ id, name }));
-const stopped = (why: string): ProfileSwitchResult => ({ stopped: why, on: [], off: [], left: [], waits: [], results: [] });
+const stopped = (why: string): ProfileSwitchResult => ({ stopped: why, on: [], off: [], left: [], results: [] });
 
 /** A profile entry (types.ts HistoryEvent `profile`): a switch's, or the migration's (profilemigrate.ts). `item`: the profile's name. */
 export const profileEvent = (context: ShareContext, item: string, profile: NonNullable<HistoryEvent['profile']>): HistoryEvent =>
@@ -164,14 +164,12 @@ export const profileEvent = (context: ShareContext, item: string, profile: NonNu
 
 /**
  * What a switch or its Undo did, as the page tells it: the items that are now as it asked (`done`, turned On and Off) and those
- * that are not (`left`), by name; the MCP servers whose Claude Code part waits for Write to Claude Code, by key; and what could
- * not be done in a tool this time (the next pass tries again).
+ * that are not (`left`), by name; and what could not be done in a tool this time (the next pass tries again).
  */
 function outcome(turns: Turns, done: Turns, results: DestinationResult[]) {
-  const waits = [...new Set(results.filter(result => result.waits && result.harness === 'claude-cli').map(result => itemKey(result.item)))];
   const names = (items: LiveItem[]) => items.map(item => item.name);
   const left = [...turns.on, ...turns.off].filter(item => !done.on.includes(item) && !done.off.includes(item));
-  return { on: names(done.on), off: names(done.off), left: names(left), waits, results: results.filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !result.waits)) };
+  return { on: names(done.on), off: names(done.off), left: names(left), results: results.filter(result => result.outcome === 'failed' || result.outcome === 'held') };
 }
 
 // ---------- Switching, and its Undo ----------
@@ -188,7 +186,7 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const read = await readLibraries(context);
   if ('stop' in read) return stopped(read.stop);
   const turns = switchPlan(profile, liveItems(read.libraries, read.plugins));
-  if (!changes(turns)) return { name: profile.name, on: [], off: [], left: [], waits: [], results: [] };
+  if (!changes(turns)) return { name: profile.name, on: [], off: [], left: [], results: [] };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
   const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off) });

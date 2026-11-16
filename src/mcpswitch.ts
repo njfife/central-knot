@@ -1,6 +1,6 @@
 // An MCP server's own switch in one tool: read at each look for its mark (servers.ts) and, for a server in the library, written
 // only to clear it: once by the profiles migration (profilemigrate.ts; in a server's kept own part, ownWithoutSwitch, where its
-// entry is out of the tool), and for a Claude Code deny it kept (servers.ts releaseKeptDenies); a plugin's part is switched off
+// entry is out of the tool), and for a Claude Code deny an earlier build's migration kept (servers.ts releaseKeptDenies); a plugin's part is switched off
 // and on with it (partswitch.ts). The server's entry stays where it is; the tool just doesn't start it. Each switch was
 // exercised in a throwaway home on 2026-11-09 (notes: ck-feedback/profiles/evidence.md):
 //   Claude Code  settings.json  "deniedMcpServers": [{ "serverName": "<name>" }]   (2.1.321: the server leaves `claude mcp list`)

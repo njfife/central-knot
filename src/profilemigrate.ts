@@ -14,13 +14,11 @@
 //                 listed, and stays.
 //   active        dropped: which profile is in use is worked out (profileplan.ts inUse)
 // Two orders matter. An item is Off on record before its switches are released, and its copies are taken out by a pass after
-// that, so a server's entry goes with its own part as released. A server's deny in Claude Code is kept instead while Claude
-// Code has its entry and the server is not wanted there afterwards, since that entry goes only at Write to Claude Code and
-// would start meanwhile: it is listed, and cleared the first time a pass finds the server wanted in Claude Code (servers.ts
-// releaseKeptDenies).
+// that, so a server's entry goes with its own part as released. (Earlier builds kept Claude Code's deny while the server's
+// entry there waited to leave; servers.ts releaseKeptDenies drains the list they kept.)
 // The steps, in order, each safe to stop after: one History entry saying what it turns Off (profiles.ts profileEvent,
 // `migrated`; its Undo turns those items back On), written only when something turns Off; the items Off, and kept own parts
-// released, on record; the switches released, and Claude Code's kept ones listed; a pass on the held items that are Off (what
+// released, on record; the switches released; a pass on the held items that are Off (what
 // this run or a stopped one turned Off: an item that stays On is left to the ordinary sync rule, with Sync off too); the old
 // file kept as profiles.v1.json; the new one written. Until the last, the file is format 1, and the next pass does what is
 // left. homepass.ts homePass, the pass main.ts runs at start and after, runs it first, where a pass may write.
@@ -28,13 +26,13 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentKind } from './agents.ts';
 import { appendHistory } from './history.ts';
-import { itemKey, wantedIn, type LibraryItem } from './library.ts';
+import { itemKey } from './library.ts';
 import { ownText } from './mcp.ts';
 import { mcpSwitchPath, ownWithoutSwitch, withMcpSwitch } from './mcpswitch.ts';
 import { itemId } from './profileplan.ts';
 import { profileEvent, readProfileFile, saveProfiles } from './profiles.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
-import { keepDenies, keepOwn, keptDenies, keptOwn } from './serverstore.ts';
+import { keepOwn, keptOwn } from './serverstore.ts';
 import { libraryGate, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { rootOf } from './skillfiles.ts';
 import { applySkills, skillKind, skillsView } from './skills.ts';
@@ -66,8 +64,8 @@ function holdsOf(offByProfile: unknown, skills: LibraryView, servers: LibraryVie
   });
 }
 
-/** Where a held server's switch in a tool is released: in Claude Code's list kept until it is wanted there, in its file, or in its kept own part. */
-type ServerRelease = 'kept' | 'file' | 'own';
+/** Where a held server's switch in a tool is released: in its file, or in its kept own part. */
+type ServerRelease = 'file' | 'own';
 
 /** Moves a format 1 profiles file to format 2 (the header says how). Does nothing for any other file, or where a pass may not write. */
 export async function migrateProfiles(context: ShareContext, tools: HarnessId[]): Promise<void> {
@@ -79,7 +77,7 @@ export async function migrateProfiles(context: ShareContext, tools: HarnessId[])
   const holds = holdsOf(file.raw.offByProfile, skills, servers);
   const library = (hold: Hold) => (hold.kind === 'skill' ? skills : servers).library[hold.key];
   const turnOff = holds.filter(hold => heldEverywhere(hold) && library(hold)?.on && !library(hold)?.deleted);
-  const serverClears = holds.filter(hold => hold.kind === 'mcp').flatMap(hold => hold.listed.map(tool => ({ hold, tool, at: releaseAt(hold, tool, turnOff.includes(hold), library(hold)) })));
+  const serverClears = holds.filter(hold => hold.kind === 'mcp').flatMap(hold => hold.listed.map(tool => ({ hold, tool, at: releaseAt(hold, tool) })));
   const active = file.view.profiles.find(profile => profile.id === file.raw!.active)?.name;
   if (turnOff.length) {
     const off = turnOff.map(hold => ({ id: itemId(hold.kind, hold.key), name: library(hold)!.name }));
@@ -88,8 +86,6 @@ export async function migrateProfiles(context: ShareContext, tools: HarnessId[])
   if (!(await onRecord(context, turnOff, serverClears.filter(clear => clear.at === 'own')))) return;
   await releaseSkills(context, holds.filter(hold => hold.kind === 'skill'), skills);
   await releaseInFiles(context, serverClears.filter(clear => clear.at === 'file'));
-  const kept = serverClears.filter(clear => clear.at === 'kept').map(({ hold }) => hold.row!.copies['claude-cli']!.folder);
-  if (kept.length) await keepDenies(context.home, [...await keptDenies(context.home), ...kept]);
   const offNow = (kind: Hold['kind']) => ({ only: new Set(holds.filter(hold => hold.kind === kind && (turnOff.includes(hold) || library(hold)?.on === false)).map(hold => hold.key)) });
   await applySkills(context, tools, [], offNow('skill'));
   await applyServers(context, tools, [], offNow('mcp'));
@@ -99,15 +95,12 @@ export async function migrateProfiles(context: ShareContext, tools: HarnessId[])
 }
 
 /**
- * Where a held server's switch in one tool is released (ServerRelease): Claude Code's deny, where it is set now, is kept while Claude Code has
- * the server's entry and the server, in the library, is not wanted there once this is done (`off`: turned Off now), so the entry
- * doesn't start before Write takes it out; Codex's, Pi's and OpenCode's switch is in the kept own part where the entry is out of
- * the tool; every other is released in its settings file at once.
+ * Where a held server's switch in one tool is released (ServerRelease): Codex's, Pi's and OpenCode's switch is in the kept own
+ * part where the entry is out of the tool; every other (Claude Code's deny and Copilot CLI's list, outside the entry, included)
+ * is released in its settings file at once.
  */
-function releaseAt(hold: Hold, tool: HarnessId, off: boolean, item: LibraryItem | undefined): ServerRelease {
-  if (tool === 'claude-cli') return item && hold.row?.copies[tool] && offIn(hold, tool) && (off || !wantedIn(item, tool)) ? 'kept' : 'file';
-  return tool !== 'copilot-cli' && !hold.row?.copies[tool] ? 'own' : 'file';
-}
+const releaseAt = (hold: Hold, tool: HarnessId): ServerRelease =>
+  (tool !== 'claude-cli' && tool !== 'copilot-cli' && !hold.row?.copies[tool] ? 'own' : 'file');
 
 /**
  * On record, before any switch is released: the items turned Off, and each held server's switch released in the own part kept

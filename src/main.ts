@@ -10,7 +10,6 @@
 // what a page shows (from renderer.ts).
 import { onlyAllowed, PRODUCT, record, strings } from './values.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
@@ -18,7 +17,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, wri
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
-import { CLAUDE_PROCESS, appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
+import { appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
 import { forgetStale, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
@@ -30,7 +29,7 @@ import { installedPlugins } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
-import { applyServers, restoreServer, serversView, serverVersion, writeToClaude } from './servers.ts';
+import { applyServers, restoreServer, serversView, serverVersion } from './servers.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
 import { agentsFolder } from './agentfiles.ts';
 import { libraryEntry } from './historyactions.ts';
@@ -963,13 +962,6 @@ async function startWatching() {
 }
 
 
-/** Whether Claude Code (its CLI, or Claude desktop and its Code tab) is running (macOS and Linux). When this can't be told, Write to Claude Code goes ahead as asked. */
-function claudeRunning(): Promise<boolean> {
-  if (current?.mode !== 'actual' || process.platform === 'win32') return Promise.resolve(false);
-  const found = (args: string[]) => new Promise<boolean>(done => execFile('pgrep', args, error => done(!error)));
-  return found(['-x', 'claude']).then(native => native || found(['-f', CLAUDE_PROCESS]));
-}
-
 async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView | null> {
   let next: NonNullable<typeof current>;
   if (mode === 'custom') {
@@ -1460,19 +1452,12 @@ app.whenReady().then(async () => {
     return { ...chosen, view, did: (passed.done ?? []).filter(result => result.harness === tool) };
   });
   // With Sync off, a click writes exactly the items it is about; spreading anything else waits for Sync.
-  // MCP servers: a click writes every tool but Claude Code; Claude Code only through Write to Claude Code, once Claude is closed.
   handle('servers:apply', async (list, resume, home) => (home === current?.home
     ? applyServers(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: elsewhere, results: [], writes: 0 }));
   handle('agents:apply', async (list, resume, home) => (home === current?.home
     ? applyAgents(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
-  // Write to Claude Code is for when Claude Code is closed: a running Claude Code would write its older copy back over it.
-  handle('servers:write-claude', async (keys, home) => (home === current?.home && Array.isArray(keys)
-    // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.
-    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 }
-      : writeToClaude(context(), await toolsNow(), keys.filter((key): key is string => typeof key === 'string'))
-    : { stopped: elsewhere, results: [], writes: 0 }));
   handleNow('servers:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await serverVersion(context(), key, hash)) ?? null : null));
   handle('skills:apply', async (list, resume, home) => (home === current?.home
     ? applySkills(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })

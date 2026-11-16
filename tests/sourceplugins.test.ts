@@ -14,7 +14,7 @@ import { agentKind, agentsView, applyAgents } from '../src/agents.ts';
 import { holdsAt, readOf } from '../src/atlink.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import * as engine from '../src/plugins.ts';
-import { applyServers, serverKind, serversView, writeToClaude } from '../src/servers.ts';
+import { applyServers, serverKind, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import { applySkills, skillKind } from '../src/skills.ts';
 import { addSource, checkSource, previewSource, removeSource, sourceKinds, sourcesView } from '../src/sources.ts';
@@ -365,7 +365,6 @@ test('The same plugin added as a source, its agent and server On, then installed
     const { id } = await add(box, 'https://github.com/team/kit');
     await applyAgents(box.context, box.tools, [{ key: 'helper', on: true, except: [], seenOn: false }]);
     await applyServers(box.context, box.tools, [{ key: 'relay', on: true, except: [], seenOn: false }]);
-    await writeToClaude(box.context, box.tools, ['relay']);
     const agentFiles = () => Promise.all(['.claude/agents/helper.md', '.copilot/agents/helper.agent.md', '.codex/agents/helper.toml'].map(path => exists(join(box.home, path))));
     const serverIn = async (file: string) => Object.keys(JSON.parse(await readFile(join(box.home, file), 'utf8').catch(() => '{}')).mcpServers ?? {}).includes('relay');
     const servers = async () => [await serverIn('.claude.json'), await serverIn('.copilot/mcp-config.json'), (await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.relay]')];
@@ -374,7 +373,6 @@ test('The same plugin added as a source, its agent and server On, then installed
     await installedKit(box, files);
     await applyAgents(box.context, box.tools, []);
     await applyServers(box.context, box.tools, []);
-    await writeToClaude(box.context, box.tools, ['relay']);
     assert.deepEqual([await agentFiles(), await servers()], [[false, false, true], [false, false, true]], 'the plugin’s alone in Claude Code and Copilot CLI');
 
     await repo.commit({ 'agents/helper.md': helperMd('Help, differently.') });
@@ -396,7 +394,7 @@ async function kitBothWays(box: Box) {
   const serverIn = async (file: string) => Object.keys(JSON.parse(await readFile(join(box.home, file), 'utf8').catch(() => '{}')).mcpServers ?? {}).includes('relay');
   return {
     files,
-    pass: async () => { await applyAgents(box.context, box.tools, []); await applyServers(box.context, box.tools, []); await writeToClaude(box.context, box.tools, ['relay']); },
+    pass: async () => { await applyAgents(box.context, box.tools, []); await applyServers(box.context, box.tools, []); },
     /** Central Knot's agent file in Claude Code and Copilot CLI, then its relay entry in each. */
     copies: async () => [...await Promise.all(['.claude/agents/helper.md', '.copilot/agents/helper.agent.md'].map(path => exists(join(box.home, path)))), await serverIn('.claude.json'), await serverIn('.copilot/mcp-config.json')],
     rows: async () => [(await agentsView(box.context, box.tools)).items.find(item => item.key === 'helper')!, (await serversView(box.context, box.tools)).items.find(item => item.key === 'relay')!],

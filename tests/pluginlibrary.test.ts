@@ -415,14 +415,14 @@ test('A tool new here is owed the plugin’s items by the automatic updates: the
   } finally { await box.cleanup(); }
 });
 
-test('A plugin’s agent and server are held in Claude Code too: no agent file of Central Knot’s there, and the server never waits for Write to Claude Code', async () => {
+test('A plugin’s agent and server are held in Claude Code too: no agent file of Central Knot’s there, and no entry of its in Claude Code’s MCP file', async () => {
   const box = await kitHome();
   try {
     await box.turn('on');
     const { applyAgents } = await import('../src/agents.ts'), { applyServers } = await import('../src/servers.ts');
     await applyAgents(box.share, box.tools, []);
     const servers = await applyServers(box.share, box.tools, []);
-    assert.deepEqual([await exists(join(box.home, '.claude/agents/helper.md')), servers.results.filter(result => result.waits).map(result => result.item)], [false, []]);
+    assert.deepEqual([await exists(join(box.home, '.claude/agents/helper.md')), servers.results.filter(result => result.harness === 'claude-cli').map(result => result.item)], [false, []]);
     assert.equal((await readFile(join(box.home, '.claude.json'), 'utf8').catch(() => '')).includes('relay'), false);
     assert.equal(await exists(box.pi('skills/helper.md')), true, 'Pi has the agent, as a skill');
   } finally { await box.cleanup(); }

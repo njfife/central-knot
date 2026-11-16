@@ -1,7 +1,7 @@
 // MCP servers from a link, on real settings files in a temp home and made-up Git repositories standing in for links
 // (tests/sourcerepo.ts: nothing reaches the network): what at a link is a server (atlink.ts serversAt) and what is left out,
-// a .mcp.json that breaks, no false change in any tool once a server is On, Claude Code's write and removal waiting for Write
-// to Claude Code, each tool's own fields from a source (library.ts A SOURCE) with both of their costs, one name in two
+// a .mcp.json that breaks, no false change in any tool once a server is On, Claude Code written as every tool (and one of its
+// writes owed, as alpha 2 left it, then edited there by hand), each tool's own fields from a source (library.ts A SOURCE) with both of their costs, one name in two
 // places, and Merge (merge.ts mergeServer). The source's table row by row is tests/library.test.ts's; skills from a link are
 // tests/sources.test.ts's, agents tests/sourceagents.test.ts's.
 import { test } from 'node:test';
@@ -13,7 +13,7 @@ import { readHistory } from '../src/history.ts';
 import { fromSourceWords, statusLine } from '../src/libraryrow.ts';
 import { readTool, serverHash, type NeutralServer } from '../src/mcp.ts';
 import { mergeServer } from '../src/merge.ts';
-import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
+import { applyServers, restoreServer, serversView } from '../src/servers.ts';
 import { openLibrary, saveLibrary, storeVersion } from '../src/serverstore.ts';
 import type { ShareContext } from '../src/share.ts';
 import { addSource, checkSource, previewSource, removeSource, rowClick, sourcesView } from '../src/sources.ts';
@@ -66,7 +66,6 @@ const claudeEntry = async (box: Box, name: string) => JSON.parse(await readFile(
 /** What a source's click did to one item, by name. */
 const sourcedOf = (result: SourceResult, name: string) => result.sourced?.find(entry => entry.name === name);
 const turn = (box: Box, key: string, on: boolean) => applyServers(box.context, box.tools, [{ key, on, except: [], seenOn: !on }]);
-const write = (box: Box, ...keys: string[]) => writeToClaude(box.context, box.tools, keys);
 
 // ---------- What at a link is a server ----------
 
@@ -240,7 +239,7 @@ test('A linked server whose entry at the source becomes left out stays as it is,
 
 // ---------- No false change once it is On ----------
 
-test('No false change after On: an empty argument list, numbers, streamable-http, Copilot’s local, a name Codex must quote and an SSE server read back at their versions in every tool; the next update arrives everywhere, Claude Code at Write', async () => {
+test('No false change after On: an empty argument list, numbers, streamable-http, Copilot’s local, a name Codex must quote and an SSE server read back at their versions in every tool; the next update arrives everywhere, Claude Code too', async () => {
   const repo = await repository(hosts, 'https://github.com/team/forms');
   const forms = (args: unknown[]) => mcpJson({
     plain: { command: 'npx', args },
@@ -255,7 +254,6 @@ test('No false change after On: an empty argument list, numbers, streamable-http
     const { id } = await add(box, 'https://github.com/team/forms');
     const keys = ['plain', 'numbers', 'stream', 'local', 'events'];
     await applyServers(box.context, box.tools, keys.map(key => ({ key, on: true, except: [], seenOn: false })));
-    await write(box, ...keys);
     const before = await Promise.all(all.map(tool => readFile(box.path(tool), 'utf8')));
     const again = await applyServers(box.context, box.tools, []);
     assert.deepEqual([again.writes, again.notices ?? []], [0, []], 'a second pass writes nothing and takes nothing in');
@@ -266,8 +264,7 @@ test('No false change after On: an empty argument list, numbers, streamable-http
 
     await repo.commit({ '.mcp.json': forms(['-y']) });
     const updated = await check(box, id);
-    assert.deepEqual(updated.sourced?.map(({ name, answer, written, deferred }) => [name, answer, written, deferred]), [['plain', 'update', ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'], ['claude-cli']]]);
-    await write(box, 'plain');
+    assert.deepEqual(updated.sourced?.map(({ name, answer, written }) => [name, answer, written]), [['plain', 'update', ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']]]);
     for (const tool of all) assert.deepEqual((await entryIn(box, tool, 'plain'))?.server.args, ['-y'], `${tool} has the update`);
     assert.equal((await applyServers(box.context, box.tools, [])).writes, 0);
   } finally { await box.cleanup(); }
@@ -296,97 +293,75 @@ test('A server taken in before this version with "args": [] is taken in once mor
   } finally { await box.cleanup(); }
 });
 
-// ---------- Claude Code's write waits ----------
+// ---------- Claude Code, written as every tool ----------
 
-test('An On server updated at its source: every other tool gets it at once, Claude Code waits and its row says so; a second update follows too, and Write writes the newest', async () => {
+test('An On server updated at its source reaches every tool at once, Claude Code’s too; with Claude Code alone, the update is On there, never “kept Off”', async () => {
   const repo = await repository(hosts, 'https://github.com/team/wait');
   await repo.commit({ '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['one'] } }) });
   const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli']);
   try {
     const { id } = await add(box, 'https://github.com/team/wait');
     await turn(box, 'docs', true);
-    assert.deepEqual([(await server(box, 'docs')).fact?.waits, await claudeEntry(box, 'docs')], [['claude-cli'], undefined]);
-    await write(box, 'docs');
+    assert.deepEqual((await claudeEntry(box, 'docs')).args, ['one']);
     await repo.commit({ '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['two'] } }) });
     const first = await check(box, id);
-    assert.deepEqual(first.sourced?.map(({ answer, on, written, deferred }) => [answer, on, written, deferred]), [['update', true, ['copilot-cli', 'codex-cli'], ['claude-cli']]]);
-    assert.deepEqual([(await entryIn(box, 'copilot-cli', 'docs'))?.server.args, (await claudeEntry(box, 'docs')).args, (await server(box, 'docs')).fact?.waits], [['two'], ['one'], ['claude-cli']]);
-    await repo.commit({ '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['three'] } }) });
-    assert.deepEqual(answered(await check(box, id)), ['mcp docs: update'], 'a waiting write is not a change here');
-    await write(box, 'docs');
-    assert.deepEqual([(await claudeEntry(box, 'docs')).args, (await server(box, 'docs')).fact?.waits], [['three'], undefined]);
-
-    // Claude Code alone: the update is On and waits there, never "kept Off".
+    assert.deepEqual(first.sourced?.map(({ answer, on, written }) => [answer, on, written]), [['update', true, ['claude-cli', 'copilot-cli', 'codex-cli']]]);
+    assert.deepEqual([(await entryIn(box, 'copilot-cli', 'docs'))?.server.args, (await claudeEntry(box, 'docs')).args], [['two'], ['two']]);
     box.tools.splice(0, box.tools.length, 'claude-cli');
     await repo.commit({ '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['four'] } }) });
-    assert.deepEqual((await check(box, id)).sourced?.map(({ on, written, deferred }) => [on, written, deferred]), [[true, [], ['claude-cli']]]);
+    assert.deepEqual((await check(box, id)).sourced?.map(({ on, written }) => [on, written]), [[true, ['claude-cli']]]);
   } finally { await box.cleanup(); }
 });
 
-test('A hand edit in Claude Code’s entry while its write waits loses to the current version and is kept as one; it is then no change here, so the source’s next change follows, and Write writes the newest', async () => {
+test('A hand edit in Claude Code’s entry while its write was owed (as alpha 2 left it) loses to the current version and is kept as one; it is then no change here, so the source’s next change follows', async () => {
   const repo = await repository(hosts, 'https://github.com/team/edge');
   await repo.commit({ '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['one'] } }) });
   const box = await sandbox(['claude-cli', 'copilot-cli']);
   try {
     const { id } = await add(box, 'https://github.com/team/edge');
-    await turn(box, 'docs', true); await write(box, 'docs');
+    await turn(box, 'docs', true);
     await repo.commit({ '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['two'] } }) });
-    await check(box, id);
+    // Claude Code keeps its lock while the update is checked: its write is held, owed as alpha 2 left it.
+    await mkdir(`${box.path('claude-cli')}.lock`);
+    try { await check(box, id); } finally { await rm(`${box.path('claude-cli')}.lock`, { recursive: true }); }
+    assert.deepEqual((await claudeEntry(box, 'docs')).args, ['one']);
     await writeFile(box.path('claude-cli'), mcpJson({ docs: { type: 'stdio', command: 'npx', args: ['mine'] } }));
     await applyServers(box.context, box.tools, []);
     const { item } = await server(box, 'docs');
     // An MCP entry has no time of its own, so an edit made where the current version had moved on loses to it (library.ts THE RULE).
-    assert.deepEqual([item?.versions.map(version => version.from.how), (await entryIn(box, 'copilot-cli', 'docs'))?.server.args], [['edited', 'source', 'source'], ['two']]);
+    assert.deepEqual([item?.versions.map(version => version.from.how), (await entryIn(box, 'copilot-cli', 'docs'))?.server.args, (await claudeEntry(box, 'docs')).args], [['edited', 'source', 'source'], ['two'], ['two']]);
     assert.ok((await readHistory(box.context)).some(event => event.key === 'mcp:docs' && event.kind === 'kept-edit'), 'History says the edit was kept');
     await repo.commit({ '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['three'] } }) });
     assert.deepEqual(answered(await check(box, id)), ['mcp docs: update']);
-    await write(box, 'docs');
     assert.deepEqual([(await claudeEntry(box, 'docs')).args, (await entryIn(box, 'copilot-cli', 'docs'))?.server.args], [['three'], ['three']]);
   } finally { await box.cleanup(); }
 });
 
-test('The source drops an On server: it leaves every other tool; its row says removed at its source and still in Claude Code until Write; Write removes it, and Turn on then Write gives Claude Code back the same entry', async () => {
+test('The source drops an On server: it leaves every tool, Claude Code’s too; its row says removed at its source; Turn on gives Claude Code back the same entry', async () => {
   const repo = await repository(hosts, 'https://github.com/team/drop');
   await repo.commit({ 'notes/SKILL.md': skillMd('notes'), '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['docs'], timeout: 30 } }) });
   const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli']);
   try {
     const { id } = await add(box, 'https://github.com/team/drop');
-    await turn(box, 'docs', true); await write(box, 'docs');
+    await turn(box, 'docs', true);
     const was = await claudeEntry(box, 'docs');
     assert.deepEqual(was, { type: 'stdio', command: 'npx', args: ['docs'], timeout: 30 });
     await repo.commit({ '.mcp.json': mcpJson({}) });
     const done = await check(box, id);
-    assert.deepEqual(done.sourced?.map(({ answer, on, removed, deferred }) => [answer, on, removed, deferred]), [['drop', undefined, ['copilot-cli', 'codex-cli'], ['claude-cli']]]);
+    assert.deepEqual(done.sourced?.map(({ answer, on, removed }) => [answer, on, removed]), [['drop', undefined, ['claude-cli', 'copilot-cli', 'codex-cli']]]);
     const { fact, item } = await server(box, 'docs');
-    assert.deepEqual([fact?.fromSource, fact?.waits, await claudeEntry(box, 'docs')], [{ link: 'https://github.com/team/drop', removed: true }, ['claude-cli'], was]);
-    assert.deepEqual([fromSourceWords(fact!.fromSource!).tag?.text, statusLine(fact!, item, box.tools)], ['removed at its source', 'Off · still in Claude Code until you click Write to Claude Code. Turn it on to put it in every tool.']);
+    assert.deepEqual([fact?.fromSource, await claudeEntry(box, 'docs')], [{ link: 'https://github.com/team/drop', removed: true }, undefined]);
+    assert.deepEqual([fromSourceWords(fact!.fromSource!).tag?.text, statusLine(fact!, item, box.tools)], ['removed at its source', 'Off · in Central Knot only. Turn it on to put it in every tool.']);
     // Its line on Sources reads the same facts (sourcespage.ts removedRow).
     assert.deepEqual(linesOf((await sourcesView(box.context, box.tools)).sources[0]), ['skill notes: nothing']);
-    await write(box, 'docs');
-    assert.equal(await claudeEntry(box, 'docs'), undefined);
-    await turn(box, 'docs', true); await write(box, 'docs');
-    assert.deepEqual(await claudeEntry(box, 'docs'), was, 'its own fields come back with it');
-  } finally { await box.cleanup(); }
-});
-
-test('Turn on before Write cancels the waiting removal: nothing is written to Claude Code', async () => {
-  const repo = await repository(hosts, 'https://github.com/team/cancel');
-  await repo.commit({ 'notes/SKILL.md': skillMd('notes'), '.mcp.json': mcpJson({ docs: { command: 'npx' } }) });
-  const box = await sandbox(['claude-cli', 'copilot-cli']);
-  try {
-    const { id } = await add(box, 'https://github.com/team/cancel');
-    await turn(box, 'docs', true); await write(box, 'docs');
-    const text = await readFile(box.path('claude-cli'), 'utf8');
-    await repo.commit({ '.mcp.json': mcpJson({}) });
-    await check(box, id);
     await turn(box, 'docs', true);
-    assert.deepEqual([(await server(box, 'docs')).fact?.waits, (await write(box, 'docs')).results, await readFile(box.path('claude-cli'), 'utf8')], [undefined, [], text]);
+    assert.deepEqual(await claudeEntry(box, 'docs'), was, 'its own fields come back with it');
   } finally { await box.cleanup(); }
 });
 
 // ---------- Each tool's own fields ----------
 
-test('His own fields stay: his server in Claude Code with his timeout is linked to the same one at a source and follows its shared part; an Off server keeps them too; a new one’s first Write writes the source’s fields', async () => {
+test('His own fields stay: his server in Claude Code with his timeout is linked to the same one at a source and follows its shared part; an Off server keeps them too; a new one’s first write writes the source’s fields', async () => {
   const box = await sandbox(['claude-cli', 'copilot-cli']);
   try {
     await writeFile(box.path('claude-cli'), mcpJson({ docs: { type: 'stdio', command: 'npx', args: ['docs'], timeout: 30 } }));
@@ -396,13 +371,13 @@ test('His own fields stay: his server in Claude Code with his timeout is linked 
     const { id, added } = await add(box, 'https://github.com/team/own');
     assert.deepEqual(answered(added), ['mcp docs: link', 'mcp fresh: make']);
     await repo.commit({ '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['docs', '--fast'], timeout: 99 }, fresh: { command: 'fresh', env: { A: '1' }, timeout: 99 } }) });
-    await check(box, id); await write(box, 'docs');
+    await check(box, id);
     assert.deepEqual(await claudeEntry(box, 'docs'), { type: 'stdio', command: 'npx', args: ['docs', '--fast'], timeout: 30 });
-    await turn(box, 'docs', false); await write(box, 'docs');
-    await turn(box, 'docs', true); await write(box, 'docs');
+    await turn(box, 'docs', false);
+    await turn(box, 'docs', true);
     assert.equal((await claudeEntry(box, 'docs')).timeout, 30, 'Off then On keeps them');
 
-    await turn(box, 'fresh', true); await write(box, 'fresh');
+    await turn(box, 'fresh', true);
     assert.deepEqual(await claudeEntry(box, 'fresh'), { type: 'stdio', command: 'fresh', env: { A: '1' }, timeout: 99 });
   } finally { await box.cleanup(); }
 });
@@ -414,12 +389,11 @@ test('The two costs of own fields from a source: a timeout changed alone there a
   const box = await sandbox(['claude-cli', 'copilot-cli']);
   try {
     const { id } = await add(box, 'https://github.com/team/costs');
-    await turn(box, 'fresh', true); await write(box, 'fresh');
+    await turn(box, 'fresh', true);
     await repo.commit({ '.mcp.json': at(['a'], 5) });
     assert.deepEqual([answered(await check(box, id)), (await claudeEntry(box, 'fresh')).timeout], [[], 99]);
     await repo.commit({ '.mcp.json': at(['b'], 7) });
     assert.deepEqual(answered(await check(box, id)), ['mcp fresh: update']);
-    await write(box, 'fresh');
     assert.deepEqual([(await claudeEntry(box, 'fresh')).args, (await claudeEntry(box, 'fresh')).timeout], [['b'], 99]);
   } finally { await box.cleanup(); }
 });
@@ -467,14 +441,14 @@ test('A server, a skill and an agent named reviewer at one source all come in, a
 
 // ---------- Merge ----------
 
-test('Merge: an environment variable changed here and another at the source merge, in every tool and in Claude Code at Write; Undo puts yours back and the update waits again; the same variable both ways, or a header added both ways, is a conflict named in words', async () => {
+test('Merge: an environment variable changed here and another at the source merge, in every tool, Claude Code’s too; Undo puts yours back and the update waits again; the same variable both ways, or a header added both ways, is a conflict named in words', async () => {
   const repo = await repository(hosts, 'https://github.com/team/merge');
   const at = (env: Record<string, string>) => mcpJson({ docs: { command: 'npx', env }, web: { type: 'http', url: 'https://web.example.com/mcp' } });
   await repo.commit({ '.mcp.json': at({ A: '1', B: '1' }) });
   const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli']);
   try {
     const { id } = await add(box, 'https://github.com/team/merge');
-    await turn(box, 'docs', true); await turn(box, 'web', true); await write(box, 'docs', 'web');
+    await turn(box, 'docs', true); await turn(box, 'web', true);
     const copilot = JSON.parse(await readFile(box.path('copilot-cli'), 'utf8'));
     copilot.mcpServers.docs.env.A = '2';
     await writeFile(box.path('copilot-cli'), JSON.stringify(copilot, null, 2));
@@ -482,9 +456,8 @@ test('Merge: an environment variable changed here and another at the source merg
     await repo.commit({ '.mcp.json': at({ A: '1', B: '3' }) });
     assert.deepEqual(answered(await check(box, id)), ['mcp docs: wait']);
     const merged = sourcedOf(await rowClick(box.context, box.tools, id, 'mcp', 'docs', 'merge'), 'docs');
-    assert.deepEqual([merged?.merge, merged?.written, merged?.deferred], ['merged', ['copilot-cli', 'codex-cli'], ['claude-cli']]);
+    assert.deepEqual([merged?.merge, merged?.written], ['merged', ['claude-cli', 'copilot-cli', 'codex-cli']]);
     assert.deepEqual((await entryIn(box, 'codex-cli', 'docs'))?.server.env, { A: '2', B: '3' });
-    await write(box, 'docs');
     assert.deepEqual((await claudeEntry(box, 'docs')).env, { A: '2', B: '3' });
 
     const entry = (await readHistory(box.context)).find(event => event.key === 'mcp:docs' && event.cause === 'source-merged')!;

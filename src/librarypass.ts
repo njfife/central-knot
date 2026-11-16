@@ -1,7 +1,7 @@
 // The pass: the library's model (library.ts) carried out on real files, the same for every kind of item. A kind (skills.ts,
 // servers.ts, agents.ts) implements `Kind`, below, for the pass: where a harness keeps it, how a copy is read, written and
 // removed in that harness's format, a harness's own part, and its record and store; its clicks, its page's view and any action
-// of its own (skills' Clear the switch and Take over, servers' Write to Claude Code) are in its own module, whose header names
+// of its own (skills' Clear the switch and Take over) are in its own module, whose header names
 // them. Everything here is the same for every kind:
 //
 //   lookAt         each managed harness's copies, read once through the kind (Disk); a copy that can't be read for sure is
@@ -31,14 +31,11 @@
 // repo reads it, stay with the kind (agents.ts agentsView and agentsForRepo, skills.ts skillsView and skillsForRepo, servers.ts
 // serversView and serversForRepo). History's sentences and actions for the library's entries are historyactions.ts's.
 //
-// Two members exist for a kind whose copies are entries in one shared file (MCP servers), and change nothing for a kind of
-// folders (skills, agents), which leaves the first out and never sets the second:
-// - Kind.folderSeen answers the guard's look in place of its `stat` of a directory: a missing file is away (its entries are
-//   written afresh once the settle window has passed, never read as deletions), one that is there keeps one fixed identity
-//   (every save replaces the file, so an inode says nothing), and a file the pass itself made is noted as there at its end.
-// - Disk.locked's `waits`: a harness whose writes wait for a step of the person's own (Claude Code's settings file, until Write
-//   to Claude Code, which runs the pass with a kind whose read leaves it out). Its copies are planned as any other's; the pass
-//   leaves each write and removal there undone, answers it held with `waits`, and A stays, so the next look still owes it.
+// One member exists for a kind whose copies are entries in one shared file (MCP servers), and a kind of folders (skills,
+// agents) leaves it out: Kind.folderSeen answers the guard's look in place of its `stat` of a directory: a missing file is away
+// (its entries are written afresh once the settle window has passed, never read as deletions), one that is there keeps one
+// fixed identity (every save replaces the file, so an inode says nothing), and a file the pass itself made is noted as there
+// at its end.
 //
 // Words: a `Kind` is what one kind implements (below); its `Disk` is what it read of the managed harnesses now; a `Look` is
 // one pass's or one page's reading (the Disk with the record, the folders and the settle clock); a `Shelf` (library.ts)
@@ -104,14 +101,8 @@ export interface Disk<Entry extends Seen> {
   byKey: Map<string, Partial<Record<HarnessId, Entry>>>;
   /** Why a copy can't be seen for sure, by `harness:key` (`harness:*`: the whole folder): it is `unseen`, and nothing happens there. */
   unseen: Map<string, string>;
-  /**
-   * Why a harness's folder can't be written now: no copy there can be written or removed (its copies are still read). `waits`:
-   * the writes wait for a step of the person's own (Claude Code's settings file, written only by Write to Claude Code), so the
-   * pass leaves each write and removal there undone, answers it held with `waits`, and plans it as it would any other.
-   * Write to Claude Code's own pass turns it round: there every other harness waits (servers.ts), so that click writes Claude
-   * Code alone and the next pass finishes the rest.
-   */
-  locked: Map<HarnessId, { why: string; waits?: true }>;
+  /** Why a harness's folder can't be written now: no copy there can be written or removed (its copies are still read). */
+  locked: Map<HarnessId, { why: string }>;
   /** What could not be read, in words for the page. */
   problems: string[];
   /**
@@ -288,18 +279,18 @@ export async function lookFor<C, E extends Seen, D extends Disk<E>>(kind: Kind<C
 export async function joinCounts<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], joining: HarnessId, rule: boolean,
 ): Promise<JoinCounts> {
-  const counts: JoinCounts = { written: 0, kept: 0, removed: 0, waits: 0, found: 0, takenIn: 0 };
+  const counts: JoinCounts = { written: 0, kept: 0, removed: 0, found: 0, takenIn: 0 };
   const { library, problem } = await kind.open(context);
   if (problem || !kind.harnesses([joining]).length) return counts;
   const look = await lookAt(kind, context, kind.harnesses(tools), library);
   const items = Object.values(library.items);
   await guardFolders(look, items);
-  const waits = !!look.disk.locked.get(joining)?.waits, leaving = new Set<string>();
+  const leaving = new Set<string>();
   for (const item of items) {
     const made = plan(item, copiesOf(look, item));
     counts.kept += [...made.keep, ...(look.givingWay.get(item.key) ?? [])].filter(kept => kept.harness === joining).length;
-    if (made.write.includes(joining)) counts[waits ? 'waits' : 'written']++;
-    if (made.remove.includes(joining)) { counts[waits ? 'waits' : 'removed']++; leaving.add(item.key); }
+    if (made.write.includes(joining)) counts.written++;
+    if (made.remove.includes(joining)) { counts.removed++; leaving.add(item.key); }
   }
   // Found there: each key it has a copy of that can be taken in (its own, or one it has another way: foundCopies) with no live
   // item for it, but a deleted item's copy the pass removes there.
@@ -413,9 +404,8 @@ function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | 
     // A copy of its own where the harness has the item another way too: the table's last row (library.ts wantedHere).
     return { is: 'present', hash: here.hash, at: here.at, ...(kindHeld?.anotherWay ? { anotherWay: kindHeld.why } : {}) };
   }
-  // A harness whose writes wait (Disk.locked `waits`) is planned as any other: the pass leaves the write for that step.
   const locked = look.disk.locked.get(tool);
-  const held = kindHeld ?? (wanted && locked && !locked.waits ? { why: locked.why } : undefined);
+  const held = kindHeld ?? (wanted && locked ? { why: locked.why } : undefined);
   if (held) return { is: 'held', ...held };
   const { copy, item: noun } = look.kind.words;
   const missing = `${toolName(tool)}’s ${copy} for it is missing just now. If it stays missing, the ${noun} turns off.`;
@@ -453,24 +443,15 @@ export function foundCopies<E extends Seen>(look: Look<unknown, E, Disk<E>>, key
 
 /**
  * What the take-in table (library.ts takeInAnswer) is told of a found key, from this look: its copies (foundCopies, each switched
- * off by its tool's own switch or not: Disk.switchedOff), whether the record holds it deleted, and whether that deleted item's copy
- * still waits to leave a harness (its plan removes a copy where writes wait: Disk.locked `waits`). The one place both a click and
+ * off by its tool's own switch or not: Disk.switchedOff), and whether the record holds it deleted. The one place both a click and
  * Synchronize everything, and each kind's view, learn it.
  */
 export function foundKey(look: AnyLook, key: string, except: readonly HarnessId[] = []): FoundKey {
   const switchedOff = look.disk.switchedOff?.get(key) ?? [];
-  const tombstone = look.library.items[key]?.deleted ? look.library.items[key] : undefined;
   const copies = foundCopies(look, key, except).map((copy): FoundCopy => ({ harness: copy.tool, hash: copy.hash, at: copy.at,
     ...(switchedOff.includes(copy.tool) ? { switchedOff: true } : {}) }));
-  return { copies, deleted: !!tombstone, leaving: !!tombstone && leavingIn(look, tombstone).length > 0 };
+  return { copies, deleted: !!look.library.items[key]?.deleted };
 }
-
-/**
- * The harnesses a deleted item's copy still waits to leave, at a step of the person's own (Write to Claude Code: Disk.locked
- * `waits`): the one place it is worked out, for the take-in table (foundKey) and for the row's words (servers.ts rowFacts `waits`).
- */
-export const leavingIn = (look: AnyLook, tombstone: LibraryItem) =>
-  plan(tombstone, copiesOf(look, tombstone)).remove.filter(tool => look.disk.locked.get(tool)?.waits);
 
 /** A found key's answers, a click's and Synchronize everything's, as each kind's view gives its row (types.ts LibraryFacts takeInAnswers). */
 export const takeInAnswers = (look: AnyLook, key: string) => {
@@ -648,23 +629,11 @@ async function syncItem(pass: Pass, item: LibraryItem) {
       }
     },
     log: async () => { told = logItem(pass, item, made, slot); await appendHistory(context, told.events); },
-    write: async harness => !waits(pass, item, harness) && writeCopy(pass, item, harness, slot[harness]),
+    write: harness => writeCopy(pass, item, harness, slot[harness]),
     // An Undo gives a harness back the copy its click took over, as that harness's own, instead of removing what is there.
-    remove: async harness => !waits(pass, item, harness)
-      && (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
+    remove: harness => (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
   });
   if (held.length) await untell(pass, told, held);
-}
-
-/**
- * Whether a write or removal in this harness waits for a step of the person's own (Disk.locked `waits`): then it is left
- * undone, said held with `waits` (a step to take, not a failure), and what is applied there stays, so the next look still owes it.
- */
-function waits(pass: Pass, item: LibraryItem, tool: HarnessId): boolean {
-  const lock = pass.disk.locked.get(tool);
-  if (!lock?.waits) return false;
-  pass.results.push({ item: item.name, harness: tool, outcome: 'held', waits: true, message: lock.why });
-  return true;
 }
 
 /** Writes the current version into one harness (Kind.write). True when it is there (carryOut notes it as applied). */
@@ -738,7 +707,7 @@ async function deletionsTold(pass: Pass) {
  * in, and a copy deleted by hand that turned it Off (these two are also notices, since no one asked for them); edits not
  * taken in that gave way, and a harness's own copies that gave way (`own-copy`). Then one rule for the rest, by what the pass
  * does and never why: a write over a copy, or a removal, that nothing above told gets its entry (cause `in-line`), whichever
- * pass makes it (a tool managed again, a write held in an earlier pass, Write to Claude Code): an `on` for the copies written
+ * pass makes it (a tool managed again, a write held in an earlier pass): an `on` for the copies written
  * over, and an `off` (a `deleted` for a deleted item) for the copies removed. Each names the harnesses the plan writes or
  * removes; one whose write or removal is then held is taken out after (untell), said in the pass's results, and finished by a
  * later pass (named then by the rule above where it writes over a copy or removes one; where it only adds, the entry of the
@@ -751,9 +720,9 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   const key = `${pass.kind.historyPrefix}${item.key}`, events: HistoryEvent[] = [], named: Told['named'] = new Map();
   // An Undo gives a harness its own copy back instead of removing what is there (syncItem): not a removal.
   const giveBack = pass.giveBack.get(item.key) ?? {}, gaveBack = made.remove.filter(tool => giveBack[tool]);
-  // A harness whose folder can't be written, or whose writes wait for Write to Claude Code (Disk.locked), is held before anything
-  // is written, so no entry names it: told and taken out again, it would rewrite History in every pass while it stays so. Any
-  // other write or removal the pass then holds is taken out after (untell).
+  // A harness whose folder can't be written (Disk.locked) is held before anything is written, so no entry names it: told and
+  // taken out again, it would rewrite History in every pass while it stays so. Any other write or removal the pass then holds is
+  // taken out after (untell).
   const can = (tools: HarnessId[]) => tools.filter(tool => !pass.disk.locked.has(tool));
   const did = { written: can(made.write), removed: can(made.remove.filter(tool => !giveBack[tool])) };
   // The copies a click takes over: each one Central Knot had not put there, which it writes over or counts as the item's.
@@ -955,7 +924,6 @@ function turn(pass: Pass, item: LibraryItem, asked: Change) {
 /** What a click's refusal says, by why the take-in table leaves the key found; a click meets only these (library.ts takeInAnswer). */
 const refusedAdd: Partial<Record<LeftFound, string>> = {
   'no-copy': 'No tool has a copy of it to take in any more.',
-  leaving: 'It is deleted from Central Knot, and its copy still leaves a tool at the next Write to Claude Code. History can restore it.',
   'choice-changed': 'The copy you chose changed since you chose it. Nothing was changed; choose again.',
 };
 

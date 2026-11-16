@@ -46,8 +46,7 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     for (const root of ['.claude/skills', '.copilot/skills']) assert.equal(await readFile(join(second.home, root, 'review/notes.log'), 'utf8'), 'kept as-is\n');
     assert.ok((await skillRows(second)).find(item => item.key === 'review')!.on);
     const docs = (await serversView(second, tools)).items.find(server => server.key === 'docs')!;
-    assert.ok(docs.on && docs.copies['copilot-cli']);
-    assert.deepEqual(docs.waits, ['claude-cli'], 'Claude Code gets it with Write to Claude Code');
+    assert.ok(docs.on && docs.copies['copilot-cli'] && docs.copies['claude-cli'], 'in Claude Code too, written by the same pass');
     assert.ok((await agentsView(second, tools)).items.find(agent => agent.key === 'planner')!.on);
     assert.deepEqual((await agentsView(second, tools)).library!.planner.versions.map(version => version.from), [{ how: 'pulled' }], 'its version says where it came from');
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/);

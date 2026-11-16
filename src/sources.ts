@@ -7,9 +7,7 @@
 //   rowClick, namesOf, libraryNow, sourcesView and sourceFacts. To add a kind: its entry in sourceKinds, its reader in
 //   atlink.ts (given what the kinds before it found), its Merge in merge.ts (Kind.merge: the compiler names it if missing), its
 //   view's one call to sourceFacts, and the Sources page's words (sourcespage.ts, which words a line by its kind and a
-//   sentence about every source by the kinds the view names, SourcesView `kinds`; its aside names the kinds still to come).
-//   A tool whose writes of the kind wait for a step of the person's own (Claude Code's MCP servers, until Write to Claude
-//   Code: librarypass.ts Disk.locked `waits`) is said by the pass's results (runSource: SourcedItem `deferred`);
+//   sentence about every source by the kinds the view names, SourcesView `kinds`; its aside names the kinds still to come);
 // - a link resolved (sourcelink.ts readLink; its branch, named or the default one, found among the repository's own: refsOf),
 //   and fetched (plugins.ts copySource: the shallow copy marketplaces get, this computer's git and its sign-in, nothing asked
 //   or kept); each source's last read is kept with its record (sourcestore.ts), read from there by each click and view, and
@@ -154,9 +152,8 @@ async function runSource(context: ShareContext, tools: HarnessId[], source: Sour
   for (const entry of sourceKinds()) {
     const read = readOf(source, found, entry, ids, clicked?.kind === entry.kind.kind ? clicked.asked : {});
     const passed = await entry.apply(context, tools, [], { source: read });
-    const toolsOf = (name: string, outcome: 'written' | 'removed' | 'waits') =>
-      passed.results.filter(each => each.item === name && (outcome === 'waits' ? each.waits : each.outcome === outcome) && each.harness).map(each => each.harness!);
-    const sourced = passed.sourced?.map(each => ({ ...each, kind: read.kind, written: toolsOf(each.name, 'written'), removed: toolsOf(each.name, 'removed'), deferred: toolsOf(each.name, 'waits') }));
+    const toolsOf = (name: string, outcome: 'written' | 'removed') => passed.results.filter(each => each.item === name && each.outcome === outcome && each.harness).map(each => each.harness!);
+    const sourced = passed.sourced?.map(each => ({ ...each, kind: read.kind, written: toolsOf(each.name, 'written'), removed: toolsOf(each.name, 'removed') }));
     done.results.push(...passed.results);
     if (sourced) done.sourced = [...done.sourced ?? [], ...sourced];
     if (!read.whole) done.notWhole = [...done.notWhole ?? [], read.kind];

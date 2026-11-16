@@ -14,7 +14,7 @@
 // Off, deleted, edited by hand in Claude Code (alone, or with a change at the source and a Check now), and Add, Merge, Replace
 // and Keep mine on its line. And an MCP server, "relay" in its .mcp.json: changed there (an environment variable, or its
 // arguments), dropped and back there, turned On and Off, deleted, edited by hand in Copilot CLI (alone, or with a change at the
-// source and a Check now), Write to Claude Code (whose writes wait for it), and Add, Merge, Replace and Keep mine on its line.
+// source and a Check now), and Add, Merge, Replace and Keep mine on its line.
 // The source's link is a plugin's own folder from the start in every third walk (a plugin.json naming its notes/ folder), and
 // becomes one and stops being one, each between two Check nows: read the same way, the second answers no update, drop or new
 // item (atlink.ts holdsAt: the link's readers first).
@@ -41,8 +41,8 @@
 //       is linked to kit, nothing of it is applied in a tool with an installer; and in a copy put back after, two plain passes,
 //       then a linked tome On and wanted in Pi is current there;
 //   (j) the source's server, the same: each entry of it Central Knot wrote over or removed held a version of it, or is still in
-//       a tool; and in a copy put back after, a second plain pass over the servers writes nothing, then after Write to Claude
-//       Code an On relay is current in every managed tool, an Off or deleted one has nothing applied. Its line's clicks too.
+//       a tool; and in a copy put back after, a second plain pass over the servers writes nothing, then an On relay is current
+//       in every managed tool, an Off or deleted one has nothing applied. Its line's clicks too.
 // A step that makes a copy unseeable (a link inside, a SKILL.md that can't be parsed, its tool's folder made again) is made
 // from a settled home, and asserts that the pass turns nothing Off and removes nothing; one more deletes a folder by hand and
 // runs passes inside a settle window of 2 s, which must change nothing; and one makes the source's SKILL.md unparseable for a
@@ -59,7 +59,7 @@ import { agentsView, applyAgents } from '../src/agents.ts';
 import type { AgentTool } from '../src/presence.ts';
 import { pruneHistory, readHistory } from '../src/history.ts';
 import { readTool } from '../src/mcp.ts';
-import { applyServers, serversView, writeToClaude } from '../src/servers.ts';
+import { applyServers, serversView } from '../src/servers.ts';
 import { wantedIn } from '../src/library.ts';
 import { asItIs, asksWhichCopy, harnessIs, placeOf, rowClicks } from '../src/libraryrow.ts';
 import { DAY_MS } from '../src/model.ts';
@@ -176,16 +176,15 @@ async function walk(seed: number): Promise<Finding[]> {
   const relay = async () => (await serversView(context(), tools)).library.relay as LibraryItem | undefined;
   /** Each tool's entry for relay, by the hash of its shared part (none where it has none). */
   const relayNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, (await readTool(context(), tool)).entries.find(entry => entry.name === 'relay')?.hash] as const)));
-  /** (j) on the home as it is, in a trial: two plain passes over the servers, the second writing nothing; Write to Claude Code; then the source's server, On, is current in every managed tool, and Off or deleted has nothing applied. */
+  /** (j) on the home as it is, in a trial: two plain passes over the servers, the second writing nothing; then the source's server, On, is current in every managed tool, and Off or deleted has nothing applied. */
   const serversSettle = () => trial(box, async () => {
     await applyServers(context(), tools, []);
     const second = await applyServers(context(), tools, []);
     if (second.writes) fail(`(j) a second plain pass over the servers writes: ${second.results.map(entry => entry.message).join(' | ').slice(0, 120)}`);
-    await writeToClaude(context(), tools, ['relay']);
     const item = await relay(), hashes = await relayNow();
     for (const tool of item ? tools : []) {
-      if (item!.on && !item!.deleted && hashes[tool] !== item!.hash) fail(`(j) after quiet passes and Write to Claude Code the source’s server, On, is not current in ${tool}`);
-      if ((!item!.on || item!.deleted) && item!.applied[tool] !== undefined) fail(`(j) after quiet passes and Write to Claude Code the source’s server, Off, still has an entry applied in ${tool}`);
+      if (item!.on && !item!.deleted && hashes[tool] !== item!.hash) fail(`(j) after quiet passes the source’s server, On, is not current in ${tool}`);
+      if ((!item!.on || item!.deleted) && item!.applied[tool] !== undefined) fail(`(j) after quiet passes the source’s server, Off, still has an entry applied in ${tool}`);
     }
   });
   // The plugin kit and its skill tome (the header): its marketplace and Central Knot's data folder are under the sandbox, so a trial puts them back too.
@@ -251,7 +250,7 @@ async function walk(seed: number): Promise<Finding[]> {
     await applyAgents(context(), tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
     // Even seeds: the source's agent, added with it, turned On too, so its changes and its line's clicks come within the walk.
     if (!(seed % 2)) await applyAgents(context(), tools, [{ key: 'critic', on: true, except: [], seenOn: false }]);
-    if (!(seed % 2)) { await applyServers(context(), tools, [{ key: 'relay', on: true, except: [], seenOn: false }]); await writeToClaude(context(), tools, ['relay']); }
+    if (!(seed % 2)) await applyServers(context(), tools, [{ key: 'relay', on: true, except: [], seenOn: false }]);
     // Even seeds: kit On, so tome is in Pi from the start and every kit step meets it.
     if (!(seed % 2)) await markets.turn(kitRoot, 'kit', 'on', undefined, box.home);
     agentAsWritten = await agentNow();
@@ -373,7 +372,7 @@ async function walk(seed: number): Promise<Finding[]> {
         add(4, { name: `${click} on critic’s line`, app: true, run: async more => asPass(await rowClick(context(more), tools, recorded.id, 'agent', 'critic', click)) });
       }
       // The source's server: changed there (an environment variable, or its arguments), dropped and back there; On, Off, Delete,
-      // edited by hand in Copilot CLI; Write to Claude Code; and its line's Add, Merge, Replace and Keep mine.
+      // edited by hand in Copilot CLI; and its line's Add, Merge, Replace and Keep mine.
       const relayItem = await relay(), relayLive = relayItem && !relayItem.deleted ? relayItem : undefined;
       const relayLine = recorded?.names.find(name => name.kind === 'mcp' && name.key === 'relay');
       if (sourceHasRelay) add(2, { name: 'the source changes relay’s B', run: () => { relayAt.B = `${++marker}`; return source.commit({ '.mcp.json': relayJson(relayAt) }); } });
@@ -384,7 +383,6 @@ async function walk(seed: number): Promise<Finding[]> {
       } });
       if (relayLive) add(2, { name: `relay ${relayLive.on ? 'Off' : 'On'}`, app: true, run: more => applyServers(context(more), tools, [{ key: 'relay', on: !relayLive.on, except: [], seenOn: relayLive.on }]) });
       if (relayLive) add(1, { name: 'relay deleted', app: true, run: more => applyServers(context(more), tools, [{ key: 'relay', on: relayLive.on, except: [], seenOn: relayLive.on, deleted: true }]) });
-      if (tools.includes('claude-cli')) add(2, { name: 'Write to Claude Code', app: true, run: more => writeToClaude(context(more), tools, ['relay']) });
       const inCopilot = join(box.home, '.copilot/mcp-config.json');
       const editRelay = async () => {
         const parsed = JSON.parse(await readFile(inCopilot, 'utf8').catch(() => '{}'));

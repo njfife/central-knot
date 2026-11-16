@@ -49,7 +49,7 @@ export async function homePass(context: ShareContext, managed: HarnessId[], writ
     crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` });
     return undefined;
   };
-  // Skills, MCP servers and agents are Central Knot's library (library.ts); Claude Code's MCP settings wait for Write to Claude Code.
+  // Skills, MCP servers and agents are Central Knot's library (library.ts).
   // The pass of the whole home: the home's standing rule, Synchronize everything, takes found items in here and nowhere else.
   const whole = { background: true } as const;
   const skills = await applySkills(context, managed, [], whole).catch(crashed(passNames.skills));
@@ -62,8 +62,7 @@ export async function homePass(context: ShareContext, managed: HarnessId[], writ
  * What the page is told of one pass of the whole home, every kind alike (main.ts keeps it for the next view: types.ts SyncView
  * caughtUp). `copies`: each copy the pass wrote or removed (the Harnesses page's Caught up band names those written:
  * model.ts caughtUpNames) and each that failed. `stopped`: each kind whose pass crashed or stopped part-way, and why
- * (with `copies`' failures, the problems band). A write left for Write to Claude Code, or for a choice of copy, is not told
- * here: its row says it waits.
+ * (with `copies`' failures, the problems band). An item left for a choice of copy is not told here: its row says it waits.
  */
 export function passTells(synced: NonNullable<HomePass['synced']>): { copies: DestinationResult[]; stopped: DestinationResult[] } {
   const kinds = [[passNames.skills, synced.skills], [passNames.servers, synced.servers], [passNames.agents, synced.agents]] as const;

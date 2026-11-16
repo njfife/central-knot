@@ -1,6 +1,6 @@
 // A seeded random walk over one MCP server ("docs", with fields of each tool's own in each tool) on real settings files in a
 // temp home, with a skill and an agent on the library in the same home: every click the MCP servers page and History offer
-// (src/libraryrow.ts rowClicks, src/historyactions.ts), Write to Claude Code, edits by hand (the server's values, or only a
+// (src/libraryrow.ts rowClicks, src/historyactions.ts), edits by hand (the server's values, or only a
 // tool's own fields), entries deleted and made by hand, a settings file deleted, rewritten without its servers or made
 // unreadable, Automatic sync off and on, a crash at each step of a write or a removal, a tool left out and managed again,
 // profile switches (src/profiles.ts: three profiles naming the server, the skill and the agent in different sets) and their Undo,
@@ -9,12 +9,12 @@
 // among the steps are Settings' switch for Synchronize everything, the one Undo of its switch-on and that Undo's Restore. After every step:
 //   (a) nothing is lost: each entry Central Knot wrote over or removed held a content that is a version of the server, or is
 //       still in a tool. Checked for the step, and for every such content since the walk began;
-//   (b) in a copy of the home put back after, a plain pass and Write to Claude Code, then two passes: the second writes nothing;
+//   (b) in a copy of the home put back after, a plain pass, then two passes: the second writes nothing;
 //       then an On server is current in every managed tool it is wanted in, and an Off or deleted one has nothing applied;
 //   (c) every action the page and History offer does something: none is refused as stale, and each changes a file or the record;
-//   (d) from a settled home, Off then On, with Write to Claude Code after each, puts each entry back with the same values and
+//   (d) from a settled home, Off then On puts each entry back with the same values and
 //       own fields, and every other byte of each file as it was;
-//   (e) a tool Central Knot doesn't manage is never written, and Claude Code's file only by Write to Claude Code;
+//   (e) a tool Central Knot doesn't manage is never written;
 //   (f) every click made a History entry, after a crash too (a profile switch: its one entry);
 //   (h) the skill's folders and the agent's files are as they were in every tool: a server's clicks never touch them (a profile
 //       switch, and its Undo, turn them On and Off too; a pass of the whole home may catch them up);
@@ -38,7 +38,7 @@ import { asksWhichCopy, harnessIs, placeOf, rowClicks, type LibraryRow } from '.
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { changes, switchPlan, undoPlan } from '../src/profileplan.ts';
 import { liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
-import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
+import { applyServers, restoreServer, serversView } from '../src/servers.ts';
 import { everythingEntryAction, setSyncEverything } from '../src/everything.ts';
 import { readRecord, type ShareContext } from '../src/share.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
@@ -81,7 +81,6 @@ async function walk(seed: number): Promise<Finding[]> {
   /** First setup's answer: Yes in the odd seeds, No in the even ones; Settings' switch may change it later in the walk. */
   const yes = seed % 2 === 1;
   const ruleOn = async () => (await readRecord(box.home)).record?.syncEverything === true;
-  const write = (more: Partial<ShareContext> = {}) => writeToClaude(context(more), tools, ['docs']);
   const files = async () => Object.fromEntries(await Promise.all(three.map(async tool => [tool, await readFile(file(tool), 'utf8').catch(() => undefined)] as const)));
   /** Each tool's docs entry as read: its content, and its own fields. */
   const entries = async () => Object.fromEntries(await Promise.all(three.map(async tool => {
@@ -91,7 +90,7 @@ async function walk(seed: number): Promise<Finding[]> {
   const seen = async (): Promise<{ fact?: LibraryFacts; item?: LibraryItem; row: LibraryRow }> => {
     const view = await serversView(context(), tools), fact = view.items.find(each => each.key === 'docs');
     const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
-    return { fact, item: view.library.docs, row: { key: 'docs', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeInAnswers: fact?.takeInAnswers, waits: fact?.waits } };
+    return { fact, item: view.library.docs, row: { key: 'docs', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeInAnswers: fact?.takeInAnswers } };
   };
   /**
    * History's actions for every server (docs, and any that turned up in a tool), each against the item as it is now, and those of
@@ -125,11 +124,10 @@ async function walk(seed: number): Promise<Finding[]> {
   let othersAsWritten: Awaited<ReturnType<typeof others>>;
 
   const record = () => readFile(join(box.home, '.central-knot/mcp.json'), 'utf8').catch(() => '');
-  /** (b) on the home as it is, in a trial: a pass and the write, then two passes; whether the home was settled already. */
+  /** (b) on the home as it is, in a trial: a pass, then two passes; whether the home was settled already. */
   const settles = async () => trial(box, async () => {
     const before = await files(), recorded = await record();
     const firstPass = await pass();
-    const wrote = await write();
     const quiet = await pass(), second = await pass();
     if (second.writes) fail(`(b) a second plain pass writes: ${second.results.map(entry => entry.message).join(' | ').slice(0, 120)}`);
     const { row, item } = await seen();
@@ -138,13 +136,12 @@ async function walk(seed: number): Promise<Finding[]> {
       if (wanted && !['current', 'cannot'].includes(is)) fail(`(b) after quiet passes an On server is “${is}” in ${tool}`);
       if ((!item.on || item.deleted) && item.applied[tool] !== undefined && is !== 'unseen') fail(`(b) after quiet passes an Off server still has an entry applied in ${tool}`);
     }
-    return same(before, await files()) && recorded === await record() && !firstPass.writes && !wrote.writes && !quiet.writes;
+    return same(before, await files()) && recorded === await record() && !firstPass.writes && !quiet.writes;
   });
 
   try {
     for (const tool of three) { await mkdir(join(file(tool), '..'), { recursive: true }); await writeFile(file(tool), first[tool]); }
     await send(rowClicks.on((await seen()).row, undefined));
-    await write();
     await put(box, 'claude-cli');
     await applySkills(context(), tools, [{ key: 'notes', on: true, except: [] }]);
     for (const tool of three) await mkdir(join(box.home, agentFiles[tool], '..'), { recursive: true });
@@ -157,7 +154,7 @@ async function walk(seed: number): Promise<Finding[]> {
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen();
       const place = placeOf(item), held = item && !item.deleted ? item : undefined;
-      type Act = { name: string; run: (more?: Partial<ShareContext>) => Promise<unknown>; app?: boolean; click?: boolean; byHand?: boolean; claude?: boolean; profile?: boolean; whole?: boolean;
+      type Act = { name: string; run: (more?: Partial<ShareContext>) => Promise<unknown>; app?: boolean; click?: boolean; byHand?: boolean; profile?: boolean; whole?: boolean;
         /** The one deleted server this step may bring back: Add on its row, or History's Restore of it. */ brings?: string };
       const acts: Act[] = [];
       const add = (weight: number, act: Act) => { for (let count = 0; count < weight; count++) acts.push(act); };
@@ -173,7 +170,6 @@ async function walk(seed: number): Promise<Finding[]> {
       if (held?.on) for (const tool of tools) clicks(1, `${held.except.includes(tool) ? 'let in' : 'keep out of'} ${tool}`, rowClicks.inHarness(row, item, tool, !held.except.includes(tool)));
       for (const version of held?.versions.filter(version => version.hash !== held.hash).slice(0, 3) ?? []) clicks(1, `make current ${version.from.how}`, rowClicks.makeCurrent(row, item, version.hash));
       if (held) clicks(1, 'Delete', rowClicks.remove(row, item));
-      if (fact?.waits?.length) add(3, { name: 'Write to Claude Code', app: true, claude: true, run: more => write(more) });
       for (const action of await historyActions()) {
         const docs = action.event.key === 'mcp:docs';
         // The one Undo's Restore brings back each item it took back; an item's Restore, that item. Each touches every kind (`whole`).
@@ -249,7 +245,6 @@ async function walk(seed: number): Promise<Finding[]> {
       if (act.app) for (const tool of three) {
         if (same(after[tool], before[tool])) continue;
         if (!managedBefore.includes(tool)) fail(`(e) ${act.name} wrote ${tool}, which Central Knot doesn’t manage`);
-        if (tool === 'claude-cli' && !act.claude) fail(`(e) ${act.name} wrote Claude Code’s file, which only Write to Claude Code writes`);
         const was = entriesBefore[tool];
         if (was && was.hash !== (await entries())[tool]?.hash) taken.add(was.hash);
       }
@@ -275,7 +270,7 @@ async function walk(seed: number): Promise<Finding[]> {
       // (c) Every action offered now does something.
       const now = await seen(), live = now.item && !now.item.deleted ? now.item : undefined;
       // `moves`: a profile's action, which does something when it turns an item On or Off, or changes a record (the same pass may
-      // turn an item Off again, as a copy deleted by hand while a removal waited, which its record and History say).
+      // turn an item Off again, as a copy deleted by hand, which its record and History say).
       type Offered = { name: string; run: () => Promise<{ stopped?: string; results: DestinationResult[] }>; moves?: boolean };
       const offered: Offered[] = (await historyActions()).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run, moves: action.whole }));
       for (const profile of await switches()) offered.push({ name: `the Profiles page’s Switch to ${profile.name}`, moves: true, run: () => switchProfile(context(), tools, profile.id) });
@@ -285,7 +280,6 @@ async function walk(seed: number): Promise<Finding[]> {
       if (live) page('Delete', rowClicks.remove(now.row, live));
       if (live?.on) for (const tool of tools) page(`switch in ${tool}`, rowClicks.inHarness(now.row, live, tool, !live.except.includes(tool)));
       for (const [index, version] of (live?.versions ?? []).entries()) if (version.hash !== live!.hash) page(`Make current #${index}`, rowClicks.makeCurrent(now.row, live, version.hash));
-      if (now.fact?.waits?.length) offered.push({ name: 'the band’s Write to Claude Code', run: () => write() });
       for (const action of offered) await trial(box, async () => {
         const was = await record(), items = await onNow(), answer = await action.run();
         const refusal = answer.stopped ?? answer.results.find(entry => entry.unchanged)?.message;
@@ -293,12 +287,12 @@ async function walk(seed: number): Promise<Finding[]> {
         if (refusal && STALE.test(refusal)) fail(`(c) ${action.name}: “${refusal.slice(0, 100)}”`);
         else if (!refusal && nothing) fail(`(c) ${action.name} does nothing`);
       });
-      // (d) Off then On, from a settled home, each with Write to Claude Code: the same values and own fields, the rest byte for byte.
+      // (d) Off then On, from a settled home: the same values and own fields, the rest byte for byte.
       if (settled && live?.on) await trial(box, async () => {
         const was = await entries(), rest = (texts: Record<string, string | undefined>) => three.map(tool => texts[tool] && writeEntry(texts[tool]!, tool, 'docs', undefined));
-        await send(rowClicks.off(now.row, live)); await write();
+        await send(rowClicks.off(now.row, live));
         const off = await seen();
-        await send(rowClicks.on(off.row, off.item)); await write();
+        await send(rowClicks.on(off.row, off.item));
         if (!same(was, await entries()) || !same(rest(after), rest(await files()))) {
           fail('(d) Off then On left an entry or a file other than it was');
           if (process.env.CK_TRACE) console.log(JSON.stringify({ was, now: await entries(), before: after, after: await files() }, null, 1));

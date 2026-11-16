@@ -181,9 +181,7 @@
 // to the step, read from the last read) makes S current dated by its click, so an edit a tool saved before the click gives way
 // to it and is kept as a version (THE RULE); its Undo puts back the version before and `seen` as it was (types.ts Change
 // seen), so where it had been changed here S waits again. The step reads the tools before the guards (librarypass.ts guardFolders): a tool managed again in
-// that same pass can read as changed here, and S then waits one read more; nothing reads as unchanged that is not. A write
-// that waits for Write to Claude Code is no change here (that tool's copy is still what was applied), so a second update
-// follows too and Write writes the newest; an edit made there while it waits is an edit like any other.
+// that same pass can read as changed here, and S then waits one read more; nothing reads as unchanged that is not.
 //
 // MERGE (`mergeFiles`, a key handed to the step as Replace's is; the kind runs the line merge: librarypass.ts Kind.merge). Three
 // folders: the base (`seen`), yours (the current version) and S, compared path by path, each path a file (its bytes and its
@@ -262,10 +260,8 @@
 //   pass finds H = A and finishes the write or the removal.
 //
 // Nothing else is stored. Whether a harness can't hold the item or has it another way is a `held` copy, worked out at each
-// look with its reason and shown as that harness's mark. Whether its writes wait for a step of the person's own (Claude
-// Code's MCP settings, until Write to Claude Code: librarypass.ts Disk.locked `waits`) is worked out at each look too, and
-// changes no plan: the write or removal is left undone until that step, and A stays, so the next look still owes it. A library
-// item never waits for a choice: the copy question exists only when a found item whose copies differ is taken in.
+// look with its reason and shown as that harness's mark. A library item never waits for a choice: the copy question exists
+// only when a found item whose copies differ is taken in.
 //
 // Skills, agents and MCP servers are on it. A harness's own part (`own`) is kept by its text's hash: an agent's whole file, an
 // MCP entry's own fields (a fragment of a settings file the harness shares with other things); a skill has none, its whole
@@ -280,8 +276,6 @@
 //
 //   what the key has                                 a click on Add                       Synchronize everything
 //   no copy that can be read                         refused: no copy to take in          left found, quietly
-//   a deleted item's copy still to leave a harness   no Add: History can restore it       left found
-//     at a step of the person's own (Write to Claude Code)
 //   the record holds it deleted                      on: its tombstone is lifted          left found, for good
 //   every copy switched off by its tool's own switch on                                   left found: its row keeps Add
 //   a copy whose own time is inside the settle       on                                   left for the next pass
@@ -765,13 +759,11 @@ export interface FoundKey {
   copies: FoundCopy[];
   /** The record holds it deleted (a tombstone). */
   deleted: boolean;
-  /** A deleted item's copy still waits to leave a harness, at a step of the person's own (Write to Claude Code). */
-  leaving: boolean;
 }
 /** Who asks to take a found key in: a click on its Add, or Synchronize everything. */
 export type TakenBy = 'click' | 'rule';
 /** Why a found key is left found (the header's FOUND table, one per row). */
-export type LeftFound = 'no-copy' | 'leaving' | 'deleted' | 'switched-off' | 'settling' | 'choice-changed';
+export type LeftFound = 'no-copy' | 'deleted' | 'switched-off' | 'settling' | 'choice-changed';
 /**
  * The table's answer: take it in from this copy (`chosen`: the person chose it among copies that differ), wait for a choice of
  * copy (`latest`: the content changed last, which the question preselects: latestCopy), or leave it found.
@@ -785,7 +777,6 @@ export type TakeInAnswer = { take: FoundCopy; chosen: boolean } | { wait: 'choic
 export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: HarnessId; hash?: string }, settle?: { clock: number; ms: number }): TakeInAnswer {
   const rule = by === 'rule', { copies } = found;
   if (!copies.length) return { leave: 'no-copy' };
-  if (found.leaving) return { leave: 'leaving' };
   if (rule && found.deleted) return { leave: 'deleted' };
   if (rule && copies.every(copy => copy.switchedOff)) return { leave: 'switched-off' };
   if (rule && settle && copies.some(copy => copy.at !== undefined && Math.abs(settle.clock - copy.at) < settle.ms)) return { leave: 'settling' };

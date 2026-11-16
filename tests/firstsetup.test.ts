@@ -190,7 +190,7 @@ test('Yes in a home like the owner’s: only new files are written, nothing ther
     const before = await filesIn(box);
     // What the question says, counted from the look the pass uses.
     const asked = whatYesDoes(await homeView(box));
-    assert.deepEqual(asked, { takes: 37, to: tools, choosing: 8, waitForClaude: 0, fromClaude: false });
+    assert.deepEqual(asked, { takes: 37, to: tools, choosing: 8 });
     assert.deepEqual(waitingForChoice(await homeView(box)).map(item => item.key), [...differing, 'docs']);
     await setSyncEverything(box.context, true, true);
     await background(box);
@@ -382,7 +382,7 @@ test('“Use the latest for the rest” says what happened to each: taken in, sk
 
 // ---------- The one Undo meets later changes ----------
 
-test('The one Undo after later changes: each take-in edited, turned Off, deleted, taken over or found in Claude Code since is left and named, as are two copies chosen; the rest go, and no copy it says it leaves is removed', async () => {
+test('The one Undo after later changes: each take-in edited, turned Off, deleted or taken over since is left and named, as are two copies chosen; the rest go, a server found in Claude Code too, and no copy it says it leaves is removed', async () => {
   const box = await sandbox();
   try {
     for (const name of ['edited', 'offed', 'deleted', 'plain', 'other']) await putSkill(box, skillRoot['claude-cli'], name);
@@ -403,16 +403,17 @@ test('The one Undo after later changes: each take-in edited, turned Off, deleted
     const before = await filesIn(box);
     const [switchOn] = await switchesOn(box);
     const plan = everythingPlan(switchOn, await history(box), await entryItems(box));
-    assert.deepEqual(plan.takeBack.map(event => event.item).sort(), ['other', 'plain']);
+    assert.deepEqual(plan.takeBack.map(event => event.item).sort(), ['docs', 'other', 'plain']);
     const undone = await everythingEntryAction(box.context, tools, switchOn.id);
     const undo = (await history(box)).find(event => event.id === undone.made![0])!;
-    assert.equal(everythingSentence(undo).text, 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool it was found in keeping its own copy. Left in: '
-      + 'deleted (deleted from Central Knot since), edited (changed since), offed (turned off since), shared (a copy it was found in taken over since), docs (found in Claude Code: no Undo) '
+    assert.equal(everythingSentence(undo).text, 'Undone: switched off, and 3 items it took in are out of Central Knot again, each tool it was found in keeping its own copy. Left in: '
+      + 'deleted (deleted from Central Knot since), edited (changed since), offed (turned off since), shared (a copy it was found in taken over since) '
       + 'and first and second (you chose their copies: each has its own Undo).');
-    const after = await filesIn(box);
+    const after = await filesIn(box), docsPut = ['.copilot/mcp-config.json', '.codex/config.toml'];
     for (const [path, bytes] of Object.entries(before)) {
       const gone = /^\.(copilot|codex)\/skills\/(plain|other)\//.test(path);
-      assert.equal(after[path], gone ? undefined : bytes, `${path}: ${gone ? 'Central Knot’s copy goes' : 'as it was'}`);
+      if (docsPut.includes(path)) assert.doesNotMatch(Buffer.from(after[path] ?? '', 'base64').toString(), /docs/, `${path}: Central Knot’s docs goes`);
+      else assert.equal(after[path], gone ? undefined : bytes, `${path}: ${gone ? 'Central Knot’s copy goes' : 'as it was'}`);
     }
     assert.deepEqual([after[`${skillRoot['claude-cli']}/plain/SKILL.md`], (await recordOf(box))?.syncEverything], [before[`${skillRoot['claude-cli']}/plain/SKILL.md`], false]);
   } finally { await box.cleanup(); }
@@ -645,7 +646,7 @@ test('Yes with a profile in use and a tool left out: the profile’s name drops 
     // Codex is left out: what Yes would do names Claude Code and Copilot CLI only.
     await chooseTools(box.context, 'codex-cli', false);
     const managed: HarnessId[] = ['claude-cli', 'copilot-cli'];
-    assert.deepEqual(whatYesDoes(await homeView(box, managed)), { takes: 2, to: ['copilot-cli'], choosing: 0, waitForClaude: 0, fromClaude: false });
+    assert.deepEqual(whatYesDoes(await homeView(box, managed)), { takes: 2, to: ['copilot-cli'], choosing: 0 });
     const codexBefore = (await readdir(join(box.home, skillRoot['codex-cli']))).sort();
     await setSyncEverything(box.context, true, true);
     await background(box, managed);

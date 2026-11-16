@@ -12,7 +12,7 @@
 // tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo,
 // remove-build (one install at a time: the held screen while another build of Central Knot is on this Mac, as made-up
 // bundles), sources (a Git link read on a click, made-up repositories standing in for GitHub), source-agents (agents from a
-// link, beside a skill), source-servers (MCP servers from a link, and Claude Code's wait for Write to Claude Code), source-plugins
+// link, beside a skill), source-servers (MCP servers from a link, reaching Claude Code as every tool), source-plugins
 // (a link to a plugin's own folder, a marketplace or a plugin one lists, and Add to Plugins), plugin-library
 // (a plugin's items in Pi as library items), parts-migration (a plugin's parts an earlier version put into Pi, moved to the
 // library at one look) and sort (the item pages sorted by last updated).
@@ -339,7 +339,7 @@ if (wanted('sync')) {
 
 // ---------- MCP servers ----------
 // MCP servers are on Central Knot's library, as skills and agents are (src/servers.ts): every new state of a server's row, at
-// four sizes. Claude Code's settings file is written only by Write to Claude Code, one band for every server that owes it.
+// four sizes. Claude Code's settings file is written in the same pass as every tool's.
 if (wanted('mcp')) {
   begin('mcp');
   const settings = { claude: join(practice, '.claude.json'), copilot: join(practice, '.copilot/mcp-config.json'), codex: join(practice, '.codex/config.toml'), copilotSwitches: join(practice, '.copilot/settings.json') };
@@ -353,24 +353,21 @@ if (wanted('mcp')) {
   await openRow('files');
   await atEverySize('found-open', 'Opened files while found: what every tool shares of a server and what stays each tool’s own, each tool’s line with its settings file, and Add', true, '.details');
   await closeRow('files');
-  // Taken in: every tool but Claude Code gets it at once; Claude Code waits, said as a plain note, and the band carries the write.
+  // Taken in: every tool gets it at once, Claude Code too.
   await a.click('#add-docs'); await switchOn('docs');
   await a.click('#add-files'); await switchOn('files');
-  await atEverySize('taken-in-waits', 'Clicked Add on docs, then on files: files is in Central Knot, on in Copilot CLI and Codex; the result says Claude Code waits for Write to Claude Code as a plain note; the amber band says what it adds, with its one button; files’s Claude Code mark is a clock', true);
-  await shot(a, 'waits-hover', 'The pointer on files’s Claude Code mark: its tooltip says it gets the server when Write to Claude Code is clicked.', await middleOf('#cell-files-claude-cli'));
+  await atEverySize('taken-in', 'Clicked Add on docs, then on files: files is in Central Knot, on in all 3 tools, Claude Code too; the result says so, and no band asks for a later step', true);
+  await shot(a, 'claude-hover', 'The pointer on files’s Claude Code mark: its tooltip says Claude Code has the current version.', await middleOf('#cell-files-claude-cli'));
   await openRow('files');
-  await atEverySize('waits-open', 'Opened files: Claude Code’s line says it gets the MCP server when Write to Claude Code is clicked, and its switch says “Waits for Write” in place of On; the other tools have the current version, Codex’s own setting named after its line', false, '.details');
+  await atEverySize('taken-in-open', 'Opened files: every tool’s line, Claude Code’s too, has the current version and its switch says On; Codex’s own setting named after its line', false, '.details');
   await closeRow('files');
-  await a.click('#mcp-write-claude'); await a.settle();
-  await atEverySize('written', 'Clicked Write to Claude Code (Claude Code quit): files is in Claude Code too, the rest of its settings kept; the band is gone', false, '.bands');
-  // Off: out of every tool; Claude Code's entry goes with Write. Then Delete from Central Knot before that write.
+  // Off: out of every tool at once, Claude Code too. Then Delete from Central Knot.
   await a.click('#switch-files'); await a.settle();
-  await atEverySize('off-waits', 'Turned files off: it left Copilot CLI and Codex at once and its row is under Off at once; the result, the Off heading and the row say it is still in Claude Code until Write; the band now offers to remove it there', true);
+  await atEverySize('off', 'Turned files off: it left every tool at once, Claude Code too, and its row is under Off at once', true);
   await openRow('files');
-  await atEverySize('off-waits-open', 'Opened the Off row: "Off · still in Claude Code until you click Write to Claude Code."; Claude Code’s line says its entry is removed then', false, '.details');
+  await atEverySize('off-open', 'Opened the Off row: "Off · in Central Knot only."; each tool’s line says it has no copy while it is off', false, '.details');
   await a.click('#delete-files'); await a.click('#delete-confirm-files'); await a.settle();
-  await atEverySize('deleted-waits', 'Then Delete from Central Knot, still before the write: files is a row tagged "deleted", with no Add, "Deleted from Central Knot · Claude Code still has it until you click Write to Claude Code. History can restore it."; Claude Code’s line says History can restore it; the band removes it', true);
-  await a.click('#mcp-write-claude'); await a.settle();
+  await atEverySize('deleted', 'Then Delete from Central Knot: files leaves the page; History can restore it', true);
   // A tool's own switch, set in its settings: read, never written; its line says Central Knot leaves it as it is.
   const switchesBefore = existsSync(settings.copilotSwitches) ? readFileSync(settings.copilotSwitches, 'utf8') : '{}';
   writeFileSync(settings.copilotSwitches, JSON.stringify({ ...JSON.parse(switchesBefore), disabledMcpServers: ['docs'] }, null, 2));
@@ -387,7 +384,7 @@ if (wanted('mcp')) {
   // An edit made in a tool becomes the current version; its versions list says where each came from, and Read shows one.
   edit(settings.codex, text => text.replace('url = "https://docs.example.test/mcp"', 'url = "https://docs.example.test/mcp/v2"'));
   await refresh();
-  await atEverySize('edit-notice', 'Outside the app, docs’s URL was edited in Codex, then Refresh: the edit is the current version, in Copilot CLI too, and Claude Code waits for Write; the notice offers Undo', false, '.sync-notices');
+  await atEverySize('edit-notice', 'Outside the app, docs’s URL was edited in Codex, then Refresh: the edit is the current version, in Copilot CLI and Claude Code too; the notice offers Undo', false, '.sync-notices');
   await openRow('docs');
   await atEverySize('versions', 'Opened docs: its versions, edited in Codex (current) and found in Claude Code, each with what changed ("URL changed")', true, '.version-row');
   await a.click('#version-read-docs-1');
@@ -395,11 +392,10 @@ if (wanted('mcp')) {
   await atEverySize('version-read', 'Clicked Read on the version found in Claude Code: what it runs, part by part, what differs from the current version marked', false, '.version-read');
   await a.click('#version-read-docs-1');
   await closeRow('docs');
-  if (await a.has('#mcp-write-claude')) { await a.click('#mcp-write-claude'); await a.settle(); }
-  // What `codex mcp remove docs` leaves: docs turns off, Claude Code's entry going at Write; Central Knot keeps it, and the notice offers Turn on.
+  // What `codex mcp remove docs` leaves: docs turns off, its entry leaving every tool; Central Knot keeps it, and the notice offers Turn on.
   edit(settings.codex, text => text.replace(/\n?\[mcp_servers\.docs\][^[]*/, '\n'));
   await refresh(); await wait(2300); await refresh();
-  await atEverySize('deleted-by-hand', 'Outside the app, docs was removed from Codex’s settings (as `codex mcp remove docs` does), then Refresh past the settle window: it is off and taken out of Copilot CLI, still in Claude Code until Write, kept in Central Knot; the notice offers Turn on', true, '.sync-notices');
+  await atEverySize('deleted-by-hand', 'Outside the app, docs was removed from Codex’s settings (as `codex mcp remove docs` does), then Refresh past the settle window: it is off and taken out of Copilot CLI and Claude Code, kept in Central Knot; the notice offers Turn on', true, '.sync-notices');
   const restore = await a.run(`document.querySelector('[id^="notice-restore-"]')?.id ?? ''`);
   if (restore) { await a.click(`#${restore}`); await a.settle(); }
   // A server a tool can't hold (SSE, in Codex), and a server whose copies differ (the copy question).
@@ -412,9 +408,9 @@ if (wanted('mcp')) {
   await atEverySize('cannot-hold', 'Added live, an SSE server from Claude Code: Copilot CLI has it now; Codex can’t take it (its own mark, "Codex has no SSE transport."), and the status says so', false, '.details');
   await closeRow('live');
   await a.click('#add-search'); await a.settle();
-  await atEverySize('copy-question', 'Clicked search’s Add: Copilot CLI’s and Codex’s entries differ, so the row asks which one every tool uses, each row quoting its own command with the words only it has marked; what choosing does says Claude Code’s part happens at Write', true, '.details-differs');
+  await atEverySize('copy-question', 'Clicked search’s Add: Copilot CLI’s and Codex’s entries differ, so the row asks which one every tool uses, each row quoting its own command with the words only it has marked, and what choosing does in each tool', true, '.details-differs');
   await a.click('#use-search-copilot-cli'); await switchOn('search');
-  await atEverySize('chosen', 'Clicked "Use this copy" on Copilot CLI’s: search is in Central Knot, on in Copilot CLI and Codex; Codex’s entry is kept as a version; Claude Code waits for Write', false, '.bands');
+  await atEverySize('chosen', 'Clicked "Use this copy" on Copilot CLI’s: search is in Central Knot, on in all 3 tools; Codex’s entry is kept as a version', false, '.bands');
   await a.click('#nav-history');
   await atEverySize('history', 'History: each server’s entries in the library’s words, with what each still offers (Turn on, Restore, Undo, Use Codex’s copy)', true);
 }
@@ -713,9 +709,9 @@ if (wanted('profiles')) {
   await name('Incident');
   await atEverySize('new-named', 'Typed "Incident" and pressed Enter: nothing is in it yet, so it offers no switch; the band says to tick at least one item, or start from what is on now');
   await a.click('#pf-skill\\:notes'); await a.click('#pf-mcp\\:files');
-  await atEverySize('incident-ticked', 'Ticked notes and files: before any switch, each row says what switching to Incident does to it; the header counts it and, since docs (which Claude Code has) turns off, says Claude Code’s MCP servers change when you press Write to Claude Code, the line wrapping whole', true);
+  await atEverySize('incident-ticked', 'Ticked notes and files: before any switch, each row says what switching to Incident does to it; the header counts it, the line wrapping whole', true);
   await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
-  await atEverySize('incident-switched', 'Clicked "Switch to Incident": the result says what it turned off and that 1 MCP server waits for Write to Claude Code, with that button and Undo switch; Incident is in use (the list, the header: "2 items on, the other 5 off", the status bar)', true);
+  await atEverySize('incident-switched', 'Clicked "Switch to Incident": the result says what it turned off, with Undo switch; Incident is in use (the list, the header: "2 items on, the other 5 off", the status bar)', true);
   await a.click('#profile-new'); await name('Development');
   await a.click('#profile-from-now');
   await a.click('#pf-skill\\:standup'); await a.click('#pf-agent\\:code-reviewer');
@@ -804,7 +800,7 @@ if (wanted('first-setup')) {
   await refresh();
   await a.click('#nav-overview');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s question, Synchronize everything?, under the lead. Its lines say apart what Yes takes in at once (6 items, and which tools get them) and the 4 more items whose copies differ, which wait with nothing chosen and are asked about one at a time with the latest copy marked where one can be told; that Claude Code gets its MCP server at Write to Claude Code; and what the one Undo covers (a copy you choose has its own Undo). Under them, No changes nothing. Synchronize everything is the main button, No, I’ll add items myself beside it', true, '#setup-question');
+  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s question, Synchronize everything?, under the lead. Its lines say apart what Yes takes in at once (6 items, and which tools get them) and the 4 more items whose copies differ, which wait with nothing chosen and are asked about one at a time with the latest copy marked where one can be told; and what the one Undo covers (a copy you choose has its own Undo). Under them, No changes nothing. Synchronize everything is the main button, No, I’ll add items myself beside it', true, '#setup-question');
   await a.size(860, 560); await show('#setup-question'); await focusOn('#setup-yes');
   await shot(a, 'question-focus-860', 'Tabbed to Synchronize everything at 860×560: its focus ring');
   await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
@@ -839,7 +835,7 @@ if (wanted('first-setup')) {
   await atEverySize('after-use-latest', 'Clicked Choose copies (the walkthrough starts again at review, 1 of 3), then Use the latest for the rest: the band says it used the latest copy for 2 items, each with its own Undo in History, and skipped docs, with no dates to go by; the walkthrough says it is done and that docs still waits on MCP servers', true, '#walkthrough', 'start');
   await a.click('#nav-settings');
   await waitFor(a, `!!document.querySelector('#setting-sync-everything')`);
-  await atEverySize('settings-promise', 'Opened Settings: Synchronize everything is on; its hint says switching it on is one entry in History, and what the one Undo covers: a copy you choose has its own Undo, and an MCP server found in Claude Code has none; its line counts the 1 item that waits, with Choose copies', false, '#setting-sync-everything');
+  await atEverySize('settings-promise', 'Opened Settings: Synchronize everything is on; its hint says switching it on is one entry in History, and what the one Undo covers: a copy you choose has its own Undo; its line counts the 1 item that waits, with Choose copies', false, '#setting-sync-everything');
   await a.click('#nav-history');
   await waitFor(a, `!!document.querySelector('.history-row[data-kind="everything"]')`, 15000);
   await atEverySize('history-switch-on', 'Opened History and scrolled to the entry for Synchronize everything switched on, kind Setting: its words say what its Undo covers, and it offers Undo', true, '.history-row[data-kind="everything"]');
@@ -860,7 +856,7 @@ if (wanted('sync-everything')) {
   await atEverySize('skills-found-off', 'Opened Skills on the Practice copy, Synchronize everything off as it is until chosen: the Found heading says Add takes each in', false, '[data-section="found"]');
   await a.click('#nav-settings');
   await waitFor(a, `!!document.querySelector('#setting-sync-everything')`);
-  await atEverySize('settings-off', 'Opened Settings: under This home, Synchronize everything is off; its hint says an MCP server reaches Claude Code at Write to Claude Code and that switching it on is one History entry whose Undo takes back all it took in but a server found in Claude Code; its line says how many found items turning it on would add now, and how many wait for a choice of copy, with Choose copies', true, '#setting-sync-everything');
+  await atEverySize('settings-off', 'Opened Settings: under This home, Synchronize everything is off; its hint says switching it on is one History entry whose Undo takes back all it took in; its line says how many found items turning it on would add now, and how many wait for a choice of copy, with Choose copies', true, '#setting-sync-everything');
   await a.size(860, 560); await show('#setting-sync-everything'); await focusOn('#sync-everything-on');
   await shot(a, 'settings-off-focus-860', 'Tabbed to its switch at 860×560: the focus ring, the row’s words beside it');
   await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
@@ -878,12 +874,12 @@ if (wanted('sync-everything')) {
   await atEverySize('skills-on-review', 'Opened review, left found: its copies differ, so it asks which copy every tool uses, as Add would; the question starts below the pinned row', false, '.ov-row.open + .details', 'start');
   await closeRow('review');
   await a.click('#nav-mcp');
-  await atEverySize('mcp-on', 'Opened MCP servers: its notice names the servers it took in and where, and that one found in Claude Code has no Undo (its entry says why); Claude Code’s part waits for Write to Claude Code, in its one band', true);
+  await atEverySize('mcp-on', 'Opened MCP servers: its notice names the servers it took in and where, and that History can undo each; Claude Code has them too', true);
   await a.click('#nav-agents');
   await atEverySize('agents-on', 'Opened Agents: its notice names the agents it took in and where they were found');
   await a.click('#nav-history');
   await waitFor(a, `!!document.querySelector('.history-row')`, 15000);
-  await atEverySize('history', 'Opened History: the entries in view each say Synchronize everything took the item in and from which tool, with Undo; docs’s, found in Claude Code, has none and says why and what to do instead', true);
+  await atEverySize('history', 'Opened History: the entries in view each say Synchronize everything took the item in and from which tool, each with Undo, docs’s, found in Claude Code, too', true);
   // The skill notes's own row, by its name and kind (release-notes, an agent, has one too).
   const notesRow = `[...document.querySelectorAll('.history-row[data-kind="on"]')].find(row => row.querySelector('.history-what strong')?.textContent === 'notes' && row.querySelector('.history-kind')?.textContent === 'Skill')`;
   await a.run(`${notesRow}.querySelector('.history-actions button').click()`); await a.settle();
@@ -2503,7 +2499,6 @@ if (wanted('source-servers')) {
   await fresh({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
   const busyDone = () => waitFor(a, `document.body.dataset.busy !== 'true'`, 20000);
   const checkNow = async () => { await a.click('#nav-sources'); await a.click('.source-row .source-actions button'); await busyDone(); await a.settle(); };
-  const writeClaude = async () => { await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('#mcp-write-claude')`, 15000); await a.click('#mcp-write-claude'); await busyDone(); await a.settle(); };
   await a.click('#nav-sources');
   await a.run(`(() => { const input = document.querySelector('#source-link'); input.value = 'https://github.com/team/service-kit'; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await a.click('#source-look'); await busyDone(); await a.settle();
@@ -2512,13 +2507,11 @@ if (wanted('source-servers')) {
   await a.click('#nav-mcp'); await openRow('relay');
   await atEverySize('server-row-source', 'On MCP servers, relay is Off, in Central Knot only; opened, its version says it came from github.com/team/service-kit, and the line at the end says it is from that source, and that what changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here', true, '.ov-row[data-key="relay"]', 'start');
   await turnOnRow('relay'); await switchOn('relay');
-  await writeClaude();
   commit({ '.mcp.json': servers({ relay: relay('debug'), 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Log more');
   await checkNow();
-  await atEverySize('server-update-waits', 'relay was turned On and written to Claude Code, then its RELAY_LOG changed at the source (and half-written was taken out there); clicked Check now: the band says relay was updated from its source, now in the other tools, and that Claude Code gets it when you click Write to Claude Code, on MCP servers, with Open MCP servers and Undo the update', true, '.source-row');
+  await atEverySize('server-updated', 'relay was turned On, in Claude Code too, then its RELAY_LOG changed at the source (and half-written was taken out there); clicked Check now: the band says relay was updated from its source, now in all 3 tools, with Open MCP servers and Undo the update', true, '.source-row');
   await a.click('#nav-mcp'); await openRow('relay');
-  await atEverySize('server-waits-row', 'On MCP servers, relay’s row: on in every tool, Claude Code’s write waiting for Write to Claude Code, which the band above offers', false, '.ov-row[data-key="relay"]', 'start');
-  await writeClaude();
+  await atEverySize('server-updated-row', 'On MCP servers, relay’s row: on in every tool, Claude Code’s with the update too', false, '.ov-row[data-key="relay"]', 'start');
   const inCopilot = join(practice, '.copilot/mcp-config.json');
   edit(inCopilot, text => { const parsed = JSON.parse(text); parsed.mcpServers.relay.env.RELAY_REGION = 'east'; return JSON.stringify(parsed, null, 2); });
   await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
@@ -2526,12 +2519,11 @@ if (wanted('source-servers')) {
   await checkNow();
   await atEverySize('server-waiting', 'relay’s RELAY_REGION was edited in Copilot CLI, and its RELAY_LOG changed at the source; clicked Check now: the band says relay changed at the source and yours stays current, and what Merge, Replace and Keep mine do; relay’s line, under a warning mark, says the same and ends with Merge, Replace and Keep mine', true, '.source-row');
   await a.click('.source-row button[id$="-mcp-relay"][id^="source-merge-"]'); await busyDone(); await a.settle();
-  await writeClaude();
   commit({ '.mcp.json': servers({ 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Drop relay');
   await checkNow();
-  await atEverySize('server-removed', 'relay was taken out of the source; clicked Check now: the band leads, under a warning mark, with relay no longer at the source, turned off and taken out of the other tools, Central Knot keeping it, and that it leaves Claude Code when you click Write to Claude Code, with Turn relay on; the source’s row has relay’s line: no longer at this source, Off, no longer from it, and Claude Code still has it until you click Write to Claude Code, with Turn on', true, '.source-row');
+  await atEverySize('server-removed', 'relay was taken out of the source; clicked Check now: the band leads, under a warning mark, with relay no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn relay on; the source’s row has relay’s line: no longer at this source, Off, no longer from it, with Turn on', true, '.source-row');
   await a.click('#nav-mcp'); await openRow('relay');
-  await atEverySize('server-removed-mcp', 'On MCP servers, relay is Off with “removed at its source” after its name and “still in Claude Code until Write”; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, and what happens should the source have it again', true, '.ov-row[data-key="relay"]', 'start');
+  await atEverySize('server-removed-mcp', 'On MCP servers, relay is Off with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, and what happens should the source have it again', true, '.ov-row[data-key="relay"]', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 

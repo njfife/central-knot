@@ -23,7 +23,7 @@ function row(hashes: LibraryRow['hashes'], more: Partial<LibraryRow> = {}, agent
   const copyOf = (tool: string): Copies[keyof Copies] => (more.unseen?.[tool] ? { is: 'unseen', why: more.unseen[tool]! } : more.cannot?.[tool] ? { is: 'held', why: more.cannot[tool]! }
     : hashes?.[tool] !== undefined ? { is: 'present', hash: hashes[tool]!, at: 0 } : { is: 'absent' });
   const copies: Copies = Object.fromEntries(tools.map(tool => [tool, copyOf(tool)]));
-  const found: FoundKey = { copies: tools.flatMap(tool => (hashes?.[tool] !== undefined && !more.unseen?.[tool] ? [{ harness: tool as HarnessId, hash: hashes[tool]! }] : [])), deleted: !!agent?.deleted, leaving: false };
+  const found: FoundKey = { copies: tools.flatMap(tool => (hashes?.[tool] !== undefined && !more.unseen?.[tool] ? [{ harness: tool as HarnessId, hash: hashes[tool]! }] : [])), deleted: !!agent?.deleted };
   const takeInAnswers = { click: takeInAnswer('click', found), rule: takeInAnswer('rule', found) };
   return { key: 'reviewer', name: 'reviewer', hashes, ...(agent && !agent.deleted ? { plan: plan(agent, copies) } : { takeInAnswers }), ...more };
 }

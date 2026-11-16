@@ -102,7 +102,7 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string };
 
-export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
+export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; }
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, its record's gate and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Other builds of Central Knot on this Mac (otherbuilds.ts): while one is found this build is held (model.ts holdingBuild) and the window shows only the held screen. Unset where they aren't looked for (main.ts buildsContext: only an installed app on a Mac, or a test with its stand-ins) and where an Applications folder can't be read. */ otherBuilds?: OtherBuild[]; /** Where this copy of the app runs from, when that is not the top of an Applications folder (otherbuilds.ts runsOutside): it replaces no build from there. */ runsOutside?: string; /** What this build said on taking the home's record over at this view's look, where it carried the other build's choices (main.ts lookForOthers, takeOverHome): the page says it once. */ tookOver?: string; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
 
@@ -118,8 +118,6 @@ export interface DesktopApi {
   skillVersion(key: string, hash: string): Promise<{ skill: string; files: string[] } | null>;
   history(): Promise<HistoryList>;
   applyServers(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
-  /** Write to Claude Code, with Claude closed: what the servers named owe Claude Code's settings file (servers.ts writeToClaude). */
-  writeClaude(keys: string[], home: string): Promise<PassResult>;
   /** One version of an MCP server: its shared part (servers.ts serverVersion). */
   serverVersion(key: string, hash: string): Promise<NeutralServer | null>;
   applyAgents(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
@@ -349,10 +347,10 @@ export interface SyncView {
 /**
  * What managing one more tool would do there now, each kind's added up (librarypass.ts joinCounts, from the same look and plans
  * the pass then uses, with the tool added): items written there; copies there that differ, kept as versions first; copies of
- * items that are Off there, removed; writes and removals that wait for Write to Claude Code; and items there Central Knot
- * doesn't hold, found, or taken in by Synchronize everything where it is on.
+ * items that are Off there, removed; and items there Central Knot doesn't hold, found, or taken in by Synchronize everything
+ * where it is on.
  */
-export interface JoinCounts { written: number; kept: number; removed: number; waits: number; found: number; takenIn: number }
+export interface JoinCounts { written: number; kept: number; removed: number; found: number; takenIn: number }
 
 /**
  * One click on an item, as the page and History send it to any kind's engine, and as the library's pass takes it. `on` and
@@ -393,7 +391,7 @@ export interface Change {
   forPlugin?: string;
 }
 
-export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, and the MCP servers that wait for Write to Claude Code. */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'waits'>; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, and what is not as it asked. */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'>; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
  * What sync did on its own, told once on its kind's page: to one item (ItemNotice), the found items Synchronize everything
@@ -453,8 +451,8 @@ export interface HistoryEvent {
    * 'switched': a skill's tool switch cleared, or its Undo (`switched`).
    * 'took-over': a skill's copy outside Central Knot taken over (`losers`: that copy), which has no Undo.
    * From before an item was on the library, read only for their sentences (historypage.ts describe): 'added' (copies a change
-   * wrote, `rejoined` where it synced to more tools), 'removed', 'written' (Write to Claude Code over an entry History didn't
-   * hold), 'restored', and 'took-over' with `tookOver`.
+   * wrote, `rejoined` where it synced to more tools), 'removed', 'written' (Claude Code's
+   * own entry written over, which History didn't hold), 'restored', and 'took-over' with `tookOver`.
    * Library items (historyactions.ts has each one's action):
    * 'on' / 'off': it was turned On or Off (`cause` says why), in every harness or (`only`) in one; `losers` are the harnesses
    *   written or removed (one whose write or removal the pass held is taken out after the writes: librarypass.ts untell).
@@ -857,11 +855,6 @@ export interface LibraryFacts {
   /** MCP servers: tools whose own switch turns it off there (mcpswitch.ts), read at each look: the entry stays, and the tool doesn't start it. */
   switchedOff?: HarnessId[];
   /**
-   * MCP servers: tools where the next pass's write or removal waits for Write to Claude Code (librarypass.ts Disk.locked
-   * `waits`); a server deleted from Central Knot whose entry there is still to go is one too (its row is a found one).
-   */
-  waits?: HarnessId[];
-  /**
    * In the library, from a source the home records: that source's link, as given. Linked to it (library.ts LibraryItem source):
    * whether its last read has a version that waits because the item was changed here (`waits`: library.ts A SOURCE `wait`), or
    * else, the item changed here, whether the source's next change would wait (`nextWaits`: library.ts changedHere). Or no longer
@@ -1105,10 +1098,9 @@ export interface ToPlugins { address: string; name: string; plugins: number }
 export type SourceRowClick = 'bringBack' | 'replace' | 'merge' | 'keep';
 /**
  * One item a source's click did something to: its pass's answer (PassResult sourced), its kind, and the tools it was written to
- * and taken out of (`written`, `removed`), and those where its write or removal waits for a step of the person's own
- * (`deferred`: Claude Code's MCP servers, until Write to Claude Code), from that pass's results for it.
+ * and taken out of (`written`, `removed`), from that pass's results for it.
  */
-export type SourcedItem = NonNullable<PassResult['sourced']>[number] & { kind: ItemKind; written: HarnessId[]; removed: HarnessId[]; deferred: HarnessId[] };
+export type SourcedItem = NonNullable<PassResult['sourced']>[number] & { kind: ItemKind; written: HarnessId[]; removed: HarnessId[] };
 /**
  * What a source's click did: each kind's pass's answers (SourcedItem, but a `wait` the source's row no longer says once the
  * passes are done: sources.ts answer), and their results; why it stopped; the kinds the source wasn't read whole for, in the
@@ -1171,7 +1163,7 @@ export type RepoView =
 /** The page of a connected repo. */
 export type ConnectedRepoView = Extract<RepoView, { connected: true }>;
 
-export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the field the refusal concerns. */ field?: 'url' | 'branch'; results: DestinationResult[]; /** Push: the commit made. */ pushed?: RepoCommit; /** Pull: how many items came in. */ pulled?: number; /** Pull: MCP servers that reach Claude Code only with Write to Claude Code. */ waitsForClaude?: string[] }
+export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the field the refusal concerns. */ field?: 'url' | 'branch'; results: DestinationResult[]; /** Push: the commit made. */ pushed?: RepoCommit; /** Pull: how many items came in. */ pulled?: number }
 // ---------- Profiles ----------
 
 /**
@@ -1199,8 +1191,7 @@ export interface SwitchedItem { id: string; name: string }
 
 /**
  * What a switch did: the profile's name, the items it turned On and Off and those not as it asked once its passes ran (`left`:
- * one turned Off again because a copy was deleted by hand; History says so), by name; the MCP servers whose Claude Code part
- * waits for Write to Claude Code, by key; and what could not be done in a tool (`results`). `event`: its History entry; none
- * when nothing changed.
+ * one turned Off again because a copy was deleted by hand; History says so), by name; and what could not be done in a tool
+ * (`results`). `event`: its History entry; none when nothing changed.
  */
-export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; waits: string[]; results: DestinationResult[]; event?: string; view?: HomeView }
+export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; view?: HomeView }

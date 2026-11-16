@@ -115,8 +115,7 @@ function practiceBanner() {
 }
 
 /** What a kind card needs from one item: whether it is On, has edits waiting or differs, and which tools hold a copy. */
-/** `waits`: a write or removal in Claude Code waits for Write to Claude Code (MCP servers). */
-interface KindFact { on: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown>; plugin?: Record<string, unknown>; waits?: boolean }
+interface KindFact { on: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown>; plugin?: Record<string, unknown> }
 
 /**
  * One kind on the Overview: how many there are and how many are On, then what needs attention in short words
@@ -132,12 +131,10 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   const on = facts.filter(fact => fact.on).length;
   const differs = facts.filter(fact => fact.differs).length;
   const edits = facts.filter(fact => fact.on && fact.edited?.length).length;
-  const waitsForClaude = facts.filter(fact => fact.waits).length;
   const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'differs' : 'differ'}`, title: `${differs} ${differs === 1 ? 'has' : 'have'} different copies. Show only these.` }
     : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} waiting`, title: `${plural(edits, 'change')} waiting to sync` }
-      : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} for Claude Code`, title: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Write to Claude Code` }
-        : on ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every synced one is the same in every tool it syncs to' }
-          : undefined;
+      : on ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every synced one is the same in every tool it syncs to' }
+        : undefined;
   const status = !attention ? null : differs
     ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
     : h(`span.kind-card-state.${attention.tone}`, { title: attention.title }, icon(attention.glyph, 13), attention.text);
@@ -204,7 +201,7 @@ export function overviewPage() {
   // An item's copies need a choice only while it is found: one in Central Knot's library never asks (libraryrow.ts asksWhichCopy).
   const libraryFacts = (which: 'skills' | 'mcp' | 'agents'): KindFact[] => {
     const source = kindSource(home, which);
-    return source.facts.map(fact => ({ on: fact.on, edited: fact.edited, copies: fact.copies, differs: asksWhichCopy(fact), waits: !!fact.waits?.length }));
+    return source.facts.map(fact => ({ on: fact.on, edited: fact.edited, copies: fact.copies, differs: asksWhichCopy(fact) }));
   };
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();

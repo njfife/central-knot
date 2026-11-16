@@ -49,12 +49,11 @@ const SYNC_OFF = 'With Automatic sync off, Sync once brings it into line; a clic
  * look (types.ts JoinCounts). What would change in the tool comes first, said as Central Knot's version replacing the tool's.
  */
 function onLine(home: HomeView, tool: HarnessId): string {
-  const { written, kept, removed, waits, found, takenIn } = home.sync.joining[tool] ?? { written: 0, kept: 0, removed: 0, waits: 0, found: 0, takenIn: 0 };
+  const { written, kept, removed, found, takenIn } = home.sync.joining[tool] ?? { written: 0, kept: 0, removed: 0, found: 0, takenIn: 0 };
   const changes = [
     written ? `Central Knot’s version written there for ${plural(written, 'item')}` : '',
     kept ? `${plural(kept, 'copy there that differs', 'copies there that differ')} kept as ${kept === 1 ? 'a version' : 'versions'} first` : '',
     removed ? (removed === 1 ? '1 copy of an item that is off removed' : `${removed} copies of items that are off removed`) : '',
-    waits ? `${plural(waits, 'MCP server change')} left for Write to Claude Code` : '',
   ].filter(Boolean);
   const besides = [takenIn ? `${plural(takenIn, 'found item')} taken in by Synchronize everything` : '', found ? `${plural(found, 'found item')} shown under Found` : ''].filter(Boolean);
   const then = `On: ${changes.length ? listed(changes) : `no item in ${names[tool]} would change`}${besides.length ? `; ${listed(besides)}` : ''}.`;
@@ -81,13 +80,12 @@ export function doneWords(tool: HarnessId, on: boolean, syncOn: boolean, did: re
   const name = names[tool];
   if (!on) return { text: `${name} is left out: Central Knot writes nothing there now. Its copies stay as they are, and every item stays as it is.` };
   if (!syncOn) return { text: `Central Knot manages ${name} now. ${SYNC_OFF}` };
-  const count = (outcome: DestinationResult['outcome']) => did.filter(result => result.outcome === outcome && !result.waits).length;
+  const count = (outcome: DestinationResult['outcome']) => did.filter(result => result.outcome === outcome).length;
   const written = count('written'), over = did.filter(result => result.outcome === 'written' && result.replaced).length;
-  const removed = count('removed'), waits = did.filter(result => result.waits).length, left = count('held') + count('failed');
+  const removed = count('removed'), left = count('held') + count('failed');
   const clauses = [
     written ? `Central Knot’s version written there for ${plural(written, 'item')}${over ? ` (${over === written ? (over === 1 ? 'over its copy' : 'over their copies') : `${over} over a copy`} there, which a version keeps)` : ''}` : '',
     removed ? (removed === 1 ? '1 copy of an item that is off removed' : `${removed} copies of items that are off removed`) : '',
-    waits ? `${plural(waits, 'MCP server change')} left for Write to Claude Code` : '',
     left ? `${plural(left, 'item')} not changed there this time (its row says why)` : '',
   ].filter(Boolean);
   if (!clauses.length) return { text: `Central Knot manages ${name} now. No item there needed changing.` };

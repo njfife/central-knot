@@ -61,9 +61,10 @@ const homes: OldHome[] = [
 
 /** What the profiles migration does to the tools' files in these homes: each file it changes, with its text after (none: gone). */
 const profilesMigration: Record<string, string | undefined> = {
-  // drafts's switch is released (Claude Code's skillOverrides goes with its last entry); search's deny is kept while Claude
-  // Code has its entry, which goes only at Write to Claude Code (servers.ts releaseKeptDenies clears it later).
-  '.claude/settings.json': '{\n  "deniedMcpServers": [\n    {\n      "serverName": "search"\n    }\n  ]\n}\n',
+  // drafts's switch and search's deny are released (Claude Code's skillOverrides and deniedMcpServers go with their last entry).
+  '.claude/settings.json': '{}\n',
+  // search was held off in Claude Code, the one tool that has it: it is Off, and its entry is taken out (a version keeps it).
+  '.claude.json': '{\n  "numStartups": 3,\n  "mcpServers": {\n    "docs": {\n      "type": "stdio",\n      "command": "npx",\n      "args": [\n        "-y",\n        "docs-mcp"\n      ]\n    }\n  }\n}\n',
   // drafts was held off in Claude Code, the one tool that has it: it is Off, and its copy is taken out (a version keeps it).
   '.claude/skills/drafts/SKILL.md': undefined,
 };
@@ -338,14 +339,14 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
     });
     after(() => rm(box.base, { recursive: true, force: true }));
 
-    test(`changes in the tools only the profiles migration’s file${sync === 'on' ? ', the table’s writes into OpenCode (pdf and lookup let go, his edits reaching its unedited copies; sheet’s later version), and alpha 1’s own items joining Pi and OpenCode' : ''}`, async () => {
+    test(`changes in the tools only the profiles migration’s files${sync === 'on' ? ', the table’s writes into OpenCode (pdf and lookup let go, his edits reaching its unedited copies; sheet’s later version), and alpha 1’s own items joining Pi and OpenCode' : ''}`, async () => {
       // Every file in every tool that changed, and why. OpenCode's settings file and Pi's hold alpha 1's server docs joining them too.
       const joining = ['.config/opencode/agents/planner.md', '.config/opencode/agents/reviewer.md', '.config/opencode/opencode.json', '.pi/agent/mcp.json',
         '.pi/agent/skills/drafts/SKILL.md', '.pi/agent/skills/notes/SKILL.md', '.pi/agent/skills/planner.md', '.pi/agent/skills/reviewer.md', '.pi/agent/skills/style/SKILL.md'];
       const table = ['.config/opencode/skills/pdf/SKILL.md', '.config/opencode/skills/sheet/SKILL.md'];
       // With Synchronize everything on, helper, found in Copilot CLI (no part's name), is taken in and turned On in every tool.
       const takenIn = rule ? ['.claude/agents/helper.md', '.config/opencode/agents/helper.md', '.pi/agent/skills/helper.md'] : [];
-      assert.deepEqual(changedInTools(made, first[2].files), ['.claude/settings.json', ...(sync === 'on' ? [...table, ...joining, ...takenIn] : [])].sort());
+      assert.deepEqual(changedInTools(made, first[2].files), ['.claude.json', '.claude/settings.json', ...(sync === 'on' ? [...table, ...joining, ...takenIn] : [])].sort());
       if (sync === 'on') for (const [to, from] of [[table[0], '.pi/agent/skills/pdf/SKILL.md'], [table[1], '.pi/agent/skills/sheet/SKILL.md']]) assert.equal(first[2].files.sha256[to], made.sha256[from], to);
       const opencodeLookup = sync === 'on' ? entries['pi-cli lookup'] : entries['opencode-cli lookup'];
       assert.deepEqual(await partEntries(box, names.mcp), { ...entries, 'opencode-cli lookup': opencodeLookup }, 'each part’s entry in each tool');

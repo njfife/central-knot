@@ -18,7 +18,7 @@ import { button, closeButton, h, icon } from './dom.ts';
 import { asItIs } from './libraryrow.ts';
 import { dayAndTime, plural } from './model.ts';
 import { linkLabel } from './sourcelink.ts';
-import { andList, kindNouns, orList, toolName, toolsPhrase } from './words.ts';
+import { andList, kindNouns, orList, toolsPhrase } from './words.ts';
 import { outcomeBand } from './matrix.ts';
 import { pageOfPart } from './pluginstatus.ts';
 import { addMarketplace, market } from './pluginstate.ts';
@@ -139,10 +139,9 @@ interface Said { text: string; warns: boolean; note?: string; undo?: { id: strin
 
 /**
  * What a source's click did, from what its passes did (types.ts SourcedItem: each item's kind and answer, the History entry that
- * says it, whether it is On, what a Merge did, and the tools it was written to, taken out of, or waits for Write to Claude Code
- * in), and the kinds it wasn't read whole for. An item its source dropped leads, with Turn on, and it, a read not whole or a
- * Merge that changed nothing is a warning; else the one update or merge has Undo. Open goes to the page of an item whose write
- * waits there, else of the first that changed. `replaced`: the item a click on Replace asked for, by kind and name, whose
+ * says it, whether it is On, what a Merge did, and the tools it was written to or taken out of), and the kinds it wasn't read
+ * whole for. An item its source dropped leads, with Turn on, and it, a read not whole or a Merge that changed nothing is a
+ * warning; else the one update or merge has Undo. Open goes to the page of the first that changed. `replaced`: the item a click on Replace asked for, by kind and name, whose
  * update says so.
  */
 export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, label: string, replaced?: { kind: ItemKind; name: string }): Said {
@@ -156,13 +155,13 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
   const unmerged = merges.filter(entry => entry.merge !== 'merged' && entry.merge !== 'had');
   const choices = 'Merge puts the source’s changes into yours if they don’t clash, Replace takes the source’s, and Keep mine keeps yours';
   const said = [
-    ...dropped.map(entry => `${entry.name} is no longer at ${label}: it was turned off${entry.removed.length ? ` and taken out of ${toolsPhrase(entry.removed, homeTools)}` : ''}; Central Knot keeps it.${waitWords(entry)}`),
+    ...dropped.map(entry => `${entry.name} is no longer at ${label}: it was turned off${entry.removed.length ? ` and taken out of ${toolsPhrase(entry.removed, homeTools)}` : ''}; Central Knot keeps it.`),
     ...updated.map(entry => {
       const now = !entry.on ? ', kept Off' : entry.written.length ? `, now in ${toolsPhrase(entry.written, homeTools)}` : '';
-      return (isReplaced(entry) ? `${entry.name} has the source’s version${now}; the one it had is kept as a version.` : `${entry.name} was updated from its source${now}.`) + waitWords(entry);
+      return (isReplaced(entry) ? `${entry.name} has the source’s version${now}; the one it had is kept as a version.` : `${entry.name} was updated from its source${now}.`);
     }),
     waiting.length ? `${names(waiting)} changed at the source; yours ${waiting.length === 1 ? 'stays current, since it was' : 'stay current, since they were'} changed here or a tool’s copy can’t be read just now: on ${waiting.length === 1 ? 'its row' : 'each one’s row'}, ${choices}.` : '',
-    ...merges.map(entry => mergeWords(entry.kind, entry.name, entry.merge!, entry.written, homeTools) + (entry.merge === 'merged' ? waitWords(entry) : '')),
+    ...merges.map(entry => mergeWords(entry.kind, entry.name, entry.merge!, entry.written, homeTools)),
     ...kept.map(({ name }) => `${name} stays as you have it, and the source’s version no longer waits: it is kept as a version, and the source’s next change is compared with it.`),
     made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in ${andList([...new Set(made.map(entry => nouns(entry.kind).title))])}.` : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
@@ -176,7 +175,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
   const undoLabel = (entry: NonNullable<typeof one>) =>
     (entry.answer === 'keep' ? 'Undo keep mine' : entry.merge ? 'Undo the merge' : isReplaced(entry) ? 'Undo the replace' : 'Undo the update');
   const undo = !turnOn && one?.history ? { id: one.history, label: undoLabel(one) } : undefined;
-  const opens = [...[...dropped, ...changed].filter(entry => entry.deferred.length), ...dropped, ...changed, ...made, ...linked][0];
+  const opens = [...dropped, ...changed, ...made, ...linked][0];
   return {
     text: said.length ? said.join(' ') : `Checked ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole || unmerged.length > 0,
     ...(changed.length + keptAll.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
@@ -184,13 +183,6 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
     ...(opens ? { open: pageOfPart[opens.kind] } : {}),
   };
 }
-
-/**
- * The tools where an item's write (On) or removal (Off) waits for Write to Claude Code (types.ts SourcedItem `deferred`), said
- * after its sentence.
- */
-const waitWords = ({ kind, on, deferred }: SourcedItem) => (!deferred.length ? ''
-  : ` ${on ? `${andList(deferred.map(toolName))} gets it` : `It leaves ${andList(deferred.map(toolName))}`} when you click Write to Claude Code, on ${nouns(kind).title}.`);
 
 /** What a click on Merge did to one item (types.ts MergeDone), said after it: `into`, the tools the merged version was written to. */
 function mergeWords(kind: ItemKind, name: string, merge: MergeDone, into: HarnessId[], homeTools: string[]): string {
@@ -271,8 +263,8 @@ function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null
 }
 
 /**
- * An item this source removed (types.ts LibraryFacts fromSource `removed`), from its kind's page: what it is now, where its
- * removal still waits for Write to Claude Code (LibraryFacts `waits`), and Turn on, its revert.
+ * An item this source removed (types.ts LibraryFacts fromSource `removed`), from its kind's page: what it is now, and Turn on,
+ * its revert.
  */
 function removedRow(fact: LibraryFacts, kind: ItemKind, locked: boolean) {
   const page = pageOfPart[kind];
@@ -283,8 +275,7 @@ function removedRow(fact: LibraryFacts, kind: ItemKind, locked: boolean) {
     h('span.source-name-main', {},
       h('span.source-name-line', {}, h('strong.source-name-text', {}, fact.name), h('span.source-name-where.tone-muted', {}, `${nouns(kind).one}, not in its last read`)),
       h('span.source-name-state', { title: 'Should this source have it again: unchanged here since, it follows the source again; changed here, it stays as you have it.' },
-        'No longer at this source: it is Off, and no longer from it.',
-        fact.waits?.length ? ` ${andList(fact.waits.map(toolName))} still has it until you click Write to Claude Code.` : '', ' ', turn)));
+        'No longer at this source: it is Off, and no longer from it.', ' ', turn)));
 }
 
 /** A line of the look's panel or a source's row: its words beside an icon of its tone. */

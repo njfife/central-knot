@@ -31,7 +31,6 @@
 //     chosen)                                again, each tool it    are now (takeInHeld); after that, an `on` one
 //                                            was found in keeping   offers a plain Turn off, a `chosen` one nothing
 //                                            its own copy
-//   (either Undo, when a copy would go back to Claude Code's MCP settings: not offered, see givesBackLater)
 //   deleted                                  Restore                the item is deleted
 //   a content change: edit, conflict,        Undo; once later       the version from before it (`previous`) is not the
 //     current, and any entry from before     changes came, "Make    current one
@@ -67,7 +66,7 @@
 import type { IconName } from './icons.ts';
 import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
-import { asItIs, noTimeTells, versionClock, writesWait, type RowWords } from './libraryrow.ts';
+import { asItIs, noTimeTells, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts } from './types.ts';
 import { andList, sentence, toolName, toolsPhrase } from './words.ts';
 
@@ -126,10 +125,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
         pulled: { glyph: 'git-branch', text: `Pulled from the Git repo into Central Knot${also('; put in')}.` },
       } as const;
       const { glyph, text } = said[event.cause === 'found' || event.cause === 'sync-everything' || event.cause === 'pulled' ? event.cause : 'switch'];
-      // A take-in whose Undo would hand Claude Code's own MCP entry back, which only Write to Claude Code writes (givesBackLater): none.
-      const tookFrom = Object.fromEntries((event.tookFrom ?? []).map(copy => [copy.tool, copy.hash]));
-      const noUndo = tookIn(event) && givesBackLater(event, tookFrom) ? ` It has no Undo: an Undo would hand Claude Code’s own entry back, and Claude Code’s MCP settings are written only by Write to Claude Code. Turn it off instead (Central Knot keeps it), or keep it out of the other tools on its row.` : '';
-      return { glyph, text: `${text}${overSaid}${gaveSaid}${noUndo}` };
+      return { glyph, text: `${text}${overSaid}${gaveSaid}` };
     }
     case 'off':
       if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
@@ -205,7 +201,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       const where = andList([...new Set(event.losers.map(loser => toolName(loser.tool)))]);
       if (event.cause === 'tool-back') return { glyph: 'diff', text: `${where}’s copy changed while Central Knot didn’t manage ${where}; it gave way to the current version and is kept as a version.` };
       if (event.cause === 'own-copy') return { glyph: 'diff', text: `${where} had a copy of its own, which Central Knot hadn’t put there; it gave way to the current version and is kept as a version.` };
-      // The write over it may wait (Write to Claude Code): the in-line entry names it when it happens.
+      // The write over it may be held in this pass: the in-line entry names it when it happens.
       return { glyph: 'diff', text: `Edited in ${where}, not taken in yet; it gave way to the current version and is kept as a version.` };
     }
     case 'conflict': {
@@ -275,12 +271,12 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   if (tookIn(event)) {
     const held = takeInHeld(event, item, itemNow);
     if (!held) return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
-    return held !== 'claude-code' && event.kind === 'on' ? switchAction(false, undefined, item) : undefined;
+    return event.kind === 'on' ? switchAction(false, undefined, item) : undefined;
   }
   if (event.kind === 'off' || event.kind === 'on') {
     const action = switchAction(event.kind === 'off', event.only, item), back = givenBack(event, item).giveBack;
     // Copies go back only with an Undo, while the item is as the click left it; a plain Turn off or Turn on gives none back.
-    if (!action || !back || !asTheClickLeftIt(event, item) || givesBackLater(event, back)) return action;
+    if (!action || !back || !asTheClickLeftIt(event, item)) return action;
     const tools = (Object.keys(back) as HarnessId[]).map(toolName);
     const own = `${andList(tools)} ${tools.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before`;
     return { label: 'Undo', help: `${action.help}; ${own}`, change: { ...action.change, giveBack: back } };
@@ -328,10 +324,10 @@ export const entriesNow = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 's
  * tool still managed; anything else is left in. In the order asked: the item is deleted from Central Knot or Off since; at another
  * version, or a copy holds an edit not taken in yet or was deleted by hand (`changed`, by the copies now: ItemNow pending); a tool it was found in is not
  * managed now (`left-out`); a tool it took a copy from is kept out (`kept-out`); a place it was found in another way (a link,
- * ~/.agents/skills) holds Central Knot's copy now (`taken-over`); or the Undo would hand Claude Code its own MCP entry back
- * (`claude-code`: givesBackLater). Synchronize everything's one Undo leaves and names each by this (everythingPlan).
+ * ~/.agents/skills) holds Central Knot's copy now (`taken-over`). Synchronize everything's one Undo leaves and names each by
+ * this (everythingPlan).
  */
-export type TakeInHeld = 'deleted' | 'off' | 'changed' | 'left-out' | 'kept-out' | 'taken-over' | 'claude-code';
+export type TakeInHeld = 'deleted' | 'off' | 'changed' | 'left-out' | 'kept-out' | 'taken-over';
 export function takeInHeld(event: HistoryEvent, item: LibraryItem | undefined, now: ItemNow): TakeInHeld | undefined {
   if (!item || item.deleted) return 'deleted';
   if (!item.on) return 'off';
@@ -340,20 +336,10 @@ export function takeInHeld(event: HistoryEvent, item: LibraryItem | undefined, n
   if (found.some(tool => !now.managed.includes(tool))) return 'left-out';
   if (took.some(tool => item.except.includes(tool))) return 'kept-out';
   if (found.some(tool => !took.includes(tool) && item.applied[tool] !== undefined)) return 'taken-over';
-  return givesBackLater(event, givenBack(event, item).giveBack) ? 'claude-code' : undefined;
+  return undefined;
 }
 /** The tools a take-in found the item in (types.ts HistoryEvent foundIn); an entry from before it was recorded: where it was taken from, and its own copies. */
 const foundIn = (event: HistoryEvent): HarnessId[] => event.foundIn ?? [...new Set([...(event.winner ? [event.winner.tool] : []), ...(event.tookFrom ?? []).map(copy => copy.tool)])];
-
-/**
- * Whether an Undo would give a copy back to a harness that the kind writes only on a step of the person's own (libraryrow.ts
- * writesWait: Claude Code's MCP settings, written by Write to Claude Code alone). That give-back would wait, and the write
- * after would remove the copy instead, so such an Undo is not offered.
- */
-const givesBackLater = (event: HistoryEvent, back: Change['giveBack']) => {
-  const kind = libraryEntry(event)?.kind;
-  return !!kind && Object.keys(back ?? {}).some(tool => writesWait(kind, tool));
-};
 
 /**
  * Whether the item is still as the entry's click left it: at the version it left (types.ts HistoryEvent version, or the
@@ -403,11 +389,15 @@ export function versionChoices(event: HistoryEvent, item: LibraryItem | undefine
 
 // ---------- Synchronize everything's own entries (everything.ts) ----------
 
-/** One take-in a switch-on's Undo leaves in, by name, with why (TakeInHeld); `chosen`: a copy chosen meanwhile, with its own Undo. */
-export type LeftIn = { item: string; why: TakeInHeld | 'chosen' };
+/**
+ * One take-in a switch-on's Undo leaves in, by name, with why (TakeInHeld); `chosen`: a copy chosen meanwhile, with its own Undo.
+ * Kept in its History entry. `claude-code` is only read: earlier builds left in an MCP server found in Claude Code, whose
+ * settings they wrote only at a click of the person's own.
+ */
+export type LeftIn = { item: string; why: TakeInHeld | 'chosen' | 'claude-code' };
 
 /** What the one Undo of a switch-on covers, as every place that promises it says it (the question, Yes's band, Settings, History). */
-export const oneUndoCovers = (fromClaude = true) => `One Undo in History takes back what it takes in; a copy you choose has its own Undo${fromClaude ? ', and an MCP server found in Claude Code has none (its entry says why)' : ''}.`;
+export const oneUndoCovers = 'One Undo in History takes back what it takes in; a copy you choose has its own Undo.';
 
 /**
  * What a switch-on entry's one Undo would do now, read from History (`history`, oldest first): the rule's take-ins after it (cause
@@ -467,7 +457,7 @@ const keptSaid = (tools: HarnessId[]) => (tools.length === 1 ? `${toolName(tools
 /** What a Synchronize everything entry says: switched on, switched off, or a switch-on's Undo and what it did. */
 export function everythingSentence(event: HistoryEvent): { glyph: IconName; text: string } {
   const { ruleOn, undo } = event.everything ?? { ruleOn: false };
-  if (!undo) return ruleOn ? { glyph: 'refresh-cw', text: `Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. ${oneUndoCovers().replace(/^One Undo in History/, 'Its Undo')}` }
+  if (!undo) return ruleOn ? { glyph: 'refresh-cw', text: `Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. ${oneUndoCovers.replace(/^One Undo in History/, 'Its Undo')}` }
     : { glyph: 'circle-minus', text: 'Switched off: what turns up in a tool waits on its page for Add.' };
   const count = undo.itemUndos.length;
   const out = count ? `${itemsSaid(count)} it took in ${count === 1 ? 'is' : 'are'} out of Central Knot again, each tool it was found in keeping its own copy` : 'nothing it took in was taken back';
