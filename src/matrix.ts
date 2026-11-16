@@ -1314,14 +1314,16 @@ function usageBand() {
 
 /**
  * When the reading was made (and how long it took, when that was over 2 s), and how far back each tool goes: this page's tools,
- * and any other with sessions ("Claude Code: 30 days or more; Codex: history from Nov 2"). A tool's phrase never wraps inside.
+ * any other installed one with sessions, and one not installed only with a use in USAGE_DAYS, a leftover folder being no tool
+ * ("Claude Code: 30 days or more; Codex: history from Nov 2"). A tool's phrase never wraps inside.
  */
 function usageRead(read: UsageReading) {
   const took = read.tookMs > 2000 ? `, in ${(read.tookMs / 1000).toFixed(1)} s` : '';
   const back = (each: ToolUsage) => (each.unread ? 'couldn’t be read' : !each.sessions ? 'no sessions'
     : startsLate(read, each.from) ? `history from ${dayWords(each.from!)}` : `${USAGE_DAYS} days or more`);
   const reach = (each: ToolUsage) => back(each) + (each.skipped ? `, ${plural(each.skipped, 'file')} couldn’t be read` : '');
-  const tools = read.tools.filter(each => toolList().includes(each.tool) || each.sessions).map(each => `${names[each.tool]}: ${reach(each)}`.replace(/ /g, '\u00a0'));
+  const named = (each: ToolUsage) => toolList().includes(each.tool) || (each.sessions > 0 && (!!state.home?.sync.present.includes(each.tool) || each.used.some(used => used.sessions.length)));
+  const tools = read.tools.filter(named).map(each => `${names[each.tool]}: ${reach(each)}`.replace(/ /g, '\u00a0'));
   return `Usage read ${dayAndTime(read.at)}${took}. ${tools.join('; ')}.`;
 }
 

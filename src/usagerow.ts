@@ -7,6 +7,7 @@
 // (usage.ts) and the words and drawing (matrix.ts).
 import type { ItemKind, LibraryItem } from './library.ts';
 import { DAY_MS } from './model.ts';
+import { agentsKeptIn } from './presence.ts';
 import { pluginOf } from './sourcelink.ts';
 import type { HarnessId, LibraryFacts, ToolUsage, UsageReading } from './types.ts';
 
@@ -70,15 +71,19 @@ export const cantSayFor = (history: ToolUsage, kind: ItemKind): CantSay | undefi
 /** Whether a tool's history starts later than USAGE_DAYS before the reading: it counts as far back as it goes. */
 export const startsLate = (reading: Pick<UsageReading, 'at'>, from: string | undefined) => !!from && Date.parse(from) > Date.parse(reading.at) - USAGE_DAYS * DAY_MS;
 
+/** The kind a tool's records give this kind's uses, where it keeps the kind as another: an agent kept in a skills folder (presence.ts agentsKeptIn: Pi) is used as a skill. */
+const keptAs = (kind: ItemKind, tool: HarnessId): ItemKind | undefined =>
+  (kind === 'agent' && (agentsKeptIn as Partial<Record<HarnessId, string>>)[tool] === 'skills folder' ? 'skill' : undefined);
+
 /**
  * What one tool's history in a reading says of a row's item (none: that tool wasn't read). A use counts by the kind's spelling,
- * or, whatever kind the tool's record gave it, when it names the row's own copy in that tool (an agent Pi keeps as a skill).
+ * or, in a tool that keeps the kind as another (keptAs), a use of that other kind that names the row's own copy there.
  */
 export function toolSays(reading: UsageReading, kind: ItemKind, facts: LibraryFacts, tool: HarnessId): ToolSays | undefined {
   const history = reading.tools.find(each => each.tool === tool);
   if (!history) return undefined;
   const names = new Set(spelledIn[tool](namesOf(facts, tool), kind).map(name => name.toLowerCase())), copy = new Set(copyNames(facts, tool).map(name => name.toLowerCase()));
-  const hits = history.used.filter(used => (used.kind === kind ? names : copy).has(used.name.toLowerCase()));
+  const hits = history.used.filter(used => (used.kind === kind ? names.has(used.name.toLowerCase()) : used.kind === keptAs(kind, tool) && copy.has(used.name.toLowerCase())));
   const last = hits.map(hit => hit.last).sort().at(-1), cantSay = cantSayFor(history, kind);
   return { tool, sessions: new Set(hits.flatMap(hit => hit.sessions)).size, ...(last ? { last } : {}), ...(cantSay ? { cantSay } : {}), ...(startsLate(reading, history.from) ? { since: history.from } : {}) };
 }

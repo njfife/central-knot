@@ -219,6 +219,12 @@ test('Each tool\'s spelling: Claude Code\'s plugin:skill and plugin_<plugin>_<se
     sessionsIn(reading, 'skill', triage, 'copilot-cli'), sessionsIn(reading, 'mcp', askLou, 'pi-cli')], [1, 1, 1, 1, 2]);
 });
 
+test('Across kinds only where a tool keeps one kind as another: a skill and an agent of one name, or a skill and a server, each used alone, count only for their own row', () => {
+  const sessionsOf = (used: Record<string, number[]>, kind: 'skill' | 'agent' | 'mcp', name: string) => toolSays(readingOf({ 'claude-cli': used }), kind, facts(name, { 'claude-cli': copy(name) }), 'claude-cli')!.sessions;
+  assert.deepEqual([sessionsOf({ 'skill:reviewer': [1] }, 'agent', 'reviewer'), sessionsOf({ 'agent:reviewer': [1] }, 'skill', 'reviewer'), sessionsOf({ 'mcp:github': [1] }, 'skill', 'github'), sessionsOf({ 'skill:github': [1] }, 'mcp', 'github')],
+    [0, 0, 0, 0]);
+});
+
 test('A use of another copy of the same name counts, in any case; two spellings in one session count it once', () => {
   const notes = facts('notes', { 'codex-cli': copy('notes-folder', 'Notes') });
   const reading = readingOf({ 'codex-cli': { 'skill:notes-folder': [1, 2], 'skill:NOTES': [2, 3] } });
