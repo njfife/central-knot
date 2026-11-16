@@ -112,7 +112,7 @@ The main process, the window's frame, Settings, and what every page shares.
 - **Start:** `renderer.ts` for the window; `main.ts`'s handlers for what a call does. **Examples:** `tests/signin.test.ts`, `tests/words.test.ts`, `tests/model.test.ts`, `tests/pagedata.test.ts`; every page opened in `scripts/e2e.mjs`.
 
 ## The store and safe writes
-What every engine stands on: `.central-knot/` and its record, the gates on writing, and writes that never lose a save made meanwhile.
+What every engine stands on: `.central-knot/` and its record, the gates on writing, and writes that never lose a save made meanwhile (but for an unlocked save in Claude Code's file, replaced in place: `share.ts writeFileChecked` `inPlace`).
 - `share.ts` the store: the home's record, which names a build and holds the tools left out and Synchronize everything (`readRecord`, `SyncRecord`; only `takeOverSync`, called from `main.ts takeOverHome`, rewrites the build it names), whether the record lets this build write (`syncGate`: by its generation alone), whether this window may write at all (`writeAccess`: never while held, `ShareContext.held`), the gate for library writes (`libraryGate`; its header says which writes ask it, and which don't), checked writes (`writeFileChecked`), a skill's folder copied (`placeCopy`)
 - `textedit.ts` one entry of a JSON or TOML file changed, every other byte kept · `values.ts` untrusted values checked, with safe defaults
 - **Start:** `share.ts`'s header, then its exports, by their comments; a skill's copy is written over by `skillfiles.ts swapFolder`. **Examples:** `tests/share-recovery.test.ts`, `tests/textedit.test.ts`, `tests/skillsafety.test.ts`, `tests/librarygate.test.ts` (the gate for the clicks that write before their pass).

@@ -272,7 +272,9 @@ const occupiedError = () => Object.assign(new Error('Something that is not reada
  * Writes a tool's file only if it still holds `expected` (undefined: only if nothing is there), keeping its mode. The current file is
  * moved aside and checked there, then the new one is put in place exclusively: a save that lands meanwhile is never overwritten.
  * `inPlace`, for a file written under its tool's own lock, which the tool also reads outside it (Claude Code's: mcp.ts editEntry):
- * the file is never missing for a moment; it is checked where it is, then replaced in one rename, as the tool's own saves do.
+ * the file is never missing for a moment; it is checked where it is, then replaced in one rename, as the tool's own saves do. What
+ * it gives up: a save made without that lock between the check and the rename is written over, not refused (mcp.ts's header says
+ * both ways that gap can go, and what the person would see).
  */
 export async function writeFileChecked(path: string, text: string, expected: string | undefined, inPlace = false) {
   // A settings file that is a link (dotfiles) is written where it points, so the link and its target stay as they are.

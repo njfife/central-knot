@@ -1485,7 +1485,7 @@ span.ins-confirm { margin-top: 0; }
 .profiles-split .detail-column .pane-header, .profiles-split .detail-column > .bands { max-width: none; }
 .profiles-split .toolbar-end { border-left: 0; padding-left: 0; }
 .profile-header .pane-title h2, .profile-header .pane-title p { overflow-wrap: anywhere; }
-/* What a switch will do, and that Claude Code's part waits, is said whole: it wraps rather than being cut */
+/* What a switch will do is said whole: it wraps rather than being cut */
 .profile-header .pane-title p { white-space: normal; }
 .profile-header { flex-wrap: wrap; row-gap: 8px; }
 .profile-header .pane-title { flex: 1 1 220px; }

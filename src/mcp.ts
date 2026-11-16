@@ -8,7 +8,11 @@
 // `inPlace`). Measured on Claude Code 2.1.325, 2026-11-16: its saves and `claude mcp add` take the folder `<file>.lock`
 // (abandoned after 10 s) and read the file again first; it also writes unlocked (at exit, when the lock stays busy), its older
 // copy if it finds the file missing. Rapid writes it undid under load: 80 of 2,646 unlocked; 2 of 8,789 locked but moved
-// aside; none of 13,243 in place. The kit that measures it again: /home/picoder/work/ck-next/claude-write-kit (race-ck.sh).
+// aside; none of 13,243 in place. Those unlocked writes are the gap left, both ways: one landing between Central Knot's check
+// and its rename is written over, and Claude Code's own change in it is lost (not measured); one that read the file before the
+// rename and lands after it puts the older file back, which the next pass reads as the server turned off by hand or an older
+// version come back as an edit, each with its click back (the measures above: none of 13,243). The kit that measures it again:
+// /home/picoder/work/ck-next/claude-write-kit (race-ck.sh).
 import { record, withoutBom } from './values.ts';
 import { lstat, mkdir, readFile, readlink, realpath, rmdir, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -293,15 +297,14 @@ export function jsonEntry(tool: HarnessId, server: NeutralServer, extras: Record
  * Rereads the file, checks the entry is still what was decided on, then edits only that entry (FIL-02). The write itself refuses
  * if the file changed after this read, so a setting saved meanwhile (even an unrelated one) is never lost. Claude Code's file is
  * reread, checked and replaced in place holding Claude Code's lock (takeClaudeLock), so its saves wait for this one and its reads
- * never find the file gone; only an unlocked write of its own landing between the check and the rename would be written over (the
- * header's measures). Answers why nothing was written, if it wasn't: `changed`, the entry or the file changed since it was read,
- * or Claude Code kept its lock (the next pass tries again).
+ * never find the file gone; its writes made without the lock are the one gap, both ways (the header). Answers why nothing was written, if it wasn't: `changed`, the entry or the file changed since it was read;
+ * `locked`, Claude Code's lock stayed held (Claude Code saving, or a lock one that stopped left). The next pass tries again.
  */
-export async function editEntry(context: ShareContext, tool: HarnessId, name: string, expected: string | undefined, server: NeutralServer | undefined, extras?: Record<string, unknown>, place?: string[]): Promise<{ stopped: string; changed?: true } | undefined> {
+export async function editEntry(context: ShareContext, tool: HarnessId, name: string, expected: string | undefined, server: NeutralServer | undefined, extras?: Record<string, unknown>, place?: string[]): Promise<{ stopped: string; changed?: true; locked?: true } | undefined> {
   const file = mcpFile(context, tool), lock = tool === 'claude-cli' ? `${file}.lock` : undefined;
   // Any failure but a change (permissions, a full disk) stops this one write, never the rest of the pass.
   const failed = (error: unknown) => ({ stopped: `Could not write ${harnesses[tool].name}'s settings file: ${error instanceof Error ? error.message : String(error)}` });
-  try { if (lock && !await takeClaudeLock(lock)) return { stopped: 'Claude Code is saving its settings just now. Nothing was written; the next pass tries again.', changed: true }; }
+  try { if (lock && !await takeClaudeLock(lock)) return { stopped: 'Claude Code’s settings file is locked just now, so it was left as it is. Central Knot tries again when sync runs.', locked: true }; }
   catch (error) { return failed(error); }
   try {
     const now = await readTool(context, tool);

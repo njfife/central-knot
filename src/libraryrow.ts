@@ -263,6 +263,8 @@ export function foldVersions(versions: readonly Version[], unfolded: boolean): {
  * off; it keeps whatever it had), in no tool Central Knot manages.
  */
 const offWhere = (leftOut: readonly string[]) => (leftOut.length ? 'in no tool Central Knot manages' : 'in Central Knot only');
+/** The tools whose copy of an Off item the plan still removes (a removal held: Claude Code's lock, a file that couldn't be written). */
+const stillIn = (row: LibraryRow, tools: readonly string[]) => (row.plan?.remove ?? []).filter(tool => tools.includes(tool));
 
 /** The home's harnesses by name, as a sentence lists them ("all 3 tools", or their names). */
 const named = (some: readonly string[], tools: readonly string[]) => toolsPhrase([...some], [...tools]);
@@ -284,7 +286,8 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
     return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Add it to keep it in Central Knot${whereAdded(row, item, tools)}${below}.${rule}`;
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
-  if (place === 'off') return `Off · ${offWhere(leftOut)}. Turn it on to put it in every tool.${ownSaid}`;
+  const still = stillIn(row, tools);
+  if (place === 'off') return `Off · ${still.length ? `still in ${named(still, tools)} until sync runs` : offWhere(leftOut)}. Turn it on to put it in every tool.${ownSaid}`;
   // A copy deleted by hand turns the item Off at the next pass: that is what it is about to be.
   const deletedIn = row.plan?.turnedOffBy;
   if (deletedIn) return `On · its copy was deleted in ${toolName(deletedIn)}, so it turns off when sync runs. Central Knot keeps it.`;
@@ -432,6 +435,8 @@ export function sentences(words: RowWords) {
     const place = placeOf(item);
     const none = leftOut.length ? `No tool it manages has it until you turn it on; ${andList(leftOut.map(toolName))}, left out, ${leftOut.length === 1 ? 'keeps whatever it has' : 'keep whatever they have'}.`
       : 'No tool has it until you turn it on.';
+    const still = andList(stillIn(row, tools).map(toolName));
+    if (place === 'off' && still) return { text: `still in ${still} until sync runs`, title: `Off. Central Knot keeps this ${noun}; its ${copy} leaves ${still} when sync runs.` };
     if (place === 'off') return { text: offWhere(leftOut), title: `Central Knot keeps this ${noun} and its versions. ${none}` };
     const found = `A tool has this ${noun}; Central Knot doesn’t yet. Add it to keep it in Central Knot${whereAdded(row, item, tools)}.`;
     if (place === 'found' && !canAdd(row)) return { text: 'can’t be taken in', title: 'Its line in the opened row says why.' };

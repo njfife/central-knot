@@ -9,16 +9,19 @@ import { existsSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { editEntry, readTool, type NeutralServer } from '../src/mcp.ts';
+import { applyServers, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 
 const docs: NeutralServer = { transport: 'stdio', command: 'npx', args: ['-y', 'docs'] };
 const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
 
 async function home() {
-  const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-claudelock-')));
-  const context: ShareContext = { home: base, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') };
-  const file = join(base, '.claude.json'), lock = `${file}.lock`;
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-claudelock-'))), home = join(base, 'home');
+  await mkdir(home);
+  const context: ShareContext = { home, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') };
+  const file = join(home, '.claude.json'), lock = `${file}.lock`;
   await writeFile(file, `${JSON.stringify({ numStartups: 1, mcpServers: {} }, null, 2)}\n`);
   const lockThere = () => stat(lock).then(() => true, () => false);
   const servers = async () => (await readTool(context, 'claude-cli')).entries.map(entry => entry.name);
@@ -70,7 +73,7 @@ test('a lock Claude Code keeps for 2 seconds leaves the file as it is, and says 
     const before = await readFile(target, 'utf8');
     await mkdir(box.lock);
     assert.deepEqual(await editEntry(box.context, 'claude-cli', 'docs', undefined, docs),
-      { stopped: 'Claude Code is saving its settings just now. Nothing was written; the next pass tries again.', changed: true });
+      { stopped: 'Claude Code’s settings file is locked just now, so it was left as it is. Central Knot tries again when sync runs.', locked: true });
     assert.equal(await readFile(target, 'utf8'), before, 'the file is untouched');
     assert.equal(await box.lockThere(), true, 'Claude Code’s lock is left to it');
   } finally { await box.cleanup(); }
@@ -107,7 +110,7 @@ test('the file is never missing while it is written: checked where it is, then r
   } finally { await box.cleanup(); }
 });
 
-test('a save Claude Code makes without its lock just before the rename is kept: nothing is written, and the next pass tries again', async () => {
+test('a save Claude Code makes without its lock after the entry was read, landing at the write’s own check, is kept: nothing is written, and the next pass tries again', async () => {
   const box = await home(), original = fs.readFile, unlocked = `${JSON.stringify({ numStartups: 9, mcpServers: {} }, null, 2)}\n`;
   let reads = 0;
   // The second read of the file is the write's own check, after the entry was read: Claude Code's exit-time save lands then.
@@ -121,5 +124,29 @@ test('a save Claude Code makes without its lock just before the rename is kept: 
   try {
     assert.equal(stopped?.changed, true);
     assert.equal(await readFile(box.file, 'utf8'), unlocked, 'Claude Code’s save stays as it made it');
+  } finally { await box.cleanup(); }
+});
+
+test('a lock Claude Code keeps through a pass holds a write and a removal there, each saying so in the same words; the Off row says where it still is; the next sync does both', async () => {
+  const box = await home(), tools = ['claude-cli'] as const, claude = [...tools];
+  const locked = 'Claude Code’s settings file is locked just now, so it was left as it is. Central Knot tries again when sync runs.';
+  try {
+    await writeFile(box.file, `${JSON.stringify({ mcpServers: { a: { type: 'stdio', command: 'a' }, b: { type: 'stdio', command: 'b' } } }, null, 2)}\n`);
+    await applyServers(box.context, claude, [{ key: 'a', on: true, except: [] }, { key: 'b', on: true, except: [] }]);
+    await applyServers(box.context, claude, [{ key: 'b', on: false, except: [], seenOn: true }]);
+    // The lock is kept through the pass, as Claude Code or one that stopped mid-save leaves it: a turned Off, b turned back On.
+    await mkdir(box.lock);
+    const held = await applyServers(box.context, claude, [{ key: 'a', on: false, except: [], seenOn: true }, { key: 'b', on: true, except: [], seenOn: false }]);
+    assert.deepEqual(held.results.filter(result => result.harness === 'claude-cli').map(result => [result.item, result.outcome, result.message]),
+      [['a', 'held', locked], ['b', 'held', locked]]);
+    assert.deepEqual(await box.servers(), ['a'], 'the file is as it was');
+    // a is Off, and still in Claude Code until sync runs: its row says so, not "in Central Knot only".
+    const view = await serversView(box.context, claude), row = view.items.find(item => item.key === 'a')!;
+    const hashes = Object.fromEntries(Object.entries(row.copies).map(([tool, copy]) => [tool, copy!.hash]));
+    assert.equal(statusLine({ ...row, hashes }, view.library.a, claude), 'Off · still in Claude Code until sync runs. Turn it on to put it in every tool.');
+    assert.equal(sentences(libraryWords.mcp).placeTag({ ...row, hashes }, view.library.a, claude)?.text, 'still in Claude Code until sync runs');
+    await rmdir(box.lock);
+    await applyServers(box.context, claude, []);
+    assert.deepEqual(await box.servers(), ['b']);
   } finally { await box.cleanup(); }
 });

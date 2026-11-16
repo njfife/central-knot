@@ -1277,7 +1277,7 @@ function whenCell(skill: ItemRow) {
 function section(role: 'on' | 'found' | 'off' | 'away', list: ItemRow[]) {
   if (!list.length) return null;
   const label = role === 'away' ? `Not in ${names[focus!]}` : placeNames[role === 'on' ? 0 : role === 'found' ? 1 : 2];
-  const note = role === 'found' ? foundNote(list) : role === 'off' ? offNote() : role === 'away' ? 'only other tools have these' : null;
+  const note = role === 'found' ? foundNote(list) : role === 'off' ? offNote(list) : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)), note ? sectionNote(note) : null)),
@@ -1294,8 +1294,11 @@ function foundNote(list: ItemRow[]) {
   return `in a tool, not in Central Knot: Synchronize everything leaves these (open a row to see why)${choosing ? `. ${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : ''}`;
 }
 
-/** The Off heading's note: no tool has these (none it manages, where a tool is left out). */
-const offNote = () => (leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these');
+/** The Off heading's note: no tool has these (none it manages, where a tool is left out), or those whose removal is still to come. */
+function offNote(list: ItemRow[]) {
+  const still = [...new Set(list.flatMap(skill => skill.plan?.remove ?? []))];
+  return still.length ? `in Central Knot; still in ${andList(still.map(tool => names[tool]))} until sync runs` : leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
+}
 
 /** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */
 const switchStatus = (skill: ItemRow) => statusLine(skill, itemOf(skill), toolList(), !!state.home?.sync.syncEverything, leftOutTools());

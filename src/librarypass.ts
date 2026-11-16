@@ -210,8 +210,11 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
    * giveBackCopy, which puts back the harness's own copy as it was. A kind with no such reason leaves it out.
    */
   refusesToLoad?(context: ShareContext, item: LibraryItem, harness: HarnessId, content: Content): Promise<string | undefined>;
-  /** Removes one harness's copy, only while it is as read: `changed` when a save landed meanwhile. */
-  remove(context: ShareContext, item: LibraryItem, here: Entry): Promise<'removed' | 'changed' | 'failed'>;
+  /**
+   * Removes one harness's copy, only while it is as read: `changed` when a save landed meanwhile; `held`, not now for the kind's
+   * own reason, said as given (Claude Code's lock: servers.ts). Either way the next pass tries again.
+   */
+  remove(context: ShareContext, item: LibraryItem, here: Entry): Promise<'removed' | 'changed' | 'failed' | { held: string }>;
   /**
    * A History entry's action as the click it is (as the page would send it), from the entry, the item now and what the
    * managed tools hold of it now (historyactions.ts ItemNow); undefined when it has nothing left to do.
@@ -657,8 +660,8 @@ async function removeCopy(pass: Pass, item: LibraryItem, here: Seen): Promise<bo
   const done = await pass.kind.remove(pass.context, item, here), where = toolName(here.tool);
   if (done !== 'removed') {
     // A save that landed between the read and the removal stays; the next pass keeps it as a version and removes it then.
-    const message = done === 'changed' ? `${where}’s copy changed just now, so it stays until the next look.` : `Could not remove ${where}’s copy yet. Central Knot will try again.`;
-    pass.results.push({ item: item.name, harness: here.tool, outcome: done === 'changed' ? 'held' : 'failed', message });
+    const message = typeof done === 'object' ? done.held : done === 'changed' ? `${where}’s copy changed just now, so it stays until the next look.` : `Could not remove ${where}’s copy yet. Central Knot will try again.`;
+    pass.results.push({ item: item.name, harness: here.tool, outcome: done === 'failed' ? 'failed' : 'held', message });
     return false;
   }
   pass.writes++;

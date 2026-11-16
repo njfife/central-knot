@@ -162,7 +162,7 @@ export const serverKind: Kind<NeutralServer, McpEntry, ServerDisk> = {
   remove: async (context, _item, here) => {
     context.fault?.('before-remove');
     const stopped = await editEntry(context, here.tool, here.name, here.hash, undefined);
-    return !stopped ? 'removed' : stopped.changed ? 'changed' : 'failed';
+    return !stopped ? 'removed' : stopped.locked ? { held: stopped.stopped } : stopped.changed ? 'changed' : 'failed';
   },
   historyAction: libraryAction,
   merge: mergeServer,

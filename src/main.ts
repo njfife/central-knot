@@ -1409,7 +1409,7 @@ app.whenReady().then(async () => {
     return deleted.problem ? deleted : { profiles: await profilesSaved() };
   });
   handle('profiles:switch', async (id, home) => {
-    if (home !== current?.home || typeof id !== 'string') return { stopped: elsewhere, on: [], off: [], left: [], waits: [], results: [] };
+    if (home !== current?.home || typeof id !== 'string') return { stopped: elsewhere, on: [], off: [], left: [], results: [] };
     const result = await switchProfile(context(), await toolsNow(), id);
     return { ...result, view: await syncThenView() };
   });
