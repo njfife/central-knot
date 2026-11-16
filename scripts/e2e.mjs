@@ -9,7 +9,8 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
-import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { packagedApp } from './package-app.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
@@ -24,8 +25,7 @@ const shots = option('--shots');
 const crashRounds = Number(option('--crash-rounds', 6));
 const canWriteRealHome = writesRealHome(process.platform);
 const root = resolve(import.meta.dirname, '..');
-const packaged = join(root, 'release/Central Knot-darwin-arm64/Central Knot.app/Contents/MacOS/Central Knot');
-const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : packaged;
+const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : packagedApp();
 
 // ---------- Checks ----------
 const failures = [];
@@ -2017,8 +2017,9 @@ async function practiceFlow() {
     [savedSettings().historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
     [7, ['aged-5'], true, false, true, false, 'What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 7 days. Change in Settings.', true]);
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
-  // in its hint's place. Main refuses a change too, and nothing about it is saved.
-  const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
+  // in its hint's place: on a Mac, one outside the Applications folder; on Linux, any (signin.ts whyNoSignIn). Main refuses a
+  // change too, and nothing about it is saved.
+  const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : process.platform === 'darwin' ? 'Move Central Knot to the Applications folder first.' : 'Not available on Linux yet.';
   const refused = await a.run(`window.centralKnot.setStartAtSignIn(true).then(() => 'saved', error => String(error))`);
   same('Start at sign-in that can’t be changed is off and disabled, says why, and main refuses a change', [
     await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
@@ -2335,8 +2336,12 @@ async function sourcesFlow() {
 
   // Edited in Claude Code (sync takes it in), then changed at the source: the source's version waits; Replace takes it.
   const inClaude = join(home, roots['claude-cli'], 'deslop/SKILL.md');
+  // The page is told of an edit sync took in by a refresh of its own, whose notice would take the place of the next click's
+  // band: after each edit in a tool it comes first.
+  const toldOfEdit = name => until(async () => (await a.text('#announcement') ?? '').includes(`Sync changed ${name}`));
   writeFileSync(inClaude, readNow(inClaude).replace('gently', 'my way'));
   check('an edit in Claude Code is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  await toldOfEdit('deslop');
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.') });
   await a.click(`#source-check-${id}`);
   await until(async () => await a.exists(`#source-replace-${id}-skill-deslop`));
@@ -2358,6 +2363,7 @@ async function sourcesFlow() {
   // Merge: a line added in Claude Code and the source's new description, lines apart, become one version in every tool.
   writeFileSync(inClaude, `${readNow(inClaude)}Use plain words.\n`);
   check('a line added in Claude Code is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('Use plain words.'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  await toldOfEdit('deslop');
   const described = files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.').replace('Removes slop from prose.', 'Removes slop from any prose.');
   commit(deslop, { 'SKILL.md': described });
   await a.click(`#source-check-${id}`);
@@ -2376,6 +2382,7 @@ async function sourcesFlow() {
   await a.click('#nav-sources');
   writeFileSync(inClaude, readNow(inClaude).replace('Remove slop, firmly.', 'Remove slop, my way.'));
   check('the clashing edit is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  await toldOfEdit('deslop');
   commit(deslop, { 'SKILL.md': described.replace('Remove slop, firmly.', 'Remove slop, kindly.') });
   await a.click(`#source-check-${id}`);
   await until(async () => await a.exists(`#source-merge-${id}-skill-deslop`));
@@ -2398,8 +2405,7 @@ async function sourcesFlow() {
   // Keep mine's outcome, with its Undo and History's note.
   writeFileSync(inClaude, described.replace('Remove slop, firmly.', 'Remove slop, kindly.').replace('Removes slop from any prose.', 'Removes slop from any prose, my way.'));
   check('the source’s change made by hand is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('any prose, my way.'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
-  // The page is told of that edit by a refresh of its own, whose notice would take the band's place: it comes first.
-  await until(async () => /Sync changed deslop/.test(await a.text('#announcement') ?? ''));
+  await toldOfEdit('deslop');
   await until(() => a.run(`document.body.dataset.busy !== 'true' && document.querySelector('#source-merge-${id}-skill-deslop')?.disabled === false`));
   await a.click(`#source-merge-${id}-skill-deslop`);
   check('a Merge that finds the source’s change in yours already says so, offers Undo the merge and History’s note, and the line no longer waits', await until(async () => /deslop already had the source’s changes, so Merge changed nothing in it; the source’s version no longer waits\./.test(await a.text('.band-done .band-text') ?? ''))
@@ -2479,6 +2485,7 @@ async function sourcesFlow() {
     && await a.exists('#source-open-agents') && await until(() => ['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('Be brief and kind.'))), await a.text('.band-done'));
   writeFileSync(agentFile('claude-cli'), readNow(agentFile('claude-cli')).replace('You review code.', 'You review code, mine.'));
   check('an edit in Claude Code is taken in and reaches every tool', await until(() => ['copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('You review code, mine.'))), ['copilot-cli', 'codex-cli'].map(tool => readNow(agentFile(tool))));
+  await toldOfEdit('reviewer');
   commit(kit, { 'agents/reviewer.md': reviewerMd.replace('Be brief.', 'Be brief, kind and exact.') });
   await a.click(`#source-check-${kitId}`);
   await until(async () => await a.exists(`#source-merge-${kitId}-agent-reviewer`));
@@ -2510,6 +2517,7 @@ async function sourcesFlow() {
   copilotMcp.mcpServers.relay.env.A = 'mine';
   writeFileSync(mcpFile('copilot-cli'), JSON.stringify(copilotMcp, null, 2));
   check('an edit in Copilot CLI is taken in and reaches Codex', await until(() => /A = "mine"/.test(readNow(mcpFile('codex-cli')))), readNow(mcpFile('codex-cli')));
+  await toldOfEdit('relay');
   commit(kit, { '.mcp.json': relayJson({ A: '1', B: '3' }) });
   await a.click(`#source-check-${kitId}`);
   await until(async () => await a.exists(`#source-merge-${kitId}-mcp-relay`));
@@ -2776,14 +2784,35 @@ async function updateFlow() {
   } finally { await fixture.close(); }
 }
 
-/** A released build starts on this computer's home and offers no Practice copy, and its main process refuses one. */
+/**
+ * A released build starts on this computer's home and offers no Practice copy, and its main process refuses one. Where the
+ * real home is written (machine.ts writesRealHome), its first open of a fresh home asks first setup's question, and Yes takes
+ * a skill found in Codex into OpenCode's folder under ~/.config (Codex and OpenCode are the home's only tools: OpenCode reads
+ * Claude Code's skills folder, so a skill there gets no copy of its own).
+ */
 async function releasedStartupFlow() {
   // A development build (--electron) starts as a released one with --as-released; a packaged build needs no switch.
-  const a = await launch(join(scratch, 'released-data'), flag('--electron') ? ['--as-released'] : []);
+  const asReleased = flag('--electron') ? ['--as-released'] : [];
+  const a = await launch(join(scratch, 'released-data'), asReleased);
   const realHome = process.platform === 'darwin' ? 'This Mac’s home' : 'This computer’s home';
   same('a released build opens this computer’s home, never the practice copy', [await a.text('#home-label'), await a.exists('#home-fixture')], [realHome, false]);
   same('and its main process refuses the practice copy', await a.run(`window.centralKnot.selectHome('fixture').then(() => 'opened', () => 'refused')`), 'refused');
   await a.quit();
+  if (!canWriteRealHome) return;
+  const fresh = join(scratch, 'home-first-open'), handoff = text('handoff', 'Hand it over.');
+  for (const [path, version] of [['.local/bin/codex', 'codex-cli 0.142.3'], ['.opencode/bin/opencode', '1.19.5']]) {
+    mkdirSync(join(fresh, path, '..'), { recursive: true });
+    writeFileSync(join(fresh, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  }
+  skill(join(fresh, '.codex/skills'), 'handoff', handoff);
+  const b = await launch(join(scratch, 'first-open-data'), asReleased, fresh, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  await b.click('#nav-overview');
+  check('at its first open of a fresh home, the Overview asks first setup’s question', await b.exists('#setup-yes'), await b.text('.overview-lead'));
+  await b.click('#setup-yes');
+  for (let tries = 0; tries < 40 && !readNow(join(fresh, '.config/opencode/skills/handoff/SKILL.md')); tries++) await wait(100);
+  same('Yes takes the skill found in Codex into OpenCode, byte for byte', readNow(join(fresh, '.config/opencode/skills/handoff/SKILL.md')), handoff);
+  same('no page errors, a released build’s first open', b.pageErrors, []);
+  await b.quit();
 }
 
 /**
@@ -4372,6 +4401,7 @@ try {
 } finally {
   app?.child.kill('SIGKILL');
   execChmod();
+  await mountsGone(scratch);
   rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
 }
 console.log(`e2e: ${passes} passed, ${failures.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}`);

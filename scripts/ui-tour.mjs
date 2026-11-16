@@ -24,8 +24,9 @@ import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
-import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
+import { packagedApp } from './package-app.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -33,7 +34,7 @@ const flag = name => args.includes(name);
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',') : undefined;
 const full = flag('--full');
 const root = resolve(import.meta.dirname, '..');
-const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : join(root, 'release/Central Knot-darwin-arm64/Central Knot.app/Contents/MacOS/Central Knot');
+const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : packagedApp();
 const scratch = mkdtempSync(join(tmpdir(), 'ck-tour-'));
 const HOME = join(scratch, 'home');
 mkdirSync(HOME, { recursive: true });
@@ -2716,6 +2717,8 @@ if (wanted('sort')) {
 }
 
 a.quit();
-// The app was stopped just now and its helper processes may still be writing: the folder goes once they are done.
+// The app was stopped just now and its helper processes may still be writing, and an AppImage's mount goes after it: the
+// folder goes once they are done.
+await mountsGone(scratch);
 rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 console.log(`tour in ${out}`);
