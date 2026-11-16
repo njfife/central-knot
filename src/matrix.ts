@@ -1038,7 +1038,7 @@ function turnOff(skill: ItemRow) {
     const off = plugins.turned.map(item => item.tool).filter(tool => !notIn.includes(tool));
     return off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : '';
   };
-  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, stillIn(skill, notIn, toolList()), toolList(), leftOutTools())}${pluginSaid(notIn)}`, plugins.left);
+  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, stillIn(skill, itemOf(skill), notIn, toolList()), toolList(), leftOutTools())}${pluginSaid(notIn)}`, plugins.left);
 }
 
 /** Every tool that can have it: where it is on once it is on everywhere. */
@@ -1371,7 +1371,7 @@ function libraryDelete(lib: LibraryPage, skill: ItemRow) {
     arm.classList.add('delete-quiet');
     return h('span.delete-offer', {}, arm, h('span.delete-offer-note', {}, lib.say.said.deleteOffer));
   }
-  const said = lib.say.said.deleted(name, item.on, stillIn(skill, [], toolList()), toolList());
+  const said = lib.say.said.deleted(name, item.on, stillIn(skill, item, [], toolList()), toolList());
   const run = () => { view.confirmDelete = undefined; click({ kind, items: [name], changes: [rowClicks.remove(skill, item)], said }); };
   // Armed, it is still a button (outlined in red); Cancel beside it is a link.
   const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: `delete-confirm-${skill.key}`, disabled: !canWrite(), onclick: run });
