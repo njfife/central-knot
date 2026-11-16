@@ -24,7 +24,7 @@ import { libraryWords } from './libraryrow.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
-import { loadPlugins, market, resetMarket } from './pluginstate.ts';
+import { endListNews, loadPlugins, market, resetMarket } from './pluginstate.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
@@ -218,12 +218,13 @@ export function setHome(view: HomeView | null | undefined, { reload = true } = {
 let focusAfterBusy: string | undefined;
 
 /**
- * The page is acting: work under busy, or the Plugins page's switch clicks waiting their turn (pluginstate.ts market.clicking).
- * Meanwhile the home can't be switched, a plugin action other than a switch click is off, and a background refresh waits;
+ * Why the page is acting, while it is: work under busy (its line), or the Plugins page's switch clicks waiting their turn
+ * (pluginstate.ts market.clicking). Meanwhile no route opens another home, a plugin action other than a switch click is off,
+ * each such control saying why (dom.ts button and toggle take the reason as `disabled`), and a background refresh waits;
  * body[data-busy] says it (showActing), and the end-to-end checks wait on it.
  */
-export const acting = () => !!state.busy || market.clicking;
-export const showActing = () => { document.body.dataset.busy = String(acting()); };
+export const acting = (): string | undefined => state.busy || (market.clicking ? 'Waits until the plugin clicks are done.' : undefined);
+export const showActing = () => { document.body.dataset.busy = String(!!acting()); };
 /** What follows any acting once it ends: a background refresh asked for meanwhile runs, and the Git repo's count is read again (no fetch). */
 export function afterActing() {
   drainOwedRefresh();
@@ -511,7 +512,7 @@ const openHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mod
   if (!view) { announce(''); return; }
   accept(view);
   tell({ page: state.page, carry: true, text: openedText(view) + leftText,
-    act: left && left.mode !== 'custom' ? { label: `Go back to ${left.label}`, id: 'outcome-go-back', run: () => void loadHome(left.mode) } : undefined });
+    act: left && left.mode !== 'custom' ? { label: `Go back to ${left.label}`, id: 'outcome-go-back', run: () => void loadHome(left.mode), whyOff: acting } : undefined });
 }));
 
 /** At launch: the home last opened (so sync resumes where it was), else this computer's home (dev builds: the practice copy). */
@@ -528,6 +529,8 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
 /** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */
 export async function readAgain() {
   let read = false;
+  // What a list of plugin clicks said is not restated over a home read again.
+  endListNews();
   await busy(noToolManaged() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
     const view = await api().refresh(true);
     if (!view) return;
@@ -788,7 +791,7 @@ export interface Outcome {
   /** The band goes after a few seconds: an Undo's confirmation. */
   fade?: boolean;
   undo?: { id: string; label: string };
-  act?: { label: string; id: string; run: () => void; title?: string };
+  act?: { label: string; id: string; run: () => void; title?: string; /** Why it is off now, asked at each drawing (a home's Go back while the page acts). */ whyOff?: () => string | undefined };
   /** A second button after `act`: the next step the result offers ("Turn document-tools off in Claude Code"). */
   next?: { label: string; id: string; run: () => void; title?: string };
   /** Plain information, nothing done and nothing wrong: the information mark, not a tick. */

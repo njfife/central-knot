@@ -13,7 +13,7 @@ import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
 import { cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, PREVIEW_ONLY, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, takesPlugins } from './presence.ts';
-import { applyPluginOps, market, openLink, shownDetail, switchHeld, toggleOpened, turnPlugin } from './pluginstate.ts';
+import { applyPluginOps, market, openLink, pluginBusy, shownDetail, toggleOpened, turnPlugin } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, toolNames as names } from './words.ts';
@@ -86,7 +86,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   // At most two actions on a line: bring it into line there, and keep it out or let it in.
   const actions = (tool: HarnessId, mark: ToolMark) => {
     const owed = sw?.tools[tool], kept = !!sw?.entry?.except.includes(tool);
-    const act = (label: string, what: PluginTurn, id: string, title: string) => button({ variant: 'link', size: 'micro', label, id: `${id}-${marketIndex}-${plugin.name}-${tool}`, disabled: switchHeld(entry.source, plugin.name) || !!stopped,
+    const act = (label: string, what: PluginTurn, id: string, title: string) => button({ variant: 'link', size: 'micro', label, id: `${id}-${marketIndex}-${plugin.name}-${tool}`, disabled: pluginBusy(entry.source, plugin.name) || !!stopped,
       attrs: { title: stopped ?? title }, onclick: () => turnPlugin(entry, plugin.name, what, tool) });
     const fix = owed?.act && (mark === 'missing' || mark === 'waits' || mark === 'not-brought' || mark === 'stays')
       ? (owed.act === 'install' || owed.act === 'install-items' ? act('Install there', 'fix', 'pfix', owed.act === 'install-items' ? itemsInstall(tool)

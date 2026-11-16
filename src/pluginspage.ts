@@ -5,14 +5,14 @@
 // mark only says what it has.
 import { acting, noToolManaged, rerender, showPage, state as app } from './app.ts';
 import { noToolsState } from './pages.ts';
-import { button, closeButton, emptyState, h, icon, rereadBand, withToolCount } from './dom.ts';
+import { button, closeButton, emptyState, h, icon, rereadBand, whyOff, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
-import { resultLines, pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
+import { pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
@@ -30,8 +30,8 @@ function addBox(first: boolean) {
   }
   // One add at a time: Enter while one is being read does nothing (the box is disabled then too).
   const add = () => { if (!acting() && market.draftSource.trim()) void addMarketplace(market.draftSource.trim()); };
-  const input = h('input.market-add-input', { id: 'marketplace-source', type: 'text', disabled: acting(), placeholder: 'owner/repo, Git URL or folder', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: market.draftSource,
-    oninput: (event: Event) => { market.draftSource = (event.target as HTMLInputElement).value; const go = document.getElementById('add-marketplace') as HTMLButtonElement | null; if (go) go.disabled = acting() || !market.draftSource.trim(); },
+  const input = h('input.market-add-input', { id: 'marketplace-source', type: 'text', disabled: !!acting(), ...whyOff(acting()), placeholder: 'owner/repo, Git URL or folder', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: market.draftSource,
+    oninput: (event: Event) => { market.draftSource = (event.target as HTMLInputElement).value; const go = document.getElementById('add-marketplace') as HTMLButtonElement | null; if (go) go.disabled = !!acting() || !market.draftSource.trim(); },
     onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') add(); if (event.key === 'Escape' && !first) { market.addOpen = false; rerender(); } } });
   const close = first ? null : closeButton(() => { market.addOpen = false; market.draftSource = ''; rerender(); }, { id: 'close-add-marketplace', label: 'Close' });
   return h(`div.market-add.market-add-open${first ? '.market-add-first' : ''}`, {},
@@ -58,7 +58,7 @@ function suggestions(view: PluginsView, first = false) {
   // Off, like Add, while something else is being read or added: one piece of work on the page at a time.
   const no = (offer: { source: string; name: string }) => {
     const made = closeButton(() => void declineMarketplace(offer.source, offer.name), { id: `suggested-no-${id(offer.source)}`, label: `Don’t suggest ${offer.name}` });
-    if (acting()) made.setAttribute('disabled', '');
+    if (acting()) { made.setAttribute('disabled', ''); made.title = acting()!; }
     return made;
   };
   return h(`div.market-suggested${first ? '.market-suggested-first' : ''}`, { role: 'group', 'aria-label': 'Suggested marketplaces' },
@@ -165,7 +165,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const someCan = view.canWrite && (pluginColumns.some(tool => !blocked(view, entry, tool)) || view.tools.length > pluginColumns.length);
   // The hint heads the name column, wrapping within it when the column is narrow.
   const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-managed', { role: 'columnheader', 'aria-label': 'On or off' }),
-    h('div.ov-name.plugin-hint', { role: 'columnheader' }, someCan ? [h('span.hint-long', {}, 'A switch acts at once, in every tool that takes the plugin.'), h('span.hint-short', {}, 'A switch acts at once.')] : 'Plugin'),
+    h('div.ov-name.plugin-hint', { role: 'columnheader' }, someCan ? [h('span.hint-long', {}, 'A switch installs or removes it in every tool that takes the plugin; clicks run in turn.'), h('span.hint-short', {}, 'Clicks run in turn.')] : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   // With more than one plugin behind, one button runs every update in this marketplace at once, those the filter hides too.
   const behind = view.canWrite ? entry.plugins.filter(plugin => updateOps(view, entry, plugin).length) : [];
@@ -339,7 +339,7 @@ function undoButton(): HTMLElement | null {
   const back = undoOps();
   if (!back.length) return null;
   const undo = button({ variant: 'outline', size: 'small', label: market.lastRun?.undo ? 'Undo the rest' : 'Undo', id: 'plugins-undo', disabled: acting(), onclick: undoLast });
-  undo.title = undoTitle(back);
+  undo.title = acting() ?? undoTitle(back);
   return undo;
 }
 
@@ -446,7 +446,7 @@ export function pluginsPage() {
   if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Once one is installed, Central Knot finds it on its own, or at once with Refresh at the top.',
     button({ variant: 'outline', label: 'See Harnesses', id: 'plugins-no-tools', onclick: () => showPage('harnesses') })));
   const shown = current();
-  const lines = market.lastRun ? resultLines(market.lastRun.done, market.lastRun.undo) : [];
+  const lines = lastLines();
   // With no marketplaces, adding one is the only thing to do: its box sits in the middle of the page, with examples.
   const empty = emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Adding one installs nothing.',
     h('div.market-empty-add', {},

@@ -43,7 +43,8 @@ interface ButtonOptions {
   /** Accessible name where the visible label is not enough, and the name of an icon-only button. */
   name?: string;
   id?: string;
-  disabled?: boolean;
+  /** Off; a reason, as text, also says why it is off (its title and description: app.ts acting). */
+  disabled?: boolean | string;
   /** A bar button with an icon and a label: when its bar can't fit (fitBars), only the icon shows, the label as its tooltip. */
   collapse?: boolean;
   onclick: (event: MouseEvent) => void;
@@ -59,10 +60,12 @@ export function button(options: ButtonOptions): HTMLElement {
   // tooltip then stands in for the label, so it starts with it unless its name already says it.
   const tip = !collapses ? undefined : name && !name.toLowerCase().includes(label!.toLowerCase()) ? `${label}: ${name}` : name ?? label;
   return h(`button.btn.${variant}.${size}${label ? '' : '.square'}${collapses ? '.collapsible' : ''}`, {
-    type: 'button', id: options.id, disabled: options.disabled, onclick: options.onclick,
-    'aria-label': name, title: label ? undefined : name, 'data-tip': tip, ...options.attrs,
+    type: 'button', id: options.id, disabled: !!options.disabled, onclick: options.onclick,
+    'aria-label': name, title: label ? undefined : name, 'data-tip': tip, ...options.attrs, ...whyOff(options.disabled),
   }, options.icon && icon(options.icon, iconSize), label && h('span.btn-label', {}, label));
 }
+/** A control off for a reason says it, as its title and description. */
+export const whyOff = (disabled: unknown) => (typeof disabled === 'string' ? { title: disabled, 'aria-description': disabled } : {});
 
 
 /** Keeps the start and the distinguishing tail: the start ellipsizes, the tail stays. */
@@ -91,8 +94,8 @@ export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria
  * An on/off switch; its label is also its tooltip. `mixed`: neither, drawn in between (its knob in the middle); a click turns
  * it on. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint).
  */
-export function toggle({ on, mixed = false, partial = false, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; mixed?: boolean; partial?: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
-  return h(`button.switch${partial ? '.switch-partial' : ''}`, { type: 'button', id, role: 'switch', 'aria-checked': mixed ? 'mixed' : String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(mixed || !on); } },
+export function toggle({ on, mixed = false, partial = false, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; mixed?: boolean; partial?: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean | string; id?: string; attrs?: Props }) {
+  return h(`button.switch${partial ? '.switch-partial' : ''}`, { type: 'button', id, role: 'switch', 'aria-checked': mixed ? 'mixed' : String(on), 'aria-label': label, title: label, disabled: !!disabled, ...attrs, ...whyOff(disabled), onclick: (event: Event) => { event.stopPropagation(); onchange(mixed || !on); } },
     h('span.switch-knob'));
 }
 

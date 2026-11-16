@@ -4186,14 +4186,15 @@ esac
   await pictures('plugin-switch-failed');
   await fitsAtMinimum(a, 'a plugin’s page with an install that failed');
   // Two plugins clicked in a row without waiting: release-helper's Add, then starter-skills (Claude Code's stand-in takes 3 s over
-  // it). The second waits its turn while the first runs, Skills stays usable meanwhile, and the view is read at the end only.
+  // it). The second waits its turn while the first runs, the first is read back as soon as it ends, and Skills stays usable.
   await a.click('#plugin-back');
   writeFileSync(join(home, 'slow'), '');
   await a.run(`document.querySelector('#padd-0-release-helper').click(); document.querySelector('#pswitch-0-starter-skills').click()`);
   const rowSays = name => a.run(`document.querySelector('[data-plugin="${name}"] .plugin-click')?.dataset.click ?? 'nothing'`);
   same('the second click waits its turn while the first runs, and another plugin’s switch stays usable', [await rowSays('release-helper'), await rowSays('starter-skills'), await a.exists('#pswitch-0-issue-tracker:not([disabled])')], ['running', 'waiting', true]);
   for (let tries = 0; tries < 50 && await rowSays('starter-skills') !== 'running'; tries++) await wait(100);
-  same('the first’s row says it ended; the view isn’t read again yet, so its Add stays drawn, held', [await rowSays('release-helper'), await a.exists('#padd-0-release-helper[disabled]')], ['ended', true]);
+  same('the first is read back as soon as it ends: its row says so, and its switch is On and free while the second runs', [await rowSays('release-helper'), await switchIs('#pswitch-0-release-helper:not([disabled])'), await rowSays('starter-skills')], ['ended', 'true', 'running']);
+  check('a control the list turns off says why', await a.run(`document.querySelector('#open-add-marketplace')?.title`) === 'Waits until the plugin clicks are done.', await a.run(`document.querySelector('#open-add-marketplace')?.outerHTML`));
   await a.run(`document.querySelector('#nav-skills').click()`);
   check('an item page’s switch can be used meanwhile', await a.run(`!!document.querySelector('#switch-triage[aria-checked="true"]:not([disabled])')`), await a.text('.page'));
   await a.run(`document.querySelector('#switch-triage').click()`);
@@ -4203,7 +4204,7 @@ esac
   same('both end installed, and the item page’s click ran', [!!both['release-helper@ck-test-market'], !!both['starter-skills@ck-test-market'], entry('release-helper')?.on, entry('starter-skills')?.on,
     existsSync(join(home, '.pi/agent/skills/hello/SKILL.md')), await a.run(`document.querySelector('#switch-triage').getAttribute('aria-checked')`)], [true, true, true, true, true, 'false']);
   await a.click('#nav-plugins');
-  same('read at the end, each row shows its switch On, its marks, and its own result', [await switchIs('#pswitch-0-release-helper'), await switchIs('#pswitch-0-starter-skills'), await marks('release-helper'), await marks('starter-skills'), await rowSays('release-helper'), await rowSays('starter-skills')],
+  same('each row shows its switch On, its marks, and its own result', [await switchIs('#pswitch-0-release-helper'), await switchIs('#pswitch-0-starter-skills'), await marks('release-helper'), await marks('starter-skills'), await rowSays('release-helper'), await rowSays('starter-skills')],
     ['true', 'true', ['installed', 'items'], ['installed', 'items'], 'ended', 'ended']);
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();

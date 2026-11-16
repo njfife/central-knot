@@ -6,7 +6,7 @@ import { button, h, icon, toggle } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, resultLines, type PluginOp } from './pluginplan.ts';
-import { applyPluginOps, clickOn, market, openLink, shownDetail, switchHeld, turnPlugin } from './pluginstate.ts';
+import { applyPluginOps, clickOn, market, openLink, pluginBusy, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
 import { PREVIEW_ONLY, addWords, cantUninstall, copyStale, foundIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
@@ -78,26 +78,30 @@ export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: 
   const stopped = !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
   if (found.length) {
     const label = stopped ?? addWords(plugin.name, found);
-    return h('button.btn.outline.small.add-item', { type: 'button', id: id.replace(/^pswitch/, 'padd'), title: label, 'aria-label': label, disabled: switchHeld(entry.source, plugin.name) || !!stopped,
+    return h('button.btn.outline.small.add-item', { type: 'button', id: id.replace(/^pswitch/, 'padd'), title: label, 'aria-label': label, disabled: pluginBusy(entry.source, plugin.name) || !!stopped,
       onclick: (event: Event) => { event.stopPropagation(); turnPlugin(entry, plugin.name, 'add'); } }, 'Add');
   }
   const words = switchWords(view, entry, plugin.name);
-  return toggle({ on: !!sw?.entry?.on, partial: switchPartial(view, sw), label: stopped ? `${words.slice(0, words.indexOf('.') + 1)} ${stopped}` : words, disabled: switchHeld(entry.source, plugin.name) || !!stopped, id,
+  return toggle({ on: !!sw?.entry?.on, partial: switchPartial(view, sw), label: stopped ? `${words.slice(0, words.indexOf('.') + 1)} ${stopped}` : words, disabled: pluginBusy(entry.source, plugin.name) || !!stopped, id,
     onchange: on => turnPlugin(entry, plugin.name, on ? 'on' : 'off') });
 }
 
 /**
- * A plugin's latest click in the page's list (pluginstate.ts market.clicks), on its row and its page: Waiting, then what it
- * does while main runs it, then what main returned (Failed and why, when nothing worked), until the next list starts. One line,
- * shortened with "…"; the whole of it is its tooltip.
+ * What a plugin's click in the page's list says on its row and its page: its aim while it waits ("Waiting to install") and while
+ * main runs it ("Installing…"), then what main returned, a failure once, starting with its tool (the problems band has each
+ * whole). It stays until the list's news ends (pluginstate.ts endListNews).
  */
+export function clickWords(click: PluginClick): { text: string; failed: boolean } {
+  if (!click.ran) return { text: click.state === 'waiting' ? click.said.waiting : click.said.running, failed: false };
+  const lines = resultLines(click.ran.done), text = [...lines.map(line => line.short), click.ran.stopped].filter(Boolean).join('; ') || 'Nothing changed';
+  return { text: `${text.charAt(0).toUpperCase()}${text.slice(1)}`, failed: !!click.ran.stopped || lines.some(line => !line.ok) };
+}
+
+/** A plugin's latest click in the page's list, on its row and its page (clickWords): one line, shortened with "…", the whole of it its tooltip. */
 export function clickNote(entry: MarketplaceView, plugin: string): HTMLElement | null {
   const click = clickOn(entry.source, plugin);
   if (!click) return null;
-  const lines = click.ran ? resultLines(click.ran.done) : [], failed = !!click.ran?.stopped || lines.some(line => !line.ok);
-  const ended = [...lines.map(line => line.short), click.ran?.stopped].filter(Boolean).join('; ') || 'Nothing changed';
-  const text = click.state === 'waiting' ? 'Waiting' : click.state === 'running' ? click.doing
-    : failed && !lines.some(line => line.ok) ? `Failed: ${ended}` : `${ended.charAt(0).toUpperCase()}${ended.slice(1)}`;
+  const { text, failed } = clickWords(click);
   const glyph = click.state === 'waiting' ? icon('clock', 12) : click.state === 'running' ? icon('refresh-cw', 12, 'spin') : icon(failed ? 'triangle-alert' : 'check', 12);
   return h(`span.plugin-click${failed ? '.failed' : ''}`, { 'data-click': click.state, title: text }, glyph, h('span', {}, text));
 }
