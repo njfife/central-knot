@@ -11,7 +11,7 @@ import { clickGoes, clickHeld, clickRuns, entryOf, firstRecord, newEntry, owedTo
 import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts';
-import { itemTools, itemsBack, itemsView, readPlugin, runItems, withItemsOf, type ItemsAsk, type ItemState } from './pluginlibrary.ts';
+import { itemTools, itemsBack, itemsView, lookAtKinds, readPlugin, runItems, withItemsOf, type ItemsAsk, type ItemState, type KindLooks } from './pluginlibrary.ts';
 import { recordedIds } from './sourcestore.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ItemKind } from './library.ts';
@@ -126,16 +126,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   const declined = async (): Promise<string[]> => {
     try { const list = JSON.parse(await readFile(declinedPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
   };
-  /**
-   * Each CLI's version by its path (`--version`), for a plugin skill switch's tested range. A version read is kept until
-   * Refresh all (a CLI may be updated meanwhile); a read that failed (a slow first start) is tried again next time.
-   */
-  const versionReads = new Map<string, Promise<string | undefined>>();
-  const cliVersion = (binary: string | undefined) => {
-    if (!binary) return Promise.resolve(undefined);
-    if (!versionReads.has(binary)) versionReads.set(binary, probeVersion(binary).then(probe => { if (!probe.version) versionReads.delete(binary); return probe.version; }));
-    return versionReads.get(binary)!;
-  };
+  /** Each CLI's version (`--version`, kept by discovery.ts probeVersion while the binary is the same file), for a plugin skill switch's tested range. */
+  const cliVersion = async (binary: string | undefined) => (binary ? (await probeVersion(binary)).version : undefined);
   /** A tool's build: its CLI's, else the one discovery read for this home (ChatGPT desktop's own Codex, which isn't a CLI here). */
   const buildOf = async (ctx: engine.PluginContext, tool: HarnessId, snapshots: Snapshot[]) => (await cliVersion(ctx.binaries[tool])) ?? snapshots.find(snapshot => snapshot.harness === tool)?.probe.version;
   /** A context for one request. `clis`: look for the tools' CLIs (only a request that runs or reports on them needs them). */
@@ -380,16 +372,19 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   /**
    * Each listed plugin with items (pluginlibrary.ts withItemsOf), read from its marketplace's copy as the table reads it
    * (itemsView): its page's "Its items", and what Pi and OpenCode have of it (pluginstatus.ts toolNow). A plugin whose parts wait
-   * to be moved (pluginstatus.ts waitsToMove) is not read: it has no Its items, so Update and Update all bring it nothing.
+   * to be moved (pluginstatus.ts waitsToMove) is not read: it has no Its items, so Update and Update all bring it nothing. The
+   * home is looked at once for them all (pluginlibrary.ts lookAtKinds), when the first is read.
    */
   async function withItems(ctx: engine.PluginContext, share: ShareContext, tools: HarnessId[], marketplaces: MarketplaceView[], entries: PluginEntry[]) {
     const read = await withItemsOf(share, entries), recorded = (await recordedIds(share.home)).ids;
+    let looks: KindLooks | undefined;
     for (const market of marketplaces) for (const plugin of market.plugins) {
       const entry = entryOf({ tools: [], plugins: read }, market.source, plugin.name);
       if (!entry || waitsToMove(market, plugin.name)) continue;
       const at: Awaited<ReturnType<typeof itemFiles>> = plugin.gone ? { commitAt: '', problem: MARKET_UNREAD } : await itemFiles(ctx, market.source, plugin.name);
       const reads = at.files && await readPlugin(at.files, entry, at.commitAt, recorded, []);
-      (market.items ??= {})[plugin.name] = await itemsView(share, tools, entry, reads || undefined, at.problem);
+      looks ??= await lookAtKinds(share, tools);
+      (market.items ??= {})[plugin.name] = itemsView(tools, looks, entry, reads || undefined, at.problem);
     }
   }
 
@@ -437,7 +432,6 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const desktopOnly = Object.fromEntries(tools.flatMap(tool => { const app = read.snapshots.find(snapshot => snapshot.harness === tool)?.app; return !ctx.binaries[tool] && app ? [[tool, app.name]] : []; }));
     // The app's own copy, named with the version it answers (the Copilot runtime may run a newer Copilot CLI it updated to).
     const via = Object.fromEntries(await Promise.all(Object.entries(ctx.apps ?? {}).filter(([tool]) => tools.includes(tool as HarnessId)).map(async ([tool, app]) => [tool, viaLabel(app, await cliVersion(ctx.binaries[tool as HarnessId]))] as const)));
-    if (fresh) versionReads.clear();
     const versions = Object.fromEntries((await Promise.all(tools.filter(tool => SKILL_SWITCH_TESTED_FROM[tool]).map(async tool => [tool, await buildOf(ctx, tool, read.snapshots)] as const))).filter(([, version]) => version));
     // What is offered without being looked for: the default of a plugin tool that is here, unless it is listed already (a
     // tool added it, or the person did), was declined, or this build carries its own marketplace.

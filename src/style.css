@@ -1151,6 +1151,7 @@ span.ins-confirm { margin-top: 0; }
   .plugin-row-open { flex: none; max-width: 50%; margin-right: 14px; }
   /* A long note (a copy that differs, several versions) wraps beside the line rather than pushing what it holds out of view. */
   .plugin-row-update { flex: 0 1 auto; margin-left: 14px; }
+  .plugin-row-name > .plugin-click { flex: 0 1 auto; margin-left: 14px; }
 }
 /* The header's hint keeps to whole lines: a narrow table says it shorter. */
 .hint-short { display: none; }
@@ -1262,6 +1263,12 @@ span.ins-confirm { margin-top: 0; }
 /* The list row's version warning: its own line under the plugin's description, wrapping between words */
 .plugin-row-warning { font-size: 11.5px; }
 .plugin-row-warning > .icon { align-self: flex-start; margin-top: 2px; }
+/* A switch click's line on its plugin's row and page (pluginparts.ts clickNote): shortened with "…", its tooltip whole */
+.plugin-click { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; font-size: 11.5px; color: var(--ink-soft); }
+.plugin-click > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-click > .icon { flex: none; }
+.plugin-click.failed { color: var(--warning); }
+.plugin-panel > .plugin-click { margin: -4px 0 10px; font-size: 12px; }
 .plugin-muted { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-soft); }
 .plugin-readme h3 { margin-bottom: 8px; }
 /* Narrow content: the marketplaces become a strip above the page they open. */

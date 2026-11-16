@@ -15,7 +15,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, writesWait, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, writesWait, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -688,7 +688,7 @@ export function outcomeBand(table = state.page === 'skills' || state.page === 'm
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
     outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
     h('span.band-actions', {},
-      outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
+      outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: outcome.act.whyOff?.(), attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
         : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
         : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
@@ -1040,7 +1040,7 @@ function turnOff(skill: ItemRow) {
     return off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : '';
   };
   // "No tool has it" only where none does: a tool whose plugin switch can't be written still has it.
-  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, [...notIn, ...plugins.leftIn], toolList(), leftOutTools())}${pluginSaid(notIn)}`, plugins.left);
+  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], toolList()), toolList(), leftOutTools())}${pluginSaid(notIn)}`, plugins.left);
 }
 
 /** Every tool that can have it: where it is on once it is on everywhere. */
@@ -1353,7 +1353,7 @@ function libraryDelete(lib: LibraryPage, skill: ItemRow) {
     arm.classList.add('delete-quiet');
     return h('span.delete-offer', {}, arm, h('span.delete-offer-note', {}, lib.say.said.deleteOffer));
   }
-  const said = lib.say.said.deleted(name, item.on);
+  const said = lib.say.said.deleted(name, item.on, stillIn(skill, item, [], toolList()), toolList());
   const run = () => { view.confirmDelete = undefined; click({ kind, items: [name], changes: [rowClicks.remove(skill, item)], said }); };
   // Armed, it is still a button (outlined in red); Cancel beside it is a link.
   const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: `delete-confirm-${skill.key}`, disabled: !canWrite(), onclick: run });

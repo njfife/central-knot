@@ -9,11 +9,13 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
-import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { packagedApp } from './package-app.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { managedNow } from '../src/share.ts';
+import { writesRealHome } from '../src/machine.ts';
 import { applySkills } from '../src/skills.ts';
 
 const args = process.argv.slice(2);
@@ -21,10 +23,9 @@ const flag = name => args.includes(name);
 const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
 const shots = option('--shots');
 const crashRounds = Number(option('--crash-rounds', 6));
-const canWriteRealHome = process.platform === 'darwin';
+const canWriteRealHome = writesRealHome(process.platform);
 const root = resolve(import.meta.dirname, '..');
-const packaged = join(root, 'release/Central Knot-darwin-arm64/Central Knot.app/Contents/MacOS/Central Knot');
-const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : packaged;
+const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : packagedApp();
 
 // ---------- Checks ----------
 const failures = [];
@@ -47,8 +48,10 @@ const entriesSorted = text => {
 // ---------- Disposable home ----------
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'ck-e2e-')));
 const HOME = join(scratch, 'home');
-// What stands in for /Applications, the running apps and the Trash in every launch (platform.ts macPlaces): no flow looks at
-// or removes the real ones.
+// What stands in for /Applications, the running apps and the Trash in every launch on a Mac (platform.ts macPlaces): no flow
+// looks at or removes the real ones. Off a Mac, where there are none, only the flows about another build name stand-ins of
+// their own (alphaSyncedHome), as a Mac's: a Linux user's app never looks for another build (main.ts looksForBuilds), and
+// every other flow runs as theirs does.
 const MAC = standInMac(join(scratch, 'mac'));
 const CLAUDE = join(HOME, '.claude/skills'), COPILOT = join(HOME, '.copilot/skills'), AGENTS = join(HOME, '.agents/skills'), CODEX = join(HOME, '.codex/skills');
 const text = (name, body = 'Body.', extra = '') => `---\nname: ${name}\ndescription: The ${name} skill.\n${extra}---\n\n${body}\n`;
@@ -71,6 +74,14 @@ function tree(directory, options = {}) {
   };
   visit(directory);
   return out;
+}
+/** Claude Code's, Copilot CLI's and Codex's CLIs in `home`'s ~/.local/bin, stand-ins that answer --version only: the tools a home has. */
+function toolClis(home) {
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.'], ['codex', 'codex-cli 0.142.3']]) {
+    writeFileSync(join(home, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
+    chmodSync(join(home, '.local/bin', name), 0o755);
+  }
 }
 function seedHome() {
   const rich = skill(CLAUDE, 'rich', text('rich', 'Values stay as they are: api_key=abc123'));
@@ -96,11 +107,7 @@ function seedHome() {
   symlinkSync('SKILL.md', join(held, 'alias'));
   const shared = skill(AGENTS, 'linked');
   symlinkSync(shared, join(CLAUDE, 'linked'));
-  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
-  for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.'], ['codex', 'codex-cli 0.142.3']]) {
-    writeFileSync(join(HOME, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
-    chmodSync(join(HOME, '.local/bin', name), 0o755);
-  }
+  toolClis(HOME);
   writeFileSync(join(HOME, '.claude/unrelated.json'), '{ "keep":   "these bytes" }\n');
   skill(CLAUDE, `very-long-${'n'.repeat(150)}`);
   skill(CLAUDE, 'MixedCase');
@@ -115,10 +122,10 @@ function seedHome() {
 
 // ---------- App ----------
 // On Linux the file manager the app opens is this stand-in: it notes what it was asked to open.
-const opened = join(scratch, 'opened.txt');
+const fileManagerAsked = join(scratch, 'opened.txt');
 if (process.platform === 'linux') {
   mkdirSync(join(scratch, 'bin'));
-  writeFileSync(join(scratch, 'bin/xdg-open'), `#!/bin/sh\necho "$*" >> '${opened}'\n`);
+  writeFileSync(join(scratch, 'bin/xdg-open'), `#!/bin/sh\necho "$*" >> '${fileManagerAsked}'\n`);
   chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
 }
 let app;
@@ -129,10 +136,10 @@ process.on('exit', () => { for (const child of launched) { try { child.kill('SIG
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
-  // OpenCode's CLI is looked for only inside the throwaway home, and every app in the stand-in for /Applications (CK_TEST_APPS,
-  // empty here): a machine that has them installed (the Mac these run on does) would otherwise bring them into every flow that
-  // opens "This Mac's home".
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_TEST_APPS: MAC.root, ...more };
+  // OpenCode's CLI is looked for only inside the throwaway home, and on a Mac every app in the stand-in for /Applications
+  // (CK_TEST_APPS, empty here): a machine that has them installed (the Mac these run on does) would otherwise bring them into
+  // every flow that opens "This Mac's home".
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -1932,8 +1939,8 @@ async function practiceFlow() {
   // Show log file opens the folder the log is in, and says so (macOS and Windows select the file: the Mac check covers that).
   if (process.platform === 'linux') {
     await a.click('#show-log');
-    for (let tries = 0; tries < 30 && !existsSync(opened); tries++) await wait(100);
-    same('Show log file opens the log’s folder and names the file', [existsSync(opened) && readFileSync(opened, 'utf8').trim(), await a.text('#setting-log .setting-note')],
+    for (let tries = 0; tries < 30 && !existsSync(fileManagerAsked); tries++) await wait(100);
+    same('Show log file opens the log’s folder and names the file', [existsSync(fileManagerAsked) && readFileSync(fileManagerAsked, 'utf8').trim(), await a.text('#setting-log .setting-note')],
       [join(scratch, 'data'), 'Opened the log’s folder. The file is central-knot.log.']);
   }
   // History's action for an entry that is no library item's (here, none at all) reaches no kind's restore (main.ts history:restore).
@@ -2023,8 +2030,9 @@ async function practiceFlow() {
     [savedSettings().historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
     [7, ['aged-5'], true, false, true, false, 'What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 7 days. Change in Settings.', true]);
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
-  // in its hint's place. Main refuses a change too, and nothing about it is saved.
-  const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
+  // in its hint's place: on a Mac, one outside the Applications folder; on Linux, any (signin.ts whyNoSignIn). Main refuses a
+  // change too, and nothing about it is saved.
+  const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : process.platform === 'darwin' ? 'Move Central Knot to the Applications folder first.' : 'Not available on Linux yet.';
   const refused = await a.run(`window.centralKnot.setStartAtSignIn(true).then(() => 'saved', error => String(error))`);
   same('Start at sign-in that can’t be changed is off and disabled, says why, and main refuses a change', [
     await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
@@ -2341,8 +2349,12 @@ async function sourcesFlow() {
 
   // Edited in Claude Code (sync takes it in), then changed at the source: the source's version waits; Replace takes it.
   const inClaude = join(home, roots['claude-cli'], 'deslop/SKILL.md');
+  // The page is told of an edit sync took in by a refresh of its own, whose notice would take the place of the next click's
+  // band: after each edit in a tool it comes first.
+  const toldOfEdit = name => until(async () => (await a.text('#announcement') ?? '').includes(`Sync changed ${name}`));
   writeFileSync(inClaude, readNow(inClaude).replace('gently', 'my way'));
   check('an edit in Claude Code is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  await toldOfEdit('deslop');
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.') });
   await a.click(`#source-check-${id}`);
   await until(async () => await a.exists(`#source-replace-${id}-skill-deslop`));
@@ -2364,6 +2376,7 @@ async function sourcesFlow() {
   // Merge: a line added in Claude Code and the source's new description, lines apart, become one version in every tool.
   writeFileSync(inClaude, `${readNow(inClaude)}Use plain words.\n`);
   check('a line added in Claude Code is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('Use plain words.'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  await toldOfEdit('deslop');
   const described = files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.').replace('Removes slop from prose.', 'Removes slop from any prose.');
   commit(deslop, { 'SKILL.md': described });
   await a.click(`#source-check-${id}`);
@@ -2382,6 +2395,7 @@ async function sourcesFlow() {
   await a.click('#nav-sources');
   writeFileSync(inClaude, readNow(inClaude).replace('Remove slop, firmly.', 'Remove slop, my way.'));
   check('the clashing edit is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  await toldOfEdit('deslop');
   commit(deslop, { 'SKILL.md': described.replace('Remove slop, firmly.', 'Remove slop, kindly.') });
   await a.click(`#source-check-${id}`);
   await until(async () => await a.exists(`#source-merge-${id}-skill-deslop`));
@@ -2404,8 +2418,7 @@ async function sourcesFlow() {
   // Keep mine's outcome, with its Undo and History's note.
   writeFileSync(inClaude, described.replace('Remove slop, firmly.', 'Remove slop, kindly.').replace('Removes slop from any prose.', 'Removes slop from any prose, my way.'));
   check('the source’s change made by hand is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('any prose, my way.'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
-  // The page is told of that edit by a refresh of its own, whose notice would take the band's place: it comes first.
-  await until(async () => /Sync changed deslop/.test(await a.text('#announcement') ?? ''));
+  await toldOfEdit('deslop');
   await until(() => a.run(`document.body.dataset.busy !== 'true' && document.querySelector('#source-merge-${id}-skill-deslop')?.disabled === false`));
   await a.click(`#source-merge-${id}-skill-deslop`);
   check('a Merge that finds the source’s change in yours already says so, offers Undo the merge and History’s note, and the line no longer waits', await until(async () => /deslop already had the source’s changes, so Merge changed nothing in it; the source’s version no longer waits\./.test(await a.text('.band-done .band-text') ?? ''))
@@ -2485,6 +2498,7 @@ async function sourcesFlow() {
     && await a.exists('#source-open-agents') && await until(() => ['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('Be brief and kind.'))), await a.text('.band-done'));
   writeFileSync(agentFile('claude-cli'), readNow(agentFile('claude-cli')).replace('You review code.', 'You review code, mine.'));
   check('an edit in Claude Code is taken in and reaches every tool', await until(() => ['copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('You review code, mine.'))), ['copilot-cli', 'codex-cli'].map(tool => readNow(agentFile(tool))));
+  await toldOfEdit('reviewer');
   commit(kit, { 'agents/reviewer.md': reviewerMd.replace('Be brief.', 'Be brief, kind and exact.') });
   await a.click(`#source-check-${kitId}`);
   await until(async () => await a.exists(`#source-merge-${kitId}-agent-reviewer`));
@@ -2516,6 +2530,7 @@ async function sourcesFlow() {
   copilotMcp.mcpServers.relay.env.A = 'mine';
   writeFileSync(mcpFile('copilot-cli'), JSON.stringify(copilotMcp, null, 2));
   check('an edit in Copilot CLI is taken in and reaches Codex', await until(() => /A = "mine"/.test(readNow(mcpFile('codex-cli')))), readNow(mcpFile('codex-cli')));
+  await toldOfEdit('relay');
   commit(kit, { '.mcp.json': relayJson({ A: '1', B: '3' }) });
   await a.click(`#source-check-${kitId}`);
   await until(async () => await a.exists(`#source-merge-${kitId}-mcp-relay`));
@@ -2782,14 +2797,35 @@ async function updateFlow() {
   } finally { await fixture.close(); }
 }
 
-/** A released build starts on this computer's home and offers no Practice copy, and its main process refuses one. */
+/**
+ * A released build starts on this computer's home and offers no Practice copy, and its main process refuses one. Where the
+ * real home is written (machine.ts writesRealHome), its first open of a fresh home asks first setup's question, and Yes takes
+ * a skill found in Codex into OpenCode's folder under ~/.config (Codex and OpenCode are the home's only tools: OpenCode reads
+ * Claude Code's skills folder, so a skill there gets no copy of its own).
+ */
 async function releasedStartupFlow() {
   // A development build (--electron) starts as a released one with --as-released; a packaged build needs no switch.
-  const a = await launch(join(scratch, 'released-data'), flag('--electron') ? ['--as-released'] : []);
+  const asReleased = flag('--electron') ? ['--as-released'] : [];
+  const a = await launch(join(scratch, 'released-data'), asReleased);
   const realHome = process.platform === 'darwin' ? 'This Mac’s home' : 'This computer’s home';
   same('a released build opens this computer’s home, never the practice copy', [await a.text('#home-label'), await a.exists('#home-fixture')], [realHome, false]);
   same('and its main process refuses the practice copy', await a.run(`window.centralKnot.selectHome('fixture').then(() => 'opened', () => 'refused')`), 'refused');
   await a.quit();
+  if (!canWriteRealHome) return;
+  const fresh = join(scratch, 'home-first-open'), handoff = text('handoff', 'Hand it over.');
+  for (const [path, version] of [['.local/bin/codex', 'codex-cli 0.142.3'], ['.opencode/bin/opencode', '1.19.5']]) {
+    mkdirSync(join(fresh, path, '..'), { recursive: true });
+    writeFileSync(join(fresh, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  }
+  skill(join(fresh, '.codex/skills'), 'handoff', handoff);
+  const b = await launch(join(scratch, 'first-open-data'), asReleased, fresh, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  await b.click('#nav-overview');
+  check('at its first open of a fresh home, the Overview asks first setup’s question', await b.exists('#setup-yes'), await b.text('.overview-lead'));
+  await b.click('#setup-yes');
+  for (let tries = 0; tries < 40 && !readNow(join(fresh, '.config/opencode/skills/handoff/SKILL.md')); tries++) await wait(100);
+  same('Yes takes the skill found in Codex into OpenCode, byte for byte', readNow(join(fresh, '.config/opencode/skills/handoff/SKILL.md')), handoff);
+  same('no page errors, a released build’s first open', b.pageErrors, []);
+  await b.quit();
 }
 
 /**
@@ -2851,14 +2887,15 @@ async function fewToolsFlow() {
   same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']);
   await a.click('#nav-harnesses');
   check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
-  // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.
-  await a.click('#nav-agents');
+  // On Plugins, its only tool goes away (Pi, still here, holds no plugins): the page it was on no longer exists here, so the
+  // Overview opens.
+  await a.click('#nav-plugins');
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   rmSync(join(home, '.local/bin/claude'));
   await a.click('#header-refresh');
-  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']]);
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
-  check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds agents now\.$/.test(moved ?? ''), moved);
+  check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds plugins now\.$/.test(moved ?? ''), moved);
   // Claude desktop alone, with no CLI and no .claude folder yet: Claude Code is here, said so with both versions.
   mkdirSync(join(home, 'Applications/Claude.app/Contents'), { recursive: true });
   writeFileSync(join(home, 'Applications/Claude.app/Contents/Info.plist'), '<?xml version="1.0"?>\n<plist><dict><key>CFBundleShortVersionString</key><string>4.16336.0</string></dict></plist>\n');
@@ -2899,11 +2936,12 @@ async function fewToolsFlow() {
     check(`at ${width}×${height} the line about Cowork is whole, inside the tools panel`, await a.run(`(() => { const note = document.querySelector('#plugin-cowork-note'); if (!note) return false; const box = note.getBoundingClientRect(), panel = note.closest('.plugin-panel').getBoundingClientRect(); return box.width > 0 && note.scrollWidth <= note.clientWidth + 1 && box.right <= panel.right && box.bottom <= panel.bottom; })()`));
   }
   await a.send('Emulation.clearDeviceMetricsOverride');
-  check('with only Claude desktop, the plugin box names its route, its Code tab', box.includes('Claude CodePlugin not installedThrough Claude desktop’s Code tab 2.1.317') && !box.includes('Only Claude desktop'), box);
+  check('with only Claude desktop, the plugin box names its route, its Code tab', box.includes('Claude CodeNot installedThrough Claude desktop’s Code tab 2.1.317') && !box.includes('Only Claude desktop'), box);
   check('and says once that Cowork uses the Claude account’s plugins, with no box for it', box.includes('Cowork in Claude desktop uses the plugins in your Claude account, so Central Knot doesn’t install there.') && (await a.all('.plugin-tool-name')).every(name => !name.includes('Cowork')), box);
   same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
-  // In the Practice copy (a real home is preview only off macOS) the install runs through that copy and its record counts.
+  // In the Practice copy (so it writes on every platform: a real home is preview only on Windows) the install runs through
+  // that copy and its record counts.
   const p = await launch(join(scratch, 'few-practice-data'), ['--practice-copy'], home);
   const practiceHome = await p.run(`document.querySelector('.status-home').title`);
   await p.run(`window.centralKnot.addMarketplace(${JSON.stringify(appMarket)})`);
@@ -2978,7 +3016,8 @@ async function openCodeFlow() {
   same('no page errors, OpenCode', a.pageErrors, []);
   await a.quit();
 
-  // Writes, in the Practice copy (a real home is preview only off macOS): OpenCode joins it by its folder.
+  // Writes, in the Practice copy (so they happen on every platform: a real home is preview only on Windows): OpenCode joins it
+  // by its folder.
   const p = await launch(join(scratch, 'opencode-practice-data'), ['--practice-copy'], home, onlyHere);
   const practice = await p.run(`document.querySelector('.status-home').title`);
   const mine = join(practice, '.config/opencode');
@@ -3310,21 +3349,18 @@ async function freedOtherWaysFlow() {
 }
 
 /**
- * This Mac's own home whose record names the alpha, gone before this build opened (only where the real home can be written: the
- * Mac run). The first look carries the alpha's choices: its Automatic sync off is in force before the first pass, so with an edit
- * waiting no tool file changes, the status bar says so once, and nothing else names the alpha; History's days are the longer of
- * the two; and a build that still remembers the home writes at its first pass with the alpha's days already in force.
+ * This Mac's own home whose record names the alpha, gone before this build opened (only where the real home can be written:
+ * machine.ts writesRealHome; off a Mac, the alpha's stand-ins stand in for a Mac's). The first look carries the alpha's
+ * choices: its Automatic sync off is in force before the first pass, so with an edit waiting no tool file changes, the status
+ * bar says so once, and nothing else names the alpha; History's days are the longer of the two; and a build that still
+ * remembers the home writes at its first pass with the alpha's days already in force.
  */
 async function thisMacTakeOverFlow() {
   if (!canWriteRealHome) return;
   const asThisMac = async (tag, settings) => {
     const held = await alphaSyncedHome(tag);
     rmSync(held.alphaPath, { recursive: true });
-    mkdirSync(join(held.home, '.local/bin'), { recursive: true });
-    for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.'], ['codex', 'codex-cli 0.142.3']]) {
-      writeFileSync(join(held.home, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
-      chmodSync(join(held.home, '.local/bin', name), 0o755);
-    }
+    toolClis(held.home);
     writeFileSync(join(held.data, 'app-settings.json'), JSON.stringify({ home: { mode: 'actual' }, ...settings }));
     return held;
   };
@@ -3907,12 +3943,18 @@ async function crashFlow() {
   execChmod();
   rmSync(HOME, { recursive: true, force: true });
   mkdirSync(COPILOT, { recursive: true });
+  // Claude Code and Copilot CLI are here by their CLIs: on the Mac runner, the real ones installed outside any home; elsewhere
+  // (no tool installed there) the home's own stand-ins.
+  if (process.platform !== 'darwin') toolClis(HOME);
   const expected = {};
   for (let number = 0; number < 40; number++) {
     const directory = skill(CLAUDE, `bulk-${number}`);
     for (let file = 0; file < 60; file++) writeFileSync(join(directory, `file-${file}.txt`), `${number}:${file}\n`.repeat(2000));
     expected[`bulk-${number}`] = tree(directory);
   }
+  const record = join(HOME, '.central-knot/skills.json');
+  /** How many skills the record has On; -1 while it can't be read (none yet, or caught between two writes). */
+  const onRecordNow = () => { try { return Object.values(JSON.parse(readFileSync(record, 'utf8')).items).filter(item => item.on).length; } catch { return -1; } };
   let interrupted = 0;
   for (let round = 0; round < crashRounds; round++) {
     const a = await launch(join(scratch, 'crash-data'));
@@ -3921,9 +3963,12 @@ async function crashFlow() {
     // Each skill a click takes in is on record once it is carried out, one after another, so a kill leaves some taken in
     // (opening catches their copies up) and the rest still found: those are taken in again, in one request (no bulk switch on
     // the page), not waited for, so the kill lands while it copies.
-    const record = join(HOME, '.central-knot/skills.json');
-    await a.run(`(() => { const found = [...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].filter(row => row.querySelector('.add-item')).map(row => ({ key: row.dataset.key, on: true, except: [] }));
-      if (found.length) window.centralKnot.applySkills(found, false, document.querySelector('.status-home').title); else document.querySelector('#header-refresh').click(); return true; })()`);
+    const taking = await a.run(`(() => { const found = [...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].filter(row => row.querySelector('.add-item')).map(row => ({ key: row.dataset.key, on: true, except: [] }));
+      if (found.length) window.centralKnot.applySkills(found, false, document.querySelector('.status-home').title); else document.querySelector('#header-refresh').click(); return found.length; })()`);
+    // Off the Mac a take-in starts later than this window allows (on a Linux machine the first skill is on record about
+    // 0.8 s after the click, the 40th at 2.2 s, and the copies follow until about 6 s), so there the window opens once this
+    // round's first skill is on record; a round with nothing left to take in has no take-in to wait for.
+    if (process.platform !== 'darwin' && taking > 0) for (const before = onRecordNow(), end = Date.now() + 15000; Date.now() < end && onRecordNow() <= before;) await wait(10);
     await wait(30 + Math.round(round * 700 / Math.max(1, crashRounds - 1)) + randomInt(40));
     await a.crash();
     if (readdirSync(COPILOT).length < 40) interrupted++;
@@ -3933,7 +3978,9 @@ async function crashFlow() {
     }
     if (existsSync(record)) { try { JSON.parse(readFileSync(record, 'utf8')); passes++; } catch { check(`round ${round}: record stays valid`, false); } }
   }
-  const onRecord = (() => { try { return Object.values(JSON.parse(readFileSync(join(HOME, '.central-knot/skills.json'), 'utf8')).items).filter(item => item.on).length; } catch { return 0; } })();
+  const onRecord = Math.max(0, onRecordNow());
+  // A round killed before its take-in began tests nothing (every folder is merely absent): some skills must be on record.
+  check('the kills landed while skills were taken in: some are on record before the last open', onRecord > 0, onRecord);
   const a = await launch(join(scratch, 'crash-data'));
   await a.click('#home-actual');
   await a.click('#nav-skills');
@@ -4077,6 +4124,7 @@ case "$*" in
   "plugin marketplace add ${market}") mkdir -p "$HOME/.claude/plugins" && printf '{"ck-test-market":{"source":{"source":"git","url":"${market}"}}}' > "$HOME/.claude/plugins/known_marketplaces.json" ;;
   "plugin install issue-tracker@ck-test-market --scope user") mkdir -p '${copy}/skills/triage' && cp '${triage}' '${copy}/skills/triage/' && printf '{"version":2,"plugins":{"issue-tracker@ck-test-market":[{"scope":"user","installPath":"${copy}","version":"2.0.0"}]}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;
   "plugin uninstall issue-tracker@ck-test-market --scope user") printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;
+  "plugin install starter-skills@ck-test-market --scope user") [ -f "$HOME/slow" ] && sleep 3; "${process.execPath}" -e "const fs = require('fs'), file = '$HOME/.claude/plugins/installed_plugins.json', now = JSON.parse(fs.readFileSync(file, 'utf8')); now.plugins['starter-skills@ck-test-market'] = [{ scope: 'user', installPath: '${market}', version: '1.0.0' }]; fs.writeFileSync(file, JSON.stringify(now))" ;;
   *) exit 9 ;;
 esac
 `, { mode: 0o755 });
@@ -4085,12 +4133,12 @@ esac
   const calls = () => (existsSync(join(home, 'claude-calls.txt')) ? readFileSync(join(home, 'claude-calls.txt'), 'utf8').trim().split('\n').filter(call => call.startsWith('plugin ')) : []);
   const installed = () => existsSync(join(home, '.claude/plugins/installed_plugins.json')) && !!JSON.parse(readFileSync(join(home, '.claude/plugins/installed_plugins.json'), 'utf8')).plugins['issue-tracker@ck-test-market'];
   const inPi = () => [existsSync(join(home, '.pi/agent/skills/triage/SKILL.md')), (readNow(join(home, '.pi/agent/mcp.json')) ?? '').includes('issues')];
-  const entry = () => JSON.parse(readFileSync(join(home, '.central-knot/plugins.json'), 'utf8')).plugins.find(each => each.plugin === 'issue-tracker');
+  const entry = (plugin = 'issue-tracker') => JSON.parse(readFileSync(join(home, '.central-knot/plugins.json'), 'utf8')).plugins.find(each => each.plugin === plugin);
   const a = await launch(data, [], tools);
   same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-issue-tracker')); tries++) await wait(100);
-  const marks = () => a.run(`[...document.querySelectorAll('[data-plugin="issue-tracker"] .cell-button')].map(cell => cell.dataset.state)`);
+  const marks = (plugin = 'issue-tracker') => a.run(`[...document.querySelectorAll('[data-plugin="${plugin}"] .cell-button')].map(cell => cell.dataset.state)`);
   const switchIs = selector => a.run(`(() => { const s = document.querySelector('${selector}'); return s ? s.getAttribute('aria-checked') + (s.classList.contains('switch-partial') ? ' partial' : '') : 'missing'; })()`);
   const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   const pictures = async name => { if (!shots) return; for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
@@ -4197,6 +4245,27 @@ esac
     await a.exists('#pfix-0-document-tools-claude-cli'), existsSync(join(home, '.pi/agent/skills/pdf-reader/SKILL.md'))], [true, 'missing', true, true]);
   await pictures('plugin-switch-failed');
   await fitsAtMinimum(a, 'a plugin’s page with an install that failed');
+  // Two plugins clicked in a row without waiting: release-helper's Add, then starter-skills (Claude Code's stand-in takes 3 s over
+  // it). The second waits its turn while the first runs, the first is read back as soon as it ends, and Skills stays usable.
+  await a.click('#plugin-back');
+  writeFileSync(join(home, 'slow'), '');
+  await a.run(`document.querySelector('#padd-0-release-helper').click(); document.querySelector('#pswitch-0-starter-skills').click()`);
+  const rowSays = name => a.run(`document.querySelector('[data-plugin="${name}"] .plugin-click')?.dataset.click ?? 'nothing'`);
+  same('the second click waits its turn while the first runs, and another plugin’s switch stays usable', [await rowSays('release-helper'), await rowSays('starter-skills'), await a.exists('#pswitch-0-issue-tracker:not([disabled])')], ['running', 'waiting', true]);
+  for (let tries = 0; tries < 50 && await rowSays('starter-skills') !== 'running'; tries++) await wait(100);
+  same('the first is read back as soon as it ends: its row says so, and its switch is On and free while the second runs', [await rowSays('release-helper'), await switchIs('#pswitch-0-release-helper:not([disabled])'), await rowSays('starter-skills')], ['ended', 'true', 'running']);
+  check('a control the list turns off says why', await a.run(`document.querySelector('#open-add-marketplace')?.title`) === 'Waits until the plugin clicks are done.', await a.run(`document.querySelector('#open-add-marketplace')?.outerHTML`));
+  await a.run(`document.querySelector('#nav-skills').click()`);
+  check('an item page’s switch can be used meanwhile', await a.run(`!!document.querySelector('#switch-triage[aria-checked="true"]:not([disabled])')`), await a.text('.page'));
+  await a.run(`document.querySelector('#switch-triage').click()`);
+  await done();
+  rmSync(join(home, 'slow'));
+  const both = JSON.parse(readFileSync(join(home, '.claude/plugins/installed_plugins.json'), 'utf8')).plugins;
+  same('both end installed, and the item page’s click ran', [!!both['release-helper@ck-test-market'], !!both['starter-skills@ck-test-market'], entry('release-helper')?.on, entry('starter-skills')?.on,
+    existsSync(join(home, '.pi/agent/skills/hello/SKILL.md')), await a.run(`document.querySelector('#switch-triage').getAttribute('aria-checked')`)], [true, true, true, true, true, 'false']);
+  await a.click('#nav-plugins');
+  same('each row shows its switch On, its marks, and its own result', [await switchIs('#pswitch-0-release-helper'), await switchIs('#pswitch-0-starter-skills'), await marks('release-helper'), await marks('starter-skills'), await rowSays('release-helper'), await rowSays('starter-skills')],
+    ['true', 'true', ['installed', 'items'], ['installed', 'items'], 'ended', 'ended']);
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
 }
@@ -4370,6 +4439,7 @@ try {
 } finally {
   app?.child.kill('SIGKILL');
   execChmod();
+  await mountsGone(scratch);
   rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
 }
 console.log(`e2e: ${passes} passed, ${failures.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}`);
