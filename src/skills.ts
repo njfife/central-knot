@@ -210,7 +210,7 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
 
 /**
  * The plugin a tool has this skill through, if it does: a plugin skill of that name is this one when its SKILL.md is the
- * skill's; another one that only shares the name is not.
+ * skill's; another one that only shares the name is not. Turned off there or not, as for every kind (plugins.ts partsHolding).
  */
 function pluginFor(disk: SkillDisk, key: string, tool: HarnessId): ThroughPlugin | undefined {
   const given = disk.through.get(tool)?.get(key), shape = disk.shapes.get(key);

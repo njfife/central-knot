@@ -63,13 +63,12 @@
 // folder it can't write, or for an agent in Pi, which keeps agents as skills, a skill of that name there, of which Pi would
 // load only one: a folder, a link to one, or a loose file Central Knot didn't put there; agents.ts agentHeld), or it has the
 // item another way (`anotherWay`: for every kind, through a plugin installed there that brings the same item, linked to it or
-// of the same content, which for an agent or a server is a plugin on there: skills.ts pluginFor, plugins.ts partsHolding; for
-// skills also OpenCode reading Claude Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that
-// Central Knot doesn't own). Only the second lets A go, since Central Knot's copy is not what the harness has. The kind answers
-// (librarypass.ts Disk.held, told where the item is wanted); tests/librarypass.test.ts has a reader on a toy kind. A harness
-// can have the item another way and hold a copy of its own as well (a copy in ~/.agents/skills beside one in its own folder):
-// that copy is `present` with `anotherWay` (the table's last row), and the harness is decided as one the item isn't wanted in
-// (wantedHere).
+// of the same content, turned off there or not (skills.ts pluginFor, plugins.ts partsHolding); for skills also OpenCode reading
+// Claude Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot doesn't own).
+// Only the second lets A go, since Central Knot's copy is not what the harness has. The kind answers (librarypass.ts Disk.held,
+// told where the item is wanted); tests/librarypass.test.ts has a reader on a toy kind. A harness can have the item another way
+// and hold a copy of its own as well (a copy in ~/.agents/skills beside one in its own folder): that copy is `present` with
+// `anotherWay` (the table's last row), and the harness is decided as one the item isn't wanted in (wantedHere).
 //
 // An item linked to a plugin (A PLUGIN, below), in a tool with the plugin's own installer, is held first by plugins.ts pluginHolds.
 //

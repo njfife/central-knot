@@ -10,11 +10,11 @@ import assert from 'node:assert/strict';
 import { chmod, cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { agentKind, applyAgents } from '../src/agents.ts';
+import { agentKind, agentsView, applyAgents } from '../src/agents.ts';
 import { holdsAt, readOf } from '../src/atlink.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import * as engine from '../src/plugins.ts';
-import { applyServers, serverKind, writeToClaude } from '../src/servers.ts';
+import { applyServers, serverKind, serversView, writeToClaude } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import { applySkills, skillKind } from '../src/skills.ts';
 import { addSource, checkSource, previewSource, removeSource, sourceKinds, sourcesView } from '../src/sources.ts';
@@ -385,27 +385,56 @@ test('The same plugin added as a source, its agent and server On, then installed
   } finally { await box.cleanup(); }
 });
 
-test('A plugin turned off in a tool holds nothing there: the source’s agent and server, On, come back in Claude Code and Copilot CLI at the next pass, and leave again when it is turned on', async () => {
+/** A source's agent helper and server relay On, from the plugin kit's own folder: the pass, Central Knot's copies in each tool, and each row's facts. */
+async function kitBothWays(box: Box) {
+  const files = { '.claude-plugin/plugin.json': '{"name":"kit"}', 'agents/helper.md': helperMd(), '.mcp.json': mcpJson({ relay: { command: 'npx', args: ['relay'] } }) };
+  const repo = await repository(hosts, 'https://github.com/team/kit');
+  await repo.commit(files);
+  await add(box, 'https://github.com/team/kit');
+  await applyAgents(box.context, box.tools, [{ key: 'helper', on: true, except: [], seenOn: false }]);
+  await applyServers(box.context, box.tools, [{ key: 'relay', on: true, except: [], seenOn: false }]);
+  const serverIn = async (file: string) => Object.keys(JSON.parse(await readFile(join(box.home, file), 'utf8').catch(() => '{}')).mcpServers ?? {}).includes('relay');
+  return {
+    files,
+    pass: async () => { await applyAgents(box.context, box.tools, []); await applyServers(box.context, box.tools, []); await writeToClaude(box.context, box.tools, ['relay']); },
+    /** Central Knot's agent file in Claude Code and Copilot CLI, then its relay entry in each. */
+    copies: async () => [...await Promise.all(['.claude/agents/helper.md', '.copilot/agents/helper.agent.md'].map(path => exists(join(box.home, path)))), await serverIn('.claude.json'), await serverIn('.copilot/mcp-config.json')],
+    rows: async () => [(await agentsView(box.context, box.tools)).items.find(item => item.key === 'helper')!, (await serversView(box.context, box.tools)).items.find(item => item.key === 'relay')!],
+  };
+}
+
+test('A plugin turned off in a tool keeps holding the item there, as for every kind: the source’s agent and server stay out of Claude Code and Copilot CLI, and each row says it comes through kit, turned off there; uninstalled, Central Knot’s copies come back', async () => {
   const box = await sandbox(['claude-cli', 'copilot-cli']);
   try {
-    const files = { '.claude-plugin/plugin.json': '{"name":"kit"}', 'agents/helper.md': helperMd(), '.mcp.json': mcpJson({ relay: { command: 'npx', args: ['relay'] } }) };
-    const repo = await repository(hosts, 'https://github.com/team/kit');
-    await repo.commit(files);
-    await add(box, 'https://github.com/team/kit');
-    await applyAgents(box.context, box.tools, [{ key: 'helper', on: true, except: [], seenOn: false }]);
-    await applyServers(box.context, box.tools, [{ key: 'relay', on: true, except: [], seenOn: false }]);
-    const pass = async () => { await applyAgents(box.context, box.tools, []); await applyServers(box.context, box.tools, []); await writeToClaude(box.context, box.tools, ['relay']); };
-    const serverIn = async (file: string) => Object.keys(JSON.parse(await readFile(join(box.home, file), 'utf8').catch(() => '{}')).mcpServers ?? {}).includes('relay');
-    const copies = async () => [...await Promise.all(['.claude/agents/helper.md', '.copilot/agents/helper.agent.md'].map(path => exists(join(box.home, path)))), await serverIn('.claude.json'), await serverIn('.copilot/mcp-config.json')];
-    await installedKit(box, files);
-    await pass();
-    assert.deepEqual(await copies(), [false, false, false, false], 'the plugin’s alone, while it is on');
-    await installedKit(box, files, false);
-    await pass();
-    assert.deepEqual(await copies(), [true, true, true, true], 'turned off in both tools: Central Knot’s copies are back');
-    await installedKit(box, files, true);
-    await pass();
-    assert.deepEqual(await copies(), [false, false, false, false], 'turned on again: they leave again');
+    const kit = await kitBothWays(box);
+    await installedKit(box, kit.files);
+    await kit.pass();
+    assert.deepEqual(await kit.copies(), [false, false, false, false], 'the plugin’s alone, while it is on');
+    await installedKit(box, kit.files, false);
+    await kit.pass();
+    assert.deepEqual(await kit.copies(), [false, false, false, false], 'turned off in both tools: still the plugin’s, its box the item’s switch there');
+    for (const row of await kit.rows()) {
+      assert.deepEqual(Object.entries(row.plugin ?? {}).map(([tool, given]) => [tool, given?.plugin, given?.off]), [['claude-cli', 'kit', true], ['copilot-cli', 'kit', true]], row.key);
+      for (const tool of ['claude-cli', 'copilot-cli'] as const) assert.match(row.cannot[tool] ?? '', /through the plugin kit \(version 1\.0\.0\), turned off there, so no separate copy is placed there\.$/, `${row.key} in ${tool}`);
+    }
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: {} }));
+    await put(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }));
+    await kit.pass();
+    assert.deepEqual(await kit.copies(), [true, true, true, true], 'the plugin uninstalled: Central Knot’s copies are back');
+  } finally { await box.cleanup(); }
+});
+
+test('The row’s Through a plugin switch turned Off in Claude Code for kit’s helper and relay sticks over a pass: Central Knot’s copies stay out there', async () => {
+  const box = await sandbox(['claude-cli']);
+  try {
+    const kit = await kitBothWays(box);
+    await installedKit(box, kit.files);
+    await kit.pass();
+    // What the row's box writes for Off in Claude Code (partswitch.ts): the plugin's agent and server each turned off there.
+    const plugins: engine.PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: {} };
+    for (const part of [{ kind: 'agent' as const, name: 'helper' }, { kind: 'mcp' as const, name: 'relay' }]) assert.equal((await engine.setPart(plugins, 'team', 'kit', part, 'claude-cli', false, '/m')).outcome, 'part-off');
+    await kit.pass();
+    assert.deepEqual((await kit.copies()).filter((_, index) => index % 2 === 0), [false, false], 'no agent file and no relay entry of Central Knot’s in Claude Code');
   } finally { await box.cleanup(); }
 });
 
