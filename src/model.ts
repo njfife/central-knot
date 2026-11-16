@@ -63,7 +63,7 @@ export function nearDay(iso: string): 'today' | 'yesterday' | undefined {
   return day === new Date().toDateString() ? 'today' : day === new Date(Date.now() - DAY_MS).toDateString() ? 'yesterday' : undefined;
 }
 /** "today", "yesterday", else "Nov 8" (with the year when it isn't this one). */
-function dayWords(iso: string): string {
+export function dayWords(iso: string): string {
   const date = new Date(iso);
   return nearDay(iso) ?? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 }

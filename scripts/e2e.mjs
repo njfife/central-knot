@@ -4336,6 +4336,65 @@ esac
   await a.quit();
 }
 
+/**
+ * Read usage (usage.ts, usagerow.ts) on a folder home whose tools have made-up session history: nothing is read until the click,
+ * then each row says its figure, an opened row each tool's, and Sort can put the rows by last used. Each skill was taken in from
+ * a copy saved 40 days ago, so every one is old enough for "No use seen" to mean something.
+ */
+async function usageFlow() {
+  const home = join(scratch, 'usage-home'), data = join(scratch, 'usage-data'), ago = days => new Date(Date.now() - days * 86_400_000);
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) {
+    writeFileSync(join(home, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
+    chmodSync(join(home, '.local/bin', name), 0o755);
+  }
+  const [claude, codex] = ['.claude/skills', '.codex/skills'].map(path => join(home, path));
+  for (const name of ['notes', 'standup', 'idle']) { const folder = skill(claude, name); for (const path of [folder, join(folder, 'SKILL.md')]) utimesSync(path, ago(40), ago(40)); }
+  const lines = (path, records) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n') + '\n'); };
+  const skillCall = (name, days) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: name } }] }, timestamp: ago(days).toISOString() });
+  // Claude Code: notes called 2 days ago; standup typed 40 days ago; a listing that names idle, which is no use.
+  lines(join(home, '.claude/projects/-work/s1.jsonl'), [{ type: 'attachment', attachment: { type: 'skill_listing', content: '- idle: x' }, timestamp: ago(2).toISOString() }, skillCall('notes', 2)]);
+  lines(join(home, '.claude/projects/-work/s2.jsonl'), [{ type: 'user', message: { content: '<command-name>/standup</command-name>' }, timestamp: ago(40).toISOString() }]);
+  // Codex: its history starts 12 days ago; notes's SKILL.md read 5 days ago.
+  lines(join(home, '.codex/sessions/2026/11/01/rollout-a.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(12).toISOString() },
+    { type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', parsed_cmd: [{ type: 'read', name: 'SKILL.md', path: join(claude, 'notes/SKILL.md') }] } }, timestamp: ago(5).toISOString() }]);
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const real = join(scratch, 'usage-real');
+  mkdirSync(real, { recursive: true });
+  const a = await launch(data, [], real);
+  await a.click('#nav-settings');
+  for (let tries = 0; tries < 30 && !(await a.exists('#sync-everything-on')); tries++) await wait(100);
+  await a.click('#sync-everything-on');
+  await a.click('#nav-skills');
+  for (let tries = 0; tries < 50 && (await sectionsNow(a))[0]?.[1]?.length !== 3; tries++) { await wait(100); await a.settle(); }
+  same('the three skills are On, taken in by Synchronize everything', await sectionsNow(a), [['on', ['idle', 'notes', 'standup']]]);
+  same('before a reading: the one click, and no line, figure or Last used', [await a.text('#read-usage'), await a.exists('#usage-line'), await a.exists('.ov-used'), await a.all('#item-order option', 'e.value')],
+    ['Read usage', false, false, ['name', 'updated']]);
+  await a.click('#read-usage');
+  for (let tries = 0; tries < 50 && !/^Usage read/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
+  const line = await a.text('#usage-line .band-text') ?? '';
+  check('the line says when it was read, how long it took and how far back each tool goes (Claude Code keeps 30 days; Codex began 12 days ago), with Read again',
+    /^Usage read today at .+, in [\d.]+ m?s\. Claude Code: 30 days or more; Codex: since \w+ \d+\.$/.test(line) && (await a.text('#read-usage-again')) === 'Read again', line);
+  const figures = () => a.run(`Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => [row.dataset.key, row.querySelector('.ov-used')?.textContent]))`);
+  same('each row says its figure: used, or no use seen in 30 days (a listing is no use, nor a use 40 days ago)', await figures(),
+    { idle: 'No use seen in 30 days', notes: 'used 2 days ago', standup: 'No use seen in 30 days' });
+  await a.click('#open-standup');
+  same('an opened row says each tool’s figure: its last use beyond the 30 days, and a history that starts 12 days ago',
+    await a.all('.details-usage', 'e.textContent.trim()'), ['No use seen in the last 30 days; last used 5 weeks ago.', `No use seen since ${await a.run(`new Date(${ago(12).getTime()}).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })`)}, where its history starts.`]);
+  await a.click('#open-standup');
+  await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = 'used'; select.dispatchEvent(new Event('change')); })()`);
+  await a.settle();
+  same('Sort by Last used: the newest use first, then the one used 40 days ago, then the one never seen', (await sectionsNow(a))[0][1], ['notes', 'standup', 'idle']);
+  await a.click('#read-usage-again');
+  for (let tries = 0; tries < 50 && !/^Usage read/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
+  same('Read again reads afresh and keeps the order chosen', [(await sectionsNow(a))[0][1], (await figures()).notes], [['notes', 'standup', 'idle'], 'used 2 days ago']);
+  await fitsAtMinimum(a, 'Skills with usage read and its figures');
+  await a.shot('usage-read');
+  same('no page errors, usage', a.pageErrors, []);
+  await a.quit();
+}
+
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
@@ -4343,7 +4402,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, otherBuildFlow, freedOtherWaysFlow, thisMacTakeOverFlow, listDiffersFlow, pluginSwitchFlow, pluginUpdatesFlow, repoBaseFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, firstSetupFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, otherBuildFlow, freedOtherWaysFlow, thisMacTakeOverFlow, listDiffersFlow, pluginSwitchFlow, pluginUpdatesFlow, repoBaseFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, usageFlow, firstSetupFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();

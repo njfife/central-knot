@@ -14,6 +14,7 @@ const api: DesktopApi = {
   history: () => ipcRenderer.invoke('history:list'),
   instructions: readId => ipcRenderer.invoke('instructions:view', readId),
   agentVersion: (key, hash) => ipcRenderer.invoke('agents:version', key, hash),
+  readUsage: home => ipcRenderer.invoke('usage:read', home),
   eventChange: eventId => ipcRenderer.invoke('history:change', eventId),
   showFile: path => ipcRenderer.invoke('file:show', path),
   marketplaceReadme: source => ipcRenderer.invoke('plugins:readme', source),

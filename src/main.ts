@@ -39,6 +39,7 @@ import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draft
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { addSource, checkDue, checkSource, previewSource, removeSource, rowClick, sourcesView } from './sources.ts';
+import { readUsage } from './usage.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
@@ -1355,6 +1356,10 @@ app.whenReady().then(async () => {
   // Reveal only: the file manager selects it; nothing is opened, run or written.
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? skillChange(context(), eventId) : undefined));
+  // The tools' session history, read on the page's click: outside the queue (usage.ts writes nothing and reads nothing a pass
+  // writes). This computer's home reads OpenCode's data where XDG_DATA_HOME moves it, as each tool's folder its own variable.
+  handleNow('usage:read', async home => (current && home === current.home
+    ? readUsage({ home: current.home, overrides: context().overrides, dataHome: current.mode === 'actual' ? process.env.XDG_DATA_HOME : undefined }) : null));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
