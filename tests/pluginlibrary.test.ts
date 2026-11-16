@@ -594,6 +594,6 @@ test('A plugin with no skill, agent or MCP server: nothing of it goes into Pi, a
 test('Each reason said once for the names it holds, a long list cut, the reasons of a mix in turn', () => {
   const names = (out: Parameters<typeof notInWhy>[2][number]['out'], ...list: string[]) => list.map(name => ({ name, out }));
   assert.equal(notInWhy('opencode-cli', 'kit', [...names('another', 'notes'), ...names({ cannot: 'OpenCode can’t hold an SSE server.' }, 'relay'), ...names('own', 'a', 'b', 'c', 'd', 'e')]),
-    'None of kit’s items is on in OpenCode. notes: another source’s is in Central Knot, so the plugin’s isn’t brought in (deleting that one on its row takes the plugin’s); relay: OpenCode can’t hold an SSE server; a, b, c and 2 more: OpenCode has a copy of its own of that name, never written over (turning it on in OpenCode on its row keeps that copy as a version and puts the plugin’s there).');
+    'None of kit’s items is on in OpenCode. notes: another source’s is in Central Knot, so the plugin’s isn’t brought in (deleting that one on its row takes the plugin’s); relay: OpenCode can’t hold an SSE server; a, b, c and 2 more: OpenCode has a copy of its own of that name, never written over (turning each on in OpenCode on its row keeps that copy as a version and puts the plugin’s there).');
   assert.equal(notInWhy('pi-cli', 'kit', names({ cannot: 'Its SKILL.md isn’t valid.' }, 'broken')), 'None of kit’s items is on in Pi. broken: Its SKILL.md isn’t valid.');
 });

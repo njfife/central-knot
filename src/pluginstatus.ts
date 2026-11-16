@@ -501,7 +501,8 @@ export function notInWhy(tool: HarnessId, plugin: string, outs: { name: string; 
   if (!outs.length) return `None of ${plugin}’s parts can go into ${where}: it has no skill, agent or MCP server, which is all ${where} takes of a plugin. What it brings${brings ? ` (${brings})` : ''} stays with the tools that take plugins.`;
   const said = [...groupBy(outs, ({ out }) => (typeof out === 'string' ? out : out.cannot)).values()].map(group => {
     const names = group.map(each => each.name), out = group[0]!.out, list = andList(names.length > 4 ? [...names.slice(0, 3), `${names.length - 3} more`] : names);
-    const [what, way] = typeof out === 'string' ? OUT[out].map(fill) : [out.cannot.replace(/\.$/, '')];
+    // Said of several names, the way names each: "(ticking Pi on the plugin’s page brings each back)".
+    const [what, way] = typeof out === 'string' ? OUT[out].map(text => fill(names.length > 1 ? text.replace(/\bit\b/, 'each') : text)) : [out.cannot.replace(/\.$/, '')];
     return `${list}: ${what}${way ? ` (${way})` : ''}`;
   });
   return `None of ${plugin}’s items is on in ${where}. ${said.join('; ')}.`;

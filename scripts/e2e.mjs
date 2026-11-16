@@ -1302,6 +1302,7 @@ async function practiceFlow() {
   // opened, from a marketplace nothing here has added: Claude Code's own record and copy are enough.
   writeClaudeInstall(practice, 'ck-outside', 'outside-tools', '0.3.0', {
     'skills/outside-skill/SKILL.md': '---\nname: outside-skill\ndescription: Comes with a plugin.\n---\n\nSteps.\n',
+    'skills/outside-other/SKILL.md': '---\nname: outside-other\ndescription: Comes with it too.\n---\n\nSteps.\n',
     '.mcp.json': JSON.stringify({ mcpServers: { 'outside-server': { command: 'npx', args: ['-y', 'outside'] } } }),
   });
   await a.click('#header-refresh');
@@ -1320,7 +1321,9 @@ async function practiceFlow() {
   await a.click(`${outsideRow} .switch`);
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
   check('one click turns the whole plugin off in Claude Code, and the result names what went with it', outsideOff() && !(await switchOn(a, outside)) && !(await a.exists('#outcome-whole'))
-    && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off there, with its MCP server outside-server\./.test(await a.text('.bands') ?? ''), [await a.text('.bands'), readNow(join(practice, '.claude/settings.json'))]);
+    && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off there, with its 1 other skill and 1 MCP server\./.test(await a.text('.bands') ?? ''), [await a.text('.bands'), readNow(join(practice, '.claude/settings.json'))]);
+  const other = 'outside-tools@ck-outside/outside-other';
+  same('and the plugin’s other skill’s row says it is off in Claude Code too', [await cellState(a, other, 'claude-cli'), await switchOn(a, other)], ['plugin-off', false]);
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 60 && (outsideOff() || !/Undone: outside-skill/.test(await a.text('.bands') ?? '')); tries++) await wait(100);
   check('its one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside) && /Undone: outside-skill is back on in Claude Code\./.test(await a.text('.bands') ?? ''), [await a.text('.bands'), readNow(join(practice, '.claude/settings.json'))]);
@@ -1579,17 +1582,17 @@ async function practiceFlow() {
   same('Show more follows the description’s width with the same plugin open', [narrow[0], wide[0]], [true, false]);
   if (narrow[0] !== true || wide[0] !== false) console.error('description widths', narrow[1], wide[1]);
   await a.click('#sidebar-toggle'); await fullSize(a);
-  // The plugin's switch acts at once: On asks each tool's own installer (stand-ins here that refuse). Each tool's box is then
-  // empty, and says a click puts it in that tool.
+  // The plugin's switch acts at once: On asks each tool's own installer (stand-ins here whose own add refuses the marketplace).
+  // Each refusal is kept until Refresh: each tool's box is then off, saying so in that tool's words, and no click tries again.
   await a.click('#pswitch-page-0-document-tools');
   for (let tries = 0; tries < 60 && !(await a.exists('.plugin-problems')); tries++) await wait(100);
   check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-problems')), await a.text('.bands'));
-  same('and nothing is claimed installed: the switch is on, and each tool’s box is empty, a click putting it there',
+  same('and nothing is claimed installed: the switch is on, and each tool’s box is off, saying that tool refused the marketplace until Refresh',
     [await a.run(`document.querySelector('#pswitch-page-0-document-tools')?.getAttribute('aria-checked')`), await a.run(`[...document.querySelectorAll('.plugin-tool .cell-box')].map(box => [box.dataset.state, box.getAttribute('aria-checked'), box.disabled])`),
-      /^Not in Claude Code, though the plugin is on\. Click to put document-tools in Claude Code\./.test(await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli')?.title`) ?? '')],
-    ['true', [['missing', 'false', false], ['missing', 'false', false], ['missing', 'false', false]], true]);
+      /^Claude Code: Claude Code refused this marketplace: “.+” It isn’t tried there again until Refresh/.test(await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli')?.title`) ?? '')],
+    ['true', [['cannot', 'false', true], ['cannot', 'false', true], ['cannot', 'false', true]], true]);
   await a.shot('practice-plugins');
-  await fitsAtMinimum(a, 'a plugin page whose install didn’t finish, each tool’s box empty');
+  await fitsAtMinimum(a, 'a plugin page whose install didn’t finish, each tool’s box off with why');
   await a.click('#plugin-back');
   await fitsAtMinimum(a, 'the plugin table with its switches, one on and in no tool');
   await a.click('#popen-0-document-tools');
