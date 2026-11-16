@@ -3965,6 +3965,8 @@ async function crashFlow() {
     if (existsSync(record)) { try { JSON.parse(readFileSync(record, 'utf8')); passes++; } catch { check(`round ${round}: record stays valid`, false); } }
   }
   const onRecord = Math.max(0, onRecordNow());
+  // A round killed before its take-in began tests nothing (every folder is merely absent): some skills must be on record.
+  check('the kills landed while skills were taken in: some are on record before the last open', onRecord > 0, onRecord);
   const a = await launch(join(scratch, 'crash-data'));
   await a.click('#home-actual');
   await a.click('#nav-skills');
