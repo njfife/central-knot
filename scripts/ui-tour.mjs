@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
@@ -691,6 +691,47 @@ if (wanted('plugins')) {
   await a.click('#plugin-back');
   await a.click('#popen-0-spark'); await waitFor(a, `!!document.querySelector('.plugin-group, .plugin-muted:not(:empty)') && !/Reading/.test(document.querySelector('.plugin-page')?.textContent ?? '')`, 60000); await shot(a, 'plugin-page-remote', 'Opened "spark", whose files live in GitHub’s copilot-plugins repository (read from there).');
   if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'plugins-undone', 'Clicked "Undo" on the result of the switch.'); }
+}
+
+// ---------- A plugin's switch clicks waiting their turn ----------
+// A folder with Claude Code only: three plugins' switches clicked in a row while Claude Code's stand-in takes 8 s over the first
+// install (it runs; the others wait), then the results, release-helper's refused. Each state at the four sizes.
+if (wanted('plugin-clicks')) {
+  begin('plugin-clicks');
+  const folder = join(scratch, 'clicks-home'), market = join(scratch, 'clicks-market'), slow = join(scratch, 'slow');
+  mkdirSync(join(folder, '.claude/plugins'), { recursive: true });
+  writeMarket(market);
+  const versions = JSON.stringify({ 'document-tools': '1.2.0', 'issue-tracker': '2.0.0' });
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  writeFileSync(join(HOME, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
+case "$*" in
+  "plugin marketplace add "*) printf '{"team-tools":{"source":{"source":"directory","path":"${market}"},"installLocation":"${market}"}}' > "$HOME/.claude/plugins/known_marketplaces.json" ;;
+  *release-helper*) echo 'Plugin "release-helper" not found in marketplace "team-tools".'; exit 1 ;;
+  "plugin install "*) [ -f '${slow}' ] && sleep 8; "${process.execPath}" -e "const fs = require('fs'), id = process.argv[1], file = process.env.HOME + '/.claude/plugins/installed_plugins.json'; let now = { version: 2, plugins: {} }; try { now = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {} now.plugins[id] = [{ scope: 'user', installPath: '${market}/plugins/' + id.split('@')[0], version: ${versions.replaceAll('"', "'")}[id.split('@')[0]] }]; fs.writeFileSync(file, JSON.stringify(now))" "$3" ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  a.quit();
+  await wait(500);
+  const settings = join(scratch, 'data/app-settings.json');
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: folder } }));
+  a = await launch();
+  await a.click('#nav-plugins');
+  await addMarketplace(a, market);
+  // Sized without settling: the page acts until the list ends.
+  const sizeNow = async (width, height) => { Object.assign(a.viewport, { width, height }); await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.run(`window.dispatchEvent(new Event('resize'))`); await wait(300); };
+  writeFileSync(slow, '');
+  await a.run(`['document-tools', 'issue-tracker', 'release-helper'].forEach(name => document.querySelector('#pswitch-0-' + name).click())`);
+  await waitFor(a, `document.querySelector('[data-plugin="document-tools"] .plugin-click')?.dataset.click === 'running'`);
+  for (const [width, height] of SIZES) { await sizeNow(width, height); await shot(a, `waiting-${width}`, `Clicked three plugins’ switches in a row: document-tools’ row says Installing… (Claude Code’s stand-in is slow), the other two say Waiting; only those three switches are held (${width}×${height})`); }
+  await sizeNow(1280, 800);
+  await a.run(`document.querySelector('#popen-0-issue-tracker').click()`); await wait(300);
+  await shot(a, 'waiting-page', 'Opened issue-tracker’s page meanwhile: its panel says Waiting, and its switch and links are held.');
+  await a.run(`document.querySelector('#plugin-back').click()`);
+  rmSync(slow);
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await atEverySize('ended', 'The list ran: each row says its own result; release-helper’s says Claude Code refused it, and why. The toolbar offers one Undo, for the last click that finished', true);
 }
 
 // ---------- Profiles ----------

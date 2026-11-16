@@ -1,14 +1,15 @@
 // Plugins: browse marketplaces, and turn each plugin on or off with its one switch (pluginrecord.ts).
 // The list of marketplaces sits at the left; the chosen one shows its plugins or its README, and a plugin opens its own page
-// (pluginpage.ts). Every click acts at once: a switch through pluginstate.ts turnPlugin, Update, Update all and the switches
-// under a plugin's What it holds through pluginstate.ts applyPluginOps. Each tool's mark only says what it has.
-import { noToolManaged, rerender, showPage, state as app } from './app.ts';
+// (pluginpage.ts). A switch's click waits its turn in the page's list (pluginstate.ts turnPlugin), its row saying how it stands;
+// Update, Update all and the switches under a plugin's What it holds act at once (pluginstate.ts applyPluginOps). Each tool's
+// mark only says what it has.
+import { acting, noToolManaged, rerender, showPage, state as app } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { button, closeButton, emptyState, h, icon, rereadBand, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
-import { dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
+import { clickNote, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { resultLines, pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLast, undoOps } from './pluginstate.ts';
@@ -24,21 +25,21 @@ const when = (iso: string) => (new Date(iso).toDateString() === new Date().toDat
 /** The add box: open with no marketplaces yet, otherwise one "Add marketplace" button that opens it. */
 function addBox(first: boolean) {
   if (!first && !market.addOpen) {
-    return h('div.market-add', {}, button({ variant: 'ghost', size: 'small', icon: 'plus', label: 'Add marketplace', id: 'open-add-marketplace', disabled: !!app.busy,
+    return h('div.market-add', {}, button({ variant: 'ghost', size: 'small', icon: 'plus', label: 'Add marketplace', id: 'open-add-marketplace', disabled: acting(),
       onclick: () => { market.addOpen = true; rerender(); requestAnimationFrame(() => document.getElementById('marketplace-source')?.focus()); } }));
   }
   // One add at a time: Enter while one is being read does nothing (the box is disabled then too).
-  const add = () => { if (!app.busy && market.draftSource.trim()) void addMarketplace(market.draftSource.trim()); };
-  const input = h('input.market-add-input', { id: 'marketplace-source', type: 'text', disabled: !!app.busy, placeholder: 'owner/repo, Git URL or folder', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: market.draftSource,
-    oninput: (event: Event) => { market.draftSource = (event.target as HTMLInputElement).value; const go = document.getElementById('add-marketplace') as HTMLButtonElement | null; if (go) go.disabled = !!app.busy || !market.draftSource.trim(); },
+  const add = () => { if (!acting() && market.draftSource.trim()) void addMarketplace(market.draftSource.trim()); };
+  const input = h('input.market-add-input', { id: 'marketplace-source', type: 'text', disabled: acting(), placeholder: 'owner/repo, Git URL or folder', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: market.draftSource,
+    oninput: (event: Event) => { market.draftSource = (event.target as HTMLInputElement).value; const go = document.getElementById('add-marketplace') as HTMLButtonElement | null; if (go) go.disabled = acting() || !market.draftSource.trim(); },
     onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') add(); if (event.key === 'Escape' && !first) { market.addOpen = false; rerender(); } } });
   const close = first ? null : closeButton(() => { market.addOpen = false; market.draftSource = ''; rerender(); }, { id: 'close-add-marketplace', label: 'Close' });
   return h(`div.market-add.market-add-open${first ? '.market-add-first' : ''}`, {},
     h('div.market-add-head', {}, h('label.market-add-label', { for: 'marketplace-source' }, 'Add a marketplace'), close),
     input,
     h('div.market-add-actions', {},
-      button({ variant: 'primary', size: 'small', label: 'Add', id: 'add-marketplace', disabled: !!app.busy || !market.draftSource.trim(), onclick: add }),
-      button({ variant: 'outline', size: 'small', icon: 'folder-plus', label: 'Folder…', name: 'Choose a marketplace folder', id: 'pick-marketplace-folder', disabled: !!app.busy, onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) })));
+      button({ variant: 'primary', size: 'small', label: 'Add', id: 'add-marketplace', disabled: acting() || !market.draftSource.trim(), onclick: add }),
+      button({ variant: 'outline', size: 'small', icon: 'folder-plus', label: 'Folder…', name: 'Choose a marketplace folder', id: 'pick-marketplace-folder', disabled: acting(), onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) })));
 }
 
 /** Under the open add box: a link that is no marketplace goes on Sources. */
@@ -57,14 +58,14 @@ function suggestions(view: PluginsView, first = false) {
   // Off, like Add, while something else is being read or added: one piece of work on the page at a time.
   const no = (offer: { source: string; name: string }) => {
     const made = closeButton(() => void declineMarketplace(offer.source, offer.name), { id: `suggested-no-${id(offer.source)}`, label: `Don’t suggest ${offer.name}` });
-    if (app.busy) made.setAttribute('disabled', '');
+    if (acting()) made.setAttribute('disabled', '');
     return made;
   };
   return h(`div.market-suggested${first ? '.market-suggested-first' : ''}`, { role: 'group', 'aria-label': 'Suggested marketplaces' },
     h('h3.market-suggested-title', {}, 'Suggested'),
     h('ul', {}, offers.map(offer => h('li.market-suggestion', { title: `${offer.source}. Adding it lists its plugins here and installs nothing.` },
       h('span.market-suggestion-text', {}, h('span.market-suggestion-name', {}, offer.name), h('span.market-suggestion-meta', {}, `For ${andList(offer.tools.map(tool => names[tool]))}`)),
-      button({ variant: 'outline', size: 'small', label: 'Add', name: `Add ${offer.name}`, id: `suggested-add-${id(offer.source)}`, disabled: !!app.busy, onclick: () => void addMarketplace(offer.source) }),
+      button({ variant: 'outline', size: 'small', label: 'Add', name: `Add ${offer.name}`, id: `suggested-add-${id(offer.source)}`, disabled: acting(), onclick: () => void addMarketplace(offer.source) }),
       no(offer)))));
 }
 
@@ -122,7 +123,8 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
       // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
       behind || updates.length ? h('span.plugin-row-update', {},
         behind ? versionNote(h('span', {}, behind.charAt(0).toUpperCase() + behind.slice(1)), '.plugin-row-warning') : null,
-        updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`, { row: true }) : null) : null),
+        updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`, { row: true }) : null) : null,
+      clickNote(entry, plugin.name)),
     view.tools.map(tool => markCell(view, entry, plugin, tool, marketIndex, compareTo)),
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
 }
@@ -168,7 +170,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   // With more than one plugin behind, one button runs every update in this marketplace at once, those the filter hides too.
   const behind = view.canWrite ? entry.plugins.filter(plugin => updateOps(view, entry, plugin).length) : [];
   const updateAll = behind.length > 1 ? h('p.market-hint', {}, icon('refresh-cw', 13, 'tone-warning'), h('span', {}, `${behind.length} plugins have an update. `,
-    button({ variant: 'link', size: 'micro', id: `market-update-all-${marketIndex}`, label: 'Update all', disabled: !!app.busy, attrs: { title: updateAllTitle(view, entry, behind, shown) },
+    button({ variant: 'link', size: 'micro', id: `market-update-all-${marketIndex}`, label: 'Update all', disabled: acting(), attrs: { title: updateAllTitle(view, entry, behind, shown) },
       onclick: () => void applyPluginOps(behind.flatMap(plugin => updateOps(view, entry, plugin))) }))) : null;
   return [
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${reasons.join(' ')} `,
@@ -206,7 +208,7 @@ function aboutTab(view: PluginsView, entry: MarketplaceView, marketIndex: number
   const read = market.readmes.get(entry.source);
   // The move of a waiting plugin's parts reads this marketplace's copy (partsmigrate.ts), which Remove would delete.
   const waits = !!entry.waiting?.length;
-  const remove = entry.origins.includes('central-knot') && !entry.bundled ? button({ variant: 'outline', size: 'small', icon: 'circle-minus', label: 'Remove from this list', name: `Remove ${marketTitle(entry)} from this list. Installed plugins stay installed.`, id: `forget-${marketIndex}`, disabled: !!app.busy || waits, onclick: () => void forgetMarketplace(entry.source) }) : null;
+  const remove = entry.origins.includes('central-knot') && !entry.bundled ? button({ variant: 'outline', size: 'small', icon: 'circle-minus', label: 'Remove from this list', name: `Remove ${marketTitle(entry)} from this list. Installed plugins stay installed.`, id: `forget-${marketIndex}`, disabled: acting() || waits, onclick: () => void forgetMarketplace(entry.source) }) : null;
   if (remove) remove.title = waits ? 'Parts of its plugins from an earlier version wait to be moved to the library, which reads this marketplace’s copy. It can be removed once they are moved.' : 'Removes it from this list only. Installed plugins stay installed.';
   const source = entry.page ? button({ variant: 'link', size: 'micro', label: entry.sourceLabel, id: `market-page-${marketIndex}`, onclick: () => openLink(entry.page!) }) : h('span', { title: entry.source }, entry.sourceLabel);
   return [
@@ -243,7 +245,7 @@ function feedNote(entry: MarketplaceView, marketIndex: number): HTMLElement | nu
     : `Newer plugins arrive by themselves. Tools that have one installed pick up the new version when they next start; if a tool can’t, Update shows here.${at ? ` Last checked ${at}.` : ''}`;
   return h('div.market-in-tools', { id: 'market-feed' },
     h('p', {}, trouble ? icon('circle-alert', 13, 'tone-warning') : null, said),
-    button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', name: 'Check now for newer plugins', id: `check-feed-${marketIndex}`, disabled: !!app.busy, onclick: () => void checkCarriedFeed(entry) }));
+    button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', name: 'Check now for newer plugins', id: `check-feed-${marketIndex}`, disabled: acting(), onclick: () => void checkCarriedFeed(entry) }));
 }
 
 /**
@@ -269,7 +271,7 @@ function inToolsNote(view: PluginsView, entry: MarketplaceView, marketIndex: num
       : `${listOf(has)} ${has.length > 1 ? 'list' : 'lists'} this marketplace, so these plugins also show in ${where()}.${lacks}`;
   return h('div.market-in-tools', { id: 'market-listed' },
     h('p', {}, said),
-    could.map(tool => button({ variant: 'outline', size: 'small', label: `List in ${names[tool]}`, name: `List ${marketTitle(entry)} in ${names[tool]}’s own plugin list. Nothing is installed.`, id: `add-carried-${marketIndex}-${tool}`, disabled: !!app.busy, onclick: () => void addCarriedTo(entry, tool) })));
+    could.map(tool => button({ variant: 'outline', size: 'small', label: `List in ${names[tool]}`, name: `List ${marketTitle(entry)} in ${names[tool]}’s own plugin list. Nothing is installed.`, id: `add-carried-${marketIndex}-${tool}`, disabled: acting(), onclick: () => void addCarriedTo(entry, tool) })));
 }
 
 /**
@@ -336,7 +338,7 @@ function legend(view: PluginsView, entry: MarketplaceView) {
 function undoButton(): HTMLElement | null {
   const back = undoOps();
   if (!back.length) return null;
-  const undo = button({ variant: 'outline', size: 'small', label: market.lastRun?.undo ? 'Undo the rest' : 'Undo', id: 'plugins-undo', disabled: !!app.busy, onclick: undoLast });
+  const undo = button({ variant: 'outline', size: 'small', label: market.lastRun?.undo ? 'Undo the rest' : 'Undo', id: 'plugins-undo', disabled: acting(), onclick: undoLast });
   undo.title = undoTitle(back);
   return undo;
 }
@@ -350,7 +352,9 @@ function undoTitle(back: PluginOp[]): string {
   const where = (actions: PluginOp['action'][]) => andList([...new Set(back.filter(op => actions.includes(op.action)).map(op => op.tool))].sort(byToolOrder).map(tool => names[tool]));
   const does = UNDO_WORDS.filter(([actions]) => where(actions)).map(([actions, verb]) => `${verb} ${where(actions)}`);
   const updated = !market.lastRun?.undo && market.lastRun?.done.some(entry => entry.action === 'update' && entry.report.changed);
-  const said = [`Reverses what changed, through each tool’s own command or switch: ${andList(does)}.`, updated ? 'The update itself stays: it can’t be undone.' : ''];
+  // A switch's Undo names its plugin: several plugins' clicks may have run since the page was last read.
+  const plugin = !market.lastRun?.undo && market.lastRun?.turn ? ` for ${market.lastRun.turn.plugin}` : '';
+  const said = [`Reverses what changed${plugin}, through each tool’s own command or switch: ${andList(does)}.`, updated ? 'The update itself stays: it can’t be undone.' : ''];
   return [...said, ...(market.lastRun?.turn?.limits ?? [])].filter(Boolean).join(' ');
 }
 
@@ -388,7 +392,7 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(() => { market.lastRun = undefined; }, 'report-dismiss'));
   const outcome = app.outcome?.page === 'plugins' && app.outcome.act ? app.outcome : undefined;
   if (!outcome?.act) return null;
-  const action = button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: !!app.busy, onclick: () => outcome.act!.run() });
+  const action = button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: acting(), onclick: () => outcome.act!.run() });
   return h('div.toolbar-result', { role: 'status', id: 'plugins-result', 'data-outcome': '' }, icon('check', 14, 'tone-success'), h('span.toolbar-result-text', { title: outcome.text }, outcome.text), action, dismiss(clearNotice, 'report-dismiss'));
 }
 

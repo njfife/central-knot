@@ -1,12 +1,12 @@
-// Pieces the marketplace and plugin pages draw alike: a plugin's one switch, a tool's mark, Update, a README, and "a · b · c"
-// lines. The switch acts at once (pluginstate.ts turnPlugin), and so does Update (pluginstate.ts applyPluginOps). What the
-// marks and the switch say comes from pluginstatus.ts.
-import { state as app } from './app.ts';
+// Pieces the marketplace and plugin pages draw alike: a plugin's one switch and its click's line (clickNote), a tool's mark,
+// Update, a README, and "a · b · c" lines. The switch's click waits its turn (pluginstate.ts turnPlugin); Update acts at once
+// (pluginstate.ts applyPluginOps). What the marks and the switch say comes from pluginstatus.ts.
+import { acting } from './app.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import { pluginKey, type PluginOp } from './pluginplan.ts';
-import { applyPluginOps, market, openLink, shownDetail, turnPlugin } from './pluginstate.ts';
+import { pluginKey, resultLines, type PluginOp } from './pluginplan.ts';
+import { applyPluginOps, clickOn, market, openLink, shownDetail, switchHeld, turnPlugin } from './pluginstate.ts';
 import { PREVIEW_ONLY, addWords, cantUninstall, copyStale, foundIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
@@ -70,7 +70,7 @@ export function markCell(view: PluginsView, entry: MarketplaceView, plugin: Plug
 
 /**
  * A plugin's one switch (pluginrecord.ts): On (striped where it is kept out of a tool that takes it) or Off; for a plugin
- * found in a tool with no entry here, Add in its place. A click records it and runs what its table owes, at once.
+ * found in a tool with no entry here, Add in its place. A click joins the page's list (pluginstate.ts turnPlugin).
  */
 export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginView, id: string) {
   const sw = entry.switches?.[plugin.name];
@@ -78,12 +78,28 @@ export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: 
   const stopped = !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
   if (found.length) {
     const label = stopped ?? addWords(plugin.name, found);
-    return h('button.btn.outline.small.add-item', { type: 'button', id: id.replace(/^pswitch/, 'padd'), title: label, 'aria-label': label, disabled: !!app.busy || !!stopped,
-      onclick: (event: Event) => { event.stopPropagation(); void turnPlugin(entry, plugin.name, 'add'); } }, 'Add');
+    return h('button.btn.outline.small.add-item', { type: 'button', id: id.replace(/^pswitch/, 'padd'), title: label, 'aria-label': label, disabled: switchHeld(entry.source, plugin.name) || !!stopped,
+      onclick: (event: Event) => { event.stopPropagation(); turnPlugin(entry, plugin.name, 'add'); } }, 'Add');
   }
   const words = switchWords(view, entry, plugin.name);
-  return toggle({ on: !!sw?.entry?.on, partial: switchPartial(view, sw), label: stopped ? `${words.slice(0, words.indexOf('.') + 1)} ${stopped}` : words, disabled: !!app.busy || !!stopped, id,
-    onchange: on => void turnPlugin(entry, plugin.name, on ? 'on' : 'off') });
+  return toggle({ on: !!sw?.entry?.on, partial: switchPartial(view, sw), label: stopped ? `${words.slice(0, words.indexOf('.') + 1)} ${stopped}` : words, disabled: switchHeld(entry.source, plugin.name) || !!stopped, id,
+    onchange: on => turnPlugin(entry, plugin.name, on ? 'on' : 'off') });
+}
+
+/**
+ * A plugin's latest click in the page's list (pluginstate.ts market.clicks), on its row and its page: Waiting, then what it
+ * does while main runs it, then what main returned (Failed and why, when nothing worked), until the next list starts. One line,
+ * shortened with "…"; the whole of it is its tooltip.
+ */
+export function clickNote(entry: MarketplaceView, plugin: string): HTMLElement | null {
+  const click = clickOn(entry.source, plugin);
+  if (!click) return null;
+  const lines = click.ran ? resultLines(click.ran.done) : [], failed = !!click.ran?.stopped || lines.some(line => !line.ok);
+  const ended = [...lines.map(line => line.short), click.ran?.stopped].filter(Boolean).join('; ') || 'Nothing changed';
+  const text = click.state === 'waiting' ? 'Waiting' : click.state === 'running' ? click.doing
+    : failed && !lines.some(line => line.ok) ? `Failed: ${ended}` : `${ended.charAt(0).toUpperCase()}${ended.slice(1)}`;
+  const glyph = click.state === 'waiting' ? icon('clock', 12) : click.state === 'running' ? icon('refresh-cw', 12, 'spin') : icon(failed ? 'triangle-alert' : 'check', 12);
+  return h(`span.plugin-click${failed ? '.failed' : ''}`, { 'data-click': click.state, title: text }, glyph, h('span', {}, text));
 }
 
 /**
@@ -108,7 +124,7 @@ export function updateButton(ops: PluginOp[], id: string, { row = false } = {}) 
   const title = [named('update') && `Updates it in ${named('update')} now. An update can’t be undone.`,
     named('update-items') && `Brings its items up to date from the plugin now, in ${named('update-items')}; History can undo each.`];
   // On a list row it is a link, so the row keeps its height, and a click on it doesn't open the plugin.
-  return button({ variant: row ? 'link' : 'outline', size: row ? 'micro' : 'small', icon: row ? undefined : 'refresh-cw', id, disabled: !!app.busy,
+  return button({ variant: row ? 'link' : 'outline', size: row ? 'micro' : 'small', icon: row ? undefined : 'refresh-cw', id, disabled: acting(),
     label: `Update in ${tools.length > 2 ? `${tools.length} tools` : andList(tools.map(tool => names[tool]))}`, attrs: { title: title.filter(Boolean).join(' ') },
     onclick: (event: Event) => { if (row) event.stopPropagation(); void applyPluginOps(ops); } });
 }

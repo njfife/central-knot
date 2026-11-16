@@ -4064,6 +4064,7 @@ case "$*" in
   "plugin marketplace add ${market}") mkdir -p "$HOME/.claude/plugins" && printf '{"ck-test-market":{"source":{"source":"git","url":"${market}"}}}' > "$HOME/.claude/plugins/known_marketplaces.json" ;;
   "plugin install issue-tracker@ck-test-market --scope user") mkdir -p '${copy}/skills/triage' && cp '${triage}' '${copy}/skills/triage/' && printf '{"version":2,"plugins":{"issue-tracker@ck-test-market":[{"scope":"user","installPath":"${copy}","version":"2.0.0"}]}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;
   "plugin uninstall issue-tracker@ck-test-market --scope user") printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;
+  "plugin install starter-skills@ck-test-market --scope user") [ -f "$HOME/slow" ] && sleep 3; "${process.execPath}" -e "const fs = require('fs'), file = '$HOME/.claude/plugins/installed_plugins.json', now = JSON.parse(fs.readFileSync(file, 'utf8')); now.plugins['starter-skills@ck-test-market'] = [{ scope: 'user', installPath: '${market}', version: '1.0.0' }]; fs.writeFileSync(file, JSON.stringify(now))" ;;
   *) exit 9 ;;
 esac
 `, { mode: 0o755 });
@@ -4072,12 +4073,12 @@ esac
   const calls = () => (existsSync(join(home, 'claude-calls.txt')) ? readFileSync(join(home, 'claude-calls.txt'), 'utf8').trim().split('\n').filter(call => call.startsWith('plugin ')) : []);
   const installed = () => existsSync(join(home, '.claude/plugins/installed_plugins.json')) && !!JSON.parse(readFileSync(join(home, '.claude/plugins/installed_plugins.json'), 'utf8')).plugins['issue-tracker@ck-test-market'];
   const inPi = () => [existsSync(join(home, '.pi/agent/skills/triage/SKILL.md')), (readNow(join(home, '.pi/agent/mcp.json')) ?? '').includes('issues')];
-  const entry = () => JSON.parse(readFileSync(join(home, '.central-knot/plugins.json'), 'utf8')).plugins.find(each => each.plugin === 'issue-tracker');
+  const entry = (plugin = 'issue-tracker') => JSON.parse(readFileSync(join(home, '.central-knot/plugins.json'), 'utf8')).plugins.find(each => each.plugin === plugin);
   const a = await launch(data, [], tools);
   same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-issue-tracker')); tries++) await wait(100);
-  const marks = () => a.run(`[...document.querySelectorAll('[data-plugin="issue-tracker"] .cell-button')].map(cell => cell.dataset.state)`);
+  const marks = (plugin = 'issue-tracker') => a.run(`[...document.querySelectorAll('[data-plugin="${plugin}"] .cell-button')].map(cell => cell.dataset.state)`);
   const switchIs = selector => a.run(`(() => { const s = document.querySelector('${selector}'); return s ? s.getAttribute('aria-checked') + (s.classList.contains('switch-partial') ? ' partial' : '') : 'missing'; })()`);
   const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   const pictures = async name => { if (!shots) return; for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
@@ -4184,6 +4185,26 @@ esac
     await a.exists('#pfix-0-document-tools-claude-cli'), existsSync(join(home, '.pi/agent/skills/pdf-reader/SKILL.md'))], [true, 'missing', true, true]);
   await pictures('plugin-switch-failed');
   await fitsAtMinimum(a, 'a plugin’s page with an install that failed');
+  // Two plugins clicked in a row without waiting: release-helper's Add, then starter-skills (Claude Code's stand-in takes 3 s over
+  // it). The second waits its turn while the first runs, Skills stays usable meanwhile, and the view is read at the end only.
+  await a.click('#plugin-back');
+  writeFileSync(join(home, 'slow'), '');
+  await a.run(`document.querySelector('#padd-0-release-helper').click(); document.querySelector('#pswitch-0-starter-skills').click()`);
+  const rowSays = name => a.run(`document.querySelector('[data-plugin="${name}"] .plugin-click')?.dataset.click ?? 'nothing'`);
+  same('the second click waits its turn while the first runs, and another plugin’s switch stays usable', [await rowSays('release-helper'), await rowSays('starter-skills'), await a.exists('#pswitch-0-issue-tracker:not([disabled])')], ['running', 'waiting', true]);
+  for (let tries = 0; tries < 50 && await rowSays('starter-skills') !== 'running'; tries++) await wait(100);
+  same('the first’s row says it ended; the view isn’t read again yet, so its Add stays drawn, held', [await rowSays('release-helper'), await a.exists('#padd-0-release-helper[disabled]')], ['ended', true]);
+  await a.run(`document.querySelector('#nav-skills').click()`);
+  check('an item page’s switch can be used meanwhile', await a.run(`!!document.querySelector('#switch-triage[aria-checked="true"]:not([disabled])')`), await a.text('.page'));
+  await a.run(`document.querySelector('#switch-triage').click()`);
+  await done();
+  rmSync(join(home, 'slow'));
+  const both = JSON.parse(readFileSync(join(home, '.claude/plugins/installed_plugins.json'), 'utf8')).plugins;
+  same('both end installed, and the item page’s click ran', [!!both['release-helper@ck-test-market'], !!both['starter-skills@ck-test-market'], entry('release-helper')?.on, entry('starter-skills')?.on,
+    existsSync(join(home, '.pi/agent/skills/hello/SKILL.md')), await a.run(`document.querySelector('#switch-triage').getAttribute('aria-checked')`)], [true, true, true, true, true, 'false']);
+  await a.click('#nav-plugins');
+  same('read at the end, each row shows its switch On, its marks, and its own result', [await switchIs('#pswitch-0-release-helper'), await switchIs('#pswitch-0-starter-skills'), await marks('release-helper'), await marks('starter-skills'), await rowSays('release-helper'), await rowSays('starter-skills')],
+    ['true', 'true', ['installed', 'items'], ['installed', 'items'], 'ended', 'ended']);
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
 }

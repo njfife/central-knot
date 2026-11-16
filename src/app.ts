@@ -1,8 +1,9 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
-// state (`state`), the page shown (showPage), what is said after a click (tell, announce) and the busy line (busy); a click on
-// an item page sent to its kind's engine (applyClick, through kindPages) and its result kept for the page (lastResult); History's
-// actions (restoreEvent); the reads of the home (loadHome, readAgain) and the Sync switch, Sync once and Synchronize everything's
-// row; and the Instructions, base instructions and Profiles pages' actions. A sync notice lives across reads here, until its
+// state (`state`), the page shown (showPage), what is said after a click (tell, announce), the busy line (busy) and whether the
+// page is acting (acting: busy, or the Plugins page's switch clicks running); a click on an item page sent to its kind's engine
+// (applyClick, through kindPages) and its result kept for the page (lastResult); History's actions (restoreEvent); the reads of
+// the home (loadHome, readAgain, readHomeOnce) and the Sync switch, Sync once and Synchronize everything's row; and the
+// Instructions, base instructions and Profiles pages' actions. A sync notice lives across reads here, until its
 // page shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it. Not here: drawing (renderer.ts and each
 // page's module), the Plugins page's state (pluginstate.ts), the Sources and Git repo pages' (sourcespage.ts, repopage.ts), and
 // every rule a page shows (the engines' answers in the view: libraryrow.ts, historyactions.ts, profileplan.ts).
@@ -23,7 +24,7 @@ import { libraryWords } from './libraryrow.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
-import { loadPlugins, resetMarket } from './pluginstate.ts';
+import { loadPlugins, market, resetMarket } from './pluginstate.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
@@ -217,6 +218,19 @@ export function setHome(view: HomeView | null | undefined, { reload = true } = {
 let focusAfterBusy: string | undefined;
 
 /**
+ * The page is acting: work under busy, or the Plugins page's switch clicks waiting their turn (pluginstate.ts market.clicking).
+ * Meanwhile the home can't be switched, a plugin action other than a switch click is off, and a background refresh waits;
+ * body[data-busy] says it (showActing), and the end-to-end checks wait on it.
+ */
+export const acting = () => !!state.busy || market.clicking;
+export const showActing = () => { document.body.dataset.busy = String(acting()); };
+/** What follows any acting once it ends: a background refresh asked for meanwhile runs, and the Git repo's count is read again (no fetch). */
+export function afterActing() {
+  drainOwedRefresh();
+  if (state.home) loadRepoSoon();
+}
+
+/**
  * One piece of work at a time: every mutating control is disabled while it runs. Its "Reading…" message gives way, when
  * the work said nothing of its own, to what the status bar said before. A background refresh that arrived meanwhile runs
  * once it is done.
@@ -227,7 +241,7 @@ export async function busy(message: string, work: () => Promise<void>) {
   state.outcome = undefined;
   state.undoMoved = undefined;
   state.busy = message;
-  document.body.dataset.busy = 'true';
+  showActing();
   announce(message);
   const working = state.said.seq;
   rerender();
@@ -238,13 +252,12 @@ export async function busy(message: string, work: () => Promise<void>) {
   // When the work said nothing since its "Reading…", what was said before comes back.
   if (state.said.seq === working) announce(before.text, before.quiet, before.link);
   state.busy = undefined;
-  document.body.dataset.busy = 'false';
+  showActing();
   rerender();
   focusById(document.getElementById(focusAfterBusy ?? '') ? focusAfterBusy : focused);
   focusAfterBusy = undefined;
-  drainOwedRefresh();
-  // Any change may change what differs from the git repo: its page and sidebar count read again (no fetch).
-  if (state.home) loadRepoSoon();
+  // Any change may change what differs from the git repo.
+  afterActing();
 }
 
 /**
@@ -1163,11 +1176,21 @@ export const syncNow = () => busy('Syncing…', async () => {
   announce('Synced once. Automatic sync stays off.', true);
 });
 
-/** A background read is running, or one arrived while the page was busy and runs when it is done (busy). */
+/** A background read is running, or one arrived while the page was acting and runs when it is done (afterActing). */
 let refreshing = false;
 let refreshOwed = false;
 /** A background view that arrived while an action ran: its notices and caught-up results go into the next one (withSetAside). */
 let setAside: HomeView | undefined;
+/**
+ * The home read again by a Plugins action before it ends (pluginstate.ts readAgain): it stands for a background refresh owed
+ * meanwhile, so the home is read once, and takes in a view set aside, so no notice is lost.
+ */
+export async function readHomeOnce(): Promise<void> {
+  refreshOwed = false;
+  const read = await api().refresh().catch(() => null);
+  setHome(read && withSetAside(setAside, read));
+  setAside = undefined;
+}
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const isPage = (page: string): page is Page => (pages as readonly string[]).includes(page);
 api().onNavigate(page => {
@@ -1203,19 +1226,19 @@ function keepUnshown(was: HomeView | undefined, view: HomeView): HomeView {
 }
 
 /**
- * A background pass changed something: read again quietly, keeping drafts. In the middle of an action it waits, and runs
- * when the action is done, so a change (a tool appearing, say) is never lost; an action that starts while the read is on
- * its way goes first, and the read runs again after it. What the status bar says stays, unless the view brings a notice
+ * A background pass changed something: read again quietly, keeping drafts. While the page acts (acting) it waits, and runs
+ * when that ends, so a change (a tool appearing, say) is never lost; an action that starts while the read is on its way goes
+ * first, and the read runs again after it. What the status bar says stays, unless the view brings a notice
  * the page didn't have: then that is the news.
  */
 async function backgroundRefresh() {
   if (!state.home) return;
-  if (state.busy || refreshing) { refreshOwed = true; return; }
+  if (acting() || refreshing) { refreshOwed = true; return; }
   refreshing = true;
   try {
     const read = await api().refresh();
     const view = read ? withSetAside(setAside, read) : undefined;
-    if (state.busy) { refreshOwed = true; if (view) setAside = view; return; }
+    if (acting()) { refreshOwed = true; if (view) setAside = view; return; }
     if (!view) return;
     setAside = undefined;
     const known = new Set(state.home ? noticesByPage(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
@@ -1239,9 +1262,9 @@ async function backgroundRefresh() {
   }
 }
 
-/** A background refresh asked for while busy or while another ran: run it now, once, if nothing is running. */
+/** A background refresh asked for while the page acted or while another ran: run it now, once, if nothing is running. */
 function drainOwedRefresh() {
-  if (!refreshOwed || state.busy || refreshing) return;
+  if (!refreshOwed || acting() || refreshing) return;
   refreshOwed = false;
   void backgroundRefresh();
 }
