@@ -1001,17 +1001,10 @@ test('A skill deleted from Central Knot: the tombstone holds at Check now and at
 
 // ---------- What is at a link ----------
 
-test('A link to a plugin, or a marketplace, is named as that and nothing there is read; a folder of loose skills beside an agents folder and a commands folder brings the skills and the agent, never a command', async () => {
+// A link to a plugin or a marketplace: tests/sourceplugins.test.ts.
+test('A folder of loose skills beside an agents folder and a commands folder brings the skills and the agent, never a command', async () => {
   const box = await sandbox();
   try {
-    const plugin = await repository(hosts, 'https://github.com/team/plugin');
-    await plugin.commit({ '.claude-plugin/plugin.json': '{"name":"plugin"}', 'skills/pdf/SKILL.md': skillMd('pdf') });
-    const said = await previewSource(box.context, box.tools, 'https://github.com/team/plugin');
-    assert.deepEqual(['holds' in said && said.holds, said.refused], ['plugin', 'The link holds a plugin (a .claude-plugin or .codex-plugin folder). Plugins from a link come in a later version; nothing here is read.']);
-    const market = await repository(hosts, 'https://github.com/team/market');
-    await market.commit({ '.agents/plugins/marketplace.json': '{}' });
-    assert.match((await previewSource(box.context, box.tools, 'https://github.com/team/market')).refused ?? '', /holds a marketplace/);
-
     const loose = await repository(hosts, 'https://github.com/team/loose');
     await loose.commit({ 'pdf/SKILL.md': skillMd('pdf'), 'docx/SKILL.md': skillMd('docx'), 'agents/writer.md': '---\nname: writer\n---\nWrite.\n', 'commands/go.md': 'Go.\n' });
     const look = await previewSource(box.context, box.tools, 'https://github.com/team/loose') as Extract<SourcePreview, { token: string }>;

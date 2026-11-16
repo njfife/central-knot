@@ -34,7 +34,7 @@ test('Parts are found as Claude Code and Codex find them: what plugin.json and t
     // plugin.json's version wins over the entry's.
     assert.equal(contents.version, '0.9.0');
     assert.deepEqual(contents.hooks, ['PreToolUse', 'SessionStart']);
-    assert.deepEqual(contents.mcpServers, [{ name: 'files', runs: 'npx -y files-mcp' }]);
+    assert.deepEqual(contents.mcpServers, [{ name: 'files', runs: 'npx -y files-mcp', entry: '{"command":"npx","args":["-y","files-mcp"]}' }]);
     // A marketplace's root plugin whose entry lists skills loads only those.
     assert.deepEqual((await pluginContents(root, { skills: ['./skills/hello'] }, root, { atMarketplaceRoot: true })).skills.map(skill => skill.name), ['hello']);
     // Codex: its manifest's list replaces skills/, and an empty list falls back to it.

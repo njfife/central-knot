@@ -636,7 +636,7 @@ export const installedCopies = (context: PluginContext, tool: PluginTool): Promi
 });
 
 /** One item a tool has through an installed plugin: a skill, an agent or an MCP server, with the plugin it comes through. */
-export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string; /** A skill's SKILL.md, to tell it from another skill of the same name. */ text?: string }
+export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string; /** A skill's SKILL.md, an agent's file, an MCP server's entry as JSON: to tell it from another of the same name. */ text?: string }
 
 /**
  * What each of a tool's installed plugins gives it, by name: its skills in every tool, and its agents and MCP servers
@@ -654,8 +654,8 @@ export async function pluginParts(context: PluginContext, tool: PluginTool): Pro
     const add = (kind: PartKind, name: string, more: { off?: boolean; text?: string } = {}) => given.push({ kind, name, ...from, ...(off || more.off ? { off: true as const } : {}), ...(more.text === undefined ? {} : { text: more.text }) });
     for (const skill of contents.skills) add('skill', skill.name, { off: state.skillsOff?.some(entry => entry.skill === skill.name), text: skill.text });
     if (tool === 'codex-cli') continue;
-    for (const agent of contents.agents) add('agent', agent.name, { off: agentsOff?.includes(agent.name) });
-    for (const server of contents.mcpServers) add('mcp', server.name, { off: serversOff?.includes(server.name) });
+    for (const agent of contents.agents) add('agent', agent.name, { off: agentsOff?.includes(agent.name), text: agent.text });
+    for (const server of contents.mcpServers) add('mcp', server.name, { off: serversOff?.includes(server.name), text: server.entry });
   }
   return given;
 }
@@ -676,7 +676,7 @@ export async function linkedToPlugin(home: string, items: Record<string, Pick<Li
 /**
  * What each of `tools` has through its installed plugins, of one kind: by tool, then by the item's key on its page
  * (share.ts itemKey of its name). A name alone doesn't make two items one: the caller counts an item as the plugin's when the
- * library's item is linked to that plugin (linkedToPlugin) or, for a skill, when its SKILL.md is the same. A name two plugins
+ * library's item is linked to that plugin (linkedToPlugin) or its content is the same (each kind's own test). A name two plugins
  * hold goes by the first listed. Read once where `home` carries `reads` (one pass or one view), since the Skills, MCP servers
  * and Agents pages all ask.
  */
@@ -693,6 +693,20 @@ export async function throughPlugins(home: { home: string; overrides?: Partial<R
       if (!byKey.has(key)) byKey.set(key, { ...plugin, name });
     }
     if (byKey.size) found.set(tool, byKey);
+  }
+  return found;
+}
+
+/**
+ * What each of `tools` has through its installed plugins that holds the library's item of a key there (agents.ts and servers.ts
+ * `through`): the part of the plugin the item is linked to (linkedToPlugin), or a part of the same content (`same`, the kind's own
+ * test against the item's current version). For every kind (skills: skills.ts pluginFor), a part holds the item turned off or not:
+ * the Through a plugin box is the item's switch in that tool, so an off part must keep holding it.
+ */
+export async function partsHolding(home: Parameters<typeof throughPlugins>[0], tools: HarnessId[], kind: 'agent' | 'mcp', items: Record<string, Pick<LibraryItem, 'source' | 'deleted'>>, same: (key: string, part: GivenByPlugin) => boolean) {
+  const linked = await linkedToPlugin(home.home, items), found = new Map<HarnessId, Map<string, ThroughPlugin>>();
+  for (const [tool, given] of await throughPlugins(home, tools, kind)) {
+    found.set(tool, new Map([...given].flatMap(([key, { text, ...part }]) => (linked(key, part) || same(key, { ...part, text }) ? [[key, part] as const] : []))));
   }
   return found;
 }

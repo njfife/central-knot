@@ -118,7 +118,7 @@ test('What at a link is an MCP server: each entry of the .mcp.json in its folder
   } finally { await box.cleanup(); }
 });
 
-test('Whose .mcp.json it is: a link whose folder is one skill keeps it as the skill’s file, broken SKILL.md or not; a loose agent beside one hides nothing; a plugin is a plugin', async () => {
+test('Whose .mcp.json it is: a link whose folder is one skill keeps it as the skill’s file, broken SKILL.md or not; a loose agent beside one hides nothing; a plugin’s own folder reads it as its servers', async () => {
   const box = await sandbox();
   try {
     const skill = await repository(hosts, 'https://github.com/team/skill-with-servers');
@@ -136,8 +136,8 @@ test('Whose .mcp.json it is: a link whose folder is one skill keeps it as the sk
 
     const plugin = await repository(hosts, 'https://github.com/team/plugin');
     await plugin.commit({ '.claude-plugin/plugin.json': '{"name":"p"}', '.mcp.json': mcpJson({ docs: { command: 'npx' } }) });
-    const held = await previewSource(box.context, box.tools, 'https://github.com/team/plugin');
-    assert.deepEqual(['holds' in held && held.holds, 'names' in held && held.names], ['plugin', []]);
+    const held = await previewSource(box.context, box.tools, 'https://github.com/team/plugin') as Extract<SourcePreview, { token: string }>;
+    assert.deepEqual([held.holds, linesOf(held)], ['plugin', ['mcp docs: make']]);
   } finally { await box.cleanup(); }
 });
 

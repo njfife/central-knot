@@ -12,7 +12,8 @@
 // tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo,
 // remove-build (one install at a time: the held screen while another build of Central Knot is on this Mac, as made-up
 // bundles), sources (a Git link read on a click, made-up repositories standing in for GitHub), source-agents (agents from a
-// link, beside a skill), source-servers (MCP servers from a link, and Claude Code's wait for Write to Claude Code), plugin-library
+// link, beside a skill), source-servers (MCP servers from a link, and Claude Code's wait for Write to Claude Code), source-plugins
+// (a link to a plugin's own folder, a marketplace or a plugin one lists, and Add to Plugins), plugin-library
 // (a plugin's items in Pi as library items), parts-migration (a plugin's parts an earlier version put into Pi, moved to the
 // library at one look) and sort (the item pages sorted by last updated).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
@@ -2338,7 +2339,6 @@ if (wanted('sources')) {
   const deslop = repo('stephenturner/skill-deslop');
   deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly.'), 'references/phrases.md': '# Phrases\n', 'references/structures.md': '# Structures\n', 'references/examples.md': '# Examples\n', 'references/checklist.md': '# Checklist\n', 'README.md': '# skill-deslop\n', 'LICENSE': 'MIT License\n', '.gitignore': '.DS_Store\n' });
   repo('team/kit')({ 'notes/SKILL.md': '---\nname: notes\ndescription: Take notes the team’s way.\n---\n\nThe team’s notes.\n', 'release/SKILL.md': '---\nname: release\ndescription: Cut a release.\n---\n\nCut it.\n', 'agents/writer.md': '---\nname: writer\n---\nWrite.\n' });
-  repo('team/plugin')({ '.claude-plugin/plugin.json': '{"name":"plugin"}', 'skills/pdf/SKILL.md': '---\nname: pdf\ndescription: PDFs.\n---\nPDFs.\n' });
   await fresh({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
   const busyDone = () => waitFor(a, `document.body.dataset.busy !== 'true'`, 20000);
   const type = text => a.run(`(() => { const input = document.querySelector('#source-link'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
@@ -2417,8 +2417,6 @@ if (wanted('sources')) {
   await a.size(860, 560); await show('.source-row'); await focusOn('#source-turn-on-skill-deslop'); await shot(a, 'removed-focus-860', 'Tabbed to Turn on on deslop’s line at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
   await a.click('#source-turn-on-skill-deslop'); await busyDone(); await a.settle();
   await atEverySize('turned-on', 'Clicked Turn on on deslop’s line: the band says deslop is on in all 3 tools, with Undo; deslop’s line is gone from the source’s row', false, '.source-row');
-  await lookAt('https://github.com/team/plugin');
-  await atEverySize('plugin', 'Looked at a link to a plugin: where it read, and that it holds a plugin, which a later version brings; nothing here is read, so there is no Add, only Cancel', false, '#source-preview');
   await lookAt('https://github.com/nobody/missing');
   await atEverySize('cannot-read', 'Looked at a link with no repository there (or none this computer can read): why, in plain words, and Cancel', false, '#source-preview');
   await a.click('#source-cancel');
@@ -2534,6 +2532,68 @@ if (wanted('source-servers')) {
   await atEverySize('server-removed', 'relay was taken out of the source; clicked Check now: the band leads, under a warning mark, with relay no longer at the source, turned off and taken out of the other tools, Central Knot keeping it, and that it leaves Claude Code when you click Write to Claude Code, with Turn relay on; the source’s row has relay’s line: no longer at this source, Off, no longer from it, and Claude Code still has it until you click Write to Claude Code, with Turn on', true, '.source-row');
   await a.click('#nav-mcp'); await openRow('relay');
   await atEverySize('server-removed-mcp', 'On MCP servers, relay is Off with “removed at its source” after its name and “still in Claude Code until Write”; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, and what happens should the source have it again', true, '.ov-row[data-key="relay"]', 'start');
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
+// ---------- A link to a plugin or a marketplace (atlink.ts holdsAt, sources.ts handOff), with made-up repositories ----------
+if (wanted('source-plugins')) {
+  begin('source-plugins');
+  const hosts = join(scratch, 'source-plugin-hosts');
+  const repo = path => {
+    const dir = join(hosts, 'github.com', `${path}.git`);
+    mkdirSync(dir, { recursive: true });
+    execFileSync('git', ['init', '--quiet', '--initial-branch=main', dir]);
+    const git = (...rest) => execFileSync('git', ['-C', dir, '-c', 'user.name=Team', '-c', 'user.email=team@example.com', '-c', 'commit.gpgsign=false', ...rest]);
+    return Object.assign((files, message = 'change') => {
+      for (const [file, text] of Object.entries(files)) { if (text === null) rmSync(join(dir, file), { recursive: true, force: true }); else { mkdirSync(join(dir, file, '..'), { recursive: true }); writeFileSync(join(dir, file), text); } }
+      git('add', '--all'); git('commit', '--quiet', '-m', message);
+    }, { git });
+  };
+  const skill = (name, description) => `---\nname: ${name}\ndescription: ${description}\n---\n\nSteps.\n`;
+  repo('acme/incident-response-toolkit')({
+    '.claude-plugin/plugin.json': JSON.stringify({ name: 'incident-response-toolkit', skills: ['./playbooks/incident-timeline-builder'], mcpServers: { 'statuspage-incident-publisher': { command: 'npx', args: ['-y', '@acme/statuspage-mcp'] } } }),
+    'skills/postmortem-writer-with-five-whys/SKILL.md': skill('postmortem-writer-with-five-whys', 'Write a blameless postmortem, asking why five times.'),
+    'playbooks/incident-timeline-builder/SKILL.md': skill('incident-timeline-builder', 'Build an incident’s timeline from chat, alerts and deploys.'),
+    'agents/on-call-triage-coordinator.md': '---\nname: on-call-triage-coordinator\ndescription: Triages a page and pulls in the right people.\n---\n\nTriage.\n',
+    '.mcp.json': JSON.stringify({ mcpServers: { 'pagerduty-incident-bridge': { command: 'npx', args: ['-y', '@acme/pagerduty-mcp'] }, 'runbook-search': { command: '${CLAUDE_PLUGIN_ROOT}/bin/runbook-search' } } }),
+    'commands/declare-incident.md': 'Declare.\n', 'commands/page-secondary.md': 'Page.\n', 'commands/status-update.md': 'Update.\n', 'commands/close-incident.md': 'Close.\n',
+    'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [] } }), '.lsp.json': JSON.stringify({ yaml: { command: 'yaml-language-server' } }), 'bin/runbook-search': '#!/bin/sh\n',
+  });
+  const names = ['release-notes-writer', 'dependency-upgrade-planner', 'flaky-test-hunter', 'api-changelog-auditor', 'terraform-plan-reviewer', 'k8s-manifest-linter', 'oncall-handoff-summarizer', 'sql-migration-checker', 'feature-flag-cleaner', 'accessibility-auditor', 'docs-link-checker', 'security-advisory-reader'];
+  const market = repo('acme/engineering-plugins');
+  market({ '.claude-plugin/marketplace.json': JSON.stringify({ name: 'acme-engineering-plugins', plugins: names.map(name => ({ name, source: `./plugins/${name}`, description: `The ${name.replaceAll('-', ' ')}.` })) }),
+    ...Object.fromEntries(names.flatMap(name => [[`plugins/${name}/.claude-plugin/plugin.json`, JSON.stringify({ name })], [`plugins/${name}/skills/${name}/SKILL.md`, skill(name, `The ${name.replaceAll('-', ' ')}.`)]])) });
+  market.git('checkout', '--quiet', '-b', 'release-2026-q4'); market({ 'README.md': 'The release branch.\n' }); market.git('checkout', '--quiet', 'main');
+  const handbook = repo('acme/team-handbook');
+  handbook({ 'writing-style/SKILL.md': skill('writing-style', 'Write the team’s way.') });
+  await fresh({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
+  const busyDone = () => waitFor(a, `document.body.dataset.busy !== 'true'`, 20000);
+  const type = text => a.run(`(() => { const input = document.querySelector('#source-link'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  const lookAt = async link => { await type(link); await a.click('#source-look'); await busyDone(); await a.settle(); };
+  await a.click('#nav-sources');
+  await atEverySize('empty', 'Clicked Sources: the heading says any GitHub or GitLab link goes here; the line under the field says a plugin’s own folder brings its skills, agents and MCP servers and a marketplace goes to Plugins; the aside says a marketplace’s link is handed to Plugins');
+  await lookAt('https://github.com/acme/incident-response-toolkit');
+  await atEverySize('look-plugin', 'Looked at a plugin’s own folder: that it holds a plugin, whose skills, agents and MCP servers come in as this source’s, each with its own switch; that its 4 commands, its hooks, its 1 LSP server and its bin folder are not brought in, and what to do to have the whole plugin; two skills (one in a folder its plugin.json names), an agent, a server from .mcp.json and one from plugin.json, coming in Off; the server that runs from the plugin’s folder left out', true, '#source-preview', 'start');
+  await a.click('#source-add'); await busyDone(); await a.settle();
+  await atEverySize('plugin-row', 'Clicked Add: the band says what came in, Off; the source’s row lists them and says what of the plugin is not brought in', false, '.source-row', 'start');
+  await lookAt('https://github.com/acme/engineering-plugins');
+  await atEverySize('look-marketplace', 'Looked at a marketplace’s link: what it is (acme-engineering-plugins, with 12 plugins), that it goes on the Plugins page where each plugin has its own switch, and Add to Plugins adds it with its 12 plugins, none turned on; and that a link to one of its other folders brings that folder’s items here; Add to Plugins, Cancel, and that nothing is installed or kept here', true, '#source-preview');
+  await a.size(860, 560); await focusOn('#source-to-plugins'); await shot(a, 'look-marketplace-focus-860', 'Tabbed to Add to Plugins at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
+  await lookAt('https://github.com/acme/engineering-plugins/tree/release-2026-q4');
+  await atEverySize('look-marketplace-branch', 'Looked at the same marketplace on its branch release-2026-q4: refused, with why (the Plugins page adds a marketplace from its repository’s default branch, main, at its root) and what to do instead (clone it and add the folder with Folder… on Plugins); no Add to Plugins', false, '#source-preview');
+  await lookAt('https://github.com/acme/engineering-plugins/tree/main/plugins/release-notes-writer');
+  await atEverySize('look-listed', 'Looked at one plugin’s folder in that marketplace: it is the plugin release-notes-writer, which its repository’s marketplace lists, so it goes on Plugins with that marketplace, where it has its own switch; Add to Plugins for acme-engineering-plugins', false, '#source-preview');
+  await lookAt('https://github.com/acme/engineering-plugins');
+  await a.click('#source-to-plugins'); await busyDone(); await a.settle();
+  await atEverySize('plugins-after', 'Clicked Add to Plugins: the Plugins page opens on acme-engineering-plugins with its 12 plugins, each with its switch off, and the band says the marketplace was added and nothing was installed', true);
+  if (await a.has('#open-add-marketplace')) await a.click('#open-add-marketplace');
+  await atEverySize('plugins-add-box', 'Clicked Add marketplace: the box, and under it the line that any other link, to a folder of skills, agents or MCP servers, or to one plugin, goes on Sources, with a link to that page', true, '.market-add-note');
+  await a.click('#nav-sources');
+  await lookAt('https://github.com/acme/team-handbook');
+  await a.click('#source-add'); await busyDone(); await a.settle();
+  handbook({ '.claude-plugin/marketplace.json': JSON.stringify({ name: 'team-handbook-plugins', plugins: [] }), 'writing-style/SKILL.md': null }, 'Become a marketplace');
+  await a.click('.source-rows > li:last-child .source-actions button'); await busyDone(); await a.settle();
+  await atEverySize('row-now-marketplace', 'acme/team-handbook became a marketplace; clicked Check now on its row: under a warning mark, the row says the link now holds a marketplace, which goes on Plugins, that this source turns nothing off, and to remove this source, then look at its link again to see how it can go on Plugins; writing-style stays as it was', false, '.source-rows > li:last-child', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 

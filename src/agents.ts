@@ -17,7 +17,7 @@
 import { constants } from 'node:fs';
 import { access, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, oneFileName, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
+import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, oneFileName, parseAgent, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
 import { harnesses, toolConfigRoot } from './harnesses.ts';
 import { libraryAction } from './historyactions.ts';
@@ -26,7 +26,7 @@ import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { mergeAgent } from './merge.ts';
-import { linkedToPlugin, pluginHolds, throughPlugins } from './plugins.ts';
+import { partsHolding, pluginHolds } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
 import { errorCode, exists, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
 import { sourceFacts } from './sources.ts';
@@ -59,7 +59,15 @@ async function readDisk(context: ShareContext, managed: HarnessId[], library: Ki
     // A plugin's item, in a tool that takes the plugin, is held by the plugin alone (plugins.ts pluginHolds); its can't-take
     // answer keeps a copy the tool has.
     linked: await pluginHolds(context, managed),
-    held: (item, tool) => { const linked = disk.linked(item, tool); if (linked) return linked; const why = agentHeld(disk, managed, item, tool); return why ? { why } : undefined; },
+    held: (item, tool) => {
+      const linked = disk.linked(item, tool);
+      if (linked) return linked;
+      // A plugin installed there that brings the agent is a way it has it: Central Knot's copy goes (library.ts THE RULE).
+      const given = disk.through.get(tool)?.get(item.key);
+      if (given) return { why: throughPlugin(tool, given, 'agent'), anotherWay: true };
+      const why = agentHeld(disk, managed, item, tool);
+      return why ? { why } : undefined;
+    },
     refuses: (item, tool) => { const linked = disk.linked(item, tool); return linked && !linked.anotherWay ? linked.why : undefined; },
   };
   for (const tool of managed as AgentTool[]) {
@@ -107,29 +115,22 @@ async function skillsLoaded(context: ShareContext, managed: HarnessId[]): Promis
 }
 
 /**
- * The agents each harness has through its installed plugins, by key: such a harness gets no file of its own beside the
- * plugin's. Only the plugin's own agent counts (a name alone could be another agent): one the library holds linked to that
- * plugin (`items`: the agents' record).
+ * The agents each harness has through its installed plugins, by key (plugins.ts partsHolding): such a harness gets no file of
+ * its own beside the plugin's. The same agent is one whose shared part is the item's current version.
  */
-async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ThroughPlugins> {
-  const found: ThroughPlugins = new Map(), linked = await linkedToPlugin(context.home, items);
-  for (const [tool, given] of await throughPlugins(context, tools, 'agent')) {
-    const own = [...given].flatMap(([key, { text: _text, ...plugin }]) => (linked(key, plugin) ? [[key, plugin] as const] : []));
-    found.set(tool, new Map(own));
-  }
-  return found;
-}
+const agentsThroughPlugins = (context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ThroughPlugins> =>
+  partsHolding(context, tools, 'agent', items, (key, part) => {
+    const agent = part.text === undefined ? undefined : parseAgent('claude-cli', part.name ?? key, part.text);
+    return !!agent && !items[key]?.deleted && agentHash(agent) === items[key]?.hash;
+  });
 
 /**
- * Why a harness with no copy can't be given the agent, for an agent's own reasons (Disk.held): a plugin brings the agent
- * there, a harness that keeps agents as skills has a skill of its name (a folder, a link to one, or a loose file Central Knot
- * didn't put there: readDisk), or its name can't be stored there
- * (unless that harness held it under that name before). Worked out at each look and never stored. A plugin that brings the
- * agent is "has it another way" in the model's terms (library.ts); agents still hold it as can't-take, so nothing they do changes.
+ * Why a harness with no copy can't be given the agent, for an agent's own reasons (Disk.held, after a plugin that brings it):
+ * a harness that keeps agents as skills has a skill of its name (a folder, a link to one, or a loose file Central Knot didn't
+ * put there: readDisk), or its name can't be stored there (unless that harness held it under that name before). Worked out at
+ * each look and never stored.
  */
 function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: HarnessId): string | undefined {
-  const given = disk.through.get(tool)?.get(item.key);
-  if (given) return throughPlugin(tool, given, 'agent');
   if (disk.skills.get(tool)?.has(item.key)) {
     return `${nameOf(tool)} has a skill named “${item.name}” and loads only one skill of a name. Delete or rename that skill to use this agent in ${nameOf(tool)}.`;
   }

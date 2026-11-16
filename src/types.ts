@@ -214,7 +214,8 @@ export interface DesktopApi {
   /** Marketplaces and installs; `fresh` fetches every Git marketplace again, and `readId` (a view's) reuses the read that view was built from, when it is the latest. */
   plugins(fresh?: boolean, readId?: number): Promise<PluginsView | null>;
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
-  addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
+  /** `already`: the marketplace was on the Plugins page before (on Central Knot's list, or added in a tool). */
+  addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string; already?: true }>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
   /** Stops offering a suggested marketplace; `again`: offers it again (the Undo of that). */
   declineMarketplace(source: string, again?: boolean): Promise<PluginsView | null>;
@@ -740,8 +741,8 @@ export interface PluginContents {
   agents: NamedPart[];
   /** Hook events it listens to, such as PreToolUse. */
   hooks: string[];
-  /** Each MCP server with what it runs or connects to. */
-  mcpServers: { name: string; runs: string }[];
+  /** Each MCP server with what it runs or connects to, and its entry as the plugin writes it, as JSON. */
+  mcpServers: { name: string; runs: string; entry: string }[];
   /** Some server refers to ${CLAUDE_PLUGIN_ROOT}, which only Claude Code fills in. */
   mcpUsesPluginRoot: boolean;
   lspServers: string[];
@@ -1060,8 +1061,14 @@ export interface SourceName {
   /** An item in Central Knot (not deleted): whether it is On. */
   on?: boolean;
 }
-/** What a link holds, read from its files (atlink.ts holdsAt): items of a kind a source brings, a plugin or a marketplace (a later version), none, or no folder there. */
-export type SourceHolds = 'items' | 'plugin' | 'marketplace' | 'empty' | 'missing';
+/**
+ * What a link holds, read from its files (atlink.ts holdsAt): items of a kind a source brings (`items`), a plugin's own folder,
+ * read for its skills, agents and MCP servers (`plugin`), a marketplace or a plugin its repository's marketplace lists (`listed`),
+ * neither read (each goes on the Plugins page), none (`empty`), or no folder there (`missing`).
+ */
+export type SourceHolds = 'items' | 'plugin' | 'listed' | 'marketplace' | 'empty' | 'missing';
+/** What of a plugin's own folder doesn't come with its items (atlink.ts holdsAt): how many commands and LSP servers, and whether it has hooks and a bin folder. */
+export interface NotComing { commands: number; hooks: boolean; lspServers: number; bin: boolean }
 /** One read of a link, as a preview and a source's row show it. */
 export interface SourceFound {
   link: string;
@@ -1072,10 +1079,12 @@ export interface SourceFound {
   holds: SourceHolds;
   names: SourceName[];
   /**
-   * Why the read can't be read (no folder there, a plugin, a marketplace, nothing of any kind there), in words; absent when it
-   * can. An item there that can't be read says why on its own line (SourceName `why`).
+   * Why the read can't be read (no folder there, a marketplace or a plugin one lists, nothing of any kind there), in words; absent
+   * when it can. An item there that can't be read says why on its own line (SourceName `why`).
    */
   unread?: string;
+  /** A plugin's own folder (`holds: 'plugin'`): what of it doesn't come, worked out at each read. */
+  notComing?: NotComing;
 }
 /**
  * A source as the Sources page shows it: its last read (sourcestore.ts: a cache; none kept here reads as nothing at the link's
@@ -1084,8 +1093,14 @@ export interface SourceFound {
 export interface SourceView extends SourceFound { id: string; addedAt: string; readAt?: string; problem?: string }
 /** The Sources page: each source, and the kinds a source brings in this version (sources.ts's table, in its order), which its sentences about every source name. */
 export interface SourcesView { sources: SourceView[]; kinds: ItemKind[]; access: WriteAccess; problem?: string }
-/** A link read before anything is kept: what Add would do (`token` names it for Add), or why it can't be added. */
-export type SourcePreview = (SourceFound & { token: string; refused?: string }) | { refused: string; link: string };
+/**
+ * A link read before anything is kept: what Add would do (`token` names it for Add), or why it can't be added; for a marketplace
+ * the Plugins page can add (sources.ts handOff), what Add to Plugins hands it (`toPlugins`: the address it adds, the catalog's
+ * name and how many plugins it lists), Add itself still refused.
+ */
+export type SourcePreview = (SourceFound & { token: string; refused?: string; toPlugins?: ToPlugins }) | { refused: string; link: string };
+/** A marketplace handed from Sources to the Plugins page (SourcePreview `toPlugins`). */
+export interface ToPlugins { address: string; name: string; plugins: number }
 /** A click on one name's line at a source (sources.ts rowClick): Add on one held deleted, Replace, Merge or Keep mine on one whose version waits. */
 export type SourceRowClick = 'bringBack' | 'replace' | 'merge' | 'keep';
 /**

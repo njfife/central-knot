@@ -1,8 +1,13 @@
 // What is at a source's link (sources.ts), read from a copy of it by its files alone, and what was read there as the pass and
 // the source's table are given it. One function decides each thing:
-// - what the link's folder is (holdsAt), before any kind is read: no folder there (`missing`); a marketplace's or a plugin's
-//   own files (named, nothing read: a later version); else what each kind's reader finds there (`items`), or nothing of any
-//   kind (`empty`);
+// - what the link's folder is (holdsAt), in this order: no folder there (`missing`); a marketplace (`marketplace`: its own
+//   marketplace.json, Claude Code's or Codex's); a plugin its repository's root marketplace lists (`listed`: an entry whose folder
+//   is the link's, on the copy, nothing fetched); a plugin's own folder (`plugin`: a .claude-plugin or .codex-plugin folder); else
+//   what each kind's reader finds there (`items`), or nothing of any kind (`empty`). Nothing is read at a marketplace or a listed
+//   plugin: both go on the Plugins page (sources.ts handOff says when Look offers it). A plugin's own folder is read as a link's
+//   folder is, and then for what its own files hold elsewhere (pluginItems, its header below), each name once, the link's
+//   readers' first, so a source never loses an item because its repository gained a plugin.json; what of a plugin doesn't come
+//   (its commands, hooks, LSP servers and bin folder) is named (`notComing`), never read;
 // - which files there are an item of one kind, each one's key, name and content, or why it is unreadable: that kind's reader
 //   (sources.ts SourceKind `at`), given the items the kinds before it in the table found (`earlier`), so a file one kind holds
 //   is never read as another's (heldEarlier, the one test). Skills' is skillsAt; agents' is agentsAt and MCP servers' is
@@ -13,14 +18,19 @@
 // brought in by a rule (two of one name, a name no tool can store, a skill that can't be copied as it is, a server that runs
 // files from the repository) is `leftOut` as well: it counts as read (readOf), so it holds back no other item's drop, and an
 // item it stands for in Central Knot stays as it is.
+// Known misses, as the README says: a plugin whose own repository another marketplace on the Plugins page lists is read here as
+// items, and so is a link to another folder inside a marketplace's repository (its skills/, say); with both on, a skill is placed
+// once while its SKILL.md is the same (skills.ts pluginFor), and so are an agent and a server while their shared part is (plugins.ts
+// partsHolding), but one that differs comes twice. A plugin with only .codex-plugin/plugin.json is read at the default places, not at
+// paths that manifest names. Of a name the link's readers and the plugin's files both find in different folders, the link's is read.
 // Not here: fetching a link (sources.ts fetchInto), the kinds' table (sources.ts sourceKinds), and the table each read meets
 // (library.ts sourceAnswers).
 import { lstat, readFile, readdir } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { agentHash, frontMatter, parseAgent, type SharedAgent } from './agentfiles.ts';
-import { inside } from './catalogdetail.ts';
+import { CODEX_MANIFEST, MANIFEST, inside, pluginContents, pluginFiles, type PluginFiles } from './catalogdetail.ts';
 import { parseSkill } from './discovery.ts';
-import { itemKey } from './library.ts';
+import { itemKey, type ItemKind } from './library.ts';
 import type { SourceRead } from './librarypass.ts';
 import { cannotHold, fromJson, ownPartOf, runsFrom, type NeutralServer } from './mcp.ts';
 import type { AgentTool } from './presence.ts';
@@ -28,7 +38,8 @@ import { readTree } from './share.ts';
 import type { SkillContent } from './skillstore.ts';
 import type { SourceKind } from './sources.ts';
 import type { SourceRecord } from './sourcestore.ts';
-import type { HarnessId, SourceHolds } from './types.ts';
+import { parseCatalog } from './plugins.ts';
+import type { Catalog, HarnessId, NotComing, SourceHolds } from './types.ts';
 import { record, withoutBom } from './values.ts';
 import { andList, orList, toolName } from './words.ts';
 
@@ -48,26 +59,38 @@ export type ItemThere<Content> = { folder: string; folderName: string; key: stri
  */
 export type ReaderAt<Content> = (root: string, folder: string, rootName: string, earlier: readonly ItemThere<unknown>[]) => Promise<ItemThere<Content>[]>;
 /**
- * What is at a link (holdsAt): what its folder is, and each kind's items there, in the table's order (none for no folder there,
- * a plugin or a marketplace).
+ * What is at a link (holdsAt): what its folder is, and each kind's items there, in the table's order (none for no folder there, a
+ * marketplace or a listed plugin); the marketplace it holds, or that lists it (`market`); what of a plugin's own folder doesn't
+ * come (`notComing`).
  */
-export interface Holds { holds: SourceHolds; kinds: { entry: SourceKind; items: ItemThere<unknown>[] }[] }
+export interface Holds { holds: SourceHolds; kinds: { entry: SourceKind; items: ItemThere<unknown>[] }[]; market?: Market; notComing?: NotComing }
+/** A marketplace at a link, from its catalog: its name, how many plugins it lists, and (`listed`) the plugin that is the link's folder; or why it can't be read. */
+export type Market = { name: string; plugins: number; plugin?: string } | { problem: string };
+const marketOf = (catalog: Catalog): Market => (catalog.problem ? { problem: catalog.problem } : { name: catalog.name, plugins: catalog.plugins.length });
 
 const present = (path: string) => lstat(path).then(() => true, () => false);
 const isFolder = (path: string) => lstat(path).then(info => info.isDirectory(), () => false);
 
 /**
- * What is at the link's `folder` in a copy (`root`) of `repository`, in this order: no folder there, a marketplace, a plugin,
- * else what each kind's reader finds.
+ * What is at the link's `folder` in a copy (`root`) of `repository`, in this order: no folder there, a marketplace, a plugin its
+ * repository's root marketplace lists, a plugin's own folder, else what each kind's reader finds (the header above).
  */
 export async function holdsAt(root: string, folder: string, repository: string, kinds: readonly SourceKind[]): Promise<Holds> {
-  const at = join(root, folder);
+  const at = join(root, folder), rootName = repoName(repository);
   if (!(await isFolder(at)) || !(await inside(root, at))) return { holds: 'missing', kinds: [] };
-  if (await present(join(at, '.claude-plugin/marketplace.json')) || await present(join(at, '.agents/plugins/marketplace.json'))) return { holds: 'marketplace', kinds: [] };
-  if (await present(join(at, '.claude-plugin')) || await present(join(at, '.codex-plugin'))) return { holds: 'plugin', kinds: [] };
+  if (await present(join(at, MANIFEST)) || await present(join(at, CODEX_MANIFEST))) return { holds: 'marketplace', kinds: [], market: marketOf(await parseCatalog(at, repository, 'git', { counts: false })) };
+  const listing = folder ? await parseCatalog(root, repository, 'git', { counts: false }) : undefined, listed = listing?.plugins.find(plugin => plugin.folder === resolve(at));
+  if (listing && listed) return { holds: 'listed', kinds: [], market: { name: listing.name, plugins: listing.plugins.length, plugin: listed.name } };
   const read: Holds['kinds'] = [];
-  for (const entry of kinds) read.push({ entry, items: await entry.at(root, folder, repoName(repository), read.flatMap(each => each.items)) });
-  return { holds: read.some(each => each.items.length) ? 'items' : 'empty', kinds: read };
+  for (const entry of kinds) read.push({ entry, items: await entry.at(root, folder, rootName, read.flatMap(each => each.items)) });
+  if (!(await present(join(at, '.claude-plugin')) || await present(join(at, '.codex-plugin')))) return { holds: read.some(each => each.items.length) ? 'items' : 'empty', kinds: read };
+  const theirs = await pluginItems(await pluginFiles(at, {}, root), root, rootName, 'link'), contents = await pluginContents(at, {}, root);
+  const withTheirs = ({ entry, items }: Holds['kinds'][number]) => {
+    const more = [...theirs[entry.kind.kind].items, ...[theirs[entry.kind.kind].unread ?? []].flat()];
+    return { entry, items: [...items, ...more.filter(item => !items.some(own => own.key === item.key))] };
+  };
+  const notComing = { commands: contents.commands.length, hooks: contents.hooks.length > 0, lspServers: contents.lspServers.length, bin: contents.bin };
+  return { holds: 'plugin', kinds: read.map(withTheirs), notComing };
 }
 /** Whether an item an earlier kind found holds this path (from the repository's root): its folder joined with one of its files. */
 const heldEarlier = (earlier: readonly ItemThere<unknown>[], path: string) => earlier.some(item => item.files.some(file => join(item.folder, file) === path));
@@ -104,7 +127,7 @@ const usableName = (name: string) => !!name && name.length <= 200 && !/[/\\:\0]/
 /**
  * One skill's folder at a link: its name (its SKILL.md's, else its folder's, `folderName`), its files and its content, or why it
  * is unreadable. Its files are listed whatever else, so a later kind never reads one of them as its own (heldEarlier).
- * `byFolder`: named by its folder alone, as every tool's copy is (a plugin's skill: pluginlibrary.ts), its SKILL.md still read.
+ * `byFolder`: named by its folder alone, as every tool's copy is (a marketplace's plugin's skill: pluginItems), its SKILL.md still read.
  */
 export async function skillAt(root: string, folder: string, folderName: string, byFolder = false): Promise<ItemThere<SkillContent>> {
   const directory = join(root, folder), file = join(directory, 'SKILL.md'), tree = await readTree(directory), files = [...tree.files.keys()].sort();
@@ -168,7 +191,7 @@ async function agentFileAt(root: string, path: string, loose: boolean): Promise<
   const text = await readFile(join(root, path), 'utf8').catch(() => undefined);
   return text === undefined ? { ...file, unreadable: `${path} can’t be read` } : agentInText(file, text, loose);
 }
-/** An agent file's text read as an agent (agentFileAt's parse; a plugin's agent file: pluginlibrary.ts), none when it is no agent. */
+/** An agent file's text read as an agent (agentFileAt's parse; a plugin's agent file: pluginItems), none when it is no agent. */
 export function agentInText(file: Pick<AgentFile, 'path' | 'tool' | 'name'>, text: string, loose: boolean): AgentFile | undefined {
   const { path, tool, name } = file;
   if (tool !== 'codex-cli') {
@@ -223,7 +246,7 @@ function agentOf(files: AgentFile[], folder: string, rootName: string): ItemTher
 // OpenCode and Codex would each hold differently.
 // Never read: a tool's or editor's own settings (.vscode/mcp.json, .cursor/mcp.json, .claude/settings.json), an `mcp.json`
 // without the dot, a .mcp.json in a folder inside (a link to that folder reads it), Central Knot's own repo layout
-// (mcp/<name>.json), and a plugin's manifest (a link holding a plugin is read as nothing: holdsAt).
+// (mcp/<name>.json), and a plugin's manifest (a plugin's own folder: its servers there are pluginItems').
 // Known miss, as the README says: a server left out stays left out while it is there, and the source never turns it Off.
 
 /** Every MCP server in the `.mcp.json` at the link's `folder` (the header above). */
@@ -244,7 +267,7 @@ export async function serversAt(root: string, folder: string, rootName: string, 
 }
 
 /**
- * One entry of a .mcp.json at a link (serversAt's header), or of a plugin's servers (pluginlibrary.ts), `at` the folder it runs
+ * One entry of a .mcp.json at a link (serversAt's header), or of a plugin's servers (pluginItems), `at` the folder it runs
  * from: its server and Claude Code's own part, or why it is unreadable or left out.
  */
 export async function serverAt(where: { folder: string; folderName: string; files: string[]; key: string; name: string }, raw: unknown, twin: boolean, at: string): Promise<ItemThere<NeutralServer>> {
@@ -261,6 +284,54 @@ export async function serverAt(where: { folder: string; folderName: string; file
   const mixed = server.transport === 'stdio' ? !!(server.url ?? server.headers) : !!(server.command ?? server.args ?? server.env ?? server.cwd);
   if (mixed) return unreadable('it has both a command’s fields and a URL’s, which not every tool can hold', true);
   return { ...where, hash: entry.hash, content: server, own: { 'claude-cli': ownPartOf(entry) } };
+}
+
+// ---------- A plugin's items ----------
+// One reader for a plugin's skills, agents and MCP servers (pluginItems), from its files as catalogdetail.ts pluginFiles finds them
+// (as Claude Code finds a plugin's: the paths its plugin.json names, else skills/, agents/ and .mcp.json, or one skill at its root),
+// through the per-item checks a link's readers use (skillAt, agentInText, serverAt), never their place-finding; what is no agent
+// at a link (a README, a page with no front matter) is none here either. Each item is named as a link's are: its folder from
+// `root`, and that folder's own name (`rootName` for the root), never Central Knot's copy's. Two routes read with it, a
+// marketplace's plugin in Pi and OpenCode (`marketplace`: pluginlibrary.ts readPlugin) and a plugin's own folder at a source's
+// link (`link`: holdsAt), and they differ only in a skill's key (library.ts A SOURCE says the two rules). What its files leave
+// unread (PluginFiles `unread`) is an unreadable line of that kind: one by name, or one line (`unread`) for a folder of them that
+// can't be listed, a servers file that isn't JSON, or a plugin.json that can't be read (then every kind's).
+
+/** The route a plugin's items are read for (the header above). */
+export type PluginRoute = 'marketplace' | 'link';
+/** One kind's items in a plugin (with a line for each one its files name and can't read), and the line for what of that kind they leave unread as a whole. */
+export interface PluginKindRead { items: ItemThere<unknown>[]; unread?: ItemThere<unknown> }
+
+/** Of a kind's items, two of one key are both left out, said once each (a plugin's folders are read nested). */
+const onceEach = (items: ItemThere<unknown>[], what: string) => items.map((item): ItemThere<unknown> => {
+  if (items.filter(other => other.key === item.key).length < 2) return item;
+  const { folder, folderName, key, name, files } = item;
+  return { folder, folderName, key, name, files, unreadable: `two ${what} in the plugin are named ${name}`, leftOut: true };
+});
+
+/** Each kind's items in a plugin's files, read for `route` (the header above). */
+export async function pluginItems(files: PluginFiles, root: string, rootName: string, route: PluginRoute): Promise<Record<ItemKind, PluginKindRead>> {
+  const where = (path: string) => { const folder = relative(root, path); return { folder, folderName: folder ? basename(folder) : rootName }; };
+  const plugin = { ...where(files.folder), files: [] };
+  const named = (names: string[]): ItemThere<unknown>[] => names.filter(name => name !== '*').map(name => ({ ...plugin, key: itemKey(name), name, unreadable: 'it can’t be read' }));
+  const whole = (unread: boolean, what: string, key: string, why: string): Pick<PluginKindRead, 'unread'> => (!unread ? {}
+    : { unread: { ...plugin, key: itemKey(files.unread.manifest ? 'plugin.json' : key), unreadable: files.unread.manifest ? `its .claude-plugin/plugin.json can’t be read, so where its ${what} are isn’t known` : why } });
+  const skills = await Promise.all(files.skills.map(({ name, dir }) => { const at = where(dir); return route === 'link' ? skillAt(root, at.folder, at.folderName) : skillAt(root, at.folder, name, true); }));
+  const agents = files.agents.flatMap(({ name, path, text, whole: all }): ItemThere<unknown>[] => {
+    const file = join(files.folder, path), there = { ...where(dirname(file)), key: itemKey(name), name, files: [basename(file)] }, shown = relative(root, file);
+    const read = all ? agentInText({ path: shown, tool: 'claude-cli', name }, text, false) : undefined;
+    // A page (a README, or a .md with no front matter) is no agent, as at any link (agentsAt's header).
+    if (NOT_AN_AGENT.test(basename(file)) || (all && !read)) return [];
+    if (!read) return [{ ...there, unreadable: `${shown} is larger than Central Knot copies` }];
+    return ['unreadable' in read ? { ...there, unreadable: read.unreadable } : { ...there, hash: agentHash(read.agent), content: read.agent, own: { 'claude-cli': read.text } }];
+  });
+  const keys = Object.keys(files.servers).map(itemKey);
+  const servers = await Promise.all(Object.entries(files.servers).map(([name, raw]) => serverAt({ ...plugin, key: itemKey(name), name }, raw, keys.filter(key => key === itemKey(name)).length > 1, files.folder)));
+  return {
+    skill: { items: [...named(files.unread.skills), ...onceEach(skills, 'skills')], ...whole(files.unread.skills.includes('*'), 'skills', 'skills', 'a folder of its skills is there but can’t be listed') },
+    agent: { items: [...named(files.unread.agents), ...onceEach(agents, 'agents')], ...whole(files.unread.agents.includes('*'), 'agents', 'agents', 'a folder of its agents is there but can’t be listed') },
+    mcp: { items: servers, ...whole(files.unread.servers, 'MCP servers', '.mcp.json', 'a file of its MCP servers can’t be read as JSON') },
+  };
 }
 
 // ---------- A read, and why it holds nothing ----------
@@ -281,7 +352,7 @@ const canBringIn = (found: Holds) => found.kinds.some(each => each.items.some(it
 export function readOf(source: SourceRecord, found: Holds, entry: SourceKind, recorded: ReadonlySet<string>, clicked: RowClick = {}): SourceRead<unknown> {
   const there = itemsOf(found, entry), names: SourceRead<unknown>['names'] = new Map();
   for (const item of there) names.set(item.key, 'unreadable' in item ? { unreadable: item.unreadable } : { name: item.name, hash: item.hash, content: item.content, ...(item.own ? { own: item.own } : {}) });
-  const whole = found.holds === 'items' && found.kinds.some(each => each.items.some(wasRead)) && there.every(wasRead);
+  const whole = (found.holds === 'items' || found.holds === 'plugin') && found.kinds.some(each => each.items.some(wasRead)) && there.every(wasRead);
   return { id: source.id, link: source.link, commitAt: source.commitAt, kind: entry.kind.kind, mergeWith: entry.kind.merge, whole, names, recorded, ...clicked };
 }
 
@@ -290,17 +361,25 @@ const anyItem = (found: Holds) => orList(found.kinds.map(each => each.entry.kind
 
 /**
  * Why what is at a link can't be read, in words, none when it can: the link's folder isn't in the read (moved or deleted there;
- * or, for a source's row, no read of it is kept here), a plugin or a marketplace, or nothing of any kind there (each kind's
- * part from its entry: SourceKind `noneThere`). Look refuses Add for it, and a source's row says it; an item there that can't
- * be read says why on its own line (sources.ts namesOf).
+ * or, for a source's row, no read of it is kept here), a marketplace or a plugin its repository's marketplace lists (each goes on
+ * the Plugins page: marketWhy), or nothing of any kind there (each kind's part from its entry: SourceKind `noneThere`; a plugin's
+ * own folder, nothing in it). Look refuses Add for it, and a source's row says it; an item there that can't be read says why on its
+ * own line (sources.ts namesOf).
  */
 export function unreadWhy(found: Holds, where: Pick<SourceRecord, 'ref' | 'folder'>): string | undefined {
   const at = where.folder ? `the folder ${where.folder}` : 'its root';
   if (found.holds === 'missing') return `Nothing at ${at} on ${where.ref} to read: moved or deleted there, or not read here yet.`;
-  if (found.holds === 'plugin') return 'The link holds a plugin (a .claude-plugin or .codex-plugin folder). Plugins from a link come in a later version; nothing here is read.';
-  if (found.holds === 'marketplace') return 'The link holds a marketplace. Add it on the Plugins page; plugins from a link come in a later version, so nothing here is read.';
+  if (found.holds === 'marketplace' || found.holds === 'listed') return marketWhy(found);
   if (found.holds === 'empty') return `No ${anyItem(found)} at ${at}: ${found.kinds.map(each => each.entry.noneThere).join('; ')}.`;
+  if (found.holds === 'plugin' && !found.kinds.some(each => each.items.length)) return `The plugin at ${at} holds no ${anyItem(found)}.`;
   return undefined;
+}
+/** Why a marketplace, or a plugin one lists, isn't read here: it goes on the Plugins page, with a switch for each plugin. */
+function marketWhy({ holds, market }: Holds): string {
+  if (!market || 'problem' in market) return `The link holds a marketplace, which goes on the Plugins page, but it can’t be read: ${market?.problem ?? 'its marketplace.json is missing'}`;
+  const plugins = `${market.plugins} plugin${market.plugins === 1 ? '' : 's'}`;
+  if (holds === 'listed') return `The link’s folder is the plugin ${market.plugin}, which its repository’s marketplace, ${market.name}, lists: it goes on the Plugins page with that marketplace (${plugins}), where it has a switch of its own, so a source doesn’t read it.`;
+  return `The link holds a marketplace, ${market.name}, with ${plugins}: it goes on the Plugins page, where each of its plugins has a switch of its own, so a source doesn’t read it.`;
 }
 /** Why Look refuses Add: nothing there can be read (unreadWhy), or nothing there can be brought in (each item's line says why). */
 export const nothingToAddWhy = (found: Holds, where: Pick<SourceRecord, 'ref' | 'folder'>) =>
