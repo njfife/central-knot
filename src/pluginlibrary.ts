@@ -6,7 +6,8 @@
 // - running it (runItems): each kind's pass (sources.ts sourceKinds) with that read and the clicks the plugin's switch makes on
 //   its items, one pass per kind, as a profile switch makes them; and its Undo (itemsBack);
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool), from one look at the home that every
-//   plugin of a view shares (lookAtKinds).
+//   plugin of a view shares (lookAtKinds), with why none of them is on in such a tool, which the run's report says too
+//   (pluginstatus.ts notInWhy).
 // When a plugin is read: at a click that brings it into Pi or OpenCode (On, Add, a tool's box ticked), at its Update and
 // Update all, and at the automatic updates' check, for a plugin with items (withItemsOf) or a tool new here (marketplaces.ts);
 // Off and a box unticked only click. A plugin whose parts from before the library wait to be moved takes this route
@@ -28,6 +29,7 @@ import { pluginLink } from './sourcelink.ts';
 import { sourceKinds, type SourceKind } from './sources.ts';
 import { recordedIds } from './sourcestore.ts';
 import type { Change, HarnessId, PassResult, PluginItemLine, PluginItemsView, SyncNotice } from './types.ts';
+import { notInWhy, type ItemOut } from './pluginstatus.ts';
 import { toolNames } from './words.ts';
 
 /** The managed tools a plugin's items go to as library items: those with no plugin installer (Pi, OpenCode). */
@@ -132,7 +134,12 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
     if (was && was.on === item.on && was.except.join() === item.except.join()) return [];
     return [{ kind, key: item.key, on: !!was?.on, except: was?.except ?? item.except }];
   });
-  const done = named.map((tool): PluginDone => ({ ...op, tool, report: reportIn(tool, ask, before, after, results, files.problem) }));
+  // Why none is on in a tool, from what this run knows (no other look): an item made now and kept out had a copy of that name there.
+  const made = new Set(results.flatMap(({ result }) => result.sourced ?? []).filter(said => said.answer === 'make').map(said => said.name));
+  const outs = (tool: HarnessId) => [...read.flatMap(each => [...each.names].flatMap(([key, name]) => ('unreadable' in name ? [{ name: key, out: { cannot: name.unreadable } }] : []))),
+    ...results.flatMap(({ result }) => result.sourced ?? []).flatMap(said => (said.answer === 'differs' || said.answer === 'another' ? [{ name: said.name, out: said.answer === 'differs' ? 'yours' as const : 'another' as const }] : [])),
+    ...after.filter(({ item }) => !wantedIn(item, tool)).map(({ item }) => ({ name: item.name, out: outFor(item, tool, item.except.includes(tool) && made.has(item.name)) }))];
+  const done = named.map((tool): PluginDone => ({ ...op, tool, report: reportIn(tool, ask, before, after, results, files.problem ?? notInWhy(tool, entry.plugin, outs(tool)), !!files.problem) }));
   return { ...ran(done, results), ...(back.length ? { back } : {}) };
 }
 type Op = Pick<PluginOp, 'source' | 'marketName' | 'plugin' | 'action'>;
@@ -155,17 +162,26 @@ function clickOn(ask: ItemsAsk, item: LibraryItem, own: (tool: HarnessId) => boo
   return { key: item.key, on, except, forPlugin: entry.id };
 }
 
-/** One tool's report of a run on a plugin's items: what it has of them now, and whether the run changed what it has. */
-function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], problem?: string): PluginDone['report'] {
+/**
+ * One tool's report of a run on a plugin's items: what it has of them now, and whether the run changed what it has. `why`: why
+ * none is on there, the plugin's files unreadable (`unread`) or each item's reason (notInWhy).
+ */
+function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], why: string, unread: boolean): PluginDone['report'] {
   const on = onIn(after, tool), has = on > 0, name = toolNames[tool];
   const changed = has !== onIn(before, tool) > 0 || wroteIn(results, tool);
   const said = `${on} of its ${after.length} items ${on === 1 ? 'is' : 'are'} on in ${name}.`;
   const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message, runs: [], changed });
   if ('outOf' in ask) return report(has ? 'failed' : 'uninstalled');
-  if (!has && 'into' in ask) return report('held', problem ?? `None of its items can go into ${name}.`);
-  if (problem && 'read' in ask) return report('failed', problem);
-  return report('read' in ask && !ask.bring ? 'updated' : 'installed', problem ? `${said} ${problem}` : said);
+  if (!has && 'into' in ask) return report('held', why);
+  if (unread && 'read' in ask) return report('failed', why);
+  return report('read' in ask && !ask.bring ? 'updated' : 'installed', unread ? `${said} ${why}` : said);
 }
+
+/**
+ * Why one of a plugin's items is not on in a tool with no installer: off on its own row, deleted, or kept out of it (`own`: the
+ * tool has a copy of its own of that name, never written over).
+ */
+const outFor = (item: LibraryItem, tool: HarnessId, own: boolean): ItemOut => (item.deleted ? 'deleted' : !item.on ? 'off' : own ? 'own' : 'kept');
 const wroteIn = (results: Passed[], tool: HarnessId) => results.some(({ result }) => result.results.some(each => each.harness === tool && (each.outcome === 'written' || each.outcome === 'removed')));
 
 /**
@@ -203,29 +219,43 @@ export function itemsView(tools: readonly HarnessId[], looks: KindLooks, entry: 
   const lines: PluginItemLine[] = [], linked = linkedIn(looks.map(({ kind, look }) => ({ kind: kind.kind.kind, library: look.library })), entry.id);
   const on = Object.fromEntries(itemTools(tools).map(tool => [tool, onIn(linked, tool)]));
   let ready = false;
+  // Each name's reason in each tool it isn't on in, given that tool: what notInWhy says where none is on.
+  const outs: ((tool: HarnessId) => { name: string; out: ItemOut } | undefined)[] = [];
   for (const { kind, look } of looks) {
     const items = look.library.items, read = reads?.find(each => each.kind === kind.kind.kind);
     const answers = read ? sourceAnswers(items, read, read.recorded, { copies: item => copiesOf(look, item) }) : new Map();
+    const reason = (line: PluginItemLine, item?: LibraryItem) => (tool: HarnessId) => (line.state === 'not-brought' ? { name: line.name, out: line.why === YOURS ? 'yours' as const : line.why === ANOTHER ? 'another' as const : { cannot: line.why! } }
+      : line.state === 'deleted' ? { name: line.name, out: 'deleted' as const }
+      : item && !wantedIn(item, tool) ? { name: line.name, out: outFor(item, tool, !!look.disk.byKey.get(item.key)?.[tool] && item.applied[tool] === undefined) } : undefined);
     for (const [key, answer] of answers) {
       const item = items[key], there = read!.names.get(key), name = there && 'name' in there ? there.name : item?.name ?? key;
       if (['update', 'make', 'drop'].includes(answer)) ready = true;
       lines.push(lineOf(kind, key, name, item, answer, there && 'unreadable' in there ? there.unreadable : undefined));
+      if (answer !== 'make') outs.push(reason(lines.at(-1)!, item?.source === entry.id ? item : undefined));
     }
     for (const item of Object.values(items)) {
       if (answers.has(item.key) || item.deleted) continue;
-      if (item.source === entry.id) lines.push(lineOf(kind, item.key, item.name, item, 'nothing'));
+      if (item.source === entry.id) { lines.push(lineOf(kind, item.key, item.name, item, 'nothing')); outs.push(reason(lines.at(-1)!, item)); }
       else if (read?.whole && !item.on && !item.source && fromLinkSinceTakeIn(item, read.link)) lines.push({ kind: kind.kind.kind, key: item.key, name: item.name, state: 'removed' });
     }
   }
-  return { lines, on, of: linked.length, ...(ready ? { ready: true as const } : {}), ...(problem ? { problem } : {}) };
+  // Where a plugin that is On is wanted and none of its items is on: why. Not where a name new to it comes in at its install (a
+  // tick, or the automatic updates for a tool new here), nor for a plugin not read now (its problem is said instead).
+  const away = reads && !lines.some(line => line.state === 'new') ? itemTools(tools).filter(tool => entry.on && !entry.except.includes(tool) && !on[tool]).map(tool => {
+    const why = outs.flatMap(reason => reason(tool) ?? []);
+    return [tool, { said: notInWhy(tool, entry.plugin, why), tickHelps: why.some(({ out }) => out === 'kept' || out === 'off' || out === 'deleted') }] as const;
+  }) : [];
+  return { lines, on, of: linked.length, ...(ready ? { ready: true as const } : {}), ...(problem ? { problem } : {}), ...(away.length ? { notIn: Object.fromEntries(away) } : {}) };
 }
 
+/** A name not brought in, as its line says why: his own item of that name, or another source's. */
+const YOURS = 'you have your own', ANOTHER = 'another source has it';
 /** One name's line in "Its items", from the table's answer for it (library.ts SourceAnswer). */
 function lineOf(kind: SourceKind, key: string, name: string, item: LibraryItem | undefined, answer: string, unreadable?: string): PluginItemLine {
   const base = { kind: kind.kind.kind, key, name };
   if (unreadable) return { ...base, state: 'not-brought', why: unreadable };
   if (answer === 'make') return { ...base, state: 'new' };
   if (answer === 'deleted') return { ...base, state: 'deleted' };
-  if (answer === 'differs' || answer === 'another') return { ...base, state: 'not-brought', why: answer === 'another' ? 'another source has it' : 'you have your own' };
+  if (answer === 'differs' || answer === 'another') return { ...base, state: 'not-brought', why: answer === 'another' ? ANOTHER : YOURS };
   return { ...base, state: answer === 'update' ? 'update' : answer === 'drop' ? 'going' : 'linked', on: !!item?.on, except: item?.except ?? [] };
 }

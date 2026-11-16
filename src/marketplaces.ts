@@ -371,20 +371,23 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * Each listed plugin with items (pluginlibrary.ts withItemsOf), read from its marketplace's copy as the table reads it
-   * (itemsView): its page's "Its items", and what Pi and OpenCode have of it (pluginstatus.ts toolNow). A plugin whose parts wait
-   * to be moved (pluginstatus.ts waitsToMove) is not read: it has no Its items, so Update and Update all bring it nothing. The
-   * home is looked at once for them all (pluginlibrary.ts lookAtKinds), when the first is read.
+   * (itemsView): its page's "Its items", and what Pi and OpenCode have of it (pluginstatus.ts toolNow). A plugin that is On with
+   * nothing linked is read too, and listed only where none of it can be on in a tool it is wanted in (itemsView `notIn`), so its
+   * page says why. A plugin whose parts wait to be moved (pluginstatus.ts waitsToMove) is not read: it has no Its items, so
+   * Update and Update all bring it nothing. The home is looked at once for them all (pluginlibrary.ts lookAtKinds), when the first is read.
    */
   async function withItems(ctx: engine.PluginContext, share: ShareContext, tools: HarnessId[], marketplaces: MarketplaceView[], entries: PluginEntry[]) {
     const read = await withItemsOf(share, entries), recorded = (await recordedIds(share.home)).ids;
+    const asked = [...read, ...entries.filter(entry => entry.on && !read.includes(entry) && itemTools(tools).some(tool => !entry.except.includes(tool)))];
     let looks: KindLooks | undefined;
     for (const market of marketplaces) for (const plugin of market.plugins) {
-      const entry = entryOf({ tools: [], plugins: read }, market.source, plugin.name);
+      const entry = entryOf({ tools: [], plugins: asked }, market.source, plugin.name);
       if (!entry || waitsToMove(market, plugin.name)) continue;
       const at: Awaited<ReturnType<typeof itemFiles>> = plugin.gone ? { commitAt: '', problem: MARKET_UNREAD } : await itemFiles(ctx, market.source, plugin.name);
       const reads = at.files && await readPlugin(at.files, entry, at.commitAt, recorded, []);
       looks ??= await lookAtKinds(share, tools);
-      (market.items ??= {})[plugin.name] = itemsView(tools, looks, entry, reads || undefined, at.problem);
+      const shown = itemsView(tools, looks, entry, reads || undefined, at.problem);
+      if (read.includes(entry) || shown.notIn) (market.items ??= {})[plugin.name] = shown;
     }
   }
 

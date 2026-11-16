@@ -89,6 +89,8 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     // A plugin a bundled build doesn't include says why here, on the page, once for every tool.
     notIncluded ? h('p.plugin-panel-hint', { id: 'plugin-not-included' }, notIncluded) : null,
     waiting.length ? h('p.plugin-panel-hint', { id: 'plugin-parts-waiting' }, waitingWords(view, entry, plugin.name, waiting)) : null,
+    // Where none of its items is on in a tool that takes no plugins, why (pluginstatus.ts notInWhy), as its run's report says.
+    view.tools.map(tool => entry.items?.[plugin.name]?.notIn?.[tool]).map((why, at) => (why ? h('p.plugin-panel-hint', { id: `plugin-not-in-${view.tools[at]}` }, why.said) : null)),
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo);
       return h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),

@@ -726,9 +726,10 @@ export interface MarketplaceView {
 export interface PluginItemLine { kind: ItemKind; key: string; name: string; state: 'linked' | 'update' | 'going' | 'new' | 'removed' | 'deleted' | 'not-brought'; on?: boolean; except?: HarnessId[]; why?: string }
 /**
  * A plugin's items as its page shows them: its lines, how many of its `of` items linked to it are on in each tool with no installer
- * (`on`), whether Update has something to do, and why the plugin can't be read now.
+ * (`on`), whether Update has something to do, and why the plugin can't be read now. `notIn`: for a plugin On, each tool it is
+ * wanted in where none is on, why (pluginstatus.ts notInWhy), and whether a tick on that tool's box brings some in (`tickHelps`).
  */
-export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; of: number; ready?: true; problem?: string }
+export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; of: number; ready?: true; problem?: string; notIn?: Partial<Record<HarnessId, { said: string; tickHelps: boolean }>> }
 
 /**
  * One named part of a plugin (a skill, command or agent): what it says it does, its whole file (SKILL.md or NAME.md) as
