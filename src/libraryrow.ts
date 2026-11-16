@@ -279,6 +279,12 @@ const offWhere = (leftOut: readonly string[]) => (leftOut.length ? 'in no tool C
 
 /** The home's harnesses by name, as a sentence lists them ("all 3 tools", or their names). */
 const named = (some: readonly string[], tools: readonly string[]) => toolsPhrase([...some], [...tools]);
+/**
+ * The tools a click on an item leaves it in: those where its write or removal didn't go through (`notIn`, clickplan.ts
+ * clickResults), and those whose copy can't be seen for sure (`row.unseen`: two folders named alike but for case, say), where
+ * no pass changes anything and so no result names the tool.
+ */
+export const stillIn = (row: LibraryRow, notIn: readonly string[], tools: readonly string[]) => tools.filter(tool => notIn.includes(tool) || !!row.unseen?.[tool]);
 const harnessesWhere = (row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], ...states: HarnessIs[]) =>
   tools.filter(tool => states.includes(harnessIs(row, item, tool)));
 
@@ -453,6 +459,8 @@ export function sentences(words: RowWords) {
   function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = []): { text: string; title: string } | undefined {
     const place = placeOf(item);
     if (place === 'off' && row.waits?.length) return { text: `still in ${andList(row.waits.map(toolName))} until Write`, title: `Off. Central Knot keeps this ${noun}; its ${copy} leaves ${andList(row.waits.map(toolName))} when you click Write to Claude Code.` };
+    const unseen = stillIn(row, [], tools);
+    if (place === 'off' && unseen.length) return { text: `still in ${andList(unseen.map(toolName))}`, title: unseen.map(tool => row.unseen![tool]).join(' ') };
     const none = leftOut.length ? `No tool it manages has it until you turn it on; ${andList(leftOut.map(toolName))}, left out, ${leftOut.length === 1 ? 'keeps whatever it has' : 'keep whatever they have'}.`
       : 'No tool has it until you turn it on.';
     if (place === 'off') return { text: offWhere(leftOut), title: `Central Knot keeps this ${noun} and its versions. ${none}` };
@@ -501,7 +509,9 @@ export function sentences(words: RowWords) {
       const where = on ? `, in ${named(on, tools)}.` : '. It is Off, so no tool was changed.';
       return `${name}: ${theVersion(version.from)}, ${when}, is current again${where}`;
     },
-    deleted: (name: string, wasOn: boolean) => `${name} is deleted from Central Knot${wasOn ? ', and out of every tool' : ''}. History can restore it.`,
+    /** `left`: the tools it is still in (stillIn). */
+    deleted: (name: string, wasOn: boolean, left: readonly string[] = [], tools: readonly string[] = []) =>
+      `${name} is deleted from Central Knot${!wasOn ? '' : left.length ? `, but still in ${named(left, tools)}` : ', and out of every tool'}. History can restore it.`,
     /** Beside Delete from Central Knot, before it is armed: how it differs from Off. */
     deleteOffer: 'Off keeps it here; Delete removes it from Central Knot.',
     /** Under Delete it now: what happens, and for how long History can undo it (`days`: History's days, from Settings). */

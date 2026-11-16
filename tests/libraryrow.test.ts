@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, asksWhichCopy, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, switchLabel, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, switchLabel, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyOn, kindSource } from '../src/itemrow.ts';
@@ -32,6 +32,24 @@ const marks = (hashes: LibraryRow['hashes'], agent: LibraryItem | undefined, mor
 const withItem = (hashes: LibraryRow['hashes'], agent: LibraryItem) => [row(hashes, {}, agent), agent] as const;
 const markIn = (hashes: LibraryRow['hashes'], agent: LibraryItem, tool: string) => harnessIs(row(hashes, {}, agent), agent, tool);
 const lineIn = (hashes: LibraryRow['hashes'], agent: LibraryItem | undefined, tool: string, where: string, more: Partial<LibraryRow> = {}) => harnessLine(row(hashes, more, agent), agent, tool, where);
+
+test('A skill whose copy in Claude Code sits beside a folder named like it but for case (a case-sensitive disk) can’t be removed there: Off and Delete say it is still in Claude Code, and so does its row', () => {
+  // deploy is On in all three tools; then the person makes ~/.claude/skills/Deploy, another skill. Claude Code's copy of
+  // deploy is unseen (skillfiles.ts readSkillsFolder), so no pass removes it, and no click's result names that tool.
+  const skills = sentences(libraryWords.skills), all = { 'claude-cli': 'a', 'copilot-cli': 'a', 'codex-cli': 'a' };
+  const twins = { 'claude-cli': 'Two folders whose names differ only by case are in Claude Code’s skills folder. Rename one so Central Knot can tell them apart.' };
+  const deploy: LibraryRow = { key: 'deploy', name: 'deploy', hashes: all, unseen: twins };
+  const noneFailed: string[] = [];
+  assert.equal(skills.said.off('deploy', stillIn(deploy, noneFailed, tools), tools),
+    'deploy is off, but still in Claude Code. Central Knot keeps it, and turning it on puts each folder back as it was.');
+  assert.equal(skills.said.deleted('deploy', true, stillIn(deploy, noneFailed, tools), tools), 'deploy is deleted from Central Knot, but still in Claude Code. History can restore it.');
+  const off = { ...newItem('deploy', 'deploy'), on: false };
+  assert.deepEqual(skills.placeTag({ ...deploy, hashes: { 'claude-cli': 'a' } }, off, tools), { text: 'still in Claude Code', title: twins['claude-cli'] });
+  // With nothing unseen, each says what it always said.
+  const seen: LibraryRow = { key: 'deploy', name: 'deploy', hashes: all };
+  assert.deepEqual([skills.said.off('deploy', stillIn(seen, noneFailed, tools), tools), skills.said.deleted('deploy', true, stillIn(seen, noneFailed, tools), tools), skills.placeTag({ key: 'deploy' }, off, tools)?.text],
+    ['deploy is off: no tool has it. Central Knot keeps it, and turning it on puts each folder back as it was.', 'deploy is deleted from Central Knot, and out of every tool. History can restore it.', 'in Central Knot only']);
+});
 
 test('An agent stands in one of three places: on, off (in Central Knot only), or found; a deleted one is found again', () => {
   assert.deepEqual([placeOf(item()), placeOf(item({ on: false })), placeOf(undefined), placeOf(item({ deleted: { at: 'then' } }))], ['on', 'off', 'found', 'found']);
