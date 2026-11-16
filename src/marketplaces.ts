@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { installedContents, marketplacePage, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
 import { searchPath } from './platform.ts';
 import { failedFor, reverse, runPlan, succeeded, type PlanApi, type PluginDone, type PluginOp } from './pluginplan.ts';
-import { clickGoes, clickHeld, clickRuns, entryOf, firstRecord, newEntry, owedTo, readPluginRecord, savePluginRecord, withEntry, type Holding, type Owed, type PluginEntry, type PluginRecord, type PluginSwitch, type WaitedBefore } from './pluginrecord.ts';
+import { clickGoes, clickHeld, clickRuns, entryOf, firstEntry, firstRecord, newEntry, owedTo, readPluginRecord, savePluginRecord, withEntry, type Holding, type Owed, type PluginEntry, type PluginRecord, type PluginSwitch, type WaitedBefore } from './pluginrecord.ts';
 import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts';
@@ -692,16 +692,18 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   };
 
   /**
-   * The entry a turn records: On or Off, Add's On, or one tool's box (pluginrecord.ts A TOOL'S BOX). A plugin with no entry
-   * starts from what the first read would record (On, kept out of every tool that lacks it; `has`: the tools that have it now).
+   * The entry a turn records: On or Off, Add's On, or one tool's box, by the table's rows for a box (pluginrecord.ts A TOOL'S
+   * BOX). `has`: the tools that have it now; `managed`: the home's tools, for the first read's rule.
    */
-  function turnedEntry(before: PluginEntry | undefined, what: PluginTurn, tool: HarnessId | undefined, fresh: () => PluginEntry, has: HarnessId[]): PluginEntry | undefined {
+  function turnedEntry(before: PluginEntry | undefined, what: PluginTurn, tool: HarnessId | undefined, fresh: () => PluginEntry, has: HarnessId[], managed: HarnessId[]): PluginEntry | undefined {
     if (what === 'on' || what === 'off') return { ...(before ?? fresh()), on: what === 'on' };
     if (what === 'add') return before ? undefined : { ...fresh(), on: true };
     if (!tool) return undefined;
-    const base = before ?? { ...fresh(), on: true, except: harnessIds.filter(each => !has.includes(each)) };
-    const out = base.on || what === 'keep-out' ? base.except : harnessIds;
-    return { ...base, on: base.on || what === 'let-in', except: harnessIds.filter(each => (each === tool ? what === 'keep-out' : out.includes(each))) };
+    if (before && !before.on && what === 'keep-out') return before;
+    const plain = before ?? fresh(), holders = [...new Set(what === 'let-in' ? [...has, tool] : has)].map(each => ({ ...plain, tool: each }));
+    const base = before?.on ? before : { ...plain, on: true, except: holders.length ? firstEntry(managed, holders, [], holders[0]!).except : [...harnessIds] };
+    if (what === 'keep-out' && has.every(each => each === tool)) return { ...base, on: false };
+    return { ...base, except: harnessIds.filter(each => (each === tool ? what === 'keep-out' : base.except.includes(each))) };
   }
 
   /**
@@ -722,7 +724,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (!entry || !listed || (tool && !shown.tools.includes(tool))) return { stopped: 'It is no longer listed here, so nothing was changed. Read the page again.', done: [] };
     const before = entryOf(known.record, source, plugin);
     const has = (Object.entries(switchOf(shown, entry, listed, known, known.record).tools) as [HarnessId, Owed][]).filter(([, owed]) => owed.has === 'whole' || owed.has === 'items').map(([each]) => each);
-    const after = turnedEntry(before, what, tool, () => newEntry(entry.source, entry.name || before?.marketName || '', plugin, false), has);
+    const after = turnedEntry(before, what, tool, () => newEntry(entry.source, entry.name || before?.marketName || '', plugin, false), has, shown.tools);
     if (!after) return { stopped: 'That doesn’t apply to this plugin now, so nothing was changed. Read the page again.', done: [] };
     const record = withEntry(known.record, source, plugin, after);
     // Written onto the record as it is then, so what a check wrote while this click was reading (a tool joining) stays.
@@ -739,15 +741,16 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const other = entry.states[plugin]?.[each];
       const otherMarket = clickGoes(what) === 'out' && other?.state === 'held' ? other.reason : undefined;
       const why = owed.has === 'unknown' ? recordUnread(each) : clickHeld(what, owed) ?? otherMarket;
-      // A tool whose own add refused this marketplace is said once, where its state is (pluginstatus.ts blocked), not on every click.
-      if (why && !entry.refusedBy?.[each]) held.push({ source: entry.source, marketName, plugin, tool: each, action: clickGoes(what) === 'out' ? 'remove' : 'install', report: { tool: each, outcome: 'held', message: why, runs: [] } });
+      // A tool's refusal of this marketplace is said once, where its state is (pluginstatus.ts blocked), not on every click.
+      if (why && why !== entry.refusedBy?.[each]) held.push({ source: entry.source, marketName, plugin, tool: each, action: clickGoes(what) === 'out' ? 'remove' : 'install', report: { tool: each, outcome: 'held', message: why, runs: [] } });
     }
     const ran = ops.length ? await runPlan(ops, ownApi, String(home)) : { done: [] as PluginDone[] };
     // A copy turned off in a tool's own settings comes back off: its whole-plugin switch is turned off again after the install.
     const offBefore = (each: HarnessId) => { const state = entry.states[plugin]?.[each]; return state?.state === 'installed' && !!state.off; };
     const back = reverse(ran.done).flatMap(op => (op.action === 'install' && offBefore(op.tool) ? [op, { ...op, action: 'plugin-off' as const }] : [op]));
     // Pi and OpenCode: its items (pluginlibrary.ts).
-    const items = itemsIn.length && !ran.stopped ? await turnItems(entry.source, marketName, after, what, itemsIn) : undefined;
+    // An untick that leaves the plugin Off takes its items there as Off does: each item's `except` stays for its next On.
+    const items = itemsIn.length && !ran.stopped ? await turnItems(entry.source, marketName, after, what === 'keep-out' && !after.on ? 'off' : what, itemsIn) : undefined;
     if (items?.back) back.push({ source: entry.source, marketName, plugin, tool: itemsIn[0]!, action: 'items-back', items: items.back });
     const ended = ran.stopped ?? items?.stopped;
     return { done: [...ran.done, ...(items?.done ?? []), ...held], before: before ?? null, back, ...(ended ? { stopped: ended } : {}) };

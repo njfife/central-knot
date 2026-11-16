@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import * as engine from '../src/plugins.ts';
 import { WAITS_TO_MOVE } from '../src/pluginstatus.ts';
+import { applySkills } from '../src/skills.ts';
 import type { ActionReport, DesktopApp, HarnessId } from '../src/types.ts';
 
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -707,6 +708,70 @@ test('One tick on a plugin that is Off turns it On in that tool alone: Pi ticked
   } finally { await box.cleanup(); }
 });
 
+test('A tick on one tool reaches that tool alone: items turned off on their rows come back On in Pi, not in OpenCode', async () => {
+  const box = await switchHome({ tools: ['claude-cli', 'pi-cli', 'opencode-cli'] });
+  try {
+    for (const folder of ['.pi/agent', '.config/opencode']) await mkdir(join(box.home, folder), { recursive: true });
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    const at = fivePlaces(box);
+    assert.deepEqual([await at.pi(), await at.opencode()], [true, true]);
+    await applySkills(box.host.share!(), ['claude-cli', 'pi-cli', 'opencode-cli'], [{ key: 'pdf', on: false, except: [] }]);
+    assert.deepEqual([await at.pi(), await at.opencode()], [false, false], 'turned off on its row: out of both');
+    await box.markets.turn(box.root, 'pdf', 'let-in', 'pi-cli', box.home);
+    assert.deepEqual([await at.pi(), await at.opencode()], [true, false]);
+  } finally { await box.cleanup(); }
+});
+
+test('Unticking the only tool that has it turns the plugin Off, its except as it was, so On brings it back where it last was', async () => {
+  const box = await switchHome();
+  try {
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    const at = fivePlaces(box);
+    await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    await box.markets.turn(box.root, 'pdf', 'keep-out', 'pi-cli', box.home);
+    assert.deepEqual([(await at.entry()).on, (await at.entry()).except, await at.pi()], [false, ['claude-cli'], false]);
+    box.calls.length = 0;
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    assert.deepEqual([(await at.entry()).on, await at.pi(), at.claude()], [true, true, []], 'back in Pi, where it last was; Claude Code stays out');
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin found installed by hand, its only box unticked: uninstalled there and recorded Off, not On in no tool', async () => {
+  const box = await switchHome();
+  try {
+    await box.markets.install(box.root, 'team', 'pdf', ['claude-cli'], box.home);
+    box.calls.length = 0;
+    await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    const entry = (await box.record()).plugins.find(each => each.plugin === 'pdf')!;
+    assert.deepEqual([fivePlaces(box).claude(), entry.on], [['uninstall pdf claude-cli'], false]);
+  } finally { await box.cleanup(); }
+});
+
+test('An Off plugin’s box unticked where its uninstall failed takes that copy out and records nothing: On restores the setup it had', async () => {
+  let failing = true;
+  const installed = () => join(box.home, '.claude/plugins/installed_plugins.json');
+  const box = await switchHome({ engine: { uninstall: async (_context, marketplace, plugin, tool) => {
+    if (failing) return { tool, outcome: 'failed', message: 'It failed.', runs: [] };
+    box.calls.push(`uninstall ${plugin} ${tool}`);
+    const { [`${plugin}@${marketplace}`]: _gone, ...rest } = JSON.parse(await readFile(installed(), 'utf8')).plugins;
+    await put(installed(), JSON.stringify({ version: 2, plugins: rest }));
+    return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true };
+  } } });
+  try {
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    failing = false;
+    box.calls.length = 0;
+    await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    const at = fivePlaces(box);
+    assert.deepEqual([at.claude(), (await at.entry()).on, (await at.entry()).except], [['uninstall pdf claude-cli'], false, []]);
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    assert.deepEqual([at.claude().at(-1), await at.pi()], ['install pdf claude-cli', true]);
+  } finally { await box.cleanup(); }
+});
+
 test('One tick on a plugin never turned on records it On in that tool alone, by the first read’s rule', async () => {
   const box = await switchHome();
   try {
@@ -716,7 +781,17 @@ test('One tick on a plugin never turned on records it On in that tool alone, by 
   } finally { await box.cleanup(); }
 });
 
-test('A tool still holding a plugin that is Off keeps a ticked box: unticked, it is taken out there and kept out; its Undo puts it back', async () => {
+test('A tick on an Off plugin whose every managed tool then has it records it as the first read would: kept out of nothing', async () => {
+  const box = await switchHome({ tools: ['claude-cli'] });
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    await box.markets.turn(box.root, 'pdf', 'let-in', 'claude-cli', box.home);
+    assert.deepEqual((await box.record()).plugins.map(entry => [entry.plugin, entry.on, entry.except]), [['pdf', true, []]]);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool still holding a plugin that is Off keeps a ticked box: unticked, it is taken out there, the record as it was; its Undo puts it back', async () => {
   const box = await switchHome();
   try {
     await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
@@ -726,7 +801,7 @@ test('A tool still holding a plugin that is Off keeps a ticked box: unticked, it
     box.calls.length = 0;
     const out = await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
     const entry = async () => (await box.record()).plugins.find(each => each.plugin === 'pdf')!;
-    assert.deepEqual([box.calls, (await entry()).on, (await entry()).except], [['uninstall pdf claude-cli'], false, ['claude-cli']]);
+    assert.deepEqual([box.calls, (await entry()).on, (await entry()).except], [['uninstall pdf claude-cli'], false, []]);
     await box.markets.undoTurn(box.root, 'pdf', out.before!, out.back!, box.home);
     assert.deepEqual([box.calls.at(-1), (await entry()).except, (await box.switchOf('pdf')).tools['claude-cli']!.has], ['install pdf claude-cli', [], 'whole']);
   } finally { await box.cleanup(); }

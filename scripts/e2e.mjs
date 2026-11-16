@@ -1582,17 +1582,17 @@ async function practiceFlow() {
   same('Show more follows the description’s width with the same plugin open', [narrow[0], wide[0]], [true, false]);
   if (narrow[0] !== true || wide[0] !== false) console.error('description widths', narrow[1], wide[1]);
   await a.click('#sidebar-toggle'); await fullSize(a);
-  // The plugin's switch acts at once: On asks each tool's own installer (stand-ins here whose own add refuses the marketplace).
-  // Each refusal is kept until Refresh: each tool's box is then off, saying so in that tool's words, and no click tries again.
+  // The plugin's switch acts at once: On asks each tool's own installer (stand-ins here whose own add fails, saying nothing of the
+  // marketplace: no refusal to keep). Each tool's box is then empty, and a tick tries again.
   await a.click('#pswitch-page-0-document-tools');
   for (let tries = 0; tries < 60 && !(await a.exists('.plugin-problems')); tries++) await wait(100);
   check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-problems')), await a.text('.bands'));
-  same('and nothing is claimed installed: the switch is on, and each tool’s box is off, saying that tool refused the marketplace until Refresh',
+  same('and nothing is claimed installed: the switch is on, and each tool’s box is empty, a tick trying again',
     [await a.run(`document.querySelector('#pswitch-page-0-document-tools')?.getAttribute('aria-checked')`), await a.run(`[...document.querySelectorAll('.plugin-tool .cell-box')].map(box => [box.dataset.state, box.getAttribute('aria-checked'), box.disabled])`),
-      /^Claude Code: Claude Code refused this marketplace: “.+” It isn’t tried there again until Refresh/.test(await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli')?.title`) ?? '')],
-    ['true', [['cannot', 'false', true], ['cannot', 'false', true], ['cannot', 'false', true]], true]);
+      /^Not in Claude Code, though the plugin is on\. Click to put document-tools in Claude Code\./.test(await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli')?.title`) ?? '')],
+    ['true', [['missing', 'false', false], ['missing', 'false', false], ['missing', 'false', false]], true]);
   await a.shot('practice-plugins');
-  await fitsAtMinimum(a, 'a plugin page whose install didn’t finish, each tool’s box off with why');
+  await fitsAtMinimum(a, 'a plugin page whose install didn’t finish, each tool’s box empty');
   await a.click('#plugin-back');
   await fitsAtMinimum(a, 'the plugin table with its switches, one on and in no tool');
   await a.click('#popen-0-document-tools');
@@ -3944,6 +3944,8 @@ async function firstSetupFlow() {
 
 /** Force-kills the app part-way through real copies, then checks nothing half-written is visible to a tool. */
 async function crashFlow() {
+  // Its checks are one or two per skill folder in place at each kill, so their count changes from run to run: said apart.
+  const before = passes;
   execChmod();
   rmSync(HOME, { recursive: true, force: true });
   mkdirSync(COPILOT, { recursive: true });
@@ -3996,8 +3998,8 @@ async function crashFlow() {
   same('stale stages are cleared', readdirSync(join(HOME, '.copilot')).filter(name => name.startsWith('.ck-')), []);
   same('no page errors, crashes', a.pageErrors, []);
   await a.quit();
-  console.log(`crash rounds: ${crashRounds}, interrupted a copy in ${interrupted}`);
   check('at least one round really interrupted copying', interrupted > 0, interrupted);
+  console.log(`crash rounds: ${crashRounds}, interrupted a copy in ${interrupted}, ${passes - before} checks passed in this flow`);
 }
 
 /**
@@ -4224,20 +4226,20 @@ esac
   await a.click(box('claude-cli'));
   await done();
   same('a tick puts it back', [installed(), await boxIs('claude-cli')], [true, ['true', false, 'installed']]);
-  // Unticked in Claude Code, then put back there with its own command: its box is ticked, and unticking takes it out.
+  // Unticked in Claude Code, the only tool that has it (Pi is kept out): the plugin's Off, kept out of Pi as before, so its On
+  // brings it back to Claude Code. Then put back there with its own command: its box is ticked, and unticking takes it out.
   await a.click(box('claude-cli'));
   await done();
+  same('unticking the only tool that has it turns the plugin Off, its except as it was', [installed(), entry()?.on, entry()?.except, await switchIs('#pswitch-page-0-issue-tracker')], [false, false, ['pi-cli'], 'false']);
   writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'issue-tracker@ck-test-market': [{ scope: 'user', installPath: copy, version: '2.0.0' }] } }));
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && (await boxIs('claude-cli'))?.[2] !== 'stays'; tries++) await wait(100);
-  same('a plugin kept out of a tool that has it again keeps a ticked box there', await boxIs('claude-cli'), ['true', false, 'stays']);
+  same('an Off plugin a tool has again keeps a ticked box there', await boxIs('claude-cli'), ['true', false, 'stays']);
   await pictures('plugin-switch-take-out');
   await a.click(box('claude-cli'));
   await done();
-  same('unticking takes it out there', [installed(), calls().at(-1)], [false, 'plugin uninstall issue-tracker@ck-test-market --scope user']);
-  // Off, then one box ticked: On in Claude Code alone, every other tool kept out, Pi too.
-  await a.click('#pswitch-page-0-issue-tracker');
-  await done();
+  same('unticking takes it out there, and records nothing: the plugin is Off', [installed(), calls().at(-1), entry()?.on, entry()?.except], [false, 'plugin uninstall issue-tracker@ck-test-market --scope user', false, ['pi-cli']]);
+  // Off, one box ticked: On in Claude Code alone, every other tool kept out, Pi too.
   await a.click(box('claude-cli'));
   await done();
   same('one tick on an Off plugin turns it On in that tool alone', [installed(), entry()?.on, entry()?.except, inPi(), await boxIs('pi-cli'), await switchIs('#pswitch-page-0-issue-tracker')],

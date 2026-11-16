@@ -106,7 +106,7 @@ export interface LibraryRow {
   switchedOff?: readonly string[];
   /** Harnesses where the next pass's write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
   waits?: readonly string[];
-  /** Harnesses with no copy of Central Knot's that have it on through an installed plugin (matrix.ts pluginOnIn): an Off item is still on there. */
+  /** `pluginOn`: the tools with no copy of their own that have it on through an installed plugin (matrix.ts pluginOnIn): an Off item is still on there. */
   pluginOn?: readonly string[];
 }
 

@@ -422,6 +422,21 @@ test('A marketplace a tool’s own add refused is not tried there again: later i
   } finally { forgetRefusals(); await box.cleanup(); }
 });
 
+test('Only the tool’s own answer about the marketplace is a refusal: an add that failed for want of a network is said as it was, and tried again at the next click', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market'), bin = join(box.base, 'bin'), copilot = join(bin, 'copilot'), log = join(box.base, 'calls.txt');
+    await marketplace(root);
+    await mkdir(bin, { recursive: true });
+    await writeFile(copilot, `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.109." && exit 0\necho "$*" >> '${log}'\necho 'fatal: unable to access: Could not resolve host: github.com' >&2\nexit 128\n`, { mode: 0o755 });
+    const context = { ...box.context, binaries: { 'copilot-cli': copilot } }, catalog = await parseCatalog(root, root, 'folder');
+    const first = await install(context, catalog, 'marker', 'copilot-cli');
+    assert.deepEqual([first.outcome, first.message, await refusedBy(context, 'copilot-cli', root)], ['failed', 'Could not add the marketplace. fatal: unable to access: Could not resolve host: github.com', undefined]);
+    await install(context, catalog, 'marker', 'copilot-cli');
+    assert.equal((await readFile(log, 'utf8')).trim().split('\n').length, 2, 'tried again');
+  } finally { forgetRefusals(); await box.cleanup(); }
+});
+
 test('Codex is told the chosen home outright, since on Windows it finds its own from the system', { skip: noPosix }, async () => {
   const box = await sandbox();
   const saved = process.env.CODEX_HOME;

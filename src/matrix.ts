@@ -232,7 +232,7 @@ const toolList = (): Tool[] => {
 };
 /** Whether the focused harness has its own copy; with no focus, every item counts. */
 const inFocus = (skill: ItemRow) => !focus || inTool(skill, focus as HarnessId);
-/** The tools that have a person's own item through a plugin and have it on there. */
+/** A row's `pluginOn`: the tools with no copy of their own that have it on through an installed plugin (libraryrow.ts LibraryRow). */
 const pluginOnIn = (skill: ItemRow) => toolList().filter(tool => { const given = throughPluginHere(skill, tool); if (!given) return false; const item = itemThrough(skill, tool); return item ? itemOn(item) : !given.off; });
 /** An item as Central Knot's library holds it (library.ts), deleted or not; none for an item only found in a harness. */
 const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, kind).library[skill.key] : undefined);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
@@ -38,6 +38,21 @@ test('A tool the plugin is kept out of is said as not installed there, kept out;
   const mark = (tool: HarnessId) => toolMark(view, kept, 'p', tool, owedTo({ on: true, except }, tool, toolNow(view, kept, 'p', tool, undefined, false), view.tools));
   assert.deepEqual(mark('copilot-cli'), { mark: 'absent', words: 'Not installed in Copilot CLI, and kept out of it: nothing puts it there by itself.' });
   assert.deepEqual(mark('codex-cli'), { mark: 'cannot', words: 'Codex: other' }, 'Codex holds another marketplace of this name: its box is off, saying why');
+});
+
+test('A tool’s box: ticked where the plugin is; off before the click where its copy can’t be taken out here, saying why on its line; one he unticked says so', () => {
+  const on = (except: HarnessId[] = []): MarketplaceView => ({ ...entry, switches: { p: { entry: { on: true, except }, tools: {} } } });
+  const box = (at: MarketplaceView, tool: HarnessId, shown = view) => boxOf(shown, at, 'p', tool, toolMark(shown, at, 'p', tool, owedTo({ on: true, except: at.switches!.p!.entry!.except }, tool, toolNow(shown, at, 'p', tool, undefined, false), shown.tools)));
+  assert.deepEqual(box(on(), 'claude-cli'), { ticked: true });
+  // The Anthropic Directory's copy, or no command-line tool: the box is off before any click, never a kept-out it can't undo.
+  const directory: MarketplaceView = { ...on(), states: { p: { 'claude-cli': { state: 'installed', path: '/x', directory: 'x' } } } };
+  assert.deepEqual(box(directory, 'claude-cli'), { ticked: true, off: FROM_DIRECTORY, line: 'Can’t be taken out here' });
+  assert.deepEqual(box(on(), 'claude-cli', { ...view, clis: {} }), { ticked: true, off: 'Claude Code’s command-line tool wasn’t found.', line: 'No Claude Code command-line tool here' });
+  // Already kept out of a tool holding such a copy: the box says the way out, in words.
+  assert.equal(box({ ...directory, switches: { p: { entry: { on: true, except: ['claude-cli'] }, tools: {} } } }, 'claude-cli').off, `${FROM_DIRECTORY} It is kept out of Claude Code: uninstall it in Claude Code itself, then tick to put it back.`);
+  // Unticked: kept out, said on its line. A tool whose own add refused the marketplace says so on its line.
+  assert.deepEqual(box(on(['copilot-cli']), 'copilot-cli'), { ticked: false, line: 'Kept out: tick to put it back' });
+  assert.deepEqual(box({ ...on(), refusedBy: { 'copilot-cli': 'Copilot CLI refused this marketplace: “Invalid marketplace.json”' } }, 'copilot-cli').line, 'Copilot CLI refused this marketplace');
 });
 
 test('Only a known version that names another release is a difference', () => {

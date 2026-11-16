@@ -489,13 +489,13 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
 });
 
 /**
- * Undo's label: "Undo the rest" after an Undo that didn't finish; with its plugin ("Undo gamma") when the sentence beside it
- * (lastLines) names several plugins, since it reverses only the last click; else "Undo".
+ * Undo's label: "Undo the rest" after an Undo that didn't finish; with the click it reverses ("Undo gamma", "Undo gamma in Codex"
+ * for a box) when the sentence beside it (lastLines) names more than that one click, since it reverses only the last; else "Undo".
  */
 export function undoLabel(): string {
-  const last = market.lastRun;
+  const last = market.lastRun, ran = market.clicks.filter(click => click.ran), click = ran.at(-1);
   if (last?.undo) return 'Undo the rest';
-  return last?.turn && new Set(lastLines().map(line => line.plugin)).size > 1 ? `Undo ${last.turn.plugin}` : 'Undo';
+  return last?.turn && click && ran.length > 1 ? `Undo ${click.plugin}${click.tool ? ` in ${toolNames[click.tool]}` : ''}` : 'Undo';
 }
 
 /** Undo, or "Undo the rest": the last run's way back, by the route that made it (turnPlugin or applyPluginOps). */

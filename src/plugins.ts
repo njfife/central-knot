@@ -1070,8 +1070,10 @@ export async function addMarketplace(context: PluginContext, catalog: Catalog, t
   const add = await native(context, tool, ['plugin', 'marketplace', 'add', catalog.source]);
   // Only the tool's own record counts: a command that said it worked and listed nothing did not add it.
   if (add.ok && (await registeredSource(context, tool, catalog.name))) return { outcome: 'added', message: `Added to ${name}’s own plugin list.`, runs: [add] };
-  // Its own add refused it: kept, so no later click runs it again (refusedBy).
-  if (!add.ok && context.binaries[tool]) refusals.set(refusalKey(tool, catalog.source), { version: (await probeVersion(context.binaries[tool]!)).version, said: `${name} refused this marketplace: “${lastLines(add.output)}” It isn’t tried there again until Refresh, or a new version of ${name}.` });
+  // The tool itself refused the marketplace: its own words name the marketplace's file, so it read the marketplace and said no
+  // ("Invalid marketplace.json"). Kept, so no later click runs it again (refusedBy). Any other failure (no network, a timeout) is
+  // said as it was, and tried again at the next click.
+  if (!add.ok && context.binaries[tool] && /marketplace\.json/i.test(add.output)) refusals.set(refusalKey(tool, catalog.source), { version: (await probeVersion(context.binaries[tool]!)).version, said: `${name} refused this marketplace: “${lastLines(add.output)}” It isn’t tried there again until Refresh, or a new version of ${name}.` });
   return { outcome: 'failed', message: `Could not add the marketplace${add.ok ? `: ${name} doesn’t list it` : ''}. ${lastLines(add.output)}`.trim(), runs: [add] };
 }
 

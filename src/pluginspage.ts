@@ -320,7 +320,7 @@ function legend(view: PluginsView, entry: MarketplaceView) {
     [['outdated'], 'Out of date: Update on its row', 'cell-differs.cell-on', 'refresh-cw'],
     [['waits'], 'Goes in at the next automatic check', 'cell-waiting', 'clock'],
     [['parts-waiting'], 'Waits to be moved: parts from an earlier version', 'cell-waiting', 'clock'],
-    [['not-brought'], 'Not brought by itself: off in a tool’s own settings', 'cell-kept', 'circle-off'],
+    [['not-brought'], 'Not brought by itself: off in a tool’s own settings', 'cell-not-brought', 'circle-off'],
     [['missing'], 'Not in that tool, though on: tick it on its page', 'cell-differs', 'circle-alert'],
     [['stays'], 'Still there, though off or kept out', 'cell-differs.cell-on', 'circle-alert'],
     [['unknown', 'not-known'], 'Unknown: its record can’t be read', 'cell-differs', 'circle-question-mark'],

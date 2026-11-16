@@ -35,9 +35,14 @@
 // any tool: each plugin some managed tool has is On, kept out of every tool that lacks it while some managed tool lacks it.
 // What a click runs of the table's answer is clickRuns (On only installs, Off only uninstalls), beside it.
 // A TOOL'S BOX on the plugin's page (marketplaces.ts turnedEntry) changes the entry, then the table answers for that tool alone:
-// unticked, the tool joins `except` (row 9 or 10 then uninstalls); ticked, it leaves `except` (row 4 or 5 then installs). A tick
-// on a plugin that is Off makes it On in that tool alone (every other HarnessId in `except`), and a box of a plugin with no entry
-// starts from what the first read would record (below); an explicit destination is never widened.
+//   On, ticked                → the tool leaves `except` (row 4 or 5 installs).
+//   On, unticked              → the tool joins `except` (row 9 or 10 takes it out); where no other tool has it, the plugin's Off
+//                               instead, `except` as it was, so its On brings it back where it last was.
+//   Off or no entry, ticked   → On, `except` by the first read's rule (firstEntry), the ticked tool counted as having it.
+//   No entry, unticked        → the first read's rule, then as On, unticked.
+//   Off, unticked             → the entry as it is (`except` changes only while On): that tool's copy is taken out (row 9 or 10).
+// In Pi and OpenCode a tick turns On only what it brings into that tool: an item that comes On is kept out of every other tool
+// it wasn't in (pluginlibrary.ts clickOn). A copy that can't be taken out here has its box off (pluginstatus.ts boxOf).
 // Who reads what: marketplaces.ts gathers what the tools have (pluginstatus.ts toolNow) and carries out a click (turn, undoTurn); the
 // automatic updates carry out the background's installs (pluginupdates.ts); the pages and pluginstatus.ts say the answer.
 import { randomUUID } from 'node:crypto';
@@ -60,7 +65,7 @@ export interface PluginEntry {
   marketName: string;
   plugin: string;
   on: boolean;
-  /** The tools it is kept out of: by his unticking their box, by the first read (the tools that lacked it), or by his ticking one tool of a plugin that was Off. */
+  /** The tools it is kept out of: those whose box he unticked, and those the first read's rule left out (the first read, and a tick on a plugin Off or with no entry: A TOOL'S BOX). */
   except: HarnessId[];
 }
 /** plugins.json. */

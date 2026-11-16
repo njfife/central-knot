@@ -1120,7 +1120,7 @@ span.ins-confirm { margin-top: 0; }
    click: the switch and the boxes on the plugin's page act). */
 .plugin-row-switch { justify-content: flex-start; padding-left: 8px; }
 .cell-button.cell-plain, .cell-button.cell-plain:hover { cursor: inherit; border-color: transparent; background: transparent; filter: none; }
-.cell-kept { color: var(--ink-soft); border-style: dotted; }
+.cell-not-brought { color: var(--ink-soft); border-style: dotted; }
 /* A tool's box on a plugin's page that can't act now keeps its outline, faded: its tooltip says why. */
 .cell-button.cell-box:disabled { border-color: var(--cell-line); opacity: .6; }
 .plugin-panel-switch { display: inline-flex; align-items: center; gap: 10px; }

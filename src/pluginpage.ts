@@ -11,7 +11,7 @@ import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { clickNote, componentsOf, dotted, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
+import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView } from './types.ts';
@@ -89,12 +89,14 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     // A plugin a bundled build doesn't include says why here, on the page, once for every tool.
     notIncluded ? h('p.plugin-panel-hint', { id: 'plugin-not-included' }, notIncluded) : null,
     waiting.length ? h('p.plugin-panel-hint', { id: 'plugin-parts-waiting' }, waitingWords(view, entry, plugin.name, waiting)) : null,
-    // Where none of its items is on in a tool that takes no plugins, why (pluginstatus.ts notInWhy), as its run's report says.
-    view.tools.map(tool => entry.items?.[plugin.name]?.notIn?.[tool]).map((why, at) => (why ? h('p.plugin-panel-hint', { id: `plugin-not-in-${view.tools[at]}` }, why.said) : null)),
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
-      const { mark, words } = markOf(view, entry, plugin, tool, compareTo);
+      const { mark, words } = markOf(view, entry, plugin, tool, compareTo), box = boxOf(view, entry, plugin.name, tool, { mark, words });
+      // Under the box: what it has, or what the box says more (why it is off, that he unticked it); in Pi and OpenCode, where none
+      // of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its run's report says.
+      const reasons = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons;
       return h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
-        h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: words }, status(tool, mark)),
+        h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]),
+          reasons ? reasons.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason)) : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark)),
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
           view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null));
     })), view.tools.length),
@@ -114,7 +116,7 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const out = tools.filter(tool => line.except?.includes(tool)).map(tool => names[tool]);
     const where = line.on === false ? 'Off' : out.length ? `Kept out of ${andList(out)}` : '';
     const said = { linked: where, update: 'An update is ready: Update brings it in', going: 'No longer in the plugin: Update turns it off', new: 'New in the plugin: Update brings it in',
-      removed: 'Removed by the plugin’s update, so it is off. Turning it on keeps it as yours', deleted: 'Not brought in: you deleted it; History’s Restore, or the plugin’s next On, brings it back',
+      removed: 'Removed by the plugin’s update, so it is off. Turning it on keeps it as yours', deleted: 'Deleted here: tick to bring it back',
       'not-brought': `Not brought in: ${line.why ?? ''}` }[line.state];
     return [said, line.state === 'update' ? where : ''].filter(Boolean).join(' · ');
   };

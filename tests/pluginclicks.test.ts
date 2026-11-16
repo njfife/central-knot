@@ -218,3 +218,13 @@ test('A plugin that partly failed is said once at the list’s end, with where i
   // Its failure, with why, is in the problems band, as any failure is.
   assert.deepEqual(lastLines().filter(line => !line.ok).map(line => `${line.plugin}: ${line.text}`), ['beta: Codex: Not installed. Codex refused it.']);
 });
+
+test('After two clicks on one plugin’s boxes, Undo names the click it reverses: the plugin and its tool', async () => {
+  start();
+  turnPlugin(entry, 'alpha', 'let-in', 'claude-cli');
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(installed('alpha'));
+  await main.answer(installed('alpha'));
+  assert.equal(undoLabel(), 'Undo alpha in Claude Code');
+});
