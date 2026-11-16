@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ALPHA_BUILD, buildWords, checkFailure, lineApp, macDownload, newerRelease, otherDownloads, releasesApi, releaseLine, tagVersion, tagWords, updateButton, updateFailure, updateIndicator, updatesShown, updateStatus, whyNoUpdate, type UpdateFacts } from '../src/updates.ts';
+import { ALPHA_BUILD, buildWords, checkFailure, lineApp, linuxDownload, macDownload, newerRelease, otherDownloads, releasesApi, releaseLine, tagVersion, tagWords, updateButton, updateFailure, updateIndicator, updatesShown, updateStatus, whyNoUpdate, type UpdateFacts } from '../src/updates.ts';
 import { STANDARD_BUILD } from '../src/values.ts';
 import type { UpdateReason, UpdateView } from '../src/types.ts';
 
@@ -91,6 +91,15 @@ test('packaging leaves the release folder holding only its own two downloads', (
   assert.deepEqual(otherDownloads(folder, own('Central Knot Alpha', '0.6.0')), ['Central-Knot-0.5.0-mac-arm64.dmg', 'Central-Knot-0.5.0-mac-arm64.zip', 'Acme-Knot-0.5.0-mac-arm64.zip'], 'an alpha: every other download goes');
   assert.deepEqual(otherDownloads(folder, own('Central Knot', '0.5.0')), ['Central-Knot-Alpha-0.6.0-mac-arm64.dmg', 'Central-Knot-Alpha-0.6.0-mac-arm64.zip', 'Acme-Knot-0.5.0-mac-arm64.zip'], 'the standard app: no alpha file stays');
   assert.deepEqual(otherDownloads(folder, own('Central Knot', '0.6.0')), folder.filter(file => file.endsWith('.zip') || file.endsWith('.dmg')), 'an earlier version of its own goes too');
+});
+
+test('a line’s Linux download is its AppImage, named by the same rule; Mac packaging leaves it be, and no Mac build is offered it', () => {
+  assert.equal(linuxDownload(lineApp(releaseLine('v0.6.0-alpha.1')).name, '0.6.0'), 'Central-Knot-Alpha-0.6.0-linux-x86_64.AppImage');
+  assert.equal(linuxDownload(lineApp(releaseLine('v0.6.0')).name, '0.6.0'), 'Central-Knot-0.6.0-linux-x86_64.AppImage');
+  const folder = ['Central-Knot-0.6.0-linux-x86_64.AppImage', 'Central-Knot-Alpha-0.6.0-linux-x86_64.AppImage', 'Central-Knot-0.5.0-mac-arm64.zip'];
+  assert.deepEqual(otherDownloads(folder, []), ['Central-Knot-0.5.0-mac-arm64.zip'], 'the Mac packaging’s clean-up takes Mac downloads alone');
+  const linuxOnly = { assets: [{ name: 'Central-Knot-0.6.0-linux-x86_64.AppImage', browser_download_url: 'https://github.com/njfife/central-knot/releases/download/v0.6.0/appimage', size: 1000 }] };
+  assert.equal(newerRelease([release('v0.6.0', linuxOnly)], 'v0.5.0'), undefined, 'a release with only the AppImage offers a Mac build nothing');
 });
 
 test('the releases are read as one page of 100, so alphas don’t push a newer preview out of sight', () => {

@@ -48,7 +48,7 @@ import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profil
 import { defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
-import { machineNames } from './machine.ts';
+import { machineNames, writesRealHome } from './machine.ts';
 import { joinedWords, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
@@ -153,7 +153,7 @@ function context(): ShareContext {
   return {
     home: current!.home, mode: current!.mode, read, build: BUILD, buildName: own.name,
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
-    allowActualWrites: process.platform === 'darwin' && !smoke,
+    allowActualWrites: writesRealHome(process.platform) && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
     historyDays: historyDays(), held: heldReason(),
   };

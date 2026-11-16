@@ -91,10 +91,10 @@ Each tool's own instruction file, edited in place; and one base text kept in a m
 - **Start:** `instructions.ts`'s header. **Examples:** `tests/instructions.test.ts`, `tests/baseinstructions.test.ts`, `tests/draftbase.test.ts`, `tests/drafts.test.ts`.
 
 ## Updates, packaging and custom builds
-The app updating itself from GitHub releases, its Mac packages, and custom builds that carry a marketplace.
-- `updates.ts` release lines, which release is newer, and the words (no Node) · `updateflow.ts` an update's steps in main · `updater.ts` Electron's parts: the build's tag, Squirrel
+The app updating itself from GitHub releases, its Mac packages and Linux AppImage, and custom builds that carry a marketplace.
+- `updates.ts` release lines, which release is newer, each platform's download name (`macDownload`, `linuxDownload`), and the words (no Node) · `updateflow.ts` an update's steps in main · `updater.ts` Electron's parts: the build's tag, Squirrel
 - `updateview.ts` the sidebar's update control and Settings' Updates row · `bundle.ts` a custom build and the marketplace it carries · `bundlefeed.ts` a bundled build's feed
-- `bundlepack.ts` a custom build's inputs, packed and staged · `scripts/build.mjs` builds `dist/` · `scripts/package-mac.mjs` the Mac app and its two downloads, signed
+- `bundlepack.ts` a custom build's inputs, packed and staged · `scripts/build.mjs` builds `dist/` · `scripts/package-mac.mjs` the Mac app and its two downloads, signed · `scripts/package-linux.mjs` the Linux AppImage · `scripts/package-app.mjs` what the two share: the version, the release tag (`tagHere`), the packager's folder (`packageFolder`), and where the checks find the packaged app (`packagedApp`)
 - `otherbuilds.ts` one install at a time: another build of Central Knot on this Mac (any `com.centralknot.` bundle id but this one's), found at each look, replaced or quit on a click, in main · `otherbuildview.ts` the held screen that stands in for every page while one is found, its words and its clicks
 - `scripts/mac-dmg.mjs` the disk image · `scripts/mac-dmg-layout.sh` its window's layout · `scripts/release-tag.mjs` the tag a build records · `scripts/release-tag.d.mts` its types
 - `scripts/custom-build.mjs` stages a custom build · `scripts/publish-bundle.mjs` a marketplace release onto a feed
@@ -104,7 +104,7 @@ The app updating itself from GitHub releases, its Mac packages, and custom build
 The main process, the window's frame, Settings, and what every page shares.
 - `main.ts` the main process: window, menu bar, folder watching, the background pass, settings storage, every IPC channel (the Plugins page's handlers are `marketplaces.ts registerMarketplaces`) · `preload.ts` the page's calls into main (`types.ts DesktopApi`)
 - `homepass.ts` what one pass does, in order, at start and at every look (`homePass`): a profiles file from before moved, plugin parts from before moved (`partsmigrate.ts migrateParts`), then with Sync on skills, MCP servers and agents; and what it tells the page, every kind alike (`passTells`)
-- `signin.ts` Start at sign-in · `machine.ts` how this computer, its home and keys are named · `trayicon.ts` the menu bar icon · `index.html` the window's frame
+- `signin.ts` Start at sign-in · `machine.ts` how this computer, its home and keys are named, and whether it writes a real home (`writesRealHome`) · `trayicon.ts` the menu bar icon · `index.html` the window's frame
 - `renderer.ts` the page's entry: sidebar, header, status bar, which page draws (`renderPage`) · `app.ts` the page's state and most pages' actions (`applyClick`, `restoreEvent`)
 - `settingspage.ts` Settings, and the open home's Synchronize everything row (switched by `everything.ts setSyncEverything`, counted by `setupcounts.ts whatYesDoes`) · `style.css` every style · `dom.ts` the `h` element builder and small controls · `icons.ts` the glyphs · `brand.ts` each tool's mark
 - `types.ts` the shapes main and the page share · `words.ts` tools' and kinds' names, lists in words · `model.ts` small helpers: times, counts · `flags.ts` per-viewer flags
@@ -118,8 +118,8 @@ What every engine stands on: `.central-knot/` and its record, the gates on writi
 - **Start:** `share.ts`'s header, then its exports, by their comments; a skill's copy is written over by `skillfiles.ts swapFolder`. **Examples:** `tests/share-recovery.test.ts`, `tests/textedit.test.ts`, `tests/skillsafety.test.ts`, `tests/librarygate.test.ts` (the gate for the clicks that write before their pass).
 
 ## Test and tour scripts
-How each is run: `AGENTS.md` ("Checking a change") and README ("For developers"); the Mac run is `.github/workflows/mac.yml`. Unit tests are `tests/*.test.ts`. Every script that opens the app names a stand-in for /Applications, the running apps and the Trash (`tests/macstandins.ts`, set as CK_TEST_APPS: `platform.ts macPlaces`), so none looks at or removes the real ones.
-- `scripts/e2e.mjs` the end-to-end checks on the real app in a throwaway home · `scripts/ui-tour.mjs` the screenshot tour · `scripts/cdp.mjs` the DevTools client the scripts drive the app with
+How each is run: `AGENTS.md` ("Checking a change") and README ("For developers"); the Mac run is `.github/workflows/mac.yml`, the Linux run `.github/workflows/linux.yml`. Unit tests are `tests/*.test.ts`. Every script that opens the app names a stand-in for /Applications, the running apps and the Trash (`tests/macstandins.ts`, set as CK_TEST_APPS: `platform.ts macPlaces`), so none looks at or removes the real ones; off a Mac, where there are none, `scripts/e2e.mjs` names one only in its flows about another build.
+- `scripts/e2e.mjs` the end-to-end checks on the real app in a throwaway home · `scripts/ui-tour.mjs` the screenshot tour · `scripts/cdp.mjs` the DevTools client the scripts drive the app with, and the wait for an AppImage's mount to go (`mountsGone`)
 - `scripts/fixture-market.mjs` a realistic marketplace · `scripts/git-http-fixture.mjs` Git repos served here · `scripts/update-fixture.mjs` a stand-in for GitHub's releases
 - `scripts/update-proof.mjs` a real signed update, on a Mac · `scripts/alpha-check.mjs` the alpha beside the standard app · `scripts/bundled-check.mjs` a bundled build end to end
 - `scripts/real-home-trial.ts` the two-way trial on a real home its owner opened for it
