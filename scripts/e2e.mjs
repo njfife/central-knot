@@ -3337,9 +3337,10 @@ async function freedOtherWaysFlow() {
 
 /**
  * This Mac's own home whose record names the alpha, gone before this build opened (only where the real home can be written:
- * machine.ts writesRealHome; off a Mac, the alpha's stand-ins stand in for a Mac's). The first look carries the alpha's choices: its Automatic sync off is in force before the first pass, so with an edit
- * waiting no tool file changes, the status bar says so once, and nothing else names the alpha; History's days are the longer of
- * the two; and a build that still remembers the home writes at its first pass with the alpha's days already in force.
+ * machine.ts writesRealHome; off a Mac, the alpha's stand-ins stand in for a Mac's). The first look carries the alpha's
+ * choices: its Automatic sync off is in force before the first pass, so with an edit waiting no tool file changes, the status
+ * bar says so once, and nothing else names the alpha; History's days are the longer of the two; and a build that still
+ * remembers the home writes at its first pass with the alpha's days already in force.
  */
 async function thisMacTakeOverFlow() {
   if (!canWriteRealHome) return;
@@ -3949,12 +3950,12 @@ async function crashFlow() {
     // Each skill a click takes in is on record once it is carried out, one after another, so a kill leaves some taken in
     // (opening catches their copies up) and the rest still found: those are taken in again, in one request (no bulk switch on
     // the page), not waited for, so the kill lands while it copies.
-    await a.run(`(() => { const found = [...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].filter(row => row.querySelector('.add-item')).map(row => ({ key: row.dataset.key, on: true, except: [] }));
-      if (found.length) window.centralKnot.applySkills(found, false, document.querySelector('.status-home').title); else document.querySelector('#header-refresh').click(); return true; })()`);
+    const taking = await a.run(`(() => { const found = [...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].filter(row => row.querySelector('.add-item')).map(row => ({ key: row.dataset.key, on: true, except: [] }));
+      if (found.length) window.centralKnot.applySkills(found, false, document.querySelector('.status-home').title); else document.querySelector('#header-refresh').click(); return found.length; })()`);
     // Off the Mac a take-in starts later than this window allows (on a Linux machine the first skill is on record about
     // 0.8 s after the click, the 40th at 2.2 s, and the copies follow until about 6 s), so there the window opens once this
-    // round's first skill is on record.
-    if (process.platform !== 'darwin') for (const before = onRecordNow(), end = Date.now() + 15000; Date.now() < end && onRecordNow() <= before;) await wait(10);
+    // round's first skill is on record; a round with nothing left to take in has no take-in to wait for.
+    if (process.platform !== 'darwin' && taking > 0) for (const before = onRecordNow(), end = Date.now() + 15000; Date.now() < end && onRecordNow() <= before;) await wait(10);
     await wait(30 + Math.round(round * 700 / Math.max(1, crashRounds - 1)) + randomInt(40));
     await a.crash();
     if (readdirSync(COPILOT).length < 40) interrupted++;

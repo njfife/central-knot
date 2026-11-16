@@ -29,7 +29,8 @@ if (rest.length) plainly(`Not an input here: ${rest.join(' ')}. The Linux packag
 async function runtime() {
   const file = join('node_modules/.cache/central-knot', `appimage-runtime-x86_64-${RUNTIME.tag}`);
   if (!existsSync(file)) {
-    const response = await fetch(`https://github.com/AppImage/type2-runtime/releases/download/${RUNTIME.tag}/runtime-x86_64`);
+    const response = await fetch(`https://github.com/AppImage/type2-runtime/releases/download/${RUNTIME.tag}/runtime-x86_64`)
+      .catch(error => plainly(`The AppImage runtime couldn’t be downloaded (${error.cause?.code ?? error.message}). Nothing was packaged.`));
     if (!response.ok) plainly(`The AppImage runtime couldn’t be downloaded (HTTP ${response.status}). Nothing was packaged.`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, Buffer.from(await response.arrayBuffer()));

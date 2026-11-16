@@ -69,7 +69,7 @@ test('The gate in a home whose record can’t be read, and a home that can’t b
   refusedEveryWay(await row('a record that can’t be read'), /^refused: The sync record is damaged\. Nothing was written or deleted\./);
   refusedEveryWay(await row('a home that can’t be written'), /^refused: Preview only:/);
 });
-test('A real home is written on macOS and Linux; on Windows it is preview only, and the gate says so (machine.ts writesRealHome, as main.ts reads it)', async () => {
+test('A real home is written on macOS and Linux; on Windows it is preview only, and the gate says so (machine.ts writesRealHome)', async () => {
   const box = await sandbox();
   try {
     const onPlatform = async (platform: string) => {
