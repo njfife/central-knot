@@ -1,7 +1,7 @@
 // The usage reading, in main: which skills, agents and MCP servers each tool's own session history shows were used, and
-// when. It runs on a click (main.ts usage:read, DesktopApi.readUsage) and at no other time, outside main's queue: it reads
-// nothing a pass writes and writes nothing at all. Nothing is stored either: the page keeps the answer in its own slot
-// (app.ts state.usage) until the home changes or the app closes.
+// when. It runs on a click (main.ts usage:read, DesktopApi.readUsage) and at no other time, outside main's queue: it changes
+// nothing in the home (OpenCode's database is read from a temporary copy, removed after), so it never holds up a pass. Nothing
+// is stored: the page keeps the answer in its own slot (app.ts state.usage) until the home changes or the app closes.
 //
 // `readers` is the one table, a row per tool: where its sessions are (under the same folders, moved by the same variables,
 // as its other files: harnesses.ts), which kinds its records can tell (`tells`, the same table for the page: types.ts
