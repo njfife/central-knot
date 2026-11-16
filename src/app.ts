@@ -295,8 +295,6 @@ export interface Click {
   said: string | ((notIn: HarnessId[], wrote: HarnessId[]) => string);
   /** Said after it, as a warning: what the click left as it is, and why ("Still on in Codex: its settings file can’t be read."). */
   also?: string;
-  /** Said after it, as a plain note: what is still to come, or left as it should be ("Claude Code gets it when you click Write to Claude Code."). */
-  note?: string;
   /** An Undo: its result is said for a few seconds, with no Undo of its own. */
   undoing?: boolean;
   /**
@@ -304,8 +302,6 @@ export interface Click {
    * through, never beside a click refused as a whole. `said`: what that part brought with it, said when it all worked.
    */
   plugins?: { ops: PluginOp[]; said?: string };
-  /** Offered beside the Undo: the next step the result names (the whole plugin's switch where one item has none). */
-  next?: Outcome['next'];
 }
 
 /** Each item page's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
@@ -355,11 +351,11 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   const choose = differs ? ' Its copies differ: choose which copy every tool uses.' : '';
   const plugText = !plugged ? '' : plugged.failed.length || plugged.stopped ? switchProblems(plugged) : click.plugins?.said ?? '';
   // A hold that came after the change is said beside what was done, not dropped.
-  const text = done || !refusal ? [said, plugText, click.also, [click.note, waits].filter(Boolean).join(' '), refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
+  const text = done || !refusal ? [said, plugText, click.also, waits, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
   const switchedBack = plugged?.back ?? [];
   const undo = click.undoing || !done ? undefined : (made.length && await allUndoable(made)) || switchedBack.length ? () => void undoClick(click, made, switchedBack) : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
-  tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned, next: done || !refusal ? click.next : undefined,
+  tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned,
     text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
 });
@@ -421,9 +417,8 @@ async function runSwitches(ops: PluginOp[], undo = false) {
 }
 
 /** A plugin switch click's words: `said` when everything ran (else what ran and what didn't), and `undone` its Undo's. Said
- * after it, what the click left as it is: `also` as a warning (a switch that can't be written), `note` plainly (a tool with no
- * switch for one item). `next`: a second button beside the Undo. */
-interface SwitchWords { said?: string; undone?: string; also?: string; note?: string; next?: Outcome['next'] }
+ * after it, as a warning: what the click left as it is (`also`: a switch that can't be written). */
+interface SwitchWords { said?: string; undone?: string; also?: string }
 
 /**
  * Turns plugins' items on or off from the Skills, MCP servers and Agents pages (pluginswitch.ts), with each tool's own
@@ -432,13 +427,13 @@ interface SwitchWords { said?: string; undone?: string; also?: string; note?: st
  */
 export const applyPluginSwitches = (ops: PluginOp[], words: SwitchWords = {}) => switchPlugins(ops, words, false);
 
-const switchPlugins = (ops: PluginOp[], { said, undone, also, note, next }: SwitchWords, undo: boolean) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
+const switchPlugins = (ops: PluginOp[], { said, undone, also }: SwitchWords, undo: boolean) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
   const ran = await runSwitches(ops, undo);
   setHome(await api().refresh());
   const worked = !ran.failed.length && !ran.stopped;
-  const text = [worked && said ? said : ran.stopped ?? resultSentence(ran.lines, undo), worked ? '' : switchProblems({ ...ran, stopped: undefined }), also, note].filter(Boolean).join(' ') || 'Nothing changed.';
+  const text = [worked && said ? said : ran.stopped ?? resultSentence(ran.lines, undo), worked ? '' : switchProblems({ ...ran, stopped: undefined }), also].filter(Boolean).join(' ') || 'Nothing changed.';
   const act = ran.back.length ? { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void switchPlugins(ran.back, { said: undone }, true) } : undefined;
-  tell({ page: state.page, text, warn: !worked || !!also, band: true, fade: undo && worked, act, next: worked ? next : undefined });
+  tell({ page: state.page, text, warn: !worked || !!also, band: true, fade: undo && worked, act });
 });
 
 /**
@@ -776,10 +771,8 @@ export interface Outcome {
   fade?: boolean;
   undo?: { id: string; label: string };
   act?: { label: string; id: string; run: () => void; title?: string };
-  /** A second button after `act`: the next step the result offers ("Turn document-tools off in Claude Code"). */
+  /** A second button after `act`: the next step the result offers ("Write to Claude Code"). */
   next?: { label: string; id: string; run: () => void; title?: string };
-  /** Plain information, nothing done and nothing wrong: the information mark, not a tick. */
-  info?: boolean;
   /** When it was said (state.said.seq): a result newer than a table's pending changes still shows there. */
   said?: number;
 }

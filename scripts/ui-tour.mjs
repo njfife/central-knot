@@ -1165,28 +1165,25 @@ if (wanted('plugin-items')) {
   await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560: the tools’ lines and their switches, then its SKILL.md under the link.');
   await a.theme('light'); await shot(a, 'skill-open-860-light', 'The same at 860×560, light.'); await a.theme('dark');
   await size(1728, 1117); await shot(a, 'skill-open-1728', 'The open row at 1728×1117.'); await size(1280, 800);
-  // The row's own switch turns it off in every tool with a switch for one skill of a plugin. Copilot CLI and Codex have it off
-  // already, and Claude Code has none, so nothing changes: said plainly, with the whole plugin's switch offered (not clicked
-  // here: it is Claude Code's own command). The row's switch never turns a whole plugin off itself.
-  await a.click('[id="switch-document-tools@team-tools/pdf-reader"]'); await a.settle();
-  await shot(a, 'main-switch-left', 'Clicked pdf-reader’s own switch (on in Claude Code): Copilot CLI and Codex have it off already, and Claude Code has no switch for one skill of a plugin, so nothing changed. The band says so in its normal tone, naming pdf-reader, with the information mark, and offers “Turn document-tools off in Claude Code”.');
-  await size(860, 560); await shot(a, 'main-switch-left-860', 'The same at 860×560.'); await size(1280, 800);
-  if (await a.has('#outcome-whole')) {
-    await a.click('#outcome-whole'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
-    await shot(a, 'main-switch-whole', 'Clicked “Turn document-tools off in Claude Code”: the whole plugin is off there, with Claude Code’s own command, and the band names what went with it, with Undo.');
-    await a.click('#outcome-undo-plugin'); await a.settle();
-    await shot(a, 'main-switch-whole-undone', 'Clicked Undo: document-tools is on in Claude Code again.');
-  }
+  // The row's own switch turns it off in every tool that has it. Copilot CLI and Codex have it off already, and Claude Code has
+  // no switch for one skill of a plugin, so there it turns the whole plugin off, as the switch's name and tooltip say first.
+  const pdfSwitch = '[id="switch-document-tools@team-tools/pdf-reader"]';
+  await shot(a, 'main-switch-before', `Before the row's switch is clicked (pdf-reader open, on in Claude Code only): its name and tooltip say “${await a.run(`document.querySelector('${pdfSwitch}').getAttribute('aria-label')`)}”`);
+  await a.click(pdfSwitch); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+  await shot(a, 'main-switch-whole', 'Clicked pdf-reader’s own switch: the whole plugin document-tools is off in Claude Code, with Claude Code’s own command, and the band says pdf-reader is off there and names what went with it, with one Undo and no second button.');
+  await size(860, 560); await shot(a, 'main-switch-whole-860', 'The same at 860×560.'); await size(1280, 800);
+  await a.click('#outcome-undo-plugin'); await a.settle();
+  await shot(a, 'main-switch-whole-undone', 'Clicked Undo: document-tools is on in Claude Code again.');
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
-  // spreadsheet is on in all three: its switch turns it off in Copilot CLI and Codex with their own switches, leaves Claude
-  // Code on (and says so), and its Undo turns both back on.
+  // spreadsheet is on in all three: its switch turns it off in Copilot CLI and Codex with their own switches and the whole
+  // plugin in Claude Code, and its one Undo turns them all back on.
   await a.click('[id="switch-document-tools@team-tools/spreadsheet"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
-  await shot(a, 'main-switch-changed', 'Clicked spreadsheet’s own switch: off in Copilot CLI and Codex at once, each with its own switch; still on in Claude Code, which has no switch for one skill of a plugin, so “Turn document-tools off in Claude Code” is offered beside Undo.');
+  await shot(a, 'main-switch-changed', 'Clicked spreadsheet’s own switch: off in Copilot CLI and Codex at once, each with its own switch, and in Claude Code, which has no switch for one skill of a plugin, with the whole plugin document-tools; the band names what went with it, with Undo.');
   await size(860, 560); await a.click('#sidebar-toggle');
-  await shot(a, 'main-switch-changed-860-sidebar', 'The same at 860×560 with the sidebar open: the two buttons drop under the sentence, which keeps the width.');
+  await shot(a, 'main-switch-changed-860-sidebar', 'The same at 860×560 with the sidebar open: the sentence keeps the width, Undo beside or under it.');
   await a.click('#sidebar-toggle'); await size(1280, 800);
   await a.click('#outcome-undo-plugin'); await a.settle();
-  await shot(a, 'main-switch-changed-undone', 'Clicked Undo: “Undone: spreadsheet is back on in Copilot CLI and Codex.”');
+  await shot(a, 'main-switch-changed-undone', 'Clicked Undo: “Undone: spreadsheet is back on in Claude Code, Copilot CLI and Codex.”');
   if (await a.has('#open-triage')) {
     await a.click('#open-triage'); await shot(a, 'copy-and-plugin', 'Opened triage: the copy in Pi and the plugin installed in Codex share the row, its SKILL.md being the same; Codex’s line has its switch.');
     // Each tool's switch for the item is in its opened row, and applies at once. issue-tracker is off in Codex: its switch

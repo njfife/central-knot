@@ -1303,13 +1303,22 @@ async function practiceFlow() {
   same('a plugin’s skill is a row with its mark, filled under Claude Code, empty elsewhere, and a switch that is on',
     [/from outside-tools/.test(await a.text(outsideRow) ?? ''), await cellState(a, outside, 'claude-cli'), await cellState(a, outside, 'copilot-cli'), await switchOn(a, outside), await a.exists('.ov-section-plugins')],
     [true, 'plugin', 'plugin-none', true, true]);
-  // Its switch turns it off only where a tool has a switch for one skill of a plugin: Claude Code has none, so nothing is
-  // written there, and the band says where the whole plugin's switch is.
-  const outsideSettings = readNow(join(practice, '.claude/settings.json'));
+  // Claude Code has no switch for one skill of a plugin, so the row's switch turns the whole plugin there, with Claude Code's
+  // own command (a stand-in here): said on the switch before the click, and in the result after it, with one Undo.
+  const outsideSettings = readNow(join(practice, '.claude/settings.json')), outsideStub = join(HOME, '.local/bin/claude'), outsideStubBefore = readFileSync(outsideStub, 'utf8');
+  writeFileSync(outsideStub, `#!/bin/sh\ncase "$*" in\n  "plugin disable outside-tools@ck-outside --scope user") printf '{"enabledPlugins":{"outside-tools@ck-outside":false}}' > "$HOME/.claude/settings.json" ;;\n  "plugin enable outside-tools@ck-outside --scope user") printf '%s' '${outsideSettings || '{}'}' > "$HOME/.claude/settings.json" ;;\n  *) exit 9 ;;\nesac\n`);
+  const outsideOff = () => JSON.parse(readNow(join(practice, '.claude/settings.json')) || '{}').enabledPlugins?.['outside-tools@ck-outside'] === false;
+  check('the row’s switch says first that in Claude Code it turns off everything outside-tools brings', (await a.run(`document.querySelector('${outsideRow} .switch').getAttribute('aria-label')`) ?? '')
+    .endsWith('In Claude Code, which has no switch for one skill of a plugin, it turns off everything outside-tools brings there.'), await a.run(`document.querySelector('${outsideRow} .switch').getAttribute('aria-label')`));
   await a.click(`${outsideRow} .switch`);
-  check('the row’s switch never turns a whole plugin off: Claude Code is left on, and said', readNow(join(practice, '.claude/settings.json')) === outsideSettings && await switchOn(a, outside)
-    && /outside-skill: nothing changed\. Still on in Claude Code: it has no switch for one skill of a plugin, only one for the whole plugin, outside-tools\./.test(await a.text('.bands') ?? '')
-    && await a.text('#outcome-whole') === 'Turn outside-tools off in Claude Code', [await a.text('.bands'), await a.text('#outcome-whole')]);
+  for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
+  check('one click turns the whole plugin off in Claude Code, and the result names what went with it', outsideOff() && !(await switchOn(a, outside)) && !(await a.exists('#outcome-whole'))
+    && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off there, with its MCP server outside-server\./.test(await a.text('.bands') ?? ''), [await a.text('.bands'), readNow(join(practice, '.claude/settings.json'))]);
+  await a.click('#outcome-undo-plugin');
+  for (let tries = 0; tries < 60 && (outsideOff() || !/Undone: outside-skill/.test(await a.text('.bands') ?? '')); tries++) await wait(100);
+  check('its one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside) && /Undone: outside-skill is back on in Claude Code\./.test(await a.text('.bands') ?? ''), [await a.text('.bands'), readNow(join(practice, '.claude/settings.json'))]);
+  writeFileSync(outsideStub, outsideStubBefore);
+  if (outsideSettings) writeFileSync(join(practice, '.claude/settings.json'), outsideSettings); else rmSync(join(practice, '.claude/settings.json'), { force: true });
   await a.click(`[id="open-${outside}"]`);
   check('its details open with where it is on and which plugin it is from, then where it is handled', /On in Claude Code · from the plugin outside-tools[\s\S]*marketplace “ck-outside”, which isn’t added in Central Knot/.test(await a.text('main') ?? ''), await a.text('main'));
   await a.click('#nav-mcp');
@@ -1618,7 +1627,8 @@ async function practiceFlow() {
   // A click on it applies at once, with Claude Code's own command (a stand-in here): the result leads with the skill clicked,
   // and its Undo turns the plugin back on there.
   const settingsAt = pluginSettingsNow() ?? '{}';
-  writeFileSync(claudeStub, `#!/bin/sh\ncase "$*" in\n  "plugin disable issue-tracker@ck-test-market --scope user") printf '{"enabledPlugins":{"issue-tracker@ck-test-market":false}}' > "$HOME/.claude/settings.json" ;;\n  "plugin enable issue-tracker@ck-test-market --scope user") printf '%s' '${settingsAt}' > "$HOME/.claude/settings.json" ;;\n  *) exit 9 ;;\nesac\n`);
+  const issueTrackerStub = `#!/bin/sh\ncase "$*" in\n  "plugin disable issue-tracker@ck-test-market --scope user") printf '{"enabledPlugins":{"issue-tracker@ck-test-market":false}}' > "$HOME/.claude/settings.json" ;;\n  "plugin enable issue-tracker@ck-test-market --scope user") printf '%s' '${settingsAt}' > "$HOME/.claude/settings.json" ;;\n  *) exit 9 ;;\nesac\n`;
+  writeFileSync(claudeStub, issueTrackerStub);
   const wholeOff = () => JSON.parse(pluginSettingsNow() ?? '{}').enabledPlugins?.['issue-tracker@ck-test-market'] === false;
   await a.click('#enable-triage-claude-cli');
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
@@ -1628,8 +1638,8 @@ async function practiceFlow() {
   for (let tries = 0; tries < 60 && (wholeOff() || !/Undone: triage/.test(await a.text('.bands') ?? '')); tries++) await wait(100);
   check('its Undo turns the plugin back on there', !wholeOff() && /Undone: triage is back on in Claude Code\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
   writeFileSync(claudeStub, stubBefore);
-  // Codex has the plugin too, and a switch for one skill of it: the row's switch takes Pi's copy out and turns Codex's skill
-  // off in one click (Claude Code left on, and said), and its one Undo puts both back.
+  // Codex has the plugin too, and a switch for one skill of it: the row's switch takes Pi's copy out, turns Codex's skill off
+  // and the whole plugin off in Claude Code (a stand-in for its command) in one click, and its one Undo puts all three back.
   const codexPlugin = join(practice, '.codex/plugins/cache/ck-test-market/issue-tracker/9.9.9'), codexToml = join(practice, '.codex/config.toml');
   const codexTomlBefore = readNow(codexToml);
   mkdirSync(join(codexPlugin, 'skills/triage'), { recursive: true });
@@ -1640,14 +1650,17 @@ async function practiceFlow() {
   // Pi's copy, found, is added to Central Knot first, so the click is the row's Off.
   if (await a.exists('#add-triage')) { await a.click('#add-triage'); for (let tries = 0; tries < 60 && !(await switchOn(a, 'triage')); tries++) await wait(100); }
   const piTriage = join(practice, '.pi/agent/skills/triage/SKILL.md');
+  writeFileSync(claudeStub, issueTrackerStub);
   await a.click('.ov-row[data-key="triage"] .switch');
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
   const codexItemOff = () => /name = "issue-tracker:triage"[^[]*enabled = false/.test(readNow(codexToml));
-  check('one click takes Pi’s copy out and turns the plugin’s skill off in Codex, and says what it left on', codexItemOff() && !existsSync(piTriage) && await cellState(a, 'triage', 'codex-cli') === 'plugin-off'
-    && /Still on in Claude Code: it has no switch for one skill of a plugin, only one for the whole plugin, issue-tracker\./.test(await a.text('.bands') ?? ''), [await a.text('.bands'), readNow(codexToml)]);
+  check('one click takes Pi’s copy out, turns the plugin’s skill off in Codex and the whole plugin off in Claude Code, and says what went with it', codexItemOff() && wholeOff() && !existsSync(piTriage)
+    && await cellState(a, 'triage', 'codex-cli') === 'plugin-off' && await cellState(a, 'triage', 'claude-cli') === 'plugin-off'
+    && /^triage is off: no tool has it\..* Its whole plugin issue-tracker was turned off in Claude Code, with its MCP server issues\./.test(await a.text('.band-done .band-text') ?? ''), [await a.text('.bands'), readNow(codexToml)]);
   await a.click('#outcome-undo');
-  for (let tries = 0; tries < 60 && (codexItemOff() || !existsSync(piTriage)); tries++) await wait(100);
-  same('its one Undo puts both back', [codexItemOff(), existsSync(piTriage), await cellState(a, 'triage', 'codex-cli'), await switchOn(a, 'triage')], [false, true, 'plugin', true]);
+  for (let tries = 0; tries < 60 && (codexItemOff() || wholeOff() || !existsSync(piTriage)); tries++) await wait(100);
+  same('its one Undo puts all three back', [codexItemOff(), wholeOff(), existsSync(piTriage), await cellState(a, 'triage', 'codex-cli'), await cellState(a, 'triage', 'claude-cli'), await switchOn(a, 'triage')], [false, false, true, 'plugin', 'plugin', true]);
+  writeFileSync(claudeStub, stubBefore);
   // The same Off from a page read before triage was turned off elsewhere is refused as a whole: the plugin's skill in Codex
   // is never switched beside the refusal. On again after, as it was.
   await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'triage', on: false, except: [], seenOn: true }], false, view.home); document.querySelector('.ov-row[data-key="triage"] .switch').click(); })()`);

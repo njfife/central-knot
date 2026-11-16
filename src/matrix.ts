@@ -23,7 +23,7 @@ import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, Plu
 import { pluginOf } from './sourcelink.ts';
 import { market } from './pluginstate.ts';
 import type { PluginDraft } from './pluginplan.ts';
-import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, type PluginItemAt } from './pluginswitch.ts';
+import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { partOfPage, samePart } from './pluginstatus.ts';
 import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -220,7 +220,8 @@ const library = () => libraryPages[kind];
 function committedList(): ItemRow[] {
   if (!state.home) return [];
   const { facts } = kindSource(state.home, kind);
-  if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fromFacts) };
+  // Where a plugin has it on is read from the plugins the tools have, beside the facts (an Off item's words say it).
+  if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fromFacts).map(row => ({ ...row, pluginOn: pluginOnIn(row) })) };
   return factsCache[kind]!.list;
 }
 /** The harness a Harnesses page shows: its column comes first, and the rows it has come before the others. */
@@ -683,7 +684,7 @@ export function outcomeBand(table = state.page === 'skills' || state.page === 'm
     rest = rest.slice(hits[0].at + hits[0].name.length);
   }
   // Two buttons take their own line under the words in a narrow window (style.css), so the sentence is never squeezed.
-  return h(`div.band.band-done${outcome.next ? '.band-two' : ''}`, { role: 'status', 'data-outcome': '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : outcome.info ? icon('info', 14, 'tone-muted') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
+  return h(`div.band.band-done${outcome.next ? '.band-two' : ''}`, { role: 'status', 'data-outcome': '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
     outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
     h('span.band-actions', {},
@@ -1038,7 +1039,8 @@ function turnOff(skill: ItemRow) {
     const off = plugins.turned.map(item => item.tool).filter(tool => !notIn.includes(tool));
     return off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : '';
   };
-  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, notIn, toolList(), leftOutTools())}${pluginSaid(notIn)}`, plugins.left);
+  // "No tool has it" only where none does: a tool whose plugin switch can't be written still has it.
+  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, [...notIn, ...plugins.leftIn], toolList(), leftOutTools())}${pluginSaid(notIn)}`, plugins.left);
 }
 
 /** Every tool that can have it: where it is on once it is on everywhere. */
@@ -1075,56 +1077,34 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
 /**
  * One click of a main switch: the item's own copies' `changes` with its switches in the tools that have it through a plugin,
  * applied as one click with one Undo (app.ts applyClick); or, with no copy to change, the plugins' part alone. `said`: what it
- * did, given the tools where it didn't. Said after it, what it left as it is: `also`, a problem; `note`, what is still to come;
- * the tools with no switch for one item of a plugin (pluginswitch.ts turnEvery), plainly, with the whole plugin's switch there
- * offered beside the Undo.
+ * did, given the tools where it didn't, then what the plugins' part took with it (pluginswitch.ts alongWords: a whole plugin
+ * where a tool has no switch for one item). `also`: what it left as it is, said as a problem.
  */
 function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string): Promise<void> {
   // Said as "there" when the result is about that one tool, as after a tool's own switch; else by the tool's name.
   const there = !changes.length && new Set(plugins.turned.map(item => item.tool)).size === 1;
   const along = plugins.turned.map(item => alongWords(item, plugins.ops, there)).filter(Boolean).join(' ') || undefined;
-  const next = wholePluginAct(name, plugins.whole, on);
-  if (changes.length) return applyClick({ kind, items: [name], changes, said, also, note: plugins.limit, next, plugins: plugins.ops.length ? { ops: plugins.ops, said: along } : undefined });
+  if (changes.length) return applyClick({ kind, items: [name], changes, said, also, plugins: plugins.ops.length ? { ops: plugins.ops, said: along } : undefined });
   const where = toolsPhrase(plugins.turned.map(item => item.tool), toolList());
-  return applyPluginSwitches(plugins.ops, { also, note: plugins.limit, next, said: [said([]), along].filter(Boolean).join(' '), undone: undoneWords(name, on, where) });
+  return applyPluginSwitches(plugins.ops, { also, said: [said([]), along].filter(Boolean).join(' '), undone: undoneWords(name, on, where) });
 }
 
 /** A plugin item's Undo, in one form on every page: what the click did, turned back ("Undone: triage is back on in Codex."). */
 const undoneWords = (name: string, on: boolean, where: string) => (on ? `Undone: ${name} is off in ${where} again.` : `Undone: ${name} is back on in ${where}.`);
 
-/** The whole plugin's switch in the tools that have no switch for one of its items (`whole`), as a result's second button. */
-function wholePluginAct(name: string, whole: PluginItemAt[], on: boolean) {
-  if (!whole.length) return undefined;
-  const plugin = [...new Set(whole.map(item => item.install.plugin))];
-  const where = toolsPhrase(whole.map(item => item.tool), toolList());
-  return { label: `Turn ${plugin.length === 1 ? plugin[0] : 'its plugins'} ${on ? 'on' : 'off'} in ${where}`, id: 'outcome-whole', title: 'Turn the whole plugin there, with everything it brings; Undo turns it back', run: () => {
-    const draft: PluginDraft = new Map();
-    for (const item of whole) clickPluginItem(draft, item);
-    const ops = [...draft.values()];
-    void applyPluginSwitches(ops, { said: whole.map(item => itemSaid(item, on, ops)).join(' '), undone: undoneWords(name, on, where) });
-  } };
-}
-
 /**
- * A main switch's click that changes nothing: every tool it is still on (or off) in has no switch for one item of a plugin, or
- * one that can't be written. Said plainly, naming the item; where a whole plugin's switch does it, that is offered, with Undo.
+ * A plugin's row's one switch: on while some tool has it on; a click turns it on or off in every tool, the whole plugin where a
+ * tool has no switch for one item (its label says so first). One that changes nothing (every tool's switch can't be written)
+ * is said as a problem.
  */
-function nothingChanged(name: string, plugins: ReturnType<typeof turnEvery>, on: boolean, also?: string) {
-  const left = [also, plugins.limit].filter(Boolean).join(' ');
-  // A known limit (no switch for one item) is said plainly, as information; a switch that can't be written is a problem.
-  tell({ page: state.page, item: name, warn: !!also, info: !also, band: true, text: `${name}: nothing changed.${left ? ` ${left}` : ` It is ${on ? 'on' : 'off'} already.`}`, act: wholePluginAct(name, plugins.whole, on) });
-  rerender();
-}
-
-/** A plugin's row's one switch: on while some tool has it on; a click turns it on or off in every tool with a switch for one item. */
 function pluginRowSwitch(row: PluginRow) {
   const items = rowItems(row);
   const onTools = items.filter(itemOn).map(item => item.tool);
   const on = onTools.length > 0;
-  const label = `${row.name}: ${on ? `on in ${toolsPhrase(onTools, toolList())}` : 'off'}. Click to turn it ${on ? 'off' : 'on'} in every tool that can switch it.`;
+  const label = [`${row.name}: ${on ? `on in ${toolsPhrase(onTools, toolList())}` : 'off'}. Click to turn it ${on ? 'off' : 'on'} in every tool that can switch it.`, wholeWords(items, !on)].filter(Boolean).join(' ');
   return toggle({ on, label, disabled: !canWrite(), id: `switch-${row.key}`, onchange: next => {
     const plugins = turnEvery(items, next);
-    if (!plugins.ops.length) { nothingChanged(row.name, plugins, next, plugins.left); return; }
+    if (!plugins.ops.length) { tell({ page: state.page, item: row.name, warn: true, band: true, text: `${row.name}: nothing changed. ${plugins.left ?? `It is ${next ? 'on' : 'off'} already.`}` }); rerender(); return; }
     mainClick(row.name, next, [], plugins, () => `${row.name} is ${next ? 'on' : 'off'} in ${toolsPhrase(plugins.turned.map(item => item.tool), toolList())}.`, plugins.left);
   } });
 }
@@ -1156,9 +1136,10 @@ function itemSwitch(skill: ItemRow, prefix = '') {
  * is kept out of some or switched off in a tool's own settings: style.css .switch-partial), or off (in Central Knot only).
  */
 function librarySwitch(skill: ItemRow, id: string) {
-  const item = itemOf(skill);
-  const label = switchLabel(skill, item, toolList());
-  return toggle({ on: libraryPlace(item) === 'on', partial: isPartial(item, toolList(), skill), label, onchange: next => flip(skill, next), disabled: !canWrite(), id });
+  const item = itemOf(skill), on = libraryPlace(item) === 'on';
+  // Where a tool has it through a plugin with no switch for one item there, the click turns the whole plugin: said first.
+  const label = [switchLabel(skill, item, toolList()), wholeWords(throughItems(skill), !on)].filter(Boolean).join(' ');
+  return toggle({ on, partial: isPartial(item, toolList(), skill), label, onchange: next => flip(skill, next), disabled: !canWrite(), id });
 }
 
 /**
@@ -1318,9 +1299,10 @@ function foundNote(list: ItemRow[]) {
   return `in a tool, not in Central Knot: Synchronize everything leaves these (open a row to see why)${choosing ? `. ${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : ''}`;
 }
 
-/** The Off heading's note: no tool has these, or (while a write waits) the tools that still have some until Write to Claude Code. */
+/** The Off heading's note: no tool has these, or the tools that still have some on through a plugin, or (while a write waits) until Write to Claude Code. */
 function offNote(list: ItemRow[]) {
-  const still = [...new Set(list.flatMap(skill => skill.waits ?? []))];
+  const still = [...new Set(list.flatMap(skill => skill.waits ?? []))], through = [...new Set(list.flatMap(skill => skill.pluginOn ?? []))];
+  if (through.length) return `in Central Knot; some on in ${andList(through.map(tool => names[tool]))} through a plugin`;
   return still.length ? `in Central Knot; still in ${andList(still.map(tool => names[tool]))} until Write` : leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
 }
 
