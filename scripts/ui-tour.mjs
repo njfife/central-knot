@@ -15,7 +15,8 @@
 // link, beside a skill), source-servers (MCP servers from a link, and Claude Code's wait for Write to Claude Code), source-plugins
 // (a link to a plugin's own folder, a marketplace or a plugin one lists, and Add to Plugins), plugin-library
 // (a plugin's items in Pi as library items), parts-migration (a plugin's parts an earlier version put into Pi, moved to the
-// library at one look) and sort (the item pages sorted by last updated).
+// library at one look), sort (the item pages sorted by last updated) and usage (Read usage on made-up session history: each row's
+// figure, an opened row's line per tool, and the "No use seen in 30 days" chip with its band).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -2772,6 +2773,41 @@ if (wanted('sort')) {
   await a.size(1280, 800);
   await a.click('#nav-mcp'); await shot(a, 'mcp', 'MCP servers, sorted the same way (one choice for the three pages): every server is found, and an MCP entry has no time of its own, so none says when and they go by name');
   await a.click('#nav-agents'); await shot(a, 'agents', 'Agents, sorted the same way: every agent is found, each saying when its newest copy changed');
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
+// ---------- Usage read from the tools' session history (usage.ts, usagerow.ts) ----------
+if (wanted('usage')) {
+  begin('usage');
+  await fresh();
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  // Made-up session history in the Practice copy's tool folders: Claude Code called notes 2 days ago and had review typed 9 days
+  // ago; Copilot CLI invoked standup 3 days ago, its history starting 20 days ago; Codex has none. Each skill's copies were saved 40
+  // days ago, so each is old enough for the chip.
+  const lines = (path, records) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n') + '\n'); };
+  const ago = days => new Date(Date.now() - days * DAY).toISOString();
+  lines(join(practice, '.claude/projects/-work/s1.jsonl'), [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'notes' } }] }, timestamp: ago(2) }]);
+  lines(join(practice, '.claude/projects/-work/s2.jsonl'), [{ type: 'user', message: { content: '<command-name>/review</command-name>' }, timestamp: ago(9) }]);
+  lines(join(practice, '.copilot/session-state/c1/events.jsonl'), [{ type: 'session.start', data: {}, timestamp: ago(20) }]);
+  lines(join(practice, '.copilot/session-state/c2/events.jsonl'), [{ type: 'skill.invoked', data: { name: 'standup' }, timestamp: ago(3) }]);
+  for (const key of ['notes', 'release-notes', 'standup', 'review']) {
+    const folders = ['.claude', '.copilot', '.codex'].map(root => join(practice, root, 'skills', key)).filter(existsSync);
+    for (const path of folders.flatMap(folder => [join(folder, 'SKILL.md'), folder])) utimesSync(path, new Date(), new Date(Date.now() - 40 * DAY));
+  }
+  await refresh();
+  await a.click('#nav-skills');
+  for (const key of ['notes', 'release-notes', 'standup', 'review']) { await turnOnRow(key); await switchOn(key); }
+  await shot(a, 'before', 'Skills before any reading: the page as it was, but for Read usage at the toolbar’s end');
+  await a.click('#read-usage');
+  await waitFor(a, `/^Usage read/.test(document.querySelector('#usage-line .band-text')?.textContent ?? '')`);
+  await atEverySize('read', 'Clicked Read usage: the line under the toolbar says when it was read and how far back each tool goes; each row says used how long ago, or no use seen since the date its tools’ history starts (release-notes)', true);
+  await openRow('release-notes');
+  await atEverySize('opened', 'Opened release-notes, docked beside the table from 1728: each tool’s line says its figure, a history that starts 20 days ago, or that it keeps no sessions here', false, '.details-usage');
+  await closeRow('release-notes');
+  await a.click('.chip[data-tip="No use seen in 30 days"]');
+  await atEverySize('chip', 'Clicked the chip No use seen in 30 days: the rows it holds, and its short band: how many, what it left out, and beside Turn these off what it does', true);
+  await a.click('#nav-agents');
+  await shot(a, 'agents', 'Agents after the same reading: each agent’s figure, or a faint can’t say where no tool that has it on can tell (release-notes, only in Codex, which keeps no sessions here); no chip, as none is in it');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 

@@ -1,6 +1,6 @@
 // An item (a skill, an MCP server or an agent) as the item pages draw it (ItemRow), each kind's items in a home as every
 // page reads them (kindSource), and the order of the rows under a heading (inOrder; the choice itself is matrix.ts
-// orderChoice). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is libraryrow.ts's,
+// orderChoice; a row's last use, usagerow.ts lastUse). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is libraryrow.ts's,
 // from the kind's view (types.ts LibraryView).
 import { currentIndex, type LibraryItem, type Plan, type VersionChange } from './library.ts';
 import { inLibrary } from './libraryrow.ts';
@@ -80,8 +80,8 @@ export const anyOn = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) =>
 
 // ---------- The order of the rows under a heading ----------
 
-/** The two orders the item pages offer: by name (as always, and the default), or by last updated, newest first. */
-export type RowOrder = 'name' | 'updated';
+/** The orders the item pages offer: by name (as always, and the default), by last updated, or by last used once usage is read, newest first. */
+export type RowOrder = 'name' | 'updated' | 'used';
 
 /** By name, a leading dot aside (".hidden" sorts with the h's). */
 const byName = (first: { key: string }, second: { key: string }) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, ''));
@@ -100,10 +100,12 @@ export function lastUpdated(row: Pick<ItemRow, 'versions'>, item: LibraryItem | 
 }
 
 /**
- * The rows under one heading in the chosen order. Last updated: newest first, an item with no time after every one with a
- * time; equal times, or none, go by name, so every look gives the same order. `itemOf`: a row's item as the library holds it.
+ * The rows under one heading in the chosen order. Last updated or last used: newest first, an item with no time after every
+ * one with a time; equal times, or none, go by name, so every look gives the same order. `itemOf`: a row's item as the library
+ * holds it; `usedAt`: a row's last use (ms).
  */
-export function inOrder<Row extends Pick<ItemRow, 'key' | 'versions'>>(rows: readonly Row[], order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined): Row[] {
-  const time = new Map(rows.map(row => [row.key, order === 'updated' ? lastUpdated(row, itemOf(row)) ?? -Infinity : 0]));
+export function inOrder<Row extends Pick<ItemRow, 'key' | 'versions'>>(rows: readonly Row[], order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined, usedAt: (row: Row) => number | undefined = () => undefined): Row[] {
+  const timeOf = (row: Row) => (order === 'updated' ? lastUpdated(row, itemOf(row)) : order === 'used' ? usedAt(row) : 0);
+  const time = new Map(rows.map(row => [row.key, timeOf(row) ?? -Infinity]));
   return [...rows].sort((first, second) => (time.get(second.key)! - time.get(first.key)!) || byName(first, second));
 }

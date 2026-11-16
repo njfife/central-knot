@@ -2,9 +2,9 @@
 // state (`state`), the page shown (showPage), what is said after a click (tell, announce), the busy line (busy) and whether the
 // page is acting (acting: busy, or the Plugins page's switch clicks running); a click on an item page sent to its kind's engine
 // (applyClick, through kindPages) and its result kept for the page (lastResult); History's actions (restoreEvent); the reads of
-// the home (loadHome, readAgain, readHomeOnce) and the Sync switch, Sync once and Synchronize everything's row; and the
-// Instructions, base instructions and Profiles pages' actions. A sync notice lives across reads here, until its
-// page shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it. Not here: drawing (renderer.ts and each
+// the home (loadHome, readAgain, readHomeOnce), the usage reading on a click (readUsage), and the Sync switch, Sync once and
+// Synchronize everything's row; and the Instructions, base instructions and Profiles pages' actions.
+// A sync notice lives across reads here, until its page shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it. Not here: drawing (renderer.ts and each
 // page's module), the Plugins page's state (pluginstate.ts), the Sources and Git repo pages' (sourcespage.ts, repopage.ts), and
 // every rule a page shows (the engines' answers in the view: libraryrow.ts, historyactions.ts, profileplan.ts).
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
@@ -12,7 +12,7 @@ import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
-import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice } from './types.ts';
+import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice, UsageReading } from './types.ts';
 import { anyOn, kindSource } from './itemrow.ts';
 import { caughtUpNames, noticeNames, plural, withSetAside } from './model.ts';
 import { button, h } from './dom.ts';
@@ -21,7 +21,7 @@ import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, keptBack } from './clickplan.ts';
 import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
-import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
+import { andList, fewNames, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { endListNews, loadPlugins, market, resetMarket } from './pluginstate.ts';
@@ -107,6 +107,8 @@ export const state = {
   said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void } },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
+  /** What the tools' session history shows was used (usage.ts): read only on the item pages' Read usage click (readUsage), for this home. */
+  usage: pageData<UsageReading>('unasked'),
   /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
   instructions: pageData<InstructionFile[]>(),
   /** The one instruction file being edited (InstructionDraft). */
@@ -280,6 +282,7 @@ function accept(view: HomeView) {
   state.draftPick = undefined;
   resetPageData(state.instructions);
   resetPageData(state.history);
+  resetPageData(state.usage, 'unasked');
   resetMarket();
   // The note of what plugin updates did by themselves is about one home.
   void loadPluginUpdates();
@@ -289,6 +292,18 @@ function accept(view: HomeView) {
   if (state.page !== 'repo') void loadRepo(false);
   // The sidebar counts the sources too (their last reads: no network).
   if (state.page !== 'sources') void loadSources();
+}
+
+/**
+ * Reads the open home's session history (main's usage:read), on Read usage. Not `busy`: it changes nothing, so the page stays
+ * usable and its line says it is reading; an answer for a home switched meanwhile is dropped (accept resets the slot).
+ */
+export async function readUsage() {
+  const home = state.home?.home;
+  if (!home) return;
+  const reading = readPageData(state.usage, () => api().readUsage(home));
+  rerender();
+  if ((await reading) !== 'dropped') rerender();
 }
 
 /** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */
@@ -405,7 +420,7 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
   await putHistory();
   kindPages[click.kind].keep(results, []);
   const failed = [...results.filter(keptBack).map(entry => entry.message), ...(unswitched ? [switchProblems(unswitched)].filter(Boolean) : [])];
-  const what = click.items.length === 1 ? click.items[0] : andList(click.items);
+  const what = click.items.length === 1 ? click.items[0] : fewNames(click.items);
   const lead = failed.length ? `Not all of ${what} could be put back.` : `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`;
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
     text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, ...failed].join(' ') });

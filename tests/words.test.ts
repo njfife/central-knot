@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { capitalToolsPhrase, toolsPhrase } from '../src/words.ts';
+import { capitalToolsPhrase, fewNames, toolsPhrase } from '../src/words.ts';
 
 test('"all N tools" means exactly the home’s tools, compared by which tools they are', () => {
   const event = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -15,4 +15,9 @@ test('the same phrase can start a label: "All 3 tools", or the names as they are
   const home = ['claude-cli', 'copilot-cli', 'codex-cli'];
   assert.equal(capitalToolsPhrase(home, home), 'All 3 tools');
   assert.equal(capitalToolsPhrase(['codex-cli', 'claude-cli'], home), 'Codex and Claude Code');
+});
+
+test('many names in a sentence: four in full, then the first three and how many more', () => {
+  const names = (count: number) => Array.from({ length: count }, (_, index) => `item${index + 1}`);
+  assert.deepEqual([fewNames(names(4)), fewNames(names(40))], ['item1, item2, item3 and item4', 'item1, item2, item3 and 37 more']);
 });
