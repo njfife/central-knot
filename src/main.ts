@@ -16,7 +16,7 @@ import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { discover, findOtherApps } from './discovery.ts';
+import { discover, findOtherApps, forgetVersions } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
@@ -1255,7 +1255,7 @@ app.whenReady().then(async () => {
     return selectHome(mode as HomeMode);
   });
   handle('discovery:start', async () => startHome());
-  handle('discovery:refresh', async () => (current ? syncThenView() : null));
+  handle('discovery:refresh', async asked => { if (asked === true) forgetVersions(); return current ? syncThenView() : null; });
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
     typeof change?.key === 'string' && typeof change.on === 'boolean' && Array.isArray(change.except)

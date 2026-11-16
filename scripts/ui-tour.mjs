@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
@@ -692,6 +692,65 @@ if (wanted('plugins')) {
   await a.click('#plugin-back');
   await a.click('#popen-0-spark'); await waitFor(a, `!!document.querySelector('.plugin-group, .plugin-muted:not(:empty)') && !/Reading/.test(document.querySelector('.plugin-page')?.textContent ?? '')`, 60000); await shot(a, 'plugin-page-remote', 'Opened "spark", whose files live in GitHub’s copilot-plugins repository (read from there).');
   if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'plugins-undone', 'Clicked "Undo" on the result of the switch.'); }
+}
+
+// ---------- A plugin's switch clicks waiting their turn ----------
+// A folder with Claude Code only. Three plugins' switches clicked in a row while Claude Code's stand-in takes 8 s over
+// issue-tracker's install: document-tools ends and is read back, issue-tracker runs, release-helper waits (Claude Code then
+// refuses it). Then the ends, each plugin's own page, and an uninstall the stand-in is slow over.
+if (wanted('plugin-clicks')) {
+  begin('plugin-clicks');
+  const folder = join(scratch, 'clicks-home'), market = join(scratch, 'clicks-market'), slow = join(scratch, 'slow');
+  mkdirSync(join(folder, '.claude/plugins'), { recursive: true });
+  writeMarket(market);
+  const versions = JSON.stringify({ 'document-tools': '1.2.0', 'issue-tracker': '2.0.0' }).replaceAll('"', "'");
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  writeFileSync(join(HOME, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
+case "$*" in
+  "plugin marketplace add "*) printf '{"team-tools":{"source":{"source":"directory","path":"${market}"},"installLocation":"${market}"}}' > "$HOME/.claude/plugins/known_marketplaces.json" ;;
+  *release-helper*) echo 'Plugin "release-helper" not found in marketplace "team-tools".'; exit 1 ;;
+  "plugin install "*|"plugin uninstall "*)
+    case "$2 $3" in "install issue-tracker@team-tools"|"uninstall document-tools@team-tools") [ -f '${slow}' ] && sleep 8 ;; esac
+    "${process.execPath}" -e "const fs = require('fs'), [verb, id] = process.argv.slice(1), file = process.env.HOME + '/.claude/plugins/installed_plugins.json'; let now = { version: 2, plugins: {} }; try { now = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {} if (verb === 'install') now.plugins[id] = [{ scope: 'user', installPath: '${market}/plugins/' + id.split('@')[0], version: ${versions}[id.split('@')[0]] }]; else delete now.plugins[id]; fs.writeFileSync(file, JSON.stringify(now))" "$2" "$3" ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  a.quit();
+  await wait(500);
+  const settings = join(scratch, 'data/app-settings.json');
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: folder } }));
+  a = await launch();
+  await a.click('#nav-plugins');
+  await addMarketplace(a, market);
+  // Sized, and themed, without settling: the page acts until the list ends.
+  const sizeNow = async (width, height) => { Object.assign(a.viewport, { width, height }); await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.run(`window.dispatchEvent(new Event('resize'))`); await wait(300); };
+  const themeNow = async value => { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await wait(300); };
+  const rowIs = (name, state) => waitFor(a, `document.querySelector('[data-plugin="${name}"] .plugin-click')?.dataset.click === '${state}'`, 15000);
+  const pageOf = async name => { await a.run(`document.querySelector('#plugin-back')?.click(); document.querySelector('#popen-0-${name}').click()`); await wait(400); };
+  writeFileSync(slow, '');
+  await a.run(`['document-tools', 'issue-tracker', 'release-helper'].forEach(name => document.querySelector('#pswitch-0-' + name).click())`);
+  await rowIs('document-tools', 'ended'); await rowIs('issue-tracker', 'running');
+  for (const [width, height] of SIZES) { await sizeNow(width, height); await shot(a, `running-${width}`, `Clicked three plugins’ switches in a row: document-tools ended and was read back (its switch On and free again, its mark ✓), issue-tracker says Installing… (Claude Code’s stand-in is slow), release-helper says Waiting to install; only those two switches are held (${width}×${height})`); }
+  await sizeNow(1280, 800);
+  await themeNow('light'); await shot(a, 'running-light', 'The same, light: the held switches beside the free ones.'); await themeNow('dark');
+  await pageOf('release-helper');
+  await shot(a, 'waiting-page', 'Opened release-helper’s page meanwhile: its panel says Waiting to install, and its switch and links are held.');
+  await a.run(`document.querySelector('#plugin-back').click()`);
+  rmSync(slow);
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await atEverySize('ended', 'The list ran: each row says its own result, release-helper’s why Claude Code refused it (the problems band has it whole). The status line says the whole list; there is no Undo, since the last click, release-helper’s, changed nothing', true);
+  await pageOf('document-tools'); await a.settle();
+  await shot(a, 'ended-page', 'document-tools’ own page after its click: its panel says Installed in Claude Code.');
+  await pageOf('release-helper'); await a.settle();
+  await shot(a, 'failed-page', 'release-helper’s own page after its click: its panel says why Claude Code refused it, starting with the tool.');
+  await a.click('#plugin-back');
+  writeFileSync(slow, '');
+  await a.run(`document.querySelector('#pswitch-0-document-tools').click()`);
+  await rowIs('document-tools', 'running');
+  await shot(a, 'uninstalling', 'Turned document-tools off: its row says Uninstalling… while Claude Code’s stand-in takes its time; the earlier list’s rows are gone, as a new list starts.');
+  rmSync(slow);
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
 }
 
 // ---------- Profiles ----------

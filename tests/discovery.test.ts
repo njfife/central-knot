@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { discover, findApp, probeVersion } from '../src/discovery.ts';
+import { discover, findApp, forgetVersions, probeVersion } from '../src/discovery.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, shellPath } from '../src/platform.ts';
 import { isPresent } from '../src/presence.ts';
 
@@ -179,6 +179,35 @@ test('The terminal’s PATH is read from the login shell, whatever its startup f
     await writeFile(join(dir, 'hangs'), '#!/bin/sh\nsleep 30\n', { mode: 0o755 });
     assert.deepEqual([await shellPath(join(dir, 'broken')), await shellPath(join(dir, 'hangs'), 200), await shellPath('')], [undefined, undefined, undefined]);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('A tool is asked its version once while its binary is the same file, and again when it is replaced or the person refreshes', { skip: process.platform === 'win32' }, async () => {
+  const setup = await fixture();
+  try {
+    const asked = join(setup.home, 'asked.log'), started = join(setup.home, 'started'), binary = join(setup.home, 'fixture-claude'), npmTime = new Date('1985-10-26T08:15:00Z');
+    // Written as npm writes a CLI: a new file put in place, with npm's fixed time. Its first start answers no version.
+    const install = async (version: string) => {
+      await writeFile(`${binary}.new`, `#!/bin/sh\necho asked >> '${asked}'\n[ -f '${started}' ] && echo '${version} (Claude Code)' || { touch '${started}'; echo 'starting up'; }\n`, { mode: 0o755 });
+      await utimes(`${binary}.new`, npmTime, npmTime);
+      await rename(`${binary}.new`, binary);
+    };
+    const read = async () => (await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [binary] })).probe;
+    const timesAsked = async () => (await readFile(asked, 'utf8')).split('\n').filter(Boolean).length;
+    await install('2.1.318');
+    // The first start's answer is not kept: the next read asks again.
+    assert.equal((await read()).state, 'malformed');
+    assert.equal((await read()).version, '2.1.318');
+    assert.equal((await read()).version, '2.1.318');
+    assert.equal(await timesAsked(), 2, 'the third read of the home asks no more');
+    // Updated: another file of the same size and time.
+    await install('2.1.319');
+    assert.equal((await read()).version, '2.1.319');
+    assert.equal(await timesAsked(), 3);
+    // Behind a version manager's shim the file stays the same: the person's Refresh asks again.
+    forgetVersions();
+    await read();
+    assert.equal(await timesAsked(), 4);
+  } finally { await setup.cleanup(); }
 });
 
 test('A version probe finds a script CLI’s interpreter beside it, even when the app was opened with a short PATH', { skip: process.platform === 'win32' }, async () => {
