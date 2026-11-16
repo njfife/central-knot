@@ -417,6 +417,8 @@ const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [ran.st
  * and the choices that turn it all back.
  */
 async function runSwitches(ops: PluginOp[], undo = false) {
+  // A plugin changes here as it does on its own page: the Plugins list's rows from before are no longer true (pluginstate.ts).
+  endListNews();
   const home = state.home!.home;
   const plan = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setPart: api().setPluginPart, setWhole: api().setPluginOn };
   const result = await runPlan(ops, plan, home);

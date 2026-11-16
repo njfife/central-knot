@@ -15,7 +15,7 @@
 import { afterActing, announce, busy, readHomeOnce, rerender, showActing, state as app, tell } from './app.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
-import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, type LastRun, type PluginDone, type PluginOp, type ResultLine } from './pluginplan.ts';
+import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDone, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, categoriesOf, copiesToCompare, marketTitle, matches, pluginPlace, undoLimits } from './pluginstatus.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginTurn, PluginTurnResult, PluginsView } from './types.ts';
@@ -380,7 +380,8 @@ export const pluginBusy = (source: string, plugin: string) => !!app.busy || (cli
 
 /**
  * The latest list's rows are its news, true until the plugins change or are read again: they go at a new list, at any other
- * plugin action (act), at the person's Refresh (app.ts readAgain) and with another home (resetMarket). A running list keeps them.
+ * plugin action (act), at an item page's switch for a plugin's item (app.ts runSwitches), at the person's Refresh (app.ts
+ * readAgain) and with another home (resetMarket). A running list keeps them.
  */
 export function endListNews(): void { if (!market.clicking) market.clicks = []; }
 
@@ -425,8 +426,13 @@ async function runClicks(list: PluginClick[], home: string): Promise<void> {
   }
   if (market.clicks !== list) return;
   market.clicking = false;
-  const lines = lastLines(), failed = [...new Set(lines.filter(line => !line.ok).map(line => line.plugin))];
-  if (list.length > 1) announce([resultSentence(lines, false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.', !failed.length && undoOps().length > 0);
+  // A plugin that partly failed is said once, where it went and where not ("beta: installed in Claude Code, not in Codex");
+  // one that went nowhere is named as failed.
+  const lines = lastLines(), went = new Set(lines.filter(line => line.ok).map(line => line.plugin));
+  const notIn = (plugin: string) => [...new Set(list.filter(click => click.plugin === plugin).flatMap(click => click.ran?.done ?? []).filter(step => !succeeded(step.report)).map(step => toolNames[step.tool]))];
+  const said = lines.map(line => (line.ok && notIn(line.plugin).length ? { ...line, text: `${line.text}, not in ${andList(notIn(line.plugin))}` } : line));
+  const failed = [...new Set(lines.filter(line => !line.ok && !went.has(line.plugin)).map(line => line.plugin))];
+  if (list.length > 1) announce([resultSentence(said, false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.', !lines.some(line => !line.ok) && undoOps().length > 0);
   showActing();
   rerender();
   if (document.activeElement === document.body && clickedLast) document.getElementById(clickedLast)?.focus();
@@ -485,6 +491,16 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
   }
   announce(market.problem ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.'));
 });
+
+/**
+ * Undo's label: "Undo the rest" after an Undo that didn't finish; with its plugin ("Undo gamma") when the sentence beside it
+ * (lastLines) names several plugins, since it reverses only the last click; else "Undo".
+ */
+export function undoLabel(): string {
+  const last = market.lastRun;
+  if (last?.undo) return 'Undo the rest';
+  return last?.turn && new Set(lastLines().map(line => line.plugin)).size > 1 ? `Undo ${last.turn.plugin}` : 'Undo';
+}
 
 /** Undo, or "Undo the rest": the last run's way back, by the route that made it (turnPlugin or applyPluginOps). */
 export function undoLast(): void {

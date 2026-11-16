@@ -12,7 +12,7 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
@@ -334,11 +334,11 @@ function legend(view: PluginsView, entry: MarketplaceView) {
     marks.has('cannot') ? item('Can’t go there', h('span.legend-cell.cell-cannot', {})) : null);
 }
 
-/** The way back from the last run, as a button: "Undo", or "Undo the rest" after an Undo that didn't finish. */
+/** The way back from the last run, as a button labelled by undoLabel. */
 function undoButton(): HTMLElement | null {
   const back = undoOps();
   if (!back.length) return null;
-  const undo = button({ variant: 'outline', size: 'small', label: market.lastRun?.undo ? 'Undo the rest' : 'Undo', id: 'plugins-undo', disabled: acting(), onclick: undoLast });
+  const undo = button({ variant: 'outline', size: 'small', label: undoLabel(), id: 'plugins-undo', disabled: acting(), onclick: undoLast });
   undo.title = acting() ?? undoTitle(back);
   return undo;
 }

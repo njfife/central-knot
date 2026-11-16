@@ -30,8 +30,8 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, readAgain, state: app } = await import('../src/app.ts');
-const { clickOn, lastLines, market, pluginBusy, resetMarket, turnPlugin, undoLast } = await import('../src/pluginstate.ts');
+const { acting, applyPluginSwitches, readAgain, state: app } = await import('../src/app.ts');
+const { clickOn, lastLines, market, pluginBusy, resetMarket, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickWords } = await import('../src/pluginparts.ts');
 
 /** Lets the page's awaits run on to the next call to main. */
@@ -187,4 +187,35 @@ test('A list’s rows are its news: the person’s Refresh takes them away', asy
   await alphaInstalled();
   await readAgain();
   assert.deepEqual(states(), []);
+});
+
+test('A list’s rows are its news: an item page’s switch for a plugin’s item takes them away', async () => {
+  await alphaInstalled();
+  await applyPluginSwitches([]);
+  assert.deepEqual(states(), []);
+});
+
+test('Beside a sentence naming several plugins, Undo names the one it reverses: the last click’s', async () => {
+  start();
+  for (const name of ['alpha', 'beta']) turnPlugin(entry, name, 'on');
+  await settled();
+  await main.answer(installed('alpha'));
+  await main.answer(installed('beta'));
+  assert.equal(app.said.text, 'alpha: installed in Claude Code; beta: installed in Claude Code.');
+  assert.equal(undoLabel(), 'Undo beta');
+  // A list of one names one plugin: plain Undo.
+  await alphaInstalled();
+  assert.equal(undoLabel(), 'Undo');
+});
+
+test('A plugin that partly failed is said once at the list’s end, with where it went and where not', async () => {
+  start();
+  for (const name of ['alpha', 'beta']) turnPlugin(entry, name, 'on');
+  await settled();
+  await main.answer(installed('alpha'));
+  const codexRefused = { ...report('failed', 'Not installed. Codex refused it.'), tool: 'codex-cli' as const };
+  await main.answer({ done: [...installed('beta').done, { source: '/market', marketName: 'team', plugin: 'beta', tool: 'codex-cli', action: 'install', report: codexRefused }], before: null, back: [] });
+  assert.equal(app.said.text, 'alpha: installed in Claude Code; beta: installed in Claude Code, not in Codex.');
+  // Its failure, with why, is in the problems band, as any failure is.
+  assert.deepEqual(lastLines().filter(line => !line.ok).map(line => `${line.plugin}: ${line.text}`), ['beta: Codex: Not installed. Codex refused it.']);
 });
