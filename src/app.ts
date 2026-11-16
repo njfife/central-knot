@@ -516,7 +516,7 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
 export async function readAgain() {
   let read = false;
   await busy(noToolManaged() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
-    const view = await api().refresh();
+    const view = await api().refresh(true);
     if (!view) return;
     state.skillsResult = undefined;
     // Said first, so a page that leaves (setHome) adds its reason after what was read.
