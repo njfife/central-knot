@@ -8,7 +8,7 @@ Download the Mac disk image (Apple silicon), `Central-Knot-<version>-mac-arm64.d
 
 A released build opens on **This Mac's home**: your real tools. Nothing is changed until you choose it. The sidebar's **Home** list also has **Another folder…**, for a backup or another account's home; Central Knot writes only inside that folder, and one that is or links into your real tool folders is read-only. The **Practice copy** (sample data in a throwaway folder, removed at Quit) is only in development builds: run `npm start` from the source to try things on sample files first.
 
-Real-home writes happen only on macOS. If something looks wrong, Settings → **Show log file** opens Central Knot's own log: each plugin change with what it came to and why, and each item a change couldn't reach.
+Real-home writes happen on macOS and Linux; on Windows a real home is preview only. If something looks wrong, Settings → **Show log file** opens Central Knot's own log: each plugin change with what it came to and why, and each item a change couldn't reach.
 
 ## The pages
 
@@ -161,7 +161,7 @@ Central Knot's state lives in one folder, `.central-knot/` inside the selected h
 
 ## Not here yet
 
-Windows and Linux real-home writes and desktop app locations, installing a plugin into Cowork (the one Cowork session tried had only the Claude account's plugins, see Plugins), and a plugin installed through a desktop app shown loading in a signed-in session. For OpenCode: its own (npm) plugins, Disable for one agent, agents kept in the older `agent` folder, and writing a draft of the base instructions. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
+Windows real-home writes; Windows and Linux desktop app locations; on Linux, one build at a time (a development run and another build that open one home both write it), and a way to quit on a desktop with no system tray (GNOME without its AppIndicator extension), where a closed window keeps syncing until its process is stopped; installing a plugin into Cowork (the one Cowork session tried had only the Claude account's plugins, see Plugins), and a plugin installed through a desktop app shown loading in a signed-in session. For OpenCode: its own (npm) plugins, Disable for one agent, agents kept in the older `agent` folder, and writing a draft of the base instructions. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
 
 ## For developers
 
@@ -174,7 +174,7 @@ npm test             # TypeScript check and unit tests (tests/*.test.ts)
 ```
 
 - **Where things are:** `MAP.md`, at the repository's root: every source file and script by area, where to start reading, the paths that cross areas and where the recipes for common changes are (`tests/map.test.ts` keeps it true). `LEDGER.md` is history up to 2026-11-13, frozen: how the code works now is in `MAP.md` and each module's header; a change's story is in its pull request.
-- **End to end:** `npm run e2e` (`scripts/e2e.mjs`) drives the app over its debug port in a throwaway HOME, with a stand-in for `/Applications`, the running apps and the Trash (`CK_TEST_APPS`, `tests/macstandins.ts`): no test or tour looks at or removes the real ones, and with it a development run looks for another build too. `--electron` runs the dev build instead of the packaged app; on Linux add `--no-sandbox` and run it under `xvfb-run`. `--flows openCodeFlow,…` runs only the named flows while working on one.
+- **End to end:** `npm run e2e` (`scripts/e2e.mjs`) drives the app over its debug port in a throwaway HOME, with a stand-in for `/Applications`, the running apps and the Trash (`CK_TEST_APPS`, `tests/macstandins.ts`): no test or tour looks at or removes the real ones, and with it a development run looks for another build too. Off a Mac only the flows about another build name one, so every other flow runs as a Linux user's app does, which never looks. `--electron` runs the dev build instead of the packaged app; on Linux add `--no-sandbox` and run it under `xvfb-run`. `--flows openCodeFlow,…` runs only the named flows while working on one.
 - **UI tour:** `node scripts/ui-tour.mjs <outDir> [--electron]` is the light tour: the app opens on the Practice copy and each page is opened once, one picture each, in a few seconds. `--only shell,skills,…` takes the pictures of the named features; `--full` takes every feature at 860×560 up to 2560×1440, dark and light (about ten minutes, for a new release).
 - **Harness tests:** `npm run test:harness` installs, updates and uninstalls a marker plugin with the real `claude`, `copilot` and `codex` CLIs in disposable homes (a missing one is skipped), checks that a plugin turned off stays off through an update and that one its marketplace dropped keeps its copy, and takes a bundled build's marketplace through being packed, unpacked, added to each tool's own list, installed and uninstalled. `CK_HARNESS_APPS=1` runs the same tests through the copy each desktop app carries.
 - **Smoke:** `npm run smoke:mac` opens a hidden window on fixture data only.
@@ -227,7 +227,7 @@ It packs the marketplace exactly as the build does and writes the archive, then 
 - What it prints also names each plugin the release no longer lists.
 
 - **Try one without packaging:** `node scripts/custom-build.mjs <inputs> --out build/custom` stages the build on any system, then `CK_CUSTOM_BUILD=build/custom npm start` runs it. A plain `npm run build` makes `dist/` the standard app again.
-- **Check:** `node scripts/bundled-check.mjs` builds a bundled build from the fixture marketplace with the documented command, deletes the marketplace, opens the packaged app in a throwaway home and checks its name, its own settings folder, the marketplace added to each tool's own list (stand-ins for the tools' CLIs record what they were asked), the Plugins page at four window sizes, Settings, and the feed: a release published to a folder served on this computer is taken, a plugin it no longer offers stays while a tool has it, and a broken publish changes nothing (`--electron` does the same as a development run; adding to the tools is checked on a Mac only, where the home can be written). The Mac CI runs it after the end-to-end checks.
+- **Check:** `node scripts/bundled-check.mjs` builds a bundled build from the fixture marketplace with the documented command, deletes the marketplace, opens the packaged app in a throwaway home and checks its name, its own settings folder, the marketplace added to each tool's own list (stand-ins for the tools' CLIs record what they were asked), the Plugins page at four window sizes, Settings, and the feed: a release published to a folder served on this computer is taken, a plugin it no longer offers stays while a tool has it, and a broken publish changes nothing (`--electron` does the same as a development run; adding to the tools is checked where the home can be written, on macOS and Linux). The Mac CI runs it after the end-to-end checks.
 
 ### Logo
 

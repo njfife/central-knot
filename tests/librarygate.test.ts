@@ -1,10 +1,10 @@
 // The gate for library writes (src/share.ts libraryGate), on real folders in a temp home. First its own table: each state a
 // home can be in, against each way of asking (only asking, `start`, `resume`, `ownFile`): what it answers, and what it made or
-// remembered. Then the clicks that write before their own pass runs (a skill's Take over, a tool's own switch cleared and its
-// Undo), in a home waiting for Resume (refused, unless the click is a Resume, which the gate remembers before anything is
-// written); and clicks refused for a reason of their own, which make no record and resume no home. The pass's own gate:
-// tests/agents.test.ts; a tool's Manage switch: tests/managetool.test.ts; Synchronize everything: tests/firstsetup.test.ts; a
-// profile switch: tests/profiles.test.ts.
+// remembered; and on which platforms a real home lets writes in at all. Then the clicks that write before their own pass runs
+// (a skill's Take over, a tool's own switch cleared and its Undo), in a home waiting for Resume (refused, unless the click is
+// a Resume, which the gate remembers before anything is written); and clicks refused for a reason of their own, which make
+// no record and resume no home. The pass's own gate: tests/agents.test.ts; a tool's Manage switch: tests/managetool.test.ts;
+// Synchronize everything: tests/firstsetup.test.ts; a profile switch: tests/profiles.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -12,6 +12,7 @@ import { join } from 'node:path';
 
 import { saveProfile, switchProfile } from '../src/profiles.ts';
 import { libraryGate, newRecord, remember, saveRecord, syncGate, type Entering, type ShareContext } from '../src/share.ts';
+import { writesRealHome } from '../src/machine.ts';
 import { applySkills, clearSwitch, restoreSkill, takeOver } from '../src/skills.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
@@ -67,6 +68,19 @@ test('The gate in a home waiting for Resume: refuses, unless the click is a Resu
 test('The gate in a home whose record can’t be read, and a home that can’t be written: refuses every way, in plain words', async () => {
   refusedEveryWay(await row('a record that can’t be read'), /^refused: The sync record is damaged\. Nothing was written or deleted\./);
   refusedEveryWay(await row('a home that can’t be written'), /^refused: Preview only:/);
+});
+test('A real home is written on macOS and Linux; on Windows it is preview only, and the gate says so (machine.ts writesRealHome, as main.ts reads it)', async () => {
+  const box = await sandbox();
+  try {
+    const onPlatform = async (platform: string) => {
+      const gate = await libraryGate({ ...box.context, mode: 'actual', realHome: box.home, allowActualWrites: writesRealHome(platform) }, {});
+      return 'refused' in gate ? `refused: ${gate.refused}` : 'let in';
+    };
+    assert.deepEqual({ darwin: await onPlatform('darwin'), linux: await onPlatform('linux'), win32: await onPlatform('win32') }, {
+      darwin: 'let in', linux: 'let in',
+      win32: 'refused: Preview only: writing to real folders works only on macOS and Linux in this version. You can look around; nothing is written.',
+    });
+  } finally { await box.cleanup(); }
 });
 
 // ---------- Take over ----------

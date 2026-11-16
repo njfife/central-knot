@@ -1,7 +1,8 @@
 // A stand-in for this Mac's places (platform.ts macPlaces, named by CK_TEST_APPS): a folder whose Applications holds made-up
 // app bundles, whose lsappinfo answers as macOS's does for the copies a test says are running, and whose Trash receives what
 // Replace takes. Every test and script that opens the app sets CK_TEST_APPS to one (scripts/e2e.mjs, ui-tour.mjs,
-// alpha-check.mjs, bundled-check.mjs), so none looks at or changes the real Applications folders, apps or Trash.
+// alpha-check.mjs, bundled-check.mjs), so none looks at or changes the real Applications folders, apps or Trash; off a Mac,
+// where there are none, scripts/e2e.mjs sets one only in its flows about another build.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
