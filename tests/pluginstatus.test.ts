@@ -16,6 +16,7 @@ test('A tool takes a plugin by its own installer only when its CLI is there and 
   assert.match(blocked({ ...view, clis: {}, desktopOnly: { 'claude-cli': 'Claude desktop' } }, entry, 'claude-cli') ?? '', /^Only Claude desktop was found here, and the copy of Claude Code it carries isn’t there yet \(the app adds it once it has run\). Claude Code’s command-line tool wasn’t found either.$/);
   assert.equal(blocked(view, { ...entry, copilotRefuses: 'Copilot refuses npm.' }, 'copilot-cli'), 'Copilot refuses npm.');
   assert.deepEqual(route('copilot-cli', { ...entry, copilotRefuses: 'x' }), { cannot: 'x' }, 'Copilot CLI refusing the marketplace takes nothing of it');
+  assert.deepEqual(route('copilot-cli', { ...entry, refusedBy: { 'copilot-cli': 'Copilot CLI refused this marketplace.' } }), { cannot: 'Copilot CLI refused this marketplace.' }, 'nor does a tool whose own add refused it');
   assert.equal(toolNow({ ...view, tools: [...view.tools, 'pi-cli'] }, entry, 'p', 'pi-cli', undefined, false).route, 'items', 'Pi takes a plugin as library items');
   // Parts of it from before the library wait to be moved: Pi and OpenCode have none of it and can take none, so nothing is owed
   // there; the tools with an installer are as for any plugin.

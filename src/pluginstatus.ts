@@ -32,14 +32,14 @@ export const whyNotCarried = (entry: MarketplaceView, plugin: string): string | 
   return left && `${notCarried(entry.bundled!.app, left.reason)}${entry.owner ? ` Ask ${entry.owner} if you need it.` : ''}`;
 };
 
-/** Why a tool can't take this marketplace's plugins, if it can't: no CLI and no copy in its desktop app, a Codex-only marketplace, or Copilot refusing it. */
+/** Why a tool can't take this marketplace's plugins, if it can't: no CLI and no copy in its desktop app, a Codex-only marketplace, Copilot refusing it, or the tool's own add having refused it (refusedBy). */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
   if (!takesPlugins(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
   const app = view.desktopOnly?.[tool];
   // Plugins install through the tool's own CLI or, with none, the copy its desktop app carries (PLG-04): here, neither is.
   if (!view.clis[tool]) return app ? `Only ${app} was found here, and the copy of ${names[tool]} it carries isn’t there yet (the app adds it once it has run). ${cliMissing(tool)} either.` : noCli(tool);
   if (entry.codexOnly && tool !== 'codex-cli') return entry.codexOnly;
-  return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
+  return (tool === 'copilot-cli' ? entry.copilotRefuses : undefined) ?? entry.refusedBy?.[tool];
 }
 
 /**

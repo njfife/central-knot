@@ -287,7 +287,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       }
       const states = await statesFor(ctx, tools.filter(takesPlugins), catalog, source, [...catalog.plugins, ...dropped.map(name => ({ name, description: '' }))]);
       if (base.bundled) base.bundled = { ...base.bundled, addedTo: (await readAdded(catalog.name))[ctx.home] ?? [] };
-      return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, codexOnly: catalog.codexOnly, plugins: shown, states };
+      const refused = Object.fromEntries((await Promise.all(tools.filter(takesPlugins).map(async tool => [tool, await engine.refusedBy(ctx, tool, source)] as const))).filter(([, said]) => said));
+      return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, codexOnly: catalog.codexOnly, plugins: shown, states, ...(Object.keys(refused).length ? { refusedBy: refused } : {}) };
     } catch { return { ...base, problem: 'It could not be read.' }; }
   }
 
@@ -738,7 +739,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const other = entry.states[plugin]?.[each];
       const otherMarket = clickGoes(what) === 'out' && other?.state === 'held' ? other.reason : undefined;
       const why = owed.has === 'unknown' ? recordUnread(each) : clickHeld(what, owed) ?? otherMarket;
-      if (why) held.push({ source: entry.source, marketName, plugin, tool: each, action: clickGoes(what) === 'out' ? 'remove' : 'install', report: { tool: each, outcome: 'held', message: why, runs: [] } });
+      // A tool whose own add refused this marketplace is said once, where its state is (pluginstatus.ts blocked), not on every click.
+      if (why && !entry.refusedBy?.[each]) held.push({ source: entry.source, marketName, plugin, tool: each, action: clickGoes(what) === 'out' ? 'remove' : 'install', report: { tool: each, outcome: 'held', message: why, runs: [] } });
     }
     const ran = ops.length ? await runPlan(ops, ownApi, String(home)) : { done: [] as PluginDone[] };
     // A copy turned off in a tool's own settings comes back off: its whole-plugin switch is turned off again after the install.

@@ -708,6 +708,8 @@ export interface MarketplaceView {
   copilotRefuses?: string;
   /** Why only Codex can take this marketplace's plugins (it is in Codex's own format), if so. */
   codexOnly?: string;
+  /** Tools whose own add refused this marketplace while the app runs, each with why in its words (plugins.ts refusedBy). */
+  refusedBy?: Partial<Record<HarnessId, string>>;
   /**
    * The plugins of this marketplace with a part on the record of the parts written before the library, while that record waits to
    * be moved (partsmigrate.ts): such a plugin waits in Pi and OpenCode until it is (pluginstatus.ts waitsToMove).

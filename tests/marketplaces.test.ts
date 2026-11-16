@@ -732,6 +732,30 @@ test('A tool still holding a plugin that is Off keeps a ticked box: unticked, it
   } finally { await box.cleanup(); }
 });
 
+test('A tool whose own add refused the marketplace: its line says so in its words, and later clicks neither run it there again nor list it as failed', { skip: process.platform === 'win32' }, async () => {
+  let box!: Awaited<ReturnType<typeof setup>>;
+  box = await setup({ tools: ['claude-cli', 'copilot-cli'], engine: {
+    findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', 'copilot-cli': join(box.base, 'bin/copilot') }, apps: {} }),
+    install: async (context, catalog, plugin, tool) => (tool === 'copilot-cli' ? engine.install(context, catalog, plugin, tool) : { tool, outcome: 'installed', message: 'Installed.', runs: [], changed: true }),
+  } });
+  try {
+    const log = join(box.base, 'copilot-calls.txt'), calls = async () => (await readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).length;
+    await put(join(box.base, 'bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.109." && exit 0\necho "$*" >> '${log}'\necho 'Invalid marketplace.json: plugins.302.source' >&2\nexit 1\n`);
+    await chmod(join(box.base, 'bin/copilot'), 0o755);
+    const root = join(box.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    await box.markets.add(root);
+    const first = await box.markets.turn(root, 'pdf', 'on', undefined, box.home);
+    assert.deepEqual([first.done.filter(step => step.tool === 'copilot-cli').map(step => step.report.outcome), await calls()], [['failed'], 1]);
+    const said = 'Copilot CLI refused this marketplace: “Invalid marketplace.json: plugins.302.source” It isn’t tried there again until Refresh, or a new version of Copilot CLI.';
+    const view = (await box.markets.view()).marketplaces.find(entry => entry.source === root)!;
+    assert.deepEqual([view.refusedBy, view.switches!.pdf!.tools['copilot-cli']!.held], [{ 'copilot-cli': said }, said]);
+    await box.markets.turn(root, 'pdf', 'off', undefined, box.home);
+    const again = await box.markets.turn(root, 'pdf', 'on', undefined, box.home);
+    assert.deepEqual([again.done.map(step => step.tool), await calls()], [['claude-cli'], 1]);
+  } finally { engine.forgetRefusals(); await box.cleanup(); }
+});
+
 test('Off, then Undo: installed again where it was, a copy that was off in a tool’s own settings off again there, and the record On', async () => {
   const box = await switchHome();
   try {

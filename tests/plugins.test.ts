@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { tomlValue } from '../src/textedit.ts';
 import { compareVersions } from '../src/values.ts';
 import { INLINE_SKILLS_CONFIG } from '../src/pluginstatus.ts';
-import { cachedCatalog, checkAccess, fromDirectory, gitFailure, repositoryKey, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, update, type PluginContext } from '../src/plugins.ts';
+import { cachedCatalog, checkAccess, forgetRefusals, fromDirectory, gitFailure, refusedBy, repositoryKey, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, update, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
 
@@ -230,6 +230,8 @@ test('Before a tool is told to fetch a Git marketplace, access is checked; a fai
     assert.deepEqual([reachable.outcome, reachable.message], ['failed', 'Could not add the marketplace. add failed'], 'the tool’s own result decides');
 
     await stopped(server);
+    // Claude Code's refusal is forgotten first, as the person's Refresh does: else it is said, and nothing is checked.
+    forgetRefusals();
     const unreachable = await install(context, await parseCatalog(root, `${base}/market.git`, 'git'), 'marker', 'claude-cli');
     assert.match(unreachable.message, /Can’t reach the marketplace/);
     assert.equal((await calls()).trim().split('\n').length, 1, 'only the passed check let the tool run');
@@ -394,6 +396,30 @@ test('A CLI that is a script finds its interpreter beside it, even when the app 
     assert.ok(report.runs.length > 0, JSON.stringify(report));
     assert.doesNotMatch(report.runs[0]!.output, /No such file or directory/, report.runs[0]!.output);
   } finally { process.env.PATH = savedPath; await box.cleanup(); }
+});
+
+test('A marketplace a tool’s own add refused is not tried there again: later installs are held with its words, until Refresh or a new version of the tool', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market'), bin = join(box.base, 'bin'), copilot = join(bin, 'copilot'), log = join(box.base, 'calls.txt');
+    await marketplace(root);
+    await mkdir(bin, { recursive: true });
+    // Copilot CLI 1.0.109 refuses the official marketplace's file as invalid.
+    const copilotAt = (version: string) => writeFile(copilot, `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI ${version}." && exit 0\necho "$*" >> '${log}'\necho 'Invalid marketplace.json: plugins.302.source' >&2\nexit 1\n`, { mode: 0o755 });
+    await copilotAt('1.0.109');
+    const context = { ...box.context, binaries: { 'copilot-cli': copilot } }, catalog = await parseCatalog(root, root, 'folder');
+    const calls = async () => (await readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).length;
+    assert.deepEqual([(await install(context, catalog, 'marker', 'copilot-cli')).outcome, await calls()], ['failed', 1]);
+    const again = await install(context, catalog, 'marker', 'copilot-cli');
+    const said = 'Copilot CLI refused this marketplace: “Invalid marketplace.json: plugins.302.source” It isn’t tried there again until Refresh, or a new version of Copilot CLI.';
+    assert.deepEqual([again.outcome, again.message, again.runs, await calls()], ['held', `${said} Nothing was added to Copilot CLI.`, [], 1], 'nothing ran');
+    assert.equal(await refusedBy(context, 'copilot-cli', root), said, 'the page says it where Copilot CLI’s state is said');
+    // A new version is asked again; the person's Refresh forgets every refusal.
+    await copilotAt('1.0.1100');
+    assert.deepEqual([(await install(context, catalog, 'marker', 'copilot-cli')).outcome, await calls()], ['failed', 2]);
+    forgetRefusals();
+    assert.deepEqual([await refusedBy(context, 'copilot-cli', root), (await install(context, catalog, 'marker', 'copilot-cli')).outcome, await calls()], [undefined, 'failed', 3]);
+  } finally { forgetRefusals(); await box.cleanup(); }
 });
 
 test('Codex is told the chosen home outright, since on Windows it finds its own from the system', { skip: noPosix }, async () => {
