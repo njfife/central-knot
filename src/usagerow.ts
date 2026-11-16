@@ -1,11 +1,13 @@
 // What a usage reading (types.ts UsageReading, read in main by usage.ts) says of one row on the Skills, MCP servers and Agents
 // pages. Pure, for the page: which names in each tool's history are a row's item, by that tool's spelling rules (`spelledIn`,
 // a row per tool, as usage.ts readers has); what each tool's history says of it (`toolSays`); and the row's one figure
-// (`rowFigure`). The 30 days a figure counts (`USAGE_DAYS`) are here, read by usage.ts too. A use seen always counts; only a
+// (`rowFigure`); and the "No use seen in 30 days" filter's rule (`noUseSeen`), with the items its Turn these off leaves to
+// their own row (`leftToItsRow`). The 30 days (`USAGE_DAYS`) are here, read by usage.ts too. A use seen always counts; only a
 // tool whose records are sure for the kind (types.ts UsageTells) can say that none was seen. Not here: reading the history
 // (usage.ts) and the words and drawing (matrix.ts).
-import type { ItemKind } from './library.ts';
+import type { ItemKind, LibraryItem } from './library.ts';
 import { DAY_MS } from './model.ts';
+import { pluginOf } from './sourcelink.ts';
 import type { HarnessId, LibraryFacts, ToolUsage, UsageReading } from './types.ts';
 
 /** How many days back a figure counts uses. */
@@ -90,3 +92,18 @@ export function rowFigure(says: readonly ToolSays[], on: readonly HarnessId[]): 
 
 /** An item's newest use in any tool (ms), for the "Last used" order; undefined: none seen. */
 export const lastUse = (says: readonly ToolSays[]) => { const last = says.map(each => each.last ?? '').sort().at(-1); return last ? Date.parse(last) : undefined; };
+
+/**
+ * Where an item stands for the "No use seen in 30 days" filter (council 1, 2026-11-16): `in` when it is On, no tool saw a use
+ * within USAGE_DAYS, a tool that has it on can tell for its kind (rowFigure's `noneSeen`; a history shorter than USAGE_DAYS
+ * counts as far back as it goes), and its oldest version is at least USAGE_DAYS older than the reading; `new` when only that
+ * age keeps it out; undefined otherwise: Off, deleted or found, a use seen, or no tool that has it on can tell ("can't say").
+ */
+export function noUseSeen(item: LibraryItem | undefined, figure: RowFigure, readingAt: string): 'in' | 'new' | undefined {
+  if (!item?.on || item.deleted || !figure || !('noneSeen' in figure)) return undefined;
+  const oldest = Math.min(...item.versions.map(version => Date.parse(version.at)));
+  return oldest <= Date.parse(readingAt) - USAGE_DAYS * DAY_MS ? 'in' : 'new';
+}
+
+/** Whether Turn these off leaves an item to its own row: a plugin's item (a tool has it through one), or one linked to a plugin. */
+export const leftToItsRow = (facts: LibraryFacts) => Object.keys(facts.plugin ?? {}).length > 0 || !!(facts.fromSource && pluginOf(facts.fromSource.link));

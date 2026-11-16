@@ -4338,8 +4338,9 @@ esac
 
 /**
  * Read usage (usage.ts, usagerow.ts) on a folder home whose tools have made-up session history: nothing is read until the click,
- * then each row says its figure, an opened row each tool's, and Sort can put the rows by last used. Each skill was taken in from
- * a copy saved 40 days ago, so every one is old enough for "No use seen" to mean something.
+ * then each row says its figure, an opened row each tool's, and Sort can put the rows by last used. Three skills were taken in
+ * from copies saved 40 days ago, old enough for "No use seen in 30 days"; fresh, saved 2 days ago, is left out as new. The chip
+ * lists the two with no use seen, and Turn these off turns them off in one click whose Undo puts every file back.
  */
 async function usageFlow() {
   const home = join(scratch, 'usage-home'), data = join(scratch, 'usage-data'), ago = days => new Date(Date.now() - days * 86_400_000);
@@ -4349,7 +4350,7 @@ async function usageFlow() {
     chmodSync(join(home, '.local/bin', name), 0o755);
   }
   const [claude, codex] = ['.claude/skills', '.codex/skills'].map(path => join(home, path));
-  for (const name of ['notes', 'standup', 'idle']) { const folder = skill(claude, name); for (const path of [folder, join(folder, 'SKILL.md')]) utimesSync(path, ago(40), ago(40)); }
+  for (const [name, days] of [['notes', 40], ['standup', 40], ['idle', 40], ['fresh', 2]]) { const folder = skill(claude, name); for (const path of [folder, join(folder, 'SKILL.md')]) utimesSync(path, ago(days), ago(days)); }
   const lines = (path, records) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n') + '\n'); };
   const skillCall = (name, days) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: name } }] }, timestamp: ago(days).toISOString() });
   // Claude Code: notes called 2 days ago; standup typed 40 days ago; a listing that names idle, which is no use.
@@ -4358,6 +4359,9 @@ async function usageFlow() {
   // Codex: its history starts 12 days ago; notes's SKILL.md read 5 days ago.
   lines(join(home, '.codex/sessions/2026/11/01/rollout-a.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(12).toISOString() },
     { type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', parsed_cmd: [{ type: 'read', name: 'SKILL.md', path: join(claude, 'notes/SKILL.md') }] } }, timestamp: ago(5).toISOString() }]);
+  // A profile of all four, in use once they are On: turning two off ends that, which the chip's band says first.
+  mkdirSync(join(home, '.central-knot'), { recursive: true });
+  writeFileSync(join(home, '.central-knot/profiles.json'), JSON.stringify({ formatVersion: 2, profiles: [{ id: 'everyday', name: 'Everyday', items: ['skill:fresh', 'skill:idle', 'skill:notes', 'skill:standup'] }] }));
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
   const real = join(scratch, 'usage-real');
@@ -4367,10 +4371,10 @@ async function usageFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('#sync-everything-on')); tries++) await wait(100);
   await a.click('#sync-everything-on');
   await a.click('#nav-skills');
-  for (let tries = 0; tries < 50 && (await sectionsNow(a))[0]?.[1]?.length !== 3; tries++) { await wait(100); await a.settle(); }
-  same('the three skills are On, taken in by Synchronize everything', await sectionsNow(a), [['on', ['idle', 'notes', 'standup']]]);
-  same('before a reading: the one click, and no line, figure or Last used', [await a.text('#read-usage'), await a.exists('#usage-line'), await a.exists('.ov-used'), await a.all('#item-order option', 'e.value')],
-    ['Read usage', false, false, ['name', 'updated']]);
+  for (let tries = 0; tries < 50 && (await sectionsNow(a))[0]?.[1]?.length !== 4; tries++) { await wait(100); await a.settle(); }
+  same('the four skills are On, taken in by Synchronize everything', await sectionsNow(a), [['on', ['fresh', 'idle', 'notes', 'standup']]]);
+  same('before a reading: the one click, and no line, figure, chip or Last used', [await a.text('#read-usage'), await a.exists('#usage-line'), await a.exists('.ov-used'), await a.all('.chip', 'e.dataset.tip'), await a.all('#item-order option', 'e.value')],
+    ['Read usage', false, false, [], ['name', 'updated']]);
   await a.click('#read-usage');
   for (let tries = 0; tries < 50 && !/^Usage read/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
   const line = await a.text('#usage-line .band-text') ?? '';
@@ -4378,19 +4382,38 @@ async function usageFlow() {
     /^Usage read today at .+, in [\d.]+ m?s\. Claude Code: 30 days or more; Codex: since \w+ \d+\.$/.test(line) && (await a.text('#read-usage-again')) === 'Read again', line);
   const figures = () => a.run(`Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => [row.dataset.key, row.querySelector('.ov-used')?.textContent]))`);
   same('each row says its figure: used, or no use seen in 30 days (a listing is no use, nor a use 40 days ago)', await figures(),
-    { idle: 'No use seen in 30 days', notes: 'used 2 days ago', standup: 'No use seen in 30 days' });
+    { fresh: 'No use seen in 30 days', idle: 'No use seen in 30 days', notes: 'used 2 days ago', standup: 'No use seen in 30 days' });
   await a.click('#open-standup');
   same('an opened row says each tool’s figure: its last use beyond the 30 days, and a history that starts 12 days ago',
     await a.all('.details-usage', 'e.textContent.trim()'), ['No use seen in the last 30 days; last used 5 weeks ago.', `No use seen since ${await a.run(`new Date(${ago(12).getTime()}).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })`)}, where its history starts.`]);
   await a.click('#open-standup');
   await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = 'used'; select.dispatchEvent(new Event('change')); })()`);
   await a.settle();
-  same('Sort by Last used: the newest use first, then the one used 40 days ago, then the one never seen', (await sectionsNow(a))[0][1], ['notes', 'standup', 'idle']);
+  same('Sort by Last used: the newest use first, then the one used 40 days ago, then those never seen, by name', (await sectionsNow(a))[0][1], ['notes', 'standup', 'fresh', 'idle']);
   await a.click('#read-usage-again');
   for (let tries = 0; tries < 50 && !/^Usage read/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
-  same('Read again reads afresh and keeps the order chosen', [(await sectionsNow(a))[0][1], (await figures()).notes], [['notes', 'standup', 'idle'], 'used 2 days ago']);
+  same('Read again reads afresh and keeps the order chosen', [(await sectionsNow(a))[0][1], (await figures()).notes], [['notes', 'standup', 'fresh', 'idle'], 'used 2 days ago']);
   await fitsAtMinimum(a, 'Skills with usage read and its figures');
   await a.shot('usage-read');
+  // The chip: the two old enough with no use seen; fresh, 2 days old, left out and counted.
+  same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['All', null], ['No use seen in 30 days', '2']]);
+  await a.click('.chip[data-tip="No use seen in 30 days"]');
+  same('with the chip on, the table holds those two', await sectionsNow(a), [['on', ['standup', 'idle']]]);
+  const band = await a.text('#unused-band .band-text') ?? '';
+  check('its band says how many, which tools were read and that a use elsewhere isn’t seen, Codex’s late start, the new one left out, and the profile it ends',
+    /^2 skills with no use seen in the last 30 days\. Read from Claude Code and Codex: a use anywhere else \(another computer, the web, a tool Central Knot doesn’t read\) isn’t seen\. Codex’s history starts \w+ \d+\. Left out: 1 skill under 30 days old\. With these off, Everyday stops being the profile in use\.$/.test(band), band);
+  await fitsAtMinimum(a, 'Skills with the No use seen chip on and its band');
+  await a.shot('usage-chip');
+  const filesOf = names => Object.fromEntries(names.flatMap(name => [claude, codex].map(root => [join(root, name), readNow(join(root, name, 'SKILL.md'))])));
+  const before = filesOf(['standup', 'idle']);
+  await a.click('#turn-unused-off');
+  for (let tries = 0; tries < 50 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
+  same('Turn these off: one click turns both off, in every tool, and says so with one Undo', [await a.text('.outcome-text, [data-outcome] .band-text'), Object.values(filesOf(['standup', 'idle'])).every(text => text === ''), await sectionsNow(a)],
+    ['Turned off 2 skills with no use seen in the last 30 days: idle and standup. Central Knot keeps them, and turning one on puts it back as it was.', true, []]);
+  await a.click('#outcome-undo');
+  for (let tries = 0; tries < 50 && Object.values(filesOf(['standup', 'idle'])).some(text => text === ''); tries++) await wait(100);
+  await a.click('.chip[data-tip="All"]');
+  same('its Undo puts both back On, every file byte for byte', [filesOf(['standup', 'idle']), (await sectionsNow(a))[0][1]], [before, ['notes', 'standup', 'fresh', 'idle']]);
   same('no page errors, usage', a.pageErrors, []);
   await a.quit();
 }

@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { readUsage } from '../src/usage.ts';
-import { onIn, rowFigure, toolSays, USAGE_DAYS } from '../src/usagerow.ts';
+import { leftToItsRow, noUseSeen, onIn, rowFigure, toolSays, USAGE_DAYS } from '../src/usagerow.ts';
+import { newItem, type LibraryItem } from '../src/library.ts';
 import type { HarnessId, LibraryFacts, ToolCopy, UsageReading } from '../src/types.ts';
 
 const NOW = Date.parse('2026-11-16T12:00:00Z');
@@ -213,4 +214,48 @@ test('A row\'s figure: used, with its newest use; no use seen, when a tool that 
     figure(inCopilot, {}, ['claude-cli', 'copilot-cli']),
     figure(switchedOff, {}, ['claude-cli']),
   ], [{ used: daysAgo(2) }, { noneSeen: true }, { noneSeen: true }, undefined, undefined]);
+});
+
+// ---------- "No use seen in 30 days" (usagerow.ts noUseSeen): a row for each line of the rule ----------
+
+/** An item in the library, On or Off, whose oldest version is `days` old. */
+const kept = (key: string, days: number, more: Partial<LibraryItem> = {}): LibraryItem =>
+  ({ ...newItem(key, key), on: true, hash: 'h', versions: [{ hash: 'h', at: daysAgo(days), from: { how: 'found', harness: 'claude-cli' } }], ...more });
+/** Where an agent kept `days` old stands for the filter, with these uses and tools that have it on, in a reading made now. */
+function standing(item: LibraryItem, row: LibraryFacts, tools: HarnessId[], used: Partial<Record<HarnessId, Record<string, number[]>>> = {}, from: Partial<Record<HarnessId, string>> = {}) {
+  const reading = readingOf(used, from);
+  return noUseSeen(item, rowFigure(tools.flatMap(tool => toolSays(reading, 'agent', row, tool) ?? []), onIn(row, tools)), reading.at);
+}
+const inClaude = facts('reviewer', { 'claude-cli': copy('reviewer') });
+
+test('In: On, no use seen in 30 days, Claude Code (which can tell) has it on, and its oldest version is 40 days old', () => {
+  assert.equal(standing(kept('reviewer', 40), inClaude, ['claude-cli', 'copilot-cli']), 'in');
+});
+
+test('A history shorter than 30 days counts as far back as it goes: Codex since 12 days ago, no use there, is in', () => {
+  const row = facts('notes', { 'codex-cli': copy('notes') }), reading = readingOf({}, { 'codex-cli': daysAgo(12) });
+  assert.equal(noUseSeen(kept('notes', 40), rowFigure([toolSays(reading, 'skill', row, 'codex-cli')!], onIn(row, ['codex-cli'])), reading.at), 'in');
+});
+
+test('No tool that has it on can tell (Copilot CLI has no record of an agent, Codex\'s may not show one): can\'t say, never in', () => {
+  assert.equal(standing(kept('reviewer', 40), facts('reviewer', { 'copilot-cli': copy('reviewer'), 'codex-cli': copy('reviewer') }), ['claude-cli', 'copilot-cli', 'codex-cli']), undefined);
+});
+
+test('A use seen anywhere keeps it out, even one only a reader that may miss uses saw (an agent in Codex)', () => {
+  assert.equal(standing(kept('reviewer', 40), inClaude, ['claude-cli', 'codex-cli'], { 'codex-cli': { 'agent:reviewer': [1] } }), undefined);
+});
+
+test('Its oldest version at least 30 days old: 30 days exactly is in; a minute younger is new, left out and counted', () => {
+  const minuteYounger = kept('reviewer', 30, { versions: [{ hash: 'h', at: new Date(NOW - USAGE_DAYS * DAY + 60_000).toISOString(), from: { how: 'found', harness: 'claude-cli' } }] });
+  assert.deepEqual([standing(kept('reviewer', 30), inClaude, ['claude-cli']), standing(minuteYounger, inClaude, ['claude-cli'])], ['in', 'new']);
+});
+
+test('Off, deleted or only found: never in', () => {
+  assert.deepEqual([standing(kept('reviewer', 40, { on: false }), inClaude, ['claude-cli']), standing(kept('reviewer', 40, { deleted: { at: daysAgo(1) } }), inClaude, ['claude-cli']),
+    standing(undefined as unknown as LibraryItem, inClaude, ['claude-cli'])], [undefined, undefined, undefined]);
+});
+
+test('Turn these off leaves to its own row a plugin\'s item and one linked to a plugin, not one from a Git link', () => {
+  assert.deepEqual([leftToItsRow(facts('triage', {}, { plugin: { 'claude-cli': { plugin: 'tracker', marketplace: 'm' } } })), leftToItsRow(facts('triage', {}, { fromSource: { link: 'plugin:tracker@m' } })),
+    leftToItsRow(facts('notes', {}, { fromSource: { link: 'https://github.com/o/r' } })), leftToItsRow(inClaude)], [true, true, false, false]);
 });

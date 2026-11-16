@@ -20,7 +20,7 @@ import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, keptBack } from './clickplan.ts';
 import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
-import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
+import { andList, fewNames, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
@@ -406,7 +406,7 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
   await putHistory();
   kindPages[click.kind].keep(results, []);
   const failed = [...results.filter(keptBack).map(entry => entry.message), ...(unswitched ? [switchProblems(unswitched)].filter(Boolean) : [])];
-  const what = click.items.length === 1 ? click.items[0] : andList(click.items);
+  const what = click.items.length === 1 ? click.items[0] : fewNames(click.items);
   const lead = failed.length ? `Not all of ${what} could be put back.` : `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`;
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
     text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, ...failed].join(' ') });
