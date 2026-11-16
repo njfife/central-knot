@@ -16,7 +16,7 @@ Central Knot is a configuration mover, not a secret manager or security product.
 
 ## Platform focus
 
-macOS is the only supported platform right now. Linux and Windows are not being supported yet: do not make a Linux or Windows run a required check, and do not spend time on Linux-only or Windows-only failures or features, unless Nathan asks.
+macOS is the released platform. Linux is being built, one step of the Linux plan at a time (Nathan, 2026-11-16: "Linux first"); no Linux work changes what the Mac build does. Windows comes after Linux and is not started: do not make a Windows run a required check, and do not spend time on Windows-only failures or features, unless Nathan asks.
 
 ## Checking a change
 
@@ -28,7 +28,7 @@ Keep the loop short. These are the checks; nothing else is required.
 
 - The full tour (`--full`, hundreds of pictures, about ten minutes) runs for a new release only. Do not run it, repair it or extend it for an ordinary change; a section outside your feature is not yours to fix.
 - The end-to-end checks already open every page, fail on a page error and check that nothing is cut off at each window size. Add a check there, not a tour section, when behaviour needs covering.
-- No Linux or Windows run is required (see Platform focus).
+- A Linux run (`.github/workflows/linux.yml`: every push to `next`, or `gh workflow run linux.yml -R njfife/central-knot --ref <branch>`) is for the Linux plan's steps, never a required check for a Mac change; no Windows run is required.
 - A change that adds, renames or removes a file under `src/` or `scripts/` changes its entry in `MAP.md`; `tests/map.test.ts` (in `npm test`) fails until it does and says what to change.
 - `docs/SPEC.md` is history, as `LEDGER.md` is: written before the library and not kept true, so read `MAP.md` and the module headers for how the code works now. Its ids cited in comments (`SYN-03`, `MCP-02`, `D-36`) are historical.
 

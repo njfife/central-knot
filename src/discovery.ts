@@ -1,7 +1,8 @@
-// One tool in a home, read (discover): its skills as its folders hold them, its CLI and version, and its desktop app; what each
-// tool refuses in a skill (copilotProblem, codexProblem, piProblem, opencodeProblem); and the other apps here that start the
-// tools or read their files (findOtherApps). Read only: nothing here writes. Which tools are managed is presence.ts's; where
-// CLIs and apps are looked for is platform.ts's; the skills on the library are read by skillfiles.ts.
+// One tool in a home, read (discover): its skills as its folders hold them, its CLI and version (each binary asked once while it
+// is the same file: probeVersion), and its desktop app; what each tool refuses in a skill (copilotProblem, codexProblem,
+// piProblem, opencodeProblem); and the other apps here that start the tools or read their files (findOtherApps). Read only:
+// nothing here writes. Which tools are managed is presence.ts's; where CLIs and apps are looked for is platform.ts's; the skills
+// on the library are read by skillfiles.ts.
 import { constants } from 'node:fs';
 import { access, lstat, open, readFile, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
@@ -20,12 +21,32 @@ function errorCode(error: unknown): string {
 
 const VERSION = /\b\d+\.\d+\.\d+(?:[-+][\w.-]+)?\b/;
 
+/**
+ * Each binary's answer to --version, kept while it is the same file (its inode, size and modification time, after following
+ * links), so a read of the home asks each tool once, and a tool updated, replaced or removed while the app runs is asked again.
+ * Only an answer with a version is kept: one that failed or timed out (a slow first start) is asked again next time. A tool
+ * updated behind a version manager's shim keeps its file, so the person's Refresh empties it (forgetVersions, from main.ts).
+ * The one cache of versions: the Plugins page asks through probeVersion too (marketplaces.ts cliVersion).
+ */
+const versions = new Map<string, { file: string; answer: ProbeResult }>();
+export const forgetVersions = () => versions.clear();
+
 export async function probeVersion(binary: string, timeoutMs = 1500): Promise<ProbeResult> {
   try {
     await access(binary, constants.X_OK);
   } catch (error) {
     return { state: errorCode(error) === 'EACCES' ? 'restricted' : 'missing', detail: 'Executable unavailable.' };
   }
+  const file = await stat(binary).then(({ ino, size, mtimeMs }) => `${ino} ${size} ${mtimeMs}`, () => undefined);
+  const known = versions.get(binary);
+  if (file && known?.file === file) return known.answer;
+  const answer = await askVersion(binary, timeoutMs);
+  if (file && answer.state === 'ok') versions.set(binary, { file, answer });
+  return answer;
+}
+
+/** The binary's own --version, run outside the home with its own folder first on PATH, within `timeoutMs`. */
+function askVersion(binary: string, timeoutMs: number): Promise<ProbeResult> {
   return new Promise(resolveResult => {
     execFile(binary, ['--version'], {
       cwd: tmpdir(), env: { ...process.env, PATH: pathBeside(binary) }, timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024,

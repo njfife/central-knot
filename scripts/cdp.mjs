@@ -1,6 +1,8 @@
 // One DevTools-protocol client for the scripts that drive the real app: its page (Chrome's protocol) and, in a dev run, its
 // main process (Node's inspector, `--inspect=<port>`), where a test can see what only main has: the menus it builds, the dialogs
-// it opens, and what the system tells it. Test-side only: nothing in the app opens for it.
+// it opens, and what the system tells it; and, for an AppImage, the wait for its own mount to go (mountsGone). Test-side only:
+// nothing in the app opens for it.
+import { readFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
 
 /**
@@ -103,6 +105,16 @@ export const standIn = (main, platform) => main.run(`(() => {
 
 /** Blurs and focuses the window, as coming back to it from the system's settings does: the page and menus read again. */
 export const refocus = main => main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
+
+/**
+ * Waits, up to 5 s, until nothing is mounted inside `folder` (Linux's mount table): an AppImage mounts itself under the TMPDIR
+ * it was given, here inside the script's throwaway folder, and that mount goes a moment after the app does. Until then the
+ * folder can't be removed. Elsewhere nothing is mounted there.
+ */
+export async function mountsGone(folder) {
+  if (process.platform !== 'linux') return;
+  for (let tries = 0; tries < 50 && readFileSync('/proc/self/mountinfo', 'utf8').includes(` ${folder}/`); tries++) await wait(100);
+}
 
 /** One day in milliseconds, for History events made to look days old. */
 export const DAY = 24 * 60 * 60 * 1000;

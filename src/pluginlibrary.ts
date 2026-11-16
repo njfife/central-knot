@@ -5,7 +5,8 @@
 //   items (atlink.ts pluginItems, its `marketplace` route), and whether each kind was read whole;
 // - running it (runItems): each kind's pass (sources.ts sourceKinds) with that read and the clicks the plugin's switch makes on
 //   its items, one pass per kind, as a profile switch makes them; and its Undo (itemsBack);
-// - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool).
+// - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool), from one look at the home that every
+//   plugin of a view shares (lookAtKinds).
 // When a plugin is read: at a click that brings it into Pi or OpenCode (On, Add, Let in, Install there), at its Update and
 // Update all, and at the automatic updates' check, for a plugin with items (withItemsOf) or a tool new here (marketplaces.ts);
 // Off, Keep out and Take out there only click. A plugin whose parts from before the library wait to be moved takes this route
@@ -18,7 +19,7 @@ import { basename } from 'node:path';
 import { pluginItems, wasRead } from './atlink.ts';
 import type { PluginFiles } from './catalogdetail.ts';
 import { fromLinkSinceTakeIn, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
-import { copiesOf, lookFor, type SourceRead } from './librarypass.ts';
+import { copiesOf, lookFor, type KindLibrary, type SourceRead } from './librarypass.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry } from './pluginrecord.ts';
 import { takesPlugins } from './presence.ts';
@@ -55,11 +56,13 @@ export async function readPlugin(files: PluginFiles, entry: PluginEntry, commitA
   });
 }
 
-/** Each kind's items linked to the plugin, as the record holds them now. */
+/** Each kind's items linked to the plugin, in each kind's library as given. */
 type Linked = { kind: ItemKind; item: LibraryItem };
+const linkedIn = (libraries: { kind: ItemKind; library: KindLibrary }[], id: string): Linked[] =>
+  libraries.flatMap(({ kind, library }) => Object.values(library.items).filter(item => item.source === id && !item.deleted).map(item => ({ kind, item })));
+/** Each kind's items linked to the plugin, as the record holds them now. */
 async function linkedItems(context: ShareContext, id: string): Promise<Linked[]> {
-  const kinds = await Promise.all(sourceKinds().map(async kind => ({ kind: kind.kind.kind, library: (await kind.kind.open(context)).library })));
-  return kinds.flatMap(({ kind, library }) => Object.values(library.items).filter(item => item.source === id && !item.deleted).map(item => ({ kind, item })));
+  return linkedIn(await Promise.all(sourceKinds().map(async kind => ({ kind: kind.kind.kind, library: (await kind.kind.open(context)).library }))), id);
 }
 
 /**
@@ -183,18 +186,23 @@ export async function itemsBack(context: ShareContext, tools: HarnessId[], id: s
 
 // ---------- The page ----------
 
+/** Each kind's look at the home (librarypass.ts lookFor), made once for a whole Plugins view and read by every plugin's itemsView. */
+export const lookAtKinds = (context: ShareContext, tools: readonly HarnessId[]) =>
+  Promise.all(sourceKinds().map(async kind => ({ kind, look: (await lookFor(kind.kind, context, tools)).look })));
+export type KindLooks = Awaited<ReturnType<typeof lookAtKinds>>;
+
 /**
  * What the Plugins page shows of a plugin's items (types.ts PluginItemsView), from the same table the pass carries out: each
  * item linked to it, with its state where it isn't plain (Off; an update ready; removed by the plugin's update); each name it
  * has that is not brought in, with why; how many are on in each tool (onIn); and whether Update has something to do (`ready`). `reads`: none where the plugin can't
- * be read now (`problem` says why); then only its linked items are listed.
+ * be read now (`problem` says why); then only its linked items are listed. `looks`: the home as lookAtKinds read it.
  */
-export async function itemsView(context: ShareContext, tools: readonly HarnessId[], entry: PluginEntry, reads: SourceRead<unknown>[] | undefined, problem?: string): Promise<PluginItemsView> {
-  const lines: PluginItemLine[] = [], linked = await linkedItems(context, entry.id);
+export function itemsView(tools: readonly HarnessId[], looks: KindLooks, entry: PluginEntry, reads: SourceRead<unknown>[] | undefined, problem?: string): PluginItemsView {
+  const lines: PluginItemLine[] = [], linked = linkedIn(looks.map(({ kind, look }) => ({ kind: kind.kind.kind, library: look.library })), entry.id);
   const on = Object.fromEntries(itemTools(tools).map(tool => [tool, onIn(linked, tool)]));
   let ready = false;
-  for (const kind of sourceKinds()) {
-    const { look } = await lookFor(kind.kind, context, tools), items = look.library.items, read = reads?.find(each => each.kind === kind.kind.kind);
+  for (const { kind, look } of looks) {
+    const items = look.library.items, read = reads?.find(each => each.kind === kind.kind.kind);
     const answers = read ? sourceAnswers(items, read, read.recorded, { copies: item => copiesOf(look, item) }) : new Map();
     for (const [key, answer] of answers) {
       const item = items[key], there = read!.names.get(key), name = there && 'name' in there ? there.name : item?.name ?? key;

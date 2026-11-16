@@ -6,7 +6,7 @@ import type { DesktopApi } from './types.ts';
 
 const api: DesktopApi = {
   selectHome: mode => ipcRenderer.invoke('discovery:select', mode),
-  refresh: () => ipcRenderer.invoke('discovery:refresh'),
+  refresh: asked => ipcRenderer.invoke('discovery:refresh', asked === true),
   applySkills: (changes, resume, home) => ipcRenderer.invoke('skills:apply', changes, resume, home),
   clearSkillSwitch: (key, tool, resume, home) => ipcRenderer.invoke('skills:clear-switch', key, tool, resume, home),
   takeOverSkill: (key, tool, resume, home) => ipcRenderer.invoke('skills:take-over', key, tool, resume, home),

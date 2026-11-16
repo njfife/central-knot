@@ -108,7 +108,8 @@ export interface HomeView { mode: HomeMode; label: string; home: string; snapsho
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
-  refresh(): Promise<HomeView | null>;
+  /** The home read again, after a pass. `asked`: the person's Refresh, which asks each tool its version again too (discovery.ts forgetVersions). */
+  refresh(asked?: boolean): Promise<HomeView | null>;
   applySkills(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
   /** Clears a tool's own switch that turns a skill off there (skills.ts clearSwitch). `resume`: as a click's (app.ts clickResumes). */
   clearSkillSwitch(key: string, tool: HarnessId, resume: boolean, home: string): Promise<PassResult>;
