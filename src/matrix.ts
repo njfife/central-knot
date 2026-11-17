@@ -20,7 +20,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -1028,7 +1028,9 @@ function turnOff(skill: ItemRow) {
     return off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : '';
   };
   // "No tool has it" only where none does: a tool whose plugin switch can't be written still has it.
-  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], toolList()), toolList(), leftOutTools())}${pluginSaid(notIn)}`, plugins.left);
+  // A tool's own copy, which Off leaves alone (library.ts), is still there too: said as its mark says it.
+  const own = ownCopies(skill, itemOf(skill), toolList());
+  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], toolList()), toolList(), leftOutTools(), own)}${pluginSaid(notIn)}`, plugins.left);
 }
 
 /** Every tool that can have it: where it is on once it is on everywhere. */
@@ -1412,13 +1414,18 @@ function foundNote(list: ItemRow[]) {
 
 /**
  * The Off heading's note: no tool has these, or the tools that still have some on through a plugin, or how many are still in a
- * tool until sync runs, whose removal there was held (Claude Code's lock, a file that couldn't be written).
+ * tool until sync runs, whose removal there was held (Claude Code's lock, a file that couldn't be written), or how many a tool
+ * has a copy of its own of, which Central Knot left alone (libraryrow.ts ownCopies, as each row's mark and tag say).
  */
 function offNote(list: ItemRow[]) {
   const through = [...new Set(list.flatMap(skill => skill.pluginOn ?? []))];
   if (through.length) return `in Central Knot; some on in ${andList(through.map(tool => names[tool]))} through a plugin`;
   const owed = list.filter(skill => skill.plan?.remove.length), still = [...new Set(owed.flatMap(skill => skill.plan!.remove))];
-  return owed.length ? `in Central Knot; ${owed.length} still in ${andList(still.map(tool => names[tool]))} until sync runs` : leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
+  if (owed.length) return `in Central Knot; ${owed.length} still in ${andList(still.map(tool => names[tool]))} until sync runs`;
+  const ownIn = (skill: ItemRow) => ownCopies(skill, itemOf(skill), toolList());
+  const own = list.filter(skill => ownIn(skill).length), where = [...new Set(own.flatMap(ownIn))];
+  if (own.length) return `in Central Knot; ${own.length} also in ${andList(where.map(tool => names[tool]))}, ${own.length === 1 ? 'a copy' : 'copies'} Central Knot didn’t put there`;
+  return leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
 }
 
 /** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */

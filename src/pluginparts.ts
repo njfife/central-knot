@@ -122,13 +122,13 @@ export function clickWords(click: PluginClick): { text: string; failed: boolean 
   return { text: `${text.charAt(0).toUpperCase()}${text.slice(1)}`, failed: !!click.ran.stopped || lines.some(line => !line.ok) };
 }
 
-/** A plugin's latest click in the page's list, on its row and its page (clickWords): one line, shortened with "…", the whole of it its tooltip. */
+/** A plugin's latest click in the page's list, on its row and its page (clickWords), in its whole words (style.css .plugin-click wraps them). */
 export function clickNote(entry: MarketplaceView, plugin: string): HTMLElement | null {
   const click = clickOn(entry.source, plugin);
   if (!click) return null;
   const { text, failed } = clickWords(click);
   const glyph = click.state === 'waiting' ? icon('clock', 12) : click.state === 'running' ? icon('refresh-cw', 12, 'spin') : icon(failed ? 'triangle-alert' : 'check', 12);
-  return h(`span.plugin-click${failed ? '.failed' : ''}`, { 'data-click': click.state, title: text }, glyph, h('span', {}, text));
+  return h(`span.plugin-click${failed ? '.failed' : ''}`, { 'data-click': click.state }, glyph, h('span', {}, text));
 }
 
 /**
