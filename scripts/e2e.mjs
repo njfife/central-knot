@@ -2,7 +2,7 @@
 // Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,…]
 // `--flows` runs only the named flows, here, on one HOME, for working on one. Without it the run is every flow that can run here
 // (crashFlow needs a home the app writes and --crash-rounds above 0: `runs`): this script once per group (`groups`, at the end)
-// with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time, then once for each flow in `afterTheGroups` (runGroups).
+// with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time (runGroups).
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -171,11 +171,20 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   await send('Runtime.enable');
   await send('Log.enable');
   // A page that never settles (a renderer error at start, a read that never ends) fails the run instead of holding it open.
+  /** A click on the control `selector` names, then the page settled; `closing`: a row's own switch or Add starts a run of its own. */
+  const clickRow = async (selector, closing) => {
+    await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); if (${closing} && e.matches('.switch, .add-item') && e.closest('[data-key], [data-plugin]') && !e.closest('.details')) document.querySelector('#outcome-dismiss, #report-dismiss')?.click(); e.click(); })()`);
+    await settle();
+  };
   const settle = async () => { await wait(120); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s.')) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors,
     inspect, main: inspect && (() => mainProcess(inspect)),
-    click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
+    // A row's own switch or Add clicked here is a run of its own: the header's result is closed first, which ends the run on screen
+    // (clicklist.ts runAt), so each step reads its own click's result. clickInRun leaves it open, so a click soon after the last
+    // one joins its run, as a person's usually does; the checks of runs click that way, by pointer (clickAt) or in the page.
+    click: selector => clickRow(selector, true),
+    clickInRun: selector => clickRow(selector, false),
     exists: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     text: selector => run(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`),
     all: (selector, field = 'e.textContent') => run(`[...document.querySelectorAll(${JSON.stringify(selector)})].map(e => ${field})`),
@@ -409,7 +418,7 @@ async function manageFlow() {
   await a.click('#sync-switch');
   // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
-  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'history', 'sources', 'repo', 'settings']);
+  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
   await a.click('#nav-overview');
   same('its Overview names the tools left out and opens Harnesses', [await a.text('.overview-lead'), await a.exists('#overview-open-harnesses'), await a.exists('#overview-choose-home')],
     ['Central Knot manages none of the tools here: Claude Code, Copilot CLI and Codex are left out.', true, false]);
@@ -574,6 +583,33 @@ const FILE_COLUMN_BLANK = `(() => {
   const column = document.querySelector('.detail-files').getBoundingClientRect(), file = document.querySelector('.detail-files .content').getBoundingClientRect();
   return column.right - file.right > 1 ? ['the file’s column runs ' + Math.round(column.right - file.right) + 'px past the file’s box'] : [];
 })()`;
+
+/**
+ * The opened row `key` and its details under it as the page draws them (style.css .ov-row.open), each colour named by the
+ * page's own token (picked, accent, warning, line). With the pointer on the row: where the pointer is, the row's background
+ * and box shadows, then the details'. Then, the pointer off the page and the keyboard's focus on the row's first control:
+ * where the focus is, and the row's look again. The focus is let go after.
+ */
+async function openedRowLook(a, key) {
+  const row = `.ov-row.open[data-key="${key}"]`;
+  /** Reads `what` on the page, where `row` is the row and `drawn(element)` its look in token names. */
+  const read = what => a.run(`(() => {
+    const probe = document.body.appendChild(document.createElement('i'));
+    const tokens = ['picked', 'accent', 'warning', 'line'].map(name => { probe.style.color = 'var(--' + name + ')'; return [getComputedStyle(probe).color, name]; });
+    probe.remove();
+    const drawn = element => tokens.reduce((said, [colour, name]) => said.split(colour).join(name), getComputedStyle(element).backgroundColor + ', ' + getComputedStyle(element).boxShadow);
+    const row = document.querySelector('${row}');
+    return ${what};
+  })()`);
+  const [x, y] = await a.run(`(() => { const box = document.querySelector('${row}').getBoundingClientRect(); return [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)]; })()`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  const underPointer = await read(`[row.matches(':hover') ? 'pointer on the row' : 'pointer elsewhere', drawn(row), drawn(row.nextElementSibling)]`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
+  await a.run(`document.querySelector('${row} button').focus({ focusVisible: true })`);
+  const withFocus = await read(`[row.matches(':has(:focus-visible)') ? 'keyboard focus in the row' : 'no keyboard focus in the row', drawn(row)]`);
+  await a.run(`document.activeElement?.blur()`);
+  return [...underPointer, ...withFocus];
+}
 
 /**
  * The copy question of the skill `key`, open under its row: what its rows say (`words`), its shape at each window size, then in
@@ -769,6 +805,14 @@ async function practiceFlow() {
   await a.click('#add-notes');
   await a.click('#outcome-undo');
   same('Undo of taking a found skill in leaves every folder as before, and it is found again, the focus on its Add as Undo goes', [folders('notes'), await a.exists('#add-notes'), /^Undone: notes is as before\./.test(await a.text('.band-done') ?? ''), await a.run(`document.activeElement?.id`)], [notesFound, true, true, 'add-notes']);
+  // Add, then Off on the same row soon after: one run. The header says notes is off, as the run left it, and the run's one Undo
+  // takes both back: notes is found again, every folder as before.
+  await a.clickInRun('#add-notes');
+  await a.clickInRun('#switch-notes');
+  const mixedSaid = await a.text('#header [data-outcome] .band-text');
+  await a.click('#outcome-undo');
+  same('Add then Off in one run: the header says notes is off, and the run’s Undo leaves notes found, every folder as before',
+    [mixedSaid, await a.exists('#add-notes'), folders('notes'), /^Undone: notes is as before\./.test(await a.text('#header [data-outcome] .band-text') ?? '')], ['1 skill is off: notes.', true, notesFound, true]);
   await pointerOver('.ov-row[data-key="notes"]');
   await a.click('#add-notes');
   same('adding a found skill takes it in and writes it to every tool at once, byte for byte', [await switchOn(a, 'notes'), folders('notes')[2], folders('notes')[1]], [true, folders('notes')[0], folders('notes')[0]]);
@@ -800,7 +844,9 @@ async function practiceFlow() {
   await a.click('#delete-same-everywhere');
   await a.click('#delete-confirm-same-everywhere');
   same('Delete from Central Knot takes it out of every tool and off the page', [sameStats(), (await rowKeys(a)).includes('same-everywhere')], [[null, null, null], false]);
-  for (const key of ['release-notes', 'standup']) await a.click(`#add-${key}`);
+  // Two Adds, the second soon after the first: one run, said once.
+  for (const key of ['release-notes', 'standup']) await a.clickInRun(`#add-${key}`);
+  same('two Adds in a row are one run, said once', await a.text('#header [data-outcome] .band-text'), '2 skills are on: release-notes and standup.');
   await a.click('#header-refresh');
   same('Refresh regroups the rows: the three are On', (await sectionsNow(a))[0], ['on', ['notes', 'release-notes', 'standup']]);
   same('copies written every way', [existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.claude/skills/standup/SKILL.md')), existsSync(join(practice, '.codex/skills/standup/SKILL.md'))], [true, true, true]);
@@ -818,6 +864,8 @@ async function practiceFlow() {
     { quote: '“Read the supplied changes. Explain what changed, what to check, and what is still unknown.”', tinted: [], does: 'Replaces Copilot CLI’s copy; adds it to Codex.' },
     { quote: '“Read the pull request. List defects first, then missing tests. Ignore style unless it hides a bug.”', tinted: [], does: 'Replaces Claude Code’s copy; adds it to Codex.' },
   ]);
+  same('a row with its copy question open and the question are one block, its bar the warning colour, the row too under the pointer and with the focus in it', await openedRowLook(a, 'review'),
+    ['pointer on the row', 'picked, warning 3px 0px 0px 0px inset', 'picked, warning 3px 0px 0px 0px inset', 'keyboard focus in the row', 'picked, warning 3px 0px 0px 0px inset']);
   await a.click('#use-review-copilot-cli');
   same('the chosen copy is used in every tool, and it is on', [readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), readNow(join(practice, '.codex/skills/review/SKILL.md')), await switchOn(a, 'review')], [reviewCopilot, reviewCopilot, true]);
   check('the result names the copy chosen and says the others are kept as versions', (await a.text('.band-done') ?? '').includes('review is in Central Knot now, with Copilot CLI’s copy, and on in all 3 tools. The other copies are kept as its versions.'), await a.text('.bands'));
@@ -949,7 +997,7 @@ async function practiceFlow() {
   await wait(2200);
   await a.click('#header-refresh');
   same('then the skill turns off everywhere', releaseNotesIn(), [false, false, false]);
-  check('with a notice that Central Knot keeps it, offering Turn on', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && /Turn on/.test(await a.text('.sync-notices') ?? ''), await a.text('.bands'));
+  check('with a notice that Central Knot keeps it, offering Turn it on', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && /Turn it on/.test(await a.text('.sync-notices') ?? ''), await a.text('.bands'));
   check('and the table keeps it under Off, in Central Knot only', ((await sectionsNow(a)).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && /in Central Knot only/.test(await a.text('.ov-row[data-key="release-notes"]') ?? '') && !(await switchOn(a, 'release-notes')), await sectionsNow(a));
   await a.click('#nav-history');
   check('History lists it', (await a.text('#history-scroll') ?? '').includes('release-notes'), await a.text('#history-scroll'));
@@ -1066,13 +1114,13 @@ async function practiceFlow() {
   check('the deletion spreads in the background', spread);
   await a.click('#nav-history');
   const standupDeleted = `[...document.querySelectorAll('.history-row[data-kind="off"]')].find(row => row.textContent.includes('standup'))`;
-  // Its Turn on comes with the page's read after the pass that spread the deletion.
+  // Its Turn it on comes with the page's read after the pass that spread the deletion.
   for (let tries = 0; tries < 50 && !(await a.run(`!!${standupDeleted}?.querySelector('.history-actions button')`)); tries++) await wait(100);
-  same('History says the deletion turned it off everywhere, and offers Turn on', await a.run(`[${standupDeleted}?.querySelector('.history-about')?.textContent, ${standupDeleted}?.querySelector('.history-actions button')?.textContent]`),
-    ['Its copy was deleted in Claude Code, so it was turned off and removed from Copilot CLI and Codex. Central Knot keeps it.', 'Turn on']);
+  same('History says the deletion turned it off everywhere, and offers Turn it on', await a.run(`[${standupDeleted}?.querySelector('.history-about')?.textContent, ${standupDeleted}?.querySelector('.history-actions button')?.textContent]`),
+    ['Its copy was deleted in Claude Code, so it was turned off and removed from Copilot CLI and Codex. Central Knot keeps it.', 'Turn it on']);
   await a.run(`${standupDeleted}.querySelector('.history-actions button').click()`);
   await a.settle();
-  check('Turn on brings standup back', existsSync(join(practice, '.claude/skills/standup/SKILL.md')) && existsSync(join(practice, '.copilot/skills/standup/SKILL.md')));
+  check('Turn it on brings standup back', existsSync(join(practice, '.claude/skills/standup/SKILL.md')) && existsSync(join(practice, '.copilot/skills/standup/SKILL.md')));
   await a.click('#nav-skills');
   await a.click('#nav-skills');
   same('review keeps the version made current, in every tool', ['claude', 'copilot', 'codex'].map(tool => readNow(join(practice, `.${tool}/skills/review/SKILL.md`))), [reviewClaude, reviewClaude, reviewClaude]);
@@ -1159,6 +1207,20 @@ async function practiceFlow() {
   const docked = await tableTop();
   await sizeTo(a, 1280, 560);
   check('a scrolled table keeps its place across the dock breakpoint, both ways', scrolled > 0 && docked === scrolled && await tableTop() === scrolled, { scrolled, docked, back: await tableTop() });
+  // An opened row and its details are one block, the row too under the pointer and with the focus in it. Scrolled until
+  // the middle of its details is at the table's top, the row has gone up with the list: none of it is in view, nor drawn
+  // over the details.
+  await opened('zz-1');
+  same('an opened row and its details are one block: one background, one accent bar down both, no line under the row, under the pointer and with the focus in it', await openedRowLook(a, 'zz-1'),
+    ['pointer on the row', 'picked, accent 3px 0px 0px 0px inset', 'picked, accent 3px 0px 0px 0px inset', 'keyboard focus in the row', 'picked, accent 3px 0px 0px 0px inset']);
+  same('scrolled past an opened row, nothing of it stays in view', await a.run(`(() => {
+    const row = document.querySelector('.ov-row.open[data-key="zz-1"]'), details = row.nextElementSibling, table = row.closest('.scroll'), area = table.getBoundingClientRect();
+    const detailsTop = details.getBoundingClientRect().top - area.top + table.scrollTop;
+    table.scrollTop = detailsTop + details.offsetHeight / 2;
+    const atTop = document.elementFromPoint(area.left + area.width / 2, area.top + 2);
+    return [table.scrollTop >= detailsTop ? 'scrolled past the row' : 'the table can’t scroll past the row', row.getBoundingClientRect().bottom < area.top + 1 && !atTop?.closest('.ov-row') ? 'the row out of view' : 'the row in view'];
+  })()`), ['scrolled past the row', 'the row out of view']);
+  await opened('zz-1', false);
   await fullSize(a);
   for (let n = 1; n <= 6; n++) rmSync(join(practice, `.claude/skills/zz-${n}`), { recursive: true, force: true });
   await a.click('#header-refresh');
@@ -1275,7 +1337,7 @@ async function practiceFlow() {
   // release-notes is added from the keyboard: the rows are shared with Skills and MCP servers, so it stays where it was too.
   await a.run(`document.querySelector('#add-release-notes').focus()`);
   await a.press('Shift');
-  await a.click('#add-release-notes');
+  await a.clickInRun('#add-release-notes');
   same('after a click each agent stays where it was, under Found, from the keyboard too', await sectionsNow(a), [['found', ['code-reviewer', 'release-notes']]]);
   const reviewerFiles = ['.claude/agents/code-reviewer.md', '.copilot/agents/code-reviewer.agent.md', '.codex/agents/code-reviewer.toml'].map(file => join(practice, file));
   const [claudeAgent, , codexAgent] = reviewerFiles;
@@ -1284,7 +1346,7 @@ async function practiceFlow() {
   check('code-reviewer reached Copilot with name, description and prompt, without Claude Code’s own fields', taken[1].includes('description: Reviews a change') && taken[1].includes('You are a careful code reviewer.') && !taken[1].includes('tools:') && !taken[1].includes('model:'), taken[1]);
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', taken[2].includes('developer_instructions = """'));
-  same('taken in, they are On, and the result says where', [await switchOn(a, 'code-reviewer'), /release-notes is in Central Knot now, and on in all 3 tools/.test(await a.text('#header') ?? '')], [true, true]);
+  same('taken in, they are On, and the two Adds, one soon after the other, are said once', [await switchOn(a, 'code-reviewer'), await a.text('#header [data-outcome] .band-text')], [true, '2 agents are on: code-reviewer and release-notes.']);
   // Off takes the agent out of every harness. Central Knot keeps it: its row stays, off, with its description; On (here the
   // result's Undo) writes every harness's file back byte for byte, Claude Code's own fields included.
   await a.click('#switch-code-reviewer');
@@ -1413,12 +1475,54 @@ async function practiceFlow() {
   await a.click(`${outsideRow} .switch`);
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
   check('one click turns the whole plugin off in Claude Code, and the result names what went with it', outsideOff() && !(await switchOn(a, outside)) && !(await a.exists('#outcome-whole'))
-    && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off there, with its 1 other skill and 1 MCP server\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
+    && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off in Claude Code, with its 1 other skill and 1 MCP server\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
   const other = 'outside-tools@ck-outside/outside-other';
   same('and the plugin’s other skill’s row says it is off in Claude Code too', [await cellState(a, other, 'claude-cli'), await switchOn(a, other)], ['plugin-off', false]);
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 60 && (outsideOff() || !/Undone: outside-skill/.test(await a.text('#header') ?? '')); tries++) await wait(100);
   check('its one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside) && /Undone: outside-skill is back on in Claude Code\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
+  // Two of its skills turned off 150 ms apart (clip 04), the second while the first still runs (Claude Code's stand-in takes a
+  // second to disable it): the first takes the whole plugin off in Claude Code; the second, worked out in its turn, finds nothing
+  // left to change there, so it neither fails nor turns the plugin back on; the run's one Undo puts it back.
+  writeFileSync(outsideStub, readFileSync(outsideStub, 'utf8').replace('--scope user") printf', '--scope user") sleep 1; printf'));
+  await a.run(`document.querySelector('${outsideRow} .switch').click()`); await wait(150);
+  await a.run(`document.querySelector('.ov-row[data-key="${other}"] .switch').click()`);
+  await a.settle();
+  same('two skills of one plugin turned off 150 ms apart: the plugin is off in Claude Code, neither click fails, and the header says both and what went with the first',
+    [outsideOff(), await switchOn(a, outside), await switchOn(a, other), await a.exists('#header .problem-line'), await a.text('#header [data-outcome] .band-text')],
+    [true, false, false, false, '2 skills are off: outside-skill and outside-other. outside-skill: its whole plugin outside-tools was turned off in Claude Code, with its 1 other skill and 1 MCP server.']);
+  await a.click('#outcome-undo');
+  check('and the run’s one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside), await a.text('#header'));
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
+  const rowSwitch = key => `document.querySelector('.ov-row[data-key="${key}"] .switch').click()`, headerText = () => a.text('#header .header-result');
+  // A plugin's row clicked again while its first click runs (the stand-in's second): the second click is taken, from the state the
+  // row is drawn in, and the row ends as it says.
+  await a.run(rowSwitch(outside)); await wait(150); await a.run(rowSwitch(outside));
+  await a.settle();
+  same('a plugin’s row clicked again while its click runs ends as the second click says: the plugin is on again, and nothing is called on already',
+    [outsideOff(), await switchOn(a, outside), /already/.test(await headerText() ?? '')], [false, true, false]);
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
+  // One run: outside-skill Off (its whole plugin off), then, drawn Off once that ended, outside-other On (the plugin on again).
+  // Each row is said as the run left it, and the run's one Undo takes the clicks back newest first: the plugin is on, as before.
+  await a.run(rowSwitch(outside));
+  for (let tries = 0; tries < 60 && await switchOn(a, other); tries++) await wait(100);
+  await a.run(rowSwitch(other));
+  await a.settle();
+  const bothOn = /^2 skills are on: outside-skill and outside-other\./.test(await a.text('#header [data-outcome] .band-text') ?? '');
+  await a.click('#outcome-undo');
+  same('Off then On in one run: both rows said on, as the run left them, and its Undo leaves the plugin on, as before the run', [bothOn, outsideOff(), await switchOn(a, outside)], [true, false, true]);
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
+  // One run where the plugin's click fails (Claude Code refuses to disable it) and release-notes' Off works: the failure is said as
+  // one, not counted among those done, and the run's one Undo takes back release-notes.
+  writeFileSync(outsideStub, readFileSync(outsideStub, 'utf8').replace('--scope user") sleep 1; printf', '--scope user") echo "Error: refused" >&2; exit 1; printf'));
+  const notesOnBefore = await switchOn(a, 'release-notes');
+  await a.run(rowSwitch(outside)); await wait(150); await a.run(`document.getElementById('switch-release-notes').click()`);
+  await a.settle();
+  const failedSaid = [await a.text('#header [data-outcome] .band-text'), await a.exists('#outcome-undo'), await switchOn(a, outside), await a.exists('#header .problem-line')];
+  await a.click('#outcome-undo');
+  same('a plugin’s click that fails among others: not counted, said as a problem, and the run keeps its Undo, which turns release-notes back on',
+    [notesOnBefore, ...failedSaid, await switchOn(a, 'release-notes'), outsideOff()], [true, '1 skill is off: release-notes.', true, true, true, true, false]);
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
   writeFileSync(outsideStub, outsideStubBefore);
   if (outsideSettings) writeFileSync(join(practice, '.claude/settings.json'), outsideSettings); else rmSync(join(practice, '.claude/settings.json'), { force: true });
   await a.click(`[id="open-${outside}"]`);
@@ -2024,7 +2128,7 @@ async function practiceFlow() {
   same('Settings rows use the page width, each control at the row end, text 16px in as on other pages', await a.run(`(() => {
     const page = document.querySelector('.settings-scroll'), style = getComputedStyle(page), row = document.querySelector('#setting-log'), box = row.getBoundingClientRect();
     return [Math.round(page.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - box.width),
-      Math.round(box.right - parseFloat(getComputedStyle(row).paddingRight) - document.querySelector('#show-log').getBoundingClientRect().right),
+      Math.round(box.right - parseFloat(getComputedStyle(row).paddingRight) - document.querySelector('#open-log-folder').getBoundingClientRect().right),
       Math.round(document.querySelector('#setting-log-title').getBoundingClientRect().left - page.getBoundingClientRect().left)];
   })()`), [0, 0, 16]);
   const appSettings = join(scratch, 'data/app-settings.json');
@@ -2043,11 +2147,79 @@ async function practiceFlow() {
   chmodSync(appSettings, 0o644);
   await a.click('#appearance-system');
   check('the next save clears the failure', !(await a.exists('.setting-failure')) && savedSettings().appearance === 'system');
-  // Show log file opens the folder the log is in, and says so (macOS and Windows select the file: the Mac check covers that).
+  // The log: Show log shows its last 200 lines under its row, the page scrolled to the newest, with earlier lines back to its
+  // start and Refresh log; Open log folder is a second button.
+  const logFile = join(scratch, 'data/central-knot.log'), logAside = `${logFile}.aside`;
+  /** The log as the page shows it: its lines, whether the newest is in view, and whether anything is wider than the page. */
+  const logShown = () => a.run(`(() => {
+    const text = document.querySelector('#log-text'), page = document.querySelector('#settings-scroll');
+    if (!text) return null;
+    const lines = text.textContent.split('\\n'), view = page.getBoundingClientRect(), end = text.getBoundingClientRect().bottom;
+    return { first: lines[0], last: lines.at(-1), count: lines.length, newestInView: end <= view.bottom && end > view.top, scrolled: page.scrollTop > 0,
+      wider: page.scrollWidth > page.clientWidth || text.scrollWidth > text.clientWidth };
+  })()`);
+  renameSync(logFile, logAside);
+  await a.click('#show-log');
+  same('Show log before anything was logged says so, with Refresh log', [await a.text('#setting-log-lines .setting-log-note'), await a.exists('#log-text'), await a.text('#log-refresh')],
+    ['Nothing has been logged yet.', false, 'Refresh log']);
+  // A log longer than a page, its oldest line a stack trace with no space to break at, then the app's own lines.
+  const stackLine = `2026-11-17T09:00:00.000Z request sync:apply failed: Error: ENOENT at ${'/very/long/path/without/a/space'.repeat(12)}`;
+  writeFileSync(logFile, [stackLine, ...Array.from({ length: 450 }, (_, n) => `2026-11-17T09:00:01.000Z filler line ${n + 1}`)].join('\n') + '\n' + readFileSync(logAside, 'utf8'));
+  rmSync(logAside);
+  const linesOnFile = () => readFileSync(logFile, 'utf8').split('\n').filter(Boolean);
+  await a.click('#log-refresh');
+  let shown = await logShown();
+  same('Refresh log shows the log’s last 200 lines as in the file, scrolled so the newest is in view; Show log is now Hide log, Open log folder a second button',
+    [shown?.count, shown?.last, shown?.newestInView, shown?.scrolled, await a.text('#show-log'), await a.text('#open-log-folder'), await a.text('#log-earlier')],
+    [200, linesOnFile().at(-1), true, true, 'Hide log', 'Open log folder', 'Show 200 earlier lines']);
+  // Where the page lands, the foot: that the times are UTC, and the log's buttons again (the row's are far above), all in view.
+  same('the foot of the lines says the times are UTC and has Refresh log, Hide log and Open log folder, in view; the row says Log', await a.run(`(() => {
+    const foot = document.querySelector('#log-end'), view = document.querySelector('#settings-scroll').getBoundingClientRect(), box = foot.getBoundingClientRect();
+    return [foot.querySelector('.setting-log-note')?.textContent, [...foot.querySelectorAll('button')].map(button => button.textContent), box.top >= view.top && box.bottom <= view.bottom,
+      document.querySelector('#setting-log-title').textContent];
+  })()`), ['Times are in UTC, as the file has them.', ['Refresh log', 'Hide log', 'Open log folder'], true, 'Log']);
+  // A click that logs (Update plugins automatically, turned off), then Refresh log: its line is the newest, in view.
+  await a.click('#plugin-updates-on');
+  await a.click('#log-refresh');
+  shown = await logShown();
+  check('a click that logs, then Refresh log: its line is the newest, and in view', shown?.last.endsWith(' plugin updates: turned off') && shown.newestInView, shown);
+  await a.click('#plugin-updates-on');
+  // Earlier lines, at the smallest window, to the log's start: each click keeps the place (the button stays where it was, the
+  // lines it brought under it), the last says exactly how many were left, and the stack trace wraps: nothing is wider than the page.
+  await sizeTo(a, ...SMALLEST);
+  await a.run(`document.querySelector('#log-earlier').scrollIntoView({ block: 'center' })`);
+  const earlierAt = () => a.run(`(document.querySelector('#log-earlier') ?? document.querySelector('#setting-log-lines .setting-log-note')).getBoundingClientRect().top`);
+  const labels = [];
+  for (let clicks = 0; clicks < 20 && await a.exists('#log-earlier'); clicks++) {
+    const before = await earlierAt();
+    labels.push(await a.text('#log-earlier'));
+    await a.click('#log-earlier');
+    const after = await earlierAt();
+    check(`Show earlier lines keeps the place (click ${clicks + 1})`, Math.abs(after - before) < 1, { before, after });
+  }
+  shown = await logShown();
+  same('earlier lines go back to the log’s start, which says so; the last button said exactly how many were left',
+    [labels.at(-1), await a.text('#setting-log-lines .setting-log-note'), shown?.count, shown?.first], [`Show ${linesOnFile().length - 200 * labels.length} earlier lines`, 'This is the start of the log.', linesOnFile().length, stackLine]);
+  same('a long stack-trace line wraps at 860×560: nothing is wider than the page', shown?.wider, false);
+  // The log's text can be selected (the page's body can't): a drag over its first line selects some of it.
+  const [fromX, fromY] = await a.run(`(() => { const box = document.querySelector('#log-text').getBoundingClientRect(); return [box.left + 14, box.top + 14]; })()`);
+  for (const [type, x, buttons] of [['mouseMoved', fromX, 0], ['mousePressed', fromX, 1], ['mouseMoved', fromX + 240, 1], ['mouseReleased', fromX + 240, 0]]) {
+    await a.send('Input.dispatchMouseEvent', { type, x, y: fromY, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: 1 });
+  }
+  const selected = await a.run(`getSelection().toString()`);
+  check('a drag over the log selects its text, to copy', selected.length > 10 && stackLine.includes(selected), selected);
+  await a.run(`getSelection().removeAllRanges()`);
+  await fullSize(a);
+  await fitsAtMinimum(a, 'Settings with the whole log shown');
+  await a.run(`document.querySelector('#log-foot-show-log').focus()`);
+  await a.click('#log-foot-show-log');
+  same('Hide log at the foot takes the lines away; the row’s button says Show log again, with the focus', [await a.exists('#setting-log-lines'), await a.text('#show-log'), await a.run(`document.activeElement?.id`)],
+    [false, 'Show log', 'show-log']);
+  // Open log folder opens the folder the log is in, and says so (macOS and Windows select the file: the Mac check covers that).
   if (process.platform === 'linux') {
-    await a.click('#show-log');
+    await a.click('#open-log-folder');
     for (let tries = 0; tries < 30 && !existsSync(fileManagerAsked); tries++) await wait(100);
-    same('Show log file opens the log’s folder and names the file', [existsSync(fileManagerAsked) && readFileSync(fileManagerAsked, 'utf8').trim(), await a.text('#setting-log .setting-note')],
+    same('Open log folder opens the log’s folder and names the file', [existsSync(fileManagerAsked) && readFileSync(fileManagerAsked, 'utf8').trim(), await a.text('#setting-log .setting-note')],
       [join(scratch, 'data'), 'Opened the log’s folder. The file is central-knot.log.']);
   }
   // History's action for an entry that is no library item's (here, none at all) reaches no kind's restore (main.ts history:restore).
@@ -2423,7 +2595,25 @@ async function sourcesFlow() {
   const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
   const type = async (text) => a.run(`(() => { const input = document.querySelector('#source-link'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
 
+  same('the sidebar names the page Library sources, between Plugins and Profiles', [await a.text('#nav-sources .nav-label'),
+    await a.run(`[document.querySelector('#nav-sources').previousElementSibling?.id, document.querySelector('#nav-sources').nextElementSibling?.id]`)], ['Library sources', ['nav-plugins', 'nav-profiles']]);
+  // The Plugins page is Plugin marketplaces: its row, just above Library sources, and its title. Every row's name shows whole
+  // wherever the sidebar shows names (at the smallest window only once it is opened: its rail shows the marks alone).
+  same('the sidebar names the Plugins page Plugin marketplaces', await a.text('#nav-plugins .nav-label'), 'Plugin marketplaces');
+  for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await sizeTo(a, width, height);
+    const rail = await a.run(`document.body.classList.contains('rail')`);
+    if (rail) await a.click('#sidebar-toggle');
+    same(`every sidebar row’s name shows whole at ${width}×${height}${rail ? ', the sidebar opened' : ''}`,
+      await a.run(`[...document.querySelectorAll('#nav .nav-label')].filter(label => !label.offsetWidth || label.scrollWidth > label.clientWidth).map(label => label.textContent)`), []);
+    if (rail) await a.click('#sidebar-toggle');
+  }
+  await fullSize(a);
+  await a.click('#nav-plugins');
+  same('the Plugins page’s title says Plugin marketplaces', await a.text('.page-title'), 'Plugin marketplaces');
   await a.click('#nav-sources');
+  same('the page’s title says Library sources, and its last line says a marketplace’s link goes to Plugin marketplaces instead', [await a.text('.page-title'), await a.text('.repo-aside')],
+    ['Library sources', 'A marketplace’s link isn’t a library source: Look offers Add to Plugin marketplaces instead, where each of its plugins has its own switch.']);
   check('the Sources page opens empty, with its field', await a.exists('#source-link') && /No sources yet/.test(await a.text('.page') ?? ''), await a.text('.page'));
   await type('https://github.com/stephenturner/skill-deslop/tree/main');
   await a.click('#source-look');
@@ -2443,7 +2633,7 @@ async function sourcesFlow() {
   await a.click('#nav-skills');
   await a.click('#open-deslop');
   const opened = await a.text('.details') ?? '';
-  check('its opened row on Skills says which source it is from, and its version says so too', /From github\.com\/stephenturner\/skill-deslop \(main\), a source\. What changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here\./.test(opened) && /from github\.com\/stephenturner\/skill-deslop \(main\)/.test(opened), opened);
+  check('its opened row on Skills says which source it is from, and its version says so too', /From github\.com\/stephenturner\/skill-deslop \(main\), a source\. What changes there comes in once a day while Automatic sync is on, and at Check now on Library sources, unless you change it here\./.test(opened) && /from github\.com\/stephenturner\/skill-deslop \(main\)/.test(opened), opened);
   await a.click('#switch-deslop');
   const asGiven = Object.fromEntries(Object.entries(files).map(([path, text]) => [path, text]));
   const inTool = root => Object.fromEntries(Object.keys(files).map(path => [path, readNow(join(home, root, 'deslop', path))]));
@@ -2472,7 +2662,7 @@ async function sourcesFlow() {
   await a.click('#nav-skills');
   const waitingRow = await a.text('.ov-row[data-key="deslop"]') ?? '';
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
-  check('its row on Skills says the source has an update, and its opened row says Merge and Replace are on Sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now\. On Sources, Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
+  check('its row on Skills says the source has an update, and its opened row says Merge and Replace are on Library sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now\. On Library sources, Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
   await a.shot('skills-waiting');
   await a.click('#nav-sources');
   await a.click(`#source-replace-${id}-skill-deslop`);
@@ -2497,7 +2687,7 @@ async function sourcesFlow() {
   await a.shot('sources-merged');
   await a.click('#nav-skills');
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
-  check('its opened row on Skills says it is still changed here, so the source’s next change will wait for Merge, Replace or Keep mine', /You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on Sources\./.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its opened row on Skills says it is still changed here, so the source’s next change will wait for Merge, Replace or Keep mine', /You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on Library sources\./.test(await a.text('.details') ?? ''), await a.text('.details'));
   // A clash: the same line changed in Claude Code and at the source. Merge names the file and changes nothing.
   await a.click('#nav-sources');
   writeFileSync(inClaude, readNow(inClaude).replace('Remove slop, firmly.', 'Remove slop, my way.'));
@@ -2540,7 +2730,7 @@ async function sourcesFlow() {
   check('History says the source dropped it', await until(async () => /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it, so it is off and removed from all 3 tools/.test(await a.text('.page') ?? '')), await a.text('.page'));
   // The notice that stays: deslop's line on the source's row, and its row on Skills, until it is turned on.
   await a.click('#nav-sources');
-  check('the source’s row keeps a line for deslop, removed there, with Turn on', await until(async () => /No longer at this source: it is Off, and no longer from it\./.test(await a.text('.source-row .source-name[data-key="deslop"][data-state="removed"]') ?? '')) && await a.exists('#source-turn-on-skill-deslop'), await a.text('.source-row'));
+  check('the source’s row keeps a line for deslop, removed there, with Turn it on', await until(async () => /No longer at this source: it is Off, and no longer from it\./.test(await a.text('.source-row .source-name[data-key="deslop"][data-state="removed"]') ?? '')) && await a.text('#source-turn-on-skill-deslop') === 'Turn it on', await a.text('.source-row'));
   await a.shot('sources-removed');
   await a.click('#nav-skills');
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
@@ -2549,7 +2739,7 @@ async function sourcesFlow() {
   await a.shot('skills-removed');
   await a.click('#nav-sources');
   await a.click('#source-turn-on-skill-deslop');
-  check('Turn on puts deslop in every tool, says so with Undo, and its line goes', await until(() => Object.values(roots).every(root => existsSync(join(home, root, 'deslop/SKILL.md'))))
+  check('Turn it on puts deslop in every tool, says so with Undo, and its line goes', await until(() => Object.values(roots).every(root => existsSync(join(home, root, 'deslop/SKILL.md'))))
     && await until(async () => /deslop is on in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '')) && await a.exists('#outcome-undo') && !(await a.exists('#source-turn-on-skill-deslop')) && record()?.on === true, [await a.text('.band-done'), await a.text('.source-row')]);
   await a.shot('sources-turned-on');
   // Add on a name the library holds deleted: unslop, deleted from Central Knot on Skills, comes back Off from its line.
@@ -2670,23 +2860,23 @@ async function sourcesFlow() {
   await a.click('#switch-pdf');
   check('turned On, pdf’s SKILL.md is in Claude Code', await until(() => existsSync(join(home, roots['claude-cli'], 'pdf/SKILL.md'))), readdirSync(join(home, roots['claude-cli'])));
 
-  // A marketplace: Look offers Add to Plugins, never Add. While the repository can't be read, Add to Plugins opens Plugins with
+  // A marketplace: Look offers Add to Plugin marketplaces, never Add. While the repository can't be read, Add to Plugin marketplaces opens Plugin marketplaces with
   // that page's words and the link stays; once it can, the marketplace is listed there, nothing is installed, no tool record is made.
   await a.click('#nav-sources');
   await type('https://github.com/team/market');
   await a.click('#source-look');
   await until(() => a.exists('#source-to-plugins'));
   const marketLook = await a.text('#source-preview') ?? '';
-  check('a marketplace’s link: Look names it with its plugin count and offers Add to Plugins, not Add', /The link holds a marketplace, acme-tools, with 1 plugin/.test(marketLook) && /none turned on/.test(marketLook) && !(await a.exists('#source-add')), marketLook);
+  check('a marketplace’s link: Look names it with its plugin count and offers Add to Plugin marketplaces, not Add', /The link holds a marketplace, acme-tools, with 1 plugin/.test(marketLook) && /none turned on/.test(marketLook) && !(await a.exists('#source-add')), marketLook);
   renameSync(market, `${market}.away`);
   await a.click('#source-to-plugins');
-  check('the repository unreadable: Add to Plugins opens Plugins with its words, nothing listed', await until(async () => /No access, or no repository there/.test(await a.text('.plugin-problems') ?? '')) && !(await a.text('.market-list') ?? '').includes('acme-tools'), await a.text('.page'));
+  check('the repository unreadable: Add to Plugin marketplaces opens Plugin marketplaces with its words, nothing listed', await until(async () => /No access, or no repository there/.test(await a.text('.plugin-problems') ?? '')) && !(await a.text('.market-list') ?? '').includes('acme-tools'), await a.text('.page'));
   await a.click('#nav-sources');
   check('and the link and its look stay on Sources', await a.run(`document.querySelector('#source-link').value`) === 'https://github.com/team/market' && await a.exists('#source-to-plugins'), await a.text('.page'));
   renameSync(`${market}.away`, market);
   await a.click('#source-to-plugins');
   const pluginsSaid = async () => `${await a.text('.plugins-page') ?? ''} ${await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`) ?? ''}`;
-  check('Add to Plugins opens Plugins with acme-tools listed and says nothing was installed; no tool record is made', await until(async () => (await a.text('.market-list') ?? '').includes('acme-tools') && /Marketplace added: 1 plugin, nothing installed \(acme-tools\)\./.test(await pluginsSaid()))
+  check('Add to Plugin marketplaces opens Plugin marketplaces with acme-tools listed and says nothing was installed; no tool record is made', await until(async () => (await a.text('.market-list') ?? '').includes('acme-tools') && /Marketplace added: 1 plugin, nothing installed \(acme-tools\)\./.test(await pluginsSaid()))
     && !existsSync(join(home, '.claude/plugins')) && !existsSync(join(home, '.copilot/config.json')) && !(JSON.parse(readNow(join(home, '.central-knot/plugins.json')) || '{}').plugins ?? []).length,
     [await pluginsSaid(), existsSync(join(home, '.claude/plugins')), readNow(join(home, '.central-knot/plugins.json'))]);
   await a.click('#nav-sources');
@@ -2753,7 +2943,7 @@ async function updateFlow() {
     for (let i = 0; i < 40 && await focused() !== 'check-updates'; i++) await wait(250);
     same('Check now takes the focus back when the check ends', await focused(), 'check-updates');
     same('and a screen reader is told what it found, which the row already shows', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], ['0.5.0 preview 5 is available. Updating downloads it and restarts Central Knot.', true]);
-    same('the row’s buttons are the size of the page’s other row buttons', await a.run(`['setting-update', 'check-updates', 'show-log'].map(id => document.getElementById(id).getBoundingClientRect().height)`), [32, 32, 32]);
+    same('the row’s buttons are the size of the page’s other row buttons', await a.run(`['setting-update', 'check-updates', 'show-log', 'open-log-folder'].map(id => document.getElementById(id).getBoundingClientRect().height)`), [32, 32, 32, 32]);
     // Something typed and not saved holds the restart: an instruction file's draft.
     const typeDraft = async () => {
       await a.click('#nav-instructions');
@@ -2953,7 +3143,7 @@ async function fewToolsFlow() {
     await a.quit();
     return;
   }
-  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'history', 'sources', 'repo', 'settings']);
+  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
   same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
   check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
@@ -2971,13 +3161,13 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.codex/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.codex/skills/notes/SKILL.md'), text('notes'));
   await a.click('#header-refresh');
-  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'history', 'sources', 'repo', 'settings']);
+  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
   cli('.pi/agent/bin/pi', 'pi 1.5.0');
   await a.click('#header-refresh');
   // Codex, whose folder is still here, holds plugins: were it counted, that page would be back.
-  same('with Pi alone, Plugins is left out, and Agents stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']);
+  same('with Pi alone, Plugins is left out, and Agents stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']);
   check('and the Overview names it once', (await a.text('#overview-absent') ?? '').includes('No tool here holds plugins') && await a.exists('#overview-agents'), await a.text('#overview-absent'));
   await a.click('#nav-skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
@@ -2991,7 +3181,7 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.claude'), { recursive: true });
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
-  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']);
+  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
   await a.click('#nav-harnesses');
   check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
   // On Plugins, its only tool goes away (Pi, still here, holds no plugins): the page it was on no longer exists here, so the
@@ -3000,7 +3190,7 @@ async function fewToolsFlow() {
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   rmSync(join(home, '.local/bin/claude'));
   await a.click('#header-refresh');
-  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']]);
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
   check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds plugins now\.$/.test(moved ?? ''), moved);
   // Claude desktop alone, with no CLI and no .claude folder yet: Claude Code is here, said so with both versions.
@@ -3114,7 +3304,7 @@ async function openCodeFlow() {
   await pictures(a, 'opencode-page-skills');
   await a.click('#harness-tab-plugins');
   await pictures(a, 'opencode-page-plugins');
-  check('its Plugins tab says where plugins install and that a plugin’s items can go in', /installs marketplace plugins into Claude Code\. A plugin’s page on Plugins puts its skills, agents and MCP servers in OpenCode as items of Central Knot’s that follow the plugin\./.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
+  check('its Plugins tab says where plugins install and that a plugin’s items can go in', /installs marketplace plugins into Claude Code\. A plugin’s page on Plugin marketplaces puts its skills, agents and MCP servers in OpenCode as items of Central Knot’s that follow the plugin\./.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
   await a.click('#harness-tab-about');
   const about = await a.text('#harness-body');
   check('About names its folders and its settings file', ['~/.config/opencode/skills', '~/.claude/skills', '~/.config/opencode/opencode.json', '~/.config/opencode/agents', '~/.config/opencode/AGENTS.md'].every(path => about.includes(path)), about);
@@ -4415,7 +4605,7 @@ esac
   same('the second click waits its turn while the first runs, and another plugin’s switch stays usable', [await rowSays('release-helper'), await rowSays('starter-skills'), await a.exists('#pswitch-0-issue-tracker:not([disabled]):not([aria-disabled])')], ['running', 'waiting', true]);
   for (let tries = 0; tries < 50 && await rowSays('starter-skills') !== 'running'; tries++) await wait(100);
   same('the first is read back as soon as it ends: its row says so, and its switch is On and free while the second runs', [await rowSays('release-helper'), await switchIs('#pswitch-0-release-helper:not([disabled]):not([aria-disabled])'), await rowSays('starter-skills')], ['ended', 'true', 'running']);
-  check('a control the list turns off says why', await a.run(`document.querySelector('#open-add-marketplace')?.title`) === 'Waits until the plugin clicks are done.', await a.run(`document.querySelector('#open-add-marketplace')?.outerHTML`));
+  check('a control the list turns off says why', await a.run(`document.querySelector('#open-add-marketplace')?.title`) === 'Waits until the switches clicked are done.', await a.run(`document.querySelector('#open-add-marketplace')?.outerHTML`));
   await a.run(`document.querySelector('#nav-skills').click()`);
   check('an item page’s switch can be used meanwhile', await a.run(`!!document.querySelector('#switch-triage[aria-checked="true"]:not([disabled])')`), await a.text('.page'));
   await a.run(`document.querySelector('#switch-triage').click()`);
@@ -4457,6 +4647,7 @@ async function rowsKeepTheirPlacesFlow() {
 const fs = require('fs'), dir = process.env.HOME + '/.claude/plugins', record = dir + '/installed_plugins.json', [, verb, id] = process.argv.slice(2);
 if (process.argv[2] === '--version') { console.log('2.1.322 (Claude Code)'); process.exit(0); }
 if (fs.existsSync(process.env.HOME + '/slow')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+while (fs.existsSync(process.env.HOME + '/hold')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
 fs.mkdirSync(dir, { recursive: true });
 const now = fs.existsSync(record) ? JSON.parse(fs.readFileSync(record, 'utf8')) : { version: 2, plugins: {} };
 if (verb === 'marketplace') fs.writeFileSync(dir + '/known_marketplaces.json', JSON.stringify({ 'rows-market': { source: { source: 'git', url: process.argv[5] } } }));
@@ -4489,18 +4680,37 @@ fs.writeFileSync(record, JSON.stringify(now));
   const states = rows => a.run(`Object.fromEntries([...document.querySelectorAll(${JSON.stringify(rows)})].map(row => [row.dataset.key ?? row.dataset.plugin, row.querySelector('.switch')?.getAttribute('aria-checked') ?? null]))`);
   const changed = (before, after) => Object.keys(after).filter(key => before[key] !== after[key]);
   const focused = () => a.run(`document.activeElement?.id`);
-  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const done = async () => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const headerSays = () => a.text('#header [data-outcome] .band-text');
+  /** While `hold` is there, Claude Code's stand-in waits before any plugin command: a plugin click stays running, however long. */
+  const hold = () => writeFileSync(join(home, 'hold'), ''), letGo = () => rmSync(join(home, 'hold'), { force: true });
+  /**
+   * Holds the page's run of clicks open, however far apart the clicks after it land: a click on plug-03's skill on Skills, whose
+   * command waits (hold), so each click made after it waits its turn behind it. Let go, it fails (the stand-in has no disable)
+   * and changes nothing. It ends on MCP servers, the list at its top.
+   */
+  const holdRun = async () => {
+    hold();
+    await a.click('#nav-skills');
+    await a.run(`document.querySelector('.ov-row[data-key$="/plug-03-skill"] .switch').click()`);
+    await a.run(`document.getElementById('nav-mcp').click()`);
+    for (let tries = 0; tries < 50 && !(await a.exists('#switch-srv-30')); tries++) await wait(100);
+  };
+  const letRunGo = async () => { letGo(); await done(); };
 
-  // A list too short to scroll, on a fresh visit: five rows clicked one after another, each as soon as the last is done, each
-  // where it was before the first click, are the five that change, and no row moves.
+  // A list too short to scroll, on a fresh visit: four rows clicked 150 ms apart, each where it was before the first click, are the
+  // four that change, each Off in every tool, no row moves, and the header says the four once: clicks made while the run's result is
+  // on screen are one run, however far apart they land.
   await a.click('#nav-agents');
   const sixBefore = await placesNow('table-agents', 'data-key'), sixStates = await states('.ov-row[data-key]'), sixPoints = [];
-  for (const agent of agents.slice(0, 5)) sixPoints.push(await middleOf(`#switch-${agent}`));
-  for (const point of sixPoints) { await clickAt(point); for (let tries = 0; tries < 50 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(20); }
-  await a.settle();
+  for (const agent of agents.slice(0, 4)) sixPoints.push(await middleOf(`#switch-${agent}`));
+  for (const point of sixPoints) { await clickAt(point); await wait(150); }
+  await done();
   const sixAfter = await placesNow('table-agents', 'data-key');
   await a.shot('rows-agents-short');
-  same('on a list of six, five clicks on a fresh visit change exactly the five rows aimed at, and no row moves', [changed(sixStates, await states('.ov-row[data-key]')), agents.map(agent => sixAfter.at[agent])], [agents.slice(0, 5), agents.map(agent => sixBefore.at[agent])]);
+  same('on a list of six, four clicks 150 ms apart change exactly the four rows aimed at, Off in every tool, no row moves, and the header says the four once',
+    [changed(sixStates, await states('.ov-row[data-key]')), agents.map(agent => existsSync(join(home, '.claude/agents', `${agent}.md`))), agents.map(agent => sixAfter.at[agent]), await headerSays()],
+    [agents.slice(0, 4), [false, false, false, false, true, true], agents.map(agent => sixBefore.at[agent]), '4 agents are off: ag-1, ag-2, ag-3 and ag-4.']);
   // The last agent deleted from Central Knot: the page is empty, and the result is said once, in the header.
   for (const agent of agents) for (const id of [`#open-${agent}`, `#delete-${agent}`, `#delete-confirm-${agent}`]) await a.click(id);
   same('the last agent deleted: the page is empty, and its result is said once, in the header', [await a.exists('.ov-row[data-key]'), await a.run(`document.querySelectorAll('[data-outcome]').length`), await a.exists('#header [data-outcome]')], [false, 1, true]);
@@ -4516,17 +4726,24 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.run(`document.getElementById('${table}').scrollTop = 0`);
   await a.click('#header-refresh');
   same('Refresh puts them under On', await sectionsNow(a), [['on', servers], ['found', found]]);
-  // Five rows at the top of the list, the page's first clicks, each clicked where it was before the first: the result is in the
-  // header, which keeps its height, so no row moves and the list's scroll stays; while each later click runs, the result before stays.
-  const atTop = ['srv-03', 'srv-04', 'srv-05', 'srv-06', 'srv-07'], topPoints = [], topBefore = await placesNow(table, 'data-key'), topStates = await states('.ov-row[data-key]');
+  // Four rows at the top of a long list, the page's first clicks, 150 ms apart, each clicked where it was before the first: each
+  // is drawn Off at once, they are the four that change, Off in every tool, no row moves, the scroll stays, and the header, which
+  // keeps its height, says the four once.
+  const atTop = ['srv-03', 'srv-04', 'srv-05', 'srv-06'], topPoints = [], topBefore = await placesNow(table, 'data-key'), topStates = await states('.ov-row[data-key]');
   for (const key of atTop) topPoints.push(await middleOf(`#switch-${key}`));
-  const atClick = [], resultIn = () => a.run(`document.querySelector('#header [data-outcome]') ? 'header' + (document.querySelector('#outcome-undo')?.disabled ? ', Undo off' : '') : document.querySelector('[data-outcome]') ? 'elsewhere' : 'none'`);
-  for (const point of topPoints) { await clickAt(point); atClick.push(await resultIn()); await a.settle(); }
+  const resultIn = () => a.run(`document.querySelector('#header [data-outcome]') ? 'header' : document.querySelector('[data-outcome]') ? 'elsewhere' : 'none'`), drawnAtOnce = [];
+  for (const point of topPoints) { await clickAt(point); drawnAtOnce.push(await a.run(`document.activeElement?.getAttribute('aria-checked')`)); await wait(150); }
+  await done();
   await a.shot('rows-mcp-top');
-  const topAfter = await placesNow(table, 'data-key');
-  same('at the top of the list, five rows clicked one after another are the five that change, no row moves, the scroll stays, and the result is in the header, kept while the next click runs',
-    [changed(topStates, await states('.ov-row[data-key]')), ['srv-03', 'srv-08'].map(key => topAfter.at[key]), topAfter.scroll, atClick, await resultIn()],
-    [atTop, ['srv-03', 'srv-08'].map(key => topBefore.at[key]), topBefore.scroll, ['none', 'header, Undo off', 'header, Undo off', 'header, Undo off', 'header, Undo off'], 'header']);
+  const topAfter = await placesNow(table, 'data-key'), inClaude = () => Object.keys(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers ?? {});
+  same('at the top of a long list, four rows clicked 150 ms apart are drawn Off at once and are the four that change, Off in every tool; no row moves, the scroll stays, and the header says the four once',
+    [drawnAtOnce, changed(topStates, await states('.ov-row[data-key]')), atTop.filter(key => inClaude().includes(key)), ['srv-03', 'srv-08'].map(key => topAfter.at[key]), topAfter.scroll, await resultIn(), await headerSays()],
+    [atTop.map(() => 'false'), atTop, [], ['srv-03', 'srv-08'].map(key => topBefore.at[key]), topBefore.scroll, 'header', '4 MCP servers are off: srv-03, srv-04, srv-05 and srv-06.']);
+  // A result with no problem goes by itself 8 seconds after the run's last click, and no row moves when it goes.
+  const goneAfter = Date.now();
+  for (let tries = 0; tries < 150 && await a.exists('#header .header-result'); tries++) await wait(100);
+  const whenGone = Date.now() - goneAfter, goneAt = await placesNow(table, 'data-key');
+  same('a result with no problem is gone after its 8 seconds, and every row is where it was, to the pixel', [whenGone > 7000 && whenGone < 14000, goneAt], [true, topAfter]);
   await a.click('#nav-overview'); await a.click('#nav-mcp');
   // A switch in the middle of the list, the page's first click: its result comes in the header, and the list and its rows stay.
   await putAt(table, row('srv-20'), 300);
@@ -4581,7 +4798,74 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.click('#header-refresh');
   same('a row turned Off stays under On until Refresh, which puts it under Off', [pinnedThere, (await sectionsNow(a)).at(-1)], [true, ['off', ['srv-02', ...offNow].sort()]]);
 
-  // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it.
+  // Clicks behind one that still runs (holdRun) wait their turn. Clicked again while its click waits, a row is taken back at once,
+  // and nothing is written for it.
+  await holdRun();
+  await putAt(table, row('srv-30'), 200);
+  const [at30, at31] = [await middleOf('#switch-srv-30'), await middleOf('#switch-srv-31')], entry31 = () => JSON.stringify(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers['srv-31']);
+  const was31 = entry31();
+  await clickAt(at30); await clickAt(at31);
+  const drawnOff = await switchOn(a, 'srv-31');
+  await clickAt(at31);
+  const drawnBack = await switchOn(a, 'srv-31');
+  await letRunGo();
+  same('clicked again while its click waits, a row is taken back: drawn as it was at once, and nothing is written for it', [drawnOff, drawnBack, await switchOn(a, 'srv-31'), entry31(), inClaude().includes('srv-30')], [false, true, true, was31, false]);
+  // Clicked twice, 150 ms apart: whether the second lands while the first runs or after it, the row ends as the second says, and
+  // nothing is refused (the second asks from the state its row was drawn in).
+  const at33 = await middleOf('#switch-srv-33');
+  await clickAt(at33); await wait(150); await clickAt(at33); await done();
+  same('clicked twice, a row ends as the second click says, and nothing is refused, however far apart the clicks land', [await switchOn(a, 'srv-33'), inClaude().includes('srv-33'), await a.exists('#header .problem-line')], [true, true, false]);
+  // Three clicks, the second refused in its turn: srv-35 is turned Off behind the page's back (as another window would) before its
+  // click runs, so its click, made from the page as it was, is refused. The first and third are done; its row shows what is true.
+  // The change behind the page's back waits in main's queue behind the click that holds the run, so it lands before srv-35's turn.
+  await holdRun();
+  await putAt(table, row('srv-34'), 200);
+  const three = ['srv-34', 'srv-35', 'srv-36'], threePoints = [];
+  for (const key of three) threePoints.push(await middleOf(`#switch-${key}`));
+  for (const point of threePoints) { await clickAt(point); await wait(150); }
+  await a.run(`void window.centralKnot.applyServers([{ key: 'srv-35', on: false, except: [] }], false, ${JSON.stringify(home)})`);
+  await letRunGo();
+  await a.shot('rows-mcp-one-refused');
+  same('three clicks where the second is refused: the first and third are done, its row is as it truly is, and the header’s problem line names it',
+    [three.map(key => inClaude().includes(key)), await switchOn(a, 'srv-35'), await headerSays(), await a.all('#header .problem-text')], [[false, false, false], false, '2 MCP servers are off: srv-34 and srv-36.', ['srv-35 changed since the page was read. Nothing was changed; read again.']]);
+  // The run's one result at the four sizes: it stays (it has a problem line), so it is pictured whole.
+  for (const [width, height] of [SMALLEST, [1728, 1117], [2560, 1440], [1280, 800]]) { await sizeTo(a, width, height); await a.shot(`rows-mcp-run-result-${width}`); }
+  await wait(9000);
+  check('a result with a problem line stays past the 8 seconds', await a.exists('#header .problem-line'));
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
+  // A run left for another page carries on there; its result is said in the status bar, never in that page's header.
+  // Instructions read once first: while a run holds main, the page shows that read (a page keeps its data while it reads again).
+  await a.click('#nav-instructions');
+  for (let tries = 0; tries < 50 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);
+  await holdRun();
+  await putAt(table, row('srv-37'), 200);
+  await clickAt(await middleOf('#switch-srv-37'));
+  // Meanwhile every write is off, saying why, on the pages beside the lists too.
+  const offWhy = async (page, selector) => {
+    await a.run(`document.getElementById('${page}').click()`);
+    for (let tries = 0; tries < 50 && !(await a.exists(selector)); tries++) await wait(100);
+    return a.run(`(() => { const control = document.querySelector('${selector}'); return [control?.disabled, control?.title]; })()`);
+  };
+  same('while clicks run, Settings’ Synchronize everything and Instructions’ Edit are off, and say why', [await offWhy('nav-settings', '#sync-everything-on'), await offWhy('nav-instructions', '#ins-edit-claude-cli')],
+    [[true, 'Waits until the switches clicked are done.'], [true, 'Waits until the switches clicked are done.']]);
+  await a.run(`document.getElementById('nav-agents').click()`);
+  await letRunGo();
+  same('a run left for Agents: its result is in the status bar, never in the Agents header', [await a.exists('#header [data-outcome]'), (await a.text('#announcement'))?.startsWith('srv-37 is off')], [false, true]);
+  await a.click('#nav-mcp');
+  // A press on a switch whose release comes after a redraw replaced it (another switch clicked between) still counts.
+  await putAt(table, row('srv-38'), 200);
+  const [x38, y38] = await middleOf('#switch-srv-38');
+  await a.run(`document.getElementById('switch-srv-38').dataset.pressed = 'yes'`);
+  for (const type of ['mouseMoved', 'mousePressed']) await a.send('Input.dispatchMouseEvent', { type, x: x38, y: y38, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 });
+  await a.run(`document.getElementById('switch-srv-32').click()`);
+  const redrawn = await a.run(`document.getElementById('switch-srv-38').dataset.pressed !== 'yes'`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x38, y: y38, button: 'left', clickCount: 1 });
+  await done();
+  same('a press released after a redraw replaced its switch still counts as its click', [redrawn, await switchOn(a, 'srv-38'), await switchOn(a, 'srv-32')], [true, false, false]);
+
+  // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it. The
+  // last result closed first, so the click below is a run of its own.
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
   await sizeTo(a, ...SMALLEST);
   await a.run(`document.getElementById('${table}').scrollTop = 0`);
   const firstOn = (await sectionsNow(a))[0][1][0], reaches = selector => a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(), at = document.elementFromPoint(box.left + box.width / 2, box.top + 2); return !!at?.closest(${JSON.stringify(selector)}); })()`);
@@ -4628,13 +4912,13 @@ fs.writeFileSync(record, JSON.stringify(now));
   addServers('another-server');
   for (let tries = 0; tries < 80 && await a.run(`document.getElementById('${list}')?.dataset.drawnBefore === 'yes'`); tries++) await wait(100);
   same('a redraw after he scrolls on leaves his scroll alone, the focus on that switch', [(await placesNow(list, 'data-plugin')).scroll, await focused()], [pluginsScrolled, 'pswitch-0-plug-20']);
-  // While its click waits and runs (Claude Code's stand-in takes a second from here on), its switch is off yet keeps the focus.
+  // While its click runs (held), its switch is off yet keeps the focus. Claude Code's stand-in takes a second from here on.
   await putAt(list, '[data-plugin="plug-22"]', 300);
   writeFileSync(join(home, 'slow'), '');
+  hold();
   await clickAt(await middleOf('#pswitch-0-plug-22'));
-  await wait(300);
   same('while its click runs, a plugin’s switch is off and keeps the focus', [await a.run(`document.querySelector('#pswitch-0-plug-22').getAttribute('aria-disabled')`), await focused()], ['true', 'pswitch-0-plug-22']);
-  await done();
+  letGo(); await done();
   // Five plugins clicked quickly, one after another, each where it was before the first click: they wait their turn in one
   // list, each row saying how its click stands in place of its line, so no row grows and none below moves. In the table's
   // narrow form (here) and its wide one (1728), where a row's line sits beside its name.
@@ -4652,6 +4936,19 @@ fs.writeFileSync(record, JSON.stringify(now));
   await sizeTo(a, 1728, 1117);
   const fiveWide = await fiveQuickly('plug-31');
   same('…and so in the wide table', ...fiveWide);
+  // A press on plug-24's switch, plug-30's switch clicked before the release (the list redrawn: plug-24's switch replaced), then the
+  // release: still plug-24's click (judges/ci1-builder-report.md, "For the LIST step"). Both are put back after.
+  await putAt(list, '[data-plugin="plug-24"]', 200);
+  const pressedBefore = await states('[data-plugin]'), [x24, y24] = await middleOf('#pswitch-0-plug-24');
+  await a.run(`document.getElementById('pswitch-0-plug-24').dataset.pressed = 'yes'`);
+  for (const type of ['mouseMoved', 'mousePressed']) await a.send('Input.dispatchMouseEvent', { type, x: x24, y: y24, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 });
+  await a.run(`document.getElementById('pswitch-0-plug-30').click()`);
+  const replaced = await a.run(`document.getElementById('pswitch-0-plug-24').dataset.pressed !== 'yes'`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x24, y: y24, button: 'left', clickCount: 1 });
+  await done();
+  same('a press on a plugin’s switch released after a redraw replaced it still counts: plug-24 and plug-30 both change', [replaced, changed(pressedBefore, await states('[data-plugin]'))], [true, ['plug-24', 'plug-30']]);
+  for (const name of ['plug-24', 'plug-30']) await a.run(`document.getElementById('pswitch-0-${name}').click()`);
+  await done();
   // A list of four clicks, one failing (a plugin of its own at each size) and one on a plugin with no description (plug-08), at
   // each of the four sizes: every row is as tall while its click waits and runs, and after it ends or fails, as before it.
   const heights = () => a.run(`Object.fromEntries([...document.querySelectorAll('[data-plugin]')].map(row => [row.dataset.plugin, Math.round(row.getBoundingClientRect().height)]))`);
@@ -4660,6 +4957,8 @@ fs.writeFileSync(record, JSON.stringify(now));
   for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) {
     await sizeTo(a, width, height);
     await putAt(list, '[data-plugin="plug-07"]', 80);
+    // The last size's result closed, so these four are a run of their own, whose rows' notes are theirs alone.
+    await a.run(`document.querySelector('#header .band-dismiss')?.click()`);
     const heightsBefore = await heights();
     for (const name of clicked(width)) { await clickAt(await middleOf(`#pswitch-0-${name}`)); await wait(150); }
     const whileWaiting = await heights();
@@ -4672,12 +4971,15 @@ fs.writeFileSync(record, JSON.stringify(now));
   }
   same('through a list of clicks with one failure, every row keeps its height, at the four sizes', tall, [SMALLEST, [1280], [1728], [2560]].map(([width]) => [width, clicked(width).sort().map(name => `${name} ended`), [], [], []]));
   await sizeTo(a, 1280, 800);
-  // The list at its top: a click starts a new list, so the last list's failure goes from the header; the rows stay where they are.
+  // The list at its top: the last run's failure closed by its ×, it goes from the header and the rows stay where they are.
   await a.run(`document.getElementById('${list}').scrollTop = 0`);
   const atItsTop = await placesNow(list, 'data-plugin'), bandBefore = await a.exists('.plugin-problems');
+  await a.run(`document.querySelector('#header .band-dismiss')?.click()`); await a.settle();
+  const afterClose = await placesNow(list, 'data-plugin');
   await clickAt(await middleOf('#pswitch-0-plug-06')); await done();
   const stillAtTop = await placesNow(list, 'data-plugin');
-  same('at the top of the list, a failure that goes from the header moves no row', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])], [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
+  same('at the top of the list, a failure that goes from the header moves no row, nor does the click after it', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => afterClose.at[name]), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])],
+    [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name]), ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
   // Three failing plugins (plug-04, -05, -08) and one that installs (plug-10), in one list (each takes a second): one ×, two
   // reasons and Show all 3; shown, each reason whole; × closes it all.
   const failNow = ['plug-04', 'plug-05', 'plug-08'];
@@ -4810,7 +5112,7 @@ esac
   await a.click('#nav-settings');
   await a.click('#check-plugin-updates');
   for (let tries = 0; tries < 100 && !/couldn’t be made/.test(await a.text('#setting-plugin-updates-notice') ?? ''); tries++) await wait(100);
-  check('Check now says what it came to: one update couldn’t be made, with the way to the note', /Last checked today at .*\. 1 update couldn’t be made\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && (await a.text('#setting-plugin-updates-notice-action')) === 'See Plugins', await a.text('#setting-plugin-updates'));
+  check('Check now says what it came to: one update couldn’t be made, with the way to the note', /Last checked today at .*\. 1 update couldn’t be made\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && (await a.text('#setting-plugin-updates-notice-action')) === 'See Plugin marketplaces', await a.text('#setting-plugin-updates'));
   check('Check now takes the focus back once it can be pressed again', await a.run(`document.activeElement?.id`) === 'check-plugin-updates', await a.run(`document.activeElement?.id`));
   await a.click('#setting-plugin-updates-notice-action');
   for (let tries = 0; tries < 50 && !(await a.exists('#plugin-updates-failed')); tries++) await wait(100);
@@ -4958,11 +5260,13 @@ async function usageFlow() {
   await a.click('#switch-standup');
   const chipOn = () => a.run(`document.querySelector('.chip-on')?.dataset.tip`);
   const afterOne = [await sectionsNow(a), await chipOn()];
-  await a.click('#switch-spare');
+  await a.clickInRun('#switch-spare');
+  same('spare, clicked soon after standup, joins its run: said once', await a.text('#header [data-outcome] .band-text'), '2 skills are off: standup and spare.');
   await a.shot('usage-chip-pinned');
   same('with the chip on, rows turned Off by their own switch stay listed where they were, and the chip stays on', [afterOne, [await sectionsNow(a), await chipOn()], [await switchOn(a, 'standup'), await switchOn(a, 'spare')]],
     [[[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [false, false]]);
-  for (const key of ['standup', 'spare']) await a.click(`#switch-${key}`);
+  for (const key of ['standup', 'spare']) await a.clickInRun(`#switch-${key}`);
+  same('turned on again in the same run, each row is said as the run left it', await a.text('#header [data-outcome] .band-text'), '2 skills are on: standup and spare.');
   // Turn these off, with standup already pinned on the chip's list: every row takes its own group, and the chip falls back to All.
   await a.click('#switch-standup');
   await a.click('#turn-unused-off');
@@ -5001,8 +5305,8 @@ async function usageFlow() {
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
-// Every flow is in one of these groups or in afterTheGroups. A run with no --flows starts this script once per group, so each
-// group has a throwaway home, data folders, stand-ins and debug ports of its own, and several run at once (runGroups). Four groups, as the Mac runner was
+// Every flow, in groups. A run with no --flows starts this script once per group, so each group has a throwaway home, data
+// folders, stand-ins and debug ports of its own, and several run at once (runGroups). Four groups, as the Mac runner was
 // measured with four apps at once, balanced by each flow's seconds there with four at once (each flow's line in a run gives
 // them): practiceFlow, the longest, has little beside it. realHomeFlow is in its group, as both open the default data folder
 // (launch) and realHomeFlow's preview-only branch reads the History window practiceFlow set there. crashFlow comes last in its
@@ -5010,20 +5314,15 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group passes on its own.
 const groups = [
   [practiceFlow, suggestedFlow, realHomeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, sourcesFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
-  [harnessFlow, manageFlow, otherBuildFlow, usageFlow, firstSetupFlow, crashFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
+  [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
-// Each by itself, once the groups have ended. rowsKeepTheirPlacesFlow: with other apps' load beside it, a press on a plugin's
-// switch is lost when the list redraws between the press and the release, so the switch does not turn (its checks "five
-// plugins clicked quickly …" and "through a list of clicks with one failure …" fail). It goes back into a group once a switch
-// pressed while its list redraws still turns, and those checks pass in groups.
-const afterTheGroups = [rowsKeepTheirPlacesFlow];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
-const everyFlow = [...groups.flat(), ...afterTheGroups], listed = everyFlow.map(flow => flow.name);
+const listed = groups.flat().map(flow => flow.name);
 const written = [...readFileSync(import.meta.filename, 'utf8').matchAll(/^async function (\w+Flow)\(/gm)].map(([, name]) => name);
-const refused = [...written.filter(name => listed.filter(each => each === name).length !== 1).map(name => `${name} is not in groups or afterTheGroups exactly once`),
+const refused = [...written.filter(name => listed.filter(each => each === name).length !== 1).map(name => `${name} is in no group or in two`),
   ...(named ?? []).filter(name => !listed.includes(name)).map(name => `--flows names ${name}, which is no flow`),
   ...(Number.isInteger(crashRounds) && crashRounds >= 0 ? [] : [`--crash-rounds takes a whole number, and was given ${option('--crash-rounds') ?? 'none'}`])];
 if (refused.length) { rmSync(scratch, { recursive: true, force: true }); throw new Error(`Refused to start: ${refused.join('; ')}.`); }
@@ -5031,19 +5330,19 @@ if (refused.length) { rmSync(scratch, { recursive: true, force: true }); throw n
 /**
  * What a copy's output and its end say: its passes (undefined without a total line), its FAIL lines, among them one more when
  * the copy died (it ended without its total line, or with an exit other than its total's, or by a signal) or its total counts
- * more failures than its FAIL lines, and the flows it did not finish (one that began and stopped) and did not run. `label`
- * names the copy where no one flow can be named: `group 2`, or the flow of a copy that runs one by itself.
+ * more failures than its FAIL lines, and the flows it did not finish (one that began and stopped) and did not run. `number`
+ * names the copy where no one flow can be named.
  */
-function readCopy(names, label, output, code, signal) {
+function readCopy(names, number, output, code, signal) {
   const total = /^e2e: (\d+) passed, (\d+) failed/m.exec(output), ended = signal ? `ended by ${signal}` : `exit code ${code}`;
   const missed = names.filter(name => !new RegExp(`^${name}: \\d+s$`, 'm').test(output)), ran = names.filter(name => !missed.includes(name));
   const aborted = /^FAIL \[(\w+)\] aborted: /m.exec(output)?.[1];
   const failLines = output.split('\n').filter(line => line.startsWith('FAIL ')).length;
   let death;
   if (!total && missed.length) death = `FAIL [${missed[0]}] its copy ended in this flow without a total line (${ended})`;
-  else if (!total) death = `FAIL [${label}] its copy ended after its flows without a total line (${ended})`;
+  else if (!total) death = `FAIL [group ${number}] its copy ended after its flows without a total line (${ended})`;
   else if (signal || code !== (Number(total[2]) ? 1 : 0)) death = `FAIL [${ran.at(-1) ?? names[0]}] its copy died after its total (${ended})`;
-  else if (Number(total[2]) > failLines) death = `FAIL [${label}] its total says ${total[2]} failed, and only ${failLines} of its lines say FAIL`;
+  else if (Number(total[2]) > failLines) death = `FAIL [group ${number}] its total says ${total[2]} failed, and only ${failLines} of its lines say FAIL`;
   const unfinished = total ? missed.filter(name => name === aborted) : missed.slice(0, 1);
   const shown = death ? `${output.trimEnd()}\n${death}` : output.trimEnd();
   const fails = shown.split('\n').filter(line => line.startsWith('FAIL '));
@@ -5052,45 +5351,40 @@ function readCopy(names, label, output, code, signal) {
 
 /**
  * The run with no --flows: this script once per group with that group's --flows and the run's other options,
- * CK_E2E_GROUPS_AT_ONCE copies at a time (default 1), then once for each flow in afterTheGroups, one at a time. Each copy's
- * stdout and stderr, in the order they came, print as one block when it ends; then the run's total, the flows not finished and
- * not run, and every FAIL line again. The run's failures are its copies' FAIL lines, one more for each copy that died or
- * whose total counts more failures than its FAIL lines (readCopy); the passes of a copy without a total line are not known,
- * and the total says so. A signal is passed on to every
+ * CK_E2E_GROUPS_AT_ONCE copies at a time (default 1). Each copy's stdout and stderr, in the order they came, print as one
+ * block when it ends; then the run's total, the flows not finished and not run, and every FAIL line again. The run's failures
+ * are its copies' FAIL lines, one more for each copy that died or whose total counts more failures than its FAIL lines
+ * (readCopy); the passes of a copy without a total line are not known, and the total says so. A signal is passed on to every
  * copy, and each one's block printed as it ends. Returns the exit code.
  */
 async function runGroups() {
   const atOnce = Math.max(1, Number(process.env.CK_E2E_GROUPS_AT_ONCE) || 1);
-  // Each copy: its flows, and what the output calls it: `group 2 of 4` (label `group 2`), or `by itself` (label its flow).
-  const grouped = groups.map(group => group.filter(runs).map(flow => flow.name)).filter(names => names.length);
-  const waiting = grouped.map((names, index) => ({ names, label: `group ${index + 1}`, heading: `group ${index + 1} of ${grouped.length}` }));
-  const alone = afterTheGroups.filter(runs).map(flow => ({ names: [flow.name], label: flow.name, heading: 'by itself' }));
+  const waiting = groups.map(group => group.filter(runs).map(flow => flow.name)).filter(names => names.length);
+  const count = waiting.length;
   const running = new Set(), unfinished = [], notRun = [], failLines = [], uncounted = [];
-  let passed = 0, stoppedBy;
+  let passed = 0, begun = 0, stoppedBy;
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stoppedBy = signal; for (const copy of running) copy.kill(signal); });
-  const runOne = ({ names, label, heading }) => new Promise(done => {
-    const from = Date.now();
+  const runOne = names => new Promise(done => {
+    const from = Date.now(), number = ++begun;
     const copy = spawn(process.execPath, [...process.execArgv, import.meta.filename, ...args, '--flows', names.join(',')], { stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     for (const stream of [copy.stdout, copy.stderr]) stream.on('data', chunk => { output += chunk; });
     running.add(copy);
     copy.on('close', (code, signal) => {
       running.delete(copy);
-      const read = readCopy(names, label, output, code, signal);
-      if (read.passes === undefined) uncounted.push(label); else passed += read.passes;
+      const read = readCopy(names, number, output, code, signal);
+      if (read.passes === undefined) uncounted.push(number); else passed += read.passes;
       unfinished.push(...read.unfinished);
       notRun.push(...read.notRun);
       failLines.push(...read.fails);
-      console.log(`\n── ${heading}, ${Math.round((Date.now() - from) / 1000)}s${stoppedBy ? `, stopped by ${stoppedBy}` : ''}: ${names.join(', ')}\n${read.shown}`);
+      console.log(`\n── group ${number} of ${count}, ${Math.round((Date.now() - from) / 1000)}s${stoppedBy ? `, stopped by ${stoppedBy}` : ''}: ${names.join(', ')}\n${read.shown}`);
       done();
     });
   });
-  const thenAlone = alone.length ? `, then by itself: ${alone.map(copy => copy.label).join(', ')}` : '';
-  console.log(`${waiting.length} groups of flows, ${atOnce} at a time${thenAlone}; each copy's output follows when it ends.`);
+  console.log(`${waiting.length} groups of flows, ${atOnce} at a time; each group's output follows when it ends.`);
   await Promise.all(Array.from({ length: atOnce }, async () => { while (waiting.length && !stoppedBy) await runOne(waiting.shift()); }));
-  while (alone.length && !stoppedBy) await runOne(alone.shift());
-  notRun.push(...[...waiting, ...alone].flatMap(copy => copy.names));
-  const notCounted = uncounted.length ? ` (the passes of ${uncounted.join(' and ')} are not counted: no total line)` : '';
+  notRun.push(...waiting.flat());
+  const notCounted = uncounted.length ? ` (the passes of group ${uncounted.join(' and group ')} are not counted: no total line)` : '';
   console.log(`\ne2e: ${passed} passed, ${failLines.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}${notCounted}`);
   if (unfinished.length) console.error(`not finished: ${unfinished.join(', ')}`);
   if (notRun.length) console.error(`not run: ${notRun.join(', ')}`);
@@ -5108,7 +5402,7 @@ if (!named) {
   try {
     seedHome();
     // Each flow's time is printed, so a run that grows slow says where (and a grouped run, which flows ran).
-    for (const flow of everyFlow.filter(each => named.includes(each.name) && runs(each))) {
+    for (const flow of groups.flat().filter(each => named.includes(each.name) && runs(each))) {
       flowRunning = flow.name;
       const from = Date.now();
       await flow();

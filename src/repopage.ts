@@ -1,7 +1,7 @@
 // Git repo: the Managed set kept in a git repo (GitHub, GitLab or any git server), with Pull to bring the repo's changes into the
 // tools and Push to send this computer's. The page says which repo and commit are in use, when it last pulled and pushed, and
 // what differs each way; nothing moves until Pull or Push is clicked.
-import { announce, busy, rerender, setSync, showPage, state } from './app.ts';
+import { acting, announce, busy, rerender, setSync, showPage, state } from './app.ts';
 import { button, closeButton, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { outcomeBand } from './matrix.ts';
@@ -383,7 +383,7 @@ function connectedPage(view: ConnectedRepoView) {
   // Counted once, so every place on the page says the same numbers.
   const counts = waitingCounts(view);
   const words = waitingWords(counts);
-  const locked = !!state.busy || !view.access.allowed;
+  const locked = !!acting() || !view.access.allowed;
   // While the repo can't be reached, Pull and Push wait for Try again (in the band) rather than fail the same way.
   const moving = locked || repo.checking || !!view.problem;
   const pullControl = pullButton(view, counts, moving);
@@ -437,7 +437,7 @@ function connectedPage(view: ConnectedRepoView) {
 
 /** Turns Automatic sync on, beside the words that ask for it (none while it is already on). */
 const syncOnButton = (id: string) => (state.home && !state.home.syncOn
-  ? button({ variant: 'link', size: 'micro', label: 'Turn sync on', id, disabled: !!state.busy || !state.home.sync.access.allowed, onclick: () => void setSync(true) }) : undefined);
+  ? button({ variant: 'link', size: 'micro', label: 'Turn sync on', id, disabled: !!acting() || !state.home.sync.access.allowed, onclick: () => void setSync(true) }) : undefined);
 
 /** Disconnect…: asks first, in place (disconnectQuestion), with focus on Cancel. */
 const disconnectButton = (disabled: boolean) => button({ variant: 'ghost', size: 'small', icon: 'unplug', label: 'Disconnect…', id: 'repo-disconnect', disabled,
@@ -446,7 +446,7 @@ const disconnectButton = (disabled: boolean) => button({ variant: 'ghost', size:
 /** The question Disconnect… asks, while it is open. */
 const disconnectQuestion = () => (repo.confirmDisconnect ? h('div.band.repo-confirm', { role: 'alert' }, icon('unplug', 14, 'tone-muted'),
   h('span.band-text', {}, 'Disconnect? Your tools and the repo stay as they are.'),
-  button({ variant: 'outline', size: 'small', label: 'Disconnect', id: 'repo-disconnect-confirm', disabled: !!state.busy, onclick: () => void disconnect() }),
+  button({ variant: 'outline', size: 'small', label: 'Disconnect', id: 'repo-disconnect-confirm', disabled: !!acting(), onclick: () => void disconnect() }),
   button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'repo-disconnect-cancel', onclick: cancelDisconnect })) : null);
 
 /** What stopped the last action (dismissable), or why the repo couldn't be reached (with Try again). */
@@ -471,12 +471,12 @@ const layout = () => h('dl.repo-layout', { 'aria-label': 'What goes where in the
   h('dt.mono', {}, 'instructions/base.md'), h('dd', {}, 'the base instructions'));
 
 function connectForm(allowed: boolean) {
-  const ready = () => !state.busy && allowed && !!repo.draftUrl.trim();
+  const ready = () => !acting() && allowed && !!repo.draftUrl.trim();
   const go = () => { if (ready()) void connect(); };
   const refresh = () => { const control = document.getElementById('repo-connect') as HTMLButtonElement | null; if (control) control.disabled = !ready(); };
   const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, hint?: string, below?: Node) => h('div.repo-field', {},
     h('label.market-add-label', { for: id }, label, hint ? h('span.repo-field-hint', {}, hint) : null),
-    h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!state.busy || !allowed, 'aria-describedby': below ? `${id}-below` : undefined,
+    h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!acting() || !allowed, 'aria-describedby': below ? `${id}-below` : undefined,
       'aria-invalid': repo.problem && id === `repo-${repo.problemField}` ? 'true' : undefined,
       // Typing a new address or branch answers the last failure: its band goes.
       oninput: (event: Event) => { set((event.target as HTMLInputElement).value); if (repo.problem) { repo.problem = undefined; rerender(); } refresh(); }, onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
@@ -495,7 +495,7 @@ export function repoPage(): HTMLElement {
   const view = repo.view;
   // Not read yet: said so. Never read because reading failed: the reason, and Disconnect (which needs no reading) as a way out.
   if (!view && !lastReadFailure) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
-  if (!view) return h('div.page.repo-page', {}, h('div.toolbar.repo-toolbar', {}, h('span.toolbar-spacer'), repo.confirmDisconnect ? null : disconnectButton(!!state.busy)),
+  if (!view) return h('div.page.repo-page', {}, h('div.toolbar.repo-toolbar', {}, h('span.toolbar-spacer'), repo.confirmDisconnect ? null : disconnectButton(!!acting())),
     h('div.bands', {}, disconnectQuestion(), problemBand(lastReadFailure)));
   if (view.connected) return connectedPage(view);
   return h('div.page.repo-page', {},

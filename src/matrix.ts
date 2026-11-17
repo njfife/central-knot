@@ -8,14 +8,18 @@
 // Usage, once read on a click (app.ts readUsage): a line under the toolbar, a figure on each row and a line per tool in an
 // opened row, the Last used order, and the "No use seen in 30 days" chip with its band and one Turn these off (built from each
 // row's own Off: rowClicks.off); what the reading says of a row, and the chip's rule, are usagerow.ts's.
+// A row's switch or Add joins the page's list of clicks (flip, pluginRowSwitch → app.ts queueClick) and is worked out in its turn,
+// perhaps while another table is drawn: onTable then sets this module's table (its kind, view and tool) to the one the click was
+// made on, synchronously, and back.
 import { brandMark } from './brand.ts';
 import { caughtUpNames, dayAndTime, dayWords, defaultHistoryDays, groupBy, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, fewNames, kindNouns, sentence, toolList as toolsInWords, toolNames, toolsPhrase } from './words.ts';
+import { andList, fewNames, kindNouns, pageNames, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt } from './words.ts';
 import { lastUse, leftToItsRow, noUseSeen, onIn, rowFigure, startsLate, toolSays, USAGE_DAYS, type CantSay, type ToolSays, type UsageFacts } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { acting, closeResult, isKind, problemKey, leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { acting, closeResult, isKind, problemKey, leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, pin, placeIn, timeIn, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
@@ -70,7 +74,7 @@ function switchPluginItem(item: PluginItemAt) {
   const on = !itemOn(item);
   clickPluginItem(draft, item);
   const ops = [...draft.values()];
-  void applyPluginSwitches(ops, { said: itemSaid(item, on, ops), undone: undoneWords(item.name, on, names[item.tool]) });
+  void applyClick({ kind, items: [item.name], changes: [], said: itemSaid(item, on, ops), pluginsOnly: true, plugins: { ops }, undone: undoneWords(item.name, on, names[item.tool]) });
 }
 
 /** Why an item a tool has through a plugin can't be switched on this page now, if it can't: the switch itself (pluginswitch.cantSwitch), or a home that can't be written. */
@@ -87,7 +91,7 @@ function pluginItemControls(item: PluginItemAt, id: string, page?: () => void) {
   const label = `${item.name} in ${names[item.tool]}: ${on ? 'on' : 'off'}. ${why ?? clickWords(item)}`;
   return h('span.details-tool-actions', {},
     h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, on ? 'On' : 'Off'),
-      toggle({ on, label, disabled: !!why || !canWrite(), onchange: () => switchPluginItem(item), id })),
+      toggle({ on, label, disabled: why ?? writeOff(), onchange: () => switchPluginItem(item), id })),
     page ? smallAction('Plugin’s page', `${id}-page`, page, '.tool-link') : null);
 }
 
@@ -102,7 +106,7 @@ function openWhole(row: PluginRow) {
 function handledNote(row: PluginRow, lead: string, id: string) {
   const where = handledWhere(row);
   return h('p.details-limits.details-note.details-part', {}, icon('puzzle', 12, 'tone-muted'), h('span', {}, lead, where.text,
-    ...(where.listed ? [h('button.inline-link', { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); openWhole(row); } }, `${row.plugin}’s page on Plugins`), '. '] : [' ']),
+    ...(where.listed ? [h('button.inline-link', { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); openWhole(row); } }, `${row.plugin}’s page on ${pageNames.plugins}`), '. '] : [' ']),
     'Central Knot doesn’t copy it between tools; the switches below turn it on or off in each tool.'));
 }
 
@@ -342,7 +346,11 @@ function filterBar() {
   return narrowing.length ? h('div.chips', { role: 'group', 'aria-label': 'Show' }, chip('all', 'All', 'list'), narrowing) : null;
 }
 
-const canWrite = () => !!state.home && !whyReadOnly(state.home) && !state.busy;
+/** Why the page's writes but a row's own switch or Add are off now, if they are: it acts (app.ts acting says why), or the home can't be written. */
+const writeOff = (): string | boolean => acting() ?? (!state.home || !!whyReadOnly(state.home));
+const canWrite = () => !writeOff();
+/** A row's own switch or Add takes a click while a run of clicks goes on (app.ts queueClick): off only under other work or in a home that can't be written. */
+const canQueue = () => !!state.home && !whyReadOnly(state.home) && !state.busy;
 
 /** What could not be done, item by item (the first four, then how many more), as a warning band. */
 export const problemsBand = (problems: DestinationResult[]) => h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
@@ -534,7 +542,7 @@ function compareChoices(skill: ItemRow, inFiles = false, then?: () => void) {
     // A tool whose copy is one it has another way keeps it: Central Knot writes nothing there (library.ts, "held").
     const replaced = others.filter(entry => !skill.anotherWay?.[entry]), keeping = others.filter(entry => skill.anotherWay?.[entry]);
     const said = copyQuote(skill, tool, others);
-    return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${tools}’s copy`, disabled: !canWrite(), onclick: () => void turnOn(skill, tool).then(then) },
+    return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${tools}’s copy`, disabled: !canWrite(), onclick: () => void applyClick(turnOn(skill, tool)).then(then) },
       who,
       h('span.version-says', {},
         said ? h('span.version-text', {}, ...said) : null,
@@ -599,8 +607,8 @@ function openRow(key: string) {
   view.openedOn = state.visit;
   view.openedAt = state.said.seq;
   rerender();
-  // Bring the details into view without losing the row (its name and close button) under the sticky header. Docked
-  // details sit beside the table and are always in view.
+  // Details that run past the table's bottom are brought into view with their row at its top, so the row's name and the
+  // details' close button are in view too. Docked details sit beside the table and are always in view.
   if (view.comparing && underRow(key)) requestAnimationFrame(() => {
     const rowEl = document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`);
     const details = rowEl?.nextElementSibling;
@@ -620,11 +628,11 @@ function sourceTag(skill: ItemRow) {
   const tag = skill.fromSource && fromSourceWords(skill.fromSource).tag, plugin = skill.fromSource && pluginOf(skill.fromSource.link);
   return tag ? h(`span.row-tag.row-tag-source${plugin ? '.row-tag-plugin' : ''}`, { title: tag.title }, icon('link-2', 12, plugin ? 'tone-muted' : 'tone-warning'), tag.text) : null;
 }
-/** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to Sources. */
+/** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to that source's page. */
 function fromSourceLine(key: string, from: NonNullable<ItemRow['fromSource']>) {
   const said = fromSourceWords(from);
   return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits || from.removed ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
-    h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage(said.page) }, said.page === 'plugins' ? 'Plugins' : 'Sources'), said.after));
+    h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage(said.page) }, pageNames[said.page]), said.after));
 }
 
 /**
@@ -807,7 +815,7 @@ function resumeBand(): HTMLElement | null {
   const gate = state.home?.sync.gate;
   if (gate?.state !== 'needs-resume') return null;
   return h('div.band', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, gate.reason),
-    button({ variant: 'outline', size: 'small', label: 'Resume', id: 'resume', disabled: !canWrite(), onclick: () => void applyClick({ kind, changes: [], items: [], said: 'Resumed: sync carries on from the record as it is.' }) }));
+    button({ variant: 'outline', size: 'small', label: 'Resume', id: 'resume', disabled: writeOff(), onclick: () => void applyClick({ kind, changes: [], items: [], said: 'Resumed: sync carries on from the record as it is.' }) }));
 }
 
 /** The bands above a table: every item page reads its kind's view (listView). */
@@ -910,12 +918,12 @@ const age = (key: string) => {
 
 type NoticeLook = [IconName, string, string, HTMLElement | null];
 
-/** A library item's notice (libraryrow.ts noticeWords), with its button: Undo, or Turn on after a copy deleted by hand turned it off. */
+/** A library item's notice (libraryrow.ts noticeWords), with its button: Undo, or Turn it on after a copy deleted by hand turned it off. */
 function libraryNotice(lib: LibraryPage, notice: ItemNotice | PluginItemNotice, undo: (title: string) => HTMLElement): NoticeLook {
   const { text, action, help } = lib.say.noticeWords(notice);
   if (action === 'undo') return [notice.kind === 'conflict' ? 'diff' : 'check', notice.kind === 'conflict' ? 'tone-warning' : 'tone-success', text, undo(help)];
   if (!action) return ['link-2-off', 'tone-muted', text, null];
-  const on = button({ variant: 'outline', size: 'small', label: 'Turn on', id: `notice-restore-${notice.history}`, onclick: () => void restoreEvent(notice.history) });
+  const on = button({ variant: 'outline', size: 'small', label: turnIt(true), id: `notice-restore-${notice.history}`, onclick: () => void restoreEvent(notice.history) });
   on.title = help;
   return ['trash-2', 'tone-muted', text, on];
 }
@@ -1063,16 +1071,18 @@ const listNow = () => [filesView() ? 'files' : 'table', kind, focus, chosenOrder
 const pinnedHere = () => pinnedRows<Role>(listNow());
 /** The Skills page's Files view is on screen: its list, and the chosen skill's switch in its pane (`detail-` ids). */
 const filesView = () => kind === 'skills' && !focus && state.skillsView === 'files';
-/** An item's one control as drawn now (itemSwitch): its switch, or Add while it is found. */
-const controlId = (skill: ItemRow, prefix: string) => `${prefix}${libraryPlace(itemOf(skill)) === 'found' ? 'add' : 'switch'}-${skill.key}`;
+/** Add is drawn for a found item, until a click on it asks for it On (clicklist.ts wantedOn); its switch then. */
+const drawnAsAdd = (skill: ItemRow) => libraryPlace(itemOf(skill)) === 'found' && wantedOn(kind, skill.key) === undefined;
+/** An item's one control as drawn now (itemSwitch): its switch, or Add. */
+const controlId = (skill: ItemRow, prefix: string) => `${prefix}${drawnAsAdd(skill) ? 'add' : 'switch'}-${skill.key}`;
 /** Where the focus goes once a click on this row, or its Undo, is done: its control as then drawn (app.ts Click focus). */
 const focusOn = (skill: ItemRow) => { const prefix = filesView() ? 'detail-' : ''; return () => controlId(skill, prefix); };
 
 /**
  * Off: it leaves every harness, and Central Knot keeps it (library.ts), with its switches in the tools that have it through a
- * plugin.
+ * plugin. `seen`: whether its row was drawn On when clicked (libraryrow.ts rowClicks: a click made from an older state is refused).
  */
-function turnOff(skill: ItemRow) {
+function turnOff(skill: ItemRow, seen: boolean): Click {
   const name = nameOf(skill), lib = library();
   const plugins = turnEvery(throughItems(skill), false);
   // Where its plugin's item turned off too, said from what happened.
@@ -1083,7 +1093,7 @@ function turnOff(skill: ItemRow) {
   // "No tool has it" only where none does: a tool whose plugin switch can't be written still has it.
   // A tool's own copy, which Off leaves alone (library.ts), is still there too: said as its mark says it.
   const own = ownCopies(skill, itemOf(skill), toolList());
-  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], toolList()), toolList(), leftOutTools(), own)}${pluginSaid(notIn)}`, plugins.left, focusOn(skill));
+  return mainClick(name, false, [{ ...rowClicks.off(skill, itemOf(skill)), seenOn: seen }], plugins, notIn => `${lib.say.said.off(name, stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], toolList()), toolList(), leftOutTools(), own)}${pluginSaid(notIn)}`, plugins.left, focusOn(skill));
 }
 
 /** Every tool that can have it: where it is on once it is on everywhere. */
@@ -1093,9 +1103,10 @@ const onPhrase = (skill: ItemRow, left: readonly string[] = []) => toolsPhrase(c
 
 /**
  * On: in every harness it isn't kept out of. A found item is taken in by this click (`use`: the copy every harness takes where
- * they differ). Said from what happened (`notIn`: the harnesses where the write didn't go through: app.ts applyClick).
+ * they differ). Said from what happened (`notIn`: the harnesses where the write didn't go through: app.ts carryOut). `seen`:
+ * as turnOff's.
  */
-function turnOn(skill: ItemRow, use?: Tool): Promise<void> {
+function turnOn(skill: ItemRow, use?: Tool, seen?: boolean): Click {
   const name = nameOf(skill), lib = library(), found = !inLibrary(itemOf(skill));
   const plugins = turnEvery(throughItems(skill), true);
   const said = (notIn: HarnessId[]) => {
@@ -1107,7 +1118,8 @@ function turnOn(skill: ItemRow, use?: Tool): Promise<void> {
     const where = onPhrase(skill, left);
     return where ? `${name} is on in ${where}${notIn.length ? `; not in ${toolsPhrase(notIn, toolList())}` : ''}.` : `${name} is not on in any tool yet.`;
   };
-  return mainClick(name, true, [rowClicks.on(skill, itemOf(skill), use)], plugins, said, plugins.left, focusOn(skill));
+  const change = rowClicks.on(skill, itemOf(skill), use);
+  return mainClick(name, true, [seen === undefined ? change : { ...change, seenOn: seen }], plugins, said, plugins.left, focusOn(skill));
 }
 
 // ---------- Items tools have through a plugin ----------
@@ -1118,18 +1130,29 @@ const throughItems = (skill: ItemRow): PluginItemAt[] => toolList().flatMap(tool
 const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(tool => (row.installs[tool] ? [{ kind: row.kind, name: row.name, tool, install: row.installs[tool]! }] : []));
 
 /**
- * One click of a main switch: the item's own copies' `changes` with its switches in the tools that have it through a plugin,
- * applied as one click with one Undo (app.ts applyClick); or, with no copy to change, the plugins' part alone. `said`: what it
- * did, given the tools where it didn't, then what the plugins' part took with it (pluginswitch.ts alongWords: a whole plugin
- * where a tool has no switch for one item). `also`: what it left as it is, said as a problem.
+ * One click of a main switch (app.ts Click): the item's own copies' `changes` with its switches in the tools that have it
+ * through a plugin, one click with one Undo; or, with no copy to change, the plugins' part alone. `said`: what it did, given the
+ * tools where it didn't, then what the plugins' part took with it (pluginswitch.ts alongWords: a whole plugin where a tool has
+ * no switch for one item, named by the tool, as a run's result says it beside other clicks). `also`: what it left as it is,
+ * said as a problem. Its words are worked out on this table (onTable), wherever the page is once it has run.
  */
-function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string, focus?: () => string): Promise<void> {
-  // Said as "there" when the result is about that one tool, as after a tool's own switch; else by the tool's name.
-  const there = !changes.length && new Set(plugins.turned.map(item => item.tool)).size === 1;
-  const along = plugins.turned.map(item => alongWords(item, plugins.ops, there)).filter(Boolean).join(' ') || undefined;
-  if (changes.length) return applyClick({ kind, items: [name], changes, said, also, focus, plugins: plugins.ops.length ? { ops: plugins.ops, said: along } : undefined });
-  const where = toolsPhrase(plugins.turned.map(item => item.tool), toolList());
-  return applyPluginSwitches(plugins.ops, { also, said: [said([]), along].filter(Boolean).join(' '), undone: undoneWords(name, on, where) });
+function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string, focus?: () => string): Click {
+  const along = plugins.turned.map(item => alongWords(item, plugins.ops)).filter(Boolean).join(' ') || undefined;
+  const table = tableNow(), here = (notIn: HarnessId[]) => onTable(table, () => said(notIn));
+  const pluginsOnly = !changes.length, undone = pluginsOnly ? undoneWords(name, on, toolsPhrase(plugins.turned.map(item => item.tool), toolList())) : undefined;
+  return { kind, items: [name], changes, said: here, also, focus: focus && (() => onTable(table, focus)), pluginsOnly, plugins: plugins.ops.length || pluginsOnly ? { ops: plugins.ops, said: along } : undefined, undone };
+}
+
+/** The table on screen, as a click made on it names it: its kind and the harness whose page it is on. */
+const tableNow = () => ({ kind, focus });
+/**
+ * Works something out on the table a click was made on, then puts back the table on screen: a click is worked out in its turn
+ * in the page's list (app.ts queueClick) and said after it has run, perhaps while another table is drawn.
+ */
+function onTable<T>(table: ReturnType<typeof tableNow>, work: () => T): T {
+  const was = tableNow();
+  [kind, focus, view] = [table.kind, table.focus, views[table.kind]];
+  try { return work(); } finally { [kind, focus, view] = [was.kind, was.focus, views[was.kind]]; }
 }
 
 /** A plugin item's Undo, in one form on every page: what the click did, turned back ("Undone: triage is back on in Codex."). */
@@ -1145,21 +1168,34 @@ function pluginRowSwitch(row: PluginRow) {
   const onTools = items.filter(itemOn).map(item => item.tool);
   const on = onTools.length > 0;
   const label = [`${row.name}: ${on ? `on in ${toolsPhrase(onTools, toolList())}` : 'off'}. Click to turn it ${on ? 'off' : 'on'} in every tool that can switch it.`, wholeWords(items, !on)].filter(Boolean).join(' ');
-  return toggle({ on, label, disabled: !canWrite(), id: `switch-${row.key}`, onchange: next => {
+  const wanted = wantedOn(kind, row.key);
+  return toggle({ on: wanted ?? on, label: wanted === undefined ? label : turningLabel(row.name, wanted), disabled: !canQueue(), id: `switch-${row.key}`, onchange: next => {
+    if (takeBack(kind, row.key)) { rerender(); return; }
+    // Drawn as a click on it asks, it is clicked from that state, and worked out in its turn; else from what each tool has now.
     const plugins = turnEvery(items, next);
-    if (!plugins.ops.length) { tell({ page: state.page, item: row.name, warn: true, band: true, text: `${row.name}: nothing changed. ${plugins.left ?? `It is ${next ? 'on' : 'off'} already.`}` }); rerender(); return; }
-    mainClick(row.name, next, [], plugins, () => `${row.name} is ${next ? 'on' : 'off'} in ${toolsPhrase(plugins.turned.map(item => item.tool), toolList())}.`, plugins.left);
+    if (wanted === undefined && !plugins.ops.length) { tell({ page: state.page, item: row.name, warn: true, band: true, text: `${row.name}: nothing changed. ${plugins.left ?? `It is ${next ? 'on' : 'off'} already.`}` }); rerender(); return; }
+    // Its part in each tool is worked out in its turn, from the plugins as the clicks before it left them.
+    const table = tableNow(), rowNow = () => plugged().rows.find(each => each.key === row.key);
+    queueClick({ kind, key: row.key, on: next }, row.name, () => onTable(table, () => {
+      const now = rowNow(), turned = now && turnEvery(rowItems(now), next);
+      return turned?.ops.length ? mainClick(row.name, next, [], turned, () => `${row.name} is ${next ? 'on' : 'off'} in ${toolsPhrase(turned.turned.map(item => item.tool), toolList())}.`, turned.left) : undefined;
+    }), () => onTable(table, () => { const now = rowNow(); return now && rowItems(now).some(itemOn); }));
   } });
 }
 
+/** A switch's label while a click on its row is unfinished: what it is being turned to. */
+const turningLabel = (name: string, on: boolean) => `${name}: being turned ${on ? 'on' : 'off'}.`;
+
 /**
- * The switch's click: off everywhere, or on everywhere (a found item taken in, after a copy choice where its copies differ). Its
- * row is pinned where it is (itemrow.ts Pinned) until another list or none is drawn, or Refresh (app.ts pinnedRows).
+ * The switch's click: off everywhere, or on everywhere (a found item taken in, after a copy choice where its copies differ). It
+ * joins the page's list (app.ts queueClick), its row drawn in its new state at once and worked out in its turn, from the view as
+ * the clicks before it left it; a second click while it waits takes it back (clicklist.ts takeBack). Its row is pinned where it is
+ * (itemrow.ts Pinned) until another list or none is drawn, or Refresh (app.ts pinnedRows).
  */
 function flip(skill: ItemRow, on: boolean) {
   pin(pinnedHere(), skill.key, sectionOf(skill), timeIn(skill, chosenOrder(), itemOf, usedAt));
-  if (!on) { turnOff(skill); return; }
-  if (isDiffering(skill)) {
+  if (takeBack(kind, skill.key)) { rerender(); return; }
+  if (on && isDiffering(skill)) {
     // The question opens under its row; a second click on the switch closes it.
     if (view.comparing === skill.key) { view.comparing = undefined; rerender(); return; }
     view.comparing = undefined;
@@ -1167,7 +1203,13 @@ function flip(skill: ItemRow, on: boolean) {
     announce(`${nameOf(skill)}’s copies differ. Choose which copy every tool uses.`, true);
     return;
   }
-  turnOn(skill);
+  // Refused in its turn if its row is no longer as it was drawn when clicked.
+  const key = skill.key, seen = wantedOn(kind, key) ?? libraryPlace(itemOf(skill)) === 'on', table = tableNow(), refocus = focusOn(skill);
+  const rowNow = () => committedList().find(row => row.key === key);
+  queueClick({ kind, key, on }, nameOf(skill), () => onTable(table, () => { const now = rowNow(); return now && (on ? turnOn(now, undefined, seen) : turnOff(now, seen)); }),
+    () => onTable(table, () => { const now = rowNow(); return now && libraryPlace(itemOf(now)) === 'on'; }));
+  // Add gives way to the switch: the focus goes with it.
+  if (document.activeElement === document.body) document.getElementById(refocus())?.focus({ preventScroll: true });
 }
 
 /**
@@ -1175,18 +1217,19 @@ function flip(skill: ItemRow, on: boolean) {
  * keeps a second one apart (the Files view's header): ids `<prefix>switch-<key>`, `<prefix>add-<key>`.
  */
 function itemSwitch(skill: ItemRow, prefix = '') {
-  return libraryPlace(itemOf(skill)) === 'found' ? addButton(skill, controlId(skill, prefix)) : librarySwitch(skill, controlId(skill, prefix));
+  return drawnAsAdd(skill) ? addButton(skill, controlId(skill, prefix)) : librarySwitch(skill, controlId(skill, prefix));
 }
 
 /**
  * The switch of an item in Central Knot: on (applied to every harness it isn't kept out of; partial, drawn striped, where it
- * is kept out of some or switched off in a tool's own settings: style.css .switch-partial), or off (in Central Knot only).
+ * is kept out of some or switched off in a tool's own settings: style.css .switch-partial), or off (in Central Knot only). While a
+ * click on its row is unfinished, it is drawn as that click asks (clicklist.ts wantedOn); the tools' marks stay what is on disk.
  */
 function librarySwitch(skill: ItemRow, id: string) {
-  const item = itemOf(skill), on = libraryPlace(item) === 'on';
+  const item = itemOf(skill), wanted = wantedOn(kind, skill.key), on = wanted ?? libraryPlace(item) === 'on';
   // Where a tool has it through a plugin with no switch for one item there, the click turns the whole plugin: said first.
-  const label = [switchLabel(skill, item, toolList()), wholeWords(throughItems(skill), !on)].filter(Boolean).join(' ');
-  return toggle({ on, partial: isPartial(item, toolList(), skill), label, onchange: next => flip(skill, next), disabled: !canWrite(), id });
+  const label = wanted !== undefined ? turningLabel(nameOf(skill), wanted) : [switchLabel(skill, item, toolList()), wholeWords(throughItems(skill), !on)].filter(Boolean).join(' ');
+  return toggle({ on, partial: wanted === undefined && isPartial(item, toolList(), skill), label, onchange: next => flip(skill, next), disabled: !canQueue(), id });
 }
 
 /**
@@ -1197,7 +1240,7 @@ function librarySwitch(skill: ItemRow, id: string) {
 function addButton(skill: ItemRow, id: string) {
   const question = isDiffering(skill) ? (view.comparing === skill.key ? 'open' : 'closed') : undefined;
   const label = addLabel(skill, itemOf(skill), toolList(), question);
-  return h('button.btn.outline.small.add-item', { type: 'button', id, title: label, 'aria-label': label, disabled: !canWrite() || !canAdd(skill),
+  return h('button.btn.outline.small.add-item', { type: 'button', id, title: label, 'aria-label': label, disabled: !canQueue() || !canAdd(skill),
     onclick: (event: Event) => { event.stopPropagation(); flip(skill, true); } }, 'Add');
 }
 
@@ -1392,7 +1435,7 @@ function unusedBand(shown: ItemRow[]) {
     ending.length ? `With these off, ${andList(ending.map(profile => profile.name))} ${ending.length === 1 ? 'stops' : 'stop'} being the profile in use.` : '',
   ].filter(Boolean).join(' ');
   const turn = off.length ? button({ variant: 'outline', size: 'micro', label: 'Turn these off', id: 'turn-unused-off',
-    disabled: !canWrite() || state.usage.state === 'reading', onclick: () => turnTheseOff(off) }) : null;
+    disabled: writeOff() || state.usage.state === 'reading', onclick: () => turnTheseOff(off) }) : null;
   const does = turn ? h('span.usage-turn-note', {}, ` Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on.`) : null;
   return h('div.band.usage-band', { role: 'status', id: 'unused-band' }, icon('history', 14, 'tone-muted'), h('span.band-text', {}, words, does), turn);
 }
@@ -1525,7 +1568,7 @@ function libraryHarnessSwitch(lib: LibraryPage, skill: ItemRow, tool: Tool) {
   const does = out ? `Click to put it in ${where} again, its ${lib.words.copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
   const flipHere = (on: boolean) => click({ kind, items: [name], changes: [rowClicks.inHarness(skill, item, tool, !on)], said });
   return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, out ? 'Off' : 'On'),
-    toggle({ on: !out, disabled: !canWrite(), id: `enable-${skill.key}-${tool}`, label: `${name} in ${where}: ${out ? 'kept out' : 'on'}. ${does}`, onchange: flipHere })));
+    toggle({ on: !out, disabled: writeOff(), id: `enable-${skill.key}-${tool}`, label: `${name} in ${where}: ${out ? 'kept out' : 'on'}. ${does}`, onchange: flipHere })));
 }
 
 /**
@@ -1537,14 +1580,14 @@ function libraryDelete(lib: LibraryPage, skill: ItemRow) {
   if (!item) return null;
   const name = nameOf(skill), disarm = () => { view.confirmDelete = undefined; rerender(); };
   if (view.confirmDelete !== skill.key) {
-    const arm = button({ variant: 'outline', size: 'micro', label: 'Delete from Central Knot…', id: `delete-${skill.key}`, disabled: !canWrite(), onclick: () => { view.confirmDelete = skill.key; rerender(); } });
+    const arm = button({ variant: 'outline', size: 'micro', label: 'Delete from Central Knot…', id: `delete-${skill.key}`, disabled: writeOff(), onclick: () => { view.confirmDelete = skill.key; rerender(); } });
     arm.classList.add('delete-quiet');
     return h('span.delete-offer', {}, arm, h('span.delete-offer-note', {}, lib.say.said.deleteOffer));
   }
   const said = lib.say.said.deleted(name, item.on, stillIn(skill, item, [], toolList()), toolList());
   const run = () => { view.confirmDelete = undefined; click({ kind, items: [name], changes: [rowClicks.remove(skill, item)], said }); };
   // Armed, it is still a button (outlined in red); Cancel beside it is a link.
-  const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: `delete-confirm-${skill.key}`, disabled: !canWrite(), onclick: run });
+  const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: `delete-confirm-${skill.key}`, disabled: writeOff(), onclick: run });
   now.classList.add('delete-now');
   now.title = `Delete ${name} from Central Knot now. History can restore it.`;
   return h('span.delete-armed', {}, smallAction('Cancel', `delete-cancel-${skill.key}`, disarm), now,

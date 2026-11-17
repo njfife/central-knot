@@ -45,7 +45,7 @@ test('Claude Code: what an installed plugin brings, from its own record and copy
   } finally { await box.cleanup(); }
 });
 
-test('Claude Code reads the marketplace entry from its own copy of the marketplace, so a plugin whose entry lists its skills shows them, and is on the Plugins page', async () => {
+test('Claude Code reads the marketplace entry from its own copy of the marketplace, so a plugin whose entry lists its skills shows them, and is on the Plugin marketplaces page', async () => {
   const box = await sandbox();
   try {
     const market = join(box.home, '.claude/plugins/marketplaces/team');

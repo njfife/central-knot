@@ -432,7 +432,7 @@ test('A store that fails for another reason while the rule keeps a skill is not 
   } finally { await box.cleanup(); }
 });
 
-test('A take-in’s Undo is not offered once the place it was found in no longer holds that copy (Take over replaced it): it offers Turn off instead', async () => {
+test('A take-in’s Undo is not offered once the place it was found in no longer holds that copy (Take over replaced it): it offers Turn it off instead', async () => {
   const box = await sandbox();
   try {
     const shared = join(box.home, '.agents/skills/notes');
@@ -443,7 +443,7 @@ test('A take-in’s Undo is not offered once the place it was found in no longer
     const taken = (await entriesOf(box, 'notes')).find(event => event.cause === 'sync-everything')!;
     assert.equal(libraryAction(taken, (await views(box)).skills.library.notes, settled)?.label, 'Undo', 'while the shared copy is where it was found');
     assert.equal((await takeOver(box.context, tools, 'notes', 'codex-cli')).stopped, undefined);
-    assert.equal(libraryAction(taken, (await views(box)).skills.library.notes, settled)?.label, 'Turn off');
+    assert.equal(libraryAction(taken, (await views(box)).skills.library.notes, settled)?.label, 'Turn it off');
   } finally { await box.cleanup(); }
 });
 
