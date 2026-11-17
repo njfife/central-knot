@@ -1,6 +1,6 @@
 // An item (a skill, an MCP server or an agent) as the item pages draw it (ItemRow), each kind's items in a home as every
 // page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
-// orderChoice; a row's last use, usagerow.ts lastUse), and the rows a click holds where they were, on every list that orders
+// orderChoice; a row's last use, usagerow.ts lastUse), and the rows a click pins where they were, on every list that orders
 // rows by their state, the Plugins list too (Pinned). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is libraryrow.ts's,
 // from the kind's view (types.ts LibraryView).
 import { currentIndex, type LibraryItem, type Plan, type VersionChange } from './library.ts';

@@ -12,8 +12,9 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
+import { problemLines } from './matrix.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
@@ -392,10 +393,10 @@ function lastRun(lines: ResultLine[]): HTMLElement | null {
     // What a switch's Undo can't put back is said with the result, so the promise beside Undo is the whole of it.
     const limits = !last.undo && last.turn?.limits.length ? ` ${last.turn.limits.join(' ')}` : '';
     return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'),
-      h('span.toolbar-result-text', { title: `${resultSentence(lines, last.undo)}${limits}` }, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null), back, dismiss(() => { market.lastRun = undefined; }, 'report-dismiss'));
+      h('span.toolbar-result-text', { title: `${resultSentence(lines, last.undo)}${limits}` }, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null), back, dismiss(closeRun, 'report-dismiss'));
   }
   // An Undo that undid nothing still offers its way back here, whether or not its failures are still shown.
-  if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(() => { market.lastRun = undefined; }, 'report-dismiss'));
+  if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(closeRun, 'report-dismiss'));
   const outcome = app.outcome?.page === 'plugins' && app.outcome.act ? app.outcome : undefined;
   if (!outcome?.act) return null;
   const action = button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: acting(), onclick: () => outcome.act!.run() });
@@ -407,7 +408,7 @@ function problemBand(lines: ResultLine[]) {
   const failures = market.lastRun?.problemsClosed ? [] : lines.filter(line => !line.ok);
   if (!market.problem && !failures.length) return null;
   return h('div.band.plugin-problems', { role: 'alert' }, icon('triangle-alert', 14, 'tone-warning'),
-    h('span.band-text.band-lines', {}, failures.map(line => h('span', {}, h('strong.item-name', {}, line.plugin), `: ${line.text}`)), market.problem ? h('span', {}, market.problem) : null),
+    problemLines([...failures.map(line => h('span', {}, h('strong.item-name', {}, line.plugin), `: ${line.text}`)), ...(market.problem ? [h('span', {}, market.problem)] : [])]),
     dismiss(dismissProblems));
 }
 

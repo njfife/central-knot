@@ -238,12 +238,18 @@ ul { list-style: none; }
 
 #header { position: relative; z-index: 2; height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line); }
 .page-title { flex: 1; min-width: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A list page's last result (renderer.ts resultHere), between the page's name and Refresh: the header keeps its height, so no
-   row moves. Taller than the header, the result covers the toolbar under it and ends on the header's line; in narrow content
-   the page's name steps aside for it (the sidebar names the page). */
-.header-result { flex: 1 1 0; min-width: 0; align-self: flex-start; min-height: 47px; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 0; background: var(--surface); box-shadow: 0 1px 0 var(--line); }
-.header-result > .band { padding: 0; border: 0; background: none; }
+/* A list page's last result (renderer.ts resultHere), between the page's name and Refresh, its Undo and × on the header's line;
+   what is taller than the header lies over the toolbar as one panel (::after, --result-height). Under 900px the name steps aside. */
+.header-result { flex: 1 1 0; min-width: 0; align-self: flex-start; display: flex; flex-direction: column; padding: 11px 0; }
+#header:has(.header-result)::after { content: ""; position: absolute; inset: 0 0 auto 0; z-index: -1; height: var(--result-height, 48px); min-height: 100%; background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 8px 14px -10px rgb(0 0 0 / 0.3); }
+.header-result > .band, .header-result > .toolbar-result { padding: 0; border: 0; background: none; align-items: flex-start; }
+.header-result > * > svg { margin-top: 6px; }
+.header-result .band-text, .header-result .toolbar-result-text { margin-top: 5px; }
+.header-result .band-dismiss { margin-top: 2px; }
 .header-result > .toolbar-result .band-dismiss { margin-left: auto; }
+/* What went wrong under it (matrix.ts problemLines): a line each, and a stop reason in two lines. */
+.header-result .band-lines > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header-result > * + * .band-text:not(.band-lines) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 #header:has(.header-result) > .page-title { flex: none; }
 @container content (width < 900px) { #header:has(.header-result) > .page-title { display: none; } }
 .header-end { display: flex; gap: 8px; }
@@ -473,6 +479,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-section-label strong { font-weight: 600; }
 .ov-section-count { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .ov-section-after { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+/* A heading note's room while rows not its own are pinned under it (matrix.ts section). */
+.ov-section-room { visibility: hidden; }
 .ov-name { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 16px; overflow: hidden; }
 .ov-name-text { flex: 0 1 auto; min-width: 3em; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .unmanaged .ov-name-text { font-weight: 400; }

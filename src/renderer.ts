@@ -1,12 +1,13 @@
 // The page's entry: the window's frame around the page (the sidebar, the header, the status bar and the Sync switch), which page
 // draws (renderPage: while another build holds this one, the held screen of otherbuildview.ts instead of every page, with the
 // sidebar's update control kept), and drawing again on a change. On a list page the last result is in the header (resultHere),
-// whose room is always there, so a result never moves a row. The page's state and actions are app.ts's; each page is drawn by its own
+// whose room is always there, so a result never moves a row; one taller than the header lies over the toolbar as a panel
+// (style.css #header::after). The page's state and actions are app.ts's; each page is drawn by its own
 // module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
-import { button, fitBars, h, icon, runAfterLayout, whyOff } from './dom.ts';
+import { afterLayout, button, fitBars, h, icon, runAfterLayout, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
 import { kindNouns } from './words.ts';
@@ -211,9 +212,12 @@ function renderStatus() {
 
 /** A list page's last result (matrix.ts resultInHeader), in the header: its room is always there, so no row ever moves for it. */
 function resultHere() {
-  const parts = state.home && !heldBy(state.home) ? (state.page === 'plugins' ? pluginsResult() : resultInHeader() ? listResult() : []) : [];
+  const parts = state.home && !heldBy(state.home) && resultInHeader() ? (state.page === 'plugins' ? pluginsResult() : listResult()) : [];
   return parts.length ? [h('div.header-result', {}, parts)] : [];
 }
+
+// Its panel is as tall as the result (style.css #header::after), measured once it is laid out, and at each resize.
+afterLayout(() => { region('header').style.setProperty('--result-height', `${document.querySelector<HTMLElement>('#header .header-result')?.offsetHeight ?? 0}px`); });
 
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
 
@@ -222,9 +226,8 @@ function render() {
   const scrolled = remembered();
   const { rail } = applyLayout();
   renderSidebar();
-  drawPage(renderPage);
-  // After the page: its result is read from what the page drew (matrix.ts kind).
   renderHeader(rail);
+  drawPage(renderPage);
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
   runAfterLayout();
   renderStatus();

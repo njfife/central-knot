@@ -152,7 +152,9 @@ export const pinnedRows = <Group extends string | number>(list: string): Pinned<
   return (state.pinned.list === list ? state.pinned : noPins()) as Pinned<Group>;
 };
 /** Draws the page (renderer.ts render): a draw that asked for no pinned rows lets them go. */
-export function drawPage(draw: () => void) { drawing = true; asked = false; try { draw(); } finally { drawing = false; } if (!asked) state.pinned = noPins(); }
+export function drawPage(draw: () => void) { drawing = true; asked = false; try { draw(); } finally { drawing = false; } if (!asked) unpin(); }
+/** Every pinned row is let go: each takes its own place in the order again. */
+export const unpin = () => { state.pinned = noPins(); };
 
 let render = () => {};
 export const setRenderer = (next: () => void) => { render = next; };
@@ -254,12 +256,13 @@ export function afterActing() {
 /**
  * One piece of work at a time: every mutating control is disabled while it runs. Its "Reading…" message gives way, when
  * the work said nothing of its own, to what the status bar said before. A background refresh that arrived meanwhile runs
- * once it is done.
+ * once it is done. `keepResult`: the last result stays, its Undo off while the page acts, until the work says its own (an item
+ * page's click and its Undo, so the header doesn't flip between the result and the page's name at each click).
  */
-export async function busy(message: string, work: () => Promise<void>) {
+export async function busy(message: string, work: () => Promise<void>, { keepResult = false } = {}) {
   const focused = document.activeElement?.id;
   const before = state.said;
-  state.outcome = undefined;
+  if (!keepResult) state.outcome = undefined;
   state.undoMoved = undefined;
   state.busy = message;
   showActing();
@@ -348,6 +351,8 @@ export interface Click {
   undoing?: boolean;
   /** Its row's own control as the page draws it now (its switch, or Add while the item is found): the focus goes there once the click, or its Undo, is done. */
   focus?: () => string;
+  /** A click on many rows at once (Turn these off): once it, or its Undo, is done, every pinned row is let go, so each takes its own group. */
+  regroups?: boolean;
   /**
    * Its part in the tools that have the item through a plugin (pluginswitch.ts turnEvery): run once the copies' part went
    * through, never beside a click refused as a whole. `said`: what that part brought with it, said when it all worked.
@@ -376,7 +381,7 @@ const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes
 
 /**
  * One click, applied at once: an item's switch, or one tool's control in its details. The result says what was done, or why
- * nothing was, in the band at the top of the page. Its one Undo reverses exactly what the click did: the History entries the
+ * nothing was, in the window's header (renderer.ts resultHere). Its one Undo reverses exactly what the click did: the History entries the
  * click itself made (never what sync did alongside), each by its own action (historyactions.ts).
  */
 export const applyClick = (click: Click) => busy('Applying…', async () => {
@@ -407,7 +412,8 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned,
     text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
-});
+  if (click.regroups) unpin();
+}, { keepResult: true });
 
 /** Whether each History entry a click made still offers its own action, so the click's Undo can run them all. */
 async function allUndoable(made: string[]) {
@@ -439,7 +445,8 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
     text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, ...failed].join(' ') });
   for (const item of click.items) flashRow(item);
-});
+  if (click.regroups) unpin();
+}, { keepResult: true });
 
 /** What a run of plugin switches couldn't do, in words ("issue-tracker: couldn’t turn it on in Codex."), or ''. */
 const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [ran.stopped, ...ran.failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)].filter(Boolean).join(' ');
@@ -559,8 +566,7 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
 /** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */
 export async function readAgain() {
   let read = false;
-  // Every row takes its place in the order again.
-  state.pinned = noPins();
+  unpin();
   // What a list of plugin clicks said is not restated over a home read again.
   endListNews();
   await busy(noToolManaged() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
@@ -636,6 +642,9 @@ export const touchedToolsPhrase = (touched: string[]): string => toolsPhrase(tou
  * Lets go of what the last action showed (its result, Apply results, the spoken line): for moving to another place.
  * A home switch's result survives one move, since switching is often followed by a click elsewhere; `page` is where it lands.
  */
+/** × on a result: it goes, and with it what its click could not do (the item pages' last click's problems). */
+export function closeResult() { state.outcome = undefined; state.skillsResult = state.mcpResult = state.agentsResult = undefined; rerender(); }
+
 export function leaveResults(page = state.page) {
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   state.skillsResult = undefined; state.mcpResult = undefined; state.agentsResult = undefined;

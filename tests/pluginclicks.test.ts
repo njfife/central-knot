@@ -31,8 +31,8 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyPluginSwitches, drawPage, pinnedRows, readAgain, state: app } = await import('../src/app.ts');
-const { clickOn, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
+const { acting, applyPluginSwitches, closeResult, drawPage, pinnedRows, readAgain, state: app } = await import('../src/app.ts');
+const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { pin } = await import('../src/itemrow.ts');
 const { clickWords } = await import('../src/pluginparts.ts');
 
@@ -274,4 +274,25 @@ test('Find keeps a pinned plugin where it was: gamma, pinned first, stays first 
   drawPage(() => { order = shownPlugins(entry).map(plugin => plugin.name); });
   market.nav.find = '';
   assert.deepEqual(order, ['gamma', 'alpha', 'beta']);
+});
+
+// ---------- × on a result ----------
+
+test('× on the run’s result closes its problem lines too', async () => {
+  start();
+  turnPlugin(entry, 'alpha', 'on');
+  await settled();
+  await main.answer(refused('alpha'));
+  market.problem = stopped;
+  assert.equal(lastLines().filter(line => !line.ok).length, 1);
+  closeRun();
+  assert.deepEqual([lastLines(), market.problem], [[], undefined]);
+});
+
+test('× on an item page’s result closes what its click could not do too', () => {
+  start();
+  app.outcome = { page: 'mcp', text: 'docs is on in Claude Code.' } as typeof app.outcome;
+  app.mcpResult = { results: [{ item: 'docs', harness: 'codex-cli', outcome: 'failed', message: 'Could not write.' }], writes: 0 } as unknown as typeof app.mcpResult;
+  closeResult();
+  assert.deepEqual([app.outcome, app.mcpResult], [undefined, undefined]);
 });

@@ -224,7 +224,7 @@ if (wanted('skills')) {
   await closeRow('notes');
   // Taken in: written to every tool, its whole folder. Its Undo takes it out again: found once more, the tools it was found in keeping theirs.
   await a.click('#add-notes'); await switchOn('notes');
-  await atEverySize('taken-in', 'Clicked notes’s Add: it is in Central Knot now, and on in all 3 tools; the strip at the top says so, with Undo', false, '.bands');
+  await atEverySize('taken-in', 'Clicked notes’s Add: it is in Central Knot now, and on in all 3 tools; the header says so, with Undo', false, '#header');
   await a.click('#outcome-undo'); await a.settle();
   await atEverySize('taken-in-undone', 'Clicked Undo in that strip: the copy Codex got is gone, Claude Code and Copilot CLI keep theirs, and notes is found again', false, '.bands');
   await a.click('#add-notes'); await switchOn('notes');
@@ -1403,7 +1403,7 @@ async function everyPage(tag) {
       if (await a.has('.details-paths:not([open]) summary')) { await a.click('.details-paths:not([open]) summary'); await shot(a, `${tag}-skills-files-where`, `Clicked "Where each copy is", below the file, ${at}: then Delete from Central Knot….`); }
       else if (await a.has('.details-paths[open]')) { await a.run(`document.querySelector('.details-paths').scrollIntoView({ block: 'nearest' })`); await shot(a, `${tag}-skills-files-where`, `"Where each copy is" is open from the start ${at}: the skill's details in their column at the right, the status first and Delete everywhere… last.`); }
       const toggle = await a.run(`document.querySelector('[id^="detail-switch-"]')?.id ?? ''`);
-      if (toggle) { await a.click(`#${toggle}`); await shot(a, `${tag}-skills-files-switched`, `Turned its switch in the Files view: it applies at once; the result and Undo are in the strip at the top ${at}.`); if (await a.has('#outcome-undo')) await a.click('#outcome-undo'); }
+      if (toggle) { await a.click(`#${toggle}`); await shot(a, `${tag}-skills-files-switched`, `Turned its switch in the Files view: it applies at once; the result and Undo are in the header ${at}.`); if (await a.has('#outcome-undo')) await a.click('#outcome-undo'); }
       await a.click('#skills-table');
     }
     if (await a.has('.ov-row.open')) await a.click(`#${first}`);

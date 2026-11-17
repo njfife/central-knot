@@ -15,7 +15,7 @@ import { andList, fewNames, kindNouns, sentence, toolList as toolsInWords, toolN
 import { lastUse, leftToItsRow, noUseSeen, onIn, rowFigure, startsLate, toolSays, USAGE_DAYS, type CantSay, type ToolSays, type UsageFacts } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { acting, closeResult, isKind, leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, pin, placeIn, timeIn, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
@@ -180,7 +180,7 @@ function pluginSection(list: PluginRow[]) {
   if (!list.length) return null;
   return h('div', { role: 'rowgroup' },
     h('div.ov-section.ov-section-plugins', { role: 'row' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'Only through a plugin'), h('span.ov-section-count', {}, String(list.length)),
-      sectionNote('installed with their plugin · switched here like any other'))),
+      sectionNote(true, 'installed with their plugin · switched here like any other'))),
     list.flatMap(pluginRowEl));
 }
 
@@ -656,7 +656,8 @@ export function resetTablesForHarness() {
 }
 
 /** A note after a section heading, after one separating dot that is spaced the same on both sides for every note. */
-const sectionNote = (...children: (Node | string)[]) => h('span.ov-section-after', {}, h('span.ov-section-dot', { 'aria-hidden': 'true' }, '·'), ...children);
+/** A heading's note; not `shown`, only its room (section). */
+const sectionNote = (shown: boolean, ...children: (Node | string)[]) => h(`span.ov-section-after${shown ? '' : '.ov-section-room'}`, shown ? {} : { 'aria-hidden': 'true' }, h('span.ov-section-dot', { 'aria-hidden': 'true' }, '·'), ...children);
 
 export { brandMark };
 
@@ -682,12 +683,12 @@ export const resultInHeader = () => state.page === 'skills' || state.page === 'm
 
 /**
  * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar.
- * `table`: a table is on screen, so its open copy choice hides an older result (guessed from the page;
- * a harness tab without a table passes false). `header`: drawn in the header, the one place on a list page (resultInHeader).
+ * `table`: a table is on screen, so its open copy choice hides an older result (guessed from the page). On a list page it is
+ * drawn in the header only (listResult); the pages that draw it in a band are the others.
  */
-export function outcomeBand(table = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || !!harnessKindShown(), header = false): HTMLElement | null {
+export function outcomeBand(table = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || !!harnessKindShown()): HTMLElement | null {
   const outcome = state.outcome;
-  if (!outcome || header !== resultInHeader() || !outcomeShown(outcome, table) || saidInStatusBar(outcome)) return null;
+  if (!outcome || !outcomeShown(outcome, table) || saidInStatusBar(outcome)) return null;
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
@@ -706,11 +707,11 @@ export function outcomeBand(table = state.page === 'skills' || state.page === 'm
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
     outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
     h('span.band-actions', {},
-      outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: outcome.act.whyOff?.(), attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
-        : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
+      outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: outcome.act.whyOff?.() ?? acting(), attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
+        : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined, !!acting())
         : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
-    closeButton(() => { state.outcome = undefined; rerender(); }, { id: 'outcome-dismiss' }));
+    closeButton(closeResult, { id: 'outcome-dismiss' }));
 }
 
 /** Sync off: what waits, and the two ways on. Shown on every managed page, since the switch covers all of them. */
@@ -775,15 +776,24 @@ function listNotices() {
  * could not do, or else what a background pass could not do (any kind's), until a click's result is said instead.
  */
 export function listResult(): HTMLElement[] {
-  const table = state.page !== 'harnesses' || !!harnessKindShown();
-  const result = table ? lastResult(kind) : undefined;
+  // The table it is about is the page's (or the harness tab's), set here as the page will draw it: the header is drawn first.
+  const table = isKind(state.page) ? state.page : harnessKindShown();
+  if (table) useTable(table, state.page === 'harnesses' ? state.harness : undefined);
+  const result = table ? lastResult(table) : undefined;
   const background = !table || result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed');
   // A click's refusal is its result, said once, in the result's band (app.ts applyClick leaves it out of these).
-  const problems = (result?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !result.differs));
-  return [outcomeBand(table, true), background.length ? problemsBand(background) : null,
+  const problems = [...background, ...(result?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !result.differs))];
+  return [outcomeBand(!!table),
     result?.stopped ? h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, result.stopped)) : null,
-    problems.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · '))) : null,
+    problems.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(problems.map(problem => h('span', {}, `${problem.item}${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`)))) : null,
   ].filter((band): band is HTMLElement => !!band);
+}
+
+/** What went wrong, under a result in the header: two lines, each cut to one (whole in its tooltip), and how many more. */
+export function problemLines(lines: HTMLElement[]): HTMLElement {
+  for (const line of lines) line.title = line.textContent ?? '';
+  const more = lines.slice(2).map(line => line.title);
+  return h('span.band-text.band-lines', {}, lines.slice(0, 2), more.length ? h('span', { title: more.join('\n') }, `and ${more.length} more`) : null);
 }
 
 /** The record is intact but this app has no memory of it: Resume carries on from it (any switch does too). */
@@ -1383,7 +1393,7 @@ function unusedBand(shown: ItemRow[]) {
 /** Turn these off: one click with each row's own Off (libraryrow.ts rowClicks.off), so the page's one Undo puts them all back. */
 function turnTheseOff(list: ItemRow[]) {
   const { one, many } = kindNouns[kind], itemNames = list.map(nameOf);
-  click({ kind, items: itemNames, changes: list.map(skill => rowClicks.off(skill, itemOf(skill))),
+  click({ kind, items: itemNames, regroups: true, changes: list.map(skill => rowClicks.off(skill, itemOf(skill))),
     said: notIn => `Turned off ${plural(list.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(itemNames)}${notIn.length ? `, but not yet in ${toolsPhrase(notIn, toolList())}` : ''}. Central Knot keeps them, and turning one on puts it back as it was.` });
 }
 
@@ -1438,16 +1448,18 @@ function whenCell(skill: ItemRow) {
  * Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. `rows`: the rows drawn under
  * it; `truly`: the rows whose own heading it is, which its count counts. They differ once a row's own switch is clicked: the row
  * stays under the heading it was under (itemrow.ts Pinned), and its switch and its line say its state, so "On 11" may head 12
- * rows, one drawn Off. The note speaks for every row under it, so it is drawn only while each is truly its own: no "no tool
- * has these" over a row just turned On, no "Add one" over one just added.
+ * rows, one drawn Off. The note speaks for every row under it, so it shows only while each is truly its own: no "no tool
+ * has these" over a row just turned On, no "Add one" over one just added. While rows are pinned under it, its room stays
+ * (hidden), so no row below moves.
  */
 function section(role: Role, rows: ItemRow[], truly: ItemRow[]) {
   if (!rows.length) return null;
   const label = role === 'away' ? `Not in ${names[focus!]}` : placeNames[role === 'on' ? 0 : role === 'found' ? 1 : 2];
-  const note = !truly.length || rows.some(skill => !truly.includes(skill)) ? null : role === 'found' ? foundNote(truly) : role === 'off' ? offNote(truly) : role === 'away' ? 'only other tools have these' : null;
+  const own = rows.every(skill => truly.includes(skill)), about = own ? truly : rows;
+  const note = role === 'found' ? foundNote(about) : role === 'off' ? offNote(about) : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
-      h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(truly.length)), note ? sectionNote(note) : null)),
+      h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(truly.length)), note ? sectionNote(own, note) : null)),
     inOrder(rows, chosenOrder(), itemOf, usedAt, pinnedHere()).flatMap(row));
 }
 
@@ -1737,7 +1749,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   const layout = filesLayout(skill, where);
   // Its whole text on hover too, for a pane too narrow to show it.
   const paneStatus = switchStatus(skill);
-  // The result and its Undo in the strip at the top, as on every other page; the list and the skill's pane below it.
+  // The result and its Undo are in the window's header, as on the table; the list and the skill's pane below it.
   return h('div.page', {}, notices(), h('div.split', {},
     h('div.list-column', {},
       h('div.toolbar.list-toolbar.fit-bar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Skills', name: 'Back to Skills', id: 'skills-table', collapse: true, onclick: showSkillsTable }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),

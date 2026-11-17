@@ -2,7 +2,7 @@
 // here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 // Clicks go by one of two routes, split by whether the plugin's record changes: the switch and each tool's box go through
 // turnPlugin (main records first, marketplaces.ts turn); Update, Update all, a skill's switch and their Undo go through
-// applyPluginOps. Both set market.lastRun, which the toolbar says with one Undo.
+// applyPluginOps. Both set market.lastRun, which the window's header says with one Undo (pluginspage.ts pluginsResult).
 // Which clicks wait their turn and which lock, in one place:
 // - A switch or a tool's box joins the page's list (market.clicks), and one runner sends the list to main one click at a
 //   time, in the order clicked (runClicks); each row says its own click's state (pluginparts.ts clickNote). That plugin's
@@ -352,12 +352,12 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
   } finally {
     market.working = undefined;
     market.lastRun = { done: result.done, undo, home, ...(undo ? { rest: notUndone(ops, result.done) } : {}) };
-    // A run that stopped after some steps names the plugins it didn't reach; the toolbar says what did run.
+    // A run that stopped after some steps names the plugins it didn't reach; the header says what did run.
     const unrun = [...new Set(ops.filter(op => !result.done.some(entry => entry.source === op.source && entry.plugin === op.plugin)).map(op => op.plugin))];
     market.problem = result.stopped && result.done.length && unrun.length ? `Stopped before ${andList(unrun)}: ${result.stopped}` : result.stopped;
     await readAgain();
   }
-  // A result that offers Undo is said in the toolbar, with its Undo; one that only tells (an Undo done) in the status bar.
+  // A result that offers Undo is said in the header, with its Undo; one that only tells (an Undo done) in the status bar.
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), !market.problem && undoOps().length > 0);
 });
 
@@ -515,6 +515,9 @@ export function undoLast(): void {
   if (last?.turn) void undoTurn({ ...last, turn: last.turn });
   else void applyPluginOps(undoOps(), true);
 }
+
+/** × on the run's result: it goes, and its problem lines with it. */
+export function closeRun(): void { market.lastRun = undefined; market.problem = undefined; }
 
 /**
  * Closes the problem band: the stop reason and the problem lines go, and the run itself stays, so the toolbar keeps its
