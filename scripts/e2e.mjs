@@ -183,7 +183,14 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
     expand: async () => { await run(`[...document.querySelectorAll('button')].filter(b => /^Show \\d+ skill/.test(b.textContent.trim()) && b.getAttribute('aria-expanded') !== 'true').forEach(b => b.click())`); await settle(); },
     plan: () => run(`Object.fromEntries([...document.querySelectorAll('.plan-card')].map(e => [e.dataset.key, e.dataset.state]))`),
     pages: async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).filter(target => target.type === 'page').length,
-    quit: async () => { page.close(); child.kill('SIGTERM'); await new Promise(done => { child.once('exit', done); setTimeout(done, 5000); }); },
+    // Waits for the app to be gone, as the next launch on its data folder would hand over to it (main.ts, one at a time) and open
+    // nothing: Quit may wait for a plugin update (main.ts before-quit, 15 s at most), and a busy machine is slower still.
+    quit: async () => {
+      const from = Date.now();
+      page.close(); child.kill('SIGTERM');
+      if (child.exitCode === null && child.signalCode === null) await new Promise(done => { const limit = setTimeout(done, 30000); child.once('exit', () => { clearTimeout(limit); done(); }); });
+      if (Date.now() - from > 5000) console.log(`(an app took ${Math.round((Date.now() - from) / 1000)} s to quit)`);
+    },
     crash: () => new Promise(done => { page.close(); child.once('exit', done); child.kill('SIGKILL'); }),
   };
   await settle();
