@@ -748,6 +748,21 @@ test('A plugin found installed by hand, its only box unticked: uninstalled there
   } finally { await box.cleanup(); }
 });
 
+test('The last untick is that of the last tool that has it and is let in: a copy left where it is kept out doesn’t count', async () => {
+  let failing = true;
+  const box = await switchHome({ engine: { uninstall: async (_context, _marketplace, _plugin, tool) => ({ tool, outcome: failing ? 'failed' : 'uninstalled', message: failing ? 'It failed.' : 'Uninstalled.', runs: [] }) } });
+  try {
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    // Claude Code unticked, its uninstall failing: kept out, its copy left there.
+    await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    failing = false;
+    await box.markets.turn(box.root, 'pdf', 'keep-out', 'pi-cli', box.home);
+    const entry = (await box.record()).plugins.find(each => each.plugin === 'pdf')!;
+    assert.deepEqual([entry.on, entry.except], [false, ['claude-cli']], 'Off, not On in no tool it is let into');
+  } finally { await box.cleanup(); }
+});
+
 test('An Off plugin’s box unticked where its uninstall failed takes that copy out and records nothing: On restores the setup it had', async () => {
   let failing = true;
   const installed = () => join(box.home, '.claude/plugins/installed_plugins.json');

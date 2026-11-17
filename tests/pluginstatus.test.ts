@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
-import { owedTo } from '../src/pluginrecord.ts';
+import { clickRuns, owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
@@ -53,6 +53,9 @@ test('A tool’s box: ticked where the plugin is; off before the click where its
   // Unticked: kept out, said on its line. A tool whose own add refused the marketplace says so on its line.
   assert.deepEqual(box(on(['copilot-cli']), 'copilot-cli'), { ticked: false, line: 'Kept out: tick to put it back' });
   assert.deepEqual(box({ ...on(), refusedBy: { 'copilot-cli': 'Copilot CLI refused this marketplace: “Invalid marketplace.json”' } }, 'copilot-cli').line, 'Copilot CLI refused this marketplace');
+  // On, kept out of Claude Code, which has its copy again: the mark `stays`, the box ticked and free, and its untick takes the copy out (row 9).
+  const keptOut: MarketplaceView = on(['claude-cli']), owed = owedTo({ on: true, except: ['claude-cli'] }, 'claude-cli', toolNow(view, keptOut, 'p', 'claude-cli', undefined, false), view.tools);
+  assert.deepEqual([toolMark(view, keptOut, 'p', 'claude-cli', owed).mark, box(keptOut, 'claude-cli'), clickRuns('keep-out', owed)], ['stays', { ticked: true }, 'uninstall']);
 });
 
 test('Only a known version that names another release is a difference', () => {

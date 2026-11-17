@@ -36,7 +36,7 @@
 // What a click runs of the table's answer is clickRuns (On only installs, Off only uninstalls), beside it.
 // A TOOL'S BOX on the plugin's page (marketplaces.ts turnedEntry) changes the entry, then the table answers for that tool alone:
 //   On, ticked                → the tool leaves `except` (row 4 or 5 installs).
-//   On, unticked              → the tool joins `except` (row 9 or 10 takes it out); where no other tool has it, the plugin's Off
+//   On, unticked              → the tool joins `except` (row 9 or 10 takes it out); where no other tool it is let into has it, the plugin's Off
 //                               instead, `except` as it was, so its On brings it back where it last was.
 //   Off or no entry, ticked   → On, `except` by the first read's rule (firstEntry), the ticked tool counted as having it.
 //   No entry, unticked        → the first read's rule, then as On, unticked.

@@ -702,7 +702,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (before && !before.on && what === 'keep-out') return before;
     const plain = before ?? fresh(), holders = [...new Set(what === 'let-in' ? [...has, tool] : has)].map(each => ({ ...plain, tool: each }));
     const base = before?.on ? before : { ...plain, on: true, except: holders.length ? firstEntry(managed, holders, [], holders[0]!).except : [...harnessIds] };
-    if (what === 'keep-out' && has.every(each => each === tool)) return { ...base, on: false };
+    // The last untick: no other tool it is let into has it (a copy left where it is kept out doesn't count).
+    if (what === 'keep-out' && has.every(each => each === tool || base.except.includes(each))) return { ...base, on: false };
     return { ...base, except: harnessIds.filter(each => (each === tool ? what === 'keep-out' : base.except.includes(each))) };
   }
 

@@ -1586,7 +1586,7 @@ async function practiceFlow() {
   // marketplace: no refusal to keep). Each tool's box is then empty, and a tick tries again.
   await a.click('#pswitch-page-0-document-tools');
   for (let tries = 0; tries < 60 && !(await a.exists('.plugin-problems')); tries++) await wait(100);
-  check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-problems')), await a.text('.bands'));
+  check('a marketplace add that failed is said as it was, in the tool’s words, and not kept as a refusal', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-problems')), await a.text('.bands'));
   same('and nothing is claimed installed: the switch is on, and each tool’s box is empty, a tick trying again',
     [await a.run(`document.querySelector('#pswitch-page-0-document-tools')?.getAttribute('aria-checked')`), await a.run(`[...document.querySelectorAll('.plugin-tool .cell-box')].map(box => [box.dataset.state, box.getAttribute('aria-checked'), box.disabled])`),
       /^Not in Claude Code, though the plugin is on\. Click to put document-tools in Claude Code\./.test(await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli')?.title`) ?? '')],
