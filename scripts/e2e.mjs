@@ -257,6 +257,8 @@ const cellState = (a, key, tool) => a.run(`document.getElementById(${JSON.string
 /** The tools whose mark on an item's row is drawn off: off with the copy kept, or (a library item) a state of that tool's own (held). */
 const offMarks = (a, key) => a.all(`.ov-row[data-key=${JSON.stringify(key)}] .tool-mark:is([data-look="off"], [data-look="held"])`, 'e.dataset.tool');
 const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] .switch')?.getAttribute('aria-checked') === 'true'`);
+/** A heading's words as shown: its name, its count and its note, but not a note's hidden room (matrix.ts section). */
+const headingSays = (a, role) => a.run(`[...(document.querySelector('.ov-section[data-section="${role}"] .ov-section-label')?.childNodes ?? [])].filter(node => !node.classList?.contains('ov-section-room')).map(node => node.textContent).join('')`);
 /** Each section on an item page, in order, with the keys of its rows. */
 const sectionsNow = a => a.run(`[...document.querySelectorAll('.ov-section[data-section]')].map(head => [head.dataset.section, [...head.parentElement.querySelectorAll('.ov-row[data-key]')].map(row => row.dataset.key)])`);
 
@@ -285,7 +287,7 @@ async function harnessFlow() {
   await a.click('#add-release-notes');
   await a.shot('harness-switched');
   check('turning it on from a harness’s page copies it to every tool at once', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')) && existsSync(join(practice, '.codex/skills/release-notes/SKILL.md')));
-  check('and says so there', await a.exists('.harness-page .band-done'), await a.text('.harness-page'));
+  check('and says so there', await a.exists('#header .band-done'), await a.text('.harness-page'));
   await a.click('#nav-harnesses');
   check('the sidebar’s Harnesses leaves that result behind', !(await a.exists('.band-done')), await a.text('#page'));
   await a.click('#nav-skills');
@@ -744,7 +746,7 @@ async function practiceFlow() {
   await fitsAtMinimum(a, 'Skills');
 
   // One switch: a found skill's takes it into Central Knot and writes its folder to every tool at once. The pointer is over
-  // the list, as it is for a real click; each row still goes under the heading true for it at once.
+  // the list, as it is for a real click; the row stays where it was, under Found, until the list is drawn afresh (Refresh, below).
   const pointerOver = async selector => {
     const at = await a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return box ? [box.left + box.width / 2, box.top + box.height / 2] : null; })()`);
     if (at) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at[0], y: at[1] });
@@ -755,13 +757,14 @@ async function practiceFlow() {
   const notesFound = folders('notes');
   await a.click('#add-notes');
   await a.click('#outcome-undo');
-  same('Undo of taking a found skill in leaves every folder as before, and it is found again', [folders('notes'), await a.exists('#add-notes'), /^Undone: notes is as before\./.test(await a.text('.band-done') ?? '')], [notesFound, true, true]);
+  same('Undo of taking a found skill in leaves every folder as before, and it is found again, the focus on its Add as Undo goes', [folders('notes'), await a.exists('#add-notes'), /^Undone: notes is as before\./.test(await a.text('.band-done') ?? ''), await a.run(`document.activeElement?.id`)], [notesFound, true, true, 'add-notes']);
   await pointerOver('.ov-row[data-key="notes"]');
   await a.click('#add-notes');
   same('adding a found skill takes it in and writes it to every tool at once, byte for byte', [await switchOn(a, 'notes'), folders('notes')[2], folders('notes')[1]], [true, folders('notes')[0], folders('notes')[0]]);
   const statusBarShows = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);
   check('the result says where it is now, in the strip at the top only', (await a.text('.band-done') ?? '').includes('notes is in Central Knot now, and on in all 3 tools.') && !(await statusBarShows()), [await a.text('.bands'), await statusBarShows()]);
-  same('and its row is under On at once, the pointer over the list too: each heading is true for its rows and counts them', [(await sectionsNow(a))[0], await a.text('.ov-section[data-section="on"] .ov-section-count')], [['on', ['notes']], '1']);
+  same('and its row stays where it was, under Found, its switch On, the pointer over the list too: the heading counts the skills still found, and says nothing over a row now On',
+    [await sectionsNow(a), await switchOn(a, 'notes'), await a.text('.ov-section[data-section="found"] .ov-section-count'), await a.exists('.ov-section[data-section="found"] .ov-section-after:not(.ov-section-room)')], [[['found', ['notes', 'release-notes', 'review', 'standup']]], true, '3', false]);
   await pointerOver('.toolbar');
   // Off takes the folder out of every tool; Central Knot keeps it. Its Undo (On) puts every folder back, byte for byte.
   const notesOn = folders('notes');
@@ -907,6 +910,9 @@ async function practiceFlow() {
   check('without also calling it a catch-up', !(await a.text('.bands') ?? '').includes('Caught up'), await a.text('.bands'));
   check('and the status bar doesn’t say nothing changed beside it', !/Nothing changed/.test(await a.run(`document.querySelector('#announcement').dataset.text ?? ''`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   await a.shot('practice-edit-spread');
+  // A click on a row leaves the notice where it is: it goes at its × or at a newer notice, never at a click.
+  await a.click('#switch-notes'); await a.click('#outcome-undo');
+  check('a click on a row, and its Undo, leave the notice above the list as it was', (await a.text('.sync-notices') ?? '').includes('standup was edited in Claude Code; that is its current version now') && await switchOn(a, 'notes'), await a.text('.bands'));
   await a.run(`document.querySelector('.sync-notice[data-kind="edit"] [id^="notice-undo-"]').click()`);
   await a.settle();
   same('Undo makes the version before it current again, everywhere', [readFileSync(standupPath('claude'), 'utf8'), readFileSync(standupPath('copilot'), 'utf8')], [standupBefore, standupBefore]);
@@ -1002,6 +1008,29 @@ async function practiceFlow() {
     for (let tries = 0; tries < 32 && !stillWatched; tries++) { await wait(250); stillWatched = readNow(standupPath('copilot')).includes('switch that failed'); }
     same('a home switch whose settings can’t be saved stays on this home, still watched', [/could not finish\. Still on Practice copy/.test(said ?? ''), await a.text('#home-label'), stillWatched], [true, 'Practice copy', true]);
   }
+  // standup turned Off while Copilot CLI's copy can't be removed: once he is on another page and back, the background pass's
+  // problem stands alone in the header, and its × closes it.
+  await a.click('#nav-overview'); await a.click('#nav-skills');
+  const copilotLocked = [standupPath('copilot'), dirname(standupPath('copilot')), dirname(dirname(standupPath('copilot')))];
+  for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o444 : 0o555);
+  await a.click('#switch-standup');
+  await a.click('#nav-overview'); await wait(4000); await a.click('#nav-skills');
+  for (let tries = 0; tries < 40 && !/standup \(Copilot CLI\)/.test(await a.text('#header .header-result') ?? ''); tries++) await wait(250);
+  const backgroundSaid = await a.text('#header .header-result');
+  await a.run(`document.querySelector('#header .band-dismiss')?.click()`); await a.settle();
+  same('a background pass’s problem, alone in the header, is closed by its ×', [/standup \(Copilot CLI\)/.test(backgroundSaid ?? ''), await a.exists('#header .header-result')], [true, false]);
+  await a.click('#header-refresh');
+  same('reported again by the next read, it stays closed', await a.exists('#header .header-result'), false);
+  for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o644 : 0o755);
+  await a.click('#switch-standup');
+  // Cleared (standup On again, nothing left to remove), then the same failure later: it is said again.
+  for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o444 : 0o555);
+  await a.click('#switch-standup');
+  await a.click('#nav-overview'); await wait(4000); await a.click('#nav-skills');
+  for (let tries = 0; tries < 40 && !/standup \(Copilot CLI\)/.test(await a.text('#header .header-result') ?? ''); tries++) await wait(250);
+  same('the same failure, after it cleared, is said again', /standup \(Copilot CLI\)/.test(await a.text('#header .header-result') ?? ''), true);
+  for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o644 : 0o755);
+  await a.click('#switch-standup');
   // Sync off: edits are noted, not spread; the page shows them pending; Sync once spreads them once.
   await a.click('#sync-switch');
   same('Sync turns off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
@@ -1086,8 +1115,9 @@ async function practiceFlow() {
   const filesWide = await a.run(`(() => { const pane = document.querySelector('#detail-scroll').getBoundingClientRect(), file = document.querySelector('#detail-scroll pre.content').getBoundingClientRect(), details = document.querySelector('#detail-scroll .files-tail').getBoundingClientRect(); return { open: !!document.querySelector('#detail-scroll .files-tail .details-paths[open]'), beside: details.left > file.right, gap: Math.round(details.left - file.right), edge: Math.round(pane.right - details.right) }; })()`);
   check('at 1728 the details sit beside the file, open, with the file spanning to them', filesWide.open && filesWide.beside && filesWide.gap <= 40 && filesWide.edge <= 40, JSON.stringify(filesWide));
   await fullSize(a);
+  const listOrder = () => a.run(`[...document.querySelectorAll('.list-group, .list-row')].map(each => each.id.replace(/^list-/, '') || each.textContent)`), listBefore = await listOrder();
   await a.click('#detail-switch-standup');
-  same('its switch here applies at once, as the table’s does', [await a.run(`document.querySelector('#detail-switch-standup').getAttribute('aria-checked')`), existsSync(standupPath('claude'))], ['false', false]);
+  same('its switch here applies at once, as the table’s does, and its row in the list stays where it was, under the same heading', [await a.run(`document.querySelector('#detail-switch-standup').getAttribute('aria-checked')`), existsSync(standupPath('claude')), await listOrder()], ['false', false, listBefore]);
   await fitsAtMinimum(a, 'the Files view');
   await a.shot('practice-skills');
   await a.press('Escape');
@@ -1154,11 +1184,13 @@ async function practiceFlow() {
   check('a found server has Add where a switch would be, and no button that waits for a later click', await a.exists('#add-docs') && !(await a.exists('#switch-docs')) && !(await a.exists('#apply, #manage-all')));
   const tomlBefore = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
   await a.click('#add-docs');
-  // files is added from the keyboard (focus on its Add, as Tab leaves it): its row moves under On at once, and each heading counts its rows.
+  // files is added from the keyboard (focus on its Add, as Tab leaves it): the focus goes to its switch, in Add's place. Each row
+  // stays where it was, under Found, its switch On, and the heading counts what is still found, with no note over rows now On.
   await a.run(`document.querySelector('#add-files').focus()`);
   await a.press('Shift');
   await a.click('#add-files');
-  same('after a click each row is under the heading true for it, from the keyboard too, and the headings count their rows', [await sectionsNow(a), await a.text('.ov-section[data-section="on"] .ov-section-count')], [[['on', ['docs', 'files']]], '2']);
+  same('after a click each row stays where it was, its switch On, from the keyboard too, the focus on files’ switch; Found counts none and says nothing of them',
+    [await sectionsNow(a), await switchOn(a, 'docs'), await switchOn(a, 'files'), await a.run(`document.activeElement?.id`), await headingSays(a, 'found')], [[['found', ['docs', 'files']]], true, true, 'switch-files', 'Found0']);
   check('taking files in says it is on in every tool, Claude Code too, as a plain note, not a warning', /^files is in Central Knot now, and on in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '')
     && !(await a.exists('.band-done .tone-warning')), [await a.text('.bands'), await a.text('.toolbar')]);
   const copilotMcp = JSON.parse(readFileSync(join(practice, '.copilot/mcp-config.json'), 'utf8')).mcpServers;
@@ -1169,14 +1201,16 @@ async function practiceFlow() {
   same('the same click put files in Claude Code, its other settings kept, its mark current, and no band asks for a step of its own', [claudeAfter.mcpServers.files?.command, claudeAfter.theme, claudeAfter.numStartups, await cellState(a, 'files', 'claude-cli'), /Write to Claude|Quit Claude/.test(await a.text('.bands') ?? '')],
     ['npx', 'dark', 3, 'current', false]);
   await a.shot('practice-mcp');
+  await a.click('#header-refresh');
+  same('Refresh puts each row under the heading true for it: both On', [await sectionsNow(a), await a.text('.ov-section[data-section="on"] .ov-section-count')], [[['on', ['docs', 'files']]], '2']);
   // Off: out of every tool, Claude Code's too, and Central Knot keeps it. Undo puts each entry back as it was.
   const mcpFiles = ['.claude.json', '.copilot/mcp-config.json', '.codex/config.toml'].map(file => join(practice, file));
   const mcpBefore = mcpFiles.map(readNow);
-  // Turned off with the pointer over the list, its row open: it moves under Off at once.
+  // Turned off with the pointer over the list, its row open: it stays where it was, under On, drawn Off.
   await a.click('#open-files');
   await pointerOver('#switch-files');
   await a.click('#switch-files');
-  same('after a click with the pointer over the list too, each row is under the heading true for it', [await sectionsNow(a), await a.text('.ov-section[data-section="on"] .ov-section-count'), await a.text('.ov-section[data-section="off"] .ov-section-count')], [[['on', ['docs']], ['off', ['files']]], '1', '1']);
+  same('after a click with the pointer over the list too, the row stays under On, its switch Off, and On counts docs alone', [await sectionsNow(a), await switchOn(a, 'files'), await a.text('.ov-section[data-section="on"] .ov-section-count')], [[['on', ['docs', 'files']]], false, '1']);
   await pointerOver('.toolbar');
   await a.click('#open-files');
   same('Off takes files out of every tool at once, Claude Code’s too', [!!JSON.parse(readNow(mcpFiles[1])).mcpServers.files, readNow(mcpFiles[2]).includes('[mcp_servers.files]'), !!JSON.parse(readNow(mcpFiles[0])).mcpServers.files],
@@ -1222,11 +1256,11 @@ async function practiceFlow() {
     [await a.text('#add-code-reviewer'), /^Found\s*2/.test((await a.text('[data-section="found"]') ?? '').trim()), /not in Central Knot/.test(await agentRow('code-reviewer') ?? ''),
       /Add one to keep it in Central Knot and turn it on\./.test(await a.text('[data-section="found"]') ?? '')], ['Add', true, true, true]);
   await a.click('#add-code-reviewer');
-  // release-notes is added from the keyboard: the rows are shared with Skills and MCP servers, so it is under On at once too.
+  // release-notes is added from the keyboard: the rows are shared with Skills and MCP servers, so it stays where it was too.
   await a.run(`document.querySelector('#add-release-notes').focus()`);
   await a.press('Shift');
   await a.click('#add-release-notes');
-  same('after a click each agent is under the heading true for it, from the keyboard too', await sectionsNow(a), [['on', ['code-reviewer', 'release-notes']]]);
+  same('after a click each agent stays where it was, under Found, from the keyboard too', await sectionsNow(a), [['found', ['code-reviewer', 'release-notes']]]);
   const reviewerFiles = ['.claude/agents/code-reviewer.md', '.copilot/agents/code-reviewer.agent.md', '.codex/agents/code-reviewer.toml'].map(file => join(practice, file));
   const [claudeAgent, , codexAgent] = reviewerFiles;
   const reviewerNow = () => reviewerFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : null));
@@ -1234,14 +1268,14 @@ async function practiceFlow() {
   check('code-reviewer reached Copilot with name, description and prompt, without Claude Code’s own fields', taken[1].includes('description: Reviews a change') && taken[1].includes('You are a careful code reviewer.') && !taken[1].includes('tools:') && !taken[1].includes('model:'), taken[1]);
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', taken[2].includes('developer_instructions = """'));
-  same('taken in, they are On, and the result says where', [await switchOn(a, 'code-reviewer'), /release-notes is in Central Knot now, and on in all 3 tools/.test(await a.text('main') ?? '')], [true, true]);
+  same('taken in, they are On, and the result says where', [await switchOn(a, 'code-reviewer'), /release-notes is in Central Knot now, and on in all 3 tools/.test(await a.text('#header') ?? '')], [true, true]);
   // Off takes the agent out of every harness. Central Knot keeps it: its row stays, off, with its description; On (here the
   // result's Undo) writes every harness's file back byte for byte, Claude Code's own fields included.
   await a.click('#switch-code-reviewer');
-  same('Off takes the agent out of every harness; its row moves under Off, in Central Knot only, with its description',
+  same('Off takes the agent out of every harness; its row stays where it was, in Central Knot only, with its description',
     [reviewerNow(), await switchState('code-reviewer'), /in Central Knot only/.test(await agentRow('code-reviewer') ?? ''), /Reviews a change/.test(await agentRow('code-reviewer') ?? ''), await sectionsNow(a)],
-    [[null, null, null], 'false', true, true, [['on', ['release-notes']], ['off', ['code-reviewer']]]]);
-  check('the result says Central Knot keeps it', /code-reviewer is off: no tool has it\. Central Knot keeps it/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
+    [[null, null, null], 'false', true, true, [['found', ['code-reviewer', 'release-notes']]]]);
+  check('the result says Central Knot keeps it', /code-reviewer is off: no tool has it\. Central Knot keeps it/.test(await a.text('#header') ?? ''), (await a.text('#header') ?? '').slice(0, 300));
   await a.click('#outcome-undo');
   same('Undo turns it on again: every harness’s file is back byte for byte', reviewerNow(), taken);
   await agentCopiesUnderTheList(a, practice);
@@ -1279,7 +1313,7 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'); tries++) await wait(100);
   same('Make current writes the earlier version to every harness, each file as it was', reviewerNow(), taken);
   same('it is the current version, first, naming the one it went back to, into which that one is folded (one row per content)', [(await versionsShown()).length, /^back to: found in Claude Code, .*Current$/.test((await versionsShown())[0])], [2, true]);
-  check('the result names the version and offers Undo', /code-reviewer: the version found in Claude Code, .* is current again, in all 3 tools/.test(await a.text('main') ?? '') && await a.exists('#outcome-undo'), (await a.text('main') ?? '').slice(0, 300));
+  check('the result names the version and offers Undo', /code-reviewer: the version found in Claude Code, .* is current again, in all 3 tools/.test(await a.text('#header') ?? '') && await a.exists('#outcome-undo'), (await a.text('#header') ?? '').slice(0, 300));
   // A harness's own switch keeps the agent out of that harness alone; its Undo puts the same file back.
   await a.click('#enable-code-reviewer-codex-cli');
   same('Codex’s own switch takes Codex’s copy out, leaves the others, and marks Codex as kept out, on the closed row too',
@@ -1363,12 +1397,12 @@ async function practiceFlow() {
   await a.click(`${outsideRow} .switch`);
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
   check('one click turns the whole plugin off in Claude Code, and the result names what went with it', outsideOff() && !(await switchOn(a, outside)) && !(await a.exists('#outcome-whole'))
-    && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off there, with its 1 other skill and 1 MCP server\./.test(await a.text('.bands') ?? ''), [await a.text('.bands'), readNow(join(practice, '.claude/settings.json'))]);
+    && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off there, with its 1 other skill and 1 MCP server\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
   const other = 'outside-tools@ck-outside/outside-other';
   same('and the plugin’s other skill’s row says it is off in Claude Code too', [await cellState(a, other, 'claude-cli'), await switchOn(a, other)], ['plugin-off', false]);
   await a.click('#outcome-undo-plugin');
-  for (let tries = 0; tries < 60 && (outsideOff() || !/Undone: outside-skill/.test(await a.text('.bands') ?? '')); tries++) await wait(100);
-  check('its one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside) && /Undone: outside-skill is back on in Claude Code\./.test(await a.text('.bands') ?? ''), [await a.text('.bands'), readNow(join(practice, '.claude/settings.json'))]);
+  for (let tries = 0; tries < 60 && (outsideOff() || !/Undone: outside-skill/.test(await a.text('#header') ?? '')); tries++) await wait(100);
+  check('its one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside) && /Undone: outside-skill is back on in Claude Code\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
   writeFileSync(outsideStub, outsideStubBefore);
   if (outsideSettings) writeFileSync(join(practice, '.claude/settings.json'), outsideSettings); else rmSync(join(practice, '.claude/settings.json'), { force: true });
   await a.click(`[id="open-${outside}"]`);
@@ -1686,10 +1720,10 @@ async function practiceFlow() {
   await a.click('#enable-triage-claude-cli');
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
   check('the opened row’s switch applies at once, and its result leads with the skill', wholeOff() && await cellState(a, 'triage', 'claude-cli') === 'plugin-off'
-    && /triage is off in Claude Code\. Its whole plugin issue-tracker was turned off there, with its MCP server issues\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
+    && /triage is off in Claude Code\. Its whole plugin issue-tracker was turned off there, with its MCP server issues\./.test(await a.text('#header') ?? ''), [pluginSettingsNow(), await a.text('#header')]);
   await a.click('#outcome-undo-plugin');
-  for (let tries = 0; tries < 60 && (wholeOff() || !/Undone: triage/.test(await a.text('.bands') ?? '')); tries++) await wait(100);
-  check('its Undo turns the plugin back on there', !wholeOff() && /Undone: triage is back on in Claude Code\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
+  for (let tries = 0; tries < 60 && (wholeOff() || !/Undone: triage/.test(await a.text('#header') ?? '')); tries++) await wait(100);
+  check('its Undo turns the plugin back on there', !wholeOff() && /Undone: triage is back on in Claude Code\./.test(await a.text('#header') ?? ''), [pluginSettingsNow(), await a.text('#header')]);
   writeFileSync(claudeStub, stubBefore);
   // Codex has the plugin too, and a switch for one skill of it: the row's switch takes Pi's copy out, turns Codex's skill off
   // and the whole plugin off in Claude Code (a stand-in for its command) in one click, and its one Undo puts all three back.
@@ -1717,8 +1751,8 @@ async function practiceFlow() {
   // The same Off from a page read before triage was turned off elsewhere is refused as a whole: the plugin's skill in Codex
   // is never switched beside the refusal. On again after, as it was.
   await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'triage', on: false, except: [], seenOn: true }], false, view.home); document.querySelector('.ov-row[data-key="triage"] .switch').click(); })()`);
-  for (let tries = 0; tries < 60 && !/changed since the page was read/.test(await a.text('.bands') ?? ''); tries++) await wait(100);
-  check('an Off from a stale page is refused, and the plugin’s skill in Codex stays on', !codexItemOff() && /triage changed since the page was read/.test(await a.text('.bands') ?? ''), [await a.text('.bands'), readNow(codexToml)]);
+  for (let tries = 0; tries < 60 && !/changed since the page was read/.test(await a.text('#header') ?? ''); tries++) await wait(100);
+  check('an Off from a stale page is refused, and the plugin’s skill in Codex stays on', !codexItemOff() && /triage changed since the page was read/.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(codexToml)]);
   await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'triage', on: true, except: [], seenOn: false }], false, view.home); })()`);
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && !(await switchOn(a, 'triage')); tries++) await wait(100);
@@ -1732,10 +1766,18 @@ async function practiceFlow() {
   same('so does its MCP server, on MCP servers, and its mark is no button', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /has it with the plugin issue-tracker/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? ''), document.querySelector('#cell-issues-claude-cli')?.tagName]`), ['plugin', true, 'SPAN']);
   if (!(await a.exists('#enable-issues-claude-cli'))) await a.click('#open-issues');
   same('the opened row has its switch in Claude Code, on', [await a.run(`document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-checked')`), /Click to turn it off in Claude Code\.$/.test(await a.run(`document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-label')`) ?? '')], ['true', true]);
+  // That switch while Claude Code's settings can't be written: the sentence says what happened, and the reason is a problem line.
+  for (const [path, mode] of [[pluginSettings, 0o444], [dirname(pluginSettings), 0o555]]) if (existsSync(path)) chmodSync(path, mode);
+  await a.click('#enable-issues-claude-cli');
+  for (let tries = 0; tries < 40 && !(await a.exists('#header [data-outcome]')); tries++) await wait(100);
+  const failedSwitch = [await a.text('#header [data-outcome] .band-text'), await a.text('#header .problem-text')];
+  for (const [path, mode] of [[pluginSettings, 0o644], [dirname(pluginSettings), 0o755]]) if (existsSync(path)) chmodSync(path, mode);
+  same('a plugin item’s switch that fails: its sentence names no reason; the reason is its problem line', [!!failedSwitch[1], !!failedSwitch[1] && (failedSwitch[0] ?? '').includes(failedSwitch[1].split(': ').at(-1))], [true, false]);
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`); await a.settle();
   await a.click('#enable-issues-claude-cli');
   for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin-off'; tries++) await wait(100);
   check('a click turns that one server off at once with Claude Code’s own switch, and the page says so, with Undo', JSON.stringify(JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers) === '[{"serverName":"plugin:issue-tracker:issues"}]'
-    && await cellState(a, 'issues', 'claude-cli') === 'plugin-off' && /issues is off in Claude Code\./.test(await a.text('.bands') ?? '') && await a.exists('#outcome-undo-plugin'), [pluginSettingsNow(), await a.text('.bands')]);
+    && await cellState(a, 'issues', 'claude-cli') === 'plugin-off' && /issues is off in Claude Code\./.test(await a.text('#header') ?? '') && await a.exists('#outcome-undo-plugin'), [pluginSettingsNow(), await a.text('#header')]);
   await a.click('#nav-skills');
   same('the plugin’s skill is still on there', await cellState(a, 'triage', 'claude-cli'), 'plugin');
   await a.click('#nav-mcp');
@@ -1785,7 +1827,7 @@ async function practiceFlow() {
   same('an installed plugin’s skills each get a switch in the tool that has it, on', await a.all('.plugin-skills .switch[id^="pskill-"]', 'e.id + "=" + e.getAttribute("aria-checked")'), ['pskill-0-document-tools-pdf-reader-codex-cli=true', 'pskill-0-document-tools-spreadsheet-codex-cli=true']);
   await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
   check('a click turns it off at once, with Codex’s own switch, by name', readFileSync(codexConfig, 'utf8') === `${configBefore}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`, readFileSync(codexConfig, 'utf8'));
-  check('and the page shows it off', await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`) === 'false' && /Installed (· [^·]+ )?· 1 skill off/.test(await a.text('.plugin-panel')) && /pdf-reader turned off in Codex/.test(await a.text('.toolbar') ?? ''), await a.text('.plugin-page'));
+  check('and the page shows it off', await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`) === 'false' && /Installed (· [^·]+ )?· 1 skill off/.test(await a.text('.plugin-panel')) && /pdf-reader turned off in Codex/.test(await a.text('#header') ?? ''), await a.text('.plugin-page'));
   // The Skills page shows the same switch in Codex's box for the plugin's skill.
   const pdfRow = 'document-tools@ck-test-market/pdf-reader';
   await a.click('#nav-skills');
@@ -3076,16 +3118,20 @@ async function openCodeFlow() {
   await p.click('#add-oc-only');
   check('adding OpenCode’s own skill copies it to the other tools', readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only') && readNow(join(practice, '.copilot/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
   // Turned Off, it leaves the other tools; OpenCode keeps the copy it was found with (left alone as its own while the skill is
-  // off). Its tag and the Off heading say OpenCode has it, as OpenCode's mark does. Undo turns it back on.
+  // off). Its tag says OpenCode has it, as OpenCode's mark does, and so does the Off heading once the list is read again (its
+  // row stays where it was until then). Undo turns it back on.
   await p.click('#switch-oc-only');
-  same('Off, OpenCode keeps the copy it was found with, and the result, the tag and the Off heading say so, as its mark does',
+  same('Off, OpenCode keeps the copy it was found with, and the result and the tag say so, as its mark does',
     [existsSync(join(practice, '.claude/skills/oc-only')), existsSync(join(mine, 'skills/oc-only/SKILL.md')), await cellState(p, 'oc-only', 'opencode-cli'),
-      /^oc-only is off, but OpenCode has a copy Central Knot didn’t put there\./.test(await p.text('.band-done') ?? ''),
-      await p.text('.ov-row[data-key="oc-only"] .row-tag'), (await p.text('.ov-section[data-section="off"] .ov-section-after'))?.replace(/^·\s*/, '')],
-    [false, true, 'own-copy', true, 'in Central Knot and OpenCode', 'in Central Knot; 1 also in OpenCode, a copy Central Knot didn’t put there']);
+      /^oc-only is off, but OpenCode has a copy Central Knot didn’t put there\./.test(await p.text('.band-done') ?? ''), await p.text('.ov-row[data-key="oc-only"] .row-tag')],
+    [false, true, 'own-copy', true, 'in Central Knot and OpenCode']);
   await pictures(p, 'opencode-off-own-copy');
   await p.click('#outcome-undo');
   check('Undo turns it back on', await switchOn(p, 'oc-only') && readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
+  await p.click('#switch-oc-only'); await p.click('#header-refresh');
+  same('read again while Off, it is under Off, whose heading says OpenCode has a copy of its own', [(await sectionsNow(p)).at(-1)?.[1].includes('oc-only'), (await p.text('.ov-section[data-section="off"] .ov-section-after'))?.replace(/^·\s*/, '')],
+    [true, 'in Central Knot; 1 also in OpenCode, a copy Central Knot didn’t put there']);
+  await p.click('#switch-oc-only');
   // Taken in, notes goes to every tool but OpenCode, which reads Claude Code's copy: OpenCode's line says so, with no switch
   // of Central Knot's (nothing of it goes there), and its settings are untouched.
   await p.click('#add-notes');
@@ -3177,7 +3223,7 @@ async function suggestedFlow() {
   // Said no to on the empty page: it goes at once, with a note and Undo, and Undo offers it again.
   await a.click('#suggested-no-anthropics-claude-plugins-official');
   same('declined on the empty page, it leaves at once', await offered(a), []);
-  check('with a note and Undo', /claude-plugins-official won’t be suggested again\./.test(await a.text('.plugins-page') ?? '') && await a.exists('#outcome-suggest-again'), await a.text('.plugins-page'));
+  check('with a note and Undo', /claude-plugins-official won’t be suggested again\./.test(await a.text('#header') ?? '') && await a.exists('#outcome-suggest-again'), await a.text('.plugins-page'));
   await a.click('#outcome-suggest-again');
   const again = `${await a.text('.plugins-page') ?? ''} ${await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''}`;
   same('Undo offers it again, and says so', [await offered(a), /claude-plugins-official is suggested again\./.test(again), await a.exists('#outcome-suggest-again')], [['claude-plugins-official · For Claude Code'], true, false]);
@@ -3200,7 +3246,7 @@ async function suggestedFlow() {
   await a.click('#suggested-no-github-copilot-plugins');
   for (let tries = 0; tries < 50 && (await offered(a)).length !== 1; tries++) await wait(100);
   same('a declined suggestion leaves the page', await offered(a), ['claude-plugins-official · For Claude Code']);
-  check('with a note that it won’t be suggested again, and Undo', /copilot-plugins won’t be suggested again\./.test(await a.text('.plugins-page') ?? '') && await a.exists('#outcome-suggest-again'), await a.text('.plugins-page'));
+  check('with a note that it won’t be suggested again, and Undo', /copilot-plugins won’t be suggested again\./.test(await a.text('#header') ?? '') && await a.exists('#outcome-suggest-again'), await a.text('.plugins-page'));
   await a.click('#outcome-suggest-again');
   for (let tries = 0; tries < 50 && (await offered(a)).length !== 2; tries++) await wait(100);
   same('Undo offers it again', (await offered(a)).length, 2);
@@ -3717,7 +3763,7 @@ async function sharedCopiesFlow() {
   await a.click(`${row} .add-item`);
   for (let tries = 0; tries < 40 && !(await switchOn(a, name)); tries++) await wait(100);
   same('turning it on takes it in, gives Claude Code a copy, and leaves the link and the shared copy alone', onDisk(), [`link:${link}`, true, false, true]);
-  check('the result says where it is on, and which tools have it another way', /opus-sol-loop is in Central Knot now, and on in Claude Code; Copilot CLI and Pi have it another way\./.test(await a.text('.bands') ?? ''), await a.text('.bands'));
+  check('the result says where it is on, and which tools have it another way', /opus-sol-loop is in Central Knot now, and on in Claude Code; Copilot CLI and Pi have it another way\./.test(await a.text('#header') ?? ''), await a.text('#header'));
   same('Copilot CLI and Pi are marked as having it another way', [await cellState(a, name, 'copilot-cli'), await cellState(a, name, 'pi-cli')], ['another-way', 'another-way']);
   await opened();
   check('each of their lines says nothing of Central Knot’s goes there while it does', /Nothing of Central Knot’s goes there while it does\./.test(await rowLineOf('Pi')) && /Nothing of Central Knot’s goes there while it does\./.test(await rowLineOf('Copilot CLI')), [await rowLineOf('Pi'), await rowLineOf('Copilot CLI')]);
@@ -4279,7 +4325,7 @@ esac
   await pictures('plugin-switch-off-result');
   await a.click('#plugins-undo');
   await done();
-  same('Undo installs it again where it was, and the record is On, kept out of Pi', [installed(), calls().at(-1), entry()?.on, entry()?.except, await switchIs('#pswitch-0-issue-tracker')], [true, 'plugin install issue-tracker@ck-test-market --scope user', true, ['pi-cli'], 'true partial']);
+  same('Undo installs it again where it was, and the record is On, kept out of Pi; the focus is on its switch as Undo goes', [installed(), calls().at(-1), entry()?.on, entry()?.except, await switchIs('#pswitch-0-issue-tracker'), await a.run(`document.activeElement?.id`)], [true, 'plugin install issue-tracker@ck-test-market --scope user', true, ['pi-cli'], 'true partial', 'pswitch-0-issue-tracker']);
   // Taken out of Claude Code with its own command: nothing puts it back by itself; its box is empty, and a tick does.
   writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), '{"version":2,"plugins":{}}');
   const before = calls().length;
@@ -4333,12 +4379,16 @@ esac
   // Two plugins clicked in a row without waiting: release-helper's Add, then starter-skills (Claude Code's stand-in takes 3 s over
   // it). The second waits its turn while the first runs, the first is read back as soon as it ends, and Skills stays usable.
   await a.click('#plugin-back');
+  // Add, then its Undo: the plugin is found again, and the focus goes to its Add, the control its row has now.
+  await a.click('#padd-0-release-helper'); await done();
+  await a.click('#plugins-undo'); await done();
+  same('the Undo of an Add leaves the focus on the row’s Add again', [await a.exists('#padd-0-release-helper'), await a.run(`document.activeElement?.id`)], [true, 'padd-0-release-helper']);
   writeFileSync(join(home, 'slow'), '');
   await a.run(`document.querySelector('#padd-0-release-helper').click(); document.querySelector('#pswitch-0-starter-skills').click()`);
   const rowSays = name => a.run(`document.querySelector('[data-plugin="${name}"] .plugin-click')?.dataset.click ?? 'nothing'`);
-  same('the second click waits its turn while the first runs, and another plugin’s switch stays usable', [await rowSays('release-helper'), await rowSays('starter-skills'), await a.exists('#pswitch-0-issue-tracker:not([disabled])')], ['running', 'waiting', true]);
+  same('the second click waits its turn while the first runs, and another plugin’s switch stays usable', [await rowSays('release-helper'), await rowSays('starter-skills'), await a.exists('#pswitch-0-issue-tracker:not([disabled]):not([aria-disabled])')], ['running', 'waiting', true]);
   for (let tries = 0; tries < 50 && await rowSays('starter-skills') !== 'running'; tries++) await wait(100);
-  same('the first is read back as soon as it ends: its row says so, and its switch is On and free while the second runs', [await rowSays('release-helper'), await switchIs('#pswitch-0-release-helper:not([disabled])'), await rowSays('starter-skills')], ['ended', 'true', 'running']);
+  same('the first is read back as soon as it ends: its row says so, and its switch is On and free while the second runs', [await rowSays('release-helper'), await switchIs('#pswitch-0-release-helper:not([disabled]):not([aria-disabled])'), await rowSays('starter-skills')], ['ended', 'true', 'running']);
   check('a control the list turns off says why', await a.run(`document.querySelector('#open-add-marketplace')?.title`) === 'Waits until the plugin clicks are done.', await a.run(`document.querySelector('#open-add-marketplace')?.outerHTML`));
   await a.run(`document.querySelector('#nav-skills').click()`);
   check('an item page’s switch can be used meanwhile', await a.run(`!!document.querySelector('#switch-triage[aria-checked="true"]:not([disabled])')`), await a.text('.page'));
@@ -4352,6 +4402,285 @@ esac
   same('each row shows its switch On, its marks, and its own result', [await switchIs('#pswitch-0-release-helper'), await switchIs('#pswitch-0-starter-skills'), await marks('release-helper'), await marks('starter-skills'), await rowSays('release-helper'), await rowSays('starter-skills')],
     ['true', 'true', ['installed', 'items'], ['installed', 'items'], 'ended', 'ended']);
   same('no page errors, a plugin’s switch', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
+ * A click never moves a row (itemrow.ts Pinned), on lists long enough to scroll: MCP servers, then Plugins. A switch clicked in
+ * the middle leaves the scroll and the next row's place on screen as they were, and a redraw after he scrolls on leaves his
+ * scroll alone; five rows clicked one after another, each where it was before the first click, are the five that change; the
+ * next visit, a plugin's page and back, and Refresh put every row in its place in the order again.
+ */
+async function rowsKeepTheirPlacesFlow() {
+  const home = join(scratch, 'home-rows'), data = join(scratch, 'rows-data'), market = join(scratch, 'market-rows'), tools = join(scratch, 'tools-rows');
+  const numbered = prefix => Array.from({ length: 40 }, (_, at) => `${prefix}-${String(at + 1).padStart(2, '0')}`);
+  const servers = numbered('srv'), plugins = numbered('plug'), found = ['fnd-a', 'fnd-b', 'fnd-c', 'fnd-d'], claudeJson = join(home, '.claude.json');
+  // Claude Code holds 40 servers and 4 more found there; a folder marketplace lists 40 plugins (plug-08 with no description and nothing in it),
+  // and Claude Code's stand-in installs them on files alone, but for plug-07, -13, -14 and -16, whose installs fail with a long reason.
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  const addServers = (...names) => { const now = existsSync(claudeJson) ? JSON.parse(readFileSync(claudeJson, 'utf8')) : {}; writeFileSync(claudeJson, JSON.stringify({ ...now, mcpServers: { ...now.mcpServers, ...Object.fromEntries(names.map(name => [name, { command: name, args: [] }])) } })); };
+  addServers(...servers, ...found);
+  // Six agents in Claude Code: a list too short to scroll.
+  const agents = ['ag-1', 'ag-2', 'ag-3', 'ag-4', 'ag-5', 'ag-6'];
+  for (const agent of agents) { mkdirSync(join(home, '.claude/agents'), { recursive: true }); writeFileSync(join(home, '.claude/agents', `${agent}.md`), `---\nname: ${agent}\ndescription: The ${agent} agent.\n---\n\nPrompt.\n`); }
+  for (const plugin of plugins) if (plugin === 'plug-08') mkdirSync(join(market, 'plugins', plugin), { recursive: true }); else skill(join(market, 'plugins', plugin, 'skills'), `${plugin}-skill`);
+  mkdirSync(join(market, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'rows-market', owner: { name: 'Rows' }, plugins: plugins.map(name => ({ name, source: `./plugins/${name}`, version: '1.0.0', ...(name === 'plug-08' ? {} : { description: `The ${name} plugin.` }) })) }));
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/claude'), `#!${process.execPath}
+const fs = require('fs'), dir = process.env.HOME + '/.claude/plugins', record = dir + '/installed_plugins.json', [, verb, id] = process.argv.slice(2);
+if (process.argv[2] === '--version') { console.log('2.1.322 (Claude Code)'); process.exit(0); }
+if (fs.existsSync(process.env.HOME + '/slow')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+fs.mkdirSync(dir, { recursive: true });
+const now = fs.existsSync(record) ? JSON.parse(fs.readFileSync(record, 'utf8')) : { version: 2, plugins: {} };
+if (verb === 'marketplace') fs.writeFileSync(dir + '/known_marketplaces.json', JSON.stringify({ 'rows-market': { source: { source: 'git', url: process.argv[5] } } }));
+else if (/^plug-(07|13|14|16)@/.test(id ?? '') || fs.existsSync(process.env.HOME + '/fail-' + (id ?? '').split('@')[0])) { console.error('Error: failed to install plugin ' + id + ': the marketplace entry points at a folder whose plugin manifest could not be parsed (unexpected token at line 3, column 14); fix the manifest and try again.'); process.exit(1); }
+else if (verb === 'install') now.plugins[id] = [{ scope: 'user', installPath: ${JSON.stringify(market)} + '/plugins/' + id.split('@')[0], version: '1.0.0' }];
+else if (verb === 'uninstall') delete now.plugins[id];
+else process.exit(9);
+fs.writeFileSync(record, JSON.stringify(now));
+`, { mode: 0o755 });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  const a = await launch(data, [], tools);
+  await sizeTo(a, 1280, 800);
+  // Every server taken in, the last two Off; every third plugin On: through the page's own calls.
+  const apply = changes => a.run(`window.centralKnot.applyServers(${JSON.stringify(changes)}, false, ${JSON.stringify(home)}).then(() => true)`);
+  await apply(servers.map(key => ({ key, on: true, except: [] })));
+  await apply(['srv-39', 'srv-40'].map(key => ({ key, on: false, except: [] })));
+  await a.run(`window.centralKnot.applyAgents(${JSON.stringify(agents.map(key => ({ key, on: true, except: [] })))}, false, ${JSON.stringify(home)}).then(() => true)`);
+  same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  const installedFirst = plugins.filter((_, at) => at % 3 === 2);
+  for (const plugin of installedFirst) await a.run(`window.centralKnot.turnPlugin(${JSON.stringify(market)}, ${JSON.stringify(plugin)}, 'on', undefined, ${JSON.stringify(home)}).then(() => true)`);
+  await a.click('#header-refresh');
+
+  /** A list's scroll and its top on screen (a band above it moves it), and each row's place on screen (px from the window's top), by key. */
+  const placesNow = (list, attr) => a.run(`(() => { const list = document.getElementById(${JSON.stringify(list)}); return { scroll: Math.round(list.scrollTop), top: Math.round(list.getBoundingClientRect().top), at: Object.fromEntries([...list.querySelectorAll('[${attr}]')].map(row => [row.getAttribute('${attr}'), Math.round(row.getBoundingClientRect().top)])) }; })()`);
+  const putAt = (list, selector, y) => a.run(`(() => { const list = document.getElementById(${JSON.stringify(list)}); list.scrollTop += document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().top - list.getBoundingClientRect().top - ${y}; return true; })()`);
+  const middleOf = selector => a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)]; })()`);
+  /** A pointer's click at a point on screen: the control there takes the focus, as under a real hand. */
+  const clickAt = async ([x, y]) => { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); };
+  const states = rows => a.run(`Object.fromEntries([...document.querySelectorAll(${JSON.stringify(rows)})].map(row => [row.dataset.key ?? row.dataset.plugin, row.querySelector('.switch')?.getAttribute('aria-checked') ?? null]))`);
+  const changed = (before, after) => Object.keys(after).filter(key => before[key] !== after[key]);
+  const focused = () => a.run(`document.activeElement?.id`);
+  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+
+  // A list too short to scroll, on a fresh visit: five rows clicked one after another, each as soon as the last is done, each
+  // where it was before the first click, are the five that change, and no row moves.
+  await a.click('#nav-agents');
+  const sixBefore = await placesNow('table-agents', 'data-key'), sixStates = await states('.ov-row[data-key]'), sixPoints = [];
+  for (const agent of agents.slice(0, 5)) sixPoints.push(await middleOf(`#switch-${agent}`));
+  for (const point of sixPoints) { await clickAt(point); for (let tries = 0; tries < 50 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(20); }
+  await a.settle();
+  const sixAfter = await placesNow('table-agents', 'data-key');
+  await a.shot('rows-agents-short');
+  same('on a list of six, five clicks on a fresh visit change exactly the five rows aimed at, and no row moves', [changed(sixStates, await states('.ov-row[data-key]')), agents.map(agent => sixAfter.at[agent])], [agents.slice(0, 5), agents.map(agent => sixBefore.at[agent])]);
+  // The last agent deleted from Central Knot: the page is empty, and the result is said once, in the header.
+  for (const agent of agents) for (const id of [`#open-${agent}`, `#delete-${agent}`, `#delete-confirm-${agent}`]) await a.click(id);
+  same('the last agent deleted: the page is empty, and its result is said once, in the header', [await a.exists('.ov-row[data-key]'), await a.run(`document.querySelectorAll('[data-outcome]').length`), await a.exists('#header [data-outcome]')], [false, 1, true]);
+  await a.click('#nav-mcp');
+  const table = 'table-mcp', row = key => `.ov-row[data-key="${key}"]`;
+  // The two Off servers turned On, at the bottom of the list: they stay under Off, which counts none and says nothing of them.
+  // Refresh, with the list at its top and that result's band above it, puts them under On.
+  await putAt(table, row('srv-40'), 500);
+  const offHeading = () => a.run(`Math.round(document.querySelector('.ov-section[data-section="off"]').getBoundingClientRect().height)`), offTall = await offHeading();
+  for (const key of ['srv-39', 'srv-40']) { await clickAt(await middleOf(`#switch-${key}`)); await a.settle(); }
+  await a.shot('rows-mcp-heading-no-note');
+  same('MCP servers: rows turned On stay under Off, which says 0 and has no note, its room kept', [(await sectionsNow(a)).at(-1), await switchOn(a, 'srv-40'), await headingSays(a, 'off'), await offHeading()], [['off', ['srv-39', 'srv-40']], true, 'Off0', offTall]);
+  await a.run(`document.getElementById('${table}').scrollTop = 0`);
+  await a.click('#header-refresh');
+  same('Refresh puts them under On', await sectionsNow(a), [['on', servers], ['found', found]]);
+  // Five rows at the top of the list, the page's first clicks, each clicked where it was before the first: the result is in the
+  // header, which keeps its height, so no row moves and the list's scroll stays; while each later click runs, the result before stays.
+  const atTop = ['srv-03', 'srv-04', 'srv-05', 'srv-06', 'srv-07'], topPoints = [], topBefore = await placesNow(table, 'data-key'), topStates = await states('.ov-row[data-key]');
+  for (const key of atTop) topPoints.push(await middleOf(`#switch-${key}`));
+  const atClick = [], resultIn = () => a.run(`document.querySelector('#header [data-outcome]') ? 'header' + (document.querySelector('#outcome-undo')?.disabled ? ', Undo off' : '') : document.querySelector('[data-outcome]') ? 'elsewhere' : 'none'`);
+  for (const point of topPoints) { await clickAt(point); atClick.push(await resultIn()); await a.settle(); }
+  await a.shot('rows-mcp-top');
+  const topAfter = await placesNow(table, 'data-key');
+  same('at the top of the list, five rows clicked one after another are the five that change, no row moves, the scroll stays, and the result is in the header, kept while the next click runs',
+    [changed(topStates, await states('.ov-row[data-key]')), ['srv-03', 'srv-08'].map(key => topAfter.at[key]), topAfter.scroll, atClick, await resultIn()],
+    [atTop, ['srv-03', 'srv-08'].map(key => topBefore.at[key]), topBefore.scroll, ['none', 'header, Undo off', 'header, Undo off', 'header, Undo off', 'header, Undo off'], 'header']);
+  await a.click('#nav-overview'); await a.click('#nav-mcp');
+  // A switch in the middle of the list, the page's first click: its result comes in the header, and the list and its rows stay.
+  await putAt(table, row('srv-20'), 300);
+  const before = await placesNow(table, 'data-key');
+  await a.shot('rows-mcp-before');
+  await clickAt(await middleOf('#switch-srv-20')); await a.settle();
+  const after = await placesNow(table, 'data-key');
+  await a.shot('rows-mcp-after');
+  same('a switch clicked in the middle moves nothing: the list, its scroll and the next row’s place on screen are as they were, the row drawn Off under On, the focus on its switch, the result in the header',
+    [after.top, after.scroll, after.at['srv-21'], after.at['srv-20'], await switchOn(a, 'srv-20'), (await sectionsNow(a))[0][1].includes('srv-20'), await focused(), await resultIn()],
+    [before.top, before.scroll, before.at['srv-21'], before.at['srv-20'], false, true, 'switch-srv-20', 'header']);
+  // He scrolls on, past it; a background refresh (a server added to Claude Code's file) draws the page again: his scroll stays,
+  // the focus goes back on srv-20's switch without scrolling to it, and the new server goes where the order puts it.
+  await a.run(`document.getElementById('${table}').scrollTop += 600`);
+  const scrolled = (await placesNow(table, 'data-key')).scroll;
+  addServers('new-server');
+  for (let tries = 0; tries < 80 && !(await a.exists(row('new-server'))); tries++) await wait(100);
+  same('a background refresh after he scrolls on leaves his scroll alone, the focus on that switch, and the new server under Found', [(await placesNow(table, 'data-key')).scroll, await focused(), (await sectionsNow(a)).find(([role]) => role === 'found')?.[1]], [scrolled, 'switch-srv-20', [...found, 'new-server']]);
+  // Five rows, one after another, each clicked where it was on screen before the first click.
+  await putAt(table, row('srv-22'), 200);
+  const five = ['srv-22', 'srv-23', 'srv-24', 'srv-25', 'srv-26'], points = [];
+  for (const key of five) points.push(await middleOf(`#switch-${key}`));
+  const statesBefore = await states('.ov-row[data-key]');
+  for (const point of points) { await clickAt(point); await a.settle(); }
+  await a.shot('rows-mcp-five');
+  same('five rows clicked one after another, each where it was before the first click, are the five that change', changed(statesBefore, await states('.ov-row[data-key]')), five);
+  // Sorted by Last updated, Add on a found server in the middle of Found: Add gives it a time, and it keeps its place all the same.
+  // In the smallest window, where the Found heading's note takes two lines: hidden over a row now On, it keeps its room.
+  const sortBy = async value => { await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })()`); await a.settle(); };
+  await sortBy('updated');
+  await sizeTo(a, ...SMALLEST);
+  await putAt(table, row('fnd-b'), 150);
+  const foundBefore = await placesNow(table, 'data-key');
+  await clickAt(await middleOf('#add-fnd-b')); await a.settle();
+  const foundAfter = await placesNow(table, 'data-key');
+  same('sorted by Last updated, a found server taken in by its Add keeps its place among its neighbours', [await switchOn(a, 'fnd-b'), [...found, 'new-server'].map(key => foundAfter.at[key])],
+    [true, [...found, 'new-server'].map(key => foundBefore.at[key])]);
+  // So does a server with a time of its own, turned Off.
+  await putAt(table, row('srv-10'), 150);
+  const timedBefore = await placesNow(table, 'data-key');
+  await clickAt(await middleOf('#switch-srv-10')); await a.settle();
+  const timedAfter = await placesNow(table, 'data-key');
+  same('…and so does a server with a time, turned Off', [await switchOn(a, 'srv-10'), ['srv-10', 'srv-11'].map(key => timedAfter.at[key])], [false, ['srv-10', 'srv-11'].map(key => timedBefore.at[key])]);
+  await sizeTo(a, 1280, 800);
+  await sortBy('name');
+  // The next visit, then Refresh, put every row under its own heading.
+  const offNow = [...atTop, 'srv-10', 'srv-20', ...five];
+  await a.click('#nav-overview'); await a.click('#nav-mcp');
+  same('the next visit puts each row under its own heading', await sectionsNow(a), [['on', ['fnd-b', ...servers.filter(key => !offNow.includes(key))]], ['found', ['fnd-a', 'fnd-c', 'fnd-d', 'new-server']], ['off', offNow]]);
+  await clickAt(await middleOf('#switch-srv-02')); await a.settle();
+  const pinnedThere = (await sectionsNow(a))[0][1].includes('srv-02') && !(await switchOn(a, 'srv-02'));
+  await a.click('#header-refresh');
+  same('a row turned Off stays under On until Refresh, which puts it under Off', [pinnedThere, (await sectionsNow(a)).at(-1)], [true, ['off', ['srv-02', ...offNow].sort()]]);
+
+  // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it.
+  await sizeTo(a, ...SMALLEST);
+  await a.run(`document.getElementById('${table}').scrollTop = 0`);
+  const firstOn = (await sectionsNow(a))[0][1][0], reaches = selector => a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(), at = document.elementFromPoint(box.left + box.width / 2, box.top + 2); return !!at?.closest(${JSON.stringify(selector)}); })()`);
+  await clickAt(await middleOf(`#switch-${firstOn}`)); await a.settle();
+  same('an ordinary result fits in the header: the top edges of Find and Sort take their own clicks', [await reaches('.find input'), await reaches('#item-order')], [true, true]);
+  // Claude Code's file held by its lock: the result says what happened and where, and the reason once, under it.
+  const lock = `${claudeJson}.lock`, header = () => a.text('#header .header-result'), sentence = () => a.text('#header [data-outcome] .band-text'), reasonsIn = async () => ((await header()) ?? '').split('locked').length - 1;
+  /** A click on a control of this round's, which may not be there (the check after it then fails). */
+  const press = async selector => { await a.run(`document.querySelector(${JSON.stringify(selector)})?.click()`); await done(); };
+  mkdirSync(lock); const holdLock = setInterval(() => { const now = new Date(); utimesSync(lock, now, now); }, 1000);
+  try {
+  const firstRowTop = () => a.run(`Math.round(document.querySelector('#${table} .ov-row[data-key]').getBoundingClientRect().top)`), resultBottom = () => a.run(`Math.round(document.querySelector('#header .header-result').getBoundingClientRect().bottom)`);
+  await a.click('#outcome-undo'); await done();
+  same('an Undo Claude Code can’t take: the reason once, and the result ends above the first row', [await reasonsIn(), (await resultBottom()) < (await firstRowTop())], [1, true]);
+  await putAt(table, row('srv-02'), 200);
+  await clickAt(await middleOf('#switch-srv-02')); await done();
+  const lineCut = () => a.run(`[...document.querySelectorAll('#header .problem-text')].some(text => text.scrollWidth > text.clientWidth)`);
+  const expanded = () => a.run(`document.querySelector('#problems-show-all')?.getAttribute('aria-expanded')`);
+  same('a click no tool took: the sentence says so, with no reason; the reason once, cut to its line, with Show all', [await sentence(), await reasonsIn(), await lineCut(), await a.text('#problems-show-all'), await expanded()], ['srv-02 is not on in any tool yet.', 1, true, 'Show all', 'false']);
+  await press('#problems-show-all');
+  same('Show all: the reason whole, then Show less', [await lineCut(), await a.text('#problems-show-all'), await expanded()], [false, 'Show less', 'true']);
+  await press('#outcome-dismiss');
+  } finally { clearInterval(holdLock); rmSync(lock, { recursive: true }); }
+  await sizeTo(a, 1280, 800);
+
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-plug-20')); tries++) await wait(100);
+  const list = 'plugins-scroll', order = () => a.all('[data-plugin]', 'e.dataset.plugin');
+  // A first click, so the toolbar's result is there before the measured one, as it is when he works down a list.
+  await putAt(list, '[data-plugin="plug-01"]', 300);
+  await clickAt(await middleOf('#pswitch-0-plug-01')); await done();
+  await putAt(list, '[data-plugin="plug-20"]', 300);
+  const listed = await order(), next = listed[listed.indexOf('plug-20') + 1], pluginsBefore = await placesNow(list, 'data-plugin');
+  await a.shot('rows-plugins-before');
+  await clickAt(await middleOf('#pswitch-0-plug-20')); await done();
+  const pluginsAfter = await placesNow(list, 'data-plugin');
+  await a.shot('rows-plugins-after');
+  same('Plugins: a switch clicked in the middle moves nothing: the list, its scroll, the order and the next row’s place are as they were, its switch, On, keeps the focus, and the result is in the header',
+    [pluginsAfter.top, pluginsAfter.scroll, await order(), pluginsAfter.at[next], await a.run(`document.querySelector('#pswitch-0-plug-20').getAttribute('aria-checked')`), await focused(), await a.exists('#header #plugins-result')],
+    [pluginsBefore.top, pluginsBefore.scroll, listed, pluginsBefore.at[next], 'true', 'pswitch-0-plug-20', true]);
+  await a.run(`document.getElementById('${list}').scrollTop += 600`);
+  const pluginsScrolled = (await placesNow(list, 'data-plugin')).scroll;
+  await a.run(`document.getElementById('${list}').dataset.drawnBefore = 'yes'`);
+  addServers('another-server');
+  for (let tries = 0; tries < 80 && await a.run(`document.getElementById('${list}')?.dataset.drawnBefore === 'yes'`); tries++) await wait(100);
+  same('a redraw after he scrolls on leaves his scroll alone, the focus on that switch', [(await placesNow(list, 'data-plugin')).scroll, await focused()], [pluginsScrolled, 'pswitch-0-plug-20']);
+  // While its click waits and runs (Claude Code's stand-in takes a second from here on), its switch is off yet keeps the focus.
+  await putAt(list, '[data-plugin="plug-22"]', 300);
+  writeFileSync(join(home, 'slow'), '');
+  await clickAt(await middleOf('#pswitch-0-plug-22'));
+  await wait(300);
+  same('while its click runs, a plugin’s switch is off and keeps the focus', [await a.run(`document.querySelector('#pswitch-0-plug-22').getAttribute('aria-disabled')`), await focused()], ['true', 'pswitch-0-plug-22']);
+  await done();
+  // Five plugins clicked quickly, one after another, each where it was before the first click: they wait their turn in one
+  // list, each row saying how its click stands in place of its line, so no row grows and none below moves. In the table's
+  // narrow form (here) and its wide one (1728), where a row's line sits beside its name.
+  const fiveQuickly = async from => {
+    await putAt(list, `[data-plugin="${from}"]`, 200);
+    const five = listed.slice(listed.indexOf(from), listed.indexOf(from) + 5), points = [], before = await states('[data-plugin]');
+    for (const name of five) points.push(await middleOf(`#pswitch-0-${name}`));
+    for (const point of points) { await clickAt(point); await wait(150); }
+    await done();
+    return [changed(before, await states('[data-plugin]')), five];
+  };
+  const fivePlugins = await fiveQuickly('plug-23');
+  await a.shot('rows-plugins-five');
+  same('five plugins clicked quickly one after another, each where it was before the first click, are the five that change', ...fivePlugins);
+  await sizeTo(a, 1728, 1117);
+  const fiveWide = await fiveQuickly('plug-31');
+  same('…and so in the wide table', ...fiveWide);
+  // A list of four clicks, one failing (a plugin of its own at each size) and one on a plugin with no description (plug-08), at
+  // each of the four sizes: every row is as tall while its click waits and runs, and after it ends or fails, as before it.
+  const heights = () => a.run(`Object.fromEntries([...document.querySelectorAll('[data-plugin]')].map(row => [row.dataset.plugin, Math.round(row.getBoundingClientRect().height)]))`);
+  const tall = [];
+  const failing = { 860: 'plug-07', 1280: 'plug-13', 1728: 'plug-14', 2560: 'plug-16' }, clicked = width => [failing[width], 'plug-08', 'plug-10', 'plug-11'];
+  for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await sizeTo(a, width, height);
+    await putAt(list, '[data-plugin="plug-07"]', 80);
+    const heightsBefore = await heights();
+    for (const name of clicked(width)) { await clickAt(await middleOf(`#pswitch-0-${name}`)); await wait(150); }
+    const whileWaiting = await heights();
+    for (let tries = 0; tries < 40 && !(await a.exists('[data-plugin="plug-08"] .plugin-click[data-click="ended"]')); tries++) await wait(100);
+    await a.shot(`rows-plugins-states-${width}`);
+    const whileRunning = await heights();
+    await done();
+    const noted = await a.all('[data-plugin] .plugin-click', 'e.closest("[data-plugin]").dataset.plugin + " " + e.dataset.click');
+    tall.push([width, noted, ...[whileWaiting, whileRunning, await heights()].map(now => Object.keys(now).filter(name => now[name] !== heightsBefore[name]))]);
+  }
+  same('through a list of clicks with one failure, every row keeps its height, at the four sizes', tall, [SMALLEST, [1280], [1728], [2560]].map(([width]) => [width, clicked(width).sort().map(name => `${name} ended`), [], [], []]));
+  await sizeTo(a, 1280, 800);
+  // The list at its top: a click starts a new list, so the last list's failure goes from the header; the rows stay where they are.
+  await a.run(`document.getElementById('${list}').scrollTop = 0`);
+  const atItsTop = await placesNow(list, 'data-plugin'), bandBefore = await a.exists('.plugin-problems');
+  await clickAt(await middleOf('#pswitch-0-plug-06')); await done();
+  const stillAtTop = await placesNow(list, 'data-plugin');
+  same('at the top of the list, a failure that goes from the header moves no row', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])], [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
+  // Three failing plugins (plug-04, -05, -08) and one that installs (plug-10), in one list (each takes a second): one ×, two
+  // reasons and Show all 3; shown, each reason whole; × closes it all.
+  const failNow = ['plug-04', 'plug-05', 'plug-08'];
+  for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
+  await putAt(list, '[data-plugin="plug-04"]', 20);
+  const fourPoints = []; for (const name of ['plug-04', 'plug-05', 'plug-08', 'plug-10']) fourPoints.push(await middleOf(`#pswitch-0-${name}`));
+  for (const point of fourPoints) { await clickAt(point); await wait(150); }
+  for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
+  await done();
+  for (const name of failNow) rmSync(join(home, `fail-${name}`));
+  const plugReasons = () => a.run(`[...document.querySelectorAll('#header .problem-text')].map(text => text.scrollWidth > text.clientWidth ? 'cut' : 'whole')`);
+  same('three failing plugins: one ×, two reasons and Show all 3', [await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')], [1, 2, 'Show all 3']);
+  await press('#problems-show-all');
+  same('shown, each reason whole', await plugReasons(), ['whole', 'whole', 'whole']);
+  await press('#header .band-dismiss');
+  same('× closes it all', await a.exists('#header .header-result'), false);
+  rmSync(join(home, 'slow'));
+  // A plugin's page and back, then Refresh: the list in its order again, installed first.
+  const inOrder = on => [...plugins.filter(name => on.includes(name)), ...plugins.filter(name => !on.includes(name))];
+  const installedNow = [...installedFirst.filter(name => name !== 'plug-06'), 'plug-01', 'plug-10', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
+  await a.click('#popen-0-plug-20'); await a.click('#plugin-back');
+  same('back from a plugin’s page, every plugin is in its place in the order', await order(), inOrder(installedNow));
+  await putAt(list, '[data-plugin="plug-02"]', 300);
+  await clickAt(await middleOf('#pswitch-0-plug-02')); await done();
+  const pinnedInList = [(await order()).indexOf('plug-02') === inOrder(installedNow).indexOf('plug-02'), await a.run(`document.querySelector('#pswitch-0-plug-02').getAttribute('aria-checked')`)];
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && (await order()).length !== plugins.length; tries++) await wait(100);
+  same('a plugin turned On stays where it was until Refresh, which puts it with the installed ones', [pinnedInList, await order()], [[true, 'true'], inOrder([...installedNow, 'plug-02'])]);
+  same('no page errors, rows keep their places', a.pageErrors, []);
   await a.quit();
 }
 
@@ -4596,6 +4925,26 @@ async function usageFlow() {
   await a.click('#outcome-undo');
   for (let tries = 0; tries < 50 && Object.values(filesOf(['standup', 'spare'])).some(text => text === ''); tries++) await wait(100);
   same('its one Undo puts both back On, every file byte for byte', [filesOf(['standup', 'spare']), (await sectionsNow(a))[0][1]], [before, ['notes', 'idle', 'standup', 'fresh', 'spare']]);
+  // With the chip on, rows turned Off by their own switch stay listed where they were, and the chip stays on, until the list is
+  // drawn afresh; then All again for what follows.
+  const chipNamed = name => a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.dataset.tip === ${JSON.stringify(name)})?.click()`);
+  await chipNamed('No use seen in 30 days'); await a.settle();
+  await a.click('#switch-standup');
+  const chipOn = () => a.run(`document.querySelector('.chip-on')?.dataset.tip`);
+  const afterOne = [await sectionsNow(a), await chipOn()];
+  await a.click('#switch-spare');
+  await a.shot('usage-chip-pinned');
+  same('with the chip on, rows turned Off by their own switch stay listed where they were, and the chip stays on', [afterOne, [await sectionsNow(a), await chipOn()], [await switchOn(a, 'standup'), await switchOn(a, 'spare')]],
+    [[[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [false, false]]);
+  for (const key of ['standup', 'spare']) await a.click(`#switch-${key}`);
+  // Turn these off, with standup already pinned on the chip's list: every row takes its own group, and the chip falls back to All.
+  await a.click('#switch-standup');
+  await a.click('#turn-unused-off');
+  // With nothing left for a chip to narrow, All is alone and no chip is drawn.
+  same('Turn these off lets the pinned rows go: every row under its own heading, and the page back on All', [await sectionsNow(a), (await chipOn()) ?? 'All'], [[['on', ['notes', 'idle', 'fresh']], ['off', ['standup', 'spare']]], 'All']);
+  await a.click('#outcome-undo');
+  await a.click('#switch-standup');
+  same('its Undo puts spare back; standup is turned on again by its switch', [await switchOn(a, 'standup'), await switchOn(a, 'spare'), await chipOn()], [true, true, 'All']);
   // A reading that fails shows nothing from the one before (a dev run only: it reaches main to make the request fail).
   const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
   if (main) {
@@ -4628,16 +4977,16 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // ---------- Run ----------
 // Every flow, in groups. A run with no --flows starts this script once per group, so each group has a throwaway home, data
 // folders, stand-ins and debug ports of its own, and several run at once (runGroups). Four groups, as the Mac runner was
-// measured with four apps at once, balanced by each flow's seconds there with four at once (about 260 s a group):
-// practiceFlow alone takes about 220. realHomeFlow is in its group, as both open the default data folder (launch) and
+// measured with four apps at once, balanced by each flow's seconds there with four at once (about 300 s a group):
+// practiceFlow alone takes about 230. realHomeFlow is in its group, as both open the default data folder (launch) and
 // realHomeFlow's preview-only branch reads the History window practiceFlow set there. crashFlow comes last in its group, as it
 // deletes its copy's HOME. Inside a copy the flows run in this order on the HOME seeded for it (seedHome), so each group
 // passes on its own.
 const groups = [
-  [practiceFlow, realHomeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, sourcesFlow],
-  [fewToolsFlow, openCodeFlow, suggestedFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
-  [harnessFlow, manageFlow, otherBuildFlow, usageFlow, firstSetupFlow, crashFlow],
+  [practiceFlow, suggestedFlow, realHomeFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, repoBaseFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
+  [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);

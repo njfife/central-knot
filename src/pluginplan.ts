@@ -260,7 +260,6 @@ export const notUndone = (ops: PluginOp[], done: PluginDone[]): PluginOp[] => op
 
 /** The Plugins page's last run (a click, a plugin's switch or an Undo): each tool's report, whether it was an Undo, in which home, and for an Undo the reversals that didn't succeed. */
 export interface LastRun { done: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[]; /** Read again since (Refresh): what the tools have now may differ from what this run says it did. */ reread?: boolean;
-  /** Its problem lines were read and closed; what it did (and its Undo) stays. */ problemsClosed?: boolean;
   /**
    * Set when a plugin's switch made the run (marketplaces.ts turn): the plugin's entry before it (null: none), its Undo as main
    * gave it (`back`), and what that Undo can't put back (pluginstatus.ts undoLimits).

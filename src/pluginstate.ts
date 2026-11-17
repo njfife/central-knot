@@ -2,7 +2,7 @@
 // here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 // Clicks go by one of two routes, split by whether the plugin's record changes: the switch and each tool's box go through
 // turnPlugin (main records first, marketplaces.ts turn); Update, Update all, a skill's switch and their Undo go through
-// applyPluginOps. Both set market.lastRun, which the toolbar says with one Undo.
+// applyPluginOps. Both set market.lastRun, which the window's header says with one Undo (pluginspage.ts pluginsResult).
 // Which clicks wait their turn and which lock, in one place:
 // - A switch or a tool's box joins the page's list (market.clicks), and one runner sends the list to main one click at a
 //   time, in the order clicked (runClicks); each row says its own click's state (pluginparts.ts clickNote). That plugin's
@@ -12,7 +12,8 @@
 //   which also says why), so a click on one lands on a disabled control and is dropped, never run twice. A switch is off under
 //   busy too.
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
-import { afterActing, announce, busy, readHomeOnce, rerender, showActing, state as app, tell } from './app.ts';
+import { afterActing, announce, busy, focusWhenDone, pinnedRows, readHomeOnce, rerender, showActing, state as app, tell } from './app.ts';
+import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
 import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDone, type PluginOp, type ResultLine } from './pluginplan.ts';
@@ -49,7 +50,7 @@ export const market = {
   /** Why a marketplace could not be added, or why a run stopped. */
   problem: undefined as string | undefined,
   activity: undefined as MarketActivity | undefined,
-  /** The last run (a click or its Undo), so the toolbar can say what happened and offer the way back, in that home only. */
+  /** The last run (a click or its Undo), so the header can say what happened and offer the way back, in that home only. */
   lastRun: undefined as LastRun | undefined,
   /** The plugin and tools a command is running for, so their marks show it is working. */
   working: undefined as { source: string; plugin: string; tools: HarnessId[] } | undefined,
@@ -103,15 +104,19 @@ const REMOTE_READ_AHEAD = 8;
 
 /**
  * The plugins the marketplace on screen lists under the current find text and category: those every tool that can take
- * them has first, then those some tool has, then those no tool has, by name within each (pluginstatus.ts pluginPlace).
+ * them has first, then those some tool has, then those no tool has, by name within each (pluginstatus.ts pluginPlace); a
+ * plugin whose switch was clicked on this list keeps the place it had (itemrow.ts Pinned).
  */
 export function shownPlugins(entry: MarketplaceView) {
   const view = market.view;
   const listed = entry.plugins.filter(plugin => matches(plugin, market.nav.find) && (!market.nav.category || plugin.category === market.nav.category));
   if (!view) return listed;
-  const place = new Map(listed.map(plugin => [plugin.name, pluginPlace(view, entry, plugin.name)]));
+  const pins = pinnedPlugins(entry), place = new Map(listed.map(plugin => [plugin.name, placeIn(pins, plugin.name, pluginPlace(view, entry, plugin.name))]));
   return listed.sort((first, second) => place.get(first.name)! - place.get(second.name)!);
 }
+
+/** The plugins pinned on a marketplace's list, named by the marketplace and its category, never Find (app.ts pinnedRows). */
+export const pinnedPlugins = (entry: MarketplaceView) => pinnedRows<number>(`plugins ${entry.source} ${market.nav.category ?? ''}`);
 
 /** How many installed plugins' files the list reads at once in the background (see readShown). */
 const COMPARE_AT_ONCE = 3;
@@ -347,12 +352,12 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
   } finally {
     market.working = undefined;
     market.lastRun = { done: result.done, undo, home, ...(undo ? { rest: notUndone(ops, result.done) } : {}) };
-    // A run that stopped after some steps names the plugins it didn't reach; the toolbar says what did run.
+    // A run that stopped after some steps names the plugins it didn't reach; the header says what did run.
     const unrun = [...new Set(ops.filter(op => !result.done.some(entry => entry.source === op.source && entry.plugin === op.plugin)).map(op => op.plugin))];
     market.problem = result.stopped && result.done.length && unrun.length ? `Stopped before ${andList(unrun)}: ${result.stopped}` : result.stopped;
     await readAgain();
   }
-  // A result that offers Undo is said in the toolbar, with its Undo; one that only tells (an Undo done) in the status bar.
+  // A result that offers Undo is said in the header, with its Undo; one that only tells (an Undo done) in the status bar.
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), !market.problem && undoOps().length > 0);
 });
 
@@ -393,8 +398,11 @@ export function endListNews(): void { if (!market.clicking) market.clicks = []; 
 export function turnPlugin(entry: MarketplaceView, plugin: string, what: PluginTurn, tool?: HarnessId): void {
   if (!market.clicking) { endListNews(); market.problem = undefined; clearNotice(); }
   market.clicks.push({ source: entry.source, plugin, what, tool, said: aimWords(what, tool), state: 'waiting' });
-  // The control clicked is off until it is read back, which gives it focus again if nothing else took it (as busy does).
-  clickedLast = document.activeElement?.id;
+  // Its row is pinned where it is on the list (itemrow.ts Pinned), until another list or none is drawn, or Refresh (app.ts pinnedRows).
+  if (market.view) pin(pinnedPlugins(entry), plugin, pluginPlace(market.view, entry, plugin));
+  // The control clicked waits until it is read back; Add gives way to the switch then. The focus goes back to it at the
+  // list's end if nothing else took it.
+  clickedLast = document.activeElement?.id.replace(/^padd/, 'pswitch');
   if (!market.clicking) void runClicks(market.clicks, app.home!.home);
   rerender();
 }
@@ -431,7 +439,7 @@ async function runClicks(list: PluginClick[], home: string): Promise<void> {
   if (list.length > 1) announce([resultSentence(said, false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.', !lines.some(line => !line.ok) && undoOps().length > 0);
   showActing();
   rerender();
-  if (document.activeElement === document.body && clickedLast) document.getElementById(clickedLast)?.focus();
+  if (document.activeElement === document.body && clickedLast) document.getElementById(clickedLast)?.focus({ preventScroll: true });
   afterActing();
 }
 
@@ -485,6 +493,9 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
     market.working = undefined;
     await readAgain();
   }
+  // The focus goes to the plugin it undid, on the list or on its page, as Undo itself may go: its switch, or its Add again.
+  const at = market.view?.marketplaces.findIndex(each => each.source === last.turn.source), id = `pswitch-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`;
+  focusWhenDone(document.getElementById(id) ? id : id.replace(/^pswitch/, 'padd'));
   announce(market.problem ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.'));
 });
 
@@ -505,15 +516,8 @@ export function undoLast(): void {
   else void applyPluginOps(undoOps(), true);
 }
 
-/**
- * Closes the problem band: the stop reason and the problem lines go, and the run itself stays, so the toolbar keeps its
- * result line and Undo (for what a run that partly failed did change).
- */
-export function dismissProblems(): void {
-  market.problem = undefined;
-  // Closed, not dropped: a run that partly failed keeps its Undo for what it did change.
-  if (market.lastRun) market.lastRun = { ...market.lastRun, problemsClosed: true };
-}
+/** × on the run's result in the header: it goes, and its problem lines with it. */
+export function closeRun(): void { market.lastRun = undefined; market.problem = undefined; }
 
 /** The way back from the last run, while it is for the home on screen: its reversal (a switch's, as main gave it), or what an Undo didn't get to. */
 export function undoOps(): PluginOp[] {

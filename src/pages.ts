@@ -8,7 +8,7 @@ import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathTex
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { heldKinds } from './presence.ts';
-import { brandMark, itemsTable, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
+import { brandMark, itemsTable, outcomeBand, resultInHeader, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
 import { andList, kindNames, kindNouns, noToolsSentence, orList, toolList } from './words.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { asksWhichCopy } from './libraryrow.ts';
@@ -21,9 +21,9 @@ const reading = () => h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h(
 /** The preview-only reason without its own "Preview only:" prefix or final stop, to sit inside a sentence. */
 export const previewReason = (reason?: string) => (reason ?? 'nothing is written here').replace(/^Preview only:\s*/i, '').replace(/\s*You can look around; nothing is written\.?\s*$/, '').replace(/\.\s*$/, '');
 
-/** Bands an empty page still needs: what the last action did, and why nothing can be written here. */
+/** Bands an empty page still needs: what the last action did (in the header on a list page), and why nothing can be written here. */
 const emptyBands = () => {
-  const done = outcomeBand();
+  const done = state.home && resultInHeader() ? null : outcomeBand();
   const access = state.home?.sync.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, `Preview only: ${previewReason(access.reason)}. You can look around; nothing is written.`)) : null;
   return done || preview ? h('div.bands', {}, done, preview) : null;

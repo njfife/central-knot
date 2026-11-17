@@ -504,7 +504,7 @@ export function sentences(words: RowWords) {
     takenIn(name: string, on: readonly string[], tools: readonly string[], use?: string, another: readonly string[] = []): string {
       const chosen = use ? `, with ${toolName(use)}’s copy` : '', others = use ? ' The other copies are kept as its versions.' : '';
       const way = another.length ? `; ${andList(another.map(toolName))} ${another.length === 1 ? 'has' : 'have'} it another way` : '';
-      return `${name} is in Central Knot now${chosen}, and on in ${named(on, tools)}${way}.${others}`;
+      return `${name} is in Central Knot now${chosen}, and ${on.length ? `on in ${named(on, tools)}` : 'not on in any tool yet'}${way}.${others}`;
     },
     /** One harness's switch: kept out (`out`), or let in again. */
     inHarness(name: string, tool: string, out: boolean, failed: boolean): string {
