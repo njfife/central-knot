@@ -4392,6 +4392,18 @@ async function draftFlow() {
   const crlf = 'Run codex review before pushing.\r\nline one\r\nline two\r\nTARGET here\r\nlast line\r\n';
   writeFileSync(agentsMd, crlf);
   await a.click('#header-refresh');
+  const target = await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
+  // What is under the click's point, said if the check fails.
+  const under = await a.run(`(() => { const hit = document.elementFromPoint(${target.x}, ${target.y}), at = document.caretRangeFromPoint(${target.x}, ${target.y}); return { point: ${JSON.stringify(target)}, hit: hit && (hit.id || hit.className || hit.tagName), at: at && [at.startContainer.nodeName, at.startOffset], scroll: document.querySelector('#instructions-scroll').scrollTop }; })()`);
+  await clickText(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
+  const landed = await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionStart + 6)]; })()`);
+  check('in a file with Windows line endings a click puts the caret where it landed', landed[0] === 'ins-text-codex-cli' && landed[1] === 'TARGET', { landed, under });
+  await a.send('Input.insertText', { text: 'NEW ' });
+  await a.run(`(() => { const area = document.querySelector('#ins-text-codex-cli'); area.value += 'added line\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-codex-cli');
+  same('its review counts the line typed on and the line added, not every line', await says('[aria-label="Codex instructions"] .ins-review-title'), 'Review before saving AGENTS.md: 1 line changed, 1 line added.');
+  await a.click('#ins-save-codex-cli');
+  same('and the save keeps every other line byte for byte, the new line taking the file’s own ending', readNow(agentsMd), crlf.replace('TARGET', 'NEW TARGET') + 'added line\r\n');
   // A click past a line's end lands at that line's end, not on the next line.
   await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'line two');
   const pastEnd = await a.run(`(() => { const pre = document.querySelector('[aria-label="Codex instructions"] pre.ins-preview'), node = pre.firstChild, at = node.textContent.indexOf('line two');
@@ -4401,14 +4413,7 @@ async function draftFlow() {
   await a.settle();
   same('in that file a click past a line’s end puts the caret at that line’s end', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart - 8, area.selectionStart), area.value[area.selectionStart]]; })()`), ['ins-text-codex-cli', 'line two', '\n']);
   await a.press('Escape');
-  await clickText(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
-  same('in a file with Windows line endings a click puts the caret where it landed', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionStart + 6)]; })()`), ['ins-text-codex-cli', 'TARGET']);
-  await a.send('Input.insertText', { text: 'NEW ' });
-  await a.run(`(() => { const area = document.querySelector('#ins-text-codex-cli'); area.value += 'added line\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await a.click('#ins-review-codex-cli');
-  same('its review counts the line typed on and the line added, not every line', await says('[aria-label="Codex instructions"] .ins-review-title'), 'Review before saving AGENTS.md: 1 line changed, 1 line added.');
-  await a.click('#ins-save-codex-cli');
-  same('and the save keeps every other line byte for byte, the new line taking the file’s own ending', readNow(agentsMd), crlf.replace('TARGET', 'NEW TARGET') + 'added line\r\n');
+  for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
 
   // Selecting a card's text keeps the selection, to copy it: a drag opens no editor. A double-click's first click is a plain
   // click, which opens the editor, and its second selects the word there.
