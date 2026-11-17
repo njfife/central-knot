@@ -158,6 +158,8 @@ export interface DesktopApi {
   openSignInSettings(): Promise<void>;
   /** The settings may have changed: main saved a change (this page, a menu, a dialog), or the window came back (the system's own settings may have changed meanwhile). */
   onSettingsChanged(callback: () => void): void;
+  /** The window showed (main.ts sends it at every show): a start with no window collects usage then (app.ts collectUsage). */
+  onWindowShown(callback: () => void): void;
   /** Opens the folder of Central Knot's own log in the file manager, the log selected where the system can. */
   openLogFolder(): Promise<LogFolderOpened>;
   /** Central Knot's own log, its last `count` lines (Settings' Show log). */

@@ -5,7 +5,7 @@
 // with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time, then once for each flow in `afterTheGroups` (runGroups).
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants as fsConstants, cpSync, existsSync, openSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -1286,7 +1286,7 @@ async function practiceFlow() {
   await a.shot('practice-mcp-disabled');
   // The practice copy's tools keep no sessions, so every row would say "can't say": usage, collected as the home opened, draws no column.
   for (let tries = 0; tries < 50 && !/^Collected /.test(await a.text('#usage-when') ?? ''); tries++) await wait(100);
-  same('usage collected on a home whose tools keep no sessions: no Used column, the time beside the button', [await a.exists('.ov-used'), /^Collected /.test(await a.text('#usage-when') ?? '')], [false, true]);
+  same('usage collected on a home whose tools keep no sessions: no Used column, and beside the button the time and that there are no sessions yet', [await a.exists('.ov-used'), /^Collected .+ · no sessions yet$/.test(await a.text('#usage-when') ?? '')], [false, true]);
   // Full screen on a 1728×1117 display: the details dock beside the table, and a row's line, its tag and URL here, still shows whole.
   await sizeTo(a, 1728, 1117);
   same('docked at full screen, a row’s line is shortened only when it has no room', await a.all('.ov-row[data-key] .ov-name-about', 'e.scrollWidth <= e.clientWidth'), [true, true]);
@@ -5050,19 +5050,20 @@ async function usageFlow() {
   for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
   // Collected when the home opened, while the page took the clicks above: no click on the button, and no band.
   same('the home’s first opening collects usage by itself: the time beside Update usage statistics, a figure on each row, no band',
-    [await collected(), (await a.text('#collect-usage'))?.trim(), await a.exists('#usage-line'), (await figures()).notes], [true, 'Update usage statistics', false, 'used 2 days ago, in 14 sessions']);
+    [await collected(), (await a.text('#collect-usage'))?.trim(), await a.exists('#usage-line'), (await figures()).notes], [true, 'Update usage statistics', false, 'used 2 days ago · 14 sessions']);
   // Copilot CLI left out with its Manage switch: its sessions are still read, and a use there still counts.
   await a.click('#nav-harnesses');
   await a.click('#manage-copilot-cli');
   for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#manage-copilot-cli')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(100);
   await a.click('#nav-skills');
   await a.click('#collect-usage');
-  const bandText = async () => (await a.text('#usage-line .band-text') ?? '').replace(/ /g, ' ');
+  // The band holds its three sentences in one place, so its height never changes; the one on show is the one not marked unshown.
+  const bandText = async () => (await a.text('#usage-line .band-text > :not(.band-unshown)') ?? '');
   for (let tries = 0; tries < 100 && !/^Usage statistics collected/.test(await bandText()); tries++) await wait(100);
-  check('Update usage statistics opens the band: when it was collected and how far back each tool’s history goes, Copilot CLI too, not OpenCode’s year-old leftover',
-    /^Usage statistics collected today at [^.]+\. Each tool’s history: Claude Code, 30 days or more; Copilot CLI, from \w+ \d+; Codex, from \w+ \d+\.$/.test(await bandText()), await bandText());
+  same('Update usage statistics opens the band: what was collected, from where, and that nothing left the computer (the time is beside the button)',
+    await bandText(), 'Usage statistics collected from the tools’ own session history on this computer. Nothing left it.');
   same('each row says its figure: used, and in how many sessions (in Copilot CLI too, not managed here), or no use seen in 30 days (a listing is no use, nor a use 40 days ago)', await figures(),
-    { fresh: 'no use seen in 30 days', idle: 'used 3 days ago, in 1 session', notes: 'used 2 days ago, in 14 sessions', spare: 'no use seen in 30 days', standup: 'no use seen in 30 days' });
+    { fresh: 'no use seen in 30 days', idle: 'used 3 days ago · 1 session', notes: 'used 2 days ago · 14 sessions', spare: 'no use seen in 30 days', standup: 'no use seen in 30 days' });
   await a.click('#open-notes');
   same('a skill used in two tools: its opened row says each tool’s count, 13 and 1, which the row adds up to 14',
     await a.all('.details-usage', 'e.textContent.trim()'), ['Used in 13 sessions in the last 30 days, last used 2 days ago.', 'Used in 1 session in the last 30 days, last used 5 days ago.']);
@@ -5087,9 +5088,9 @@ async function usageFlow() {
   // spare used just now: the reading that lands moves no row (its cell fills where it is); the next Sort draws the new order.
   lines(join(home, '.claude/projects/-work/s4.jsonl'), [skillCall('spare', 0)]);
   await a.click('#collect-usage');
-  for (let tries = 0; tries < 100 && (await figures()).spare !== 'used just now, in 1 session'; tries++) await wait(100);
+  for (let tries = 0; tries < 100 && (await figures()).spare !== 'used just now · 1 session'; tries++) await wait(100);
   same('a reading that lands moves no row: spare, used just now, says so where it was; the band opened again by Update',
-    [(await sectionsNow(a))[0][1], (await figures()).spare, await a.exists('#usage-line')], [['notes', 'idle', 'standup', 'fresh', 'spare'], 'used just now, in 1 session', true]);
+    [(await sectionsNow(a))[0][1], (await figures()).spare, await a.exists('#usage-line')], [['notes', 'idle', 'standup', 'fresh', 'spare'], 'used just now · 1 session', true]);
   await chooseOrder('name'); await chooseOrder('used');
   same('the next draw that may reorder (Sort chosen again) puts it first', (await sectionsNow(a))[0][1], ['spare', 'notes', 'idle', 'standup', 'fresh']);
   rmSync(join(home, '.claude/projects/-work/s4.jsonl'));
@@ -5100,7 +5101,11 @@ async function usageFlow() {
   for (let tries = 0; tries < 50 && (await sectionsNow(a))[0]?.[1]?.[0] !== 'notes'; tries++) { await wait(100); await a.settle(); }
   same('Refresh lets the held order go', (await sectionsNow(a))[0][1], ['notes', 'idle', 'standup', 'fresh', 'spare']);
   await sizeTo(a, 860, 600);
-  same('at 860×600 every figure is whole, "used 2 days ago, in 14 sessions" too', await a.run(`[...document.querySelectorAll('.ov-used')].filter(cell => cell.scrollWidth > cell.clientWidth + 1).map(cell => cell.textContent)`), []);
+  same('at 860×600 the button keeps its word, and its icon is not the chip’s', [(await a.run(`document.querySelector('#collect-usage').innerText.trim()`)).split(' ')[0], await a.exists('#collect-usage svg')], ['Update', false]);
+  same('the longest figure, "used 13 days ago · 999 sessions", is whole in a figure’s cell', await a.run(`(() => { const cell = document.querySelector('.ov-used'), was = [...cell.childNodes];
+    cell.replaceChildren('used 13 days ago', Object.assign(document.createElement('span'), { className: 'ov-used-count', textContent: ' · 999 sessions' }));
+    const whole = cell.scrollWidth <= cell.clientWidth + 1; cell.replaceChildren(...was); return whole; })()`), true);
+  same('at 860×600 every figure is whole, "used 2 days ago · 14 sessions" too', await a.run(`[...document.querySelectorAll('.ov-used')].filter(cell => cell.scrollWidth > cell.clientWidth + 1).map(cell => cell.textContent)`), []);
   await fullSize(a);
   await fitsAtMinimum(a, 'Skills with usage collected and its figures');
   await a.shot('usage-read');
@@ -5121,8 +5126,12 @@ async function usageFlow() {
   same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['All', null], ['No use seen in 30 days', '2']]);
   await a.click('.chip[data-tip="No use seen in 30 days"]');
   same('with the chip on, the table holds standup and spare', await sectionsNow(a), [['on', ['standup', 'spare']]]);
-  same('its band says how many, that a use elsewhere isn’t seen, how far back each tool’s history goes, what Codex doesn’t always record, the new one left out, the profile it ends, and beside the button what it does',
-    (await a.text('#unused-band .band-text'))?.replace(/ /g, ' ').replace(/from \w+ \d+/g, 'from <day>'), '2 skills with no use seen in the last 30 days. A use on another computer or in a tool not read isn’t seen. Each tool’s history: Claude Code, 30 days or more; Copilot CLI, from <day>; Codex, from <day>. Codex doesn’t always record which skill was used. Left out: 1 skill under 30 days old. With these off, Everyday stops being the profile in use. Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on.');
+  same('its band leads with how many, what Turn these off does and the profile it ends; then, fainter, that a use elsewhere isn’t seen, how far back each tool’s history goes, what Codex doesn’t always record and the new one left out',
+    [await a.text('#unused-band .usage-lead'), (await a.text('#unused-band .usage-more'))?.replace(/ /g, ' ').replace(/from \w+ \d+/g, 'from <day>')],
+    ['2 skills with no use seen in the last 30 days. Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on. With these off, Everyday stops being the profile in use.',
+      'A use on another computer or in a tool not read isn’t seen. Each tool’s history: Claude Code, 30 days or more; Copilot CLI, from <day>; Codex, from <day>. Codex doesn’t always record which skill was used. Left out: 1 skill under 30 days old.']);
+  same('Turn these off sits at the band’s end, at 1280 and 2560 alike', await (async () => { const ends = []; for (const [width, height] of [[1280, 800], [2560, 1440]]) { await sizeTo(a, width, height);
+    ends.push(await a.run(`Math.round(document.querySelector('#unused-band').getBoundingClientRect().right - document.querySelector('#turn-unused-off').getBoundingClientRect().right)`)); } await fullSize(a); return ends[0] === ends[1]; })(), true);
   await fitsAtMinimum(a, 'Skills with the No use seen chip on and its band');
   await a.shot('usage-chip');
   const filesOf = names => Object.fromEntries(names.flatMap(name => [claude, codex].map(root => [join(root, name), readNow(join(root, name, 'SKILL.md'))])));
@@ -5159,9 +5168,9 @@ async function usageFlow() {
   if (main) {
     await main.failRequest('usage:read');
     await a.click('#collect-usage');
-    for (let tries = 0; tries < 50 && !/couldn’t be collected/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
+    for (let tries = 0; tries < 50 && !/couldn’t be collected/.test(await bandText()); tries++) await wait(100);
     same('a reading that fails: the band says so, the button offers to collect again, and no figure or chip from the reading before stays',
-      [await a.text('#usage-line .band-text'), (await a.text('#collect-usage'))?.trim(), await a.exists('.ov-used'), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
+      [await bandText(), (await a.text('#collect-usage'))?.trim(), await a.exists('.ov-used'), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
       ['Usage statistics couldn’t be collected: the tools’ session history couldn’t be read.', 'Collect usage statistics', false, false]);
     await main.restore('usage:read');
     main.close();
@@ -5176,7 +5185,7 @@ async function usageFlow() {
   for (let tries = 0; tries < 50 && !(await a.run(`document.querySelector('.ov-row[data-key="${kit}"] .ov-used')?.textContent`)); tries++) await wait(100);
   await a.click(`[id="open-${kit}"]`);
   same('a From plugins row says its figure, and its opened row Claude Code’s, by the same match', [await a.run(`document.querySelector('.ov-row[data-key="${kit}"] .ov-used')?.textContent`), (await a.text(`[id="usage-${kit}-claude-cli"]`))?.trim()],
-    ['used 4 days ago, in 1 session', 'Used in 1 session in the last 30 days, last used 4 days ago.']);
+    ['used 4 days ago · 1 session', 'Used in 1 session in the last 30 days, last used 4 days ago.']);
   await a.shot('usage-plugin-row');
   // Sort by Last used, kept from this launch to the next: the reading that comes by itself as the home opens moves no row.
   await chooseOrder('used');
@@ -5188,8 +5197,103 @@ async function usageFlow() {
   const firstDrawn = await sectionsNow(a);
   for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
   same('the next launch keeps Sort by Last used, and the reading that comes by itself moves no row', [await a.run(`document.querySelector('#item-order').value`), await sectionsNow(a)], ['used', firstDrawn]);
+
+  // ---------- A reading that lands moves nothing ----------
+  // This computer's home (`real`), opened now, has history in five tools and its reading starts afresh. Each reading's answer is
+  // held back 2.5 s in the page (or in main, where the page's call can't be wrapped), so the page is looked at while it runs.
+  const realSkills = join(real, '.claude/skills');
+  mkdirSync(join(real, '.local/bin'), { recursive: true });
+  for (const name of ['claude', 'codex']) cpSync(join(home, '.local/bin', name), join(real, '.local/bin', name));
+  for (const name of ['alpha', 'bravo', 'charlie', 'delta', 'echo']) { const folder = skill(realSkills, name); for (const path of [folder, join(folder, 'SKILL.md')]) utimesSync(path, ago(40), ago(40)); }
+  lines(join(real, '.claude/projects/-work/r0.jsonl'), [{ type: 'user', message: { content: 'hello' }, timestamp: ago(45).toISOString() }]);
+  lines(join(real, '.claude/projects/-work/r1.jsonl'), [skillCall('alpha', 2)]);
+  lines(join(real, '.codex/sessions/2026/11/12/rollout-r.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(5).toISOString() },
+    { type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', parsed_cmd: [{ type: 'read', name: 'SKILL.md', path: join(realSkills, 'alpha/SKILL.md') }] } }, timestamp: ago(5).toISOString() }]);
+  // A Codex session file that can't be read: alpha's Codex line says so beside its figure.
+  lines(join(real, '.codex/sessions/2026/11/12/rollout-locked.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(4).toISOString() }]);
+  chmodSync(join(real, '.codex/sessions/2026/11/12/rollout-locked.jsonl'), 0o000);
+  lines(join(real, '.copilot/session-state/r1/events.jsonl'), [{ type: 'skill.invoked', data: { name: 'echo' }, timestamp: ago(3).toISOString() }]);
+  lines(join(real, '.pi/agent/sessions/--w--/r.jsonl'), [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: '<skill name="echo">' }] }, timestamp: ago(4).toISOString() }]);
+  // A named pipe among Claude Code's session files holds each reading back: it waits on the pipe until the check lets it go
+  // (`letGo`), so the page is looked at while the reading runs, the same in a packaged app.
+  const pipe = join(real, '.claude/projects/-work/held.jsonl');
+  spawnSync('mkfifo', [pipe]);
+  let writer;
+  /** Whether a reading waits on the pipe: opening its other end finds one, and that end is kept open, so the reading keeps waiting. */
+  const reading = () => { if (writer === undefined) { try { writer = openSync(pipe, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK); } catch { return false; } } return true; };
+  /** Lets the waiting reading go on: the pipe's other end closed, it reads an empty session file. */
+  const letGo = async () => { for (let tries = 0; tries < 200 && !reading(); tries++) await wait(25); if (writer !== undefined) closeSync(writer); writer = undefined; };
+  {
+    const lead = () => a.text('#usage-when');
+    await chooseOrder('name');
+    await sizeTo(a, 1000, 760);
+    await a.click('#home-actual');
+    for (let tries = 0; tries < 100 && !(await a.exists('#open-alpha')); tries++) await wait(50);
+    for (let tries = 0; tries < 100 && !reading(); tries++) await wait(25);
+    same('while the first reading of a home runs, the Used column holds its room, its cells empty', [await lead(), await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].map(row => row.querySelector('.ov-used')?.textContent ?? 'no cell')`)],
+      ['Collecting…', ['', '', '', '', '']]);
+    await a.click('#open-alpha');
+    const collectingLines = await a.all('.details-usage', 'e.textContent.trim()'), openTops = await tops();
+    await letGo();
+    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await a.settle();
+    same('an opened row (details under it) says Collecting… on each tool’s line while the reading runs, and when the reading lands no row moves',
+      [collectingLines.length > 0 && collectingLines.every(line => line === 'Collecting usage statistics…'), await tops()], [true, openTops]);
+    same('a tool some of whose session files can’t be read says how many beside its figure', (await a.all('.details-usage', 'e.textContent.trim()')).find(line => /couldn’t be read/.test(line)),
+      'Used in 1 session in the last 30 days, last used 5 days ago; 1 session file couldn’t be read.');
+    await a.click('#open-alpha');
+    // Update's band, 900 wide, with five tools' history: the same height while it collects and once the reading lands.
+    await sizeTo(a, 900, 760);
+    const bandHeight = () => a.run(`document.querySelector('#usage-line')?.getBoundingClientRect().height ?? 0`);
+    await a.click('#collect-usage');
+    for (let tries = 0; tries < 50 && !(await a.exists('#usage-line')); tries++) await wait(50);
+    const [whileHeight, whileTops] = [await bandHeight(), await tops()];
+    await letGo();
+    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await a.settle();
+    same('the band an Update opens keeps its height when the reading lands (five tools, 900 wide), so no row moves', [await bandHeight(), await tops()], [whileHeight, whileTops]);
+    await a.click('#usage-line-close');
+    // The chip on, Sort by name: charlie, used since, stays where it was when the reading lands; Put in order lets it go.
+    await a.click('#nav-settings');
+    for (let tries = 0; tries < 30 && !(await a.exists('#sync-everything-on')); tries++) await wait(100);
+    await a.click('#sync-everything-on');
+    await a.click('#nav-skills');
+    for (let tries = 0; tries < 50 && (await sectionsNow(a))[0]?.[1]?.length !== 5; tries++) { await wait(100); await a.settle(); }
+    await chipNamed('No use seen in 30 days'); await a.settle();
+    same('the chip holds the three On skills with no use seen, and no rows are held', [(await sectionsNow(a))[0]?.[1], await a.exists('#put-in-order')], [['bravo', 'charlie', 'delta'], false]);
+    lines(join(real, '.claude/projects/-work/r2.jsonl'), [skillCall('charlie', 0)]);
+    await a.click('#collect-usage');
+    // Measured once the click's band has opened (its own height is the click's), while the reading waits on the pipe.
+    for (let tries = 0; tries < 100 && !reading(); tries++) await wait(25);
+    const chipTops = await tops();
+    await letGo();
+    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await a.settle();
+    same('Sort by name, the chip on: charlie, used just now, stays where it was when the reading lands, no row moves, the chip counts what Turn these off would turn off, and Put in order is offered',
+      [(await sectionsNow(a))[0][1], await tops(), (await figures()).charlie, await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), await a.exists('#put-in-order')],
+      [['bravo', 'charlie', 'delta'], chipTops, 'used just now · 1 session', [['All', null], ['No use seen in 30 days', '2']], true]);
+    await a.click('#put-in-order');
+    same('Put in order lets the held rows go: charlie leaves the chip’s list, and the link goes', [(await sectionsNow(a))[0][1], await a.exists('#put-in-order')], [['bravo', 'delta'], false]);
+    await a.click('#usage-line-close');
+    await chipNamed('All'); await a.settle();
+  }
   same('no page errors, usage after a relaunch', a.pageErrors, []);
   await a.quit();
+  // Started at sign-in, with no window (--hidden): nothing is collected until the window first shows (a second launch shows it).
+  a = await launch(data, ['--hidden'], real);
+  await a.click('#nav-skills');
+  await wait(2000);
+  same('started with no window, it collects nothing until the window shows', [reading(), await a.text('#usage-when')], [false, 'Collecting…']);
+  const again = spawn(command, [...(flag('--electron') ? [root] : []), `--user-data-dir=${data}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])],
+    { env: { ...process.env, HOME: real, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') }, stdio: 'ignore' });
+  await new Promise(done => again.once('exit', done));
+  for (let tries = 0; tries < 100 && !reading(); tries++) await wait(50);
+  await letGo();
+  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+  same('once the window shows, usage is collected', await collected(), true);
+  same('no page errors, usage started at sign-in', a.pageErrors, []);
+  await a.quit();
+  rmSync(pipe);
 }
 
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);

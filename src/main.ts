@@ -183,7 +183,7 @@ async function pluginUpdatesSwitched(on: boolean) {
 }
 
 /** Sends the page a message, when there is a window to send it to. */
-function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'said', ...args: unknown[]) {
+function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'said' | 'window:shown', ...args: unknown[]) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
@@ -1160,7 +1160,9 @@ function createWindow(show: boolean) {
   // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
   // are rebuilt and the page re-reads, both from this one event. A release published meanwhile shows then too (updateflow.ts).
   window.on('focus', () => { unseen = false; unseenPlugins = undefined; refreshTray(); send('settings:changed'); void updater?.checkIfStale(); });
-  loading = window.loadFile(join(__dirname, 'index.html'));
+  // A start with no window tells the page so, and when the window shows: it collects usage then (app.ts collectUsage).
+  window.on('show', () => send('window:shown'));
+  loading = window.loadFile(join(__dirname, 'index.html'), show ? {} : { query: { start: 'hidden' } });
 }
 
 // One Central Knot at a time: a second launch hands over to the first (which shows its window) and exits at once, before it opens

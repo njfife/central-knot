@@ -7,7 +7,8 @@
 // Instructions, base instructions and Profiles pages' actions.
 // A sync notice lives across reads here, until its page shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it. Not here: drawing (renderer.ts and each
 // page's module), the Plugins page's state (pluginstate.ts), the Sources and Git repo pages' (sourcespage.ts, repopage.ts), and
-// every rule a page shows (the engines' answers in the view: libraryrow.ts, historyactions.ts, profileplan.ts).
+// every rule a page shows (the engines' answers in the view: libraryrow.ts, historyactions.ts, profileplan.ts). One call goes
+// the other way, into a page module that imports this one: matrix.ts holdOrder, which holds the list on screen as a reading lands.
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
@@ -145,11 +146,13 @@ export const state = {
 };
 
 /**
- * The rows pinned on the list on screen (itemrow.ts Pinned): the list asks for them each time it is drawn, by its own name, and a
- * click on a row's own switch pins that row (itemrow.ts pin). Only a draw lets them go: one that asks for another list or for
- * none (another page, tab, view or plugin's page, another Sort or chip: drawPage); and Refresh (readAgain). Find keeps them.
- * Asked for outside a draw (a click, a read in the background), they are only read: another list's name gets none. In memory
- * only. `Group`: what the list groups its rows by (matrix.ts its headings, pluginstate.ts a plugin's place).
+ * The rows pinned on the list on screen (itemrow.ts Pinned): the list asks for them each time it is drawn, by its own name; a
+ * click on a row's own switch pins that row (itemrow.ts pin), and a usage reading as it lands pins the rows it could move
+ * (matrix.ts holdOrder). Only a draw lets them go: one that asks for another list or for none (another page, tab, view or
+ * plugin's page, another Sort or chip: drawPage); and Refresh (readAgain) and Put in order (unpin, from matrix.ts rowsHeld).
+ * Find keeps them. Asked for outside a draw (a click, a reading landing), they are the ones kept when the name is the list on
+ * screen's, else a set kept nowhere, so a pin there is lost. In memory only. `Group`: what the list groups its rows by
+ * (matrix.ts its headings, pluginstate.ts a plugin's place).
  */
 let drawing = false, asked = false;
 export const pinnedRows = <Group extends string | number>(list: string): Pinned<Group> => {
@@ -330,17 +333,23 @@ function accept(view: HomeView) {
   if (state.page !== 'sources') void loadSources();
 }
 
+/** Whether the window has shown: false only after a start at sign-in with no window (main.ts startedHidden, the page's `start`), until it first shows. */
+let windowShown = new URLSearchParams(globalThis.location?.search).get('start') !== 'hidden';
+api().onWindowShown(() => { if (windowShown) return; windowShown = true; void collectUsage(); });
+
 /**
  * Collects usage: main's usage:read reads the tools' own session history on this computer, and nothing leaves it. By itself
- * when a home opens (accept), and on Update usage statistics (`asked`), whose click opens the band (state.usageBand), as a
- * reading that fails does. Not `busy`: it changes nothing, so the page stays usable meanwhile. An answer for a home switched
- * meanwhile is dropped (accept resets the slot). A reading that lands moves no row: the list on screen is held first (matrix.ts holdOrder).
+ * when a home opens (accept; after a start with no window, once the window first shows), and on Update usage statistics
+ * (`asked`), whose click opens the band (state.usageBand), as a reading that fails does. Not `busy`: it changes nothing, so the
+ * page stays usable meanwhile. An answer for a home switched meanwhile is dropped (accept resets the slot). A reading that lands
+ * moves no row: once its answer is known to be kept, the list on screen is held where it is (matrix.ts holdOrder), then the slot takes it.
  */
 export async function collectUsage({ asked = false } = {}) {
   const home = state.home?.home;
   if (!home) return;
+  if (!asked && !windowShown) return;
   if (asked) state.usageBand = true;
-  const reading = readPageData(state.usage, () => api().readUsage(home).then(answer => { if (answer) holdOrder(); return answer; }));
+  const reading = readPageData(state.usage, () => api().readUsage(home), holdOrder);
   rerender();
   const landed = await reading;
   if (landed === 'failed') state.usageBand = true;

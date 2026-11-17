@@ -2825,9 +2825,20 @@ if (wanted('usage')) {
   await refresh();
   await a.click('#nav-skills');
   for (const key of ['notes', 'release-notes', 'standup', 'review']) { await turnOnRow(key); await switchOn(key); }
-  await shot(a, 'opened-home', 'Skills as the home opened: usage was collected by itself at launch, before this history was written, so beside Update usage statistics it says when, with no band, and no Used column, as no tool here could tell anything then');
-  // The reading held back, so the band can be seen while it collects (a development run only: it reaches main).
+  await shot(a, 'opened-home', 'Skills as the home opened: usage was collected by itself at launch, before this history was written, so beside Update usage statistics it says when and that there are no sessions yet, with no band, and no Used column');
+  // Readings held back, so the page can be seen while one runs (a development run only: it reaches main).
   const requests = await requestHandles(a);
+  if (requests) {
+    // The practice copy opened again: its first reading starts afresh, held back while an opened row is drawn.
+    await requests.slow('usage:read', 15000);
+    await a.click('#home-fixture');
+    await waitFor(a, `document.querySelector('#usage-when')?.textContent === 'Collecting…' && !!document.querySelector('#open-release-notes')`);
+    await openRow('release-notes');
+    await atEverySize('first-reading', 'The home opened again, its first reading running (held back here): the Used column holds its room with empty cells, and the opened row’s lines say Collecting…, so nothing moves when it lands', true, '.details-usage');
+    await requests.restore('usage:read');
+    await waitFor(a, `/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`, 30000);
+    await closeRow('release-notes');
+  }
   if (requests) await requests.slow('usage:read', 15000);
   await a.click('#collect-usage');
   if (requests) {
@@ -2835,22 +2846,32 @@ if (wanted('usage')) {
     await atEverySize('collecting', 'Clicked Update usage statistics (the reading held back here): the band says what collecting does, and beside the button, Collecting…', true);
     await requests.restore('usage:read');
   }
-  await waitFor(a, `/^Usage statistics collected/.test(document.querySelector('#usage-line .band-text')?.textContent ?? '')`, 30000);
-  await atEverySize('collected', 'The reading landed: the band says when, and how far back each tool’s history goes, with its close button; each row says used how long ago and in how many sessions, or no use seen since the date its tools’ history starts (release-notes)', true);
+  await waitFor(a, `/^Usage statistics collected/.test(document.querySelector('#usage-line .band-text > :not(.band-unshown)')?.textContent ?? '')`, 30000);
+  await atEverySize('collected', 'The reading landed: the band, as high as while it collected, says it was collected, with its close button (the time is beside the button); each row says used how long ago and, fainter, in how many sessions, or no use seen since the latest date its tools’ history starts (release-notes)', true);
   await a.click('#usage-line-close');
   await atEverySize('closed', 'Closed the band: it takes no room, and when it was collected stays beside the button', true);
   await openRow('release-notes');
   await atEverySize('opened', 'Opened release-notes, docked beside the table from 1728: each tool’s line says its figure, a history that starts 20 days ago, or that it keeps no sessions here', false, '.details-usage');
   await closeRow('release-notes');
   await a.click('.chip[data-tip="No use seen in 30 days"]');
-  await atEverySize('chip', 'Clicked the chip No use seen in 30 days: the rows it holds, and its short band: how many, what it left out, and beside Turn these off what it does', true);
+  await atEverySize('chip', 'Clicked the chip No use seen in 30 days: the rows it holds, and its band: how many and what Turn these off does lead, Turn these off at its end; each tool’s history and what it left out follow, fainter', true);
+  // Sort by Last used, release-notes (On, with no use until now) used just now, Update: the rows stay where they were, and Put in order is offered beside Sort.
+  await a.click('.chip[data-tip="All"]');
+  await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = 'used'; select.dispatchEvent(new Event('change')); })()`);
+  lines(join(practice, '.claude/projects/-work/s3.jsonl'), [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'release-notes' } }] }, timestamp: ago(0) }]);
+  await a.click('#collect-usage');
+  await waitFor(a, `!!document.querySelector('#put-in-order')`, 15000);
+  await a.click('#usage-line-close');
+  await atEverySize('held', 'Sort by Last used, release-notes used just now, Update: no row moved when the reading landed (release-notes says used just now where it was), and Put in order, beside Sort, is offered', true);
+  await a.click('#put-in-order');
+  await shot(a, 'put-in-order', 'Clicked Put in order: release-notes goes first under On, and the link goes');
   await a.click('#nav-agents');
   await shot(a, 'agents', 'Agents after the same reading: each agent’s figure, or a faint can’t say where no tool that has it on can tell (release-notes, only in Codex, which keeps no sessions here); no chip, as none is in it');
   if (requests) {
     await a.click('#nav-skills');
     await requests.fail('usage:read');
     await a.click('#collect-usage');
-    await waitFor(a, `/couldn’t be collected/.test(document.querySelector('#usage-line')?.textContent ?? '')`);
+    await waitFor(a, `/couldn’t be collected/.test(document.querySelector('#usage-line .band-text > :not(.band-unshown)')?.textContent ?? '')`);
     await atEverySize('failed', 'A reading that failed: the band says so, and the button offers to collect again; no figure from the reading before stays', true);
     await requests.restore('usage:read');
     requests.close();

@@ -108,7 +108,7 @@ test('Pi: a read of SKILL.md, an mcp__ call and a typed /skill: are uses; the sy
   assert.deepEqual(usedIn(await readUsage({ home }, NOW), 'pi-cli'), { 'skill:standup': [1, daysAgo(6)], 'skill:notes': [1, daysAgo(6)], 'mcp:ask_lou': [1, daysAgo(6)] });
 });
 
-test('OpenCode: its database, read from a copy: a skill part, a task part and a session\'s own agent are uses; a text part is not', async () => {
+test('OpenCode, closed: its database, read where it is: a skill part, a task part and a session\'s own agent are uses; a text part is not', async () => {
   const home = await newHome(), folder = join(home, '.local/share/opencode');
   await mkdir(folder, { recursive: true });
   const db = new DatabaseSync(join(folder, 'opencode.db'));
@@ -123,6 +123,46 @@ test('OpenCode: its database, read from a copy: a skill part, a task part and a 
   const before = await readdir(folder);
   assert.deepEqual(usedIn(await readUsage({ home }, NOW), 'opencode-cli'), { 'agent:planner': [1, daysAgo(8)], 'skill:notes': [1, daysAgo(8)], 'agent:reviewer': [1, daysAgo(8)] });
   assert.deepEqual(await readdir(folder), before, 'nothing is left beside OpenCode\'s database');
+});
+
+test('OpenCode, running: its last writes are only in its write-ahead log, so its database and log are read from a copy, and nothing is left beside them', async () => {
+  const home = await newHome(), folder = join(home, '.local/share/opencode');
+  await mkdir(folder, { recursive: true });
+  const db = new DatabaseSync(join(folder, 'opencode.db'));
+  db.exec('PRAGMA journal_mode=WAL; CREATE TABLE session (id text PRIMARY KEY, agent text, time_created integer NOT NULL); CREATE TABLE part (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, data text NOT NULL)');
+  db.prepare('INSERT INTO session VALUES (?, ?, ?)').run('s1', null, NOW - DAY);
+  db.prepare('INSERT INTO part VALUES (?, ?, ?, ?)').run('p1', 's1', NOW - DAY, JSON.stringify({ type: 'tool', tool: 'skill', state: { input: { name: 'notes' } } }));
+  try {
+    const before = await readdir(folder);
+    assert.ok(before.includes('opencode.db-wal'), 'OpenCode still has its database open');
+    assert.deepEqual(usedIn(await readUsage({ home }, NOW), 'opencode-cli'), { 'skill:notes': [1, daysAgo(1)] });
+    assert.deepEqual(await readdir(folder), before, 'nothing is left beside OpenCode\'s database');
+  } finally { db.close(); }
+});
+
+test('OpenCode\'s database is read in slices, with a turn of the event loop between each two, so a click waits for no long read', async () => {
+  const home = await newHome(), folder = join(home, '.local/share/opencode');
+  await mkdir(folder, { recursive: true });
+  const db = new DatabaseSync(join(folder, 'opencode.db'));
+  db.exec('CREATE TABLE session (id text PRIMARY KEY, agent text, time_created integer NOT NULL); CREATE TABLE part (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, data text NOT NULL); BEGIN');
+  db.prepare('INSERT INTO session VALUES (?, ?, ?)').run('s1', null, NOW - DAY);
+  const part = db.prepare('INSERT INTO part VALUES (?, ?, ?, ?)');
+  for (let each = 0; each < 25_000; each++) part.run(`p${each}`, 's1', NOW - DAY, JSON.stringify({ type: 'text', text: 'words' }));
+  part.run('use', 's1', NOW - DAY, JSON.stringify({ type: 'tool', tool: 'skill', state: { input: { name: 'notes' } } }));
+  db.exec('COMMIT');
+  db.close();
+  // Each slice's query, and how many turns of the event loop had run when it ran.
+  const statements = (await import('node:sqlite')).StatementSync.prototype as unknown as { all: (...args: unknown[]) => unknown };
+  const all = statements.all, at: number[] = [];
+  let turns = 0, going = true;
+  const tick = () => { if (going) { turns++; setImmediate(tick); } };
+  setImmediate(tick);
+  statements.all = function (this: unknown, ...args: unknown[]) { if (args.length === 2) at.push(turns); return all.apply(this, args); };
+  try {
+    assert.deepEqual(usedIn(await readUsage({ home }, NOW), 'opencode-cli'), { 'skill:notes': [1, daysAgo(1)] });
+  } finally { statements.all = all; going = false; }
+  assert.ok(at.length >= 10, `read in ${at.length} slices`);
+  assert.ok(at.every((turn, index) => index === 0 || turn > at[index - 1]), `turns at each slice: ${at.join(', ')}`);
 });
 
 // ---------- The window, the reach and what can't be read ----------
@@ -245,6 +285,12 @@ test('Can\'t say, by kind, as the readers\' table has it: no record (an agent in
     [['no-record', 0], ['no-record', 0], ['not-sure', 0], ['not-sure', 1], ['not-sure', 0], ['not-sure', 0], [undefined, 0], [undefined, 0]]);
 });
 
+test('A tool with no session says so whatever it can tell of the kind: Codex, which doesn\'t always record a skill, keeps no sessions here', () => {
+  const reading = readingOf({});
+  Object.assign(reading.tools.find(each => each.tool === 'codex-cli')!, { sessions: 0, recent: 0 });
+  assert.equal(toolSays(reading, 'skill', facts('notes', { 'codex-cli': copy('notes') }), 'codex-cli')!.cantSay, 'no-sessions');
+});
+
 test('Can\'t say, by reach: a tool with no session can\'t; one whose history starts 12 days ago can, as far back as it goes', () => {
   const reading = readingOf({}, { 'pi-cli': daysAgo(12) });
   reading.tools.find(each => each.tool === 'claude-cli')!.sessions = 0;
@@ -291,6 +337,12 @@ test('In: On, no use seen in 30 days, Claude Code (which can tell) has it on, an
   assert.equal(standing(kept('reviewer', 40), inClaude, ['claude-cli', 'copilot-cli']), 'in');
 });
 
+test('No use seen since the latest start among the tools that have it on, so the claim holds for each: Pi from 12 days ago, Copilot CLI from 20, Claude Code 30 days or more', () => {
+  const row = facts('notes', { 'pi-cli': copy('notes'), 'copilot-cli': copy('notes'), 'claude-cli': copy('notes') }), reading = readingOf({}, { 'pi-cli': daysAgo(12), 'copilot-cli': daysAgo(20) });
+  const tools: HarnessId[] = ['pi-cli', 'copilot-cli', 'claude-cli'];
+  assert.deepEqual(rowFigure(tools.map(tool => toolSays(reading, 'skill', row, tool)!), onIn(row, tools)), { noneSeen: true, since: daysAgo(12) });
+});
+
 test('A history shorter than 30 days counts as far back as it goes: Pi since 12 days ago, no use there, is in, and the row says since when', () => {
   const row = facts('notes', { 'pi-cli': copy('notes') }), reading = readingOf({}, { 'pi-cli': daysAgo(12) });
   const figure = rowFigure([toolSays(reading, 'skill', row, 'pi-cli')!], onIn(row, ['pi-cli']));
@@ -320,7 +372,7 @@ test('Turn these off leaves to its own row a plugin\'s item and one linked to a 
     leftToItsRow(facts('notes', {}, { fromSource: { link: 'https://github.com/o/r' } })), leftToItsRow(inClaude)], [true, true, false, false]);
 });
 
-// ---------- A reading in sum (usagerow.ts toolHistories, usageSummary): what the Overview and the chip's count read ----------
+// ---------- A reading in sum (usagerow.ts toolHistories, usageSummary): the chip and its band read noUseSeen, tooNew and foundNoneSeen; the rest is for the Overview, the next step ----------
 
 /** A home's view as the summary reads it: one kind's items and its tools, the others empty, the plugins installed, and which tools are managed and installed. */
 function homeOf(skills: { facts: LibraryFacts[]; library: Record<string, LibraryItem> }, managed: HarnessId[], present = managed, pluginItems: InstalledPlugin[] = []) {
@@ -342,9 +394,9 @@ test('Each tool\'s history: its sessions in the 30 days, and how far back it goe
   assert.deepEqual(toolHistories(readingOf({}), homeOf({ facts: [], library: {} }, ['claude-cli'])).map(each => each.tool), ['claude-cli']);
 });
 
-test('A reading in sum: the rows used, as the page lists them (Off, found and a plugin\'s own too), its three most used; of the On items not used, no use seen, too new for the chip, can\'t say', () => {
+test('A reading in sum: the rows used, as the page lists them (Off, found and a plugin\'s own too), its three most used; of the On items not used, no use seen, too new for the chip, can\'t say; the found ones (a deleted one too) with no use seen', () => {
   const inClaude = (key: string) => facts(key, { 'claude-cli': copy(key) }), inCopilot = (key: string) => facts(key, { 'copilot-cli': copy(key) });
-  const rows = [inClaude('used'), inClaude('idle'), inClaude('young'), inCopilot('mute'), inClaude('off'), inClaude('gone'), inClaude('found'), inClaude('daily')];
+  const rows = [inClaude('used'), inClaude('idle'), inClaude('young'), inCopilot('mute'), inClaude('off'), inClaude('gone'), inClaude('found'), inClaude('daily'), inClaude('quiet')];
   const library = { used: kept('used', 40), idle: kept('idle', 40), young: kept('young', 5), mute: kept('mute', 40), off: kept('off', 40, { on: false }), gone: kept('gone', 40, { deleted: { at: daysAgo(1) } }), daily: kept('daily', 40) };
   // A plugin's skill in Claude Code, a row of its own on the page; Claude Code calls it tracker:triage.
   const tracker: InstalledPlugin = { tool: 'claude-cli', plugin: 'tracker', marketName: 'm', listed: true, items: [{ kind: 'skill', name: 'triage', description: '' }] };
@@ -355,6 +407,6 @@ test('A reading in sum: the rows used, as the page lists them (Off, found and a 
   assert.deepEqual(sum.kinds.skills, {
     used: ['used', 'off', 'found', 'daily', 'tracker@m/triage'],
     mostUsed: [{ key: 'daily', name: 'daily', sessions: 4 }, { key: 'tracker@m/triage', name: 'triage', sessions: 3 }, { key: 'used', name: 'used', sessions: 2 }],
-    noUseSeen: ['idle'], tooNew: ['young'], cantSay: ['mute'] });
-  assert.deepEqual([sum.kinds.mcp, sum.tools.map(each => [each.tool, each.goes])], [{ used: [], mostUsed: [], noUseSeen: [], tooNew: [], cantSay: [] }, [['claude-cli', 'whole'], ['copilot-cli', 'none']]]);
+    noUseSeen: ['idle'], tooNew: ['young'], cantSay: ['mute'], foundNoneSeen: ['gone', 'quiet'] });
+  assert.deepEqual([sum.kinds.mcp, sum.tools.map(each => [each.tool, each.goes])], [{ used: [], mostUsed: [], noUseSeen: [], tooNew: [], cantSay: [], foundNoneSeen: [] }, [['claude-cli', 'whole'], ['copilot-cli', 'none']]]);
 });

@@ -17,6 +17,7 @@ import { copyFile, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
 import { harnessIds, toolConfigRoot } from './harnesses.ts';
 import type { ItemKind } from './library.ts';
 import type { HarnessId, ToolUsage, UsageReading, UsageTells, UsedName } from './types.ts';
@@ -154,34 +155,47 @@ async function jsonlSessions(roots: string[], sessionOf: (path: string) => strin
  */
 const firstPart = (path: string) => path.split(sep)[1]?.replace(/\.jsonl$/, '') ?? path;
 
+/** How many of OpenCode's parts are read at once, before the read gives way to the rest of main (a click's pass). */
+const PART_SLICE = 2_000;
+
 /**
- * OpenCode keeps its sessions in SQLite: a session's own agent (its `agent` column), and its skill and task calls. The database
- * and its write-ahead log are read from a copy in a temporary folder, since SQLite opening a database in WAL mode, even read
- * only, would leave files of its own beside OpenCode's.
+ * OpenCode keeps its sessions in SQLite: a session's own agent (its `agent` column), and its skill and task calls. With no
+ * write-ahead log beside it (OpenCode not running), the database is read where it is, as a file that won't change (SQLite's
+ * `immutable`), which leaves nothing beside it; with one, the last writes are only in the log, and SQLite opening a database in
+ * WAL mode, even read only, would leave files of its own beside OpenCode's, so both are read from a copy in a temporary
+ * folder. Its parts can be hundreds of thousands, and node:sqlite reads synchronously, so they are read a slice of rows at a
+ * time (PART_SLICE, by rowid), giving way between slices.
  */
 async function openCodeSessions(at: UsageWhere, now: number): Promise<Read | undefined> {
   const file = join(at.dataHome ?? join(at.home, '.local/share'), 'opencode', 'opencode.db');
   if (!existsSync(file)) return undefined;
   const { DatabaseSync } = await import('node:sqlite');
-  const copy = await mkdtemp(join(tmpdir(), 'ck-opencode-copy-'));
+  const copy = existsSync(`${file}-wal`) ? await mkdtemp(join(tmpdir(), 'ck-opencode-copy-')) : undefined;
   let db: InstanceType<typeof DatabaseSync> | undefined;
   try {
-    await copyFile(file, join(copy, 'opencode.db'));
-    await copyFile(`${file}-wal`, join(copy, 'opencode.db-wal')).catch(() => undefined);
-    db = new DatabaseSync(join(copy, 'opencode.db'));
+    if (copy) {
+      await copyFile(file, join(copy, 'opencode.db'));
+      await copyFile(`${file}-wal`, join(copy, 'opencode.db-wal')).catch(() => undefined);
+    }
+    db = copy ? new DatabaseSync(join(copy, 'opencode.db')) : new DatabaseSync(new URL(`${pathToFileURL(file).href}?immutable=1`), { readOnly: true });
     const fileTime = (await stat(file)).mtimeMs, when = (time: number) => (time > now ? fileTime : time);
     const sessions = new Map<string, Session>();
     for (const row of db.prepare('SELECT * FROM session').all() as JsonRecord[]) {
       sessions.set(row.id, { start: when(row.time_created), uses: use('agent', row.agent).map(found => ({ ...found, at: when(row.time_created) })) });
     }
-    for (const row of db.prepare(`SELECT session_id, time_created, data FROM part WHERE data LIKE '%"tool":"skill"%' OR data LIKE '%"tool":"task"%'`).iterate() as Iterable<JsonRecord>) {
-      let part: JsonRecord;
-      try { part = JSON.parse(row.data); } catch { continue; }
-      const found = part.tool === 'skill' ? use('skill', part.state?.input?.name) : part.tool === 'task' ? use('agent', part.state?.input?.subagent_type) : [];
-      sessions.get(row.session_id)?.uses.push(...found.map(each => ({ ...each, at: when(row.time_created) })));
+    const slice = db.prepare(`SELECT session_id, time_created, data FROM part WHERE rowid > ? AND rowid <= ? AND (data LIKE '%"tool":"skill"%' OR data LIKE '%"tool":"task"%')`);
+    const last = Number((db.prepare('SELECT max(rowid) AS last FROM part').get() as JsonRecord).last ?? 0);
+    for (let after = 0; after < last; after += PART_SLICE) {
+      for (const row of slice.all(after, after + PART_SLICE) as JsonRecord[]) {
+        let part: JsonRecord;
+        try { part = JSON.parse(row.data); } catch { continue; }
+        const found = part.tool === 'skill' ? use('skill', part.state?.input?.name) : part.tool === 'task' ? use('agent', part.state?.input?.subagent_type) : [];
+        sessions.get(row.session_id)?.uses.push(...found.map(each => ({ ...each, at: when(row.time_created) })));
+      }
+      await new Promise(resolve => setImmediate(resolve));
     }
     return { sessions: [...sessions.values()], skipped: 0 };
-  } finally { db?.close(); await rm(copy, { recursive: true, force: true }); }
+  } finally { db?.close(); if (copy) await rm(copy, { recursive: true, force: true }); }
 }
 
 /**

@@ -14,15 +14,17 @@ export const pageData = <T>(): PageData<T> => ({ state: 'reading', gen: 0 });
 /**
  * Reads into the slot: 'ready' with the data kept, 'failed' with what was there before kept (the page shows that, or
  * says nothing could be read), or 'dropped' when a newer read or put of this kind started meanwhile. A fetch that answers
- * null found nothing to read, which counts as a failure.
+ * null found nothing to read, which counts as a failure. `beforeKeep` runs just before the slot takes an answer it keeps,
+ * while it still holds the one before (app.ts collectUsage holds the list on screen there).
  */
-export async function readPageData<T>(slot: PageData<T>, fetch: () => Promise<T | null | undefined>): Promise<'ready' | 'failed' | 'dropped'> {
+export async function readPageData<T>(slot: PageData<T>, fetch: () => Promise<T | null | undefined>, beforeKeep?: (data: T) => void): Promise<'ready' | 'failed' | 'dropped'> {
   const gen = ++slot.gen;
   slot.state = 'reading';
   let value: T | null | undefined;
   try { value = await fetch(); } catch { value = undefined; }
   if (gen !== slot.gen) return 'dropped';
   if (value === null || value === undefined) { slot.state = 'failed'; return 'failed'; }
+  beforeKeep?.(value);
   slot.data = value;
   slot.state = 'ready';
   return 'ready';

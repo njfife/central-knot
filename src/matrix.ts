@@ -17,10 +17,10 @@ import { andList, fewNames, kindNouns, pageNames, sentence, toolList as toolsInW
 import { allSay, figureFor, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { acting, closeResult, isKind, problemKey, leftOutTools, collectUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { acting, closeResult, isKind, problemKey, leftOutTools, collectUsage, unpin, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { inOrder, kindSource, lastUpdated, pin, placeIn, timeIn, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
+import { inOrder, kindSource, lastUpdated, noPins, pin, placeIn, timeIn, type ItemRow, type KindSource, type Pinned, type RowOrder, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
@@ -165,13 +165,13 @@ function pluginRowEl(row: PluginRow) {
     return drawn;
   };
   return [
-    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${open ? '.open' : ''}${usedColumn() ? '.ov-usage' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(row.key) },
+    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${open ? '.open' : ''}${usedHere ? '.ov-usage' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(row.key) },
       h('div.ov-managed', { role: 'cell' }, pluginRowSwitch(row)),
       h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: row.description ? `${row.name}: ${row.description}` : row.name },
         h('span.ov-name-main', {}, h('span.ov-name-text', {}, row.name)),
         pluginTag(row.plugin, insideTitle(row)),
         row.description ? h('span.ov-name-about', { title: row.description }, row.description) : null),
-      usedColumn() ? usedCell(pluginRowFacts(row)) : null,
+      usedHere ? usedCell(pluginRowFacts(row)) : null,
       h('div.ov-marks', { role: 'cell' }, h('span.tool-marks', { role: 'img', 'aria-label': toolList().map(tool => cellWords(row, tool as HarnessId)).join('. ') }, toolList().map(mark))),
       h('div.ov-open', { role: 'cell' }, openButton(row.key, row.name))),
     open && !docked() ? pluginDetails(row) : null,
@@ -1031,6 +1031,7 @@ export function itemsTable(which: PageKind, harness?: Tool) {
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
   // Found; the others, only other tools have. A row whose own switch was clicked here stays under the heading it was under.
   const under = (role: Role) => [shown.filter(skill => placeIn(pins, skill.key, sectionOf(skill)) === role), shown.filter(skill => sectionOf(skill) === role)] as const;
+  usedHere = usedColumn();
   const sections = [section('on', ...under('on')), section('found', ...under('found')), pluginSection(plugins), focus ? section('away', ...under('away')) : null, section('off', ...under('off'))];
   const table = [
     h('div.toolbar.fit-bar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), orderChoice(), h('div.toolbar-end', {}, toolbarState(), usageControls())),
@@ -1293,7 +1294,7 @@ function markLegend(list: ItemRow[], plugins: PluginRow[]) {
 
 /** One row: its switch, its name, a mark per tool, and the chevron that opens its details. */
 function row(skill: ItemRow) {
-  const open = view.comparing === skill.key, when = dated(), used = usedColumn();
+  const open = view.comparing === skill.key, when = dated(), used = usedHere;
   return [
     h(`div.ov-row.ov-switch-row${takeFlash(skill.key) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${when ? '.ov-dated' : ''}${used ? '.ov-usage' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(skill.key) },
       h('div.ov-managed', { role: 'cell' }, itemSwitch(skill)),
@@ -1318,33 +1319,40 @@ function usageOf(facts: UsageFacts | undefined): ToolSays[] {
   return read && facts ? allSay(read, partOfPage[kind], facts) : [];
 }
 
+/** While a home's first reading runs (none on show yet): its rows' cells and an opened row's lines hold their room, empty or saying so. */
+const firstReading = () => !focus && state.usage.state === 'reading' && !state.usage.data;
+
 /**
- * At the toolbar's end of a kind's own page: when usage was collected ("Collected 8:44 AM"), or that it is being collected, and
- * the one button that collects it: Collect usage statistics until a reading is on show, Update usage statistics after. Its
- * click opens the band (usageBand), which says what collecting does.
+ * At the toolbar's end of a kind's own page: when usage was collected ("Collected 8:44 AM", "· no sessions yet" where no tool
+ * keeps any), or that it is being collected, and the one button that collects it: Collect usage statistics until a reading is
+ * on show, Update usage statistics after. Its click opens the band (usageBand). Short of room (dom.ts fitBars, style.css
+ * .usage-words), "Collected" and "usage statistics" go first, then the time; the button keeps its verb.
  */
 function usageControls() {
   if (focus) return null;
   const collecting = state.usage.state === 'reading', read = reading(), today = read && new Date(read.at).toDateString() === new Date().toDateString();
-  const when = collecting ? 'Collecting…' : read ? `Collected ${today ? clockTime(read.at) : dayWords(read.at)}` : '';
-  return [when ? h('span.apply-state', { id: 'usage-when' }, when) : null,
-    button({ variant: 'outline', size: 'micro', icon: 'history', collapse: true, label: read ? 'Update usage statistics' : 'Collect usage statistics', id: 'collect-usage',
-      disabled: collecting && 'Usage statistics are being collected.', onclick: () => void collectUsage({ asked: true }) })];
+  const when = collecting ? ['Collecting…'] : read ? [h('span.usage-words', {}, 'Collected '), today ? clockTime(read.at) : dayWords(read.at), read.tools.every(each => !each.sessions) ? ' · no sessions yet' : ''] : [];
+  const verb = read ? 'Update' : 'Collect';
+  const go = button({ variant: 'outline', size: 'micro', label: `${verb} usage statistics`, id: 'collect-usage', disabled: collecting && 'Usage statistics are being collected.', onclick: () => void collectUsage({ asked: true }) });
+  go.querySelector('.btn-label')!.replaceChildren(verb, h('span.usage-words', {}, ' usage statistics'));
+  return [when.length ? h('span.apply-state', { id: 'usage-when' }, when) : null, go];
 }
 
 /**
  * The band under the toolbar, while it is open (app.ts state.usageBand: an Update's click or a failed reading opens it, its
- * close button closes it): what collecting does while it collects; when it was collected and how far back each tool's history
- * goes; or that it couldn't be. Closed, nothing is lost: the time is beside the button, each tool's reach in the chip's band
- * (unusedBand), and each tool's figure, or why it can't say, in an opened row (usageLine).
+ * close button closes it): what collecting does while it collects, that it was collected, or that it couldn't be. Its three
+ * sentences share one place, the others kept but not shown, so the band is as high in each and no row moves when a reading
+ * lands. Closed, nothing is lost: the time is beside the button, each tool's reach in the chip's band (unusedBand), and each
+ * tool's figure, or why it can't say, in an opened row (usageLine).
  */
 function usageBand() {
   if (focus || !state.usageBand) return null;
-  const read = state.usage.data;
-  const words = state.usage.state === 'reading' ? 'Collecting usage statistics: reading the tools’ own session history on this computer. Nothing leaves it.'
-    : state.usage.state === 'failed' || !read ? 'Usage statistics couldn’t be collected: the tools’ session history couldn’t be read.'
-    : [`Usage statistics collected ${dayAndTime(read.at)}.`, reachWords(read)].filter(Boolean).join(' ');
-  return h('div.band.band-quiet.usage-line', { role: 'status', id: 'usage-line' }, icon('history', 14, 'tone-muted'), h('span.band-text', {}, words),
+  const now = state.usage.state === 'reading' ? 0 : state.usage.state === 'failed' || !state.usage.data ? 2 : 1;
+  const sentences = ['Collecting usage statistics: reading the tools’ own session history on this computer. Nothing leaves it.',
+    'Usage statistics collected from the tools’ own session history on this computer. Nothing left it.',
+    'Usage statistics couldn’t be collected: the tools’ session history couldn’t be read.'];
+  return h('div.band.band-quiet.usage-line', { role: 'status', id: 'usage-line' }, icon('history', 14, 'tone-muted'),
+    h('span.band-text.band-stack', {}, sentences.map((words, index) => h(`span${index === now ? '' : '.band-unshown'}`, {}, words))),
     closeButton(() => { state.usageBand = false; rerender(); }, { id: 'usage-line-close', label: 'Close this line about usage statistics', title: 'Close' }));
 }
 
@@ -1357,35 +1365,36 @@ function reachWords(read: UsageReading) {
 }
 
 /**
- * A row's figure (usagerow.ts figureFor): used how long ago and in how many sessions, no use seen in USAGE_DAYS days (or since
- * when every tool that has it on starts), or a faint "can't say" when none of them can tell.
+ * A row's figure (usagerow.ts figureFor): used how long ago and, fainter, in how many sessions; no use seen in USAGE_DAYS days
+ * (or since when the tools that have it on start); a faint "can't say" when none of them can tell; empty while a home's first
+ * reading runs.
  */
 const figureOf = (facts: UsageFacts | undefined) => { const read = reading(); return read && facts ? figureFor(read, partOfPage[kind], facts, toolList() as HarnessId[]) : undefined; };
 function usedCell(facts: UsageFacts | undefined) {
+  if (!reading()) return h('div.ov-used', { role: 'cell' });
   const figure = figureOf(facts);
-  const words = !figure ? 'can’t say' : 'used' in figure ? `used ${sinceThen(Date.parse(figure.used))}, in ${plural(figure.sessions, 'session')}`
+  const words = !figure ? 'can’t say' : 'used' in figure ? `used ${sinceThen(Date.parse(figure.used))}`
     : figure.since ? `no use seen since ${dayWords(figure.since)}` : `no use seen in ${USAGE_DAYS} days`;
-  const title = figure ? `${sentence(words)}. Open the row for each tool’s figure.` : 'No tool that has it on can tell whether it was used. Open the row for why.';
-  return h(`div.ov-used${figure ? '' : '.ov-used-faint'}`, { role: 'cell', title }, words);
+  const count = figure && 'used' in figure ? ` · ${plural(figure.sessions, 'session')}` : '';
+  const title = figure ? `${sentence(words + count)}. Open the row for each tool’s figure.` : 'No tool that has it on can tell whether it was used. Open the row for why.';
+  return h(`div.ov-used${figure ? '' : '.ov-used-faint'}`, { role: 'cell', title }, words, count ? h('span.ov-used-count', {}, count) : null);
 }
 
 /**
- * Whether this page draws the Used column: a reading is on show and some row here has a figure. A page where every row would
- * say "can't say" (no tool that has its items on keeps sessions here, say) shows none; each opened row still says why.
- * Worked out again only when the reading, the home's view or the kind changes.
+ * Whether this page draws the Used column: while a home's first reading runs (its room held, the cells empty), and once a reading
+ * is on show where some row here has a figure. A page where every row would say "can't say" (no tool that has its items on keeps
+ * sessions here, say) shows none; each opened row still says why. Asked once per draw of the table (itemsTable: usedHere).
  */
-let figured: { read: UsageReading; home: HomeView; kind: PageKind; any: boolean } | undefined;
 function usedColumn() {
-  const read = reading(), home = state.home;
-  if (!read || !home) return false;
-  if (figured?.read !== read || figured.home !== home || figured.kind !== kind)
-    figured = { read, home, kind, any: [...committedList().map(factsOf), ...plugged().rows.map(pluginRowFacts)].some(facts => !!figureOf(facts)) };
-  return figured.any;
+  if (firstReading()) return true;
+  return !!reading() && [...committedList().map(factsOf), ...plugged().rows.map(pluginRowFacts)].some(facts => !!figureOf(facts));
 }
+/** Whether the table being drawn has the Used column (usedColumn), set by itemsTable before its rows. */
+let usedHere = false;
 
 /** The reading in sum (usagerow.ts usageSummary), worked out again only when the reading or the home's view changes. */
 let summed: { read: UsageReading; home: HomeView; sum: UsageSummary } | undefined;
-/** This kind's items in the reading's sum: the "No use seen in 30 days" chip's lists, by the summary's rule. */
+/** This kind's items in the reading's sum: the "No use seen in 30 days" chip's lists and what its band leaves out, by the summary's rule. */
 function kindUsage(): KindUsage | undefined {
   const read = reading(), home = state.home;
   if (!read || !home) return undefined;
@@ -1397,17 +1406,17 @@ const inUnusedChip = (skill: ItemRow) => !!kindUsage()?.noUseSeen.includes(skill
 const unusedCount = () => kindUsage()?.noUseSeen.length ?? 0;
 
 /**
- * The chip's band: how many it holds, that a use elsewhere isn't seen, how far back each tool's history goes, which of this
- * page's tools never or not always record this kind, what it left out and why (new, found, a plugin's), a profile Turn these
- * off stops being in use, and Turn these off with what it does, which skips a plugin's items and items linked to a plugin.
+ * The chip's band. Its lead: how many it holds, Turn these off and what it does (it skips a plugin's items and items linked to
+ * a plugin), and a profile it stops being in use. Then, fainter: that a use elsewhere isn't seen, how far back each tool's
+ * history goes, which of this page's tools never or not always record this kind, and what it left out (new, found). Turn these
+ * off at the band's end.
  */
 function unusedBand(shown: ItemRow[]) {
   const read = reading(), home = state.home, sum = kindUsage();
   if (!read || !home || !sum) return null;
   const { one, many } = kindNouns[kind], tools = read.tools.filter(each => toolList().includes(each.tool) && each.sessions && !each.unread);
   const off = shown.filter(skill => !leftToItsRow(factsOf(skill)!)), kept = shown.length - off.length;
-  const fresh = sum.tooNew.length;
-  const found = committedList().filter(skill => { const figure = figureOf(factsOf(skill)); return standingOf(skill) === 1 && !!figure && 'noneSeen' in figure; }).length;
+  const fresh = sum.tooNew.length, found = sum.foundNoneSeen.length;
   // The page's tools that record this kind only sometimes ('seen'), or never (no entry).
   const record = (how: 'seen' | undefined, word: string) => {
     const list = tools.filter(each => each.tells[partOfPage[kind]] === how).map(each => each.tool);
@@ -1415,17 +1424,16 @@ function unusedBand(shown: ItemRow[]) {
   };
   const live = homeItems(home), ids = new Set(off.map(skill => itemId(partOfPage[kind], skill.key))), before = inUse(home.profiles.profiles, live);
   const ending = before.filter(profile => !inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item))).includes(profile));
-  const words = [
-    `${plural(shown.length, one, many)} with no use seen in the last ${USAGE_DAYS} days. A use on another computer or in a tool not read isn’t seen.`,
-    reachWords(read), record('seen', ' always'), record(undefined, ''),
-    fresh ? `Left out: ${plural(fresh, one, many)} under ${USAGE_DAYS} days old.` : '', found ? `Left out: ${plural(found, one, many)} found, not yet in Central Knot.` : '',
+  const lead = [`${plural(shown.length, one, many)} with no use seen in the last ${USAGE_DAYS} days.`,
+    off.length ? 'Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on.' : '',
     kept ? `${plural(kept, one, many)} from a plugin skipped: turn each off on its own row.` : '',
-    ending.length ? `With these off, ${andList(ending.map(profile => profile.name))} ${ending.length === 1 ? 'stops' : 'stop'} being the profile in use.` : '',
-  ].filter(Boolean).join(' ');
+    ending.length ? `With these off, ${andList(ending.map(profile => profile.name))} ${ending.length === 1 ? 'stops' : 'stop'} being the profile in use.` : ''];
+  const more = ['A use on another computer or in a tool not read isn’t seen.', reachWords(read), record('seen', ' always'), record(undefined, ''),
+    fresh ? `Left out: ${plural(fresh, one, many)} under ${USAGE_DAYS} days old.` : '', found ? `Left out: ${plural(found, one, many)} found, not yet in Central Knot.` : ''];
   const turn = off.length ? button({ variant: 'outline', size: 'micro', label: 'Turn these off', id: 'turn-unused-off',
     disabled: !canWrite() || state.usage.state === 'reading', onclick: () => turnTheseOff(off) }) : null;
-  const does = turn ? h('span.usage-turn-note', {}, ` Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on.`) : null;
-  return h('div.band.usage-band', { role: 'status', id: 'unused-band' }, icon('history', 14, 'tone-muted'), h('span.band-text', {}, words, does), turn);
+  return h('div.band.usage-band', { role: 'status', id: 'unused-band' }, icon('history', 14, 'tone-muted'),
+    h('span.band-text', {}, h('span.usage-lead', {}, lead.filter(Boolean).join(' ')), h('span.usage-more', {}, more.filter(Boolean).join(' '))), turn);
 }
 
 /** Turn these off: one click with each row's own Off (libraryrow.ts rowClicks.off), so the page's one Undo puts them all back. */
@@ -1435,19 +1443,25 @@ function turnTheseOff(list: ItemRow[]) {
     said: notIn => `Turned off ${plural(list.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(itemNames)}${notIn.length ? `, but not yet in ${toolsPhrase(notIn, toolList())}` : ''}. Central Knot keeps them, and turning one on puts it back as it was.` });
 }
 
-/** Why a tool can't say an item wasn't used, in an opened row: for sessions that couldn't be read, how many files were skipped. */
+/** Why a tool can't say an item wasn't used, in an opened row: for sessions that couldn't all be read, how many files were skipped. */
 const cantSayWords: Record<CantSay, (nouns: { one: string }, says: ToolSays) => string> = {
   'no-record': ({ one }) => `can’t say: its sessions don’t record which ${one} was used`,
   'not-sure': ({ one }) => `can’t say: it doesn’t always record which ${one} was used`,
-  'no-sessions': () => 'can’t say: it keeps no sessions here',
+  'no-sessions': (_, says) => `can’t say: ${names[says.tool]} keeps no sessions here`,
   'unread': (_, says) => (says.skipped ? `can’t say: ${plural(says.skipped, 'session file')} couldn’t be read` : 'can’t say: its sessions couldn’t be read'),
 };
-/** One tool's figure for a row in its opened details, once usage is collected: its sessions and last use, or no use seen (since when its history starts), or why it can't say. */
+/**
+ * One tool's figure for a row in its opened details: its sessions and last use (and how many of its session files couldn't be
+ * read, where some couldn't), or no use seen (since when its history starts), or why it can't say. While a home's first
+ * reading runs, the line holds its place, saying so, so the row is as high before the reading lands as after.
+ */
 function usageLine(facts: UsageFacts | undefined, tool: Tool, key = facts?.key) {
+  if (firstReading()) return h('p.details-usage', { id: `usage-${key}-${tool}` }, icon('history', 12, 'tone-muted'), 'Collecting usage statistics…');
   const says = usageOf(facts).find(each => each.tool === tool);
   if (!says) return null;
   const last = says.last ? `last used ${sinceThen(Date.parse(says.last))}` : '';
-  const words = says.sessions ? `Used in ${plural(says.sessions, 'session')} in the last ${USAGE_DAYS} days, ${last}`
+  const skipped = says.skipped ? `; ${plural(says.skipped, 'session file')} couldn’t be read` : '';
+  const words = says.sessions ? `Used in ${plural(says.sessions, 'session')} in the last ${USAGE_DAYS} days, ${last}${skipped}`
     : [says.cantSay ? sentence(cantSayWords[says.cantSay](kindNouns[kind], says)) : `No use seen ${says.since ? `since ${dayWords(says.since)}, where its history starts` : `in the last ${USAGE_DAYS} days`}`, last].filter(Boolean).join('; ');
   return h('p.details-usage', { id: `usage-${key}-${tool}` }, icon('history', 12, 'tone-muted'), `${words}.`);
 }
@@ -1465,12 +1479,14 @@ const chosenOrder = (): RowOrder => (focus ? 'name' : readFlag(BY_USED) ? 'used'
 /** A row's last use, for the Last used order (itemrow.ts inOrder). */
 const usedAt = (skill: ItemRow) => lastUse(usageOf(factsOf(skill)));
 /**
- * A reading about to land moves no row (app.ts collectUsage calls this before it lands): while the list on screen goes by last
- * used, each of its rows is pinned where it is now (itemrow.ts Pinned), as its own switch would pin it (flip), so its cell
- * fills in place and the new order is drawn when the pins are let go (app.ts pinnedRows: another list or none drawn, or Refresh).
+ * A reading about to land moves no row (app.ts collectUsage calls this once its answer is known to be kept, before the slot takes
+ * it). A reading moves rows only through the Last used order or the "No use seen" chip, so while the list on screen goes by last
+ * used or that chip is on, each of its rows is pinned where it is now (itemrow.ts Pinned), as its own switch would pin it
+ * (flip): its cell fills in place, and the new order is drawn when the pins are let go (app.ts pinnedRows: another list or none
+ * drawn, Refresh, or Put in order: rowsHeld).
  */
 export function holdOrder() {
-  if (chosenOrder() !== 'used') return;
+  if (chosenOrder() !== 'used' && view.filter !== 'unused') return;
   const pins = pinnedHere();
   for (const skill of filesView() ? committedList() : committedList().filter(onChip)) pin(pins, skill.key, sectionOf(skill), timeIn(skill, 'used', itemOf, usedAt));
 }
@@ -1482,9 +1498,21 @@ function orderChoice() {
   const choose = (event: Event) => { const value = (event.target as HTMLSelectElement).value; writeFlag(BY_UPDATED, value === 'updated'); writeFlag(BY_USED, value === 'used'); rerender(); };
   const order = chosenOrder(), option = (value: RowOrder, label: string) => h('option', { value, selected: order === value }, label);
   const options = [option('name', 'Name'), option('updated', 'Last updated'), option('used', 'Last used')];
-  return h('span.order', { title: 'The order of the rows under each heading' }, h('label.order-word', { for: 'item-order' }, 'Sort'),
-    h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: 'Sort by', onchange: choose }, options), icon('chevrons-up-down', 14)));
+  return [h('span.order', { title: 'The order of the rows under each heading' }, h('label.order-word', { for: 'item-order' }, 'Sort'),
+    h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: 'Sort by', onchange: choose }, options), icon('chevrons-up-down', 14))),
+    rowsHeld() ? smallAction('Put in order', 'put-in-order', () => { unpin(); rerender(); }, '.order-tidy') : null];
 }
+/**
+ * The keys of this table's rows as drawn, heading by heading, given the rows pinned on it (none: each row under its own heading,
+ * in the order Sort names), as itemsTable draws them; Find, which moves no row, aside.
+ */
+const listedKeys = (pins: Pinned<Role>) => (['on', 'found', 'away', 'off'] as Role[]).flatMap(role =>
+  inOrder(rows().filter(skill => (onChip(skill) || pins.rows.has(skill.key)) && placeIn(pins, skill.key, sectionOf(skill)) === role), chosenOrder(), itemOf, usedAt, pins).map(skill => skill.key));
+/**
+ * Whether rows on this list are held where they were (a row's own click pinned it, or a reading as it landed: holdOrder), so that
+ * putting them in order would move one: the one place that says so. Put in order, beside Sort, lets them go (orderChoice).
+ */
+const rowsHeld = () => pinnedHere().rows.size > 0 && listedKeys(pinnedHere()).join('\n') !== listedKeys(noPins()).join('\n');
 /** A row's time while the rows go by it: how long ago (itemrow.ts lastUpdated), the day and time in its tooltip; empty with none. */
 function whenCell(skill: ItemRow) {
   const at = lastUpdated(skill, itemOf(skill));
