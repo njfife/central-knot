@@ -2,7 +2,7 @@
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. One row is
 // the open home's, not the app's: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
 // and switched through app.ts switchSyncEverything.
-import { announce, machine, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { acting, announce, machine, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { oneUndoCovers } from './historyactions.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -381,7 +381,7 @@ function syncEverythingRow(): HTMLElement | null {
   const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' && !state.dismissed.has(told.history)
     ? [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told), tone: 'done', action: { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })] : [])));
   return settingRow('sync-everything', 'Synchronize everything', hint,
-    toggle({ on, label: 'Synchronize everything', onchange: chosen => void switchSyncEverything(chosen), disabled: !!cannot || !!state.busy, id: 'sync-everything-on',
+    toggle({ on, label: 'Synchronize everything', onchange: chosen => void switchSyncEverything(chosen), disabled: cannot || acting(), id: 'sync-everything-on',
       attrs: { 'aria-describedby': notice ? 'setting-sync-everything-hint setting-sync-everything-notice' : 'setting-sync-everything-hint', title: null } }),
     notice, added.length ? h('div.setting-added', {}, added) : undefined);
 }

@@ -93,16 +93,22 @@ export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria
 
 /**
  * A press and its release on one control count as its click even when a redraw replaced the control between them (the lists
- * redraw as clicks run): the browser fires no click on it then, so the release clicks the control now there, found by its id.
+ * redraw as clicks run): the browser fires no click on it then, so the release clicks the control now there, found by its id,
+ * only while it says what the pressed one said (its `aria-checked`) and the pressed one was not disabled, so a switch whose state
+ * changed under the press is never flipped the other way.
  */
 export function keepClicksAcrossRedraws(): void {
-  let pressed: Element | null = null;
+  let pressed: { control: Element; checked: string | null; disabled: boolean } | undefined;
   const control = (event: Event) => (event.target as Element | null)?.closest?.('button[id]') ?? null;
-  document.addEventListener('pointerdown', event => { pressed = control(event); }, true);
+  document.addEventListener('pointerdown', event => {
+    const at = control(event);
+    pressed = at ? { control: at, checked: at.getAttribute('aria-checked'), disabled: (at as HTMLButtonElement).disabled } : undefined;
+  }, true);
   document.addEventListener('pointerup', event => {
     const now = control(event), was = pressed;
-    pressed = null;
-    if (was && now && now !== was && now.id === was.id && !was.isConnected) (now as HTMLButtonElement).click();
+    pressed = undefined;
+    if (!was || !now || was.control.isConnected || was.disabled || now.id !== was.control.id || now.getAttribute('aria-checked') !== was.checked) return;
+    (now as HTMLButtonElement).click();
   }, true);
 }
 

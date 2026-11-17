@@ -7,7 +7,7 @@
 // quitOtherBuild (main.ts builds:replace and builds:quit); what it came to is said under the buttons while a build still holds
 // this one, the same or the next (with Show in Finder where macOS kept the bundle), and once the look finds none, in a band on
 // the page that comes back (app.ts tell). What is written while held, the menus and the login item are main.ts's (heldReason).
-import { announce, busy, setHome, showFile, shownPath, state, tell } from './app.ts';
+import { acting, announce, busy, setHome, showFile, shownPath, state, tell } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import { holdingBuild, holdsUntil, QUIT_WAIT_MS } from './model.ts';
 import type { BuildOutcome, HomeView, OtherBuild } from './types.ts';
@@ -73,7 +73,7 @@ function settingsWords(other: OtherBuild, verb: string): string {
 
 /** The screen that stands in for every page while `other` holds this build: what is going on and the buttons first, then the detail. */
 export function heldScreen(home: HomeView, other: OtherBuild): HTMLElement {
-  const { act, lead, how } = offer(home, other), disabled = !!state.busy;
+  const { act, lead, how } = offer(home, other), disabled = !!acting();
   return h('div.page', {}, h('div.scroll.held-scroll', { id: 'held-scroll' }, h('section.held', { id: 'held', 'aria-labelledby': 'held-title' },
     h('h2.held-title', { id: 'held-title' }, `${other.name} is ${whereWords(other)}`),
     h('p.held-line', {}, lead),

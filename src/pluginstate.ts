@@ -4,9 +4,9 @@
 // turnPlugin (main records first, marketplaces.ts turn); Update, Update all, a skill's switch and their Undo go through
 // applyPluginOps. Both set market.lastRun, which the window's header says with one Undo (pluginspage.ts pluginsResult).
 // Which clicks wait their turn and which lock, in one place:
-// - A switch or a tool's box joins the page's one list of clicks (clicklist.ts, which the item pages' switches join too), sent
-//   to main one click at a time, in the order clicked (runClick); the clicks of the latest run are kept here (market.clicks), and
-//   each row says its own click's state (pluginparts.ts clickNote). That plugin's switch and boxes stay off from its click until
+// - A switch or a tool's box joins the page's one list of clicks (clicklist.ts, which the item pages' switches join too) as a
+//   PluginClick, sent to main one click at a time, in the order clicked (runClick); the run's clicks are the list's (market.clicks),
+//   kept while its result is on screen, and each row says its own click's state (pluginparts.ts clickNote). That plugin's switch and boxes stay off from its click until
 //   the view is read back after it (pluginBusy); every other plugin's switch, and the rest of the app, stay usable meanwhile. The
 //   home is read once, when the list empties (app.ts oweHomeRead). Its one Undo is its last click's.
 // - Every other action here runs under app.ts busy, and is off while the page acts (app.ts acting: busy, or a run of clicks,
@@ -14,7 +14,7 @@
 //   busy too.
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
 import { announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, state as app, tell } from './app.ts';
-import { clickList, join } from './clicklist.ts';
+import { clickList, drop, join, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
@@ -56,8 +56,8 @@ export const market = {
   lastRun: undefined as LastRun | undefined,
   /** The plugin and tools a command is running for, so their marks show it is working. */
   working: undefined as { source: string; plugin: string; tools: HarnessId[] } | undefined,
-  /** The switch clicks of the latest run of clicks (clicklist.ts), in the order clicked; kept until the next run starts or the home changes. */
-  clicks: [] as PluginClick[],
+  /** The switch clicks of the run on screen, in the order clicked: the list's (clicklist.ts), kept while the run's result is on screen. */
+  get clicks(): PluginClick[] { return clickList.turns.filter(isPluginClick); },
   /** Where the person is: the marketplace shown, its tab, an open plugin page, and the filter. */
   nav: startNav(),
   /** Each marketplace's README, by source. */
@@ -82,8 +82,8 @@ export function toggleOpened(key: string): void {
 
 /** A different home has other tools and other installs: nothing done or read in the last one carries over. */
 export function resetMarket(): void {
-  // Clicks not yet sent are dropped with the list: each is passed over in its turn (runClick).
-  market.clicks = [];
+  // Its clicks leave the list: those not yet sent never run, and the result of one running is passed over (runClick).
+  drop(isPluginClick);
   resetPageData(market.read); market.problem = undefined; market.lastRun = undefined; market.working = undefined; market.addOpen = false;
   market.readmes.clear(); forgetDetails(); market.opened.clear(); market.nav = startNav();
 }
@@ -371,11 +371,12 @@ async function readAgain(): Promise<void> {
 }
 
 /**
- * One click in the page's list: the plugin, what was clicked (in one tool, for a tool's box), what its row says while it waits
- * and while it runs (`said`: aimWords), and where it is: waiting, running (main has it), reading (main returned `ran`, and the
- * view is read back) or ended.
+ * A plugin's click in the page's list (a clicklist.ts Turn): the plugin, what was clicked (in one tool, for a tool's box), what its
+ * row says while it waits and while it runs (`said`: aimWords), and once main has answered, what it returned (`ran`; the view is
+ * then read back before the click ends).
  */
-export interface PluginClick { source: string; plugin: string; what: PluginTurn; tool?: HarnessId; said: { waiting: string; running: string }; state: 'waiting' | 'running' | 'reading' | 'ended'; ran?: PluginTurnResult }
+export interface PluginClick extends Turn { source: string; plugin: string; what: PluginTurn; tool?: HarnessId; said: { waiting: string; running: string }; ran?: PluginTurnResult }
+const isPluginClick = (turn: Turn): turn is PluginClick => 'plugin' in turn;
 
 /** The latest click on this plugin in the page's list, if one is there. */
 export const clickOn = (source: string, plugin: string) => market.clicks.findLast(click => click.source === source && click.plugin === plugin);
@@ -387,23 +388,23 @@ export const pluginBusy = (source: string, plugin: string) => !!app.busy || (cli
  * plugin action (act), at an item page's switch for a plugin's item (app.ts runSwitches), at the person's Refresh (app.ts
  * readAgain) and with another home (resetMarket). A running list keeps them.
  */
-export function endListNews(): void { if (!clickList.running) market.clicks = []; }
+export function endListNews(): void { if (!clickList.running) drop(isPluginClick); }
 
 /**
  * A plugin's one switch (pluginrecord.ts), clicked: On or Off, Add for one found in a tool, or one tool's box on its page
- * unticked or ticked (`tool`). The click joins the page's list and waits its turn there; the first click after a run has ended
- * starts a new one.
+ * unticked or ticked (`tool`). The click joins the page's list and waits its turn there. It joins the run whose result is on
+ * screen (market.lastRun); with none, it starts a new one.
  */
 export function turnPlugin(entry: MarketplaceView, plugin: string, what: PluginTurn, tool?: HarnessId): void {
-  if (!clickList.running) { endListNews(); market.problem = undefined; clearNotice(); }
-  const click: PluginClick = { source: entry.source, plugin, what, tool, said: aimWords(what, tool), state: 'waiting' }, home = app.home!.home;
-  market.clicks.push(click);
+  if (!market.lastRun) { drop(turn => isPluginClick(turn) && turn.state === 'ended'); market.problem = undefined; clearNotice(); }
+  const home = app.home!.home;
+  const click: PluginClick = { state: 'waiting', run: () => runClick(click, home), ended: runEnded, source: entry.source, plugin, what, tool, said: aimWords(what, tool) };
   // Its row is pinned where it is on the list (itemrow.ts Pinned), until another list or none is drawn, or Refresh (app.ts pinnedRows).
   if (market.view) pin(pinnedPlugins(entry), plugin, pluginPlace(market.view, entry, plugin));
   // The control clicked waits until it is read back; Add gives way to the switch then. The focus goes back to it at the
   // list's end if nothing else took it.
   clickedLast = document.activeElement?.id.replace(/^padd/, 'pswitch');
-  join({ state: 'waiting', run: () => runClick(click, home), ended: runEnded });
+  join(click);
   rerender();
 }
 let clickedLast: string | undefined;
@@ -438,15 +439,14 @@ function runEnded(): void {
  * dropped (resetMarket) is passed over.
  */
 async function runClick(click: PluginClick, home: string): Promise<void> {
-  if (!market.clicks.includes(click)) return;
+  if (!clickList.turns.includes(click)) return;
   const view = market.view, entry = view?.marketplaces.find(each => each.source === click.source);
-  click.state = 'running';
   market.working = { source: click.source, plugin: click.plugin, tools: click.tool ? [click.tool] : view?.tools ?? [] };
   rerender();
   const result = await api().turnPlugin(click.source, click.plugin, click.what, click.tool, home).catch((): PluginTurnResult => ({ stopped: 'That could not finish. Click Refresh to see where things stand.', done: [] }));
-  if (!market.clicks.includes(click)) return;
+  if (!clickList.turns.includes(click)) return;
   oweHomeRead();
-  Object.assign(click, { state: 'reading', ran: result });
+  click.ran = result;
   market.working = undefined;
   const removed = result.done.filter(step => step.action === 'remove' && step.report.changed).map(step => step.tool);
   const limits = view && entry ? undoLimits(view, entry, click.plugin, removed, app.home?.pluginItems) : [];
@@ -454,8 +454,6 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
   announce(result.stopped ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${click.plugin}.`), !result.stopped && undoOps().length > 0);
   rerender();
   showView(await api().plugins().catch(() => null));
-  click.state = 'ended';
-  rerender();
 }
 
 /**

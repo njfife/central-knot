@@ -36,7 +36,7 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyPluginSwitches, clickWork, closeResult, drawPage, pinnedRows, queueClick, readAgain, showPage, state: app } = await import('../src/app.ts');
+const { acting, applyClick, closeResult, drawPage, flashRequests, pinnedRows, queueClick, readAgain, showPage, state: app, tell } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin } = await import('../src/itemrow.ts');
@@ -82,7 +82,8 @@ test('Clicks wait their turn: main gets one at a time, in the order clicked, and
   assert.deepEqual([clickList.running, acting()], [false, undefined]);
   // The one Undo is the last click that finished: beta's.
   assert.equal(market.lastRun?.turn?.plugin, 'beta');
-  // The next click starts a new list, with nothing ahead of it: the last list's rows go.
+  // While the run's result is on screen, the next click joins the run; once it is closed, the next click starts a new one.
+  closeRun();
   turnPlugin(entry, 'gamma', 'off');
   assert.deepEqual(states(), ['gamma running']);
   await settled();
@@ -201,7 +202,7 @@ test('A list’s rows are its news: the person’s Refresh takes them away', asy
 
 test('A list’s rows are its news: an item page’s switch for a plugin’s item takes them away', async () => {
   await alphaInstalled();
-  await applyPluginSwitches([]);
+  await applyClick({ kind: 'skills', items: [], changes: [], said: '', plugins: { ops: [] } });
   assert.deepEqual(states(), []);
 });
 
@@ -242,21 +243,27 @@ test('After two clicks on one plugin’s boxes, Undo names the click it reverses
 
 // ---------- An item page's switches ----------
 
-/** A skill's switch clicked on the Skills page, as matrix.ts flip sends it: drawn as the row was (its latest unended click's state, else On). */
+/** Each skill On or Off as main last answered for it (On before): what a row's state is now, as the page would read it from its view. */
+const onNow = new Map<string, boolean>();
+/** A skill's switch clicked on the page open, as matrix.ts flip sends it: drawn as the row was (its latest unended click's state, else as it is now). */
 function flip(name: string, on: boolean, made = () => {}) {
-  const seen = wantedOn('skills', name) ?? true;
+  const seen = wantedOn('skills', name) ?? onNow.get(name) ?? true;
   queueClick({ kind: 'skills', key: name, on }, name, () => {
     made();
-    return clickWork({ kind: 'skills', items: [name], changes: [{ key: name, on, except: [], seenOn: seen }], said: `${name} is ${on ? 'on' : 'off'}.` });
-  });
+    return { kind: 'skills', items: [name], changes: [{ key: name, on, except: [], seenOn: seen }], said: `${name} is ${on ? 'on' : 'off'}.` };
+  }, () => onNow.get(name) ?? true);
 }
-/** What main did of one click: the item written or removed in Claude Code, or the click refused as a whole. */
-const did = (name: string, on = false): PassResult => ({ results: [{ item: name, harness: 'claude-cli', outcome: on ? 'written' : 'removed', message: '' }], writes: 1 });
+/** What main did of one click: the item written or removed in Claude Code, or the click refused as a whole, or a write that failed. */
+const did = (name: string, on = false): PassResult => { onNow.set(name, on); return { results: [{ item: name, harness: 'claude-cli', outcome: on ? 'written' : 'removed', message: '' }], writes: 1 }; };
 const refusedAsStale = (name: string): PassResult => ({ results: [{ item: name, outcome: 'held', unchanged: true, message: `${name} changed since the page was read. Nothing was changed; read again.` }], writes: 0 });
+
+const failedWrite = (name: string): PassResult => ({ results: [{ item: name, harness: 'claude-cli', outcome: 'failed', message: 'Its folder couldn’t be written.' }], writes: 0 });
 
 function onSkills() {
   start();
-  app.page = 'skills';
+  onNow.clear();
+  flashRequests.clear();
+  Object.assign(app, { page: 'skills', harness: undefined });
 }
 
 test('Four switches clicked in a row: each row is drawn as clicked at once, main gets one at a time, and the header says the run once', async () => {
@@ -322,10 +329,65 @@ test('A click is worked out in its turn, after the home is read for the click be
 test('A click with nothing left to change in its turn (the click before it took its whole plugin with it) counts as asked: no problem line', async () => {
   onSkills();
   flip('a', false);
-  queueClick({ kind: 'skills', key: 'b', on: false }, 'b', () => undefined);
+  queueClick({ kind: 'skills', key: 'b', on: false }, 'b', () => undefined, () => false);
   await settled();
   await main.pass(did('a'));
   assert.deepEqual([main.sent, app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], [['a off, seen on'], '2 skills are off: a and b.', [], false]);
+});
+
+test('A run lasts while its result is on screen: a click after the last one ended joins it; once the result is gone, the next click starts a new run', async () => {
+  onSkills();
+  flip('a', false);
+  await settled();
+  await main.pass(did('a'));
+  flip('b', false);
+  await settled();
+  await main.pass(did('b'));
+  assert.equal(app.outcome?.text, '2 skills are off: a and b.');
+  closeResult();
+  flip('c', false);
+  await settled();
+  await main.pass(did('c'));
+  assert.equal(app.outcome?.text, 'c is off.');
+});
+
+test('Each row is said as the run left it: a row a later click turned back on is said on', async () => {
+  onSkills();
+  flip('a', false);
+  flip('b', false);
+  await settled();
+  await main.pass(did('a'));
+  // b's click, as main ran it, also put a back on (as a plugin's whole switch does).
+  onNow.set('a', true);
+  await main.pass(did('b'));
+  assert.equal(app.outcome?.text, '1 skill is off: b; 1 skill is on: a.');
+});
+
+test('A click that failed is said as failed, not counted among those done', async () => {
+  onSkills();
+  for (const name of ['a', 'b', 'c']) flip(name, false);
+  await settled();
+  await main.pass(did('a'));
+  await main.pass(failedWrite('b'));
+  await main.pass(did('c'));
+  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], ['2 skills are off: a and c.', ['b is off.'], true]);
+});
+
+test('A run made on one tool’s page is said there only: on another tool’s page, the status bar says it, and no row there flashes', async () => {
+  onSkills();
+  Object.assign(app, { page: 'harnesses', harness: 'claude-cli' });
+  flip('a', false);
+  await settled();
+  // As harnesspage.ts goHarness does: another tool's page, its header empty.
+  app.harness = 'codex-cli';
+  tell(undefined);
+  await main.pass(did('a'));
+  assert.deepEqual([app.outcome, app.said.text, flashRequests.has('a')], [undefined, 'a is off.', false]);
+  // A click there is a run of its own, said in its own header.
+  flip('b', false);
+  await settled();
+  await main.pass(did('b'));
+  assert.equal(app.outcome?.text, 'b is off.');
 });
 
 test('A run left for another page: its result is said in the status bar, never in the header of the page open', async () => {
@@ -361,7 +423,7 @@ test('A result with no problem goes 8 seconds after the run’s last click has f
   } finally { mock.timers.reset(); }
 });
 
-test('A result whose time runs out while the next run’s first click runs stays until that click says its own', async () => {
+test('A result whose time runs out while a later click runs stays, and that click joins its run', async () => {
   mock.timers.enable({ apis: ['setTimeout'] });
   try {
     onSkills();
@@ -374,7 +436,7 @@ test('A result whose time runs out while the next run’s first click runs stays
     mock.timers.tick(2000);
     assert.equal(app.outcome?.text, 'a is off.');
     await main.pass(did('b'));
-    assert.equal(app.outcome?.text, 'b is off.');
+    assert.equal(app.outcome?.text, '2 skills are off: a and b.');
   } finally { mock.timers.reset(); }
 });
 

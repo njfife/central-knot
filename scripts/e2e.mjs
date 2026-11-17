@@ -1456,7 +1456,7 @@ async function practiceFlow() {
   await a.click(`${outsideRow} .switch`);
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
   check('one click turns the whole plugin off in Claude Code, and the result names what went with it', outsideOff() && !(await switchOn(a, outside)) && !(await a.exists('#outcome-whole'))
-    && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off there, with its 1 other skill and 1 MCP server\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
+    && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off in Claude Code, with its 1 other skill and 1 MCP server\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
   const other = 'outside-tools@ck-outside/outside-other';
   same('and the plugin’s other skill’s row says it is off in Claude Code too', [await cellState(a, other, 'claude-cli'), await switchOn(a, other)], ['plugin-off', false]);
   await a.click('#outcome-undo-plugin');
@@ -1474,6 +1474,36 @@ async function practiceFlow() {
     [true, false, false, false, '2 skills are off: outside-skill and outside-other. outside-skill: its whole plugin outside-tools was turned off in Claude Code, with its 1 other skill and 1 MCP server.']);
   await a.click('#outcome-undo');
   check('and the run’s one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside), await a.text('#header'));
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
+  const rowSwitch = key => `document.querySelector('.ov-row[data-key="${key}"] .switch').click()`, headerText = () => a.text('#header .header-result');
+  // A plugin's row clicked again while its first click runs (the stand-in's second): the second click is taken, from the state the
+  // row is drawn in, and the row ends as it says.
+  await a.run(rowSwitch(outside)); await wait(150); await a.run(rowSwitch(outside));
+  await a.settle();
+  same('a plugin’s row clicked again while its click runs ends as the second click says: the plugin is on again, and nothing is called on already',
+    [outsideOff(), await switchOn(a, outside), /already/.test(await headerText() ?? '')], [false, true, false]);
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
+  // One run: outside-skill Off (its whole plugin off), then, drawn Off once that ended, outside-other On (the plugin on again).
+  // Each row is said as the run left it, and the run's one Undo takes the clicks back newest first: the plugin is on, as before.
+  await a.run(rowSwitch(outside));
+  for (let tries = 0; tries < 60 && await switchOn(a, other); tries++) await wait(100);
+  await a.run(rowSwitch(other));
+  await a.settle();
+  const bothOn = /^2 skills are on: outside-skill and outside-other\./.test(await a.text('#header [data-outcome] .band-text') ?? '');
+  await a.click('#outcome-undo');
+  same('Off then On in one run: both rows said on, as the run left them, and its Undo leaves the plugin on, as before the run', [bothOn, outsideOff(), await switchOn(a, outside)], [true, false, true]);
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
+  // One run where the plugin's click fails (Claude Code refuses to disable it) and release-notes' Off works: the failure is said as
+  // one, not counted among those done, and the run's one Undo takes back release-notes.
+  writeFileSync(outsideStub, readFileSync(outsideStub, 'utf8').replace('--scope user") sleep 1; printf', '--scope user") echo "Error: refused" >&2; exit 1; printf'));
+  const notesOnBefore = await switchOn(a, 'release-notes');
+  await a.run(rowSwitch(outside)); await wait(150); await a.run(`document.getElementById('switch-release-notes').click()`);
+  await a.settle();
+  const failedSaid = [await a.text('#header [data-outcome] .band-text'), await a.exists('#outcome-undo'), await switchOn(a, outside), await a.exists('#header .problem-line')];
+  await a.click('#outcome-undo');
+  same('a plugin’s click that fails among others: not counted, said as a problem, and the run keeps its Undo, which turns release-notes back on',
+    [notesOnBefore, ...failedSaid, await switchOn(a, 'release-notes'), outsideOff()], [true, '1 skill is off: release-notes.', true, true, true, true, false]);
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
   writeFileSync(outsideStub, outsideStubBefore);
   if (outsideSettings) writeFileSync(join(practice, '.claude/settings.json'), outsideSettings); else rmSync(join(practice, '.claude/settings.json'), { force: true });
   await a.click(`[id="open-${outside}"]`);
@@ -4562,16 +4592,17 @@ fs.writeFileSync(record, JSON.stringify(now));
   };
   const letRunGo = async () => { letGo(); await done(); };
 
-  // A list too short to scroll, on a fresh visit: four rows clicked one after another before the first is done (in one go: an agent
-  // file is written faster than a pointer moves here) are the four that change, each Off in every tool, no row moves, and the
-  // header says the four once. Clicks that each end before the next is made are runs of their own, each said on its own.
+  // A list too short to scroll, on a fresh visit: four rows clicked 150 ms apart, each where it was before the first click, are the
+  // four that change, each Off in every tool, no row moves, and the header says the four once: clicks made while the run's result is
+  // on screen are one run, however far apart they land.
   await a.click('#nav-agents');
-  const sixBefore = await placesNow('table-agents', 'data-key'), sixStates = await states('.ov-row[data-key]');
-  await a.run(`${JSON.stringify(agents.slice(0, 4))}.forEach(agent => document.getElementById('switch-' + agent).click())`);
+  const sixBefore = await placesNow('table-agents', 'data-key'), sixStates = await states('.ov-row[data-key]'), sixPoints = [];
+  for (const agent of agents.slice(0, 4)) sixPoints.push(await middleOf(`#switch-${agent}`));
+  for (const point of sixPoints) { await clickAt(point); await wait(150); }
   await done();
   const sixAfter = await placesNow('table-agents', 'data-key');
   await a.shot('rows-agents-short');
-  same('on a list of six, four clicks made before the first is done change exactly the four rows aimed at, Off in every tool, no row moves, and the header says the four once',
+  same('on a list of six, four clicks 150 ms apart change exactly the four rows aimed at, Off in every tool, no row moves, and the header says the four once',
     [changed(sixStates, await states('.ov-row[data-key]')), agents.map(agent => existsSync(join(home, '.claude/agents', `${agent}.md`))), agents.map(agent => sixAfter.at[agent]), await headerSays()],
     [agents.slice(0, 4), [false, false, false, false, true, true], agents.map(agent => sixBefore.at[agent]), '4 agents are off: ag-1, ag-2, ag-3 and ag-4.']);
   // The last agent deleted from Central Knot: the page is empty, and the result is said once, in the header.
@@ -4592,13 +4623,11 @@ fs.writeFileSync(record, JSON.stringify(now));
   // Four rows at the top of a long list, the page's first clicks, 150 ms apart, each clicked where it was before the first: each
   // is drawn Off at once, they are the four that change, Off in every tool, no row moves, the scroll stays, and the header, which
   // keeps its height, says the four once.
-  // The run held open while they are clicked, so all four are one run however far apart they land, as on a home slow enough to be felt.
-  await holdRun();
   const atTop = ['srv-03', 'srv-04', 'srv-05', 'srv-06'], topPoints = [], topBefore = await placesNow(table, 'data-key'), topStates = await states('.ov-row[data-key]');
   for (const key of atTop) topPoints.push(await middleOf(`#switch-${key}`));
   const resultIn = () => a.run(`document.querySelector('#header [data-outcome]') ? 'header' : document.querySelector('[data-outcome]') ? 'elsewhere' : 'none'`), drawnAtOnce = [];
   for (const point of topPoints) { await clickAt(point); drawnAtOnce.push(await a.run(`document.activeElement?.getAttribute('aria-checked')`)); await wait(150); }
-  await letRunGo();
+  await done();
   await a.shot('rows-mcp-top');
   const topAfter = await placesNow(table, 'data-key'), inClaude = () => Object.keys(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers ?? {});
   same('at the top of a long list, four rows clicked 150 ms apart are drawn Off at once and are the four that change, Off in every tool; no row moves, the scroll stays, and the header says the four once',
@@ -4702,6 +4731,14 @@ fs.writeFileSync(record, JSON.stringify(now));
   await holdRun();
   await putAt(table, row('srv-37'), 200);
   await clickAt(await middleOf('#switch-srv-37'));
+  // Meanwhile every write is off, saying why, on the pages beside the lists too.
+  const offWhy = async (page, selector) => {
+    await a.run(`document.getElementById('${page}').click()`);
+    for (let tries = 0; tries < 50 && !(await a.exists(selector)); tries++) await wait(100);
+    return a.run(`(() => { const control = document.querySelector('${selector}'); return [control?.disabled, control?.title]; })()`);
+  };
+  same('while clicks run, Settings’ Synchronize everything and Instructions’ Edit are off, and say why', [await offWhy('nav-settings', '#sync-everything-on'), await offWhy('nav-instructions', '#ins-edit-claude-cli')],
+    [[true, 'Waits until the switches clicked are done.'], [true, 'Waits until the switches clicked are done.']]);
   await a.run(`document.getElementById('nav-agents').click()`);
   await letRunGo();
   same('a run left for Agents: its result is in the status bar, never in the Agents header', [await a.exists('#header [data-outcome]'), (await a.text('#announcement'))?.startsWith('srv-37 is off')], [false, true]);
@@ -4809,12 +4846,11 @@ fs.writeFileSync(record, JSON.stringify(now));
   for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) {
     await sizeTo(a, width, height);
     await putAt(list, '[data-plugin="plug-07"]', 80);
+    // The last size's result closed, so these four are a run of their own, whose rows' notes are theirs alone.
+    await a.run(`document.querySelector('#header .band-dismiss')?.click()`);
     const heightsBefore = await heights();
-    // Held, so the four are one list however far apart they land: a new list clears the last one's notes.
-    hold();
     for (const name of clicked(width)) { await clickAt(await middleOf(`#pswitch-0-${name}`)); await wait(150); }
     const whileWaiting = await heights();
-    letGo();
     for (let tries = 0; tries < 40 && !(await a.exists('[data-plugin="plug-08"] .plugin-click[data-click="ended"]')); tries++) await wait(100);
     await a.shot(`rows-plugins-states-${width}`);
     const whileRunning = await heights();
@@ -4824,11 +4860,12 @@ fs.writeFileSync(record, JSON.stringify(now));
   }
   same('through a list of clicks with one failure, every row keeps its height, at the four sizes', tall, [SMALLEST, [1280], [1728], [2560]].map(([width]) => [width, clicked(width).sort().map(name => `${name} ended`), [], [], []]));
   await sizeTo(a, 1280, 800);
-  // The list at its top: a click starts a new list, so the last list's failure goes from the header; the rows stay where they are.
+  // The list at its top: the last run's failure closed by its ×, it goes from the header and the rows stay where they are.
   await a.run(`document.getElementById('${list}').scrollTop = 0`);
   const atItsTop = await placesNow(list, 'data-plugin'), bandBefore = await a.exists('.plugin-problems');
-  await clickAt(await middleOf('#pswitch-0-plug-06')); await done();
+  await a.run(`document.querySelector('#header .band-dismiss')?.click()`); await a.settle();
   const stillAtTop = await placesNow(list, 'data-plugin');
+  await clickAt(await middleOf('#pswitch-0-plug-06')); await done();
   same('at the top of the list, a failure that goes from the header moves no row', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])], [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
   // Three failing plugins (plug-04, -05, -08) and one that installs (plug-10), in one list (each takes a second): one ×, two
   // reasons and Show all 3; shown, each reason whole; × closes it all.
@@ -4836,9 +4873,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
   await putAt(list, '[data-plugin="plug-04"]', 20);
   const fourPoints = []; for (const name of ['plug-04', 'plug-05', 'plug-08', 'plug-10']) fourPoints.push(await middleOf(`#pswitch-0-${name}`));
-  hold();
   for (const point of fourPoints) { await clickAt(point); await wait(150); }
-  letGo();
   for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
   await done();
   for (const name of failNow) rmSync(join(home, `fail-${name}`));
