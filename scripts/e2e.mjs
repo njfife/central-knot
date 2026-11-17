@@ -4542,6 +4542,18 @@ async function usageFlow() {
     await main.restore('usage:read');
     main.close();
   }
+  // A plugin's own row (From plugins) says its figure as any row does, by the same match: Claude Code calls it review-kit:checks.
+  writeClaudeInstall(home, 'ck-usage', 'review-kit', '1.0.0', { 'skills/checks/SKILL.md': '---\nname: checks\ndescription: Checks a change.\n---\n\nSteps.\n' });
+  lines(join(home, '.claude/projects/-work/s3.jsonl'), [skillCall('review-kit:checks', 4)]);
+  const kit = 'review-kit@ck-usage/checks';
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${kit}"]`)); tries++) await wait(100);
+  await a.click('#read-usage-again');
+  for (let tries = 0; tries < 50 && !(await a.run(`document.querySelector('.ov-row[data-key="${kit}"] .ov-used')?.textContent`)); tries++) await wait(100);
+  await a.click(`[id="open-${kit}"]`);
+  same('a From plugins row says its figure, and its opened row Claude Code’s, by the same match', [await a.run(`document.querySelector('.ov-row[data-key="${kit}"] .ov-used')?.textContent`), (await a.text(`[id="usage-${kit}-claude-cli"]`))?.trim()],
+    ['used 4 days ago', 'Used in 1 session in the last 30 days, last used 4 days ago.']);
+  await a.shot('usage-plugin-row');
   same('no page errors, usage', a.pageErrors, []);
   await a.quit();
 }

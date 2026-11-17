@@ -12,7 +12,7 @@ import { brandMark } from './brand.ts';
 import { caughtUpNames, dayAndTime, dayWords, defaultHistoryDays, groupBy, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, fewNames, kindNouns, sentence, toolList as toolsInWords, toolNames, toolsPhrase } from './words.ts';
-import { lastUse, leftToItsRow, noUseSeen, onIn, rowFigure, startsLate, toolSays, USAGE_DAYS, type CantSay, type ToolSays } from './usagerow.ts';
+import { lastUse, leftToItsRow, noUseSeen, onIn, rowFigure, startsLate, toolSays, USAGE_DAYS, type CantSay, type ToolSays, type UsageFacts } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
 import { leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
@@ -137,7 +137,7 @@ function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
       return h('div.details-tool', {}, h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
         h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? cantSwitch(item) ?? switchWords(item) : ''].filter(Boolean).join(' ')),
-        item ? pluginItemControls(item, `enable-${row.key}-${tool}`) : null));
+        item ? pluginItemControls(item, `enable-${row.key}-${tool}`) : null), usageLine(pluginUsageFacts(row), tool, row.key));
     })),
     row.kind === 'mcp' ? null : h('div.details-file', {}, h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, `pfile-${row.key}`, () => toggleFile(row))), fileShown));
 }
@@ -162,12 +162,13 @@ function pluginRowEl(row: PluginRow) {
     return drawn;
   };
   return [
-    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${open ? '.open' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(row.key) },
+    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${open ? '.open' : ''}${reading() ? '.ov-usage' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(row.key) },
       h('div.ov-managed', { role: 'cell' }, pluginRowSwitch(row)),
       h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: row.description ? `${row.name}: ${row.description}` : row.name },
         h('span.ov-name-main', {}, h('span.ov-name-text', {}, row.name)),
         pluginTag(row.plugin, insideTitle(row)),
         row.description ? h('span.ov-name-about', { title: row.description }, row.description) : null),
+      reading() ? usedCell(pluginUsageFacts(row)) : null,
       h('div.ov-marks', { role: 'cell' }, h('span.tool-marks', { role: 'img', 'aria-label': toolList().map(tool => cellWords(row, tool as HarnessId)).join('. ') }, toolList().map(mark))),
       h('div.ov-open', { role: 'cell' }, openButton(row.key, row.name))),
     open && !docked() ? pluginDetails(row) : null,
@@ -1258,7 +1259,7 @@ function row(skill: ItemRow) {
       h('div.ov-managed', { role: 'cell' }, itemSwitch(skill)),
       nameCell(skill, differs(skill)),
       when ? whenCell(skill) : null,
-      used ? usedCell(skill) : null,
+      used ? usedCell(factsOf(skill)) : null,
       h('div.ov-marks', { role: 'cell' }, rowMarks(skill)),
       h('div.ov-open', { role: 'cell' }, openButton(skill.key, nameOf(skill)))),
     open && underRow(skill.key) ? details(skill) : null,
@@ -1272,10 +1273,13 @@ const reading = () => (focus || state.usage.state === 'failed' ? undefined : sta
 /** A row's item as its kind's view has it (types.ts LibraryFacts), whose names in each tool usagerow.ts matches. */
 const factsOf = (skill: ItemRow) => (state.home ? kindSource(state.home, kind).facts.find(facts => facts.key === skill.key) : undefined);
 /** What each tool the reading read says of a row's item (usagerow.ts toolSays): a use in a tool not managed here counts too. */
-function usageOf(skill: ItemRow): ToolSays[] {
-  const read = reading(), facts = factsOf(skill);
+function usageOf(facts: UsageFacts | undefined): ToolSays[] {
+  const read = reading();
   return read && facts ? read.tools.flatMap(each => toolSays(read, partOfPage[kind], facts, each.tool) ?? []) : [];
 }
+/** A From plugins row's item as the usage match reads it: its name in the plugin, through the plugin in each tool that has it (off where it is off there). */
+const pluginUsageFacts = (row: PluginRow): UsageFacts => ({ key: row.name, name: row.name, copies: {},
+  plugin: Object.fromEntries(pluginTools(row).filter(tool => row.copies[tool]).map(tool => [tool, { plugin: row.plugin, marketplace: row.marketName, name: row.name, ...(offIn(row, tool) ? { off: true as const } : {}) }])) });
 
 /** Read usage, at the toolbar's end of a kind's own page until the first reading (after it, the line under the toolbar reads again). */
 function readUsageButton() {
@@ -1312,9 +1316,9 @@ function usageRead(read: UsageReading) {
  * A row's figure (usagerow.ts rowFigure): used how long ago, no use seen in USAGE_DAYS days (or since when every tool that has
  * it on starts), or a faint "can't say" when none of them can tell.
  */
-const figureOf = (skill: ItemRow) => { const facts = factsOf(skill); return facts && rowFigure(usageOf(skill), onIn(facts, toolList() as HarnessId[])); };
-function usedCell(skill: ItemRow) {
-  const figure = figureOf(skill);
+const figureOf = (facts: UsageFacts | undefined) => facts && rowFigure(usageOf(facts), onIn(facts, toolList() as HarnessId[]));
+function usedCell(facts: UsageFacts | undefined) {
+  const figure = figureOf(facts);
   const words = !figure ? 'can’t say' : 'used' in figure ? `used ${sinceThen(Date.parse(figure.used))}`
     : figure.since ? `no use seen since ${dayWords(figure.since)}` : `no use seen in ${USAGE_DAYS} days`;
   const title = figure ? `${sentence(words)}. Open the row for each tool’s figure.` : 'No tool that has it on can tell whether it was used. Open the row for why.';
@@ -1322,7 +1326,7 @@ function usedCell(skill: ItemRow) {
 }
 
 /** Where a row stands for the "No use seen in 30 days" chip, in the reading on show (usagerow.ts noUseSeen), and how many it holds (no chip at 0). */
-const unusedNow = (skill: ItemRow) => { const read = reading(); return read ? noUseSeen(itemOf(skill), figureOf(skill), read.at) : undefined; };
+const unusedNow = (skill: ItemRow) => { const read = reading(); return read ? noUseSeen(itemOf(skill), figureOf(factsOf(skill)), read.at) : undefined; };
 const unusedCount = () => committedList().filter(skill => unusedNow(skill) === 'in').length;
 
 /**
@@ -1336,7 +1340,7 @@ function unusedBand(shown: ItemRow[]) {
   const { one, many } = kindNouns[kind], tools = read.tools.filter(each => toolList().includes(each.tool) && each.sessions && !each.unread);
   const off = shown.filter(skill => !leftToItsRow(factsOf(skill)!)), kept = shown.length - off.length;
   const fresh = committedList().filter(skill => unusedNow(skill) === 'new').length;
-  const found = committedList().filter(skill => { const figure = figureOf(skill); return standingOf(skill) === 1 && !!figure && 'noneSeen' in figure; }).length;
+  const found = committedList().filter(skill => { const figure = figureOf(factsOf(skill)); return standingOf(skill) === 1 && !!figure && 'noneSeen' in figure; }).length;
   // The page's tools that record this kind only sometimes ('seen'), or never (no entry).
   const record = (how: 'seen' | undefined, word: string) => {
     const list = tools.filter(each => each.tells[partOfPage[kind]] === how).map(each => each.tool);
@@ -1372,16 +1376,16 @@ const cantSayWords: Record<CantSay, (nouns: { one: string }) => string> = {
   'unread': () => 'can’t say: not all its sessions could be read',
 };
 /** One tool's figure for a row in its opened details, once usage is read: its sessions and last use, or no use seen (since when its history starts), or why it can't say. */
-function usageLine(skill: ItemRow, tool: Tool) {
-  const says = usageOf(skill).find(each => each.tool === tool);
+function usageLine(facts: UsageFacts | undefined, tool: Tool, key = facts?.key) {
+  const says = usageOf(facts).find(each => each.tool === tool);
   if (!says) return null;
   const last = says.last ? `last used ${sinceThen(Date.parse(says.last))}` : '';
   const words = says.sessions ? `Used in ${plural(says.sessions, 'session')} in the last ${USAGE_DAYS} days, ${last}`
     : [says.cantSay ? sentence(cantSayWords[says.cantSay](kindNouns[kind])) : `No use seen ${says.since ? `since ${dayWords(says.since)}, where its history starts` : `in the last ${USAGE_DAYS} days`}`, last].filter(Boolean).join('; ');
-  return h('p.details-usage', { id: `usage-${skill.key}-${tool}` }, icon('history', 12, 'tone-muted'), `${words}.`);
+  return h('p.details-usage', { id: `usage-${key}-${tool}` }, icon('history', 12, 'tone-muted'), `${words}.`);
 }
 /** In an opened row, a use seen in a tool this page doesn't show (not managed here), which counts in the row's figure too. */
-const usageElsewhere = (skill: ItemRow) => usageOf(skill).filter(each => !toolList().includes(each.tool) && each.sessions).map(each =>
+const usageElsewhere = (skill: ItemRow) => usageOf(factsOf(skill)).filter(each => !toolList().includes(each.tool) && each.sessions).map(each =>
   h('p.details-usage', { id: `usage-${skill.key}-${each.tool}` }, icon('history', 12, 'tone-muted'),
     `${names[each.tool]}, not managed here: used in ${plural(each.sessions, 'session')} in the last ${USAGE_DAYS} days, last used ${sinceThen(Date.parse(each.last!))}.`));
 
@@ -1417,7 +1421,7 @@ function section(role: 'on' | 'found' | 'off' | 'away', list: ItemRow[]) {
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)), note ? sectionNote(note) : null)),
-    inOrder(list, chosenOrder(), itemOf, skill => lastUse(usageOf(skill))).flatMap(row));
+    inOrder(list, chosenOrder(), itemOf, skill => lastUse(usageOf(factsOf(skill)))).flatMap(row));
 }
 
 /**
@@ -1555,7 +1559,7 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
       h('span.details-tool-line', {}, harnessLine(skill, tool)),
       harnessControls(skill, tool)),
     lib.toolNote?.(skill, tool as HarnessId),
-    usageLine(skill, tool));
+    usageLine(factsOf(skill), tool));
   const close = placement === 'row' ? h('button.details-close', { type: 'button', id: `close-${skill.key}`, 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { view.comparing = undefined; rerender(); } }, icon('x', 14)) : null;
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
   if (differs) return box(close, compareChoices(skill, inFiles));
