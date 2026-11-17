@@ -1368,7 +1368,7 @@ if (wanted('instructions')) {
   begin('instructions');
   await a.click('#nav-instructions');
   await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`);
-  await shot(a, 'instructions-start', 'Clicked "Instructions" in the sidebar: "How these files are read" at the top, the Base instructions card, then "Each tool’s own instructions", one card a row. The practice copy has CLAUDE.md and AGENTS.md; Copilot CLI has no file yet.');
+  await shot(a, 'instructions-start', 'Clicked "Instructions" in the sidebar: "How these files are read" at the top, the Base instructions card, then "Each tool’s own instructions". The practice copy has CLAUDE.md and AGENTS.md; Copilot CLI has no file yet.');
   await a.click('#ins-about summary'); await shot(a, 'instructions-about', 'Clicked "How these files are read": how the files are read and saved, the base, and who reads each file with its tool’s own notes.');
   await a.click('#ins-about summary');
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', 'Prefer small'); await shot(a, 'instructions-editing', 'Clicked "Prefer small commits" in Claude Code\'s text: its editor opens with the caret there, Review changes and Cancel in the card\'s head.');
@@ -1390,7 +1390,7 @@ if (wanted('instructions')) {
   await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#ins-orphan')`);
   await shot(a, 'instructions-orphan-draft', 'Typed a draft for Copilot CLI, then moved Copilot CLI\'s folder away outside the app and clicked Refresh: the card is gone, and the draft is offered to copy or discard.');
   await a.click('#ins-orphan-discard');
-  await instructionsAtSizes('two-tools', 'Two tools (Claude Code and Codex), one card a row.');
+  await instructionsAtSizes('two-tools', 'Two tools (Claude Code and Codex): one card a row, two a row once the cards area is 1936 px wide (2560).');
   // Five tools, Pi's file long: one card a row at every size, each text at a reading measure.
   renameSync(join(practice, '.copilot-away'), join(practice, '.copilot'));
   mkdirSync(join(practice, '.pi/agent'), { recursive: true });
@@ -1398,7 +1398,7 @@ if (wanted('instructions')) {
   writeFileSync(join(practice, '.pi/agent/AGENTS.md'), `## Driving GUI apps\n\n${Array.from({ length: 95 }, (_, line) => `- Step ${line + 1}: use the narrowest tool that reaches the outcome, and say which one was used and why it was the narrowest.`).join('\n')}\n`);
   writeFileSync(join(practice, '.config/opencode/AGENTS.md'), '# OpenCode\n- Keep sessions short.\n');
   await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#ins-edit-pi-cli')`, 15000);
-  await instructionsAtSizes('five-tools', 'Five tools, Pi\'s file 97 lines long, one card a row.');
+  await instructionsAtSizes('five-tools', 'Five tools, Pi\'s file 97 lines long: one card a row, two a row once the cards area is 1936 px wide (2560).');
   // A click deep in a long text at the smallest window: the caret's line is under the card's head, with its actions.
   await a.size(860, 600);
   await a.click('#ins-more-pi-cli');
@@ -1697,7 +1697,7 @@ if (wanted('missing')) {
   await a.click('#nav-overview'); await shot(a, 'after-overview', 'The same folder\'s Overview: its first sentence names only the two tools.');
   await a.size(2560, 1440);
   await a.click('#nav-harnesses'); await shot(a, 'after-2560-harnesses', 'The same folder\'s Harnesses at 2560×1440: two cards, two columns.');
-  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: one card a row.');
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: the two tools\' cards side by side.');
   await a.size(1280, 800);
   await a.size(860, 560);
   await a.click('#nav-skills'); await shot(a, 'after-860-skills', 'The same folder\'s Skills at 860×560.');

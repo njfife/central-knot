@@ -455,7 +455,13 @@ async function fullSize(a) {
  * click on an instruction text uses to place the editor's caret. The line is scrolled into view first.
  */
 async function clickText(a, selector, words) {
-  const point = await a.run(`(() => {
+  const point = await pointAt(a, selector, words);
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  await a.settle();
+}
+/** Where the start of `words` is in the shown text `selector`, as a point in the window, its line scrolled into view first. */
+function pointAt(a, selector, words) {
+  return a.run(`(() => {
     const pre = document.querySelector(${JSON.stringify(selector)}), node = pre.firstChild, at = node.textContent.indexOf(${JSON.stringify(words)});
     const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 1);
     const page = pre.closest('.scroll'), view = page.getBoundingClientRect(), line = range.getBoundingClientRect();
@@ -463,8 +469,6 @@ async function clickText(a, selector, words) {
     const box = range.getBoundingClientRect();
     return { x: box.left + 1, y: box.top + box.height / 2 };
   })()`);
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: point.x, y: point.y, button: 'left', clickCount: 1 });
-  await a.settle();
 }
 /** The open editor's id and where its caret is, as [id, the caret's offset]. */
 const caretAt = a => a.run(`[document.activeElement?.id, document.activeElement?.selectionStart]`);
@@ -1885,8 +1889,8 @@ async function practiceFlow() {
   await a.click('#nav-skills'); await a.click('#nav-instructions');
   check('and it stays open when the page is drawn again', await a.run(`document.querySelector('#ins-about')?.open`));
   await a.click('#ins-about summary');
-  const order = await a.all('#instructions-scroll > *', `e.id || e.querySelector('h2, h3')?.textContent || e.className`);
-  same('the base comes first, then a heading over the tools’ own cards, one card a row', order.slice(0, 6), ['ins-about', 'base-card', 'Each tool’s own instructions', 'Claude Code', 'Copilot CLI', 'Codex']);
+  const order = [...await a.all('#instructions-scroll > *', `e.id || e.querySelector('h2')?.textContent || e.className`), ...await a.all('.ins-tool-cards > *', `e.querySelector('h3').textContent`)];
+  same('the base comes first, then a heading over the tools’ own cards', order.slice(0, 7), ['ins-about', 'base-card', 'Each tool’s own instructions', 'ins-tool-cards', 'Claude Code', 'Copilot CLI', 'Codex']);
   check('a tool with no file says so, and its one action names it', (await a.text('#ins-head-copilot-cli')).includes('No file yet') && (await a.text('#ins-edit-copilot-cli')) === 'Add instructions for Copilot CLI', await a.text('#ins-head-copilot-cli'));
   await a.click('#ins-edit-claude-cli');
   await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value = area.value + '- Edited in Central Knot.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -2227,12 +2231,17 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('.harness-cards')); tries++) await wait(100);
   const harnessRows = await a.run(`(() => { const cards = [...document.querySelectorAll('.harness-cards > *')]; return [cards.length, new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size]; })()`);
   same(`at 2560×1440 the harnesses cards (${harnessRows[0]}) sit in one row`, harnessRows[1], 1);
-  // Instructions at full screen: one card a row, each text at a reading measure rather than the card's whole width.
+  // Instructions at full screen: the base across the page, the tools' cards two a row; at 1728 one a row, each card's head
+  // ending where its text ends (at about 160 characters).
   await a.click('#nav-instructions');
   for (let tries = 0; tries < 30 && !(await a.exists('.ins-card')); tries++) await wait(100);
-  const insRows = await a.run(`(() => { const cards = [...document.querySelectorAll('#instructions-scroll > .ins-card')], texts = [...document.querySelectorAll('#instructions-scroll .ins-preview')];
-    return { cards: cards.length, rows: new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size, widest: Math.max(...texts.map(pre => pre.getBoundingClientRect().width)), card: cards[1].getBoundingClientRect().width }; })()`);
-  check(`at 2560×1440 each instructions card (${insRows.cards}) is a row of its own, the width of the page, its text's lines no longer than about 160 characters`, insRows.cards === insRows.rows && insRows.card > 2000 && insRows.widest < 1300, insRows);
+  const toolRows = `(() => { const cards = [...document.querySelectorAll('.ins-tool-cards > .ins-card')], text = document.querySelector('.ins-tool-cards .ins-preview').getBoundingClientRect(), title = text && document.querySelector('.ins-tool-cards .ins-title').getBoundingClientRect();
+    return { cards: cards.length, rows: new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size, base: document.querySelector('#base-card').getBoundingClientRect().width, card: cards[0].getBoundingClientRect().width, text: Math.round(text.width), titleEnd: Math.round(title.right - text.right) }; })()`;
+  const twoUp = await a.run(toolRows);
+  check(`at 2560×1440 the base card spans the page and the tools’ cards (${twoUp.cards}) sit two a row`, twoUp.rows === Math.ceil(twoUp.cards / 2) && twoUp.base > 2000 && twoUp.card < 1200, twoUp);
+  await sizeTo(a, 1728, 1117);
+  const narrower = await a.run(toolRows);
+  check(`at 1728×1117 the tools' cards sit one a row, each text at most about 160 characters, the head ending where the text ends`, narrower.rows === narrower.cards && narrower.text <= 1226 && narrower.titleEnd <= 1, narrower);
   await fullSize(a);
   await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);
@@ -4167,7 +4176,7 @@ async function draftFlow() {
   // Each stand-in notes its arguments (one a line) whenever it is run for a draft, before anything else: no file, not run.
   const mode = join(realHome, 'draft-mode'), got = join(realHome, 'draft-got'), ran = `${got}.args`;
   const draft = ['<<<CENTRAL KNOT: base>>>', '# Style', 'Be brief.', '<<<CENTRAL KNOT: claude-cli>>>', '# Claude', 'Use the Task tool.', '<<<CENTRAL KNOT: codex-cli>>>', 'Run codex review before pushing.', '<<<CENTRAL KNOT: end>>>'].join('\n');
-  const answers = `printf '%s\\n' "$@" > '${ran}'\ncase "$(cat '${mode}')" in\n  fail) echo "Not logged in · Please run /login" >&2; exit 1 ;;\n  slow) cat > /dev/null; sleep 60 ;;\nesac\ncat > '${got}'\npwd > '${got}.cwd'\n`;
+  const answers = `printf '%s\\n' "$@" > '${ran}'\ncase "$(cat '${mode}')" in\n  fail) echo "Not logged in · Please run /login" >&2; exit 1 ;;\n  slow) cat > /dev/null; sleep 60 ;;\n  late) sleep 2 ;;\nesac\ncat > '${got}'\npwd > '${got}.cwd'\n`;
   const stub = (name, version, answer) => { writeFileSync(join(realHome, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\n${answers}${answer}\n`); chmodSync(join(realHome, '.local/bin', name), 0o755); };
   stub('claude', '2.1.322 (Claude Code)', `[ "$1" = "-p" ] || exit 9\ncat <<'EOF'\n${draft}\nEOF`);
   stub('codex', 'codex-cli 0.167.0', `[ "$1" = "exec" ] || exit 9\nprev=""\nfor arg; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done\necho "working"\ncat > "$out" <<'EOF'\n${draft}\nEOF`);
@@ -4178,8 +4187,39 @@ async function draftFlow() {
   const untilThere = async selector => { for (let tries = 0; tries < 80 && !(await a.exists(selector)); tries++) await wait(100); return a.exists(selector); };
   const typeModel = name => a.run(`(() => { const box = document.querySelector('#base-draft-model'); box.value = ${JSON.stringify(name)}; box.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const argsSent = () => readNow(ran).trim().split('\n');
+  // In view within a pixel: scroll positions are whole pixels, layout is not.
+  const inView = ids => a.run(`(() => { const page = document.querySelector('#instructions-scroll').getBoundingClientRect(); return ${JSON.stringify(ids)}.map(id => { const box = document.getElementById(id)?.getBoundingClientRect(); return !!box && box.top >= page.top - 1 && box.bottom <= page.bottom + 1; }); })()`);
   await a.click('#nav-instructions');
   check('with tools that can write one, the base card offers a draft', await untilThere('#base-draft'), await says('#base-card'));
+  // A file with Windows line endings: a click puts the caret where it landed, and an edit keeps every other line's ending.
+  const crlf = 'Run codex review before pushing.\r\nline one\r\nline two\r\nTARGET here\r\nlast line\r\n';
+  writeFileSync(agentsMd, crlf);
+  await a.click('#header-refresh');
+  await clickText(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
+  same('in a file with Windows line endings a click puts the caret where it landed', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionStart + 6)]; })()`), ['ins-text-codex-cli', 'TARGET']);
+  await a.send('Input.insertText', { text: 'NEW ' });
+  await a.run(`(() => { const area = document.querySelector('#ins-text-codex-cli'); area.value += 'added line\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-codex-cli');
+  same('its review counts the line typed on and the line added, not every line', await says('[aria-label="Codex instructions"] .ins-review-title'), 'Review before saving AGENTS.md: 1 line changed, 1 line added.');
+  await a.click('#ins-save-codex-cli');
+  same('and the save keeps every other line byte for byte, the new line taking the file’s own ending', readNow(agentsMd), crlf.replace('TARGET', 'NEW TARGET') + 'added line\r\n');
+
+  // Selecting a card's text keeps the selection, to copy it: a drag opens no editor. A double-click's first click is a plain
+  // click, which opens the editor, and its second selects the word there.
+  const codexText = '[aria-label="Codex instructions"] pre.ins-preview';
+  await a.run(`document.querySelector('#ins-head-codex-cli').scrollIntoView({ block: 'start' })`);
+  const from = await pointAt(a, codexText, 'line one'), to = await pointAt(a, codexText, 'last line');
+  for (const [type, at, buttons] of [['mouseMoved', from, 0], ['mousePressed', from, 1], ['mouseMoved', to, 1], ['mouseReleased', to, 0]]) await a.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', buttons, clickCount: 1 });
+  await a.settle();
+  same('a drag across a card’s text selects it and opens no editor', [await a.exists('#ins-text-codex-cli'), (await a.run(`String(getSelection())`)).includes('line two')], [false, true]);
+  const word = await pointAt(a, codexText, 'last line');
+  for (const clickCount of [1, 2]) for (const type of ['mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: word.x + 12, y: word.y, button: 'left', clickCount });
+  await a.settle();
+  same('a double-click on a word selects it, in the editor its first click opened', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionEnd)]; })()`), ['ins-text-codex-cli', 'last']);
+  await a.press('Escape');
+  writeFileSync(agentsMd, codex0);
+  await a.click('#header-refresh'); await a.click('#nav-skills'); await a.click('#nav-instructions');
+
   await a.shot('draft-entry');
   const page0 = await says('#instructions-scroll');
 
@@ -4206,6 +4246,14 @@ async function draftFlow() {
   await a.click('#base-draft-cancel');
   same('Cancel closes the panel, with the page, the files and what ran as they were', [await says('#instructions-scroll'), readNow(claudeMd), readNow(agentsMd), existsSync(copilotMd), existsSync(ran), await a.run(`document.activeElement?.id`)], [page0, claude0, codex0, false, false, 'base-draft']);
 
+  // Opened in the smallest window, the panel shows Start and Cancel, Start holding the focus.
+  await sizeTo(a, 860, 600);
+  await a.click('#base-draft');
+  same('opened at 860×600, the panel’s Start and Cancel are in view, Start focused', [...await inView(['base-draft-start', 'base-draft-cancel']), await a.run(`document.activeElement?.id`)], [true, true, 'base-draft-start']);
+  await a.shot('draft-panel-opened-860');
+  await a.click('#base-draft-cancel');
+  await fullSize(a);
+
   // A run that fails: said in the tool's words; the panel stays, with the model still typed, and the other tool can be tried.
   await a.click('#base-draft');
   await typeModel('sonnet');
@@ -4219,18 +4267,49 @@ async function draftFlow() {
   // A tool that takes its time: the panel says it is writing, the texts stay in view, and Stop ends it.
   writeFileSync(mode, 'slow');
   await a.click('#base-draft-by-codex-cli');
+  same('choosing another tool clears the model typed for the first, so it is never sent to the other', [await a.run(`document.querySelector('#base-draft-model').value`), await a.run(`document.querySelector('#base-draft-model').placeholder`)], ['', 'Codex’s default']);
+  await typeModel('gpt-5-codex');
   await a.run(`document.querySelector('#base-draft-start').click()`);
   check('while a tool writes, the panel says so and offers Stop, the texts in view as they were', await untilThere('#base-draft-stop') && /Codex is writing a draft of the base instructions/.test(await says('#base-draft-panel'))
     && (await says('[aria-label="Claude Code instructions"] pre.ins-preview')) === claude0.trimEnd(), await says('#base-card'));
   await a.shot('draft-writing');
   await a.click('#base-draft-stop');
-  check('Stop leaves the panel with Codex chosen and the model still typed, nothing said to be wrong', await untilThere('#base-draft-start') && await a.run(`document.querySelector('#base-draft-by-codex-cli').checked && document.querySelector('#base-draft-model').value === 'sonnet'`) && !(await a.exists('#base-draft-problem')), await says('#base-card'));
+  check('Stop leaves the panel with Codex chosen and the model still typed, nothing said to be wrong', await untilThere('#base-draft-start') && await a.run(`document.querySelector('#base-draft-by-codex-cli').checked && document.querySelector('#base-draft-model').value === 'gpt-5-codex'`) && !(await a.exists('#base-draft-problem')), await says('#base-card'));
+
+  // A draft dropped because a file changed while it was written: the panel shows the prompt as it is now, and Start then runs.
+  writeFileSync(mode, 'late');
+  await a.click('#base-draft-by-claude-cli');
+  await typeModel('');
+  rmSync(ran, { force: true });
+  await a.run(`document.querySelector('#base-draft-start').click()`);
+  // The stand-in notes its arguments as it starts, after the files were read: the change lands while it writes.
+  for (let tries = 0; tries < 80 && !existsSync(ran); tries++) await wait(50);
+  writeFileSync(claudeMd, `${claude0}Typed while the draft was written.\n`);
+  await untilThere('#base-draft-problem');
+  check('a file changed while the draft was written: it is dropped, and the panel shows the prompt as it would be sent now', /changed while the draft was being written/.test(await says('#base-draft-problem')) && (await says('#base-draft-prompt')).includes('Typed while the draft was written.'), await says('#base-draft-panel'));
+  await a.shot('draft-dropped-new-prompt');
+  writeFileSync(mode, 'ok');
+  await a.click('#base-draft-start');
+  check('and the next Start runs', await untilThere('#base-save') && readNow(got).includes('Typed while the draft was written.'), await says('#base-draft-panel'));
+  writeFileSync(claudeMd, claude0);
+  await a.click('#base-review-discard'); await a.click('#base-review-discard-yes');
+  await a.click('#base-draft'); await a.click('#base-draft-by-codex-cli');
 
   // A draft: sent the prompt shown, on the model typed; reviewed first, each file's change said, and what it carried nowhere pointed out.
   writeFileSync(mode, 'ok');
   await typeModel('');
+  // Start with typed text in a tool's editor asks about it first, as every action that opens an editor does, and runs nothing.
+  rmSync(ran, { force: true });
+  await a.click('#ins-edit-claude-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += 'Typed, not saved.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-draft-start');
+  check('Start with typed text in a tool’s editor asks about that text first, and runs nothing', await a.exists('#ins-keep-claude-cli') && !existsSync(ran) && !(await a.exists('#base-save')), await says('#instructions-scroll'));
+  await a.click('#ins-discard-claude-cli');
+  // A clean tool editor closes when Start runs: one thing is edited at a time.
+  await a.click('#ins-edit-claude-cli');
   await a.click('#base-draft-start');
   check('the draft opens as a review that names who wrote it', await untilThere('#base-save') && (await says('.ins-review-title')) === 'Codex’s draft. Check it, then save.', await says('#base-card'));
+  check('and the clean tool editor that was open closed', !(await a.exists('#ins-text-claude-cli')), await says('#instructions-scroll'));
   same('the tool was sent the prompt shown, byte for byte', readNow(got), shown);
   check('with no model when none is typed: the tool’s own default', !argsSent().includes('--model') && argsSent().at(-1) === '-', argsSent());
   check('and ran in a folder of its own, gone afterwards', readNow(`${got}.cwd`).includes('central-knot-draft-') && !existsSync(readNow(`${got}.cwd`).trim()), readNow(`${got}.cwd`));
@@ -4273,13 +4352,18 @@ async function draftFlow() {
   same('a draft saved as written', [readNow(claudeMd), readNow(agentsMd), readNow(copilotMd)], files1);
   // A tool whose file holds only the base: its one action says it adds to them, and starts an editor.
   same('a tool with only the base offers to add instructions of its own, by name', await says('#ins-edit-copilot-cli'), 'Add additional instructions for Copilot CLI');
+  same('its strip says the base is all its file holds; after a tool’s own text it comes then', [await says('[aria-label="Copilot CLI instructions"] .base-strip-line strong'), await says('[aria-label="Claude Code instructions"] .base-strip-line strong')], ['Only the base instructions', 'Then the base instructions']);
   await a.click('#ins-edit-copilot-cli');
   same('and a click opens its editor', await caretAt(a), ['ins-text-copilot-cli', 0]);
   await a.press('Escape');
 
   // With a base: its text stays on screen while a draft is set up, written and stopped; Cancel then leaves the card as it was.
   const card0 = await says('#base-card');
+  await sizeTo(a, 1316, 819);
   await a.click('#base-draft');
+  same('opened with a base at 1316×819, the panel’s Start is in view and focused', [...await inView(['base-draft-start']), await a.run(`document.activeElement?.id`)], [true, 'base-draft-start']);
+  await a.shot('draft-panel-with-base-1316');
+  await fullSize(a);
   await typeModel('gpt-5');
   writeFileSync(mode, 'slow');
   await a.run(`document.querySelector('#base-draft-start').click()`);
@@ -4300,6 +4384,7 @@ async function draftFlow() {
   await a.click('#base-draft-start');
   check('a file changed after the prompt was shown: nothing runs, and the panel says so', !existsSync(ran) && (await says('#base-draft-problem')).startsWith('The instruction files changed after this prompt was shown, so nothing was sent.'), await says('#base-draft-panel'));
   check('and shows the prompt as it would be sent now', (await says('#base-draft-prompt')).includes('Typed after the prompt was shown.'), await says('#base-draft-prompt'));
+  await a.shot('draft-prompt-refused');
   await a.click('#base-draft-start');
   check('Start then sends that prompt', await untilThere('#base-save') && readNow(got).includes('Typed after the prompt was shown.'), readNow(got));
   writeFileSync(claudeMd, claude0);
@@ -4314,22 +4399,32 @@ async function draftFlow() {
   await a.click('#base-review-discard'); await a.click('#base-review-discard-yes');
   check('discarding the draft leaves the card as it was', await a.exists('#base-draft') && !(await a.exists('#base-save')) && readNow(claudeMd) === `${claude0}Typed after the draft.\n`, await says('#base-card'));
 
+  // An editor opened on a card low in the window comes into view: its head, then its box.
+  await sizeTo(a, 1280, 800);
+  await a.run(`(() => { const page = document.querySelector('#instructions-scroll'), head = document.querySelector('#ins-head-codex-cli'); page.scrollTop += head.getBoundingClientRect().bottom - page.getBoundingClientRect().bottom + 2; })()`);
+  await a.click('#ins-edit-codex-cli');
+  same('an editor opened on a card low in the window shows its head and its box', await inView(['ins-head-codex-cli', 'ins-text-codex-cli']), [true, true]);
+  await a.shot('editor-low-in-window');
+  await a.press('Escape');
+  await fullSize(a);
+
   // A long text in the smallest window: the card's head, with its actions, stays in view as an edit starts and is reviewed.
   const long = Array.from({ length: 200 }, (_, line) => `- Line ${line + 1} of a long CLAUDE.md, long enough to show how a text that runs for pages is edited.`).join('\n') + '\n';
   writeFileSync(claudeMd, long);
   await a.click('#header-refresh');
   await sizeTo(a, 860, 600);
-  const inView = ids => a.run(`(() => { const page = document.querySelector('#instructions-scroll').getBoundingClientRect(); return ${JSON.stringify(ids)}.map(id => { const box = document.getElementById(id)?.getBoundingClientRect(); return !!box && box.top >= page.top && box.bottom <= page.bottom; }); })()`);
   await a.run(`document.querySelector('#ins-head-claude-cli').scrollIntoView({ block: 'start' })`);
   same('at 860×600 a 200-line text’s Edit is in view at its card’s head', await inView(['ins-edit-claude-cli']), [true]);
   await a.click('#ins-more-claude-cli');
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', '- Line 150 ');
   same('a click on line 150 opens the editor with the caret on it', await caretAt(a), ['ins-text-claude-cli', long.indexOf('- Line 150 ')]);
   same('with Review changes and Cancel in view, and line 150 too, without scrolling the page', [...await inView(['ins-review-claude-cli', 'ins-cancel-claude-cli']), await caretLineShows(a)], [true, true, true]);
+  same('and the whole box under its head, its end in view', await inView(['ins-head-claude-cli', 'ins-text-claude-cli']), [true, true]);
   await a.shot('long-text-860-editing');
   await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.setRangeText('Changed: '); area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#ins-review-claude-cli');
   same('and Save in view once it is reviewed', await inView(['ins-save-claude-cli']), [true]);
+  await a.shot('long-text-860-review');
   await a.click('#ins-review-discard-claude-cli'); await a.click('#ins-review-discard-yes-claude-cli');
   same('discarding leaves the long file as it was', readNow(claudeMd), long);
   await fullSize(a);

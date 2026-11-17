@@ -1,9 +1,9 @@
-// The editing pieces the Instructions page's tool cards and its Base instructions card share: diffs with a legend, change
-// counts, previews (a click on one opens its editor), earlier-version lists, the discard question, the keyboard hint, and the
-// info box that holds what explains the page.
+// The editing pieces the Instructions page's tool cards and its Base instructions card share: a card's stage (Stage), diffs with
+// a legend, change counts, previews (a click on one opens its editor), the open editor's box fitted under its card's head
+// (fitEditors), earlier-version lists, the discard question, the keyboard hint, and the info box that holds what explains the page.
 import { announce, machine, rerender } from './app.ts';
 import { lineDiff, folded } from './diff.ts';
-import { button, h, icon } from './dom.ts';
+import { afterLayout, button, h, icon } from './dom.ts';
 import { plural } from './model.ts';
 import { linesOf } from './words.ts';
 import type { InstructionFile } from './types.ts';
@@ -23,6 +23,9 @@ const ago = (at: string) => {
   const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60_000);
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
 };
+
+/** A card's stage (at rest, editing, reviewing): its one actions row, which goes in the card's head, and what goes under the head. */
+export interface Stage { actions: HTMLElement; body: (Node | null)[] }
 
 /** The editors' keyboard hint, once there is something to review. */
 export const keys = `Esc to cancel · ${machine.modifierKey}+Enter to review`;
@@ -85,25 +88,32 @@ export function changeCounts(diff: { kind: string }[]) {
   return { total: added + removed + altered, text: [altered ? `${plural(altered, 'line')} changed` : '', added ? `${plural(added, 'line')} added` : '', removed ? `${plural(removed, 'line')} removed` : ''].filter(Boolean).join(', ') };
 }
 
-/** What is open across redraws (every redraw rebuilds the page): texts shown whole, by their key, and the info box (infoBox). */
-const open = new Set<string>();
+/** Texts shown whole, by their key, across redraws (every redraw rebuilds the page). */
+const shownWhole = new Set<string>();
+/** Info boxes left open, by their key, across redraws (infoBox). */
+const openInfo = new Set<string>();
 
 /**
- * How a shown text opens its editor: a click on it, with the caret where the click landed, or Enter while it has focus, with
- * the caret at the start. `start` gets that place as an offset into the text. `locked`: the editor can't open now, with the
- * reason its Edit button gives (said in the status bar on a click), or `true` with none to give (something is under way).
+ * How a shown text opens its editor: a plain click on it, with the caret where the click landed, or Enter while it has focus,
+ * with the caret at the start. A click that ends with text selected in it (a drag, a double-click's word) leaves that selection
+ * to be copied. `start` gets the caret's place as an offset into the text as its editor holds it (each line break one
+ * character, as a text box keeps them). `locked`: the editor can't open now, with the reason its Edit button gives (said in the
+ * status bar on a click), or `true` with none to give (something is under way).
  */
 export interface EditOnClick { start: (caret: number) => void; locked?: string | boolean }
 
-/** The offset into `pre`'s text of the point (x, y); its end when the point is past every character. */
+/** The offset of the point (x, y) into `pre`'s text as an editor holds it (a \r\n line break is one character there); its end
+ *  when the point is past every character. */
 function offsetAt(pre: HTMLElement, x: number, y: number): number {
   const at = document.caretRangeFromPoint(x, y);
-  if (!at || !pre.contains(at.startContainer)) return pre.textContent?.length ?? 0;
   const before = document.createRange();
-  before.setStart(pre, 0);
-  before.setEnd(at.startContainer, at.startOffset);
-  return before.toString().length;
+  before.selectNodeContents(pre);
+  if (at && pre.contains(at.startContainer)) before.setEnd(at.startContainer, at.startOffset);
+  return before.toString().replace(/\r\n/g, '\n').length;
 }
+
+/** Text is selected inside `pre` (by a drag, or a double-click on a word). */
+const selectedIn = (pre: HTMLElement) => { const chosen = getSelection(); return !!chosen && !chosen.isCollapsed && pre.contains(chosen.anchorNode); };
 
 /**
  * A text shown 14 lines at a time, with "Show all N lines" / "Show less" (remembered by `key`). What is shown is the text's
@@ -111,25 +121,40 @@ function offsetAt(pre: HTMLElement, x: number, y: number): number {
  */
 export function previewBlock(text: string, key: string, label: string, moreId: string, edit?: EditOnClick) {
   const lines = linesOf(text);
-  const all = open.has(key);
+  const all = shownWhole.has(key);
   const begin = (caret: number) => {
     if (!edit?.locked) edit?.start(caret);
     else if (typeof edit.locked === 'string') announce(edit.locked);
   };
   const editable = !!edit && !edit.locked;
   return [h(`pre.ins-preview${editable ? '.ins-editable' : ''}`, { tabindex: '0', 'aria-label': label, 'aria-description': editable ? 'Click or press Enter to edit' : undefined,
-    onclick: edit ? (event: MouseEvent) => begin(offsetAt(event.currentTarget as HTMLElement, event.clientX, event.clientY)) : undefined,
+    onclick: edit ? (event: MouseEvent) => { const pre = event.currentTarget as HTMLElement; if (!selectedIn(pre)) begin(offsetAt(pre, event.clientX, event.clientY)); } : undefined,
     onkeydown: edit ? (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault(); begin(0); } } : undefined },
   (all ? lines : lines.slice(0, 14)).join('\n')),
-  lines.length > 14 ? button({ variant: 'link', size: 'micro', label: all ? 'Show less' : `Show all ${lines.length} lines`, id: moreId, onclick: () => { if (all) open.delete(key); else open.add(key); rerender(); } }) : null];
+  lines.length > 14 ? button({ variant: 'link', size: 'micro', label: all ? 'Show less' : `Show all ${lines.length} lines`, id: moreId, onclick: () => { if (all) shownWhole.delete(key); else shownWhole.add(key); rerender(); } }) : null];
 }
+
+/**
+ * Each open editor's text box is no taller than the room under its card's head in the page's scroll area, so the head's
+ * actions and the box's end show together; when they don't, opening the editor scrolls the head to the top (app.ts
+ * focusEditor). Run after each drawing and each change of width (dom.ts afterLayout); a window made only shorter is fitted at
+ * the next drawing.
+ */
+afterLayout(() => {
+  for (const box of document.querySelectorAll<HTMLTextAreaElement>('.ins-card textarea.ins-text:not(.base-own-text)')) {
+    const head = box.closest('.ins-card')?.querySelector('.ins-head'), page = box.closest('.scroll');
+    if (!head || !page) continue;
+    const room = page.clientHeight - (box.getBoundingClientRect().top - head.getBoundingClientRect().top) - 16;
+    box.style.maxHeight = `${Math.max(room, 120)}px`;
+  }
+});
 
 /**
  * One line that opens on a click or Enter to say more (a disclosure, never a hover tooltip), open or shut across redraws by
  * `key`. Holds what explains a page, so the page itself keeps what a person acts on.
  */
 export function infoBox(key: string, id: string, label: string, ...body: (Node | null)[]) {
-  return h('details.info-box', { id, open: open.has(key), ontoggle: (event: Event) => { if ((event.currentTarget as HTMLDetailsElement).open) open.add(key); else open.delete(key); } },
+  return h('details.info-box', { id, open: openInfo.has(key), ontoggle: (event: Event) => { if ((event.currentTarget as HTMLDetailsElement).open) openInfo.add(key); else openInfo.delete(key); } },
     h('summary', {}, icon('info', 14, 'tone-muted'), h('span', {}, label), icon('chevron-right', 12, 'tone-faint info-box-chevron')),
     h('div.info-box-body', {}, ...body));
 }

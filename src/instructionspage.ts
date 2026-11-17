@@ -1,18 +1,20 @@
 // Instructions: each tool's own instruction file, a plain editor (opened by a click on the text or by Edit), a diff before
-// saving and earlier versions (INS-01, INS-02); the page puts the Base instructions card (basecard.ts) first, then one tool's
-// card per row under a heading, and keeps what explains the files (who reads each, the tools' own notes) in one info box at the
-// top. A card's actions are in its head at every stage, so a long text never hides them. There is no turn-off switch:
+// saving and earlier versions (INS-01, INS-02); the page puts the Base instructions card (basecard.ts) first, then the tools'
+// cards under a heading (one a row, two on a wide page: style.css .ins-tool-cards), and keeps what explains the files (who reads
+// each, the tools' own notes) in one info box at the top. A tool's card has its actions in its head at every stage, so a long
+// text never hides them (the base card's, too, except while its Draft panel is open: basecard.ts). There is no turn-off switch:
 // instruction files are edited, never disabled or emptied by Central Knot (the one deletion is an Undo of a base save removing a
 // file that save created, while unchanged).
 import { announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
-import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keepCaret, keys, legend, previewBlock, versionsList } from './editparts.ts';
+import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keepCaret, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { fileName, lineCount, toolNames } from './words.ts';
 import { button, h, icon, lockAttrs, pathText, rereadBand } from './dom.ts';
 import { noToolsState } from './pages.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import type { HarnessId, InstructionFile } from './types.ts';
 import { lineDiff } from './diff.ts';
+import { keepLineBreaks } from './drafts.ts';
 export { lineDiff } from './diff.ts';
 
 
@@ -34,9 +36,6 @@ document.addEventListener('keydown', event => {
   event.preventDefault();
   leaveReview(edit.tool);
 });
-
-/** A card's stage: its one actions row, which goes in the card's head, and what goes under the head. */
-interface Stage { actions: HTMLElement; body: (Node | null)[] }
 
 /** The open file's editor, or its review before saving. */
 function editor(file: InstructionFile): Stage {
@@ -82,7 +81,7 @@ function editor(file: InstructionFile): Stage {
       : `Write what ${toolNames[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
     oninput: (event: Event) => {
       const target = event.target as HTMLTextAreaElement;
-      edit.text = target.value;
+      edit.text = keepLineBreaks(edit.from.text, target.value);
       if (edit.confirmDiscard) { edit.confirmDiscard = false; keepCaret(`ins-text-${file.tool}`, target.selectionStart, rerender); return; }
       // Said as you type, without redrawing the editor: the pill and Review follow whether the text differs.
       const changed = draftUnsaved();
@@ -209,7 +208,7 @@ export function instructionsPage() {
       aboutInstructions(files, !!state.base),
       baseCard(files),
       h('div.ins-section-head', {}, h('h2.ins-section-title', {}, 'Each tool’s own instructions'), h('p.ins-section-note', {}, 'Only that tool reads these.')),
-      files.map(file => instructionCard(file))));
+      h('div.ins-tool-cards', {}, files.map(file => instructionCard(file)))));
 }
 
 /** Shown while the files are not here yet: their read is under way, or it failed (Refresh reads again). */

@@ -87,8 +87,8 @@ A Git link the person gave, read on a click and once a day, and never written: e
 
 ## Instructions
 Each tool's own instruction file, edited in place; and one base text kept in a marked block in the chosen tools' files.
-- `instructions.ts` the files: read, checked save, versions, the base applied (`applyBase`) · `instructionspage.ts` the page: what explains the files in one info box (`aboutInstructions`), the base card, then each tool's card (`instructionCard`, also a harness's Instructions tab) · `editparts.ts` what both kinds of card share: a text a click opens for editing (`previewBlock`), diffs, versions, the discard question, the info box (`infoBox`)
-- `basecard.ts` the base instructions card, with the panel that sets up a draft (`draftPanel`) · `basetext.ts` the base's block in a tool's file · `draftbase.ts` a first draft by one of the person's tools: its prompt, shown before it runs (`promptNow`), and the run, sent only that prompt (`writeDraft`) · `drafts.ts` when a draft is replaced
+- `instructions.ts` the files: read, checked save, versions, the base applied (`applyBase`) · `instructionspage.ts` the page: what explains the files in one info box (`aboutInstructions`), the base card, then each tool's card (`instructionCard`, also a harness's Instructions tab) · `editparts.ts` what both kinds of card share: a card's stage (`Stage`), a text a click opens for editing (`previewBlock`), the open editor's box fitted under its card's head, diffs, versions, the discard question, the info box (`infoBox`)
+- `basecard.ts` the base instructions card, with the panel that sets up a draft (`draftPanel`) · `basetext.ts` the base's block in a tool's file · `draftbase.ts` a first draft by one of the person's tools: its prompt, shown before it runs (`promptNow`), and the run, sent only that prompt (`writeDraft`) · `drafts.ts` when a draft is replaced, and a file's own line breaks kept through the editor (`keepLineBreaks`)
 - **Start:** `instructions.ts`'s header. **Examples:** `tests/instructions.test.ts`, `tests/baseinstructions.test.ts`, `tests/draftbase.test.ts`, `tests/drafts.test.ts`.
 
 ## Updates, packaging and custom builds

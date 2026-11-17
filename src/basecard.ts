@@ -1,17 +1,18 @@
 // Base instructions (INS-03, INS-04): one text, written once, that Central Knot keeps in each chosen tool's own instruction file,
 // in a marked block after that tool's own instructions. A tool's own text is never rewritten. A copy edited in a tool's file is
 // shown, never overwritten by itself: the person uses it as the base or puts the base back. Every save shows each file's change first.
-// Its text opens for editing on a click, as a tool's card does (editparts.ts previewBlock), and its actions sit in its head at every
-// stage (editing, reviewing too), as on the tools' cards.
+// Its text opens for editing on a click, as a tool's card does (editparts.ts previewBlock), and its actions sit in its head (editing
+// and reviewing too), as on the tools' cards; while the Draft panel is open the head has none, and the panel's Start, Cancel or
+// Stop are at the panel's foot.
 // One of the person's own tools can write the first draft (INS-06): it sorts every tool's instructions into the base and what
 // stays only in each tool's file, and the draft is reviewed and saved like any other base change, each file's own text included.
 // Its panel (draftPanel) opens under the base's text and says, before anything runs, which tool runs, on which model, and the
 // whole prompt it is sent; the text above stays as it is while the tool writes.
-import { applyBaseChange, closeDraftPick, startDraft, draftStale, draftable, openDraftPick, savingOff, startTakeOut, stopDraft, baseDraftTyped, baseSaveDoesSomething, loadBaseVersion, ownText, rerender, showPage, toolDraftTyped, shownPath, startBaseEdit, state, type BaseEdit, type DraftPick } from './app.ts';
+import { applyBaseChange, closeDraftPick, draftFile, startDraft, draftStale, draftable, openDraftPick, savingOff, startTakeOut, stopDraft, baseDraftTyped, baseSaveDoesSomething, loadBaseVersion, ownText, rerender, showPage, toolDraftTyped, shownPath, startBaseEdit, state, type BaseEdit, type DraftPick } from './app.ts';
 import { baseAction, draftedOwn, fileWithBase, linesNotCarried, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText } from './dom.ts';
-import { changeCounts, diffView, discardConfirm, escapeTo, keepCaret, keys, legend, previewBlock, versionsList } from './editparts.ts';
+import { changeCounts, diffView, discardConfirm, escapeTo, keepCaret, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { brandMark } from './matrix.ts';
 import { fileName, lineCount, toolList, toolNames } from './words.ts';
 import { plural } from './model.ts';
@@ -90,9 +91,6 @@ function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: s
   if (copy === undefined) return says(own.trim() ? `Added after its own ${plural(lineCount(own), 'line')}.` : 'The base instructions are added.');
   return says(own.trim() ? 'Its copy of the base is updated. Its own instructions stay.' : 'Its copy of the base is updated.');
 }
-
-/** A stage of the card: its one actions row, which goes in the card's head, and what goes under the head. */
-interface Stage { actions: HTMLElement; body: (Node | null)[] }
 
 /** The base editor: its text, the tools that get it, and Review / Cancel (with a discard question for a typed draft). */
 function editView(files: InstructionFile[], edit: BaseEdit): Stage {
@@ -281,7 +279,8 @@ function draftPanel(pick: DraftPick): HTMLElement {
     h('p.base-explain', {}, `A tool sorts your instruction files: what every tool should get becomes the base, and the rest stays in each tool’s file. Central Knot runs ${name}’s command line once, in an empty folder, and sends it the prompt below. It writes a draft and changes nothing: your files change only when you review the draft and save it.`),
     drafters.length > 1 ? h('fieldset.draft-tools', { disabled: !!writing }, h('legend', {}, 'The tool that writes it'),
       drafters.map(tool => h('label.draft-tool', {}, h('input', { type: 'radio', name: 'draft-tool', id: `base-draft-by-${tool}`, checked: tool === pick.tool,
-        onchange: () => { pick.tool = tool; rerender(); document.getElementById(`base-draft-by-${tool}`)?.focus(); } }), brandMark(tool, 14), h('span', {}, toolNames[tool])))) : null,
+        // A model is one tool's name for it: another tool starts on its own default.
+        onchange: () => { Object.assign(pick, { tool, model: '' }); rerender(); document.getElementById(`base-draft-by-${tool}`)?.focus(); } }), brandMark(tool, 14), h('span', {}, toolNames[tool])))) : null,
     h('label.draft-model', { for: 'base-draft-model' }, 'Model'),
     h('div.draft-model-line', {},
       h('input.draft-model-input', { id: 'base-draft-model', type: 'text', value: pick.model, spellcheck: 'false', placeholder: `${name}’s default`, disabled: !!writing,
@@ -402,7 +401,8 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
   // The choice lives on the resting Base instructions card, which an open base editor replaces.
   const goWhy = state.baseEdit ? 'Finish or cancel the base instructions edit first.' : lockedWhy;
   return h('div.base-strip', {},
-    h('div.base-strip-line', {}, icon('layers', 13, 'tone-muted'), h('span', {}, h('strong', {}, 'Then the base instructions'), ` · ${plural(lines, 'line')}, ${said}`),
+    // After the tool's own text, or its editor; with neither, the base is all the file holds.
+    h('div.base-strip-line', {}, icon('layers', 13, 'tone-muted'), h('span', {}, h('strong', {}, ownText(file).trim() || draftFile() === file ? 'Then the base instructions' : 'Only the base instructions'), ` · ${plural(lines, 'line')}, ${said}`),
       goTo ? button({ variant: 'link', size: 'micro', label: base.state === 'edited' ? 'Choose what to do…' : 'Update…', id: `ins-base-go-${file.tool}`, disabled: !!goWhy, attrs: lockAttrsFor(goWhy), onclick: () => {
         // On a harness's Instructions tab the Base instructions card isn't on the page: the choice is made on Instructions.
         if (!document.getElementById(goTo)) showPage('instructions');

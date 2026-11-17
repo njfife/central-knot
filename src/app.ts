@@ -78,8 +78,9 @@ export interface BaseEdit {
 
 /**
  * The panel that sets up a draft of the base, while it is open under the base's text (basecard.ts draftPanel): the tool that
- * will write it, the model typed for it ('' for the tool's own default), the prompt it will be sent as main read it when the
- * panel opened (or when a Start found the files changed), and why the last try gave no draft. Nothing of it is stored.
+ * will write it, the model typed for that tool ('' for its own default; choosing another tool clears it), the prompt it will be
+ * sent as main last read it (when the panel opened, or when a Start or a dropped draft found the files changed), and why the
+ * last try gave no draft. Nothing of it is stored.
  */
 export interface DraftPick { tool: HarnessId; model: string; prompt: string; problem?: string }
 
@@ -961,26 +962,29 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
 });
 
 /**
- * Focus in an editor once it is drawn (`id`), with its card's head in view (`headId`: its actions are there). With `caret`
- * (where a click on the text landed) the caret goes there, and the box scrolls within itself to show that line under the head.
+ * Focus in an editor once it is drawn (`id`: its text box, or a review's Save), with its card's head (`headId`, where its
+ * actions are) and the box in view: when either is out of sight, the page scrolls the head to its top, and the box, sized to the
+ * room under the head (editparts.ts), shows whole. With `caret` (where a click on the text landed) the caret goes there, and
+ * the box scrolls within itself to show that line.
  */
 function focusEditor(id: string, headId: string, caret?: number) {
-  document.getElementById(headId)?.scrollIntoView({ block: 'nearest' });
-  const area = document.getElementById(id) as HTMLTextAreaElement | null;
-  if (!area) return;
-  area.focus({ preventScroll: true });
-  if (caret === undefined) return;
-  area.setSelectionRange(caret, caret);
-  // How far down the caret's line ends: the height of the text up to it in a one-row box, wrapped lines counted.
-  const [text, rows] = [area.value, area.rows];
-  Object.assign(area, { value: text.slice(0, caret), rows: 1 });
-  const lineEnd = area.scrollHeight;
-  Object.assign(area, { value: text, rows });
-  area.setSelectionRange(caret, caret);
-  // The part of the box on screen, from its top to the foot of the page's scroll area: the line goes halfway down it when below.
-  const box = area.getBoundingClientRect(), page = area.closest('.scroll')?.getBoundingClientRect();
-  const shown = Math.min(box.bottom, page?.bottom ?? innerHeight) - box.top;
-  area.scrollTop = lineEnd > shown ? lineEnd - shown / 2 : 0;
+  const target = document.getElementById(id), head = document.getElementById(headId), page = target?.closest('.scroll')?.getBoundingClientRect();
+  if (!target || !head || !page) return;
+  target.focus({ preventScroll: true });
+  const box = target instanceof HTMLTextAreaElement && caret !== undefined ? target : undefined;
+  // How far down the caret's line ends: the height of the text up to it in a one-row box, wrapped lines counted. Measured
+  // before the page scrolls, since the box is briefly one row tall.
+  let lineEnd = 0;
+  if (box) {
+    const [text, rows] = [box.value, box.rows];
+    Object.assign(box, { value: text.slice(0, caret), rows: 1 });
+    lineEnd = box.scrollHeight;
+    Object.assign(box, { value: text, rows });
+    box.setSelectionRange(caret!, caret!);
+  }
+  const shows = (element: Element) => { const edges = element.getBoundingClientRect(); return edges.top >= page.top - 1 && edges.bottom <= page.bottom + 1; };
+  if (!shows(head) || !shows(target)) head.scrollIntoView({ block: 'start' });
+  if (box) box.scrollTop = lineEnd > box.clientHeight ? lineEnd - box.clientHeight / 2 : 0;
 }
 
 /** Opens one file in the editor, the caret at `caret` when a click on its text opened it; any earlier result band belongs to
@@ -1186,8 +1190,12 @@ export function openDraftPick() {
     const now = await api().draftPrompt(state.home!.home);
     if ('stopped' in now) { announce(now.stopped); return; }
     state.draftPick = { tool: state.base!.drafters[0], model: '', prompt: now.prompt };
-    focusAfterBusy = 'base-draft-start';
-  }, { keepResult: true }).then(() => document.getElementById('base-draft-panel')?.scrollIntoView({ block: 'nearest' }));
+  }, { keepResult: true }).then(() => {
+    // Focus on Start, brought just into view: as much as fits above it stays (the base's text, the panel's top).
+    const start = document.getElementById('base-draft-start');
+    start?.focus({ preventScroll: true });
+    start?.scrollIntoView({ block: 'nearest' });
+  });
 }
 export function closeDraftPick() {
   state.draftPick = undefined;
@@ -1202,6 +1210,9 @@ export function closeDraftPick() {
  * tool or model can be tried, or (the files changed since the prompt was shown) the prompt as it would be sent now.
  */
 export const startDraft = () => {
+  // One thing is edited at a time: typed work in a tool's editor is asked about first, and a clean one closes.
+  if (askAboutOpenDraft()) return;
+  if (!draftUnsaved()) state.instructionEdit = undefined;
   const pick = state.draftPick!;
   const tool = pick.tool;
   state.drafting = tool;
@@ -1224,7 +1235,10 @@ export const startDraft = () => {
       const changed = files.filter(file => draft.read[file.tool] !== undefined && draft.read[file.tool] !== file.hash).map(file => file.tool);
       const base = state.base;
       if (changed.length || draft.baseHash !== (base?.hash ?? '')) {
-        none(`${changed.length ? `${fileNames(changed)} changed` : 'The base instructions changed'} while the draft was being written, so the draft was dropped. Nothing was changed. Have it written again.`);
+        // The prompt below is read again, so the next Start sends the files as they are now.
+        const now = await api().draftPrompt(state.home!.home);
+        if ('prompt' in now) pick.prompt = now.prompt;
+        none(`${changed.length ? `${fileNames(changed)} changed` : 'The base instructions changed'} while the draft was being written, so the draft was dropped. Nothing was changed. ${'prompt' in now ? 'The prompt below is as it would be sent now: Start sends it.' : now.stopped}`);
         return;
       }
       // Every tool gets a first base, as when one is written by hand; a later draft keeps the list and adds the tools it sorted.
