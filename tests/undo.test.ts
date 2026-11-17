@@ -95,7 +95,7 @@ test('Undo of turning an agent on over a different copy made by hand in one tool
 });
 
 // Only an Undo gives copies back, and only while the item is as its click left it; any other action leaves every copy Central Knot's.
-test('History’s Turn off on a take-in edited since takes it out of every tool: no copy is given back', async () => {
+test('History’s Turn it off on a take-in edited since takes it out of every tool: no copy is given back', async () => {
   const box = await sandbox();
   try {
     await put(box, 'claude-cli');
@@ -103,7 +103,7 @@ test('History’s Turn off on a take-in edited since takes it out of every tool:
     await writeFile(join(folderOf(box, 'copilot-cli'), 'SKILL.md'), skillText('Edited later.'));
     await pass(box);
     const found = (await historyActions(box)).find(action => action.event.cause === 'found')!;
-    assert.equal(found.label, 'Turn off');
+    assert.equal(found.label, 'Turn it off');
     await found.run();
     await pass(box);
     assert.deepEqual(Object.values(await everywhere(box)).filter(Boolean), [], 'no tool has it');
@@ -118,7 +118,7 @@ test('A take-in’s Undo is not offered once a tool it was found in is kept out:
     await turnOn(box);
     await inTool(box, 'claude-cli', true);
     const found = (await historyActions(box)).find(action => action.event.cause === 'found');
-    assert.equal(found?.label, 'Turn off');
+    assert.equal(found?.label, 'Turn it off');
   } finally { await box.cleanup(); }
 });
 

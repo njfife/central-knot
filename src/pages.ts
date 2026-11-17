@@ -9,7 +9,7 @@ import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { heldKinds } from './presence.ts';
 import { brandMark, itemsTable, outcomeBand, resultInHeader, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
-import { andList, kindNames, kindNouns, noToolsSentence, orList, toolList } from './words.ts';
+import { andList, kindNames, kindNouns, noToolsSentence, orList, pageNames, toolList } from './words.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { asksWhichCopy } from './libraryrow.ts';
 import { anyOn, kindSource } from './itemrow.ts';
@@ -232,10 +232,10 @@ export function overviewPage() {
           ...(home.syncOn ? [`Automatic sync is on: edits spread between tools in seconds${home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : ''}, with a notice and Undo.`]
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes in your tools is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
-        // The two pages the cards don't cover, named once so a newcomer knows what they are; Plugins only where a tool here
+        // The two pages the cards don't cover, named once so a newcomer knows what they are; the plugins' page only where a tool here
         // installs them, and neither in a home with no tools.
         empty ? null : h('p.overview-line', {}, icon('info', 14, 'tone-muted'), 'Also here: ', button({ variant: 'link', size: 'micro', label: 'Instructions', id: 'overview-instructions', onclick: () => showPage('instructions') }), ' (each tool’s own instruction file)',
-          ...(!absent.includes('plugins') ? [' and ', button({ variant: 'link', size: 'micro', label: 'Plugins', id: 'overview-plugins', onclick: () => showPage('plugins') }), ' (install from a marketplace)'] : []), '.'))));
+          ...(!absent.includes('plugins') ? [' and ', button({ variant: 'link', size: 'micro', label: pageNames.plugins, id: 'overview-plugins', onclick: () => showPage('plugins') }), ' (plugins to install in your tools)'] : []), '.'))));
 }
 
 // ---------- MCP servers ----------

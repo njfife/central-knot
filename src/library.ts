@@ -166,7 +166,7 @@
 // deleted and written again by hand is not the source's), and that source's last read of its kind doesn't hold its name (a
 // skill of that name there is no agent). That source's row on Sources and the item's row on its kind's page say so
 // (sources.ts sourceFacts, which the Sources page reads too). The drop let the link go, so turning it On (its switch,
-// History's Turn on, a profile) is the revert: it is no longer Off, and nothing says it any more.
+// History's Turn it on, a profile) is the revert: it is no longer Off, and nothing says it any more.
 // Nor once the item is deleted, the source removed, or a read holds the name again, readable or not: unchanged here since, the
 // item is linked again and follows the source (`once`); changed here, it is not brought in and never written over
 // (`differs`). A read that doesn't hold the name, whole or not, leaves it.

@@ -15,8 +15,8 @@
 //   of it, is atlink.ts's (holdsAt, readOf: whether it was read whole is decided there);
 // - the clicks: Look (previewSource: what Add would do, name by name, before anything is kept), Add, Check now, a click on one
 //   name's line in its kind (rowClick: Add on one the library holds deleted; Replace, Merge and Keep mine on one whose version
-//   waits) and Remove; and whether Look hands a marketplace to the Plugins page (handOff: Add to Plugins is the Plugins page's
-//   own add, marketplaces.ts add, which the page calls; no source is made, and nothing is kept here);
+//   waits) and Remove; and whether Look hands a marketplace to the Plugins page (handOff: its button, words.ts toPluginsLabel, is
+//   the Plugins page's own add, marketplaces.ts add, which the page calls; no source is made, and nothing is kept here);
 // - the check once a day (checkDue: the rhythm is here, main.ts only calls it on its schedule's turn, with Automatic sync on);
 // - what the table says, as the pages show it: the Sources page's view (sourcesView) and each linked or removed item's row on
 //   its kind's page (sourceFacts), both from the same answers the pass carries out, with the tools read now.
@@ -52,6 +52,7 @@ import { copyOf, lookOf, readSources, recordedIds, saveSources, sourcesFolder, s
 import { linkLabel, readLink, splitRef } from './sourcelink.ts';
 import type { Change, DestinationResult, HarnessId, LibraryFacts, PassResult, SourceFound, SourceName, SourcePreview, SourceResult, SourceRowClick, SourcesView, SourceView, ToPlugins } from './types.ts';
 import { githubRepo } from './values.ts';
+import { pageNames } from './words.ts';
 
 /** A link as resolved before it is fetched: what a source records of where it reads (its `ref` always a branch or tag's name). */
 type Resolved = Pick<SourceRecord, 'link' | 'repository' | 'ref' | 'folder'>;
@@ -208,9 +209,9 @@ async function resolve(context: ShareContext, link: string): Promise<{ where: Re
  */
 function handOff(where: Resolved, head: string | undefined, found: Holds): { toPlugins: ToPlugins } | { why: string } | undefined {
   if ((found.holds !== 'marketplace' && found.holds !== 'listed') || !found.market || 'problem' in found.market) return undefined;
-  const rule = 'the Plugins page adds a marketplace from its repository’s default branch, at its root';
-  if (found.holds === 'marketplace' && where.folder) return { why: `It is in the folder ${where.folder}, not at its repository’s root, and ${rule}. To use it, clone the repository and add that folder in it with Folder… on Plugins.` };
-  if (where.ref !== head) return { why: `It was read on ${where.ref}, not ${head ? `the default branch, ${head}` : 'a default branch'}, and ${rule}. To use it, clone that branch and add the clone’s folder with Folder… on Plugins.` };
+  const rule = `the ${pageNames.plugins} page adds a marketplace from its repository’s default branch, at its root`;
+  if (found.holds === 'marketplace' && where.folder) return { why: `It is in the folder ${where.folder}, not at its repository’s root, and ${rule}. To use it, clone the repository and add that folder in it with Folder… on ${pageNames.plugins}.` };
+  if (where.ref !== head) return { why: `It was read on ${where.ref}, not ${head ? `the default branch, ${head}` : 'a default branch'}, and ${rule}. To use it, clone that branch and add the clone’s folder with Folder… on ${pageNames.plugins}.` };
   return { toPlugins: { address: githubRepo(where.repository) ?? where.repository, name: found.market.name, plugins: found.market.plugins } };
 }
 
