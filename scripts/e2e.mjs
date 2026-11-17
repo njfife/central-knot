@@ -1130,7 +1130,10 @@ async function practiceFlow() {
   await a.click('#files-standup');
   await a.click('#list-zz-6');
   await sizeTo(a, ...SMALLEST);
-  check('the chosen row stays in view in the stacked list', await a.run(`(() => { const list = document.querySelector('#skills-list'), row = document.querySelector('#list-zz-6'), head = list.querySelector('.list-head'); const area = list.getBoundingClientRect(), box = row.getBoundingClientRect(); return box.top >= area.top + head.offsetHeight - 1 && box.bottom <= area.top + list.clientHeight + 1; })()`));
+  // The list brings the row into view at the first frame after it is laid out at the new size (matrix.ts revealSelected).
+  const rowInView = () => a.run(`(() => { const list = document.querySelector('#skills-list'), row = document.querySelector('#list-zz-6'), head = list.querySelector('.list-head'); const area = list.getBoundingClientRect(), box = row.getBoundingClientRect(); return box.top >= area.top + head.offsetHeight - 1 && box.bottom <= area.top + list.clientHeight + 1; })()`);
+  for (let tries = 0; tries < 30 && !(await rowInView()); tries++) await wait(100);
+  check('the chosen row stays in view in the stacked list', await rowInView());
   await fullSize(a);
   await a.press('Escape');
   // A scrolled table keeps its place when the window crosses the dock's breakpoint (a redraw), both ways.
@@ -1651,9 +1654,12 @@ async function practiceFlow() {
   // Narrower than any window here, with the sidebar open, so the description is held to its two lines; then wide enough
   // for it, still below the sidebar's and the dock's breakpoints, so nothing redraws the page.
   const pdfCut = () => a.run(`(() => { const li = [...document.querySelectorAll('.plugin-parts li')].find(li => li.textContent.includes('pdf-reader')); const what = li?.querySelector('.plugin-part-what'); return [li?.classList.contains('clamped') ?? null, what?.clientWidth]; })()`);
-  await sizeTo(a, 720, 560); await a.click('#sidebar-toggle'); await wait(200);
+  // The description is measured again once it is laid out at the new width: waited for, each way.
+  await sizeTo(a, 720, 560); await a.click('#sidebar-toggle');
+  for (let tries = 0; tries < 30 && (await pdfCut())[0] !== true; tries++) await wait(100);
   const narrow = await pdfCut();
-  await sizeTo(a, 960, 560); await wait(200);
+  await sizeTo(a, 960, 560);
+  for (let tries = 0; tries < 30 && (await pdfCut())[0] !== false; tries++) await wait(100);
   const wide = await pdfCut();
   same('Show more follows the description’s width with the same plugin open', [narrow[0], wide[0]], [true, false]);
   if (narrow[0] !== true || wide[0] !== false) console.error('description widths', narrow[1], wide[1]);
