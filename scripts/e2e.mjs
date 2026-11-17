@@ -175,7 +175,10 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   app = {
     child, run, send, settle, pageErrors,
     inspect, main: inspect && (() => mainProcess(inspect)),
-    click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
+    // A row's own switch or Add clicked here is a run of its own: the header's result is closed first, as a person's would have
+    // gone, since a click joins the run whose result is on screen (app.ts queueClick). The checks of runs click by pointer
+    // (clickAt) or in the page.
+    click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); if (e.matches('.switch, .add-item') && e.closest('[data-key], [data-plugin]') && !e.closest('.details')) document.querySelector('#outcome-dismiss, #report-dismiss')?.click(); e.click(); })()`); await settle(); },
     exists: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     text: selector => run(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`),
     all: (selector, field = 'e.textContent') => run(`[...document.querySelectorAll(${JSON.stringify(selector)})].map(e => ${field})`),
@@ -4757,7 +4760,9 @@ fs.writeFileSync(record, JSON.stringify(now));
   await done();
   same('a press released after a redraw replaced its switch still counts as its click', [redrawn, await switchOn(a, 'srv-38'), await switchOn(a, 'srv-32')], [true, false, false]);
 
-  // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it.
+  // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it. The
+  // last result closed first, so the click below is a run of its own.
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
   await sizeTo(a, ...SMALLEST);
   await a.run(`document.getElementById('${table}').scrollTop = 0`);
   const firstOn = (await sectionsNow(a))[0][1][0], reaches = selector => a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(), at = document.elementFromPoint(box.left + box.width / 2, box.top + 2); return !!at?.closest(${JSON.stringify(selector)}); })()`);
