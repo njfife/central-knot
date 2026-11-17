@@ -50,7 +50,8 @@
   --accent-hover: oklch(0.45 0.22 264);
   --accent-ink: oklch(0.49 0.22 264);
   --focus: oklch(0.49 0.22 264);
-  --picked: #edf1fc;
+  /* What is chosen or opened: as dark as a row's hover (--row-hover) and bluer, so an opened row is the strongest tint on its list. */
+  --picked: #e0e9fb;
   --danger: #b91c1c;
   --danger-tint: #fef0f0;
   /* The strong danger fill behind white text (a destructive button), the same in both themes as the reference gives it. */
@@ -472,10 +473,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /*
  * An opened row and its details under it are one block: one background, one 3px bar down the left of both (the warning colour
  * while its copy question is open: matrix.ts compareChoices) and no line between them; the block's line is under its details.
- * The row keeps the look under the pointer, and a docked row (its details beside the table) has it too. It scrolls with the
- * list like any row.
+ * The row keeps the look under the pointer and with the keyboard's focus in it (its control's own ring shows where), and a
+ * docked row (its details beside the table) has it too. It scrolls with the list like any row.
  */
-.ov-row.open, .ov-row.open:hover, .details { background: var(--picked); box-shadow: inset 3px 0 0 var(--accent); }
+.ov-row.open, .ov-row.open:hover, .ov-row.open:has(:focus-visible), .details { background: var(--picked); box-shadow: inset 3px 0 0 var(--accent); }
 .ov-row.open:has(+ .details-differs), .details-differs { box-shadow: inset 3px 0 0 var(--warning); }
 .ov-head { position: sticky; top: 0; z-index: 3; height: 60px; background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 .ov-head > * { align-self: center; }

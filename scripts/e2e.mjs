@@ -547,24 +547,30 @@ const FILE_COLUMN_BLANK = `(() => {
 })()`;
 
 /**
- * The opened row `key` and its details under it as the page draws them (style.css .ov-row.open), with the pointer on the row:
- * where the pointer is, then the row's background and box shadows, then the details', each colour named by the page's own
- * token (picked, accent, warning, line). The pointer is moved off the page again after.
+ * The opened row `key` and its details under it as the page draws them (style.css .ov-row.open), each colour named by the
+ * page's own token (picked, accent, warning, line). With the pointer on the row: where the pointer is, the row's background
+ * and box shadows, then the details'. Then, the pointer off the page and the keyboard's focus on the row's first control:
+ * where the focus is, and the row's look again. The focus is let go after.
  */
 async function openedRowLook(a, key) {
   const row = `.ov-row.open[data-key="${key}"]`;
-  const [x, y] = await a.run(`(() => { const box = document.querySelector('${row}').getBoundingClientRect(); return [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)]; })()`);
-  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-  const look = await a.run(`(() => {
+  /** Reads `what` on the page, where `row` is the row and `drawn(element)` its look in token names. */
+  const read = what => a.run(`(() => {
     const probe = document.body.appendChild(document.createElement('i'));
     const tokens = ['picked', 'accent', 'warning', 'line'].map(name => { probe.style.color = 'var(--' + name + ')'; return [getComputedStyle(probe).color, name]; });
     probe.remove();
     const drawn = element => tokens.reduce((said, [colour, name]) => said.split(colour).join(name), getComputedStyle(element).backgroundColor + ', ' + getComputedStyle(element).boxShadow);
     const row = document.querySelector('${row}');
-    return [row.matches(':hover') ? 'pointer on the row' : 'pointer elsewhere', drawn(row), drawn(row.nextElementSibling)];
+    return ${what};
   })()`);
+  const [x, y] = await a.run(`(() => { const box = document.querySelector('${row}').getBoundingClientRect(); return [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)]; })()`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  const underPointer = await read(`[row.matches(':hover') ? 'pointer on the row' : 'pointer elsewhere', drawn(row), drawn(row.nextElementSibling)]`);
   await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
-  return look;
+  await a.run(`document.querySelector('${row} button').focus({ focusVisible: true })`);
+  const withFocus = await read(`[row.matches(':has(:focus-visible)') ? 'keyboard focus in the row' : 'no keyboard focus in the row', drawn(row)]`);
+  await a.run(`document.activeElement?.blur()`);
+  return [...underPointer, ...withFocus];
 }
 
 /**
@@ -794,8 +800,8 @@ async function practiceFlow() {
     { quote: '“Read the supplied changes. Explain what changed, what to check, and what is still unknown.”', tinted: [], does: 'Replaces Copilot CLI’s copy; adds it to Codex.' },
     { quote: '“Read the pull request. List defects first, then missing tests. Ignore style unless it hides a bug.”', tinted: [], does: 'Replaces Claude Code’s copy; adds it to Codex.' },
   ]);
-  same('a row with its copy question open and the question are one block, its bar the warning colour', await openedRowLook(a, 'review'),
-    ['pointer on the row', 'picked, warning 3px 0px 0px 0px inset', 'picked, warning 3px 0px 0px 0px inset']);
+  same('a row with its copy question open and the question are one block, its bar the warning colour, the row too under the pointer and with the focus in it', await openedRowLook(a, 'review'),
+    ['pointer on the row', 'picked, warning 3px 0px 0px 0px inset', 'picked, warning 3px 0px 0px 0px inset', 'keyboard focus in the row', 'picked, warning 3px 0px 0px 0px inset']);
   await a.click('#use-review-copilot-cli');
   same('the chosen copy is used in every tool, and it is on', [readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), readNow(join(practice, '.codex/skills/review/SKILL.md')), await switchOn(a, 'review')], [reviewCopilot, reviewCopilot, true]);
   check('the result names the copy chosen and says the others are kept as versions', (await a.text('.band-done') ?? '').includes('review is in Central Knot now, with Copilot CLI’s copy, and on in all 3 tools. The other copies are kept as its versions.'), await a.text('.bands'));
@@ -1131,11 +1137,12 @@ async function practiceFlow() {
   const docked = await tableTop();
   await sizeTo(a, 1280, 560);
   check('a scrolled table keeps its place across the dock breakpoint, both ways', scrolled > 0 && docked === scrolled && await tableTop() === scrolled, { scrolled, docked, back: await tableTop() });
-  // An opened row and its details are one block, the row too under the pointer. Scrolled until the middle of its details is at
-  // the table's top, the row has gone up with the list: none of it is in view, nor drawn over the details.
+  // An opened row and its details are one block, the row too under the pointer and with the focus in it. Scrolled until
+  // the middle of its details is at the table's top, the row has gone up with the list: none of it is in view, nor drawn
+  // over the details.
   await opened('zz-1');
-  same('an opened row and its details are one block: one background, one accent bar down both, no line under the row', await openedRowLook(a, 'zz-1'),
-    ['pointer on the row', 'picked, accent 3px 0px 0px 0px inset', 'picked, accent 3px 0px 0px 0px inset']);
+  same('an opened row and its details are one block: one background, one accent bar down both, no line under the row, under the pointer and with the focus in it', await openedRowLook(a, 'zz-1'),
+    ['pointer on the row', 'picked, accent 3px 0px 0px 0px inset', 'picked, accent 3px 0px 0px 0px inset', 'keyboard focus in the row', 'picked, accent 3px 0px 0px 0px inset']);
   same('scrolled past an opened row, nothing of it stays in view', await a.run(`(() => {
     const row = document.querySelector('.ov-row.open[data-key="zz-1"]'), details = row.nextElementSibling, table = row.closest('.scroll'), area = table.getBoundingClientRect();
     const detailsTop = details.getBoundingClientRect().top - area.top + table.scrollTop;
