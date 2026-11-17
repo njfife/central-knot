@@ -624,7 +624,7 @@ function sourceTag(skill: ItemRow) {
 function fromSourceLine(key: string, from: NonNullable<ItemRow['fromSource']>) {
   const said = fromSourceWords(from);
   return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits || from.removed ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
-    h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage(said.page) }, said.page === 'plugins' ? 'Plugins' : 'Sources'), said.after));
+    h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage(said.page) }, said.page === 'plugins' ? 'Plugins' : 'Library sources'), said.after));
 }
 
 /**

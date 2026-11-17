@@ -127,7 +127,7 @@ export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): 
   const waits = 'Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now';
   const choose = 'Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version.'
     + ' Keep mine keeps yours current, and the source’s version as a version, so it no longer waits.';
-  return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}. On Sources, ${choose}` },
+  return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}. On Library sources, ${choose}` },
     before: `From ${label}, a source, which has a newer version. ${waits}. On `, after: `, ${choose}`, page: 'sources' };
 }
 

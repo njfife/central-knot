@@ -314,13 +314,13 @@ test('Look succeeds, then the repository can’t be read when Add to Plugins run
   } finally { await box.cleanup(); }
 });
 
-test('The Plugins page’s add refuses a link to a branch or a folder, and says to paste it on Sources', async () => {
+test('The Plugins page’s add refuses a link to a branch or a folder, and says to paste it on Library sources', async () => {
   const box = await sandbox(['claude-cli']);
   try {
     const { markets } = pluginsPage(box, box.tools);
     for (const link of ['https://github.com/team/market/tree/main', 'https://gitlab.example.com/team/market/-/tree/main/plugins']) {
       const added = await markets.add(link);
-      assert.match(added.problem ?? '', /^That link names a branch or a folder, .* Paste the link on Sources instead/, link);
+      assert.match(added.problem ?? '', /^That link names a branch or a folder, .* Paste the link on Library sources instead/, link);
     }
     assert.deepEqual((await markets.view()).marketplaces, []);
   } finally { await box.cleanup(); }

@@ -1380,6 +1380,13 @@ span.ins-confirm { margin-top: 0; }
 .setting-attention .icon { color: var(--warning); }
 .setting-message .text-action { flex: none; margin: -2px 0; padding: 2px 4px; line-height: 16px; }
 .setting-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* The log under its row (Show log): as tall as its lines, so the page scrolls, never the block; a long line wraps; its text can
+   be selected and copied (the body's is not). */
+.setting-log { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 8px; border-bottom: 1px solid var(--line); }
+.setting-log-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.setting-log > .btn.link { height: auto; padding: 0; }
+.setting-log-text { align-self: stretch; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--chrome);
+  font-family: var(--mono); font-size: 12px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
 /* A setting that can't be changed here dims its switch, as disabled buttons dim, with an outline so the pale light-theme track
    still reads as an Off switch; the row says why in the hint's place. */
 .setting-control .switch:disabled { opacity: 0.6; cursor: default; box-shadow: inset 0 0 0 1px var(--ink-faint); }

@@ -443,7 +443,7 @@ inBox('An edit in a harness becomes the current version, from that harness, and 
   assert.deepEqual(spread.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'codex-cli', ['claude-cli', 'copilot-cli']]]);
   assert.deepEqual(await versions(box), ['Be exact. (edited in Codex) *', 'Be brief. (found in Claude Code)']);
   const actions = await historyActions(box);
-  assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['on: Turn off', 'edit: Undo']);
+  assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['on: Turn it off', 'edit: Undo']);
   await actions[1].run();
   assert.match((await readOf(box, 'codex-cli'))!, /Be brief\./);
   // The list has each content once: the found entry is folded into the one made current again, which names it ("back to:").
@@ -500,12 +500,12 @@ inBox('A copy deleted by hand turns the agent Off everywhere, once it has stayed
   assert.equal(placeOf(await itemOf(box)), 'off');
   // Central Knot keeps it: History's entry turns it on again, every file as it was.
   const actions = await historyActions(box);
-  assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['off: Turn on']);
+  assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['off: Turn it on']);
   await actions[0].run();
   assert.equal(await readOf(box, 'copilot-cli'), '---\nname: reviewer\ndescription: Reviews code\n---\n\nYou review code.\nBe brief.\n');
 });
 
-inBox('Turn on after a copy was deleted by hand gives that tool back its own settings as they were last seen, narrowed ones included', async box => {
+inBox('History’s Turn it on after a copy was deleted by hand gives that tool back its own settings as they were last seen, narrowed ones included', async box => {
   await on(box, claudeAgent(undefined, claudeOwn));
   await turnOff(box);
   await turnOn(box);
@@ -516,7 +516,7 @@ inBox('Turn on after a copy was deleted by hand gives that tool back its own set
   await rm(fileOf(box, 'claude-cli'));
   await pass(box);
   assert.equal(placeOf(await itemOf(box)), 'off');
-  await (await historyActions(box)).find(action => action.label === 'Turn on')!.run();
+  await (await historyActions(box)).find(action => action.label === 'Turn it on')!.run();
   assert.equal(await readOf(box, 'claude-cli'), narrowed);
 });
 
@@ -795,7 +795,7 @@ inPiBox('Pi’s file deleted by hand while the agent is On turns it Off in every
   await pass(box);
   assert.deepEqual([placeOf(await itemOf(box)), Object.values(await filesOf(box))], ['off', [undefined, undefined, undefined, undefined]]);
   const actions = await historyActions(box);
-  assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['off: Turn on']);
+  assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['off: Turn it on']);
   await actions[0].run();
   assert.equal(await readOf(box, 'pi-cli'), text);
 });
@@ -1213,9 +1213,9 @@ inBox('A crash before a file changes leaves the click in History (it is told bef
   await (await historyActions(box))[0].run();
   assert.deepEqual(await filesOf(box), before, 'Restore puts every file back');
   await assert.rejects(turnOff(box, crashAt(box, 'before-remove')), /crash at before-remove/);
-  assert.equal((await offered()).at(-1), 'off: Turn on');
+  assert.equal((await offered()).at(-1), 'off: Turn it on');
   await pass(box);
-  await (await historyActions(box)).find(action => action.label === 'Turn on')!.run();
+  await (await historyActions(box)).find(action => action.label === 'Turn it on')!.run();
   await edit(box, 'codex-cli', 'Edit one.');
   await assert.rejects(pass(box, crashAt(box, 'before-rename')), /crash at before-rename/);
   assert.equal((await offered()).at(-1), 'edit: Undo');
@@ -1229,7 +1229,7 @@ inBox('A file a crash left moved aside, mid-removal, is put back before the pass
   assert.deepEqual([done.notices, (await itemOf(box))!.on, await readOf(box, 'codex-cli') !== undefined], [[], true, true]);
 });
 
-inBox('A removal Central Knot carried out is on record at once: after a crash, Turn on (or Restore) writes every copy back and nothing reads as deleted by hand', async box => {
+inBox('A removal Central Knot carried out is on record at once: after a crash, History’s Turn it on (or Restore) writes every copy back and nothing reads as deleted by hand', async box => {
   await on(box, claudeAgent(undefined, claudeOwn));
   const before = await filesOf(box);
   // Off stops after its first removal; with Automatic sync off, On is the next pass, inside a settle window.

@@ -380,7 +380,7 @@ async function manageFlow() {
   await a.click('#sync-switch');
   // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
-  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'history', 'sources', 'repo', 'settings']);
+  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
   await a.click('#nav-overview');
   same('its Overview names the tools left out and opens Harnesses', [await a.text('.overview-lead'), await a.exists('#overview-open-harnesses'), await a.exists('#overview-choose-home')],
     ['Central Knot manages none of the tools here: Claude Code, Copilot CLI and Codex are left out.', true, false]);
@@ -1021,8 +1021,8 @@ async function practiceFlow() {
   check('the deletion spreads in the background', spread);
   await a.click('#nav-history');
   const standupDeleted = `[...document.querySelectorAll('.history-row[data-kind="off"]')].find(row => row.textContent.includes('standup'))`;
-  same('History says the deletion turned it off everywhere, and offers Turn on', await a.run(`[${standupDeleted}?.querySelector('.history-about')?.textContent, ${standupDeleted}?.querySelector('.history-actions button')?.textContent]`),
-    ['Its copy was deleted in Claude Code, so it was turned off and removed from Copilot CLI and Codex. Central Knot keeps it.', 'Turn on']);
+  same('History says the deletion turned it off everywhere, and offers Turn it on', await a.run(`[${standupDeleted}?.querySelector('.history-about')?.textContent, ${standupDeleted}?.querySelector('.history-actions button')?.textContent]`),
+    ['Its copy was deleted in Claude Code, so it was turned off and removed from Copilot CLI and Codex. Central Knot keeps it.', 'Turn it on']);
   await a.run(`${standupDeleted}.querySelector('.history-actions button').click()`);
   await a.settle();
   check('Turn on brings standup back', existsSync(join(practice, '.claude/skills/standup/SKILL.md')) && existsSync(join(practice, '.copilot/skills/standup/SKILL.md')));
@@ -1970,7 +1970,7 @@ async function practiceFlow() {
   same('Settings rows use the page width, each control at the row end, text 16px in as on other pages', await a.run(`(() => {
     const page = document.querySelector('.settings-scroll'), style = getComputedStyle(page), row = document.querySelector('#setting-log'), box = row.getBoundingClientRect();
     return [Math.round(page.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - box.width),
-      Math.round(box.right - parseFloat(getComputedStyle(row).paddingRight) - document.querySelector('#show-log').getBoundingClientRect().right),
+      Math.round(box.right - parseFloat(getComputedStyle(row).paddingRight) - document.querySelector('#open-log-folder').getBoundingClientRect().right),
       Math.round(document.querySelector('#setting-log-title').getBoundingClientRect().left - page.getBoundingClientRect().left)];
   })()`), [0, 0, 16]);
   const appSettings = join(scratch, 'data/app-settings.json');
@@ -1989,11 +1989,71 @@ async function practiceFlow() {
   chmodSync(appSettings, 0o644);
   await a.click('#appearance-system');
   check('the next save clears the failure', !(await a.exists('.setting-failure')) && savedSettings().appearance === 'system');
-  // Show log file opens the folder the log is in, and says so (macOS and Windows select the file: the Mac check covers that).
+  // The log: Show log shows its last 200 lines under its row, the page scrolled to the newest, with earlier lines back to its
+  // start and Refresh log; Open log folder is a second button.
+  const logFile = join(scratch, 'data/central-knot.log'), logAside = `${logFile}.aside`;
+  /** The log as the page shows it: its lines, whether the newest is in view, and whether anything is wider than the page. */
+  const logShown = () => a.run(`(() => {
+    const text = document.querySelector('#log-text'), page = document.querySelector('#settings-scroll');
+    if (!text) return null;
+    const lines = text.textContent.split('\\n'), view = page.getBoundingClientRect(), end = text.getBoundingClientRect().bottom;
+    return { first: lines[0], last: lines.at(-1), count: lines.length, newestInView: end <= view.bottom && end > view.top, scrolled: page.scrollTop > 0,
+      wider: page.scrollWidth > page.clientWidth || text.scrollWidth > text.clientWidth };
+  })()`);
+  renameSync(logFile, logAside);
+  await a.click('#show-log');
+  same('Show log before anything was logged says so, with Refresh log', [await a.text('#setting-log-lines .setting-log-note'), await a.exists('#log-text'), await a.text('#log-refresh')],
+    ['Nothing has been logged yet.', false, 'Refresh log']);
+  // A log longer than a page, its oldest line a stack trace with no space to break at, then the app's own lines.
+  const stackLine = `2026-11-17T09:00:00.000Z request sync:apply failed: Error: ENOENT at ${'/very/long/path/without/a/space'.repeat(12)}`;
+  writeFileSync(logFile, [stackLine, ...Array.from({ length: 450 }, (_, n) => `2026-11-17T09:00:01.000Z filler line ${n + 1}`)].join('\n') + '\n' + readFileSync(logAside, 'utf8'));
+  rmSync(logAside);
+  const linesOnFile = () => readFileSync(logFile, 'utf8').split('\n').filter(Boolean);
+  await a.click('#log-refresh');
+  let shown = await logShown();
+  same('Refresh log shows the log’s last 200 lines as in the file, scrolled so the newest is in view; Show log is now Hide log, Open log folder a second button',
+    [shown?.count, shown?.last, shown?.newestInView, shown?.scrolled, await a.text('#show-log'), await a.text('#open-log-folder'), await a.text('#log-earlier')],
+    [200, linesOnFile().at(-1), true, true, 'Hide log', 'Open log folder', 'Show 200 earlier lines']);
+  // A click that logs (Update plugins automatically, turned off), then Refresh log: its line is the newest, in view.
+  await a.click('#plugin-updates-on');
+  await a.click('#log-refresh');
+  shown = await logShown();
+  check('a click that logs, then Refresh log: its line is the newest, and in view', shown?.last.endsWith(' plugin updates: turned off') && shown.newestInView, shown);
+  await a.click('#plugin-updates-on');
+  // Earlier lines, at the smallest window, to the log's start: each click keeps the place (the button stays where it was, the
+  // lines it brought under it), the last says exactly how many were left, and the stack trace wraps: nothing is wider than the page.
+  await sizeTo(a, ...SMALLEST);
+  await a.run(`document.querySelector('#log-earlier').scrollIntoView({ block: 'center' })`);
+  const earlierAt = () => a.run(`(document.querySelector('#log-earlier') ?? document.querySelector('#setting-log-lines .setting-log-note')).getBoundingClientRect().top`);
+  const labels = [];
+  for (let clicks = 0; clicks < 20 && await a.exists('#log-earlier'); clicks++) {
+    const before = await earlierAt();
+    labels.push(await a.text('#log-earlier'));
+    await a.click('#log-earlier');
+    const after = await earlierAt();
+    check(`Show earlier lines keeps the place (click ${clicks + 1})`, Math.abs(after - before) < 1, { before, after });
+  }
+  shown = await logShown();
+  same('earlier lines go back to the log’s start, which says so; the last button said exactly how many were left',
+    [labels.at(-1), await a.text('#setting-log-lines .setting-log-note'), shown?.count, shown?.first], [`Show ${linesOnFile().length - 200 * labels.length} earlier lines`, 'This is the start of the log.', linesOnFile().length, stackLine]);
+  same('a long stack-trace line wraps at 860×560: nothing is wider than the page', shown?.wider, false);
+  // The log's text can be selected (the page's body can't): a drag over its first line selects some of it.
+  const [fromX, fromY] = await a.run(`(() => { const box = document.querySelector('#log-text').getBoundingClientRect(); return [box.left + 14, box.top + 14]; })()`);
+  for (const [type, x, buttons] of [['mouseMoved', fromX, 0], ['mousePressed', fromX, 1], ['mouseMoved', fromX + 240, 1], ['mouseReleased', fromX + 240, 0]]) {
+    await a.send('Input.dispatchMouseEvent', { type, x, y: fromY, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: 1 });
+  }
+  const selected = await a.run(`getSelection().toString()`);
+  check('a drag over the log selects its text, to copy', selected.length > 10 && stackLine.includes(selected), selected);
+  await a.run(`getSelection().removeAllRanges()`);
+  await fullSize(a);
+  await fitsAtMinimum(a, 'Settings with the whole log shown');
+  await a.click('#show-log');
+  same('Hide log takes the lines away', [await a.exists('#setting-log-lines'), await a.text('#show-log')], [false, 'Show log']);
+  // Open log folder opens the folder the log is in, and says so (macOS and Windows select the file: the Mac check covers that).
   if (process.platform === 'linux') {
-    await a.click('#show-log');
+    await a.click('#open-log-folder');
     for (let tries = 0; tries < 30 && !existsSync(fileManagerAsked); tries++) await wait(100);
-    same('Show log file opens the log’s folder and names the file', [existsSync(fileManagerAsked) && readFileSync(fileManagerAsked, 'utf8').trim(), await a.text('#setting-log .setting-note')],
+    same('Open log folder opens the log’s folder and names the file', [existsSync(fileManagerAsked) && readFileSync(fileManagerAsked, 'utf8').trim(), await a.text('#setting-log .setting-note')],
       [join(scratch, 'data'), 'Opened the log’s folder. The file is central-knot.log.']);
   }
   // History's action for an entry that is no library item's (here, none at all) reaches no kind's restore (main.ts history:restore).
@@ -2369,7 +2429,10 @@ async function sourcesFlow() {
   const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
   const type = async (text) => a.run(`(() => { const input = document.querySelector('#source-link'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
 
+  same('the sidebar names the page Library sources, between Plugins and Profiles', [await a.text('#nav-sources .nav-label'),
+    await a.run(`[document.querySelector('#nav-sources').previousElementSibling?.id, document.querySelector('#nav-sources').nextElementSibling?.id]`)], ['Library sources', ['nav-plugins', 'nav-profiles']]);
   await a.click('#nav-sources');
+  same('the page’s title says Library sources', await a.text('.page-title'), 'Library sources');
   check('the Sources page opens empty, with its field', await a.exists('#source-link') && /No sources yet/.test(await a.text('.page') ?? ''), await a.text('.page'));
   await type('https://github.com/stephenturner/skill-deslop/tree/main');
   await a.click('#source-look');
@@ -2389,7 +2452,7 @@ async function sourcesFlow() {
   await a.click('#nav-skills');
   await a.click('#open-deslop');
   const opened = await a.text('.details') ?? '';
-  check('its opened row on Skills says which source it is from, and its version says so too', /From github\.com\/stephenturner\/skill-deslop \(main\), a source\. What changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here\./.test(opened) && /from github\.com\/stephenturner\/skill-deslop \(main\)/.test(opened), opened);
+  check('its opened row on Skills says which source it is from, and its version says so too', /From github\.com\/stephenturner\/skill-deslop \(main\), a source\. What changes there comes in once a day while Automatic sync is on, and at Check now on Library sources, unless you change it here\./.test(opened) && /from github\.com\/stephenturner\/skill-deslop \(main\)/.test(opened), opened);
   await a.click('#switch-deslop');
   const asGiven = Object.fromEntries(Object.entries(files).map(([path, text]) => [path, text]));
   const inTool = root => Object.fromEntries(Object.keys(files).map(path => [path, readNow(join(home, root, 'deslop', path))]));
@@ -2418,7 +2481,7 @@ async function sourcesFlow() {
   await a.click('#nav-skills');
   const waitingRow = await a.text('.ov-row[data-key="deslop"]') ?? '';
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
-  check('its row on Skills says the source has an update, and its opened row says Merge and Replace are on Sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now\. On Sources, Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
+  check('its row on Skills says the source has an update, and its opened row says Merge and Replace are on Library sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now\. On Library sources, Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
   await a.shot('skills-waiting');
   await a.click('#nav-sources');
   await a.click(`#source-replace-${id}-skill-deslop`);
@@ -2443,7 +2506,7 @@ async function sourcesFlow() {
   await a.shot('sources-merged');
   await a.click('#nav-skills');
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
-  check('its opened row on Skills says it is still changed here, so the source’s next change will wait for Merge, Replace or Keep mine', /You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on Sources\./.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its opened row on Skills says it is still changed here, so the source’s next change will wait for Merge, Replace or Keep mine', /You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on Library sources\./.test(await a.text('.details') ?? ''), await a.text('.details'));
   // A clash: the same line changed in Claude Code and at the source. Merge names the file and changes nothing.
   await a.click('#nav-sources');
   writeFileSync(inClaude, readNow(inClaude).replace('Remove slop, firmly.', 'Remove slop, my way.'));
@@ -2697,7 +2760,7 @@ async function updateFlow() {
     for (let i = 0; i < 40 && await focused() !== 'check-updates'; i++) await wait(250);
     same('Check now takes the focus back when the check ends', await focused(), 'check-updates');
     same('and a screen reader is told what it found, which the row already shows', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], ['0.5.0 preview 5 is available. Updating downloads it and restarts Central Knot.', true]);
-    same('the row’s buttons are the size of the page’s other row buttons', await a.run(`['setting-update', 'check-updates', 'show-log'].map(id => document.getElementById(id).getBoundingClientRect().height)`), [32, 32, 32]);
+    same('the row’s buttons are the size of the page’s other row buttons', await a.run(`['setting-update', 'check-updates', 'show-log', 'open-log-folder'].map(id => document.getElementById(id).getBoundingClientRect().height)`), [32, 32, 32, 32]);
     // Something typed and not saved holds the restart: an instruction file's draft.
     const typeDraft = async () => {
       await a.click('#nav-instructions');
@@ -2897,7 +2960,7 @@ async function fewToolsFlow() {
     await a.quit();
     return;
   }
-  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'history', 'sources', 'repo', 'settings']);
+  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
   same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
   check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
@@ -2915,13 +2978,13 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.codex/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.codex/skills/notes/SKILL.md'), text('notes'));
   await a.click('#header-refresh');
-  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'history', 'sources', 'repo', 'settings']);
+  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
   cli('.pi/agent/bin/pi', 'pi 1.5.0');
   await a.click('#header-refresh');
   // Codex, whose folder is still here, holds plugins: were it counted, that page would be back.
-  same('with Pi alone, Plugins is left out, and Agents stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']);
+  same('with Pi alone, Plugins is left out, and Agents stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']);
   check('and the Overview names it once', (await a.text('#overview-absent') ?? '').includes('No tool here holds plugins') && await a.exists('#overview-agents'), await a.text('#overview-absent'));
   await a.click('#nav-skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
@@ -2935,7 +2998,7 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.claude'), { recursive: true });
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
-  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']);
+  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
   await a.click('#nav-harnesses');
   check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
   // On Plugins, its only tool goes away (Pi, still here, holds no plugins): the page it was on no longer exists here, so the
@@ -2944,7 +3007,7 @@ async function fewToolsFlow() {
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   rmSync(join(home, '.local/bin/claude'));
   await a.click('#header-refresh');
-  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']]);
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
   check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds plugins now\.$/.test(moved ?? ''), moved);
   // Claude desktop alone, with no CLI and no .claude folder yet: Claude Code is here, said so with both versions.

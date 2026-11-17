@@ -47,7 +47,7 @@ import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoS
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
 import { machineNames, writesRealHome } from './machine.ts';
 import { joinedWords, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
@@ -255,16 +255,26 @@ const pluginUpdatesOn = () => (typeof appSettings.pluginUpdates === 'boolean' ? 
 const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(), pluginUpdates: pluginUpdatesOn(),
   ...(custom ? { build: aboutBuild(custom, app.getVersion(), bundle && { name: custom.marketplace?.displayName ?? bundle.release.marketplace, date: releaseDate(bundle.release) }) } : {}) });
 /**
- * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
- * always opens the folder: selecting a file there depends on the file manager and, like every selection, reports nothing
- * back, while opening the folder says why it couldn't. So a selection can only be taken as done; the page says which it got.
+ * Opens the folder of Central Knot's own log in Finder or Explorer, the log selected; before anything was logged, just the
+ * folder it goes in. Linux always just opens the folder: selecting a file there depends on the file manager and, like every
+ * selection, reports nothing back, while opening the folder says why it couldn't. So a selection can only be taken as done;
+ * the page says which it got.
  */
-async function showLog(): Promise<ShownLog> {
+async function openLogFolder(): Promise<LogFolderOpened> {
   const logged = await access(logPath()).then(() => true, () => false);
   if (logged && process.platform !== 'linux') { shell.showItemInFolder(logPath()); return { selected: true, logged }; }
   const failed = await shell.openPath(app.getPath('userData'));
   if (failed) throw new Error(failed);
   return { selected: false, logged };
+}
+/** The log's last `count` lines for Settings' Show log, read whole (trimLog keeps it near a megabyte); none before anything was logged. */
+async function readLog(count: unknown): Promise<LogTail> {
+  if (!Number.isInteger(count) || (count as number) < 1) throw new Error('Invalid line count.');
+  const text = await readFile(logPath(), 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error; });
+  const lines = text.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  const shown = lines.slice(-(count as number));
+  return { lines: shown, earlier: lines.length - shown.length };
 }
 /**
  * Applies the appearance setting. Electron's theme source decides `prefers-color-scheme` for the page, so every page's
@@ -1218,7 +1228,8 @@ app.whenReady().then(async () => {
     if (!isHistoryDays(days)) throw new Error('Invalid history days.');
     return changeHistoryWindow(days);
   });
-  handleNow('settings:show-log', showLog);
+  handleNow('settings:open-log-folder', openLogFolder);
+  handleNow('settings:read-log', readLog);
   handleNow('settings:plugin-updates', async on => {
     if (typeof on !== 'boolean') throw new Error('Invalid plugin updates setting.');
     await saveAppSettings({ pluginUpdates: on });

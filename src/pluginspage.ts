@@ -45,7 +45,7 @@ function addBox(first: boolean) {
 
 /** Under the open add box: a link that is no marketplace goes on Sources. */
 const toSources = () => h('p.market-add-note', {}, `Any other link, to a folder of skills, agents or MCP servers, or to one plugin, goes on `,
-  button({ variant: 'link', size: 'micro', label: 'Sources', id: 'market-add-to-sources', onclick: () => showPage('sources') }), '.');
+  button({ variant: 'link', size: 'micro', label: 'Library sources', id: 'market-add-to-sources', onclick: () => showPage('sources') }), '.');
 
 /**
  * Marketplaces offered without being looked for (suggested.ts): each named with the tools here it is the default of, an

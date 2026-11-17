@@ -499,7 +499,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (text.startsWith('-')) return { problem: 'That isn’t a marketplace: owner/repo, a Git URL or a folder.' };
     if (/^(\.\.?|~)([\\/]|$)/.test(text)) return { problem: 'Use the folder’s full path, or choose it with Folder…' };
     const link = isFolder(text) ? undefined : readLink(text);
-    if (link && 'rest' in link && link.rest) return { problem: 'That link names a branch or a folder, and a marketplace is added from its repository’s address (owner/repo, or one git clones), read at its root from its default branch. Paste the link on Sources instead: Look there says what it holds, and offers Add to Plugins for a marketplace this page can add.' };
+    if (link && 'rest' in link && link.rest) return { problem: 'That link names a branch or a folder, and a marketplace is added from its repository’s address (owner/repo, or one git clones), read at its root from its default branch. Paste the link on Library sources instead: Look there says what it holds, and offers Add to Plugins for a marketplace this page can add.' };
     const ctx = await context();
     // A Git source is asked for access before it is fetched: one that can't be read adds nothing and copies nothing (MKT-05).
     const access = isFolder(text) ? undefined : await use.checkAccess(ctx, text);

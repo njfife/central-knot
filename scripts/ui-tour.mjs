@@ -184,7 +184,7 @@ const turnOnRow = async key => { if (await a.has(`#add-${key}, #switch-${key}:no
 if (only ? only.includes('light') : !full) {
   begin('light');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  for (const name of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']) {
+  for (const name of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']) {
     if (!(await a.has(`#nav-${name}`))) throw new Error(`The sidebar has no ${name} page.`);
     await a.click(`#nav-${name}`);
     if (!(await waitFor(a, `document.querySelector('#nav-${name}')?.getAttribute('aria-current') === 'page'`))) throw new Error(`The ${name} page did not open.`);
@@ -1819,13 +1819,34 @@ if (wanted('settings')) {
   // The tour's clicks don't move focus as a real click would: let the keyboard focus go so no card keeps its ring.
   await a.run(`document.activeElement?.blur()`);
   await a.click('#appearance-system');
+  // The log. Made longer than a page first, its oldest line a stack trace with no space to break at, so earlier lines and wrapping show.
+  const logFile = join(scratch, 'data/central-knot.log');
+  const stackLine = `2026-11-17T09:00:00.000Z request sync:apply failed: Error: ENOENT at ${'/very/long/path/without/a/space'.repeat(12)}`;
+  writeFileSync(logFile, [stackLine, ...Array.from({ length: 450 }, (_, n) => `2026-11-17T09:00:01.000Z filler line ${n + 1}`)].join('\n') + '\n' + (existsSync(logFile) ? readFileSync(logFile, 'utf8') : ''));
   await a.theme('dark'); await a.click('#show-log');
-  await shot(a, 'settings-show-log', 'Clicked "Show log file". On Linux the app opens the log\'s folder (here a stand-in file manager) and the row says which file to look for. macOS and Windows select the file instead and add no line.');
-  await a.theme('light'); await shot(a, 'settings-show-log-light', 'The same, light.'); await a.theme('dark');
+  for (const [width, height] of [[860, 600], [1280, 800], [1728, 1080], [2560, 1440]]) {
+    await size(width, height); await a.run(`window.dispatchEvent(new Event('resize'))`); await a.click('#log-refresh');
+    await shot(a, `settings-show-log-${width}`, `Clicked "Show log" at ${width}×${height}: the log's last 200 lines under the Log row, oldest first, the page scrolled so the newest is in view, with Refresh log under them; the button now says Hide log, and Open log folder is beside it.`);
+  }
+  await size(1280, 800); await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.theme('light'); await a.click('#log-refresh'); await shot(a, 'settings-show-log-light', 'The same at 1280×800, light.'); await a.theme('dark');
+  await size(860, 600); await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.run(`document.querySelector('#log-earlier').scrollIntoView({ block: 'start' }); document.querySelector('#settings-scroll').scrollTop -= 120`);
+  await shot(a, 'settings-log-earlier', 'Scrolled up to the top of the lines at 860×600: "Show 200 earlier lines" above them.');
+  while (await a.has('#log-earlier')) await a.click('#log-earlier');
+  await shot(a, 'settings-log-start', 'Clicked it until the log’s start (at 860×600): each click brought its lines in under the button, which stayed where it was; now the line says this is the start of the log, and the first line, a stack trace with no space in it, wraps: nothing is wider than the page.');
+  renameSync(logFile, `${logFile}.aside`); await a.click('#log-refresh');
+  await shot(a, 'settings-log-empty', 'With no log file yet (moved aside), Refresh log: "Nothing has been logged yet.", with Refresh log.');
+  renameSync(`${logFile}.aside`, logFile);
+  await size(1280, 800); await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.click('#show-log'); await a.click('#open-log-folder');
+  await shot(a, 'settings-open-log-folder', 'Hid the log, then clicked "Open log folder". On Linux the app opens the log\'s folder (here a stand-in file manager) and the row says which file to look for. macOS and Windows select the file instead and add no line.');
+  await a.theme('light'); await shot(a, 'settings-open-log-folder-light', 'The same, light.'); await a.theme('dark');
+  await size(860, 560); await a.run(`window.dispatchEvent(new Event('resize'))`);
   // Keep history for. History is given changes 3, 12 and 25 days old; shortening to 7 days asks first, then History keeps only the newest.
   // Nothing is managed yet, so this home has no sync record: a shorter window is saved, and its History is cut the next time Central Knot records a change there.
   await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
-  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says (with the neutral info glyph) that older History no longer shows and goes the next time Central Knot records a change in this home, not that it was removed. The Show log file note from the step before is gone: one finished note at a time.');
+  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says (with the neutral info glyph) that older History no longer shows and goes the next time Central Knot records a change in this home, not that it was removed. The Open log folder note from the step before is gone: one finished note at a time.');
   await keepFor(a, 30);
   // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
   await a.click('#nav-skills');

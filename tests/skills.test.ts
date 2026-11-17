@@ -145,7 +145,7 @@ test('A file edited inside a folder makes its time: the later edit wins although
   } finally { await box.cleanup(); }
 });
 
-test('A folder really deleted by hand in one tool turns the skill Off everywhere; Central Knot keeps it, and Turn on puts it back', async () => {
+test('A folder really deleted by hand in one tool turns the skill Off everywhere; Central Knot keeps it, and History’s Turn it on puts it back', async () => {
   const box = await sandbox();
   try {
     await put(box, 'claude-cli', rich);

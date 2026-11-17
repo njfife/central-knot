@@ -158,8 +158,10 @@ export interface DesktopApi {
   openSignInSettings(): Promise<void>;
   /** The settings may have changed: main saved a change (this page, a menu, a dialog), or the window came back (the system's own settings may have changed meanwhile). */
   onSettingsChanged(callback: () => void): void;
-  /** Shows Central Knot's own log in the file manager, selected where the system can (else its folder). */
-  showLog(): Promise<ShownLog>;
+  /** Opens the folder of Central Knot's own log in the file manager, the log selected where the system can. */
+  openLogFolder(): Promise<LogFolderOpened>;
+  /** Central Knot's own log, its last `count` lines (Settings' Show log). */
+  readLog(count: number): Promise<LogTail>;
   /** Turns automatic plugin updates on or off (pluginupdates.ts). */
   setPluginUpdates(on: boolean): Promise<AppPreferences>;
   /** Automatic plugin updates: the last check, and the note of what was updated and what couldn't be. */
@@ -1055,8 +1057,10 @@ export type HistoryPrune = 'done' | 'later' | 'no-home' | 'failed';
 export interface HistoryList { events: HistoryEvent[]; days: HistoryDays }
 /** A saved History window: the settings as saved, and `pruned` when it was shorter; none when nothing was shorter or a newer request overtook it. */
 export interface HistoryWindowSaved { settings: AppPreferences; pruned?: HistoryPrune }
-/** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */
-export interface ShownLog { selected: boolean; logged: boolean }
+/** What Open log folder did: selected the log in the file manager, or only opened its folder (and whether anything is logged yet). */
+export interface LogFolderOpened { selected: boolean; logged: boolean }
+/** The log's last lines as Show log reads them (main.ts readLog): oldest first, none before anything was logged; `earlier`: how many lines come before them. */
+export interface LogTail { lines: string[]; earlier: number }
 
 
 // ---------- Sources ----------

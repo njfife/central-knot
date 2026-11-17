@@ -1,18 +1,19 @@
-// Sources: the page where a Git link is given as a source for the library (sources.ts, in main, is the engine; the table it
-// follows is library.ts's A SOURCE). One field takes the link; Look reads it and shows, item by item, what Add would do and
-// what it won't bring in and why, before anything is kept; Add brings each item into Central Knot, Off. Each source has a row:
-// its link, what it brought (On or Off), when it was last read, why it couldn't be read if so, Check now and Remove; an item
-// there the library holds deleted has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace
-// and Keep mine; an item the source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts
-// fromSource) has a line with Turn on, its switch on its kind's page. Every line and click carries its item's kind (types.ts SourceName
-// `kind`; ids too: source-merge-<id>-skill-<key>), which pluginstatus.ts pageOfPart maps to its page, and whose words
-// (words.ts kindNouns) the line says; a sentence about every source names the kinds a source brings (SourcesView `kinds`). Every
-// state a row says is the engine's (types.ts SourceNameState, and that fromSource); this page only words it. The field takes any
-// GitHub or GitLab link: a plugin's own folder is a source like any other, with what of it doesn't come said (types.ts NotComing);
-// a marketplace, or a plugin one lists, is no source: where the engine offers it (SourcePreview `toPlugins`: sources.ts handOff),
-// the look's one action is Add to Plugins, the Plugins page's own add (pluginstate.ts addMarketplace), run on that page, which
-// tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way and in Central
-// Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
+// Sources: the page where a Git link is given as a source for the library, titled Library sources on screen (renderer.ts
+// titles; in the code it stays `sources`; sources.ts, in main, is the engine; the table it follows is library.ts's A SOURCE).
+// One field takes the link; Look reads it and shows, item by item, what Add would do and what it won't bring in and why,
+// before anything is kept; Add brings each item into Central Knot, Off. Each source has a row: its link, what it brought (On
+// or Off), when it was last read, why it couldn't be read if so, Check now and Remove; an item there the library holds deleted
+// has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace and Keep mine; an item the
+// source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts fromSource) has a line
+// with Turn on, its switch on its kind's page. Every line and click carries its item's kind (types.ts SourceName `kind`; ids
+// too: source-merge-<id>-skill-<key>), which pluginstatus.ts pageOfPart maps to its page, and whose words (words.ts kindNouns)
+// the line says; a sentence about every source names the kinds a source brings (SourcesView `kinds`). Every state a row says
+// is the engine's (types.ts SourceNameState, and that fromSource); this page only words it. The field takes any GitHub or
+// GitLab link: a plugin's own folder is a source like any other, with what of it doesn't come said (types.ts NotComing); a
+// marketplace, or a plugin one lists, is no source: where the engine offers it (SourcePreview `toPlugins`: sources.ts
+// handOff), the look's one action is Add to Plugins, the Plugins page's own add (pluginstate.ts addMarketplace), run on that
+// page, which tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way
+// and in Central Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
 import { announce, applyClick, busy, rerender, showPage, state, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { asItIs } from './libraryrow.ts';
@@ -294,7 +295,7 @@ function handOffPanel(preview: Extract<SourcePreview, { token: string }>, handed
     h('div.source-preview-actions', {},
       button({ variant: 'primary', size: 'small', icon: 'plus', label: 'Add to Plugins', id: 'source-to-plugins', disabled: !state.home?.sync.access.allowed || !!state.busy, onclick: () => void toPlugins(handed.address) }),
       cancel,
-      h('span.source-note', {}, 'Nothing is installed, and nothing is kept on Sources.')));
+      h('span.source-note', {}, 'Nothing is installed, and nothing is kept on Library sources.')));
 }
 
 /** The look's panel: where it read, what Add does with each item, and Add, or why it can't be added. */

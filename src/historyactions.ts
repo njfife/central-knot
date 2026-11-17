@@ -13,23 +13,23 @@
 // write, Undo add or Finish undo) offers only what can still be said as one of these; otherwise it shows as past, with no action.
 //
 //   entry (HistoryEvent.kind, `cause`)       action                 offered while
-//   off: the switch, a copy deleted by       Turn on                the item is Off
+//   off: the switch, a copy deleted by       Turn it on             the item is Off
 //     hand (`winner`: where), or a source
 //     (`source`: brought in, Off;
 //     `source-dropped`: no longer there)
 //   on, off or deleted by a pass no click    none: nothing was asked (a deleted item's Restore is its Delete's
 //     asked (`in-line`)                      entry's; what an `on` wrote over is kept among the item's versions)
-//   off in one harness (`only`)              Turn on in <harness>   the item is On and kept out of that harness
-//   on: the switch, or an item Pull          Turn off               the item is On
+//   off in one harness (`only`)              Turn it on in <harness> the item is On and kept out of that harness
+//   on: the switch, or an item Pull          Turn it off            the item is On
 //     brought
-//   on in one harness (`only`)               Turn off in <harness>  the item is On and in that harness
+//   on in one harness (`only`)               Turn it off in <harness> the item is On and in that harness
 //   on or off whose click took tools' own    Undo: that action,     the item is as the click left it (asTheClickLeftIt);
 //     copies over (`tookFrom`)               each such copy given   after that, the plain action above, which gives
 //                                            back                   nothing back
 //   a found item taken in (on, `found`, or   Undo: out of Central   every place it was found in still holds the copy it
 //     `sync-everything` with no click;       Knot again, found      held then, in a tool still managed, as the copies
 //     chosen)                                again, each tool it    are now (takeInHeld); after that, an `on` one
-//                                            was found in keeping   offers a plain Turn off, a `chosen` one nothing
+//                                            was found in keeping   offers a plain Turn it off, a `chosen` one nothing
 //                                            its own copy
 //   deleted                                  Restore                the item is deleted
 //   a content change: edit, conflict,        Undo; once later       the version from before it (`previous`) is not the
@@ -267,7 +267,7 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   if (isClearedSwitch(event) && stillCleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
   // A found item taken in (by a click on Add, or by Synchronize everything), while it is still as that left it: its Undo takes it
   // out again (found once more, a tombstone the rule leaves for good), each tool it was found in keeping its own copy.
-  // Once it is not (takeInHeld), an `on` one offers a plain Turn off, which gives no copy back, and a `chosen` one nothing.
+  // Once it is not (takeInHeld), an `on` one offers a plain Turn it off, which gives no copy back, and a `chosen` one nothing.
   if (tookIn(event)) {
     const held = takeInHeld(event, item, itemNow);
     if (!held) return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
@@ -275,7 +275,7 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   }
   if (event.kind === 'off' || event.kind === 'on') {
     const action = switchAction(event.kind === 'off', event.only, item), back = givenBack(event, item).giveBack;
-    // Copies go back only with an Undo, while the item is as the click left it; a plain Turn off or Turn on gives none back.
+    // Copies go back only with an Undo, while the item is as the click left it; a plain Turn it off or Turn it on gives none back.
     if (!action || !back || !asTheClickLeftIt(event, item)) return action;
     const tools = (Object.keys(back) as HarnessId[]).map(toolName);
     const own = `${andList(tools)} ${tools.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before`;
@@ -358,18 +358,22 @@ function givenBack(event: HistoryEvent, item: LibraryItem): Pick<Change, 'giveBa
   return back.length ? { giveBack: Object.fromEntries(back) } : {};
 }
 
-/** An Off entry's Turn on (`turnOn`), or an On entry's Turn off: for the whole item, or (`only`) for one harness of an item that is On. */
+/**
+ * An Off entry's Turn it on (`turnOn`), or an On entry's Turn it off: the item's own switch, as on its page, for the whole item,
+ * or (`only`) for one harness of an item that is On. "It" is the item the row names, so the words say the item's switch is
+ * turned, not that History or a source starts or stops anything.
+ */
 function switchAction(turnOn: boolean, only: HarnessId | undefined, item: LibraryItem): EntryAction | undefined {
   const name = item.name, now = asItIs(item.key, item);
   if (!only) {
     if (item.on === turnOn) return undefined;
-    return turnOn ? { label: 'Turn on', help: `Put ${name} back in every tool it is not kept out of, each file as it was`, change: { ...now, on: true } }
-      : { label: 'Turn off', help: `Take ${name} out of every tool; Central Knot keeps it`, change: { ...now, on: false } };
+    return turnOn ? { label: 'Turn it on', help: `Put ${name} back in every tool it is not kept out of, each file as it was`, change: { ...now, on: true } }
+      : { label: 'Turn it off', help: `Take ${name} out of every tool; Central Knot keeps it`, change: { ...now, on: false } };
   }
   const there = toolName(only), out = item.except.includes(only);
   if (!item.on || out !== turnOn) return undefined;
-  return turnOn ? { label: `Turn on in ${there}`, help: `Put ${name} back in ${there}, as it was`, change: { ...now, except: item.except.filter(tool => tool !== only) } }
-    : { label: `Turn off in ${there}`, help: `Take ${name} out of ${there}; Central Knot keeps it`, change: { ...now, except: [...item.except, only] } };
+  return turnOn ? { label: `Turn it on in ${there}`, help: `Put ${name} back in ${there}, as it was`, change: { ...now, except: item.except.filter(tool => tool !== only) } }
+    : { label: `Turn it off in ${there}`, help: `Take ${name} out of ${there}; Central Knot keeps it`, change: { ...now, except: [...item.except, only] } };
 }
 
 /** The copies an entry says gave way, each of which is a version that can be made current now: one "Use <harness>’s" each. */

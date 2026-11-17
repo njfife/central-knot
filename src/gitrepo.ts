@@ -583,7 +583,7 @@ export function connectRepo(context: ShareContext, url: string, branch: string, 
     if (address.startsWith('-')) return refusal(context, 'That isn’t a repo address.', options);
     if (wanted && (wanted.startsWith('-') || (await runGit(['check-ref-format', '--branch', wanted], 10_000)).code !== 0)) return { ...await refusal(context, `“${wanted}” isn’t a branch name git accepts.`, options), field: 'branch' };
     if (await openClone(context)) return refusal(context, 'A repo is already connected. Disconnect it first.', options);
-    if (await sourceAt(context.home, address)) return refusal(context, 'That repo is a source here, so it can’t be the Git repo Pull and Push use too. A source is only ever read; that repo stays on the Sources page.', options);
+    if (await sourceAt(context.home, address)) return refusal(context, 'That repo is a source here, so it can’t be the Git repo Pull and Push use too. A source is only ever read; that repo stays on the Library sources page.', options);
     const dir = cloneFolder(context.home);
     const stage = `${dir}.${randomUUID()}`;
     await mkdir(storeDirectory(context.home), { recursive: true });
