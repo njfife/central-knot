@@ -1,6 +1,7 @@
 // An item (a skill, an MCP server or an agent) as the item pages draw it (ItemRow), each kind's items in a home as every
-// page reads them (kindSource), and the order of the rows under a heading (inOrder; the choice itself is matrix.ts
-// orderChoice; a row's last use, usagerow.ts lastUse). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is libraryrow.ts's,
+// page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
+// orderChoice; a row's last use, usagerow.ts lastUse), and the rows a click holds where they were, on every list that orders
+// rows by their state, the Plugins list too (Held). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is libraryrow.ts's,
 // from the kind's view (types.ts LibraryView).
 import { currentIndex, type LibraryItem, type Plan, type VersionChange } from './library.ts';
 import { inLibrary } from './libraryrow.ts';
@@ -109,3 +110,21 @@ export function inOrder<Row extends Pick<ItemRow, 'key' | 'versions'>>(rows: rea
   const time = new Map(rows.map(row => [row.key, timeOf(row) ?? -Infinity]));
   return [...rows].sort((first, second) => (time.get(second.key)! - time.get(first.key)!) || byName(first, second));
 }
+
+// ---------- Rows held where they were ----------
+
+/**
+ * The rows whose own switch (or Add) was clicked on one list, each with the group it was drawn in before its first click
+ * there, so a click never moves a row: it stays where it was, drawn in its new state, while the person works down the list.
+ * `list`: which list, as its page names it (where it is, its Sort and its chip). Every page that orders rows by their state
+ * reads it: the item tables (matrix.ts itemsTable), the Skills Files view's list (matrix.ts skillsBrowser) and the Plugins
+ * list (pluginstate.ts shownPlugins). The one kept is app.ts heldRows', which says when it is let go.
+ */
+export interface Held<Group = string | number> { list: string; groups: Map<string, Group> }
+export const noneHeld = <Group = string | number>(): Held<Group> => ({ list: '', groups: new Map() });
+/** The rows held on `list`: these, or none when they were held on another list, which lets those go. */
+export const heldOn = <Group>(held: Held<Group>, list: string): Held<Group> => (held.list === list ? held : { list, groups: new Map() });
+/** A click on a row's own switch: it keeps the group it is drawn in now, unless an earlier click on this list holds it already. */
+export function hold<Group>(held: Held<Group>, key: string, drawnIn: Group): void { if (!held.groups.has(key)) held.groups.set(key, drawnIn); }
+/** The group a row is drawn in: the one it is held in, else its own. A row new to the list is held nowhere, so it goes where its own group puts it. */
+export const placeIn = <Group>(held: Held<Group>, key: string, own: Group): Group => (held.groups.get(key) ?? own);

@@ -295,7 +295,7 @@ ul { list-style: none; }
   transition: background-color 100ms var(--ease), border-color 100ms var(--ease), color 100ms var(--ease), transform 100ms var(--ease);
 }
 .btn:active:not(:disabled) { transform: scale(0.97); }
-.btn:disabled { opacity: 0.5; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.5; }
 .btn.default { height: 32px; padding: 0 12px; }
 .btn.small { height: 28px; padding: 0 8px; }
 .btn.micro { height: 24px; padding: 0 8px; font-size: 12px; line-height: 16px; border-radius: 6px; }
@@ -501,7 +501,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .switch[aria-checked="mixed"] .switch-knob { transform: translateX(7px); }
 .switch[aria-checked="mixed"] .switch-knob::after { content: ""; position: absolute; left: 3px; right: 3px; top: calc(50% - 1px); height: 2px; border-radius: 1px; background: #8b8b95; }
 /* A switch that can't be used now (a found item with nothing to take in, a preview-only home): it looks unavailable. */
-.switch:disabled { opacity: 0.4; cursor: not-allowed; }
+.switch:disabled, .switch[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; }
 /* On in some tools only (kept out of others by the person, or switched off in a tool's own settings): on, its track striped, so it never reads as on everywhere nor as halfway. */
 .switch.switch-partial[aria-checked="true"] { background: repeating-linear-gradient(135deg, var(--switch-on) 0 4px, color-mix(in oklab, var(--switch-on) 52%, var(--switch-off)) 4px 7px); }
 
@@ -1141,8 +1141,8 @@ span.ins-confirm { margin-top: 0; }
   .plugin-row-open { flex: none; max-width: 50%; margin-right: 14px; }
   /* A long note (a copy that differs, several versions) wraps beside the line rather than pushing what it holds out of view. */
   .plugin-row-update { flex: 0 1 auto; margin-left: 14px; }
-  /* A click's state takes a line of its own under them, as in a narrower table, so its words show whole. */
-  .plugin-row-name > .plugin-click { flex: 0 0 100%; }
+  /* A click's state takes the line's place, its words whole, wrapping only where the room runs out. */
+  .plugin-row-name > .plugin-click { flex: 1 1 0; max-width: max-content; }
 }
 /* The header's hint keeps to whole lines: a narrow table says it shorter. */
 .hint-short { display: none; }

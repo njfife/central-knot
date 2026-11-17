@@ -101,14 +101,16 @@ export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: 
   const sw = entry.switches?.[plugin.name];
   const found = foundIn(view, sw);
   const stopped = !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
+  // Off while its click waits or runs, yet it keeps the focus (aria-disabled), so the keyboard stays on its row; a click is dropped.
+  const busy = pluginBusy(entry.source, plugin.name), waits = busy ? { 'aria-disabled': 'true' } : {};
   if (found.length) {
     const label = stopped ?? addWords(plugin.name, found);
-    return h('button.btn.outline.small.add-item', { type: 'button', id: id.replace(/^pswitch/, 'padd'), title: label, 'aria-label': label, disabled: pluginBusy(entry.source, plugin.name) || !!stopped,
-      onclick: (event: Event) => { event.stopPropagation(); turnPlugin(entry, plugin.name, 'add'); } }, 'Add');
+    return h('button.btn.outline.small.add-item', { type: 'button', id: id.replace(/^pswitch/, 'padd'), title: label, 'aria-label': label, disabled: !!stopped, ...waits,
+      onclick: (event: Event) => { event.stopPropagation(); if (!busy) turnPlugin(entry, plugin.name, 'add'); } }, 'Add');
   }
   const words = switchWords(view, entry, plugin.name);
-  return toggle({ on: !!sw?.entry?.on, partial: switchPartial(view, sw), label: stopped ? `${words.slice(0, words.indexOf('.') + 1)} ${stopped}` : words, disabled: pluginBusy(entry.source, plugin.name) || !!stopped, id,
-    onchange: on => turnPlugin(entry, plugin.name, on ? 'on' : 'off') });
+  return toggle({ on: !!sw?.entry?.on, partial: switchPartial(view, sw), label: stopped ? `${words.slice(0, words.indexOf('.') + 1)} ${stopped}` : words, disabled: !!stopped, id, attrs: waits,
+    onchange: on => { if (!busy) turnPlugin(entry, plugin.name, on ? 'on' : 'off'); } });
 }
 
 /**

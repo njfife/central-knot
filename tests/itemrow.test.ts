@@ -1,9 +1,10 @@
 // The order of the rows under a heading on the Skills, MCP servers and Agents pages (src/itemrow.ts inOrder), as worked
 // examples: by name, or by last updated, newest first. An item's versions change only through library.ts's keepVersion and
-// setCurrent, so each example makes them that way.
+// setCurrent, so each example makes them that way. Then the rows a click holds where they were (Held), as the MCP servers
+// page draws them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inOrder, type ItemRow } from '../src/itemrow.ts';
+import { heldOn, hold, inOrder, noneHeld, placeIn, type Held, type ItemRow } from '../src/itemrow.ts';
 import { keepVersion, newItem, setCurrent, type LibraryItem, type Shelf } from '../src/library.ts';
 
 /** A shelf that keeps nothing: these examples read only the item's record. */
@@ -70,4 +71,44 @@ test('By last used, once usage is read: the newest use first, an item with no us
   const lastUse: Record<string, number> = { notes: Date.parse(daysAgo(5)), standup: Date.parse(daysAgo(1)) };
   const rows = [row('release-notes'), row('alpha'), row('notes'), row('standup')];
   assert.deepEqual(keys(inOrder(rows, 'used', from({}), each => lastUse[each.key])), ['standup', 'notes', 'alpha', 'release-notes']);
+});
+
+// ---------- Rows held where they were ----------
+
+/** Servers On and Off, as their rows' own state says (matrix.ts sectionOf): `on` names the On ones. */
+const servers = (on: string[], off: string[]) => new Map([...on.map(key => [key, 'on'] as const), ...off.map(key => [key, 'off'] as const)]);
+/** The page as drawn, heading by heading (matrix.ts itemsTable): each row under the heading it is held under, else its own, by name. */
+const drawn = (own: Map<string, string>, held: Held<string>) => ['on', 'off'].map(heading =>
+  [heading, keys(inOrder([...own.keys()].filter(key => placeIn(held, key, own.get(key)!) === heading).map(key => row(key)), 'name', from({})))]);
+const byName = 'MCP servers by name';
+
+test('A server turned off by its own switch stays where it was under On, drawn Off; a second click keeps that place', () => {
+  const held = heldOn(noneHeld<string>(), byName);
+  // beta's switch is clicked: it is held under the heading it is under now, then the click turns it Off.
+  hold(held, 'beta', 'on');
+  assert.deepEqual(drawn(servers(['alpha', 'gamma'], ['beta', 'delta']), held), [['on', ['alpha', 'beta', 'gamma']], ['off', ['delta']]]);
+  // Clicked again, from under On where it is drawn: its own heading is Off now, and it stays where it was.
+  hold(held, 'beta', 'off');
+  assert.deepEqual(drawn(servers(['alpha', 'gamma'], ['beta', 'delta']), held), [['on', ['alpha', 'beta', 'gamma']], ['off', ['delta']]]);
+  // A change by another route (a profile switch turns gamma Off): gamma was never clicked here, so it goes under Off.
+  assert.deepEqual(drawn(servers(['alpha'], ['beta', 'delta', 'gamma']), held), [['on', ['alpha', 'beta']], ['off', ['delta', 'gamma']]]);
+});
+
+test('A server new to the list goes where its own heading and the order put it', () => {
+  const held = heldOn(noneHeld<string>(), byName);
+  hold(held, 'beta', 'on');
+  assert.deepEqual(drawn(servers(['aardvark', 'alpha'], ['beta', 'zeta']), held), [['on', ['aardvark', 'alpha', 'beta']], ['off', ['zeta']]]);
+});
+
+test('Another Sort, leaving the page and Refresh each let the held rows go, and every row takes its own heading again', () => {
+  const own = servers(['alpha'], ['beta']), regrouped = [['on', ['alpha']], ['off', ['beta']]];
+  const clicked = () => { const held = heldOn(noneHeld<string>(), byName); hold(held, 'beta', 'on'); return held; };
+  // Sort by Last updated: the page asks for another list's rows.
+  assert.deepEqual(drawn(own, heldOn(clicked(), 'MCP servers by last updated')), regrouped);
+  // Agents, then back on MCP servers: the Agents page let them go, so none are held on coming back.
+  assert.deepEqual(drawn(own, heldOn(heldOn(clicked(), 'Agents by name'), byName)), regrouped);
+  // Refresh (app.ts readAgain) starts with none held.
+  assert.deepEqual(drawn(own, heldOn(noneHeld<string>(), byName)), regrouped);
+  // Find narrows the list without asking for another, so beta stays held.
+  assert.deepEqual(drawn(own, heldOn(clicked(), byName)), [['on', ['alpha', 'beta']], ['off', []]]);
 });

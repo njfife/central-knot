@@ -4,7 +4,7 @@
 // module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, acting, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon, runAfterLayout, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
@@ -206,7 +206,13 @@ function renderStatus() {
   paintStatusMessage();
 }
 
-const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
+/**
+ * What the last draw couldn't scroll each region by, past its top (a band went while a list sat near its top, as at a click's
+ * start), given back by the next draw as the band comes back, unless the region has been scrolled since.
+ */
+let owed = new Map<string, number>();
+/** Each scrolling region before a draw: its scroll (what is owed it, while it sits at its top) and its top on screen. */
+const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => ({ id: node.id, scroll: node.scrollTop || (owed.get(node.id) ?? 0), at: node.getBoundingClientRect().top }));
 
 function render() {
   const focused = document.activeElement?.id;
@@ -214,13 +220,23 @@ function render() {
   const { rail } = applyLayout();
   renderSidebar();
   renderHeader(rail);
-  renderPage();
+  drawPage(renderPage);
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
   runAfterLayout();
   renderStatus();
   fitBars();
-  for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
-  if (focused) document.getElementById(focused)?.focus();
+  owed = new Map();
+  for (const { id, scroll, at } of scrolled) {
+    const node = document.getElementById(id);
+    if (!node) continue;
+    // A band coming or going above a region moves its top: its scroll moves as much, so its rows stay where they were on
+    // screen. A region at its very top stays there, so a band that comes never scrolls its first row out of sight.
+    const want = scroll && scroll + node.getBoundingClientRect().top - at;
+    node.scrollTop = want;
+    if (want < 0) owed.set(id, want);
+  }
+  // Back on the control that had it, without scrolling to it: a redraw never pulls the page to a row scrolled away from.
+  if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
   if (state.home) document.body.dataset.ready = 'true';
 }
 

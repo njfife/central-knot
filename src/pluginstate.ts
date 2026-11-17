@@ -12,7 +12,8 @@
 //   which also says why), so a click on one lands on a disabled control and is dropped, never run twice. A switch is off under
 //   busy too.
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
-import { afterActing, announce, busy, readHomeOnce, rerender, showActing, state as app, tell } from './app.ts';
+import { afterActing, announce, busy, focusWhenDone, heldRows, readHomeOnce, rerender, showActing, state as app, tell } from './app.ts';
+import { hold, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
 import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDone, type PluginOp, type ResultLine } from './pluginplan.ts';
@@ -103,15 +104,19 @@ const REMOTE_READ_AHEAD = 8;
 
 /**
  * The plugins the marketplace on screen lists under the current find text and category: those every tool that can take
- * them has first, then those some tool has, then those no tool has, by name within each (pluginstatus.ts pluginPlace).
+ * them has first, then those some tool has, then those no tool has, by name within each (pluginstatus.ts pluginPlace); a
+ * plugin whose switch was clicked on this list keeps the place it had (itemrow.ts Held).
  */
 export function shownPlugins(entry: MarketplaceView) {
   const view = market.view;
   const listed = entry.plugins.filter(plugin => matches(plugin, market.nav.find) && (!market.nav.category || plugin.category === market.nav.category));
   if (!view) return listed;
-  const place = new Map(listed.map(plugin => [plugin.name, pluginPlace(view, entry, plugin.name)]));
+  const held = heldRows<number>(listName(entry)), place = new Map(listed.map(plugin => [plugin.name, placeIn(held, plugin.name, pluginPlace(view, entry, plugin.name))]));
   return listed.sort((first, second) => place.get(first.name)! - place.get(second.name)!);
 }
+
+/** A marketplace's list, under its category, as the plugins held on it are named (app.ts heldRows); Find keeps them. */
+const listName = (entry: MarketplaceView) => `plugins ${entry.source} ${market.nav.category ?? ''}`;
 
 /** How many installed plugins' files the list reads at once in the background (see readShown). */
 const COMPARE_AT_ONCE = 3;
@@ -393,8 +398,11 @@ export function endListNews(): void { if (!market.clicking) market.clicks = []; 
 export function turnPlugin(entry: MarketplaceView, plugin: string, what: PluginTurn, tool?: HarnessId): void {
   if (!market.clicking) { endListNews(); market.problem = undefined; clearNotice(); }
   market.clicks.push({ source: entry.source, plugin, what, tool, said: aimWords(what, tool), state: 'waiting' });
-  // The control clicked is off until it is read back, which gives it focus again if nothing else took it (as busy does).
-  clickedLast = document.activeElement?.id;
+  // Its row stays where it is on the list (itemrow.ts Held), until the list is drawn afresh.
+  if (market.view) hold(heldRows<number>(listName(entry)), plugin, pluginPlace(market.view, entry, plugin));
+  // The control clicked waits until it is read back; Add gives way to the switch then. The focus goes back to it at the
+  // list's end if nothing else took it.
+  clickedLast = document.activeElement?.id.replace(/^padd/, 'pswitch');
   if (!market.clicking) void runClicks(market.clicks, app.home!.home);
   rerender();
 }
@@ -431,7 +439,7 @@ async function runClicks(list: PluginClick[], home: string): Promise<void> {
   if (list.length > 1) announce([resultSentence(said, false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.', !lines.some(line => !line.ok) && undoOps().length > 0);
   showActing();
   rerender();
-  if (document.activeElement === document.body && clickedLast) document.getElementById(clickedLast)?.focus();
+  if (document.activeElement === document.body && clickedLast) document.getElementById(clickedLast)?.focus({ preventScroll: true });
   afterActing();
 }
 
@@ -485,6 +493,9 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
     market.working = undefined;
     await readAgain();
   }
+  // The focus goes to the plugin it undid, on the list or on its page, as Undo itself may go.
+  const at = market.view?.marketplaces.findIndex(each => each.source === last.turn.source);
+  focusWhenDone(`pswitch-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`);
   announce(market.problem ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.'));
 });
 

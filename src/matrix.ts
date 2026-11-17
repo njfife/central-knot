@@ -15,10 +15,10 @@ import { andList, fewNames, kindNouns, sentence, toolList as toolsInWords, toolN
 import { lastUse, leftToItsRow, noUseSeen, onIn, rowFigure, startsLate, toolSays, USAGE_DAYS, type CantSay, type ToolSays, type UsageFacts } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, heldRows, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { inOrder, kindSource, lastUpdated, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
+import { hold, inOrder, kindSource, lastUpdated, placeIn, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
@@ -246,6 +246,10 @@ const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, kind).li
 const standingOf = (skill: ItemRow): 0 | 1 | 2 => ({ on: 0, found: 1, off: 2 } as const)[libraryPlace(itemOf(skill))];
 /** The headings, by place. */
 const placeNames = ['On', 'Found', 'Off'] as const;
+/** A heading of a table: On, Found, Off, or (on a harness's page) Not in it. */
+type Role = 'on' | 'found' | 'off' | 'away';
+/** The heading a row's own state puts it under: Off; else On or Found; or, on a harness's page, Not in it while that harness has no copy. */
+const sectionOf = (skill: ItemRow): Role => (standingOf(skill) === 2 ? 'off' : !inFocus(skill) ? 'away' : standingOf(skill) === 0 ? 'on' : 'found');
 /** Whether its copies differ so that its Add must ask which copy every tool uses: a found item's only (libraryrow.ts asksWhichCopy). */
 const differs = (skill: ItemRow) => asksWhichCopy(skill);
 /** Copies differ and need a choice, among the items this page is about: on a harness's page, the ones it has. */
@@ -984,11 +988,9 @@ export function itemsTable(which: PageKind, harness?: Tool) {
   const open = docked() && view.comparing && !underRow(view.comparing) ? all.find(skill => skill.key === view.comparing) : undefined;
   const openRow = docked() && !open ? plugins.find(row => row.key === view.comparing) : undefined;
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
-  // Found; the others, only other tools have.
-  const idle = shown.filter(skill => standingOf(skill) === 2), used = shown.filter(skill => standingOf(skill) !== 2);
-  const here = used.filter(inFocus), away = used.filter(skill => !inFocus(skill));
-  const sections = [section('on', here.filter(skill => standingOf(skill) === 0)), section('found', here.filter(skill => standingOf(skill) === 1)), pluginSection(plugins),
-    focus ? section('away', away) : null, section('off', idle)];
+  // Found; the others, only other tools have. A row whose own switch was clicked here stays under the heading it was under.
+  const held = heldHere(), under = (role: Role) => [shown.filter(skill => placeIn(held, skill.key, sectionOf(skill)) === role), shown.filter(skill => sectionOf(skill) === role)] as const;
+  const sections = [section('on', ...under('on')), section('found', ...under('found')), pluginSection(plugins), focus ? section('away', ...under('away')) : null, section('off', ...under('off'))];
   const table = [
     h('div.toolbar.fit-bar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), orderChoice(), h('div.toolbar-end', {}, toolbarState(), readUsageButton())),
     usageBand(),
@@ -1012,8 +1014,22 @@ export function itemsTable(which: PageKind, harness?: Tool) {
 
 const nameOf = (skill: ItemRow) => skill.name ?? skill.key;
 
-/** A click on this page: once its result is shown, each row is under the heading true for it (sections). */
+/**
+ * A click on this page other than a row's own switch or Add (Turn these off, a tool's switch in an opened row, Delete, Make
+ * current): it holds no row (flip does), so once its result is shown a row not held already is under its own heading.
+ */
 const click = (what: Click) => { void applyClick(what); };
+
+/** The list on screen, as the rows held on it are named (app.ts heldRows): the Skills Files view's list or this table, with its Sort and chip. */
+const listNow = () => [filesView() ? 'files' : 'table', kind, focus, chosenOrder(), view.filter].join(' ');
+/** The rows held on the list on screen, each with the heading it is held under. */
+const heldHere = () => heldRows<Role>(listNow());
+/** The Skills page's Files view is on screen: its list, and the chosen skill's switch in its pane (`detail-` ids). */
+const filesView = () => kind === 'skills' && !focus && state.skillsView === 'files';
+/** An item's one control as drawn now (itemSwitch): its switch, or Add while it is found. */
+const controlId = (skill: ItemRow, prefix: string) => `${prefix}${libraryPlace(itemOf(skill)) === 'found' ? 'add' : 'switch'}-${skill.key}`;
+/** Where the focus goes once a click on this row, or its Undo, is done: its control as then drawn (app.ts Click focus). */
+const focusOn = (skill: ItemRow) => { const prefix = filesView() ? 'detail-' : ''; return () => controlId(skill, prefix); };
 
 /**
  * Off: it leaves every harness, and Central Knot keeps it (library.ts), with its switches in the tools that have it through a
@@ -1030,7 +1046,7 @@ function turnOff(skill: ItemRow) {
   // "No tool has it" only where none does: a tool whose plugin switch can't be written still has it.
   // A tool's own copy, which Off leaves alone (library.ts), is still there too: said as its mark says it.
   const own = ownCopies(skill, itemOf(skill), toolList());
-  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], toolList()), toolList(), leftOutTools(), own)}${pluginSaid(notIn)}`, plugins.left);
+  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], toolList()), toolList(), leftOutTools(), own)}${pluginSaid(notIn)}`, plugins.left, focusOn(skill));
 }
 
 /** Every tool that can have it: where it is on once it is on everywhere. */
@@ -1053,7 +1069,7 @@ function turnOn(skill: ItemRow, use?: Tool): Promise<void> {
     if (found) return lib.say.said.takenIn(name, using.filter(tool => !another.includes(tool)), toolList(), use, another);
     return `${name} is on in ${onPhrase(skill, left)}.`;
   };
-  return mainClick(name, true, [rowClicks.on(skill, itemOf(skill), use)], plugins, said, plugins.left);
+  return mainClick(name, true, [rowClicks.on(skill, itemOf(skill), use)], plugins, said, plugins.left, focusOn(skill));
 }
 
 // ---------- Items tools have through a plugin ----------
@@ -1069,11 +1085,11 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
  * did, given the tools where it didn't, then what the plugins' part took with it (pluginswitch.ts alongWords: a whole plugin
  * where a tool has no switch for one item). `also`: what it left as it is, said as a problem.
  */
-function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string): Promise<void> {
+function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string, focus?: () => string): Promise<void> {
   // Said as "there" when the result is about that one tool, as after a tool's own switch; else by the tool's name.
   const there = !changes.length && new Set(plugins.turned.map(item => item.tool)).size === 1;
   const along = plugins.turned.map(item => alongWords(item, plugins.ops, there)).filter(Boolean).join(' ') || undefined;
-  if (changes.length) return applyClick({ kind, items: [name], changes, said, also, plugins: plugins.ops.length ? { ops: plugins.ops, said: along } : undefined });
+  if (changes.length) return applyClick({ kind, items: [name], changes, said, also, focus, plugins: plugins.ops.length ? { ops: plugins.ops, said: along } : undefined });
   const where = toolsPhrase(plugins.turned.map(item => item.tool), toolList());
   return applyPluginSwitches(plugins.ops, { also, said: [said([]), along].filter(Boolean).join(' '), undone: undoneWords(name, on, where) });
 }
@@ -1098,8 +1114,12 @@ function pluginRowSwitch(row: PluginRow) {
   } });
 }
 
-/** The switch's click: off everywhere, or on everywhere (a found item taken in, after a copy choice where its copies differ). */
+/**
+ * The switch's click: off everywhere, or on everywhere (a found item taken in, after a copy choice where its copies differ). Its
+ * row stays where it is until the list is drawn afresh (itemrow.ts Held; app.ts heldRows says when).
+ */
 function flip(skill: ItemRow, on: boolean) {
+  hold(heldHere(), skill.key, sectionOf(skill));
   if (!on) { turnOff(skill); return; }
   if (isDiffering(skill)) {
     // The question opens under its row; a second click on the switch closes it.
@@ -1117,7 +1137,7 @@ function flip(skill: ItemRow, on: boolean) {
  * keeps a second one apart (the Files view's header): ids `<prefix>switch-<key>`, `<prefix>add-<key>`.
  */
 function itemSwitch(skill: ItemRow, prefix = '') {
-  return libraryPlace(itemOf(skill)) === 'found' ? addButton(skill, `${prefix}add-${skill.key}`) : librarySwitch(skill, `${prefix}switch-${skill.key}`);
+  return libraryPlace(itemOf(skill)) === 'found' ? addButton(skill, controlId(skill, prefix)) : librarySwitch(skill, controlId(skill, prefix));
 }
 
 /**
@@ -1391,15 +1411,21 @@ function whenCell(skill: ItemRow) {
   return h('div.ov-when', { role: 'cell', title: `Last updated ${dayAndTime(new Date(at).toISOString())}` }, sinceThen(at));
 }
 
-/** Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. */
-function section(role: 'on' | 'found' | 'off' | 'away', list: ItemRow[]) {
-  if (!list.length) return null;
+/**
+ * Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. `rows`: the rows drawn under
+ * it; `truly`: the rows whose own heading it is, which its count counts and its note speaks for. They differ once a row's own
+ * switch is clicked: the row stays under the heading it was under (itemrow.ts Held), and its switch and its line say its state,
+ * so "On 11" may head 12 rows, one drawn Off. A heading over rows none of which is truly its own has no note: no "no tool has
+ * these" over rows just turned On.
+ */
+function section(role: Role, rows: ItemRow[], truly: ItemRow[]) {
+  if (!rows.length) return null;
   const label = role === 'away' ? `Not in ${names[focus!]}` : placeNames[role === 'on' ? 0 : role === 'found' ? 1 : 2];
-  const note = role === 'found' ? foundNote(list) : role === 'off' ? offNote(list) : role === 'away' ? 'only other tools have these' : null;
+  const note = !truly.length ? null : role === 'found' ? foundNote(truly) : role === 'off' ? offNote(truly) : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
-      h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)), note ? sectionNote(note) : null)),
-    inOrder(list, chosenOrder(), itemOf, skill => lastUse(usageOf(factsOf(skill)))).flatMap(row));
+      h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(truly.length)), note ? sectionNote(note) : null)),
+    inOrder(rows, chosenOrder(), itemOf, skill => lastUse(usageOf(factsOf(skill)))).flatMap(row));
 }
 
 /**
@@ -1658,8 +1684,9 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   if (!all.length) return itemsTable('skills');
   const needle = view.listFind.trim().toLowerCase();
   const matches = all.filter(skill => !needle || skill.key.includes(needle) || (skill.name ?? '').toLowerCase().includes(needle) || skill.description.toLowerCase().includes(needle));
-  // The table's headings, on, then found, then off, and its order under each (inOrder's, which the stable sort keeps).
-  const place = new Map(all.map(skill => [skill.key, standingOf(skill)]));
+  // The table's headings, on, then found, then off (a row whose switch was clicked here under the one it was under), and its
+  // order under each (inOrder's, which the stable sort keeps).
+  const held = heldHere(), place = new Map(all.map(skill => [skill.key, (['on', 'found', 'off'] as Role[]).indexOf(placeIn(held, skill.key, sectionOf(skill)))]));
   const shown = inOrder(matches, chosenOrder(), itemOf).sort((first, second) => place.get(first.key)! - place.get(second.key)!);
   const chosen = all.find(skill => skill.key === state.item);
   // The detail always shows a skill: the chosen one, else the first listed. In narrow content it sits below the list.

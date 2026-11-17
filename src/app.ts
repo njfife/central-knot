@@ -3,7 +3,8 @@
 // page is acting (acting: busy, or the Plugins page's switch clicks running); a click on an item page sent to its kind's engine
 // (applyClick, through kindPages) and its result kept for the page (lastResult); History's actions (restoreEvent); the reads of
 // the home (loadHome, readAgain, readHomeOnce), the usage reading on a click (readUsage), and the Sync switch, Sync once and
-// Synchronize everything's row; and the Instructions, base instructions and Profiles pages' actions.
+// Synchronize everything's row; the rows a click holds where they were (heldRows, drawPage); and the Instructions, base
+// instructions and Profiles pages' actions.
 // A sync notice lives across reads here, until its page shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it. Not here: drawing (renderer.ts and each
 // page's module), the Plugins page's state (pluginstate.ts), the Sources and Git repo pages' (sourcespage.ts, repopage.ts), and
 // every rule a page shows (the engines' answers in the view: libraryrow.ts, historyactions.ts, profileplan.ts).
@@ -13,7 +14,7 @@ import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice, UsageReading } from './types.ts';
-import { anyOn, kindSource } from './itemrow.ts';
+import { anyOn, heldOn, kindSource, noneHeld, type Held } from './itemrow.ts';
 import { caughtUpNames, noticeNames, plural, withSetAside } from './model.ts';
 import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -134,7 +135,20 @@ export const state = {
   harnessTab: 'skills' as HarnessTab,
   /** The window chooses the sidebar shape until the person uses the toggle, which holds until the window crosses the rail breakpoint. */
   sidebar: undefined as 'open' | 'rail' | undefined,
+  /** The rows a click holds where they were, on the list on screen (heldRows). */
+  held: noneHeld(),
 };
+
+/**
+ * The rows held on the list on screen (itemrow.ts Held): the list asks for them each time it is drawn, by its own name, and a
+ * click on a row's own switch holds that row (itemrow.ts hold). They are let go when a draw asks for another list or for none
+ * (another page, tab, view or plugin's page, another Sort or chip: drawPage) and at Refresh (readAgain); Find keeps them.
+ * In memory only. `Group`: what the list groups its rows by (matrix.ts its headings, pluginstate.ts a plugin's place), one list to a name.
+ */
+let asked = false;
+export const heldRows = <Group extends string | number>(list: string): Held<Group> => { asked = true; return (state.held = heldOn(state.held, list)) as Held<Group>; };
+/** Draws the page (renderer.ts render): a draw that asked for no held rows lets them go. */
+export function drawPage(draw: () => void) { asked = false; draw(); if (!asked) state.held = noneHeld(); }
 
 let render = () => {};
 export const setRenderer = (next: () => void) => { render = next; };
@@ -142,7 +156,7 @@ export const setRenderer = (next: () => void) => { render = next; };
 export const rerender = () => {
   const focused = document.activeElement?.id;
   render();
-  if (focused && document.activeElement?.id !== focused) document.getElementById(focused)?.focus();
+  if (focused && document.activeElement?.id !== focused) document.getElementById(focused)?.focus({ preventScroll: true });
 };
 
 /** The practice copy's note on the Overview, shown until the person hides it (kept per viewer, in this window's storage). */
@@ -197,8 +211,6 @@ export function paintStatusMessage() {
   if (mark) { mark.title = told.text; mark.hidden = !told.text || quiet; }
 }
 
-const focusById = (id?: string | null) => (id ? document.getElementById(id) : null)?.focus();
-
 /**
  * Takes a new view of the home. When its tools changed (one appeared or went away), or there was no home before, the
  * page follows: a page whose kind is no longer here gives way to the Overview, saying why, and a page with its own data
@@ -216,8 +228,10 @@ export function setHome(view: HomeView | null | undefined, { reload = true } = {
   if (reload) void loadPageData(state.page, { readId: view.readId });
 }
 
-/** Where focus goes when the running work ends, when its result replaced the control that started it (a review opening). */
+/** Where focus goes when the running work ends, when its result replaced the control that started it (a review opening, Add's switch, the row an Undo undid). */
 let focusAfterBusy: string | undefined;
+/** Sets focusAfterBusy from another page's action (the Plugins page's Undo). */
+export const focusWhenDone = (id: string) => { focusAfterBusy = id; };
 
 /**
  * Why the page is acting, while it is: work under busy (its line), or the Plugins page's switch clicks waiting their turn
@@ -257,7 +271,9 @@ export async function busy(message: string, work: () => Promise<void>) {
   state.busy = undefined;
   showActing();
   rerender();
-  focusById(document.getElementById(focusAfterBusy ?? '') ? focusAfterBusy : focused);
+  // Back on the control that had it without scrolling to it; a control the work put in its place is scrolled to.
+  const next = [focusAfterBusy, focused].map(id => (id ? document.getElementById(id) : null)).find(Boolean);
+  next?.focus({ preventScroll: next.id === focused });
   focusAfterBusy = undefined;
   // Any change may change what differs from the git repo.
   afterActing();
@@ -326,6 +342,8 @@ export interface Click {
   also?: string;
   /** An Undo: its result is said for a few seconds, with no Undo of its own. */
   undoing?: boolean;
+  /** Its row's own control as the page draws it now (its switch, or Add while the item is found): the focus goes there once the click, or its Undo, is done. */
+  focus?: () => string;
   /**
    * Its part in the tools that have the item through a plugin (pluginswitch.ts turnEvery): run once the copies' part went
    * through, never beside a click refused as a whole. `said`: what that part brought with it, said when it all worked.
@@ -370,6 +388,7 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
   if (plugged) setHome(await api().refresh());
+  focusAfterBusy = click.focus?.();
   const done = did || made.length > 0 || !!plugged?.done.length;
   // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
@@ -407,6 +426,7 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
     results.push(...result.results);
   }
   setHome(await api().refresh());
+  focusAfterBusy = click.focus?.();
   await putHistory();
   kindPages[click.kind].keep(results, []);
   const failed = [...results.filter(keptBack).map(entry => entry.message), ...(unswitched ? [switchProblems(unswitched)].filter(Boolean) : [])];
@@ -541,6 +561,8 @@ export async function readAgain() {
     const view = await api().refresh(true);
     if (!view) return;
     state.skillsResult = undefined;
+    // Every row takes its place in the order again.
+    state.held = noneHeld();
     // Said first, so a page that leaves (setHome) adds its reason after what was read.
     announce(readSummary(view));
     setHome(view, { reload: false });

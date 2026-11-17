@@ -230,7 +230,7 @@ if (wanted('skills')) {
   await a.click('#add-notes'); await switchOn('notes');
   // Off: out of every tool, kept in Central Knot.
   await a.click('#switch-notes'); await a.settle();
-  await atEverySize('off', 'Turned notes off: its folder left every tool; its row stays under Off, "in Central Knot only"; the result offers Undo', true);
+  await atEverySize('off', 'Turned notes off: its folder left every tool; its row stays where it was, under Found, drawn Off, "in Central Knot only", until the list is drawn afresh; the result offers Undo', true);
   await openRow('notes');
   await atEverySize('off-open', 'Opened the Off row: its status, each tool with no copy while it is off, its versions, and Delete from Central Knot with how it differs from Off', true, '.details');
   await a.click('#switch-notes'); await switchOn('notes');
@@ -365,7 +365,7 @@ if (wanted('mcp')) {
   await closeRow('files');
   // Off: out of every tool at once, Claude Code too. Then Delete from Central Knot.
   await a.click('#switch-files'); await a.settle();
-  await atEverySize('off', 'Turned files off: it left every tool at once, Claude Code too, and its row is under Off at once', true);
+  await atEverySize('off', 'Turned files off: it left every tool at once, Claude Code too; its row stays where it was, drawn Off, until the list is drawn afresh', true);
   await openRow('files');
   await atEverySize('off-open', 'Opened the Off row: "Off · in Central Knot only."; each tool’s line says it has no copy while it is off', false, '.details');
   await a.click('#delete-files'); await a.click('#delete-confirm-files'); await a.settle();
@@ -441,7 +441,7 @@ if (wanted('agents')) {
 
   // Off: out of every harness, kept in Central Knot. On puts each file back.
   await a.click('#switch-code-reviewer'); await a.settle();
-  await atEverySize('agents-off', 'Turned code-reviewer off: it left every tool, and its row stays under Off, "in Central Knot only", with its description; the result offers Undo', true);
+  await atEverySize('agents-off', 'Turned code-reviewer off: it left every tool; its row stays where it was, drawn Off, "in Central Knot only", with its description, until the list is drawn afresh; the result offers Undo', true);
   await openRow('code-reviewer');
   await atEverySize('agents-off-open', 'Opened the Off row: its status, its whole description, each tool with no copy while it is off, its versions, and Delete from Central Knot as a quiet button with how it differs from Off', true);
   await a.click('#switch-code-reviewer'); await switchOn('code-reviewer');
