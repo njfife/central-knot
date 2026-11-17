@@ -12,7 +12,7 @@ concurrency:
 jobs:
   mac:
     runs-on: [self-hosted, macOS, ARM64, ck-mac]
-    # A run takes about 11 minutes, about 6 of them the end-to-end checks in four groups at once; the limit leaves room for a slow one.
+    # A run took about 11 minutes on next b212759 (2026-11-17), about 6 of them the end-to-end checks; the limit leaves room for a slow one.
     timeout-minutes: 30
     steps:
       # An app left running by a cancelled or failed run would hold a debug port that this run could attach to.
@@ -21,6 +21,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'
+          # No npm cache: this self-hosted runner keeps ~/.npm between runs, so restoring one only costs time.
       - run: npm ci
       - run: npm test
       - run: npm run package:mac
