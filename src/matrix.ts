@@ -604,8 +604,8 @@ function openRow(key: string) {
   view.openedOn = state.visit;
   view.openedAt = state.said.seq;
   rerender();
-  // Bring the details into view without losing the row (its name and close button) under the sticky header. Docked
-  // details sit beside the table and are always in view.
+  // Details that run past the table's bottom are brought into view with their row at its top, so the row's name and the
+  // details' close button are in view too. Docked details sit beside the table and are always in view.
   if (view.comparing && underRow(key)) requestAnimationFrame(() => {
     const rowEl = document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`);
     const details = rowEl?.nextElementSibling;
