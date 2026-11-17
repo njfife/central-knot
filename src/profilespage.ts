@@ -2,7 +2,7 @@
 // shows each profile and which are in use; the open profile shows every library item (skills, MCP servers, agents) with a box
 // (in the profile or not), whether it is On now, and what a switch would turn On and Off. Ticking only edits the profile; the
 // library changes on Switch. Every rule shown here is profileplan.ts's (switchPlan, inUse), as profiles.ts carries it out.
-import { deleteProfileDef, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
+import { acting, deleteProfileDef, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { outcomeBand, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
 import { changes, homeItems, inUse, inUseName, namedItems, switchable, switchPlan, turnsWords, type LiveItem, type Turns } from './profileplan.ts';
@@ -19,7 +19,7 @@ const profiles = () => state.home!.profiles;
 const items = (): LiveItem[] => homeItems(state.home!);
 const descriptionOf = (item: LiveItem) => state.home![({ skill: 'skills', mcp: 'mcp', agent: 'agents' } as const)[item.kind]].items.find(row => row.key === item.key)?.description ?? '';
 /** Whether profiles can be changed now: nothing busy, the home writable, and its profiles file readable. */
-const canEditProfiles = () => !state.busy && !whyReadOnly(state.home!) && !profiles().problem;
+const canEditProfiles = () => !acting() && !whyReadOnly(state.home!) && !profiles().problem;
 const withClass = (element: HTMLElement, name: string) => { element.classList.add(name); return element; };
 const danger = (control: HTMLElement) => withClass(control, 'text-danger');
 
@@ -276,7 +276,7 @@ export function profileStatus(): HTMLElement | null {
     list.map(profile => menuChoice(profile, inUseNow.includes(profile), all)), h('div.pf-menu-sep', { role: 'separator' }),
     h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-edit', onclick: () => { menuOpen = false; profileState.open = inUseNow[0]?.id; showPage('profiles'); } }, h('span.pf-menu-tick'), h('span.pf-menu-name', {}, 'Edit profiles…'))) : null;
   return h('span.status-profile-wrap', {},
-    h('button.status-item.status-profile', { type: 'button', id: 'status-profile', 'aria-haspopup': 'menu', 'aria-expanded': String(menuOpen), disabled: !!state.busy,
+    h('button.status-item.status-profile', { type: 'button', id: 'status-profile', 'aria-haspopup': 'menu', 'aria-expanded': String(menuOpen), disabled: !!acting(),
       title: `Profile in use: ${name}. Click to switch profiles.`,
       onclick: (event: Event) => { event.stopPropagation(); menuOpen = !menuOpen; rerender(); if (menuOpen) (document.querySelector('.pf-menu-item[aria-checked="true"], .pf-menu-item:not(:disabled)') as HTMLElement | null)?.focus(); } },
       icon('sliders-horizontal', 14), h('span.status-clip', {}, name), icon('chevron-up', 12, 'status-profile-chevron')),

@@ -1368,6 +1368,16 @@ async function practiceFlow() {
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 60 && (outsideOff() || !/Undone: outside-skill/.test(await a.text('#header') ?? '')); tries++) await wait(100);
   check('its one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside) && /Undone: outside-skill is back on in Claude Code\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
+  // Two of its skills turned off 150 ms apart (clip 04): the first takes the whole plugin off in Claude Code; the second, worked out
+  // in its turn, finds nothing left to change there, so it neither fails nor turns the plugin back on; the run's one Undo puts it back.
+  await a.run(`document.querySelector('${outsideRow} .switch').click()`); await wait(150);
+  await a.run(`document.querySelector('.ov-row[data-key="${other}"] .switch').click()`);
+  await a.settle();
+  same('two skills of one plugin turned off 150 ms apart: the plugin is off in Claude Code, neither click fails, and the header says both and what went with the first',
+    [outsideOff(), await switchOn(a, outside), await switchOn(a, other), await a.exists('#header .problem-line'), await a.text('#header [data-outcome] .band-text')],
+    [true, false, false, false, '2 skills are off: outside-skill and outside-other. outside-skill: its whole plugin outside-tools was turned off in Claude Code, with its 1 other skill and 1 MCP server.']);
+  await a.click('#outcome-undo');
+  check('and the run’s one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside), await a.text('#header'));
   writeFileSync(outsideStub, outsideStubBefore);
   if (outsideSettings) writeFileSync(join(practice, '.claude/settings.json'), outsideSettings); else rmSync(join(practice, '.claude/settings.json'), { force: true });
   await a.click(`[id="open-${outside}"]`);
@@ -4426,18 +4436,23 @@ fs.writeFileSync(record, JSON.stringify(now));
   const states = rows => a.run(`Object.fromEntries([...document.querySelectorAll(${JSON.stringify(rows)})].map(row => [row.dataset.key ?? row.dataset.plugin, row.querySelector('.switch')?.getAttribute('aria-checked') ?? null]))`);
   const changed = (before, after) => Object.keys(after).filter(key => before[key] !== after[key]);
   const focused = () => a.run(`document.activeElement?.id`);
-  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const done = async () => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const headerSays = () => a.text('#header [data-outcome] .band-text');
+  /** Claude Code's settings file held by its lock, fresh: a click on a server waits for it (up to 2 s), so the clicks after it wait their turn in the page's list. */
+  const lock = `${claudeJson}.lock`, holdClaude = () => mkdirSync(lock), letGo = () => rmSync(lock, { recursive: true, force: true });
 
-  // A list too short to scroll, on a fresh visit: five rows clicked one after another, each as soon as the last is done, each
-  // where it was before the first click, are the five that change, and no row moves.
+  // A list too short to scroll, on a fresh visit: four rows clicked 150 ms apart, each where it was before the first click, are
+  // the four that change, each Off in every tool, no row moves, and the header says the four once.
   await a.click('#nav-agents');
   const sixBefore = await placesNow('table-agents', 'data-key'), sixStates = await states('.ov-row[data-key]'), sixPoints = [];
-  for (const agent of agents.slice(0, 5)) sixPoints.push(await middleOf(`#switch-${agent}`));
-  for (const point of sixPoints) { await clickAt(point); for (let tries = 0; tries < 50 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(20); }
-  await a.settle();
+  for (const agent of agents.slice(0, 4)) sixPoints.push(await middleOf(`#switch-${agent}`));
+  for (const point of sixPoints) { await clickAt(point); await wait(150); }
+  await done();
   const sixAfter = await placesNow('table-agents', 'data-key');
   await a.shot('rows-agents-short');
-  same('on a list of six, five clicks on a fresh visit change exactly the five rows aimed at, and no row moves', [changed(sixStates, await states('.ov-row[data-key]')), agents.map(agent => sixAfter.at[agent])], [agents.slice(0, 5), agents.map(agent => sixBefore.at[agent])]);
+  same('on a list of six, four clicks 150 ms apart change exactly the four rows aimed at, Off in every tool, no row moves, and the header says the four once',
+    [changed(sixStates, await states('.ov-row[data-key]')), agents.map(agent => existsSync(join(home, '.claude/agents', `${agent}.md`))), agents.map(agent => sixAfter.at[agent]), await headerSays()],
+    [agents.slice(0, 4), [false, false, false, false, true, true], agents.map(agent => sixBefore.at[agent]), '4 agents are off: ag-1, ag-2, ag-3 and ag-4.']);
   // The last agent deleted from Central Knot: the page is empty, and the result is said once, in the header.
   for (const agent of agents) for (const id of [`#open-${agent}`, `#delete-${agent}`, `#delete-confirm-${agent}`]) await a.click(id);
   same('the last agent deleted: the page is empty, and its result is said once, in the header', [await a.exists('.ov-row[data-key]'), await a.run(`document.querySelectorAll('[data-outcome]').length`), await a.exists('#header [data-outcome]')], [false, 1, true]);
@@ -4453,17 +4468,24 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.run(`document.getElementById('${table}').scrollTop = 0`);
   await a.click('#header-refresh');
   same('Refresh puts them under On', await sectionsNow(a), [['on', servers], ['found', found]]);
-  // Five rows at the top of the list, the page's first clicks, each clicked where it was before the first: the result is in the
-  // header, which keeps its height, so no row moves and the list's scroll stays; while each later click runs, the result before stays.
-  const atTop = ['srv-03', 'srv-04', 'srv-05', 'srv-06', 'srv-07'], topPoints = [], topBefore = await placesNow(table, 'data-key'), topStates = await states('.ov-row[data-key]');
+  // Four rows at the top of a long list, the page's first clicks, 150 ms apart, each clicked where it was before the first: each
+  // is drawn Off at once, they are the four that change, Off in every tool, no row moves, the scroll stays, and the header, which
+  // keeps its height, says the four once.
+  const atTop = ['srv-03', 'srv-04', 'srv-05', 'srv-06'], topPoints = [], topBefore = await placesNow(table, 'data-key'), topStates = await states('.ov-row[data-key]');
   for (const key of atTop) topPoints.push(await middleOf(`#switch-${key}`));
-  const atClick = [], resultIn = () => a.run(`document.querySelector('#header [data-outcome]') ? 'header' + (document.querySelector('#outcome-undo')?.disabled ? ', Undo off' : '') : document.querySelector('[data-outcome]') ? 'elsewhere' : 'none'`);
-  for (const point of topPoints) { await clickAt(point); atClick.push(await resultIn()); await a.settle(); }
+  const resultIn = () => a.run(`document.querySelector('#header [data-outcome]') ? 'header' : document.querySelector('[data-outcome]') ? 'elsewhere' : 'none'`), drawnAtOnce = [];
+  for (const point of topPoints) { await clickAt(point); drawnAtOnce.push(await a.run(`document.activeElement?.getAttribute('aria-checked')`)); await wait(150); }
+  await done();
   await a.shot('rows-mcp-top');
-  const topAfter = await placesNow(table, 'data-key');
-  same('at the top of the list, five rows clicked one after another are the five that change, no row moves, the scroll stays, and the result is in the header, kept while the next click runs',
-    [changed(topStates, await states('.ov-row[data-key]')), ['srv-03', 'srv-08'].map(key => topAfter.at[key]), topAfter.scroll, atClick, await resultIn()],
-    [atTop, ['srv-03', 'srv-08'].map(key => topBefore.at[key]), topBefore.scroll, ['none', 'header, Undo off', 'header, Undo off', 'header, Undo off', 'header, Undo off'], 'header']);
+  const topAfter = await placesNow(table, 'data-key'), inClaude = () => Object.keys(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers ?? {});
+  same('at the top of a long list, four rows clicked 150 ms apart are drawn Off at once and are the four that change, Off in every tool; no row moves, the scroll stays, and the header says the four once',
+    [drawnAtOnce, changed(topStates, await states('.ov-row[data-key]')), atTop.filter(key => inClaude().includes(key)), ['srv-03', 'srv-08'].map(key => topAfter.at[key]), topAfter.scroll, await resultIn(), await headerSays()],
+    [atTop.map(() => 'false'), atTop, [], ['srv-03', 'srv-08'].map(key => topBefore.at[key]), topBefore.scroll, 'header', '4 MCP servers are off: srv-03, srv-04, srv-05 and srv-06.']);
+  // A result with no problem goes by itself 8 seconds after the run's last click, and no row moves when it goes.
+  const goneAfter = Date.now();
+  for (let tries = 0; tries < 150 && await a.exists('#header .header-result'); tries++) await wait(100);
+  const whenGone = Date.now() - goneAfter, goneAt = await placesNow(table, 'data-key');
+  same('a result with no problem is gone after its 8 seconds, and every row is where it was, to the pixel', [whenGone > 7000 && whenGone < 14000, goneAt], [true, topAfter]);
   await a.click('#nav-overview'); await a.click('#nav-mcp');
   // A switch in the middle of the list, the page's first click: its result comes in the header, and the list and its rows stay.
   await putAt(table, row('srv-20'), 300);
@@ -4518,6 +4540,56 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.click('#header-refresh');
   same('a row turned Off stays under On until Refresh, which puts it under Off', [pinnedThere, (await sectionsNow(a)).at(-1)], [true, ['off', ['srv-02', ...offNow].sort()]]);
 
+  // Clicks behind one that still runs (Claude Code's file held by its lock, then let go) wait their turn. Clicked again while its
+  // click waits, a row is taken back at once, and nothing is written for it.
+  await putAt(table, row('srv-30'), 200);
+  const [at30, at31] = [await middleOf('#switch-srv-30'), await middleOf('#switch-srv-31')], entry31 = () => JSON.stringify(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers['srv-31']);
+  const was31 = entry31();
+  holdClaude();
+  await clickAt(at30); await clickAt(at31);
+  const drawnOff = await switchOn(a, 'srv-31');
+  await clickAt(at31);
+  const drawnBack = await switchOn(a, 'srv-31');
+  letGo(); await done();
+  same('clicked again while its click waits, a row is taken back: drawn as it was at once, and nothing is written for it', [drawnOff, drawnBack, await switchOn(a, 'srv-31'), entry31(), inClaude().includes('srv-30')], [false, true, true, was31, false]);
+  // Clicked again while its click runs, it ends as the second click says, and nothing is refused.
+  const at33 = await middleOf('#switch-srv-33');
+  holdClaude(); await clickAt(at33); await wait(150); await clickAt(at33); letGo(); await done();
+  same('clicked again while its click runs, a row ends as the second click says, and nothing is refused', [await switchOn(a, 'srv-33'), inClaude().includes('srv-33'), await a.exists('#header .problem-line'), await headerSays()], [true, true, false, '1 MCP server is on: srv-33.']);
+  // Three clicks, the second refused in its turn: srv-35 is turned Off behind the page's back (as another window would) before its
+  // click runs, so its click, made from the page as it was, is refused. The first and third are done; its row shows what is true.
+  const three = ['srv-34', 'srv-35', 'srv-36'], threePoints = [];
+  for (const key of three) threePoints.push(await middleOf(`#switch-${key}`));
+  holdClaude();
+  for (const point of threePoints) { await clickAt(point); await wait(150); }
+  await a.run(`void window.centralKnot.applyServers([{ key: 'srv-35', on: false, except: [] }], false, ${JSON.stringify(home)})`);
+  letGo(); await done();
+  await a.shot('rows-mcp-one-refused');
+  same('three clicks where the second is refused: the first and third are done, its row is as it truly is, and the header’s problem line names it',
+    [three.map(key => inClaude().includes(key)), await switchOn(a, 'srv-35'), await headerSays(), await a.all('#header .problem-text')], [[false, false, false], false, '2 MCP servers are off: srv-34 and srv-36.', ['srv-35 changed since the page was read. Nothing was changed; read again.']]);
+  // The run's one result at the four sizes: it stays (it has a problem line), so it is pictured whole.
+  for (const [width, height] of [SMALLEST, [1728, 1117], [2560, 1440], [1280, 800]]) { await sizeTo(a, width, height); await a.shot(`rows-mcp-run-result-${width}`); }
+  await wait(9000);
+  check('a result with a problem line stays past the 8 seconds', await a.exists('#header .problem-line'));
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
+  // A run left for another page carries on there; its result is said in the status bar, never in that page's header.
+  await putAt(table, row('srv-37'), 200);
+  holdClaude(); await clickAt(await middleOf('#switch-srv-37'));
+  await a.run(`document.getElementById('nav-agents').click()`);
+  letGo(); await done();
+  same('a run left for Agents: its result is in the status bar, never in the Agents header', [await a.exists('#header [data-outcome]'), (await a.text('#announcement'))?.startsWith('srv-37 is off')], [false, true]);
+  await a.click('#nav-mcp');
+  // A press on a switch whose release comes after a redraw replaced it (another switch clicked between) still counts.
+  await putAt(table, row('srv-38'), 200);
+  const [x38, y38] = await middleOf('#switch-srv-38');
+  await a.run(`document.getElementById('switch-srv-38').dataset.pressed = 'yes'`);
+  for (const type of ['mouseMoved', 'mousePressed']) await a.send('Input.dispatchMouseEvent', { type, x: x38, y: y38, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 });
+  await a.run(`document.getElementById('switch-srv-32').click()`);
+  const redrawn = await a.run(`document.getElementById('switch-srv-38').dataset.pressed !== 'yes'`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x38, y: y38, button: 'left', clickCount: 1 });
+  await done();
+  same('a press released after a redraw replaced its switch still counts as its click', [redrawn, await switchOn(a, 'srv-38'), await switchOn(a, 'srv-32')], [true, false, false]);
+
   // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it.
   await sizeTo(a, ...SMALLEST);
   await a.run(`document.getElementById('${table}').scrollTop = 0`);
@@ -4525,7 +4597,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   await clickAt(await middleOf(`#switch-${firstOn}`)); await a.settle();
   same('an ordinary result fits in the header: the top edges of Find and Sort take their own clicks', [await reaches('.find input'), await reaches('#item-order')], [true, true]);
   // Claude Code's file held by its lock: the result says what happened and where, and the reason once, under it.
-  const lock = `${claudeJson}.lock`, header = () => a.text('#header .header-result'), sentence = () => a.text('#header [data-outcome] .band-text'), reasonsIn = async () => ((await header()) ?? '').split('locked').length - 1;
+  const header = () => a.text('#header .header-result'), sentence = () => a.text('#header [data-outcome] .band-text'), reasonsIn = async () => ((await header()) ?? '').split('locked').length - 1;
   /** A click on a control of this round's, which may not be there (the check after it then fails). */
   const press = async selector => { await a.run(`document.querySelector(${JSON.stringify(selector)})?.click()`); await done(); };
   mkdirSync(lock); const holdLock = setInterval(() => { const now = new Date(); utimesSync(lock, now, now); }, 1000);

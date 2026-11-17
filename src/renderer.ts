@@ -7,7 +7,7 @@
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
-import { afterLayout, button, fitBars, h, icon, runAfterLayout, whyOff } from './dom.ts';
+import { afterLayout, button, fitBars, h, icon, keepClicksAcrossRedraws, runAfterLayout, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
 import { kindNouns } from './words.ts';
@@ -145,7 +145,7 @@ function renderHeader(rail: boolean) {
     h('h1.page-title', {}, heldBy(state.home) ? 'One build at a time' : (state.page === 'harnesses' && harnessTitle()) || titles[state.page]),
     ...resultHere(),
     // The same Refresh on every page: it reads the home again, then the page's own data (on Plugins, every marketplace).
-    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again, and put the rows back in order' : 'Read this home again, and put the rows back in order', id: 'header-refresh', disabled: !!state.busy || !state.home,
+    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again, and put the rows back in order' : 'Read this home again, and put the rows back in order', id: 'header-refresh', disabled: acting() ?? !state.home,
       onclick: () => void readAgain() })),
   );
 }
@@ -189,7 +189,7 @@ function syncSwitch(home: HomeView) {
   const title = idle ? `Automatic sync is on: it starts once ${home.sync.syncEverything ? 'something turns up in one of your tools (Synchronize everything takes it in)' : 'you turn something on'}. Click to turn it off.`
     : home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.'
     : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.';
-  return h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy, title, onclick: () => void setSync(!home.syncOn) },
+  return h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(home.syncOn), 'aria-label': 'Automatic sync', disabled: !!acting(), title, onclick: () => void setSync(!home.syncOn) },
     label, h(`span.sync-track${home.syncOn ? '.on' : ''}${idle ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, !home.syncOn ? 'Off' : idle ? 'On · nothing synced' : 'On'));
 }
 
@@ -245,6 +245,7 @@ function render() {
 }
 
 setRenderer(render);
+keepClicksAcrossRedraws();
 // The status bar's mark for a message too narrow to show (app.ts paintStatusMessage): drawn once.
 region('message-mark').replaceChildren(icon('info', 14));
 

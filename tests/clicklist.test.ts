@@ -1,14 +1,18 @@
-// The Plugins page's switch clicks waiting their turn (pluginstate.ts turnPlugin), on the page's own code with a stand-in for
-// main: each test clicks, then answers main's calls one at a time and reads what the page holds in between. Then, on the same
-// code, when the rows a click pins are let go (app.ts pinnedRows, drawPage).
-import { test } from 'node:test';
+// The page's one list of clicks (clicklist.ts), on the page's own code with a stand-in for main: each test clicks, then answers
+// main's calls one at a time and reads what the page holds in between. First the Plugins page's switch (pluginstate.ts
+// turnPlugin), then an item page's row switches (app.ts queueClick) and when their result goes by itself (app.ts FADE_MS); then,
+// on the same code, when the rows a click pins are let go (app.ts pinnedRows, drawPage).
+import { mock, test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { HarnessId, PluginTurn, PluginTurnResult, PluginsView } from '../src/types.ts';
+import type { Change, HarnessId, PassResult, PluginTurn, PluginTurnResult, PluginsView } from '../src/types.ts';
 
 /** Main, as the page sees it: each switch click waits until the test answers it; every other call is counted. */
 const main = {
   sent: [] as string[], reads: { plugins: 0, home: 0 },
   answers: [] as ((result: PluginTurnResult) => void)[],
+  /** An item page's clicks, each a pass main runs (applySkills), answered by the test with what it did (pass). */
+  passes: [] as ((result: PassResult) => void)[],
+  pass(result: PassResult) { this.passes.shift()!(result); return settled(); },
   syncChanged: () => {},
   /** Run as the home is read: a click made meanwhile, say. */
   duringHomeRead: undefined as (() => void) | undefined,
@@ -16,6 +20,7 @@ const main = {
 };
 const api = {
   turnPlugin: (_source: string, plugin: string, what: PluginTurn) => { main.sent.push(`${plugin} ${what}`); return new Promise<PluginTurnResult>(done => main.answers.push(done)); },
+  applySkills: (changes: Change[]) => { main.sent.push(changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}, seen ${change.seenOn ? 'on' : 'off'}`).join()); return new Promise<PassResult>(done => main.passes.push(done)); },
   plugins: async () => { main.reads.plugins++; return view; },
   refresh: async () => { main.reads.home++; main.duringHomeRead?.(); return null; },
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
@@ -31,13 +36,14 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyPluginSwitches, closeResult, drawPage, pinnedRows, readAgain, state: app } = await import('../src/app.ts');
+const { acting, applyPluginSwitches, clickWork, closeResult, drawPage, pinnedRows, queueClick, readAgain, showPage, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
+const { clickList, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin } = await import('../src/itemrow.ts');
 const { clickWords } = await import('../src/pluginparts.ts');
 
-/** Lets the page's awaits run on to the next call to main. */
-const settled = () => new Promise(done => setTimeout(done, 5));
+/** Lets the page's awaits run on to the next call to main (not by a timer: the fade's test holds them). */
+const settled = async () => { for (let round = 0; round < 20; round++) await new Promise(done => setImmediate(done)); };
 const plugin = (name: string) => ({ name, description: '' });
 const view = {
   home: '/home', tools: ['claude-cli'] as HarnessId[], clis: {}, canWrite: true, desktopOnly: {}, via: {}, versions: {}, suggested: [],
@@ -55,7 +61,8 @@ const words = (name: string) => clickWords(clickOn('/market', name)!).text;
 function start() {
   resetMarket();
   Object.assign(main, { sent: [], reads: { plugins: 0, home: 0 }, answers: [], duringHomeRead: undefined });
-  app.home = { home: '/home', sync: { managed: [] } } as unknown as typeof app.home;
+  app.home = { home: '/home', sync: { managed: [], gate: { state: 'open' } } } as unknown as typeof app.home;
+  Object.assign(app, { page: 'plugins', outcome: undefined });
   market.read.data = view;
 }
 
@@ -68,11 +75,11 @@ test('Clicks wait their turn: main gets one at a time, in the order clicked, and
   assert.deepEqual(main.sent, ['alpha on']);
   // Each clicked plugin's switch is off; another plugin's is not. The other plugin actions are off, and say why.
   assert.deepEqual([pluginBusy('/market', 'alpha'), pluginBusy('/market', 'beta'), pluginBusy('/market', 'gamma')], [true, true, false]);
-  assert.equal(acting(), 'Waits until the plugin clicks are done.');
+  assert.equal(acting(), 'Waits until the switches clicked are done.');
   await main.answer(installed('alpha'));
   assert.deepEqual(main.sent, ['alpha on', 'beta on']);
   await main.answer(installed('beta'));
-  assert.deepEqual([market.clicking, acting()], [false, undefined]);
+  assert.deepEqual([clickList.running, acting()], [false, undefined]);
   // The one Undo is the last click that finished: beta's.
   assert.equal(market.lastRun?.turn?.plugin, 'beta');
   // The next click starts a new list, with nothing ahead of it: the last list's rows go.
@@ -139,7 +146,7 @@ test('Another home opened while clicks wait: those not yet sent are dropped, and
   resetMarket();
   await main.answer(installed('alpha'));
   assert.deepEqual(main.sent, ['alpha on']);
-  assert.deepEqual([states(), market.clicking, market.lastRun], [[], false, undefined]);
+  assert.deepEqual([states(), clickList.running, market.lastRun], [[], false, undefined]);
   assert.deepEqual(main.reads, { plugins: 0, home: 0 });
 });
 
@@ -163,9 +170,9 @@ test('A click made while the home is read at the list’s end runs too, and the 
   main.duringHomeRead = () => { main.duringHomeRead = undefined; turnPlugin(entry, 'beta', 'on'); };
   await main.answer(installed('alpha'));
   assert.deepEqual(states(), ['alpha ended', 'beta running']);
-  assert.deepEqual([main.sent, market.clicking], [['alpha on', 'beta on'], true]);
+  assert.deepEqual([main.sent, clickList.running], [['alpha on', 'beta on'], true]);
   await main.answer(installed('beta'));
-  assert.deepEqual([main.reads, market.clicking, pluginBusy('/market', 'beta')], [{ plugins: 2, home: 2 }, false, false]);
+  assert.deepEqual([main.reads, clickList.running, pluginBusy('/market', 'beta')], [{ plugins: 2, home: 2 }, false, false]);
 });
 
 /** One click on alpha, run to the list's end. */
@@ -231,6 +238,127 @@ test('After two clicks on one plugin’s boxes, Undo names the click it reverses
   await main.answer(installed('alpha'));
   await main.answer(installed('alpha'));
   assert.equal(undoLabel(), 'Undo alpha in Claude Code');
+});
+
+// ---------- An item page's switches ----------
+
+/** A skill's switch clicked on the Skills page, as matrix.ts flip sends it: drawn as the row was (its latest unended click's state, else On). */
+function flip(name: string, on: boolean, made = () => {}) {
+  const seen = wantedOn('skills', name) ?? true;
+  queueClick({ kind: 'skills', key: name, on }, name, () => {
+    made();
+    return clickWork({ kind: 'skills', items: [name], changes: [{ key: name, on, except: [], seenOn: seen }], said: `${name} is ${on ? 'on' : 'off'}.` });
+  });
+}
+/** What main did of one click: the item written or removed in Claude Code, or the click refused as a whole. */
+const did = (name: string, on = false): PassResult => ({ results: [{ item: name, harness: 'claude-cli', outcome: on ? 'written' : 'removed', message: '' }], writes: 1 });
+const refusedAsStale = (name: string): PassResult => ({ results: [{ item: name, outcome: 'held', unchanged: true, message: `${name} changed since the page was read. Nothing was changed; read again.` }], writes: 0 });
+
+function onSkills() {
+  start();
+  app.page = 'skills';
+}
+
+test('Four switches clicked in a row: each row is drawn as clicked at once, main gets one at a time, and the header says the run once', async () => {
+  onSkills();
+  for (const name of ['a', 'b', 'c', 'd']) flip(name, false);
+  assert.deepEqual(['a', 'b', 'c', 'd', 'e'].map(name => wantedOn('skills', name)), [false, false, false, false, undefined]);
+  await settled();
+  assert.deepEqual(main.sent, ['a off, seen on']);
+  // The page acts, saying why its other writes are off; the rows' switches still take clicks (they join the list).
+  assert.equal(acting(), 'Waits until the switches clicked are done.');
+  await main.pass(did('a'));
+  assert.equal(app.outcome?.text, '1 skill is off: a; 3 to go.');
+  for (const name of ['b', 'c', 'd']) await main.pass(did(name));
+  assert.deepEqual(main.sent, ['a off, seen on', 'b off, seen on', 'c off, seen on', 'd off, seen on']);
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, main.reads.home], ['4 skills are off: a, b, c and d.', false, 4]);
+  assert.deepEqual([clickList.running, acting(), wantedOn('skills', 'a')], [false, undefined, undefined]);
+});
+
+test('A second click on a row whose click still waits takes it back: nothing is sent for it, and it is drawn as it was', async () => {
+  onSkills();
+  flip('a', false);
+  flip('b', false);
+  await settled();
+  assert.equal(takeBack('skills', 'b'), true);
+  assert.equal(wantedOn('skills', 'b'), undefined);
+  await main.pass(did('a'));
+  assert.deepEqual([main.sent, app.outcome?.text], [['a off, seen on'], 'a is off.']);
+});
+
+test('A second click on a row whose click runs is not a take-back: it runs after, from the state its row was drawn in, and is said as it left the row', async () => {
+  onSkills();
+  flip('a', false);
+  await settled();
+  assert.equal(takeBack('skills', 'a'), false);
+  flip('a', true);
+  assert.equal(wantedOn('skills', 'a'), true);
+  await main.pass(did('a'));
+  await main.pass(did('a', true));
+  assert.deepEqual([main.sent, app.outcome?.text], [['a off, seen on', 'a on, seen off'], '1 skill is on: a.']);
+});
+
+test('Three clicks where the second is refused: the first and third are done, and the result names the second in a problem line', async () => {
+  onSkills();
+  for (const name of ['a', 'b', 'c']) flip(name, false);
+  await settled();
+  await main.pass(did('a'));
+  await main.pass(refusedAsStale('b'));
+  await main.pass(did('c'));
+  assert.deepEqual([main.sent.length, app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], [3, '2 skills are off: a and c.', ['b changed since the page was read. Nothing was changed; read again.'], true]);
+});
+
+test('A click is worked out in its turn, after the home is read for the click before it', async () => {
+  onSkills();
+  const readsWhenMade: number[] = [];
+  flip('a', false, () => readsWhenMade.push(main.reads.home));
+  flip('b', false, () => readsWhenMade.push(main.reads.home));
+  await settled();
+  await main.pass(did('a'));
+  await main.pass(did('b'));
+  assert.deepEqual(readsWhenMade, [0, 1]);
+});
+
+test('A click with nothing left to change in its turn (the click before it took its whole plugin with it) counts as asked: no problem line', async () => {
+  onSkills();
+  flip('a', false);
+  queueClick({ kind: 'skills', key: 'b', on: false }, 'b', () => undefined);
+  await settled();
+  await main.pass(did('a'));
+  assert.deepEqual([main.sent, app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], [['a off, seen on'], '2 skills are off: a and b.', [], false]);
+});
+
+test('A run left for another page: its result is said in the status bar, never in the header of the page open', async () => {
+  onSkills();
+  flip('a', false);
+  await settled();
+  showPage('mcp');
+  await main.pass(did('a'));
+  assert.deepEqual([app.outcome, app.said.text], [undefined, 'a is off.']);
+});
+
+test('A result with no problem goes 8 seconds after the run’s last click has finished; one with a problem line stays', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    onSkills();
+    flip('a', false);
+    flip('b', false);
+    await settled();
+    await main.pass(did('a'));
+    // Nothing goes while clicks run.
+    mock.timers.tick(9000);
+    assert.equal(app.outcome?.text, '1 skill is off: a; 1 to go.');
+    await main.pass(did('b'));
+    mock.timers.tick(7999);
+    assert.equal(app.outcome?.text, '2 skills are off: a and b.');
+    mock.timers.tick(1);
+    assert.equal(app.outcome?.text, undefined);
+    flip('c', false);
+    await settled();
+    await main.pass(refusedAsStale('c'));
+    mock.timers.tick(60_000);
+    assert.equal(app.outcome?.text, 'c changed since the page was read. Nothing was changed; read again.');
+  } finally { mock.timers.reset(); }
 });
 
 // ---------- Rows pinned where they were ----------

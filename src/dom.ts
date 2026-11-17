@@ -91,6 +91,21 @@ export const pathText = (text: string, full = text): HTMLElement => {
 export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
 
 /**
+ * A press and its release on one control count as its click even when a redraw replaced the control between them (the lists
+ * redraw as clicks run): the browser fires no click on it then, so the release clicks the control now there, found by its id.
+ */
+export function keepClicksAcrossRedraws(): void {
+  let pressed: Element | null = null;
+  const control = (event: Event) => (event.target as Element | null)?.closest?.('button[id]') ?? null;
+  document.addEventListener('pointerdown', event => { pressed = control(event); }, true);
+  document.addEventListener('pointerup', event => {
+    const now = control(event), was = pressed;
+    pressed = null;
+    if (was && now && now !== was && now.id === was.id && !was.isConnected) (now as HTMLButtonElement).click();
+  }, true);
+}
+
+/**
  * An on/off switch; its label is also its tooltip. `mixed`: neither, drawn in between (its knob in the middle); a click turns
  * it on. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint).
  */

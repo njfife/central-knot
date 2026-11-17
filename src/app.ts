@@ -1,7 +1,8 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
-// state (`state`), the page shown (showPage), what is said after a click (tell, announce), the busy line (busy) and whether the
-// page is acting (acting: busy, or the Plugins page's switch clicks running); a click on an item page sent to its kind's engine
-// (applyClick, through kindPages) and its result kept for the page (lastResult); History's actions (restoreEvent); the reads of
+// state (`state`), the page shown (showPage), what is said after a click (tell, announce) and when a result goes by itself
+// (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
+// item page sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick) or in its turn in the page's
+// list (queueClick), its result kept for the page (lastResult), a run's said once (sayRun); History's actions (restoreEvent); the reads of
 // the home (loadHome, readAgain, readHomeOnce), the usage reading on a click (readUsage), and the Sync switch, Sync once and
 // Synchronize everything's row; the rows a click pins where they were (pinnedRows, drawPage); and the Instructions, base
 // instructions and Profiles pages' actions.
@@ -25,12 +26,14 @@ import { libraryWords } from './libraryrow.ts';
 import { andList, fewNames, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
-import { endListNews, loadPlugins, market, resetMarket } from './pluginstate.ts';
+import { endListNews, fadeRun, loadPlugins, resetMarket } from './pluginstate.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
+import { clickList, dropWaiting, join, type Turn } from './clicklist.ts';
+import { resultInHeader } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -190,14 +193,34 @@ export function tell(outcome: Outcome | undefined, otherwise = ''): void {
   state.outcome = outcome;
   if (!outcome) announce(otherwise);
   else { announce(spoken(outcome), !saidInStatusBar(outcome)); outcome.said = state.said.seq; }
-  if (outcome?.fade) setTimeout(() => { if (state.outcome !== outcome) return; state.outcome = undefined; rerender(); }, FADE_MS);
+  fadeLater();
 }
 
 /** A result as the status bar and screen readers say it: its sentence, then its reasons. */
 const spoken = (outcome: Outcome) => [outcome.text, ...outcome.reasons ?? []].join(' ');
 
-/** How long an Undo's confirmation stays in its band. */
-const FADE_MS = 5000;
+/**
+ * How long a result stays once the page stops acting, when it goes by itself: in a list page's header (matrix.ts resultInHeader),
+ * one with no problem line, whose Undo stays in History (Plugins' run too, whose Undo goes with it: pluginstate.ts fadeRun); on
+ * another page, an Undo's confirmation (Outcome fade).
+ */
+const FADE_MS = 8000;
+let fading: ReturnType<typeof setTimeout> | undefined;
+/** The result's time starts again from now; none runs while the page acts, whose end starts it (afterActing). */
+function fadeLater(): void {
+  clearTimeout(fading);
+  if (!acting()) fading = setTimeout(fadeNow, FADE_MS);
+}
+/** The pointer or the focus is in the header's result: it stays while they are, and its time starts again once they leave. */
+const heldInHeader = () => !!document.querySelector('.header-result:hover, .header-result:focus-within');
+function fadeNow(): void {
+  if (acting()) return;
+  if (heldInHeader()) { fading = setTimeout(() => (heldInHeader() ? fadeNow() : fadeLater()), 250); return; }
+  const outcome = state.outcome;
+  if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length)) state.outcome = undefined;
+  fadeRun();
+  rerender();
+}
 
 /** Paints the status bar's message from state.said, keeping its whole text as its tooltip. */
 export function paintStatusMessage() {
@@ -247,29 +270,32 @@ let focusAfterBusy: string | undefined;
 export const focusWhenDone = (id: string) => { focusAfterBusy = id; };
 
 /**
- * Why the page is acting, while it is: work under busy (its line), or the Plugins page's switch clicks waiting their turn
- * (pluginstate.ts market.clicking). Meanwhile no route opens another home, a plugin action other than a switch click is off,
- * each such control saying why (dom.ts button and toggle take the reason as `disabled`), and a background refresh waits;
+ * Why the page is acting, while it is: work under busy (its line), or a run of clicks in the page's list (clicklist.ts). Meanwhile
+ * no route opens another home, and every write but a row's switch or Add (on the item pages and Plugins, which join the list) is
+ * off, each such control saying why (dom.ts button and toggle take the reason as `disabled`); a background refresh waits;
  * body[data-busy] says it (showActing), and the end-to-end checks wait on it.
  */
-export const acting = (): string | undefined => state.busy || (market.clicking ? 'Waits until the plugin clicks are done.' : undefined);
+export const acting = (): string | undefined => state.busy || (clickList.running ? 'Waits until the switches clicked are done.' : undefined);
 export const showActing = () => { document.body.dataset.busy = String(!!acting()); };
-/** What follows any acting once it ends: a background refresh asked for meanwhile runs, and the Git repo's count is read again (no fetch). */
+/** What follows any acting once it ends: a background refresh asked for meanwhile runs, the Git repo's count is read again (no fetch), and the result's time to go starts. */
 export function afterActing() {
   drainOwedRefresh();
   if (state.home) loadRepoSoon();
+  fadeLater();
 }
+
+/** What the page says when work stopped half way: the page may no longer show what is true. */
+const couldNotFinish = () => (state.home ? `That could not finish. Still on ${state.home.label}. Click Refresh to see where things stand.` : 'Could not read this home. Nothing changed. Try again.');
 
 /**
  * One piece of work at a time: every mutating control is disabled while it runs. Its "Reading…" message gives way, when
  * the work said nothing of its own, to what the status bar said before. A background refresh that arrived meanwhile runs
- * once it is done. `keepResult`: the last result stays, its Undo off while the page acts, until the work says its own (an item
- * page's click and its Undo, so the header doesn't flip between the result and the page's name at each click).
+ * once it is done.
  */
-export async function busy(message: string, work: () => Promise<void>, { keepResult = false } = {}) {
+export async function busy(message: string, work: () => Promise<void>) {
   const focused = document.activeElement?.id;
   const before = state.said;
-  if (!keepResult) state.outcome = undefined;
+  state.outcome = undefined;
   state.undoMoved = undefined;
   state.busy = message;
   showActing();
@@ -277,9 +303,7 @@ export async function busy(message: string, work: () => Promise<void>, { keepRes
   const working = state.said.seq;
   rerender();
   try { await work(); }
-  catch {
-    announce(state.home ? `That could not finish. Still on ${state.home.label}. Click Refresh to see where things stand.` : 'Could not read this home. Nothing changed. Try again.');
-  }
+  catch { announce(couldNotFinish()); }
   // When the work said nothing since its "Reading…", what was said before comes back.
   if (state.said.seq === working) announce(before.text, before.quiet, before.link);
   state.busy = undefined;
@@ -313,6 +337,7 @@ function accept(view: HomeView) {
   resetPageData(state.instructions);
   resetPageData(state.history);
   resetPageData(state.usage, 'unasked');
+  dropWaiting();
   resetMarket();
   // The note of what plugin updates did by themselves is about one home.
   void loadPluginUpdates();
@@ -387,38 +412,128 @@ export const clickResumes = (home: HomeView) => home.sync.gate.state === 'needs-
 const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes, clickResumes(state.home!), state.home!.home);
 
 /**
- * One click, applied at once: an item's switch, or one tool's control in its details. The result says what was done, or why
- * nothing was, in the window's header (renderer.ts resultHere). Its one Undo reverses exactly what the click did: the History entries the
- * click itself made (never what sync did alongside), each by its own action (historyactions.ts).
+ * What one click did, once carried out on the page it was made on: its result as that page says it (`outcome`), whether it
+ * changed anything, its own results for its kind's problem lines (lastResult; none for a plugin's row's switches alone), where
+ * the focus goes (its control as now drawn), and what an Undo of a run takes back of it (`undo`: none when it has no Undo).
  */
-export const applyClick = (click: Click) => busy('Applying…', async () => {
+export interface Done {
+  outcome: Outcome;
+  did: boolean;
+  kept?: { kind: PageKind; results: DestinationResult[]; notices?: SyncNotice[] };
+  focus?: string;
+  regroups?: boolean;
+  undo?: { made: string[]; back: PluginOp[] };
+  /** What its plugins' part brought with it (pluginswitch.ts alongWords), said in a run's result too. */
+  along?: string;
+}
+/** A click's work, carried out for the page it was made on: a row's changes (clickWork) or a plugin's row's switches alone (switchesWork). */
+export type ClickWork = (page: Page) => Promise<Done>;
+export const clickWork = (click: Click): ClickWork => page => carryOut(click, page);
+export const switchesWork = (ops: PluginOp[], words: SwitchWords): ClickWork => page => switchesDone(ops, words, false, page);
+
+/**
+ * One click carried out: an item's switch, or one tool's control in its details, sent to its kind's engine, the home read again,
+ * then its part in the tools that have it through a plugin. Its result says what was done, or why nothing was. Its one Undo
+ * reverses exactly what the click did: the History entries the click itself made (never what sync did alongside), each by its
+ * own action (historyactions.ts).
+ */
+async function carryOut(click: Click, page: Page): Promise<Done> {
   const names = [...click.items, ...click.changes.map(change => change.key)];
   // Any click is a pass, even with no change (Resume).
   const result = await send(click.kind, click.changes);
   setHome(await api().refresh());
   const { ours, did, refusal, failed, differs, notIn } = clickResults(result.results, names);
   // A refusal is the click's result, or else one of its reasons: said once, not again among the failures.
-  kindPages[click.kind].keep(ours.filter(entry => entry !== refusal), result.notices);
-  if (result.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
+  const kept = { kind: click.kind, results: ours.filter(entry => entry !== refusal), notices: result.notices };
+  if (result.stopped) return { kept, did: false, outcome: { page, items: click.items, warn: true, band: true, text: result.stopped } };
   const made = result.made ?? [];
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
   if (plugged) setHome(await api().refresh());
-  focusAfterBusy = click.focus?.();
   const done = did || made.length > 0 || !!plugged?.done.length;
   // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
   const said = typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])], wrote);
   const choose = differs ? ' Its copies differ: choose which copy every tool uses.' : '';
-  const text = done || !refusal ? [said, plugged && !switchProblems(plugged) ? click.plugins?.said : ''].filter(Boolean).join(' ') + choose : refusal.message;
-  const switchedBack = plugged?.back ?? [];
-  const undo = click.undoing || !done ? undefined : (made.length && await allUndoable(made)) || switchedBack.length ? () => void undoClick(click, made, switchedBack) : undefined;
+  const along = plugged && !switchProblems(plugged) ? click.plugins?.said : undefined;
+  const text = done || !refusal ? [said, along].filter(Boolean).join(' ') + choose : refusal.message;
+  const back = plugged?.back ?? [];
+  const undo = !click.undoing && done && ((made.length && await allUndoable(made)) || back.length) ? { made, back } : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
-  tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned,
-    text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo ? { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } : undefined });
-  for (const item of click.items) flashRow(item);
-  if (click.regroups) unpin();
-}, { keepResult: true });
+  return { kept, did: done, undo, along, focus: click.focus?.(), regroups: click.regroups, outcome: { page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned,
+    text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick(click, made, back) } } };
+}
+
+/** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Turn these off, Resume, a copy chosen. */
+export const applyClick = (click: Click) => applyWork(clickWork(click));
+export const applyWork = (work: ClickWork) => busy('Applying…', async () => sayDone(await work(state.page)));
+/** What a click did, said in the header (renderer.ts resultHere) or its band, with its row flashed and the focus on its control. */
+function sayDone(done: Done) {
+  if (done.kept) kindPages[done.kept.kind].keep(done.kept.results, done.kept.notices);
+  tell(done.outcome);
+  focusAfterBusy = done.focus;
+  for (const item of done.outcome.items ?? []) flashRow(item);
+  if (done.regroups) unpin();
+}
+
+/** An item page's click in the page's list (clicklist.ts): its row's name, the page it was made on, and once carried out, what it did. */
+interface ItemTurn extends Turn { row: NonNullable<Turn['row']>; name: string; page: Page; done?: Done }
+/** The item pages' clicks of the run, on one page and of one kind (one tab of a harness's page). */
+const itemTurns = (page: Page, kind: PageKind) => clickList.turns.filter((turn): turn is ItemTurn => 'page' in turn && turn.page === page && turn.row?.kind === kind);
+
+/**
+ * A row's switch or Add on an item page (matrix.ts flip): its click joins the page's list and is carried out in its turn, worked
+ * out then from the view as it is (`make`; none when nothing is left to change), so the page stays live meanwhile. Its row is drawn in the
+ * state it asks for at once (clicklist.ts wantedOn), and the run's clicks on this page are said as one result (sayRun).
+ */
+export function queueClick(row: ItemTurn['row'], name: string, make: () => ClickWork | undefined): void {
+  const turn: ItemTurn = { state: 'waiting', row, name, page: state.page, run: async () => {
+    const work = make();
+    // Nothing left to change in its turn (the click before it took its whole plugin with it, say): as asked already.
+    if (!work) turn.done = { did: false, outcome: { page: turn.page, items: [name], text: `${name}: nothing left to change.` } };
+    else turn.done = await work(turn.page).catch((): Done => ({ did: false, outcome: { page: turn.page, items: [name], warn: true, band: true, text: `${name}: ${couldNotFinish()}` } }));
+    sayRun(turn);
+  } };
+  join(turn);
+  rerender();
+}
+
+/**
+ * After each click of a run, its clicks on that page said as one result there (one click alone: its own result), or in the
+ * status bar while another page is open; then its row flashes, and its control as now drawn (Add gives way to the switch) takes
+ * back the focus a redraw lost.
+ */
+function sayRun(turn: ItemTurn) {
+  const done = turn.done!, turns = itemTurns(turn.page, turn.row.kind);
+  const outcome = turns.length === 1 ? done.outcome : runOutcome(turns);
+  if (state.page !== turn.page) announce(spoken(outcome));
+  else {
+    if (done.kept) kindPages[done.kept.kind].keep(turns.flatMap(each => each.done?.kept?.results ?? []), done.kept.notices);
+    tell(outcome);
+  }
+  flashRow(turn.name);
+  if (done.focus && document.activeElement === document.body) document.getElementById(done.focus)?.focus({ preventScroll: true });
+}
+
+/**
+ * A run's clicks on one page, said once: what they turned off and on, by name ("3 skills are off: a, b and c"; one with nothing
+ * left to change counts as asked), how many are still to go, and what came with each; what each could not do as problem lines
+ * (one refused or failed whole: its own sentence); one Undo for the whole run, when each click that did something has one
+ * (undoClick, with every History entry and plugin switch they made).
+ */
+function runOutcome(turns: ItemTurn[]): Outcome {
+  const ended = turns.filter(turn => turn.done), did = ended.filter(turn => turn.done!.did), toGo = turns.length - ended.length;
+  // A row clicked twice is said as its last click left it.
+  const asked = ended.filter(turn => turn.done!.did || !turn.done!.outcome.warn), nouns = kindNouns[turns[0]!.row.kind];
+  const last = asked.filter(turn => asked.findLast(other => other.row.key === turn.row.key) === turn);
+  const said = [false, true].map(on => last.filter(turn => turn.row.on === on).map(turn => turn.name))
+    .map((names, on) => (names.length ? `${plural(names.length, nouns.one, nouns.many)} ${names.length === 1 ? 'is' : 'are'} ${on ? 'on' : 'off'}: ${fewNames(names)}` : '')).filter(Boolean).join('; ');
+  const along = did.flatMap(turn => (turn.done!.along ? [`${turn.name}: ${turn.done!.along.replace(/^./, first => first.toLowerCase())}`] : []));
+  const undos = did.map(turn => turn.done!.undo), items = turns.map(turn => turn.name);
+  const undo = undos.length && undos.every(Boolean) ? () => void undoClick({ kind: turns[0]!.row.kind, items: did.map(turn => turn.name), changes: [], said: '' }, undos.flatMap(each => each!.made), undos.flatMap(each => each!.back)) : undefined;
+  return { page: turns[0]!.page, items, band: true, warn: ended.some(turn => turn.done!.outcome.warn), reasons: ended.flatMap(turn => (asked.includes(turn) ? turn.done!.outcome.reasons ?? [] : [turn.done!.outcome.text])),
+    text: [`${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along].join(' '), act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything these clicks did', run: undo } };
+}
 
 /** Whether each History entry a click made still offers its own action, so the click's Undo can run them all. */
 async function allUndoable(made: string[]) {
@@ -450,7 +565,7 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
     text: undone ? `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.` : stopped ? 'Not all of it could be undone.' : `Not all of ${what} could be put back.` });
   for (const item of click.items) flashRow(item);
   if (click.regroups) unpin();
-}, { keepResult: true });
+});
 
 /** What a run of plugin switches couldn't do, in words ("issue-tracker: couldn’t turn it on in Codex."), or ''. */
 const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [ran.stopped, ...ran.failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)].filter(Boolean).join(' ');
@@ -480,25 +595,28 @@ async function runSwitches(ops: PluginOp[], undo = false) {
   return { done, lines, failed: lines.filter(line => !line.ok), failedIn, back: undo ? [] : reverse(done), stopped: result.stopped };
 }
 
-/** A plugin switch click's words: `said` when everything ran (else what ran), `undone` its Undo's, and `also`, one of its
- * reasons: what the click left as it is (a switch that can't be written). */
-interface SwitchWords { said?: string; undone?: string; also?: string }
+/** A plugin switch click's words: `said` when everything ran (else what ran), `undone` its Undo's, `also`, one of its reasons:
+ * what the click left as it is (a switch that can't be written), and `along`, what came with it, said in a run's result too. */
+export interface SwitchWords { said?: string; undone?: string; also?: string; along?: string }
 
 /**
  * Turns plugins' items on or off from the Skills, MCP servers and Agents pages (pluginswitch.ts), with each tool's own
- * switch, then reads the home again: a click with nothing of the person's own to change (a tool's switch for a plugin's item,
- * a plugin row's switch). The result offers Undo, which runs what this run changed, reversed.
+ * switch, then reads the home again: a click with nothing of the person's own to change (a tool's switch for a plugin's item in
+ * an opened row; a plugin row's own switch joins the page's list: switchesWork). The result offers Undo, which runs what this
+ * run changed, reversed.
  */
 export const applyPluginSwitches = (ops: PluginOp[], words: SwitchWords = {}) => switchPlugins(ops, words, false);
 
-const switchPlugins = (ops: PluginOp[], { said, undone, also }: SwitchWords, undo: boolean) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
+const switchPlugins = (ops: PluginOp[], words: SwitchWords, undo: boolean) => busy(undo ? 'Undoing…' : 'Applying…', async () => sayDone(await switchesDone(ops, words, undo, state.page)));
+
+async function switchesDone(ops: PluginOp[], { said, undone, also, along }: SwitchWords, undo: boolean, page: Page): Promise<Done> {
   const ran = await runSwitches(ops, undo);
   setHome(await api().refresh());
   const worked = !ran.failed.length && !ran.stopped;
   const text = (worked && said ? said : resultSentence(ran.lines, undo)) || 'Nothing changed.';
   const act = ran.back.length ? { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void switchPlugins(ran.back, { said: undone }, true) } : undefined;
-  tell({ page: state.page, text, reasons: switchReasons(ran, also), warn: !worked || !!also, band: true, fade: undo && worked, act });
-});
+  return { did: ran.done.length > 0, along: worked ? along : undefined, undo: act && { made: [], back: ran.back }, outcome: { page, text, reasons: switchReasons(ran, also), warn: !worked || !!also, band: true, fade: undo && worked, act } };
+}
 
 /**
  * What a read found, naming only the kinds a tool in that home can hold ("Read 1 skill and 0 MCP servers from pi-only."),
@@ -1234,9 +1352,13 @@ let refreshing = false;
 let refreshOwed = false;
 /** A background view that arrived while an action ran: its notices and caught-up results go into the next one (withSetAside). */
 let setAside: HomeView | undefined;
+/** Whether the home waits to be read once the page's run of clicks is done: a background refresh asked for meanwhile, or a plugin's click (oweHomeRead). */
+export const homeReadOwed = () => refreshOwed;
+/** A plugin's click changed what the item pages show: the home is read once at the run's end (clicklist.ts), not after each click. */
+export const oweHomeRead = () => { refreshOwed = true; };
 /**
- * The home read again by a Plugins action before it ends (pluginstate.ts readAgain): it stands for a background refresh owed
- * meanwhile, so the home is read once, and takes in a view set aside, so no notice is lost.
+ * The home read again by a Plugins action before it ends (pluginstate.ts readAgain), or at a run of clicks' end (clicklist.ts):
+ * it stands for a background refresh owed meanwhile, so the home is read once, and takes in a view set aside, so no notice is lost.
  */
 export async function readHomeOnce(): Promise<void> {
   refreshOwed = false;

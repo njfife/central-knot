@@ -3,7 +3,7 @@
 // would do there is counted by its whatJoiningDoes, which reaches the page in the view (types.ts SyncView joining). The band says
 // what the pass after the click did there, from its results (main.ts `tools:manage`, `did`). The cards themselves, the left-out
 // one included, are harnesspage.ts's.
-import { busy, clickResumes, setHome, state, tell } from './app.ts';
+import { acting, busy, clickResumes, setHome, state, tell } from './app.ts';
 import { h, toggle } from './dom.ts';
 import { plural } from './model.ts';
 import { market } from './pluginstate.ts';
@@ -33,7 +33,7 @@ export function manageRow(home: HomeView, tool: HarnessId): HTMLElement {
     : `Manage ${name}: off. Click to have Central Knot manage it.`;
   return h('div.harness-manage', {},
     h('span.harness-manage-head', {},
-      toggle({ on, label: why ?? label, id: `manage-${tool}`, disabled: !!why || !!state.busy, onchange: next => void manageTool(tool, next),
+      toggle({ on, label: why ?? label, id: `manage-${tool}`, disabled: why ?? acting(), onchange: next => void manageTool(tool, next),
         attrs: why ? {} : { 'aria-describedby': `manage-${tool}-line` } }),
       h('span.harness-manage-label', {}, on ? 'Managed' : 'Not managed')),
     why ? null : h('span.harness-manage-line', { id: `manage-${tool}-line` }, on ? offLine(name) : onLine(home, tool)));
