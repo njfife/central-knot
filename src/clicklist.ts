@@ -51,8 +51,8 @@ async function runList(): Promise<void> {
   for (;;) {
     const next = clickList.turns.find(turn => turn.state === 'waiting');
     if (next) {
+      // Not drawn: a row looks the same while its click waits and while it runs (Plugins' runClick draws its own row's words).
       next.state = 'running';
-      rerender();
       await next.run().catch(() => undefined);
       next.state = 'ended';
       rerender();
