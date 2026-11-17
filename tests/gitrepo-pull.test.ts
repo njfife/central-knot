@@ -44,7 +44,7 @@ test('An MCP server deleted by hand turns Off and stays in the repo; Delete from
   } finally { await box.cleanup(); }
 });
 
-test('Where only Claude Code takes MCP servers, Pull takes the repo’s server into Central Knot and Claude Code waits for Write to Claude Code', async () => {
+test('Where only Claude Code takes MCP servers, Pull takes the repo’s server into Central Knot and writes it into Claude Code', async () => {
   const box = await world();
   try {
     const first = await box.home('first');
@@ -55,10 +55,10 @@ test('Where only Claude Code takes MCP servers, Pull takes the repo’s server i
     const before = live((await connectRepo(claudeOnly, box.remote, '')).view);
     assert.deepEqual(before.incoming.filter(row => row.kind === 'mcp').map(row => [row.name, row.held]), [['docs', undefined]]);
     const pulled = await pullRepo(claudeOnly);
-    assert.deepEqual(pulled.waitsForClaude, ['docs']);
+    assert.equal(pulled.stopped, undefined);
     const after = live(pulled.view);
     assert.deepEqual([after.incoming, rows(after.outgoing)], [[], []]);
-    assert.deepEqual((await serversView(claudeOnly, ['claude-cli'])).items.map(server => [server.key, server.on, server.waits]), [['docs', true, ['claude-cli']]]);
+    assert.deepEqual((await serversView(claudeOnly, ['claude-cli'])).items.map(server => [server.key, server.on, !!server.copies['claude-cli']]), [['docs', true, true]]);
     await pushRepo(claudeOnly);
     assert.match(git(box.remote, 'ls-tree', '-r', '--name-only', 'main'), /mcp\/docs\.json/);
   } finally { await box.cleanup(); }
@@ -118,7 +118,7 @@ test('Pull counts and says only its own items: another skill in Central Knot hel
     await writeFile(join(author, 'skills/fresh/SKILL.md'), skillText('fresh'));
     commit('fresh');
     const pulled = await pullRepo(first);
-    assert.equal(pulled.pulled, 1);
+    assert.equal(pulled.stopped, undefined);
     assert.ok(!pulled.results.some(result => result.item === 'linked'), 'the held bystander is not in Pull’s results');
   } finally { await box.cleanup(); }
 });

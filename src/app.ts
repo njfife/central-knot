@@ -87,7 +87,7 @@ export const state = {
   /** The skill shown in the Skills detail. */
   item: undefined as string | undefined,
   busy: undefined as string | undefined,
-  /** What the last click on MCP servers, or Write to Claude Code, did. */
+  /** What the last click on MCP servers did. */
   mcpResult: undefined as PassResult | undefined,
   agentsResult: undefined as PassResult | undefined,
   /** What sync and actions did, newest last: read when the History page opens or the home changes (pagedata.ts). */
@@ -355,8 +355,7 @@ const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes
 /**
  * One click, applied at once: an item's switch, or one tool's control in its details. The result says what was done, or why
  * nothing was, in the band at the top of the page. Its one Undo reverses exactly what the click did: the History entries the
- * click itself made (never what sync did alongside), each by its own action (historyactions.ts). A write that waits for Write
- * to Claude Code is not said as done: its tool is among those the click didn't reach, and a note says it waits.
+ * click itself made (never what sync did alongside), each by its own action (historyactions.ts).
  */
 export const applyClick = (click: Click) => busy('Applying…', async () => {
   const names = [...click.items, ...click.changes.map(change => change.key)];
@@ -372,15 +371,13 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
   if (plugged) setHome(await api().refresh());
   const done = did || made.length > 0 || !!plugged?.done.length;
-  // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off); nor one whose write waits.
+  // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
-  const waited = [...new Set(ours.filter(entry => entry.waits && entry.harness).map(entry => entry.harness!))];
-  const waits = waited.length ? `${andList(waited.map(tool => toolName(tool)))} ${waited.length === 1 ? 'waits' : 'wait'} for Write to Claude Code.` : '';
-  const said = typeof click.said === 'string' ? click.said : click.said([...notIn, ...waited, ...(plugged?.failedIn ?? [])], wrote);
+  const said = typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])], wrote);
   const choose = differs ? ' Its copies differ: choose which copy every tool uses.' : '';
   const plugText = !plugged ? '' : plugged.failed.length || plugged.stopped ? switchProblems(plugged) : click.plugins?.said ?? '';
   // A hold that came after the change is said beside what was done, not dropped.
-  const text = done || !refusal ? [said, plugText, click.also, waits, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
+  const text = done || !refusal ? [said, plugText, click.also, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
   const switchedBack = plugged?.back ?? [];
   const undo = click.undoing || !done ? undefined : (made.length && await allUndoable(made)) || switchedBack.length ? () => void undoClick(click, made, switchedBack) : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
@@ -389,10 +386,7 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   for (const item of click.items) flashRow(item);
 });
 
-/**
- * Whether each History entry a click made still offers its own action, so the click's Undo can run them all: an Add that would
- * give Claude Code its MCP entry back offers none (historyactions.ts givesBackLater).
- */
+/** Whether each History entry a click made still offers its own action, so the click's Undo can run them all. */
 async function allUndoable(made: string[]) {
   const events = (await api().history()).events.filter(event => made.includes(event.id));
   const about = entriesNow(state.home!);
@@ -804,7 +798,7 @@ export interface Outcome {
   fade?: boolean;
   undo?: { id: string; label: string };
   act?: { label: string; id: string; run: () => void; title?: string; /** Why it is off now, asked at each drawing (a home's Go back while the page acts). */ whyOff?: () => string | undefined };
-  /** A second button after `act`: the next step the result offers ("Write to Claude Code"). */
+  /** A second button after `act`: the next step the result offers (the whole plugin's switch, "Turn its plugins off in Codex"). */
   next?: { label: string; id: string; run: () => void; title?: string };
   /** When it was said (state.said.seq): a result newer than a table's pending changes still shows there. */
   said?: number;
@@ -1282,22 +1276,6 @@ function drainOwedRefresh() {
   void backgroundRefresh();
 }
 
-// ---------- MCP servers ----------
-
-/**
- * Write to Claude Code, once the person has quit Claude Code: what the servers named owe Claude Code's settings file
- * (servers.ts writeToClaude). Its way back is the library's: Make current an earlier version, then Write again.
- */
-export const writeClaudeNow = (keys: string[]) => busy('Writing to Claude Code…', async () => {
-  const result = await api().writeClaude(keys, state.home!.home);
-  setHome(await api().refresh());
-  state.mcpResult = result;
-  const names = [...new Set(result.results.filter(entry => entry.harness === 'claude-cli' && (entry.outcome === 'written' || entry.outcome === 'removed')).map(entry => entry.item))];
-  const text = !names.length ? 'Nothing was written to Claude Code.' : state.home?.mode === 'fixture' ? `${andList(names)} written to the practice copy of Claude Code’s settings.`
-    : `${andList(names)} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`;
-  tell(result.stopped ? undefined : { page: state.page, items: names, text }, result.stopped);
-});
-
 // ---------- Profiles ----------
 
 /** The Profiles page's state: which profile is open, and what it is doing with it. */
@@ -1312,17 +1290,11 @@ export const profileState = {
   draft: undefined as string | undefined,
 };
 
-/**
- * What a switch or its Undo did, as its band says it: what it turned On and Off, the MCP servers whose Claude Code part waits
- * for Write to Claude Code (offered as the band's second button: never said done), and what could not change.
- */
-function turnedOutcome(lead: string, turned: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'waits'>, results: DestinationResult[], act?: Outcome['act']) {
-  const waits = turned.waits.length;
-  const waitSaid = waits ? ` ${plural(waits, 'MCP server')} ${waits === 1 ? 'waits' : 'wait'} for Write to Claude Code.` : '';
+/** What a switch or its Undo did, as its band says it: what it turned On and Off, and what could not change. */
+function turnedOutcome(lead: string, turned: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'>, results: DestinationResult[], act?: Outcome['act']) {
   const leftSaid = turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
-  tell({ page: state.page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${waitSaid}${leftSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0, act,
-    next: waits ? { label: 'Write to Claude Code', id: 'outcome-write-claude', title: 'Quit Claude Code first: it rewrites its settings file while open', run: () => void writeClaudeNow(turned.waits) } : undefined });
+  tell({ page: state.page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0, act });
 }
 
 /** What a switch did, with Undo switch (from the page or, next time the window shows, the menu bar). */

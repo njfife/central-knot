@@ -390,7 +390,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   .band-two > .band-actions { order: 1; flex-basis: 100%; flex-wrap: wrap; padding-left: 20px; }
 }
 .band-help { color: var(--ink-soft); }
-.band-why { color: var(--ink-soft); }
 .band-sync-off .text-action + .text-action { margin-left: 4px; }
 
 .sync-notice-lines { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
@@ -405,14 +404,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .notice-name:hover { text-decoration: underline; }
 .notice-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .notice-tail { order: 3; flex-basis: 100%; padding-left: 22px; font-size: 12px; }
-/* Write to Claude Code's band: an inset amber notice, its sentence over its actions; a one-sentence one keeps them on its row. */
-.sync-notice.notice-stacked { padding: 10px 38px 10px 12px; border-radius: 6px; background: color-mix(in oklab, var(--warning) 7%, var(--surface)); }
-.sync-notice.notice-stacked > .notice-dismiss { top: 8px; right: 4px; }
-.notice-stacked > .notice-text { flex: 1 1 calc(100% - 30px); }
-.notice-stacked > .notice-actions { order: 2; flex-basis: 100%; padding-left: 22px; margin-top: 6px; }
-.sync-notice.notice-stacked.notice-inline { flex-wrap: nowrap; padding-right: 12px; }
-.notice-stacked.notice-inline > .notice-text { flex: 1 1 auto; }
-.notice-stacked.notice-inline > .notice-actions { flex: none; padding-left: 0; margin: 0 0 0 auto; }
 /* Narrow content: a notice's actions take their own line under its sentence, so no button is squeezed or cut. */
 @container content (width < 880px) {
   .sync-notice > .notice-actions { flex-basis: 100%; padding-left: 22px; }
@@ -1499,7 +1490,7 @@ span.ins-confirm { margin-top: 0; }
 .profiles-split .detail-column .pane-header, .profiles-split .detail-column > .bands { max-width: none; }
 .profiles-split .toolbar-end { border-left: 0; padding-left: 0; }
 .profile-header .pane-title h2, .profile-header .pane-title p { overflow-wrap: anywhere; }
-/* What a switch will do, and that Claude Code's part waits, is said whole: it wraps rather than being cut */
+/* What a switch will do is said whole: it wraps rather than being cut */
 .profile-header .pane-title p { white-space: normal; }
 .profile-header { flex-wrap: wrap; row-gap: 8px; }
 .profile-header .pane-title { flex: 1 1 220px; }

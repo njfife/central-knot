@@ -163,25 +163,12 @@ function renameField(profile: Profile) {
     onblur: (event: Event) => { const input = event.target as HTMLInputElement; if (input.isConnected) afterClick(() => finish(true, input, () => undefined)); } });
 }
 
-/**
- * Whether a switch's MCP servers wait for Write to Claude Code (servers.ts: Claude Code's MCP settings are written only then):
- * one turning On that Claude Code doesn't have and isn't kept out of, or one turning Off that Claude Code still has.
- */
-function claudeWaits(turns: Turns): boolean {
-  const mcp = state.home!.mcp, inClaude = (item: LiveItem) => !!mcp.items.find(row => row.key === item.key)?.copies['claude-cli'];
-  const servers = (items: LiveItem[]) => items.filter(item => item.kind === 'mcp');
-  return mcp.tools.includes('claude-cli') && (servers(turns.on).some(item => !item.except.includes('claude-cli') && !inClaude(item)) || servers(turns.off).some(inClaude));
-}
-
-/**
- * What the open profile's header says under its name: whether it is in use, else what Switch would turn On and Off, and when
- * that changes an MCP server in Claude Code, that it waits for Write to Claude Code (never that it is done).
- */
+/** What the open profile's header says under its name: whether it is in use, else what Switch would turn On and Off. */
 function subtitleOf(profile: Profile, turns: Turns, isInUse: boolean, all: LiveItem[]): string {
   const count = namedItems(profile, all).length, others = all.length - count;
   if (isInUse) return `In use · ${plural(count, 'item')} on${others ? `, the other ${others} off` : ''}`;
   if (!switchable(profile, all)) return '0 items';
-  return `Switching ${turnsWords(turns, 'will')}${claudeWaits(turns) ? ' · Claude Code’s MCP servers change when you press Write to Claude Code' : ''}`;
+  return `Switching ${turnsWords(turns, 'will')}`;
 }
 
 /** Delete's confirmation: deleting a profile changes nothing in Central Knot or the tools, and Undo makes it again. */

@@ -28,7 +28,6 @@ const api: DesktopApi = {
   cancelDraft: () => ipcRenderer.invoke('instructions:cancel-draft'),
   undoBase: (undo, home) => ipcRenderer.invoke('instructions:undo-base', undo, home),
   applyServers: (changes, resume, home) => ipcRenderer.invoke('servers:apply', changes, resume, home),
-  writeClaude: (keys, home) => ipcRenderer.invoke('servers:write-claude', keys, home),
   serverVersion: (key, hash) => ipcRenderer.invoke('servers:version', key, hash),
   startHome: () => ipcRenderer.invoke('discovery:start'),
   applyAgents: (changes, resume, home) => ipcRenderer.invoke('agents:apply', changes, resume, home),

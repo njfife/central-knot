@@ -15,12 +15,12 @@ import { andList, fewNames, kindNouns, sentence, toolList as toolsInWords, toolN
 import { lastUse, leftToItsRow, noUseSeen, onIn, rowFigure, startsLate, toolSays, USAGE_DAYS, type CantSay, type ToolSays, type UsageFacts } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, writesWait, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -202,7 +202,7 @@ const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return s
 
 /** A kind's row in the shape the table works with (itemrow.ts ItemRow). */
 const fromFacts = (facts: LibraryFacts): ItemRow => ({
-  key: facts.key, name: facts.name, description: facts.description, fromSource: facts.fromSource, unseen: facts.unseen, plan: facts.plan, takeInAnswers: facts.takeInAnswers, versionChanges: facts.versionChanges, on: facts.on, except: facts.except, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
+  key: facts.key, name: facts.name, description: facts.description, fromSource: facts.fromSource, unseen: facts.unseen, plan: facts.plan, takeInAnswers: facts.takeInAnswers, versionChanges: facts.versionChanges, on: facts.on, except: facts.except, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
@@ -495,8 +495,6 @@ function compareChoices(skill: ItemRow, inFiles = false, then?: () => void) {
   const groups = [...groupBy(compared, tool => skill.hashes?.[tool] ?? tool).values()];
   // A choice turns it on everywhere: every tool that can hold it and has no copy gets the chosen one.
   const receiving = toolList().filter(tool => !skill.cannot?.[tool] && skill.copies[tool] === undefined);
-  // The tools a choice changes only when you click Write to Claude Code (libraryrow.ts writesWait).
-  const later = [...compared, ...receiving].filter(tool => writesWait(kind, tool));
   // The copy changed last is the engine's answer (library.ts latestCopy, in the take-in answer); none where no date tells.
   const asked = skill.takeInAnswers?.click, latestHash = asked && 'wait' in asked ? asked.latest : undefined;
   const latest = groups.find(([tool]) => skill.hashes?.[tool] === latestHash);
@@ -533,7 +531,7 @@ function compareChoices(skill: ItemRow, inFiles = false, then?: () => void) {
       who,
       h('span.version-says', {},
         said ? h('span.version-text', {}, ...said) : null,
-        h('span.version-effect', {}, choiceEffect(replaced.map(entry => names[entry]), receiving.map(entry => names[entry]), later.map(entry => names[entry]), keeping.map(entry => names[entry])))),
+        h('span.version-effect', {}, choiceEffect(replaced.map(entry => names[entry]), receiving.map(entry => names[entry]), keeping.map(entry => names[entry])))),
       h(`span.version-cta${group === latest ? '.version-cta-main' : ''}`, { 'aria-hidden': 'true' }, 'Use this copy'));
   };
   // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already;
@@ -547,7 +545,7 @@ function compareChoices(skill: ItemRow, inFiles = false, then?: () => void) {
   return h('div.compare-block', {},
     h('p.compare-title', {}, icon('circle-question-mark', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
     // The choice takes it into Central Knot: the copies not chosen become its versions, each of which can be made current later.
-    h('p.compare-note', {}, `Choosing applies at once${later.length ? `, in ${andList(later.map(entry => names[entry]))} when you click Write to Claude Code` : ''}: the ${lib.words.item} is taken into Central Knot with that copy, and turned on everywhere. The other copies are kept as its versions.`),
+    h('p.compare-note', {}, `Choosing applies at once: the ${lib.words.item} is taken into Central Knot with that copy, and turned on everywhere. The other copies are kept as its versions.`),
     h('div.compare-choices', {}, groups.map(choice)),
     read, bodies);
 }
@@ -729,23 +727,6 @@ export function caughtUpBand(home: HomeView): HTMLElement | null {
     closeButton(() => { state.dismissed.add(key); rerender(); }, { id: 'caught-up-dismiss' }));
 }
 
-/**
- * The rows whose write or removal in Claude Code waits for its own Write step (types.ts LibraryFacts waits): one band for all
- * of them, offered exactly while Claude Code's file owes something, whose Write writes only what those rows owe.
- */
-function writeStepBand(waiting: ItemRow[]) {
-  const owes = (skill: ItemRow) => (skill.plan?.write.includes('claude-cli') ? (skill.copies['claude-cli'] === undefined ? 'add' : 'update') : 'remove');
-  const said = (which: 'add' | 'update' | 'remove', words: string) => { const list = waiting.filter(skill => owes(skill) === which).map(nameOf); return list.length ? [words, ...nameList(list)] : []; };
-  const parts = [said('add', 'add '), said('update', 'bring '), said('remove', 'remove ')].filter(part => part.length);
-  const what = parts.flatMap((part, index) => [index ? (index === parts.length - 1 ? ' and ' : ', ') : '', ...part, ...(part[0] === 'bring ' ? [' up to date'] : [])]);
-  const quitFirst = state.home?.mode === 'fixture' ? h('span.band-why', {}, ' On your real tools, quit Claude Code first.') : ' Quit Claude Code first; it rewrites its settings file while open.';
-  const write = button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: () => void writeClaudeNow(waiting.map(skill => skill.key)),
-    attrs: { title: 'Claude Code rewrites ~/.claude.json while it is open, so Central Knot writes it only when Claude Code is closed.' } });
-  return h('div.band.sync-notices.band-write-now', { role: 'status' }, h('div.sync-notice-lines', {},
-    h('p.sync-notice.notice-stacked.notice-inline', { 'data-kind': 'write' }, icon('clock', 14, 'tone-warning'),
-      h('span.notice-text', {}, 'Claude Code’s settings wait for Write to Claude Code, to ', ...what, '.', quitFirst), h('span.notice-actions', {}, write))));
-}
-
 /** The bands above a table, from its kind's view (listView). */
 function listNotices() {
   const mcp = listView()!;
@@ -777,12 +758,9 @@ function listNotices() {
     }
     bands.push(h('div.band.sync-notices', { role: 'status' }, h('div.sync-notice-lines', {}, lines), dismissNotices(shownNotices)));
   }
-  // Claude Code rewrites ~/.claude.json while it runs, so its entries wait for an explicit write with Claude closed.
-  const waiting = committedList().filter(skill => skill.waits?.length);
-  if (waiting.length) bands.push(writeStepBand(waiting));
   if (result?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, result.stopped)));
   // A click's refusal is its result, said once, in the result's band (app.ts applyClick leaves it out of these).
-  const problems = (result?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !result.differs && !result.waits));
+  const problems = (result?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !result.differs));
   if (problems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · '))));
   return bands.length ? h('div.bands', {}, bands) : null;
 }
@@ -942,7 +920,7 @@ function takenInNotice(notice: TakenInNotice & { once?: boolean }) {
   const off = !!state.home && !state.home.syncOn, once = notice.once ?? off;
   state.seenNotices.add(notice.history);
   return h('p.sync-notice', { 'data-kind': notice.kind }, icon('plus', 14, 'tone-success'),
-    h('span.notice-text', {}, once ? 'Synced once: ' : '', library().say.takenInWords(notice, kind), h('span.notice-age', {}, ` · ${age(notice.history)}`)),
+    h('span.notice-text', {}, once ? 'Synced once: ' : '', library().say.takenInWords(notice), h('span.notice-age', {}, ` · ${age(notice.history)}`)),
     h('span.notice-actions', {}, smallAction('History', `notice-history-${notice.history}`, () => showPage('history'))),
     closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history); rerender(); }, { id: `notice-dismiss-${notice.history}`, label: 'Dismiss this notice of what Synchronize everything took in', title: 'Dismiss', look: '.notice-dismiss' }));
 }
@@ -1060,8 +1038,7 @@ const onPhrase = (skill: ItemRow, left: readonly string[] = []) => toolsPhrase(c
 
 /**
  * On: in every harness it isn't kept out of. A found item is taken in by this click (`use`: the copy every harness takes where
- * they differ). Said from what happened (`notIn`: the harnesses where the write didn't go through, or waits for Write to
- * Claude Code: app.ts applyClick).
+ * they differ). Said from what happened (`notIn`: the harnesses where the write didn't go through: app.ts applyClick).
  */
 function turnOn(skill: ItemRow, use?: Tool): Promise<void> {
   const name = nameOf(skill), lib = library(), found = !inLibrary(itemOf(skill));
@@ -1173,7 +1150,7 @@ type MarkLook = 'on' | 'off' | 'none' | 'differs' | 'waits' | 'held';
 /** What a mark says in the key, by what it is (libraryrow.ts HarnessIs, and a plugin's item). */
 const keyWords = {
   on: 'On there', 'plugin-off': 'Off there', none: 'No copy',
-  'will-sync': 'Gets a copy when sync runs next', 'write-now': 'Waits for Write to Claude Code',
+  'will-sync': 'Gets a copy when sync runs next',
   taken: 'Edited, becomes the current version', 'deleted-by-hand': 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
   current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: Central Knot keeps it', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
   'another-way': 'Has it another way, not from Central Knot', switched: 'Switched off in its own settings',
@@ -1206,7 +1183,6 @@ const libraryMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWor
   leaving: { look: 'waits', key: 'leaving', glyph: 'clock' },
   unseen: { look: 'differs', key: 'unseen', glyph: 'circle-alert' },
   'another-way': { look: 'on', key: 'another-way', glyph: 'link-2' },
-  waits: { look: 'waits', key: 'write-now', glyph: 'clock' },
 };
 function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<typeof markOf> {
   const item = itemOf(skill), is = harnessIs(skill, item, tool);
@@ -1434,11 +1410,15 @@ function foundNote(list: ItemRow[]) {
   return `in a tool, not in Central Knot: Synchronize everything leaves these (open a row to see why)${choosing ? `. ${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : ''}`;
 }
 
-/** The Off heading's note: no tool has these, or the tools that still have some on through a plugin, or (while a write waits) until Write to Claude Code. */
+/**
+ * The Off heading's note: no tool has these, or the tools that still have some on through a plugin, or how many are still in a
+ * tool until sync runs, whose removal there was held (Claude Code's lock, a file that couldn't be written).
+ */
 function offNote(list: ItemRow[]) {
-  const still = [...new Set(list.flatMap(skill => skill.waits ?? []))], through = [...new Set(list.flatMap(skill => skill.pluginOn ?? []))];
+  const through = [...new Set(list.flatMap(skill => skill.pluginOn ?? []))];
   if (through.length) return `in Central Knot; some on in ${andList(through.map(tool => names[tool]))} through a plugin`;
-  return still.length ? `in Central Knot; still in ${andList(still.map(tool => names[tool]))} until Write` : leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
+  const owed = list.filter(skill => skill.plan?.remove.length), still = [...new Set(owed.flatMap(skill => skill.plan!.remove))];
+  return owed.length ? `in Central Knot; ${owed.length} still in ${andList(still.map(tool => names[tool]))} until sync runs` : leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
 }
 
 /** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */
@@ -1469,9 +1449,7 @@ function libraryHarnessSwitch(lib: LibraryPage, skill: ItemRow, tool: Tool) {
   const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
   const does = out ? `Click to put it in ${where} again, its ${lib.words.copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
   const flipHere = (on: boolean) => click({ kind, items: [name], changes: [rowClicks.inHarness(skill, item, tool, !on)], said });
-  // A tool whose write or removal waits for Write to Claude Code says so in place of On or Off, which it is only after it.
-  const word = harnessIs(skill, item, tool) === 'waits' ? 'Waits for Write' : out ? 'Off' : 'On';
-  return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, word),
+  return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, out ? 'Off' : 'On'),
     toggle({ on: !out, disabled: !canWrite(), id: `enable-${skill.key}-${tool}`, label: `${name} in ${where}: ${out ? 'kept out' : 'on'}. ${does}`, onchange: flipHere })));
 }
 
@@ -1588,7 +1566,6 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
 function toolbarState() {
   const edits = committedList().filter(skill => skill.on && skill.edited?.length).length;
   if (edits) return h('span.apply-state.apply-waiting', {}, icon('clock', 14, 'tone-warning'), `${edits} ${edits === 1 ? 'change' : 'changes'} waiting`);
-  // A server waiting for Claude Code is said once, by the band that carries Write to Claude Code, and by its row's mark.
   if (state.home && !state.home.syncOn) return h('span.apply-state.apply-quiet', {}, icon('circle-minus', 14, 'tone-muted'), 'Nothing waiting · sync off');
   return null;
 }

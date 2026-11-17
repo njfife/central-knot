@@ -56,6 +56,6 @@ const managingEntry = (context: ShareContext, tool: HarnessId, on: boolean): His
 export async function whatJoiningDoes(context: ShareContext, managed: readonly HarnessId[], tool: HarnessId, rule: boolean): Promise<JoinCounts> {
   const tools = harnessIds.filter(other => other === tool || managed.includes(other));
   const each = [await joinCounts(skillKind, context, tools, tool, rule), await joinCounts(serverKind, context, tools, tool, rule), await joinCounts(agentKind, context, tools, tool, rule)];
-  return { written: sum(each, 'written'), kept: sum(each, 'kept'), removed: sum(each, 'removed'), waits: sum(each, 'waits'), found: sum(each, 'found'), takenIn: sum(each, 'takenIn') };
+  return { written: sum(each, 'written'), kept: sum(each, 'kept'), removed: sum(each, 'removed'), found: sum(each, 'found'), takenIn: sum(each, 'takenIn') };
 }
 const sum = (each: JoinCounts[], field: keyof JoinCounts) => each.reduce((total, counts) => total + counts[field], 0);

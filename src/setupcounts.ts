@@ -53,17 +53,14 @@ export const takenOutEarlier = (home: HomeView): number => KINDS.reduce((count, 
 
 /**
  * What Yes would do now, counted from the take-in table's rule column as the pass reads it (each kind's view): the items it takes
- * in, the tools that get one (a tool with no copy that can take it and has it no other way), the items that wait for a choice of
- * copy, the MCP servers Claude Code gets only at Write to Claude Code, and whether one was found in Claude Code (whose take-in has
- * no Undo: historyactions.ts givesBackLater).
+ * in, the tools that get one (a tool with no copy that can take it and has it no other way), and the items that wait for a choice
+ * of copy.
  */
 export function whatYesDoes(home: HomeView) {
   const takes = KINDS.flatMap(kind => { const { facts, tools } = kindSource(home, kind); return facts.filter(fact => fact.takeInAnswers && 'take' in fact.takeInAnswers.rule).map(fact => ({ kind, fact, tools })); });
   const gets = (fact: (typeof takes)[number]['fact'], tools: HarnessId[]) => tools.filter(tool => !fact.copies[tool] && !fact.cannot[tool] && !fact.anotherWay?.[tool]);
   const to = home.sync.managed.filter(tool => takes.some(({ fact, tools }) => gets(fact, tools).includes(tool)));
-  const servers = takes.filter(({ kind }) => kind === 'mcp');
-  return { takes: takes.length, to, choosing: waitingForChoice(home).length, waitForClaude: servers.filter(({ fact, tools }) => gets(fact, tools).includes('claude-cli')).length,
-    fromClaude: servers.some(({ fact }) => !!fact.copies['claude-cli']) };
+  return { takes: takes.length, to, choosing: waitingForChoice(home).length };
 }
 
 // ---------- The walkthrough ----------

@@ -13,16 +13,14 @@
 //   unseen; a missing one is away (folderSeen), so its entries are written back once it can be, never read as deletions.
 // - why a tool can't be given a server (Disk.held): it can't hold its transport (mcp.ts cannotHold), or it has the server
 //   through a plugin and no entry of its own.
-// - Claude Code's file is written only by Write to Claude Code (writeToClaude), with Claude closed: until then its writes and
-//   removals wait (Disk.locked `waits`), and each row that owes one says so (`waits`). Write to Claude Code runs the kind
-//   built the other way round: Claude Code's file open, every other tool's writes waiting for the next pass. A source's update
-//   or drop of a server waits there the same way (sources.ts SourcedItem `deferred`).
+// - Claude Code's file is written by the same passes as every tool's, holding Claude Code's own lock (mcp.ts editEntry): a
+//   running Claude Code saves it under that lock and keeps what another write put there.
 // - Merge of a source's version (merge.ts mergeServer); what at a link is a server is atlink.ts serversAt.
 // - a tool's own switch for a server (mcpswitch.ts) is read at each look for its mark (`switchedOff`) and never written by a
 //   pass. Where it lives inside the entry (Codex, Pi, OpenCode) it is that tool's own field, so it comes back with the entry.
-//   One write follows a pass: Claude Code's deny of a server the profiles migration turned Off was kept, so the server doesn't
-//   start there before Write to Claude Code takes its entry out, and is cleared once the server is wanted there (releaseKeptDenies).
-// Around the pass: applyServers, writeToClaude and restoreServer run it (the page's clicks);
+//   One write follows a pass: a Claude Code deny an earlier build's profiles migration kept is cleared once the server is wanted
+//   there (releaseKeptDenies).
+// Around the pass: applyServers and restoreServer run it (the page's clicks);
 // serversView is the MCP servers page's reading (types.ts LibraryView), with each row's source (sources.ts sourceFacts);
 // serversForRepo is what the Git repo's Push sends. Elsewhere: the formats, mcp.ts; where things are kept and
 // the migration from the earlier record, serverstore.ts and servermigrate.ts; the row and its words, libraryrow.ts with
@@ -31,8 +29,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
 import { listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, leavingIn, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
-import { libraryWords, writesWait } from './libraryrow.ts';
+import { copiesOf, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { libraryWords } from './libraryrow.ts';
 import { mergeServer } from './merge.ts';
 import { cannotHold, editEntry, fromJson, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
@@ -49,9 +47,6 @@ import { record } from './values.ts';
 /** A server in one line, as its row and the copy question say it: "Command · npx -y docs", or "HTTP · https://…". */
 export const summary = (server: NeutralServer) =>
   (server.transport === 'stdio' ? `Command · ${[server.command, ...(server.args ?? [])].filter(Boolean).join(' ')}` : `${server.transport.toUpperCase()} · ${server.url ?? ''}`);
-
-/** Why Claude Code's writes wait: said on its line, and as each write's result until Write to Claude Code. */
-export const CLAUDE_WAITS = 'Claude Code rewrites this file while it runs, so Central Knot writes it only when you click Write to Claude Code, with Claude closed.';
 
 // ---------- What the tools hold ----------
 
@@ -71,11 +66,8 @@ interface ServerDisk extends Disk<McpEntry> {
 }
 type ServerLook = Look<NeutralServer, McpEntry, ServerDisk>;
 
-/**
- * Reads each managed tool's settings file. `writeClaude`: the pass is Write to Claude Code's, which writes Claude Code's file
- * alone (every other tool's writes and removals are left for the next pass); otherwise Claude Code's wait.
- */
-async function readDisk(context: ShareContext, managed: HarnessId[], writeClaude: boolean): Promise<ServerDisk> {
+/** Reads each managed tool's settings file. */
+async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<ServerDisk> {
   const disk: ServerDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], shapes: new Map(), unseenNames: new Map(), switchedOff: new Map(),
     through: await serversThroughPlugins(context, managed, await recordedServers(context.home)), switches: await readMcpSwitches(context, managed), linked: await pluginHolds(context, managed),
@@ -108,7 +100,6 @@ async function readDisk(context: ShareContext, managed: HarnessId[], writeClaude
     }
     // A name seen twice is unseen for both entries.
     for (const [key, entry] of seen) if (!disk.unseen.has(`${tool}:${key}`)) disk.byKey.set(key, { ...disk.byKey.get(key), [tool]: entry });
-    if (writesWait('mcp', tool) !== writeClaude) disk.locked.set(tool, { why: writeClaude ? 'Write to Claude Code writes only Claude Code’s settings.' : CLAUDE_WAITS, waits: true });
   }
   for (const item of Object.values(await recordedServers(context.home))) for (const { hash } of item.versions) {
     const version = await readVersion(context, item.key, hash);
@@ -144,46 +135,38 @@ const serversThroughPlugins = (context: ShareContext, tools: HarnessId[], items:
 
 // ---------- The servers' Kind ----------
 
-/**
- * MCP servers as a kind of item (librarypass.ts Kind): one entry per server in each tool's settings file. `writeClaude`: the
- * kind Write to Claude Code runs, with Claude Code's file open to writes and every other tool's waiting; every other pass uses
- * serverKind, where Claude Code's wait.
- */
-function kindFor(writeClaude: boolean): Kind<NeutralServer, McpEntry, ServerDisk> {
-  return {
-    kind: 'mcp',
-    // The item and its copy as the page names them (libraryrow.ts libraryWords); a tool's file of them only the pass says.
-    words: { item: libraryWords.mcp.item, copy: libraryWords.mcp.copy, folder: () => 'settings file' },
-    // History's MCP entries were keyed `mcp:<name>` before the library, and still are (by the server's key now).
-    historyPrefix: 'mcp:',
-    harnesses: tools => tools.filter(tool => mcpTools.includes(tool)),
-    folder: mcpFile,
-    // Every server of a tool is in one file: the settle clock is kept per entry.
-    pathOf: (context, tool, name) => `${mcpFile(context, tool)}#${itemKey(name)}`,
-    folderSeen: async (context, tool) => sharedFileSeen(mcpFile(context, tool), await stat(mcpFile(context, tool)).then(() => true, () => false)),
-    open: openLibrary,
-    save: saveLibrary,
-    store: (context, item, _hash, server) => storeVersion(context, item.key, server),
-    readVersion,
-    hashOf: serverHash,
-    recover: recoverSettings,
-    read: (context, managed) => readDisk(context, managed, writeClaude),
-    contentOf: entry => entry.server,
-    ownOf: ownPartOf,
-    keepOwn,
-    write: writeServer,
-    refusesToLoad: async (_context, _item, tool, server) => cannotHold(tool, server),
-    remove: async (context, _item, here) => {
-      context.fault?.('before-remove');
-      const stopped = await editEntry(context, here.tool, here.name, here.hash, undefined);
-      return !stopped ? 'removed' : stopped.changed ? 'changed' : 'failed';
-    },
-    historyAction: libraryAction,
-    merge: mergeServer,
-  };
-}
-/** The servers' Kind for every pass but Write to Claude Code's: Claude Code's writes and removals wait. */
-export const serverKind = kindFor(false);
+/** MCP servers as a kind of item (librarypass.ts Kind): one entry per server in each tool's settings file. */
+export const serverKind: Kind<NeutralServer, McpEntry, ServerDisk> = {
+  kind: 'mcp',
+  // The item and its copy as the page names them (libraryrow.ts libraryWords); a tool's file of them only the pass says.
+  words: { item: libraryWords.mcp.item, copy: libraryWords.mcp.copy, folder: () => 'settings file' },
+  // History's MCP entries were keyed `mcp:<name>` before the library, and still are (by the server's key now).
+  historyPrefix: 'mcp:',
+  harnesses: tools => tools.filter(tool => mcpTools.includes(tool)),
+  folder: mcpFile,
+  // Every server of a tool is in one file: the settle clock is kept per entry.
+  pathOf: (context, tool, name) => `${mcpFile(context, tool)}#${itemKey(name)}`,
+  folderSeen: async (context, tool) => sharedFileSeen(mcpFile(context, tool), await stat(mcpFile(context, tool)).then(() => true, () => false)),
+  open: openLibrary,
+  save: saveLibrary,
+  store: (context, item, _hash, server) => storeVersion(context, item.key, server),
+  readVersion,
+  hashOf: serverHash,
+  recover: recoverSettings,
+  read: readDisk,
+  contentOf: entry => entry.server,
+  ownOf: ownPartOf,
+  keepOwn,
+  write: writeServer,
+  refusesToLoad: async (_context, _item, tool, server) => cannotHold(tool, server),
+  remove: async (context, _item, here) => {
+    context.fault?.('before-remove');
+    const stopped = await editEntry(context, here.tool, here.name, here.hash, undefined);
+    return !stopped ? 'removed' : stopped.locked ? { held: stopped.stopped } : stopped.changed ? 'changed' : 'failed';
+  },
+  historyAction: libraryAction,
+  merge: mergeServer,
+};
 
 /**
  * Writes a version into one tool's settings file: over its entry (only while that holds what was read), the tool's own
@@ -212,10 +195,10 @@ export async function applyServers(context: ShareContext, tools: HarnessId[], ch
 }
 
 /**
- * After a pass that ran (`done`): Claude Code's deny of each server the profiles migration kept it for (serverstore.ts
- * keptDenies) is cleared once the server is wanted in Claude Code, so it is never left switched off there once it is On; it
- * stays while the server is Off, kept out of Claude Code or deleted, where its entry may still wait for Write to Claude Code.
- * A settings file that can't be read or changed meanwhile keeps the deny for the next pass.
+ * After a pass that ran (`done`): drains the list of Claude Code denies an earlier build's profiles migration kept while a
+ * server's entry waited to leave Claude Code (serverstore.ts keptDenies; nothing adds to it now: the migration releases Claude
+ * Code's deny at once, as every tool's). Each is cleared once its server is wanted in Claude Code, so it is never left switched
+ * off there once it is On. A settings file that can't be read or changed meanwhile keeps the deny for the next pass.
  */
 async function releaseKeptDenies(context: ShareContext, tools: HarnessId[], done: PassResult): Promise<PassResult> {
   const kept = done.stopped || !tools.includes('claude-cli') ? [] : await keptDenies(context.home);
@@ -231,16 +214,6 @@ async function releaseKeptDenies(context: ShareContext, tools: HarnessId[], done
     await keepDenies(context.home, kept.filter(name => !wanted.includes(name)));
   } catch { /* the next pass tries again */ }
   return done;
-}
-
-/**
- * Write to Claude Code, with Claude closed (main.ts checks): a pass for the servers named (the rows that owe Claude Code a
- * write or a removal), with Automatic sync on or off, that writes Claude Code's file alone; it says only what it did there.
- * Its Undo is the library's: Make current an earlier version, then Write again.
- */
-export async function writeToClaude(context: ShareContext, tools: HarnessId[], keys: string[]): Promise<PassResult> {
-  const done = await releaseKeptDenies(context, tools, await runPass(kindFor(true), context, tools, [], { only: new Set(keys) }));
-  return { ...done, results: done.results.filter(result => result.harness === 'claude-cli') };
 }
 
 /** A History entry's action on a server (librarypass.ts restore; historyactions.ts says which click it is). */
@@ -309,8 +282,7 @@ const toolCopy = (entry: McpEntry): ToolCopy => ({
 
 /**
  * One server's row: what each managed tool holds and, for a server in the library, what the next pass does in each (`plan`,
- * from the same reading a pass makes: copiesOf) and why nothing can happen in one (`unseen`, `cannot`); the tools where a write
- * or removal waits for Write to Claude Code (`waits`, a deleted server's too, whose row is a found one), each tool's own
+ * from the same reading a pass makes: copiesOf) and why nothing can happen in one (`unseen`, `cannot`), each tool's own
  * switch (`switchedOff`), and the source it is from, as sources.ts sourceFacts says it (`fromSource`).
  */
 async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undefined, fromSource: LibraryFacts['fromSource']): Promise<LibraryFacts> {
@@ -319,7 +291,6 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
   const name = item?.name ?? entries[0]?.name ?? disk.unseenNames.get(key) ?? key;
   const copies = Object.fromEntries(entries.map(entry => [entry.tool, toolCopy(entry)]));
   const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
-  const tombstone = item ? undefined : look.library.items[key];
   const cannot: LibraryFacts['cannot'] = {}, plugin: NonNullable<LibraryFacts['plugin']> = {}, unseen: NonNullable<LibraryFacts['unseen']> = {};
   // A found server is asked about as taking it in would leave it: On everywhere, nothing applied yet.
   const asIf: Wanted = item ?? { key, name, on: true, except: [], applied: {} };
@@ -332,9 +303,6 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
     const touched = made?.write.includes(tool) || made?.remove.includes(tool);
     if (why && (copy?.is === 'held' || touched || (!copiesNow && !slot[tool]))) cannot[tool] = why;
   }
-  // Where a write or removal waits for Write to Claude Code: the plan's, or a deleted server's copy still to leave (leavingIn).
-  const waits = made ? look.managed.filter(tool => disk.locked.get(tool)?.waits && (made.write.includes(tool) || made.remove.includes(tool)))
-    : tombstone ? leavingIn(look, tombstone) : [];
   const switchedOff = disk.switchedOff.get(key) ?? [];
   const switchProblem = Object.fromEntries(entries.flatMap(entry => { const problem = disk.switches.get(entry.tool)?.problem; return problem ? [[entry.tool, problem]] : []; }));
   const edited = made ? pendingEdits(made) : [];
@@ -345,7 +313,7 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
     // The copies a tool managed again gives way with are kept before the plan, by the pass (librarypass.ts cameBack): said with it.
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key) }),
-    ...some('plugin', plugin), ...some('unseen', unseen), ...some('waits', waits), ...some('switchedOff', switchedOff), ...some('switchProblem', switchProblem),
+    ...some('plugin', plugin), ...some('unseen', unseen), ...some('switchedOff', switchedOff), ...some('switchProblem', switchProblem),
     ...(fromSource ? { fromSource } : {}),
   };
 }

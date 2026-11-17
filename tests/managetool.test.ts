@@ -16,7 +16,7 @@ import { libraryAction, librarySentence } from '../src/historyactions.ts';
 import { libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { saveProfile, switchProfile } from '../src/profiles.ts';
 import { setDisabled } from '../src/skillswitch.ts';
-import { applyServers, serversView, writeToClaude } from '../src/servers.ts';
+import { applyServers, serversView } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
 import { managedNow, readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, restoreSkill, skillsView, takeOver } from '../src/skills.ts';
@@ -82,9 +82,9 @@ async function didIn(b: Box, tool: HarnessId, done: { skills?: PassResult; serve
   const views = [await skillsView(b.context, managed), await serversView(b.context, managed), await agentsView(b.context, managed)];
   const found = views.flatMap(view => view.items.filter(fact => !live(view.library, fact.key) && (fact.copies[tool] || fact.anotherWay?.[tool])));
   return { written: results.filter(result => result.outcome === 'written').length, kept: kept.length, removed: results.filter(result => result.outcome === 'removed').length,
-    waits: results.filter(result => result.waits).length, found: found.length, takenIn: takenIn.length };
+    found: found.length, takenIn: takenIn.length };
 }
-const counts = (some: Partial<JoinCounts>): JoinCounts => ({ written: 0, kept: 0, removed: 0, waits: 0, found: 0, takenIn: 0, ...some });
+const counts = (some: Partial<JoinCounts>): JoinCounts => ({ written: 0, kept: 0, removed: 0, found: 0, takenIn: 0, ...some });
 
 /** A tool turned on, with what its card said before the click, and what the pass then did there. */
 async function turnOnTool(b: Box, tool: HarnessId = 'codex-cli', rule = false) {
@@ -296,7 +296,7 @@ test('A tool turned on counts a skill only it has as found, and with Synchronize
   } finally { await b.cleanup(); }
 });
 
-test('With a tool left out, nothing Central Knot does writes there: a skill turned On, a profile switch, Write to Claude Code, an instruction file, an Undo', async () => {
+test('With a tool left out, nothing Central Knot does writes there: a skill turned On, a profile switch, an instruction file, an Undo', async () => {
   const b = await box();
   try {
     await b.turnOn();
@@ -325,9 +325,6 @@ test('With a tool left out, nothing Central Knot does writes there: a skill turn
     const switched = await switchProfile(b.context, tools, made.id!);
     assert.equal(switched.stopped, undefined);
     assert.deepEqual(await codex(), untouched, 'a profile switch');
-    // Write to Claude Code, with docs owed there.
-    await writeToClaude(b.context, tools, ['docs']);
-    assert.deepEqual(await codex(), untouched, 'Write to Claude Code');
     // An instruction file: a save in Codex is refused, and the base goes to the managed tools only.
     await writeFile(join(b.home, '.codex/AGENTS.md'), 'Codex’s own.\n');
     const before = await codex();

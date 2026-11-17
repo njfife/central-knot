@@ -1102,7 +1102,7 @@ async function practiceFlow() {
   await a.press('Escape');
   same('Escape clears find', (await rowKeys(a)).length, 4);
   // MCP servers: on Central Knot's library, as skills and agents are. A server a tool has is found: Add takes it in and puts it
-  // in every tool by editing only that entry; Claude Code's file waits for Write to Claude Code, one band for every server that owes it.
+  // in every tool by editing only that entry, Claude Code's file too.
   await a.click('#nav-mcp');
   same('MCP servers from every tool, found', [(await rowKeys(a)).sort(), await sectionsNow(a)], [['docs', 'files'], [['found', ['docs', 'files']]]]);
   same('files is in Copilot and Codex, not in Claude Code', [await cellState(a, 'files', 'copilot-cli'), await cellState(a, 'files', 'codex-cli'), await cellState(a, 'files', 'claude-cli')], ['own-copy', 'own-copy', 'none']);
@@ -1114,20 +1114,17 @@ async function practiceFlow() {
   await a.press('Shift');
   await a.click('#add-files');
   same('after a click each row is under the heading true for it, from the keyboard too, and the headings count their rows', [await sectionsNow(a), await a.text('.ov-section[data-section="on"] .ov-section-count')], [[['on', ['docs', 'files']]], '2']);
-  check('taking files in says where it is on, and that Claude Code waits for Write, as a plain note, not a warning', /^files is in Central Knot now, and on in Copilot CLI and Codex\. Claude Code waits for Write to Claude Code\./.test(await a.text('.band-done .band-text') ?? '')
+  check('taking files in says it is on in every tool, Claude Code too, as a plain note, not a warning', /^files is in Central Knot now, and on in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '')
     && !(await a.exists('.band-done .tone-warning')), [await a.text('.bands'), await a.text('.toolbar')]);
   const copilotMcp = JSON.parse(readFileSync(join(practice, '.copilot/mcp-config.json'), 'utf8')).mcpServers;
   same('docs reached Copilot with its header as-is', copilotMcp.docs, { type: 'http', url: 'https://docs.example.test/mcp', headers: { Authorization: 'Bearer practice-token' }, tools: ['*'] });
   const tomlAfter = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
   check('docs reached Codex, and config.toml kept its comment and the files table byte for byte', tomlAfter.startsWith(tomlBefore) && tomlAfter.includes('[mcp_servers.docs]') && tomlAfter.includes('url = "https://docs.example.test/mcp"'), tomlAfter);
-  const claudeBefore = readFileSync(join(practice, '.claude.json'), 'utf8');
-  check('Claude Code waits for Write to Claude Code: one band, which says what it writes, and the row’s mark says so too', /wait for Write to Claude Code, to add files\./.test(await a.text('.band-write-now') ?? '') && !JSON.parse(claudeBefore).mcpServers.files
-    && await cellState(a, 'files', 'claude-cli') === 'waits', await a.text('.bands'));
-  await a.shot('practice-mcp');
-  await a.click('#mcp-write-claude');
   const claudeAfter = JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8'));
-  same('Write to Claude Code adds files there and keeps its other settings; the band goes', [claudeAfter.mcpServers.files?.command, claudeAfter.theme, claudeAfter.numStartups, await a.exists('#mcp-write-claude')], ['npx', 'dark', 3, false]);
-  // Off: out of every tool, Central Knot keeps it; Claude Code's entry goes with Write. Undo puts each entry back as it was.
+  same('the same click put files in Claude Code, its other settings kept, its mark current, and no band asks for a step of its own', [claudeAfter.mcpServers.files?.command, claudeAfter.theme, claudeAfter.numStartups, await cellState(a, 'files', 'claude-cli'), /Write to Claude|Quit Claude/.test(await a.text('.bands') ?? '')],
+    ['npx', 'dark', 3, 'current', false]);
+  await a.shot('practice-mcp');
+  // Off: out of every tool, Claude Code's too, and Central Knot keeps it. Undo puts each entry back as it was.
   const mcpFiles = ['.claude.json', '.copilot/mcp-config.json', '.codex/config.toml'].map(file => join(practice, file));
   const mcpBefore = mcpFiles.map(readNow);
   // Turned off with the pointer over the list, its row open: it moves under Off at once.
@@ -1137,10 +1134,10 @@ async function practiceFlow() {
   same('after a click with the pointer over the list too, each row is under the heading true for it', [await sectionsNow(a), await a.text('.ov-section[data-section="on"] .ov-section-count'), await a.text('.ov-section[data-section="off"] .ov-section-count')], [[['on', ['docs']], ['off', ['files']]], '1', '1']);
   await pointerOver('.toolbar');
   await a.click('#open-files');
-  same('Off takes files out of Copilot and Codex at once; Claude Code’s entry waits for Write, and the band says it removes it', [!!JSON.parse(readNow(mcpFiles[1])).mcpServers.files, readNow(mcpFiles[2]).includes('[mcp_servers.files]'), !!JSON.parse(readNow(mcpFiles[0])).mcpServers.files, /to remove files/.test(await a.text('.band-write-now') ?? '')],
-    [false, false, true, true]);
+  same('Off takes files out of every tool at once, Claude Code’s too', [!!JSON.parse(readNow(mcpFiles[1])).mcpServers.files, readNow(mcpFiles[2]).includes('[mcp_servers.files]'), !!JSON.parse(readNow(mcpFiles[0])).mcpServers.files],
+    [false, false, false]);
   await a.click('#outcome-undo');
-  same('Undo puts files back in each tool, every file as it was but for the entry’s place, with nothing left to write', [mcpFiles.map(readNow).map(entriesSorted), await switchOn(a, 'files'), await a.exists('#mcp-write-claude')], [mcpBefore.map(entriesSorted), true, false]);
+  same('Undo puts files back in each tool, Claude Code’s too, every file as it was but for the entry’s place', [mcpFiles.map(readNow).map(entriesSorted), await switchOn(a, 'files')], [mcpBefore.map(entriesSorted), true]);
   // A server turned off in one tool, outside Central Knot (as `copilot mcp disable` writes it), is marked so; Central Knot leaves
   // that switch as it is, and its line says so. The opened row keeps a server out of one tool.
   const copilotMcpSwitch = join(practice, '.copilot/settings.json');
@@ -2465,8 +2462,8 @@ async function sourcesFlow() {
 
   // A source with a skill, an agent and an MCP server: the look lists all three, Add brings them in Off, the agent turned On on
   // Agents gets the source's file in Claude Code byte for byte, a change at the source alone updates it (Open Agents), and Merge
-  // puts a change made in Claude Code and one made at the source together; the server turned On is in Copilot CLI's file at
-  // once and waits for Write to Claude Code, a change at the source says Claude Code waits (Open MCP servers), and Merge.
+  // puts a change made in Claude Code and one made at the source together; the server turned On is in every tool's file at
+  // once, Claude Code's with the source's own field, a change at the source reaches every tool (Open MCP servers), and Merge.
   const kit = join(hosts, 'github.com/team/kit.git'), reviewerMd = '---\nname: reviewer\ndescription: Reviews code.\ntools: Read, Grep\n---\n\nYou review code.\nThe middle.\nMore middle.\nBe brief.\n';
   const relayJson = env => `${JSON.stringify({ mcpServers: { relay: { command: 'relay-mcp', env, timeout: 30 } } }, null, 2)}\n`;
   mkdirSync(kit, { recursive: true });
@@ -2520,16 +2517,14 @@ async function sourcesFlow() {
   await a.click('#nav-mcp');
   await until(() => a.exists('#switch-relay'));
   await a.click('#switch-relay');
-  check('the source’s server, turned On, is in Copilot CLI’s file at once, and MCP servers offers Write to Claude Code', await until(() => relayIn('copilot-cli')?.command === 'relay-mcp') && await until(() => a.exists('#mcp-write-claude'))
-    && !relayIn('claude-cli') && /relay-mcp/.test(readNow(mcpFile('codex-cli'))), [readNow(mcpFile('copilot-cli')), await a.text('.bands')]);
-  await a.click('#mcp-write-claude');
-  check('Write to Claude Code puts it there with the source’s own field', await until(() => relayIn('claude-cli')?.timeout === 30), readNow(mcpFile('claude-cli')));
+  check('the source’s server, turned On, is in every tool’s file at once, Claude Code’s with the source’s own field', await until(() => relayIn('copilot-cli')?.command === 'relay-mcp')
+    && relayIn('claude-cli')?.timeout === 30 && /relay-mcp/.test(readNow(mcpFile('codex-cli'))), [readNow(mcpFile('copilot-cli')), readNow(mcpFile('claude-cli'))]);
   commit(kit, { '.mcp.json': relayJson({ A: '1', B: '2' }) });
   await a.click('#nav-sources');
   await a.click(`#source-check-${kitId}`);
-  check('a change at the source updates Copilot CLI and Codex, and the band says Claude Code gets it at Write to Claude Code, with Open MCP servers', await until(async () => /relay was updated from its source, now in Copilot CLI and Codex\. Claude Code gets it when you click Write to Claude Code, on MCP servers\./.test(await a.text('.band-done .band-text') ?? ''))
-    && await a.exists('#source-open-mcp') && relayIn('copilot-cli')?.env?.B === '2' && relayIn('claude-cli')?.env?.B === '1', [await a.text('.band-done'), readNow(mcpFile('claude-cli'))]);
-  await a.shot('sources-server-waits');
+  check('a change at the source updates every tool, Claude Code too, with Open MCP servers', await until(async () => /relay was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
+    && await a.exists('#source-open-mcp') && relayIn('copilot-cli')?.env?.B === '2' && relayIn('claude-cli')?.env?.B === '2', [await a.text('.band-done'), readNow(mcpFile('claude-cli'))]);
+  await a.shot('sources-server-updated');
   const copilotMcp = JSON.parse(readNow(mcpFile('copilot-cli')));
   copilotMcp.mcpServers.relay.env.A = 'mine';
   writeFileSync(mcpFile('copilot-cli'), JSON.stringify(copilotMcp, null, 2));
@@ -2540,8 +2535,8 @@ async function sourcesFlow() {
   await until(async () => await a.exists(`#source-merge-${kitId}-mcp-relay`));
   await until(() => a.run(`document.body.dataset.busy !== 'true' && document.querySelector('#source-merge-${kitId}-mcp-relay')?.disabled === false`));
   await a.click(`#source-merge-${kitId}-mcp-relay`);
-  check('Merge puts both changes in Copilot CLI and Codex, says Claude Code gets it at Write to Claude Code, and offers Undo the merge', await until(async () => /relay now has your changes and the source’s, merged, in Copilot CLI and Codex; the version it had is kept\. Claude Code gets it when you click Write to Claude Code, on MCP servers\./.test(await a.text('.band-done .band-text') ?? ''))
-    && (await a.text('#outcome-undo')) === 'Undo the merge' && JSON.stringify(relayIn('copilot-cli')?.env) === '{"A":"mine","B":"3"}', [await a.text('.band-done'), readNow(mcpFile('copilot-cli'))]);
+  check('Merge puts both changes in every tool, Claude Code too, and offers Undo the merge', await until(async () => /relay now has your changes and the source’s, merged, in all 3 tools; the version it had is kept\./.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#outcome-undo')) === 'Undo the merge' && JSON.stringify(relayIn('copilot-cli')?.env) === '{"A":"mine","B":"3"}' && JSON.stringify(relayIn('claude-cli')?.env) === '{"A":"mine","B":"3"}', [await a.text('.band-done'), readNow(mcpFile('copilot-cli'))]);
   // Its entry at the source now runs a file of the repository: left out there, so the server here stays as it was, and its line says so.
   commit(kit, { '.mcp.json': `${JSON.stringify({ mcpServers: { relay: { command: './bin/relay' } } }, null, 2)}\n` });
   await a.click(`#source-check-${kitId}`);
@@ -3040,7 +3035,7 @@ async function openCodeFlow() {
   if (await p.run(`document.querySelector('#open-notes')?.getAttribute('aria-expanded')`) !== 'true') await p.click('#open-notes');
   same('OpenCode’s line says it reads Claude Code’s copy, has no switch there, and its settings are untouched',
     [/OpenCode reads Claude Code’s copy/.test(await p.text('.ov-row[data-key="notes"] + *') ?? ''), await p.exists('#enable-notes-opencode-cli'), readNow(join(mine, 'opencode.json')) === settingsBefore], [true, false, true]);
-  // Its server goes to the other tools in their own forms, values as they are; Claude Code's waits for Write to Claude Code.
+  // Its server goes to the other tools in their own forms, values as they are.
   await p.click('#nav-mcp');
   await p.click('#add-oc-docs');
   const inCopilot = JSON.parse(readNow(join(practice, '.copilot/mcp-config.json')) || '{}').mcpServers?.['oc-docs'];
@@ -3766,7 +3761,10 @@ async function syncEverythingFlow() {
   await fitsAtMinimum(a, 'Skills with Synchronize everything on');
   await a.shot('everything-skills');
   await a.click('#nav-mcp');
-  same('on the MCP servers page files, found in Codex, is On; Claude Code’s part waits for Write to Claude Code', [await sectionsNow(a), await a.exists('#mcp-write-claude')], [[['on', ['files']]], true]);
+  // Claude Code had no settings file: a background pass writes it afresh once the settle window has passed (the poll: 20 s).
+  let claudeFiles;
+  for (let tries = 0; tries < 300 && claudeFiles !== 'files-mcp'; tries++) { claudeFiles = JSON.parse(readNow(join(home, '.claude.json')) || '{}').mcpServers?.files?.command; if (claudeFiles !== 'files-mcp') await wait(100); }
+  same('on the MCP servers page files, found in Codex, is On, and in Claude Code’s file too', [await sectionsNow(a), claudeFiles], [[['on', ['files']]], 'files-mcp']);
   check('and its notice, from the pass before the one that took fresh in, is still there to name it and Codex', /^Synchronize everything took in 1 MCP server, found in Codex: files\./.test(await a.text(notice) ?? ''), await a.text('.bands'));
   await a.click('#nav-history');
   for (let tries = 0; tries < 30 && !(await a.exists('.history-row')); tries++) await wait(100);
@@ -3840,9 +3838,9 @@ async function firstSetupFlow() {
   const a = await launch(data, [], real);
   await a.click('#nav-overview');
   const question = await a.text('#setup-question .setup-text') ?? '';
-  check('a home never asked shows the question, counted as the pass counts: 2 items it takes in now and the tools that get them, then 2 more that wait with nothing chosen, the server Claude Code gets at Write, and what the one Undo covers',
+  check('a home never asked shows the question, counted as the pass counts: 2 items it takes in now and the tools that get them, then 2 more that wait with nothing chosen, and what the one Undo covers',
     /^Yes takes in now the 2 items found in your tools .* \(Claude Code and Codex\);/.test(question) && /2 more items have copies that differ and wait for you: nothing is chosen for you\. You’re asked about each, one at a time, with the latest copy marked where one can be told/.test(question)
-      && /Claude Code gets the MCP server when you click Write to Claude Code\. One Undo in History takes back what it takes in; a copy you choose has its own Undo\.$/.test(question), question);
+      && /wait for you: nothing is chosen for you\. .* One Undo in History takes back what it takes in; a copy you choose has its own Undo\.$/.test(question) && !/Write to Claude/.test(question), question);
   same('and says what No leaves', await a.text('#setup-no-says'), 'No changes nothing: what is already on stays on and keeps syncing, and each found item waits on its page for Add.');
   check('the lead no longer says to open a card and turn something on where the question stands', !/Open one below/.test(await a.text('.overview-lead') ?? ''), await a.text('.overview-lead'));
   same('Synchronize everything is the main button', await a.run(`document.querySelector('#setup-yes')?.className.includes('primary')`), true);
@@ -3876,7 +3874,7 @@ async function firstSetupFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
   const ruleRow = '.history-row[data-kind="everything"]';
   same('History has the switch-on’s one entry, with its Undo', [await a.text(`${ruleRow} .history-about`), await a.text(`${ruleRow} .history-actions button`)],
-    ['Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back what it takes in; a copy you choose has its own Undo, and an MCP server found in Claude Code has none (its entry says why).', 'Undo']);
+    ['Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back what it takes in; a copy you choose has its own Undo.', 'Undo']);
   await a.click(`${ruleRow} .history-actions button`);
   for (let tries = 0; tries < 40 && existsSync(join(codex, 'notes')); tries++) await wait(100);
   same('its Undo takes notes back out of Codex, leaves review (chosen, with its own Undo) as it is, and stores the rule off',

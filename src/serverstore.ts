@@ -5,8 +5,9 @@
 //   items/mcp/<key>/versions/<hash>.json      one version's content: the shared part (mcp.ts NeutralServer)
 //   items/mcp/<key>/own/<hash>.json           one tool's own part of the server's entry (mcp.ts OwnPart), as a pass last saw it
 //   items/mcp/<name>/<hash>.json, <hash>/…    servers kept before the library: read once by the migration, never deleted
-//   claude-denies.json                        Claude Code's denies of servers that the profiles migration kept (servers.ts
-//                                             releaseKeptDenies clears each, and drops it here, once its server is wanted there)
+//   claude-denies.json                        Claude Code's denies of servers that an earlier build's profiles migration kept
+//                                             (servers.ts releaseKeptDenies clears each, and drops it here, once its server is
+//                                             wanted there; nothing adds to it now)
 //
 // Every file under items/ is named by what it holds, so a second file never replaces a first, and nothing here is pruned.
 // The pass (librarypass.ts, through servers.ts serverKind) changes the items, and so does the profiles migration, once: items

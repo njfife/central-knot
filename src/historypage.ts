@@ -64,7 +64,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'removed': return { glyph: 'circle-minus', text: `Removed from ${tools(event.losers)}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.` };
     // A skill's copies taken over before Central Knot kept versions (Replace with managed copies): past.
     case 'took-over': return { glyph: 'arrow-down-to-line', text: `Took over its copies outside Central Knot${event.undoneBy ? '; this was undone, and they were put back as they were' : ''}.` };
-    case 'written': return { glyph: 'pencil-line', text: 'Write to Claude Code replaced Claude Code’s own entry with the synced one; Central Knot kept it.' };
+    case 'written': return { glyph: 'pencil-line', text: 'Central Knot replaced Claude Code’s own entry with the synced one, and kept it.' };
     case 'added': {
       const what = event.rejoined ? 'Syncing it there again' : 'Turning it on';
       return { glyph: 'plus', text: event.undoneBy ? `${what} added copies to ${tools(event.losers)}; they were removed again.` : `${what} added ${event.losers.length === 1 ? 'a copy' : 'copies'} to ${tools(event.losers)}.` };

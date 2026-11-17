@@ -1,7 +1,7 @@
 // Where this computer keeps things, for the main process's modules: where a tool's CLI may be (executableCandidates; the PATH
 // to run it with: searchPath, pathBeside), where its desktop app may be (appCandidates, and the other apps: otherAppCandidates),
-// this Mac's Applications folders, running apps and Trash, which a test stands in for (macPlaces), and the pattern that tells
-// a running Claude Code by its command line (CLAUDE_PROCESS). Nothing here reads a tool's files.
+// and this Mac's Applications folders, running apps and Trash, which a test stands in for (macPlaces). Nothing here reads a
+// tool's files.
 import { execFile } from 'node:child_process';
 import { userInfo } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, sep } from 'node:path';
@@ -123,14 +123,6 @@ export function appCandidates(home: string, binary: string, platform: string = p
   // The macOS places stay last everywhere: harmless where they can't exist, and the Linux e2e stands in an app there.
   return [...(own[platform]?.[binary] ?? []), ...(mac[binary] ?? [])].filter(candidate => !homeOnly(binary) || candidate.app.startsWith(`${home}${sep}`));
 }
-
-/**
- * A Claude Code process by its full command line, for `pgrep -f` (an extended regular expression), beside `pgrep -x claude`
- * for the CLI's own binary: Claude Code run through node (a global npm install runs `node …/bin/claude`; a shell or search
- * that merely mentions the package doesn't count), the Code tab's own copy that Claude desktop keeps by version, and
- * Claude desktop itself, which starts Code tab sessions while it is open.
- */
-export const CLAUDE_PROCESS = '^[^ ]*node .*(@anthropic-ai/claude-code/|/bin/claude( |$))|/claude-code/[^/]+/[^/]+/claude\\.app/Contents/MacOS/claude( |$)|/Claude\\.app/Contents/MacOS/Claude( |$)';
 
 /**
  * Apps that are no tool of their own here, but run the tools or read their files (SPEC 5.1, D-24): looked for on this

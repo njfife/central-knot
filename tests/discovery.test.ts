@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover, findApp, forgetVersions, probeVersion } from '../src/discovery.ts';
-import { CLAUDE_PROCESS, appCandidates, executableCandidates, shellPath } from '../src/platform.ts';
+import { appCandidates, executableCandidates, shellPath } from '../src/platform.ts';
 import { isPresent } from '../src/presence.ts';
 
 async function fixture() {
@@ -337,13 +337,4 @@ test('Desktop apps are found where Windows and Linux install them, with the copy
     await tool(linuxRuntime, 'echo 1.0.106-8');
     assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'copilot', 'linux'))), { name: 'GitHub Copilot app', carries: 'Copilot runtime', carriedVersion: '1.0.106-8', binary: linuxRuntime });
   } finally { await setup.cleanup(); }
-});
-
-test('Write to Claude Code waits for Claude desktop and its Code tab as well as the CLI', () => {
-  const running = (command: string) => new RegExp(CLAUDE_PROCESS).test(command);
-  assert.ok(running('/Users/n/Library/Application Support/Claude/claude-code/2.1.321/e6736b2d954d/claude.app/Contents/MacOS/claude --output-format stream-json'));
-  assert.ok(running('/Applications/Claude.app/Contents/MacOS/Claude'));
-  assert.ok(running('/usr/local/bin/node /usr/local/bin/claude'));
-  assert.ok(!running('/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper --type=renderer'));
-  assert.ok(!running('grep -r @anthropic-ai/claude-code/ .'));
 });

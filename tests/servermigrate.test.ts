@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { appendHistory, readHistory } from '../src/history.ts';
 import { libraryAction, libraryEntry } from '../src/historyactions.ts';
 import { readTool, serverHash, type NeutralServer } from '../src/mcp.ts';
-import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
+import { applyServers, restoreServer, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId, HistoryEvent } from '../src/types.ts';
 
@@ -45,7 +45,7 @@ async function fixture() {
   const away = (command: string) => copy('copilot-cli', command, { away: true });
   const items = {
     synced: { state: 'shared', off: [], hash: H('S'), copies: [copy('claude-cli', 'S'), copy('codex-cli', 'S'), copy('pi-cli', 'S'), away('S')], missingSince: { 'pi-cli': 1 } },
-    // Claude Code behind, waiting for Write now; a content a pass displaced before it stopped.
+    // Claude Code behind, its write still owed; a content a pass displaced before it stopped.
     behind: { state: 'shared', off: [], hash: H('NEW'), copies: [copy('claude-cli', 'OLD'), copy('codex-cli', 'NEW'), copy('pi-cli', 'NEW'), away('NEW')], displaced: [{ tool: 'claude-cli', hash: H('D') }] },
     leftout: { state: 'shared', off: ['codex-cli'], hash: H('L'), copies: [copy('claude-cli', 'L'), copy('pi-cli', 'L'), away('L')] },
     // Pi's entry differs and was never on record: the earlier engine held for a choice of copy.
@@ -64,19 +64,21 @@ async function fixture() {
   return { home, context, files, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
-test('Every state the old MCP record holds becomes its item: after one pass every settings file is as it was but the missing one, which gets its servers afresh; every content is a version, and a second pass writes nothing', async () => {
+test('Every state the old MCP record holds becomes its item: after one pass every settings file is as it was but the missing one, which gets its servers afresh, and Claude Code’s, which gets what it was owed; every content is a version, and a second pass writes nothing', async () => {
   const box = await fixture();
   try {
     const before = await box.files();
     const oldRecord = await readFile(join(box.home, '.central-knot/mcp.json'), 'utf8');
     const first = await applyServers(box.context, managed, []);
-    // Copilot's file was missing at the old engine's last look, as now: nothing is applied there, so each server it is on in is written afresh.
-    assert.deepEqual(first.results.filter(result => result.outcome === 'written' || result.outcome === 'removed').map(result => [result.item, result.harness]),
-      [['synced', 'copilot-cli'], ['behind', 'copilot-cli'], ['leftout', 'copilot-cli'], ['collide', 'copilot-cli']], JSON.stringify(first.results));
+    // Copilot's file was missing at the old engine's last look, as now: nothing is applied there, so each server it is on in is
+    // written afresh. Claude Code is owed behind's write and gone's removal: both are done.
+    assert.deepEqual(first.results.filter(result => result.outcome === 'written' || result.outcome === 'removed').map(result => [result.item, result.harness, result.outcome]),
+      [['synced', 'copilot-cli', 'written'], ['behind', 'claude-cli', 'written'], ['behind', 'copilot-cli', 'written'], ['leftout', 'copilot-cli', 'written'], ['collide', 'copilot-cli', 'written'], ['gone', 'claude-cli', 'removed']], JSON.stringify(first.results));
     const copilot = (await readTool(box.context, 'copilot-cli')).entries.find(entry => entry.name === 'synced');
     assert.deepEqual([copilot?.server.command, copilot?.extras], ['S', { tools: ['search'] }], 'with the own fields kept for it before');
     const after = await box.files();
-    assert.deepEqual({ ...after, 'copilot-cli': undefined }, before, 'no other settings file changes because of the migration');
+    assert.deepEqual({ ...after, 'copilot-cli': undefined, 'claude-cli': undefined }, { ...before, 'claude-cli': undefined }, 'no other settings file changes because of the migration');
+    assert.deepEqual((await readTool(box.context, 'claude-cli')).entries.map(entry => [entry.name, entry.server.command]), [['synced', 'S'], ['behind', 'NEW'], ['leftout', 'L'], ['collide', 'C']]);
     assert.equal(await readFile(join(box.home, '.central-knot/mcp.v1.json'), 'utf8'), oldRecord, 'the old record is kept as it was');
     // The record as the pass left it (the page's look writes a file away for longer than the settle window afresh, in memory).
     const view = await serversView(box.context, managed), items = JSON.parse(await readFile(join(box.home, '.central-knot/mcp.json'), 'utf8')).items as typeof view.library;
@@ -84,18 +86,16 @@ test('Every state the old MCP record holds becomes its item: after one pass ever
     // Synced: On at its content, each recorded copy applied (Copilot's as just written); a tool's own fields kept for it.
     assert.deepEqual(of('synced'), [true, H('S'), [], { 'claude-cli': H('S'), 'codex-cli': H('S'), 'pi-cli': H('S'), 'copilot-cli': H('S') }, false]);
     assert.deepEqual(Object.keys(items.synced.own).sort(), ['claude-cli', 'codex-cli', 'copilot-cli', 'pi-cli'], 'the own fields kept before, and the pass keeps each tool’s as it reads it');
-    // Claude Code behind: still owed the write, which waits for Write to Claude Code; the displaced content is a version.
-    assert.deepEqual(of('behind'), [true, H('NEW'), [], { 'claude-cli': H('OLD'), 'codex-cli': H('NEW'), 'pi-cli': H('NEW'), 'copilot-cli': H('NEW') }, false]);
-    assert.deepEqual(view.items.find(item => item.key === 'behind')?.waits, ['claude-cli']);
+    // Claude Code behind: given the write it was owed; the displaced content is a version.
+    assert.deepEqual(of('behind'), [true, H('NEW'), [], { 'claude-cli': H('NEW'), 'codex-cli': H('NEW'), 'pi-cli': H('NEW'), 'copilot-cli': H('NEW') }, false]);
     assert.deepEqual(items.behind.versions.map(version => version.hash).sort(), [H('D'), H('NEW'), H('OLD')].sort());
     // Left out of Codex: kept out, Codex's own entry left alone.
     assert.deepEqual(of('leftout'), [true, H('L'), ['codex-cli'], { 'claude-cli': H('L'), 'pi-cli': H('L'), 'copilot-cli': H('L') }, false]);
     // A differing entry never on record (Pi's collide): that tool kept out, its entry a version.
     assert.deepEqual(of('collide'), [true, H('C'), ['pi-cli'], { 'claude-cli': H('C'), 'codex-cli': H('C'), 'copilot-cli': H('C') }, false]);
     assert.ok(items.collide.versions.some(version => version.hash === H('OTHER') && version.from.how === 'was-in'));
-    // Deleted, with Claude Code's removal still owed: a tombstone, the removal applied (it waits for Write to Claude Code).
-    assert.deepEqual(of('gone'), [true, H('G'), [], { 'claude-cli': H('G') }, true]);
-    assert.deepEqual(view.items.find(item => item.key === 'gone')?.waits, ['claude-cli']);
+    // Deleted, with Claude Code's removal owed: a tombstone, the removal done.
+    assert.deepEqual(of('gone'), [true, H('G'), [], {}, true]);
     // Kept separate: not in the library, every entry found as it is.
     assert.equal(items.separate, undefined);
     // A server Codex has that was never on record is found.
@@ -108,6 +108,7 @@ test('Every state the old MCP record holds becomes its item: after one pass ever
 });
 
 test('A crash while the migration writes leaves the old record and every settings file as they were; the next pass finishes it', async () => {
+  const owedToClaude = '{\n  "numStartups": 2,\n  "mcpServers": {\n    "synced": {\n      "type": "stdio",\n      "command": "S",\n      "timeout": 30\n    },\n    "behind": {\n      "type": "stdio",\n      "command": "NEW"\n    },\n    "leftout": {\n      "type": "stdio",\n      "command": "L"\n    },\n    "collide": {\n      "type": "stdio",\n      "command": "C"\n    }\n  }\n}\n';
   for (const step of ['before-replace', 'mid-replace']) {
     const box = await fixture();
     try {
@@ -116,7 +117,7 @@ test('A crash while the migration writes leaves the old record and every setting
       assert.deepEqual([await readFile(join(box.home, '.central-knot/mcp.json'), 'utf8'), await box.files()], [oldRecord, before], step);
       await applyServers(box.context, managed, []);
       assert.equal(JSON.parse(await readFile(join(box.home, '.central-knot/mcp.json'), 'utf8')).formatVersion, 2, step);
-      assert.deepEqual({ ...await box.files(), 'copilot-cli': undefined }, before, `${step}: every file but Copilot’s missing one, written afresh`);
+      assert.deepEqual({ ...await box.files(), 'copilot-cli': undefined }, { ...before, 'claude-cli': owedToClaude }, `${step}: every file but Copilot’s missing one, written afresh, and Claude Code’s, given what it was owed`);
     } finally { await box.cleanup(); }
   }
 });
@@ -135,12 +136,12 @@ test('History’s MCP entries from before the library stay listed and offer only
     await applyServers(box.context, managed, []);
     const items = (await serversView(box.context, managed)).library, history = await readHistory(box.context);
     // Each entry's item as History's page finds it (historyactions.ts libraryEntry).
-    const offered = Object.fromEntries(history.map(entry => [entry.kind, libraryAction(entry, items[libraryEntry(entry)!.key], { managed, pending: [] })?.label]));
+    const offered = Object.fromEntries(history.filter(entry => ['written', 'added', 'deleted', 'edit'].includes(entry.id)).map(entry => [entry.kind, libraryAction(entry, items[libraryEntry(entry)!.key], { managed, pending: [] })?.label]));
     assert.deepEqual(offered, { written: 'Undo', added: undefined, deleted: 'Restore', edit: 'Undo' });
     assert.equal((await restoreServer(box.context, managed, 'edit')).stopped, undefined, 'an entry naming the server as written runs its action');
     assert.equal((await serversView(box.context, managed)).library.behind.hash, H('OLD'));
     assert.deepEqual(libraryAction(history.find(entry => entry.kind === 'written')!, items.behind, { managed, pending: [] })?.change.version, H('OLD'), 'its Undo makes the entry Claude Code had current again');
-    assert.equal((await readTool(box.context, 'claude-cli')).entries.find(entry => entry.name === 'gone')?.server.command, 'G');
+    assert.equal((await readTool(box.context, 'claude-cli')).entries.find(entry => entry.name === 'gone'), undefined, 'the removal Claude Code was owed is done');
   } finally { await box.cleanup(); }
 });
 
@@ -186,7 +187,6 @@ test('An edit not spread yet is taken in by the first pass; a removal owed for a
     assert.deepEqual([items.pending.hash, (await readTool(box.context, 'pi-cli')).entries.find(entry => entry.name === 'pending')?.server.command], [H('P2'), 'P2'], 'Codex’s edit is current, and reaches Pi');
     assert.equal(items.changed.applied['claude-cli'], undefined, 'nothing applied: the edited entry is left as it is');
     assert.deepEqual([items.moved.applied['claude-cli'], items.moved.except], [undefined, ['claude-cli']], 'Claude Code’s differing entry is left as it is');
-    await writeToClaude(box.context, managed, ['changed', 'moved']);
     const after = (await readTool(box.context, 'claude-cli')).entries;
     assert.deepEqual([after.find(entry => entry.name === 'changed')?.server.command, after.find(entry => entry.name === 'moved')?.server.command], ['K2', 'X']);
   } finally { await box.cleanup(); }

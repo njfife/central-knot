@@ -105,7 +105,6 @@ test('Switched on in a home with found items: each it may take is taken in and O
     // A server found only in Claude Code, and one found only in Codex.
     await putServers(box, 'claude-cli', { docs: { command: 'npx', args: ['-y', 'docs'] } });
     await putServers(box, 'codex-cli', { files: { command: 'files-mcp' } });
-    const claudeBefore = await readFile(join(box.home, mcpFile['claude-cli']), 'utf8');
     const before = await views(box);
     assert.deepEqual([before.skills, before.mcp, before.agents].flatMap(view => view.items.filter(item => item.takeInAnswers && 'take' in item.takeInAnswers.rule).map(item => item.key)), ['notes', 'tidy', 'docs', 'files', 'helper'], 'what Settings counts while it is off');
     await turnOn(box);
@@ -118,26 +117,21 @@ test('Switched on in a home with found items: each it may take is taken in and O
     assert.deepEqual([rowOf(after.skills, 'review')?.takeInAnswers?.rule, 'take' in old.click, old.rule], [{ wait: 'choice' }, true, { leave: 'deleted' }]);
     assert.deepEqual(['helper'].map(key => placeIn(after.agents, key)), ['on']);
     assert.deepEqual([placeIn(after.mcp, 'docs'), placeIn(after.mcp, 'files')], ['on', 'on']);
-    // docs: its other tools are written, Claude Code's copy counts as applied and its file is untouched.
-    assert.deepEqual([await serverNames(box, 'copilot-cli'), await serverNames(box, 'codex-cli'), after.mcp.library.docs.applied['claude-cli'] !== undefined], [['docs', 'files'], ['files', 'docs'], true]);
-    // files: Claude Code's part waits for Write to Claude Code, said on its row (one band for every row that waits).
-    assert.deepEqual([rowOf(after.mcp, 'files')?.waits, rowOf(after.mcp, 'docs')?.waits], [['claude-cli'], undefined]);
-    assert.equal(await readFile(join(box.home, mcpFile['claude-cli']), 'utf8'), claudeBefore);
+    // docs: its other tools are written and Claude Code's copy counts as applied; files is written into Claude Code by the same
+    // pass, as into Copilot CLI.
+    assert.deepEqual([await serverNames(box, 'copilot-cli'), await serverNames(box, 'codex-cli'), await serverNames(box, 'claude-cli'), after.mcp.library.docs.applied['claude-cli'] !== undefined],
+      [['docs', 'files'], ['files', 'docs'], ['docs', 'files'], true]);
     // History: each an Add's entry, by the rule, from where it was found; said so.
     const notes = (await entriesOf(box, 'notes')).at(-1)!;
     assert.deepEqual([notes.kind, notes.cause, notes.winner?.tool], ['on', 'sync-everything', 'claude-cli']);
     assert.equal(librarySentence(notes, libraryWords.skills, tools)?.text, 'Found in Claude Code and taken into Central Knot by Synchronize everything; put in Copilot CLI and Codex.');
     assert.equal(libraryAction(notes, after.skills.library.notes, settled)?.label, 'Undo');
-    // Its existing limits too: docs's Undo would give Claude Code's copy back to its MCP file, which waits for Write, so it is
-    // not offered; files's is, since Claude Code had none.
+    // Each server's take-in has its Undo, docs's too: it gives Claude Code back its own entry, as any tool's.
     const docs = (await entriesOf(box, 'mcp:docs')).at(-1)!, files = (await entriesOf(box, 'mcp:files')).at(-1)!;
-    assert.deepEqual([docs.cause, libraryAction(docs, after.mcp.library.docs, settled), libraryAction(files, after.mcp.library.files, settled)?.label], ['sync-everything', undefined, 'Undo']);
-    // And it is said: the notice names the exception, and docs's entry says why it has no Undo and what to do instead.
+    assert.deepEqual([docs.cause, libraryAction(docs, after.mcp.library.docs, settled)?.label, libraryAction(files, after.mcp.library.files, settled)?.label], ['sync-everything', 'Undo', 'Undo']);
     const mcpNotice = done.mcp.notices!.find(notice => notice.kind === 'taken-in')!;
-    assert.equal(mcpNotice.kind === 'taken-in' && sentences(libraryWords.mcp).takenInWords(mcpNotice, 'mcp'),
-      'Synchronize everything took in 2 MCP servers, found in Claude Code and Codex: docs and files. History can undo each, except any found in Claude Code (its entry says why).');
-    assert.match(librarySentence(docs, libraryWords.mcp, tools)?.text ?? '', /It has no Undo: an Undo would hand Claude Code’s own entry back, and Claude Code’s MCP settings are written only by Write to Claude Code\. Turn it off instead/);
-    assert.doesNotMatch(librarySentence(files, libraryWords.mcp, tools)?.text ?? '', /no Undo/);
+    assert.equal(mcpNotice.kind === 'taken-in' && sentences(libraryWords.mcp).takenInWords(mcpNotice),
+      'Synchronize everything took in 2 MCP servers, found in Claude Code and Codex: docs and files. History can undo each.');
     // One notice per pass of a kind: how many, by name, and where they were found. None for a key it left.
     assert.deepEqual(noticesOf(done).map(notice => notice.kind === 'taken-in' ? [notice.items, notice.from] : notice.kind), [[['notes', 'tidy'], ['claude-cli']], [['docs', 'files'], ['claude-cli', 'codex-cli']], [['helper'], ['copilot-cli']]], 'each tool named once');
     // A click's Undo never undoes what the rule took in: none of it is a click's.

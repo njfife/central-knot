@@ -52,8 +52,6 @@ export interface ItemRow {
   versionChanges?: VersionChange[];
   /** A library kind: the names in each harness's own part of its copy (types.ts ToolCopy ownPart). */
   ownPart?: Partial<Record<Tool, string[]>>;
-  /** MCP servers: tools whose write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
-  waits?: Tool[];
   /** A library kind: how a tool has it another way, in words, which copies Take over can make Central Knot's, and (skills, MCP servers) the tools whose own switch has it off (types.ts LibraryFacts). */
   anotherWay?: Partial<Record<Tool, string>>;
   takeOver?: Partial<Record<Tool, { kind: 'link' | 'shared'; path: string }>>;

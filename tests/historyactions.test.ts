@@ -195,9 +195,10 @@ test('A take-in is taken back only while every place it was found in still holds
 });
 
 test('A switch-on, a switch-off and an Undo say what they did; the Undo’s entry offers Restore while it can put an item back, passing over one touched since', () => {
-  assert.equal(everythingSentence(rule('on', true)).text, 'Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back what it takes in; a copy you choose has its own Undo, and an MCP server found in Claude Code has none (its entry says why).');
+  assert.equal(everythingSentence(rule('on', true)).text, 'Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back what it takes in; a copy you choose has its own Undo.');
   assert.equal(everythingSentence(rule('off', false)).text, 'Switched off: what turns up in a tool waits on its page for Add.');
   const deleted = entry({ id: 'gone', kind: 'deleted', gaveBack: ['claude-cli'], losers: [{ tool: 'codex-cli', hash: 'b' }] });
+  // An Undo an earlier build recorded, which left in a server found in Claude Code (LeftIn `claude-code`), still says so.
   const undo = rule('undo', false, { everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['gone'], left: [{ item: 'docs', why: 'claude-code' }], keptIn: [] } } });
   assert.equal(everythingSentence(undo).text, 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: docs (found in Claude Code: no Undo).');
   assert.deepEqual(everythingAction(undo, [deleted, undo], about(item({ deleted: { at } }))), { label: 'Restore', help: 'Switch Synchronize everything on again and put back the 1 item this took out of Central Knot, which the switch-on’s Undo then takes back again' });

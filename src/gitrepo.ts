@@ -678,8 +678,7 @@ async function pullSkill(context: ShareContext, dir: string, change: RepoChange,
 
 /**
  * MCP servers: the repo's content becomes the server's current version in Central Knot's library, "pulled from the Git repo",
- * and a pass applies it wherever the server is On here (librarypass.ts pull); being On or Off here doesn't change, and Claude
- * Code gets it with Write to Claude Code. Removed in the repo: deleted from Central Knot, with Restore in History.
+ * and a pass applies it wherever the server is On here (librarypass.ts pull); being On or Off here doesn't change. Removed in the repo: deleted from Central Knot, with Restore in History.
  */
 async function pullServer(context: ShareContext, dir: string, change: RepoChange, item: SideItem | undefined): Promise<DestinationResult[]> {
   const tools = await managedNow(context, await context.read());
@@ -898,7 +897,6 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
     // (never as one made here, which the next Push would send), and comes in once the cause goes.
     for (const change of incoming) if (change.pull === 'stuck') unfinish(change.key, change.held!, { heldFor: true });
     const firstWrites: FirstWrite[] = [];
-    const waitsForClaude: string[] = [];
     const made = new Set<string>();
     // History is told what Pull made even if an item fails partway, so Undo covers every copy it wrote.
     try {
@@ -921,18 +919,13 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
         }
         // This item's own events: a full sync pass may also record another item's edit, which stays said as sync.
         for (const event of await readHistory(context)) if (!before.has(event.id) && event.key === change.key) made.add(event.id);
-        // Claude Code's MCP settings are written only by Write to Claude Code: that wait is said apart, not as a failure.
-        if (outcome.some(result => result.waits)) {
-          waitsForClaude.push(change.name);
-          outcome = outcome.filter(result => !result.waits);
-        }
         const stuck = outcome.find(result => result.outcome === 'held' && !result.harness) ?? outcome.find(result => result.outcome === 'failed');
         if (stuck) unfinish(change.key, stuck.message, { waitedForSync: change.pull === 'waits' || undefined });
         results.push(...outcome);
       }
     } finally { await tellHistory(context, made, firstWrites); }
     await saveState(context.home, { ...state, base: sides.latestId, pulledAt: new Date().toISOString(), unfinished: Object.keys(unfinished).length ? unfinished : undefined });
-    return { results, view: await buildView(context, options), pulled: todo.filter(change => !unfinished[change.key]).length, waitsForClaude };
+    return { results, view: await buildView(context, options), pulled: todo.filter(change => !unfinished[change.key]).length };
   }));
 }
 

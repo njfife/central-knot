@@ -7,8 +7,8 @@
 //
 //   on the old record                                    in the library
 //   synced (`state: 'shared'`)                           On at its synced content; each recorded copy has what was last
-//                                                        synced there applied, so a copy that is behind (Claude Code
-//                                                        waiting for Write) is still owed it, and an edit not spread yet is
+//                                                        synced there applied, so a copy that is behind (Claude Code's,
+//                                                        which that engine wrote only at a click) is still owed it, and an edit not spread yet is
 //                                                        taken in by the first pass, as the earlier engine would have
 //   a copy whose file was missing at the last look       nothing applied there: an entry missing there is written afresh,
 //     (`away`)                                           never read as deleted by hand
@@ -18,7 +18,7 @@
 //   a copy recorded in another settings file (a moved    nothing applied there
 //     config root)
 //   deleted everywhere (`deleted`)                       a tombstone at the content it had; a removal still owed (`status:
-//                                                        'removing'`, Claude Code's waiting for Write) stays applied while
+//                                                        'removing'`, Claude Code's waiting for a click) stays applied while
 //                                                        the entry is as it was, so it still goes once it can
 //   kept separate, never synced, or turned off since     not in the library: found, every entry as it is
 //   entries displaced by a pass that stopped part-way    versions (they are kept in the old store)
