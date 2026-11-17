@@ -1,7 +1,8 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. One row is
 // the open home's, not the app's: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
-// and switched through app.ts switchSyncEverything.
+// and switched through app.ts switchSyncEverything. Help's Log row also shows Central Knot's own log under it (Show log: its
+// last lines, read by main.ts readLog, never stored); the log is written by main.ts log.
 import { acting, announce, machine, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { oneUndoCovers } from './historyactions.ts';
 import { button, h, icon, toggle } from './dom.ts';
@@ -10,11 +11,12 @@ import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import { openWalkthrough } from './firstsetup.ts';
 import { whatYesDoes, takenOutEarlier } from './setupcounts.ts';
 import { plural } from './model.ts';
-import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, SignInPlace } from './types.ts';
+import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, LogTail, SignInPlace } from './types.ts';
 import { libraryWords, sentences } from './libraryrow.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, settingUpdateButton, unsavedWork, updates } from './updateview.ts';
 import { checkPluginsNow, checkedWords, pluginUpdates } from './pluginupdateview.ts';
+import { pageNames } from './words.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
@@ -89,6 +91,8 @@ export async function loadSettings() {
 export function openSettings() {
   messages.clear();
   shortening = undefined;
+  logAsked++;
+  shownLog = undefined;
   // An action still running from the last visit keeps its effect (a save still saves) but no longer speaks for its row, except
   // a History window change still under way: its outcome (removed, or couldn't be) is only ever said in that row.
   const updating = attempts.get('history');
@@ -98,10 +102,11 @@ export function openSettings() {
 }
 
 /**
- * Runs one row's action (a save, Show log file) and shows its outcome in that row: `work` returns a message to show (or
- * nothing), or throws, and `failure` puts why in plain words. A failure is about the value the row showed when it began (still
- * in effect). Only the row's newest attempt changes the row, and an outcome a newer read has settled says nothing. It first clears
- * the other rows' finished notes, so the page says one thing at a time. True when it worked.
+ * Runs one row's action (a save, a read of the log, Open log folder) and shows its outcome in that row: `work` returns a
+ * message to show (or nothing), or throws, and `failure` puts why in plain words. A failure is about the value the row
+ * showed when it began (still in effect). Only the row's newest attempt changes the row, and an outcome a newer read has
+ * settled says nothing. It first clears the other rows' finished notes, so the page says one thing at a time. True when it
+ * worked.
  */
 async function act(row: string, work: () => Promise<RowMessage | undefined>, failure: (error: string) => string): Promise<boolean> {
   const mine = ++attempted;
@@ -262,12 +267,81 @@ function shortenConfirmation(days: HistoryDays): HTMLElement {
       button({ variant: 'outline', size: 'small', label: `Keep ${current!.historyDays} days`, id: 'history-shorten-cancel', onclick: closeShortening })));
 }
 
-/** Shows the log in the file manager. Where it could only open the folder, the row says so and names the file to look for. */
-const showLog = () => act('log', async () => {
-  const shown = await window.centralKnot.showLog();
-  if (shown.selected) return undefined;
-  return { text: shown.logged ? 'Opened the log’s folder. The file is central-knot.log.' : 'Opened the log’s folder. Nothing has been logged yet.', tone: 'note' };
+/** Opens the log's folder in the file manager. Where the log could not be selected there, the row names the file to look for. */
+const openLogFolder = () => act('log', async () => {
+  const opened = await window.centralKnot.openLogFolder();
+  if (opened.selected) return undefined;
+  return { text: opened.logged ? 'Opened the log’s folder. The file is central-knot.log.' : 'Opened the log’s folder. Nothing has been logged yet.', tone: 'note' };
 }, () => 'Couldn’t open the log’s folder. Try again.');
+
+/**
+ * The log shown under its row, from Show log until Hide log or the page is opened afresh: how many of its last lines were
+ * asked for, and main's answer. Never stored. Show log asks for LOG_LINES, and each "Show earlier lines" for LOG_LINES more.
+ */
+let shownLog: { count: number; tail: LogTail } | undefined;
+const LOG_LINES = 200;
+/** The newest read or Hide log, so a read that answers late never shows the log again or over a newer read. */
+let logAsked = 0;
+
+/**
+ * Shows the log's last `count` lines under its row, as main reads them (main.ts readLog). `toNewest` (Show log, Refresh log)
+ * then scrolls the page just far enough to bring the newest line into view, with the page's own margin under it; earlier
+ * lines keep the place, so they come in under their button (and its focus goes to the lines once it is gone). A read that
+ * fails hides the block, and the row says so.
+ */
+async function showLog(count: number, toNewest: boolean) {
+  const mine = ++logAsked;
+  await act('log', async () => {
+    const tail = await window.centralKnot.readLog(count).catch(error => { if (mine === logAsked) shownLog = undefined; throw error; });
+    if (mine !== logAsked) return undefined;
+    const onEarlier = document.activeElement?.id === 'log-earlier';
+    shownLog = { count, tail };
+    rerender();
+    if (onEarlier && !tail.earlier) document.getElementById('log-text')?.focus({ preventScroll: true });
+    const page = document.getElementById('settings-scroll'), end = document.getElementById('log-end');
+    if (toNewest && page && end) {
+      const below = end.getBoundingClientRect().bottom + parseFloat(getComputedStyle(page).paddingBottom) - page.getBoundingClientRect().bottom;
+      if (below > 0) page.scrollTop += below;
+    }
+    return undefined;
+  }, () => 'Couldn’t read the log. Try again, or open its folder.');
+}
+/** Hide log: the lines go, and a read still under way no longer shows them. From the foot, the focus goes to the row's Show log. */
+function hideLog() {
+  const fromFoot = document.activeElement?.id === 'log-foot-show-log';
+  logAsked++;
+  shownLog = undefined;
+  rerender();
+  if (fromFoot) document.getElementById('show-log')?.focus();
+}
+
+/**
+ * The log's buttons, built here for both places they show: its row (Show log or Hide log, Open log folder), and, while the log
+ * is shown, the foot of its lines, where the page lands after a read (Refresh log first). The foot's ids start `log-foot-`.
+ */
+function logButtons(at: 'row' | 'foot'): HTMLElement {
+  const shown = shownLog, id = (name: string) => (at === 'row' ? name : `log-foot-${name}`);
+  return h('div.setting-actions', {},
+    at === 'foot' && shown ? button({ variant: 'outline', icon: 'refresh-cw', label: 'Refresh log', id: 'log-refresh', onclick: () => void showLog(shown.count, true) }) : null,
+    button({ variant: 'outline', label: shown ? 'Hide log' : 'Show log', id: id('show-log'), onclick: () => (shown ? hideLog() : void showLog(LOG_LINES, true)),
+      attrs: { 'aria-expanded': String(!!shown), 'aria-controls': shown ? 'setting-log-lines' : undefined, 'aria-describedby': 'setting-log-hint' } }),
+    button({ variant: 'outline', label: 'Open log folder', id: id('open-log-folder'), onclick: () => void openLogFolder(), attrs: { 'aria-describedby': 'setting-log-hint' } }));
+}
+
+/**
+ * The log under its row: a button for earlier lines (or that this is its start), the lines as they are in the file, and its
+ * foot (`log-end`, which a read brings into view): that the times are UTC, as the file has them, and the log's buttons.
+ */
+function logBlock({ count, tail: { lines, earlier } }: NonNullable<typeof shownLog>): HTMLElement {
+  const foot = h('div.setting-log-foot', { id: 'log-end' }, lines.length ? h('p.setting-log-note', {}, 'Times are in UTC, as the file has them.') : null, logButtons('foot'));
+  if (!lines.length) return h('div.setting-log', { id: 'setting-log-lines' }, h('p.setting-log-note', {}, 'Nothing has been logged yet.'), foot);
+  return h('div.setting-log', { id: 'setting-log-lines' },
+    earlier
+      ? button({ variant: 'link', size: 'small', label: `Show ${plural(Math.min(earlier, LOG_LINES), 'earlier line')}`, id: 'log-earlier', onclick: () => void showLog(count + LOG_LINES, false) })
+      : h('p.setting-log-note', {}, 'This is the start of the log.'),
+    h('pre.setting-log-text', { id: 'log-text', tabindex: '0', 'aria-label': 'Central Knot’s log' }, lines.join('\n')),
+    foot);
+}
 
 const messageLook: Record<RowMessage['tone'], { glyph: IconName; role: 'status' | 'alert' }> = {
   note: { glyph: 'folder-open', role: 'status' }, info: { glyph: 'info', role: 'status' }, failure: { glyph: 'circle-alert', role: 'alert' },
@@ -341,7 +415,7 @@ function pluginUpdatesRow(): HTMLElement {
   const view = pluginUpdates.view;
   const hint = 'Central Knot checks your marketplaces every four hours, with its window closed too, and updates the plugins your tools have, through each tool’s own command. A plugin you turned off stays off. An update can’t be undone.';
   const checked = on ? checkedWords(pluginUpdates.asked && view ? { ...view, checking: true } : view) : undefined;
-  const notice: RowMessage | undefined = checked && { text: checked.text, tone: checked.tone, action: checked.note ? { label: 'See Plugins', run: () => showPage('plugins') } : undefined };
+  const notice: RowMessage | undefined = checked && { text: checked.text, tone: checked.tone, action: checked.note ? { label: `See ${pageNames.plugins}`, run: () => showPage('plugins') } : undefined };
   return settingRow('plugin-updates', 'Update plugins automatically', hint,
     h('div.setting-actions', {},
       on ? button({ variant: 'outline', label: 'Check now', id: 'check-plugin-updates', disabled: !view || view.checking || pluginUpdates.asked, onclick: () => void checkPluginsNow(), attrs: { 'aria-describedby': 'setting-plugin-updates-hint' } }) : null,
@@ -395,7 +469,7 @@ export function settingsPage(): HTMLElement {
   // Why it can't be changed here replaces the hint; why the system has it off (it can be changed) shows beneath, with the way to fix it.
   const cannot = signIn?.available ? undefined : signIn?.reason?.text;
   const systemSays: RowMessage | undefined = signIn?.reason && signIn.place ? { text: signIn.reason.text, tone: 'system', action: openSignInPlace(signIn.place) } : undefined;
-  return h('div.page', {}, h('div.scroll.settings-scroll', {},
+  return h('div.page', {}, h('div.scroll.settings-scroll', { id: 'settings-scroll' },
     settingsSection('general', 'General',
       settingRow('sign-in', 'Start at sign-in', cannot ?? signInHint,
         // Off and unchangeable until main has said, so a click never acts on a guess. No tooltip: the row's title already says it.
@@ -422,7 +496,8 @@ export function settingsPage(): HTMLElement {
           icon('chevrons-up-down', 14)),
         updatingHistory ? { text: 'Updating History…', tone: 'progress' } : undefined,
         shortening ? shortenConfirmation(shortening) : undefined)),
+    // Help stays the last section, so the log's lines lengthen the page's own scroll.
     settingsSection('help', 'Help',
-      settingRow('log', 'Log file', 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t here.',
-        button({ variant: 'outline', label: 'Show log file', id: 'show-log', onclick: () => void showLog(), attrs: { 'aria-describedby': 'setting-log-hint' } })))));
+      settingRow('log', 'Log', 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t here.', logButtons('row')),
+      shownLog ? logBlock(shownLog) : null)));
 }

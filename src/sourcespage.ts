@@ -1,24 +1,25 @@
-// Sources: the page where a Git link is given as a source for the library (sources.ts, in main, is the engine; the table it
-// follows is library.ts's A SOURCE). One field takes the link; Look reads it and shows, item by item, what Add would do and
-// what it won't bring in and why, before anything is kept; Add brings each item into Central Knot, Off. Each source has a row:
-// its link, what it brought (On or Off), when it was last read, why it couldn't be read if so, Check now and Remove; an item
-// there the library holds deleted has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace
-// and Keep mine; an item the source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts
-// fromSource) has a line with Turn on, its switch on its kind's page. Every line and click carries its item's kind (types.ts SourceName
-// `kind`; ids too: source-merge-<id>-skill-<key>), which pluginstatus.ts pageOfPart maps to its page, and whose words
-// (words.ts kindNouns) the line says; a sentence about every source names the kinds a source brings (SourcesView `kinds`). Every
-// state a row says is the engine's (types.ts SourceNameState, and that fromSource); this page only words it. The field takes any
-// GitHub or GitLab link: a plugin's own folder is a source like any other, with what of it doesn't come said (types.ts NotComing);
-// a marketplace, or a plugin one lists, is no source: where the engine offers it (SourcePreview `toPlugins`: sources.ts handOff),
-// the look's one action is Add to Plugins, the Plugins page's own add (pluginstate.ts addMarketplace), run on that page, which
-// tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way and in Central
-// Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
+// Sources: the page where a Git link is given as a source for the library, titled on screen as words.ts pageNames says (in
+// the code it stays `sources`; sources.ts, in main, is the engine; the table it follows is library.ts's A SOURCE).
+// One field takes the link; Look reads it and shows, item by item, what Add would do and what it won't bring in and why,
+// before anything is kept; Add brings each item into Central Knot, Off. Each source has a row: its link, what it brought (On
+// or Off), when it was last read, why it couldn't be read if so, Check now and Remove; an item there the library holds deleted
+// has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace and Keep mine; an item the
+// source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts fromSource) has a line
+// with Turn on, its switch on its kind's page. Every line and click carries its item's kind (types.ts SourceName `kind`; ids
+// too: source-merge-<id>-skill-<key>), which pluginstatus.ts pageOfPart maps to its page, and whose words (words.ts kindNouns)
+// the line says; a sentence about every source names the kinds a source brings (SourcesView `kinds`). Every state a row says
+// is the engine's (types.ts SourceNameState, and that fromSource); this page only words it. The field takes any GitHub or
+// GitLab link: a plugin's own folder is a source like any other, with what of it doesn't come said (types.ts NotComing); a
+// marketplace, or a plugin one lists, is no source: where the engine offers it (SourcePreview `toPlugins`: sources.ts
+// handOff), the look's one action is the hand-off button (words.ts toPluginsLabel), the Plugins page's own add (pluginstate.ts
+// addMarketplace), run on that page, which tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way
+// and in Central Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
 import { acting, announce, applyClick, busy, rerender, showPage, state, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { asItIs } from './libraryrow.ts';
 import { dayAndTime, plural } from './model.ts';
 import { linkLabel } from './sourcelink.ts';
-import { andList, kindNouns, orList, toolsPhrase } from './words.ts';
+import { andList, kindNouns, orList, pageNames, toolsPhrase, toPluginsLabel, turnIt } from './words.ts';
 import { outcomeBand } from './matrix.ts';
 import { pageOfPart } from './pluginstatus.ts';
 import { addMarketplace, market } from './pluginstate.ts';
@@ -92,8 +93,8 @@ const add = (token: string, label: string) => busy('Adding the source…', async
 });
 
 /**
- * Add to Plugins: the Plugins page opens, then runs its own add with the hand-off's address (pluginstate.ts addMarketplace), whose
- * outcome or problem it tells there. The look and the field clear only when it worked; when it didn't, the link stays here.
+ * The hand-off button (words.ts toPluginsLabel): the Plugins page opens, then runs its own add with the hand-off's address
+ * (pluginstate.ts addMarketplace), whose outcome or problem it tells there. The look and the field clear only when it worked; when it didn't, the link stays here.
  */
 async function toPlugins(address: string) {
   showPage('plugins');
@@ -234,7 +235,7 @@ const whereWords = (found: SourceFound) => [`Branch ${found.ref}`, found.folder 
 function notComingWords(left: NotComing | undefined): string | undefined {
   const parts = !left ? [] : [left.commands ? `its ${plural(left.commands, 'command')}` : '', left.hooks ? 'its hooks' : '',
     left.lspServers ? `its ${plural(left.lspServers, 'LSP server')}` : '', left.bin ? 'its bin folder' : ''].filter(Boolean);
-  return parts.length ? `Not brought in: ${andList(parts)}. Central Knot installs plugins only from a marketplace, on the Plugins page: to have the whole plugin, add a marketplace that lists it there.` : undefined;
+  return parts.length ? `Not brought in: ${andList(parts)}. Central Knot installs plugins only from a marketplace, on the ${pageNames.plugins} page: to have the whole plugin, add a marketplace that lists it there.` : undefined;
 }
 
 /** An item's files, the first few by path; every one in the tooltip. */
@@ -268,7 +269,7 @@ function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null
  */
 function removedRow(fact: LibraryFacts, kind: ItemKind, locked: boolean) {
   const page = pageOfPart[kind];
-  const turn = button({ variant: 'link', size: 'micro', label: 'Turn on', id: `source-turn-on-${kind}-${fact.key}`, disabled: locked,
+  const turn = button({ variant: 'link', size: 'micro', label: turnIt(true), id: `source-turn-on-${kind}-${fact.key}`, disabled: locked,
     attrs: { title: `Turn ${fact.name} on in every tool it isn’t kept out of, as its switch on ${kindNouns[page].title} does. Undo turns it off again.` }, onclick: () => void turnOn(fact, page) });
   return h('li.source-name', { 'data-key': fact.key, 'data-kind': kind, 'data-state': 'removed' },
     h('span.source-name-icon', {}, icon('triangle-alert', 14, 'tone-warning')),
@@ -290,11 +291,11 @@ function handOffPanel(preview: Extract<SourcePreview, { token: string }>, handed
     ? ` A link to one of its other folders, not a plugin’s (its skills/, say), brings that folder’s ${broughtNames()} here.` : '';
   return h('div.source-preview', { id: 'source-preview', role: 'region', 'aria-label': `What ${label} holds` },
     h('div.source-preview-head', {}, h('strong.source-link', { title: preview.link }, label), h('span.source-where.tone-muted', {}, whereWords(preview))),
-    sayLine('puzzle', 'tone-muted', `${preview.refused ?? ''} Add to Plugins adds ${handed.name} there, with its ${plural(handed.plugins, 'plugin')}, none turned on.${folders}`),
+    sayLine('puzzle', 'tone-muted', `${preview.refused ?? ''} ${toPluginsLabel} adds ${handed.name} there, with its ${plural(handed.plugins, 'plugin')}, none turned on.${folders}`),
     h('div.source-preview-actions', {},
-      button({ variant: 'primary', size: 'small', icon: 'plus', label: 'Add to Plugins', id: 'source-to-plugins', disabled: !state.home?.sync.access.allowed || acting(), onclick: () => void toPlugins(handed.address) }),
+      button({ variant: 'primary', size: 'small', icon: 'plus', label: toPluginsLabel, id: 'source-to-plugins', disabled: !state.home?.sync.access.allowed || acting(), onclick: () => void toPlugins(handed.address) }),
       cancel,
-      h('span.source-note', {}, 'Nothing is installed, and nothing is kept on Sources.')));
+      h('span.source-note', {}, `Nothing is installed, and nothing is kept on ${pageNames.sources}.`)));
 }
 
 /** The look's panel: where it read, what Add does with each item, and Add, or why it can't be added. */
@@ -333,7 +334,7 @@ function addForm(allowed: boolean) {
           oninput: (event: Event) => { sources.draft = (event.target as HTMLInputElement).value; const control = document.getElementById('source-look') as HTMLButtonElement | null; if (control) control.disabled = !ready(); },
           onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
         button({ variant: 'outline', size: 'small', icon: 'search', label: 'Look', id: 'source-look', disabled: !ready(), onclick: go })),
-      h('span.repo-field-below', { id: 'source-link-below' }, `Any link to a repository, a branch, a folder or a file in one; owner/repo, github.com/owner/repo, or an address you would give git clone, works too. A folder brings the ${broughtNames()} in it, a plugin’s own folder too; a marketplace goes to Plugins. Central Knot uses this computer’s git and its sign-in.`)),
+      h('span.repo-field-below', { id: 'source-link-below' }, `Any link to a repository, a branch, a folder or a file in one; owner/repo, github.com/owner/repo, or an address you would give git clone, works too. A folder brings the ${broughtNames()} in it, a plugin’s own folder too; a marketplace goes to ${pageNames.plugins}. Central Knot uses this computer’s git and its sign-in.`)),
     sources.preview ? previewPanel(sources.preview) : null);
 }
 
@@ -371,7 +372,7 @@ function sourceRow(source: SourceView) {
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `source-remove-cancel-${source.id}`, onclick: () => { sources.confirmRemove = undefined; rerender(); } })) : null,
     source.problem ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, `Couldn’t fetch it at the last check: ${source.problem} What came from it stays as it is; below is its last read.`)) : null,
     source.unread ? sayLine('triangle-alert', 'tone-warning', source.holds === 'marketplace' || source.holds === 'listed'
-      ? `${source.unread} This source turns nothing off. Remove this source, then look at its link again, above, to see how it can go on Plugins.`
+      ? `${source.unread} This source turns nothing off. Remove this source, then look at its link again, above, to see how it can go on ${pageNames.plugins}.`
       : `${source.unread} Until it can be read, this source turns nothing off.`) : null,
     notComingWords(source.notComing) ? sayLine('circle-minus', 'tone-muted', notComingWords(source.notComing)!) : null,
     source.names.length || removed.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, nameButton(name))), removed.map(({ fact, kind }) => removedRow(fact, kind, locked))) : null);
@@ -395,5 +396,5 @@ export function sourcesPage(): HTMLElement {
         h('h2.eyebrow', { id: 'source-list-title' }, `Sources · ${view.sources.length}`),
         h('ul.source-rows', {}, view.sources.map(sourceRow)))
         : h('p.source-empty', {}, h('strong', {}, 'No sources yet. '), `A source is a GitHub or GitLab link that ${broughtNames()} are read from: a folder of them, or a plugin’s own folder. Each one there comes into Central Knot Off, and the link is read again once a day and on Check now for what changed there. Central Knot never writes to a source.`),
-      h('p.repo-aside', {}, 'A marketplace’s link is no source: Look offers Add to Plugins, where each of its plugins has a switch of its own.')));
+      h('p.repo-aside', {}, `A marketplace’s link isn’t a library source: Look offers ${toPluginsLabel} instead, where each of its plugins has its own switch.`)));
 }

@@ -22,7 +22,7 @@ import { originWords, theVersion, wantedIn, type LibraryItem, type Plan, type Ta
 import { clockTimesApart, dayAndTime } from './model.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, TakenInNotice } from './types.ts';
-import { andList, kindNouns, sentence, toolName, toolsPhrase } from './words.ts';
+import { andList, kindNouns, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
 
 // ---------- What a kind supplies ----------
 
@@ -127,7 +127,7 @@ export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): 
   const waits = 'Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now';
   const choose = 'Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version.'
     + ' Keep mine keeps yours current, and the source’s version as a version, so it no longer waits.';
-  return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}. On Sources, ${choose}` },
+  return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}. On ${pageNames.sources}, ${choose}` },
     before: `From ${label}, a source, which has a newer version. ${waits}. On `, after: `, ${choose}`, page: 'sources' };
 }
 
