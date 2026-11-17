@@ -12,7 +12,7 @@ concurrency:
 jobs:
   mac:
     runs-on: [self-hosted, macOS, ARM64, ck-mac]
-    # A run takes about 20 minutes, most of it the end-to-end checks (their crash rounds about 4½); the limit leaves room for them.
+    # A run takes about 10 to 11 minutes, about 5 of them the end-to-end checks in four groups at once; the limit leaves room for a slow one.
     timeout-minutes: 30
     steps:
       # An app left running by a cancelled or failed run would hold a debug port that this run could attach to.
@@ -21,7 +21,6 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'
-          cache: npm
       - run: npm ci
       - run: npm test
       - run: npm run package:mac
@@ -35,6 +34,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - run: npm run e2e
+        env: { CK_E2E_GROUPS_AT_ONCE: 4 }
       # A bundled build: the documented build command on a fixture marketplace, then the packaged build opened with the source gone.
       - run: node scripts/bundled-check.mjs
       # The alpha: packaged from a test alpha tag beside the standard app, then both opened on one throwaway home.

@@ -1,6 +1,7 @@
 // Drives the real app end to end over its debug port, in a throwaway HOME, so "This Mac's home" is disposable too.
 // Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,…]
-// `--flows` runs only the named flows, for working on one; a run that counts has them all.
+// `--flows` runs only the named flows, here, on one HOME, for working on one. Without it the run is every flow: this script once
+// per group (`groups`, at the end) with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time (runGroups).
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -22,6 +23,7 @@ const args = process.argv.slice(2);
 const flag = name => args.includes(name);
 const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
 const shots = option('--shots');
+const named = option('--flows')?.split(',');
 const crashRounds = Number(option('--crash-rounds', 6));
 const canWriteRealHome = writesRealHome(process.platform);
 const root = resolve(import.meta.dirname, '..');
@@ -30,10 +32,12 @@ const command = flag('--electron') ? join(root, 'node_modules/electron/dist', re
 // ---------- Checks ----------
 const failures = [];
 let passes = 0;
+// The flow running now, named on each FAIL line: a grouped run prints its groups' lines together.
+let flowRunning = 'seedHome';
 function check(name, ok, detail) {
   if (ok) { passes++; return; }
-  failures.push(name);
-  console.error(`FAIL ${name}${detail === undefined ? '' : `: ${JSON.stringify(detail)?.slice(0, 500)}`}`);
+  failures.push(`[${flowRunning}] ${name}`);
+  console.error(`FAIL [${flowRunning}] ${name}${detail === undefined ? '' : `: ${JSON.stringify(detail)?.slice(0, 500)}`}`);
 }
 const same = (name, actual, expected) => check(name, JSON.stringify(actual) === JSON.stringify(expected), { actual, expected });
 // A file a poll reads; empty for the moment the app's checked write has it moved aside.
@@ -133,7 +137,8 @@ let app;
 // an app holding a debug port that a later run could attach to.
 const launched = new Set();
 process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
-for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
+// A grouped run's parent passes these on to its copies and waits for them instead (runGroups).
+if (named) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
   // OpenCode's CLI is looked for only inside the throwaway home, and on a Mac every app in the stand-in for /Applications
@@ -143,8 +148,9 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
-  // debugPorts). A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
-  const child = spawn(command, [...(flag('--electron') ? [root, '--inspect=0'] : []), '--remote-debugging-port=0', `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: ['ignore', 'ignore', 'pipe'] });
+  // debugPorts). A dev run also opens its main process to the checks (an installed app doesn't take --inspect). A window that
+  // another copy's window covers stays a shown page (Chromium's switch): hidden, it would take no new size from the checks.
+  const child = spawn(command, [...(flag('--electron') ? [root, '--inspect=0'] : []), '--remote-debugging-port=0', '--disable-backgrounding-occluded-windows', `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: ['ignore', 'ignore', 'pipe'] });
   launched.add(child);
   child.once('exit', () => launched.delete(child));
   let port, inspect;
@@ -182,6 +188,21 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   };
   await settle();
   return app;
+}
+
+/**
+ * New profile, then its name and Enter, typed in the page as the name field opens: leaving the field saves the name it has
+ * (profilespage.ts renameField), and in a grouped run another copy's window can take the focus between two requests.
+ */
+async function newProfile(a, name) {
+  await a.run(`new Promise((done, fail) => {
+    const field = new MutationObserver(() => { const input = document.querySelector('#profile-name'); if (!input) return; field.disconnect();
+      input.value = ${JSON.stringify(name)}; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); done(true); });
+    field.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => { field.disconnect(); fail(new Error('New profile opened no name field within 30 s.')); }, 30000);
+    document.querySelector('#profile-new').click();
+  })`);
+  await a.settle();
 }
 
 /**
@@ -585,9 +606,22 @@ async function agentInPi(a, practice) {
   await a.click('#open-code-reviewer');
   await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-about');
   check('Pi’s About says its agents are in its skills folder, each as a skill', /Agents\s*In its skills folder, each as a skill/.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
+  await a.click('#nav-skills');
+  await piCaughtUp(a);
   await a.click('#nav-agents');
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.click('#header-refresh');
+}
+
+/**
+ * On the Skills page, waits until every skill current in Codex is current in Pi too, whose folder a check made: the app brings
+ * a tool that joins up to date in a pass, and the page shows Pi's copies current once that pass has ended and been read. Pi's
+ * folder removed before then is made again by the pass's later writes.
+ */
+async function piCaughtUp(a) {
+  const behind = () => a.run(`[...document.querySelectorAll('.ov-row[data-key]')].map(row => ['codex-cli', 'pi-cli'].map(tool => document.getElementById('cell-' + row.dataset.key + '-' + tool)?.dataset.state))
+    .filter(([codex, pi]) => codex === 'current' && pi !== 'current').length`);
+  for (let tries = 0; tries < 100 && await behind(); tries++) await wait(100);
 }
 
 /**
@@ -826,9 +860,7 @@ async function practiceFlow() {
   const allFolders = () => Object.fromEntries(skillsOn.map(key => [key, folders(key)]));
   const allOn = allFolders(), gone = [null, null, null];
   await a.click('#nav-profiles');
-  await a.click('#profile-new');
-  await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
-  await a.settle();
+  await newProfile(a, 'Incident');
   same('an empty profile offers no switch: it would turn everything off', [await a.exists('#profile-switch'), await a.exists('#profile-from-now')], [false, true]);
   await a.click('#pf-skill\\:notes');
   same('ticking only edits the profile', allFolders(), allOn);
@@ -940,8 +972,10 @@ async function practiceFlow() {
   let watched = false;
   for (let tries = 0; tries < 40 && !watched; tries++) { await wait(250); watched = readNow(standupPath('claude')).includes('watched'); }
   check('a change on disk spreads on its own', watched);
-  await wait(800);
-  check('and the page hears about it without a click', (await a.text('.sync-notices') ?? '').includes("standup was edited in Copilot CLI"), await a.text('.bands'));
+  // The page hears of it once the pass that spread it has told it, and it has read again.
+  const heard = async () => (await a.text('.sync-notices') ?? '').includes('standup was edited in Copilot CLI');
+  for (let tries = 0; tries < 50 && !(await heard()); tries++) await wait(100);
+  check('and the page hears about it without a click', await heard(), await a.text('.bands'));
   // A background read whose reply arrives while an action runs is set aside, but the notice it carried still reaches the page. (A dev run only: it slows a reply in the main process.)
   if (main) {
     check('the refresh reply is slowed', await main.slowReply('discovery:refresh', 1500));
@@ -1019,6 +1053,7 @@ async function practiceFlow() {
   await a.click('#decide-second-opinion');
   await fitsAtMinimum(a, 'a copy choice with four tools');
   await a.click('#decide-second-opinion');
+  await piCaughtUp(a);
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.click('#header-refresh');
   const nameFits = await a.run(`(() => { const cell = document.querySelector('.ov-row[data-key="second-opinion"] .ov-name'); return cell.scrollWidth <= cell.clientWidth + 1 && cell.getBoundingClientRect().height < 44; })()`);
@@ -2508,7 +2543,9 @@ async function sourcesFlow() {
   check('a change at the source updates the agent in every tool, and the band opens Agents', await until(async () => /reviewer was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
     && await a.exists('#source-open-agents') && await until(() => ['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('Be brief and kind.'))), await a.text('.band-done'));
   writeFileSync(agentFile('claude-cli'), readNow(agentFile('claude-cli')).replace('You review code.', 'You review code, mine.'));
-  check('an edit in Claude Code is taken in and reaches every tool', await until(() => ['copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('You review code, mine.'))), ['copilot-cli', 'codex-cli'].map(tool => readNow(agentFile(tool))));
+  // Agents folders the app made after it opened the home aren't watched (main.ts startWatching watches what is there), so
+  // the edit is taken in by the pass the next event elsewhere prompts or by the poll (main.ts POLL_MS, 20 s): waited for.
+  check('an edit in Claude Code is taken in and reaches every tool', await until(() => ['copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('You review code, mine.')), 30000), ['copilot-cli', 'codex-cli'].map(tool => readNow(agentFile(tool))));
   await toldOfEdit('reviewer');
   commit(kit, { 'agents/reviewer.md': reviewerMd.replace('Be brief.', 'Be brief, kind and exact.') });
   await a.click(`#source-check-${kitId}`);
@@ -2713,6 +2750,8 @@ async function updateFlow() {
     same('clicked on another page, it checks and the status bar says what it found', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], [found, false]);
     check('the control showed the check, then went back to the quiet arrows', (await a.run('window.ckLooks')).includes('checking Checking…') && (await control()).look === 'check', await a.run('window.ckLooks'));
     same('its tooltip says it is up to date', (await control()).title, 'Up to date. Click to check now.');
+    // It takes the focus back once it can be pressed again, a redraw after the look changes.
+    for (let i = 0; i < 40 && await focused() !== 'update-control'; i++) await wait(100);
     same('and it takes the focus back', await focused(), 'update-control');
     await a.quit();
     // An update that didn't take (the old build opens again) says so, in Settings.
@@ -2762,9 +2801,7 @@ async function updateFlow() {
     })()`);
     a = await launch(narrowData, [], HOME, as('v0.5.0-preview.5'));
     await a.click('#nav-profiles');
-    await a.click('#profile-new');
-    await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident response on call'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
-    await a.settle();
+    await newProfile(a, 'Incident response on call');
     // Nothing is in Central Knot in this fresh home, so the empty profile is the one in use: the status bar names it.
     await sizeTo(a, ...SMALLEST);
     /** In the rail, then open: the sidebar fits, and nothing in the status bar runs into its neighbour. */
@@ -3999,10 +4036,10 @@ async function crashFlow() {
     // the page), not waited for, so the kill lands while it copies.
     const taking = await a.run(`(() => { const found = [...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].filter(row => row.querySelector('.add-item')).map(row => ({ key: row.dataset.key, on: true, except: [] }));
       if (found.length) window.centralKnot.applySkills(found, false, document.querySelector('.status-home').title); else document.querySelector('#header-refresh').click(); return found.length; })()`);
-    // Off the Mac a take-in starts later than this window allows (on a Linux machine the first skill is on record about
-    // 0.8 s after the click, the 40th at 2.2 s, and the copies follow until about 6 s), so there the window opens once this
-    // round's first skill is on record; a round with nothing left to take in has no take-in to wait for.
-    if (process.platform !== 'darwin' && taking > 0) for (const before = onRecordNow(), end = Date.now() + 15000; Date.now() < end && onRecordNow() <= before;) await wait(10);
+    // The kill window opens once this round's first skill is on record, so the kill lands in the take-in, however late a busy
+    // machine starts it; the first round has no record yet, which counts as none on. A round with nothing left to take in
+    // has no take-in to wait for.
+    if (taking > 0) for (const before = Math.max(0, onRecordNow()), end = Date.now() + 15000; Date.now() < end && onRecordNow() <= before;) await wait(10);
     await wait(30 + Math.round(round * 700 / Math.max(1, crashRounds - 1)) + randomInt(40));
     await a.crash();
     if (readdirSync(COPILOT).length < 40) interrupted++;
@@ -4589,26 +4626,91 @@ async function usageFlow() {
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
-const started = Date.now();
-try {
-  seedHome();
-  // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, otherBuildFlow, freedOtherWaysFlow, thisMacTakeOverFlow, listDiffersFlow, pluginSwitchFlow, pluginUpdatesFlow, repoBaseFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, usageFlow, firstSetupFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
-  const named = option('--flows')?.split(',');
-  for (const flow of flows.filter(each => !named || named.includes(each.name))) {
-    const from = Date.now();
-    await flow();
-    console.log(`${flow.name}: ${Math.round((Date.now() - from) / 1000)}s`);
-  }
-  execChmod();
-} catch (error) {
-  failures.push(`aborted: ${error.message}`);
-  console.error(error);
-} finally {
-  app?.child.kill('SIGKILL');
-  execChmod();
-  await mountsGone(scratch);
-  rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
+// Every flow, in groups. A run with no --flows starts this script once per group, so each group has a throwaway home, data
+// folders, stand-ins and debug ports of its own, and several run at once (runGroups). Four groups, as the Mac runner was
+// measured with four apps at once, balanced by each flow's seconds there with four at once (about 260 s a group):
+// practiceFlow alone takes about 220. realHomeFlow is in its group, as both open the default data folder (launch) and
+// realHomeFlow's preview-only branch reads the History window practiceFlow set there. crashFlow comes last in its group, as it
+// deletes its copy's HOME. Inside a copy the flows run in this order on the HOME seeded for it (seedHome), so each group
+// passes on its own.
+const groups = [
+  [practiceFlow, realHomeFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, sourcesFlow],
+  [fewToolsFlow, openCodeFlow, suggestedFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
+  [harnessFlow, manageFlow, otherBuildFlow, usageFlow, firstSetupFlow, crashFlow],
+];
+// crashFlow needs a home the app writes, and a round to kill in.
+const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
+const listed = groups.flat().map(flow => flow.name);
+const written = [...readFileSync(import.meta.filename, 'utf8').matchAll(/^async function (\w+Flow)\(/gm)].map(([, name]) => name);
+const refused = [...written.filter(name => listed.filter(each => each === name).length !== 1).map(name => `${name} is in no group or in two`),
+  ...(named ?? []).filter(name => !listed.includes(name)).map(name => `--flows names ${name}, which is no flow`)];
+if (refused.length) { rmSync(scratch, { recursive: true, force: true }); throw new Error(`Refused to start: ${refused.join('; ')}.`); }
+
+/**
+ * The run with no --flows: this script once per group with that group's --flows and the run's other options,
+ * CK_E2E_GROUPS_AT_ONCE copies at a time (default 1). Each copy's stdout and stderr, in the order they came, print as one
+ * block when it ends; then the run's total, the flows that did not run, and every FAIL line again. A copy that ends without
+ * its total line counts as one failure, named for the flow it was in. A signal is passed on to every copy, and each one's
+ * block printed as it ends. Returns the exit code.
+ */
+async function runGroups() {
+  const atOnce = Math.max(1, Number(process.env.CK_E2E_GROUPS_AT_ONCE) || 1);
+  const waiting = groups.map(group => group.filter(runs).map(flow => flow.name)).filter(names => names.length), count = waiting.length;
+  const running = new Set(), notRun = [], failLines = [];
+  let passed = 0, failed = 0, stoppedBy;
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stoppedBy = signal; for (const copy of running) copy.kill(signal); });
+  const runOne = names => new Promise(done => {
+    const from = Date.now(), number = count - waiting.length;
+    const copy = spawn(process.execPath, [...process.execArgv, import.meta.filename, ...args, '--flows', names.join(',')], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    for (const stream of [copy.stdout, copy.stderr]) stream.on('data', chunk => { output += chunk; });
+    running.add(copy);
+    copy.on('close', code => {
+      running.delete(copy);
+      const total = /^e2e: (\d+) passed, (\d+) failed/m.exec(output);
+      const missed = names.filter(name => !new RegExp(`^${name}: \\d+s$`, 'm').test(output));
+      if (total) { passed += Number(total[1]); failed += Number(total[2]); }
+      else { failed++; output += `\nFAIL [${missed[0] ?? names.at(-1)}] its copy ended without a total line (exit code ${code})`; }
+      notRun.push(...missed);
+      failLines.push(...output.split('\n').filter(line => line.startsWith('FAIL ')));
+      console.log(`\n── group ${number} of ${count}, ${Math.round((Date.now() - from) / 1000)}s${stoppedBy ? `, stopped by ${stoppedBy}` : ''}: ${names.join(', ')}\n${output.trimEnd()}`);
+      done();
+    });
+  });
+  console.log(`${count} groups of flows, ${atOnce} at a time; each group's output follows when it ends.`);
+  await Promise.all(Array.from({ length: atOnce }, async () => { while (waiting.length && !stoppedBy) await runOne(waiting.shift()); }));
+  notRun.push(...waiting.flat());
+  console.log(`\ne2e: ${passed} passed, ${failed} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}`);
+  if (notRun.length) console.error(`not run: ${notRun.join(', ')}`);
+  if (failLines.length) console.error(failLines.join('\n'));
+  return stoppedBy ? 130 : failed ? 1 : 0;
 }
-console.log(`e2e: ${passes} passed, ${failures.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}`);
-if (failures.length) { console.error(failures.join('\n')); process.exit(1); }
+
+const started = Date.now();
+if (!named) {
+  rmSync(scratch, { recursive: true, force: true });
+  process.exitCode = await runGroups();
+} else {
+  try {
+    seedHome();
+    // Each flow's time is printed, so a run that grows slow says where (and a grouped run, which flows ran).
+    for (const flow of groups.flat().filter(each => named.includes(each.name) && runs(each))) {
+      flowRunning = flow.name;
+      const from = Date.now();
+      await flow();
+      console.log(`${flow.name}: ${Math.round((Date.now() - from) / 1000)}s`);
+    }
+    execChmod();
+  } catch (error) {
+    check(`aborted: ${error.message}`, false);
+    console.error(error);
+  } finally {
+    app?.child.kill('SIGKILL');
+    execChmod();
+    await mountsGone(scratch);
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
+  }
+  console.log(`e2e: ${passes} passed, ${failures.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}`);
+  if (failures.length) { console.error(failures.join('\n')); process.exit(1); }
+}
