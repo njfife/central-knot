@@ -1977,7 +1977,13 @@ async function practiceFlow() {
   check('the migrated plugin’s page lists Its items: pdf-reader his own, spreadsheet kept out of Pi', /skill pdf-reader\s*Not brought in: you have your own/.test(migrated) && /skill spreadsheet/.test(migrated), migrated);
   await fitsAtMinimum(a, 'a migrated plugin’s page, with Its items');
   await a.shot('practice-plugin-migrated');
+  // Pi joined just above: its folder goes once the pass bringing it up to date has ended, or that pass makes it again and the
+  // Plugins table below has a fourth tool's column.
+  await a.click('#nav-skills');
+  await piCaughtUp(a);
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-document-tools');
   await a.click('#plugin-back');
   // About has every fact about the marketplace, and Remove.
   await a.click('#market-tab-about');
