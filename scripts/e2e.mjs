@@ -2028,15 +2028,20 @@ async function practiceFlow() {
   // A typed base draft belongs to this home: switching home from another page asks first on Instructions, and stays.
   await a.click('#base-edit');
   await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- Not saved.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  // The click on a tool's text and its Edit share one lock. Typing doesn't redraw the page, so the first click meets the base's
-  // typed work as Edit does: it opens nothing and asks about that work. Kept, the card says why it is locked, and a click on its
-  // text says it again.
+  // The click on a tool's text and its Edit share one lock. Typing doesn't redraw the page: until something else does (a
+  // background pass may), the first click meets the base's typed work as Edit does and asks about it; once the page is drawn
+  // again, the card is locked and the click says why. Either way nothing opens and the typed work stays. Kept, a click on the
+  // text says why.
+  const lockedWhy = 'Finish or cancel the base instructions edit first.';
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', 'Prefer small commits');
-  check('a click on a tool’s text while the base editor holds typed work opens nothing, and asks about the base’s changes as Edit does', !(await a.exists('#ins-text-claude-cli')) && await a.exists('#base-keep') && (await a.run(`document.querySelector('#base-text').value`)).includes('- Not saved.'), await a.text('#base-card'));
-  await a.click('#base-keep');
+  check('a click on a tool’s text while the base editor holds typed work opens nothing: it asks about the base’s changes as Edit does, or, once the page is drawn again, says why', !(await a.exists('#ins-text-claude-cli')) && (await a.run(`document.querySelector('#base-text').value`)).includes('- Not saved.')
+    && (await a.exists('#base-keep') || (await a.run(`document.querySelector('#announcement')?.dataset.text`)) === lockedWhy), [await a.text('#base-card'), await a.run(`document.querySelector('#announcement')?.dataset.text`)]);
+  if (await a.exists('#base-keep')) await a.click('#base-keep');
+  // The status line emptied, so what it says next is this click's.
+  await a.run(`document.querySelector('#announcement').dataset.text = ''`);
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', 'Prefer small commits');
-  check('kept, the card says why it is locked, and a click on its text says it again and opens nothing', !(await a.exists('#ins-text-claude-cli')) && (await a.run(`document.querySelector('#base-text').value`)).includes('- Not saved.')
-    && (await a.run(`document.querySelector('#announcement')?.dataset.text`)) === 'Finish or cancel the base instructions edit first.' && (await a.text('#ins-head-claude-cli')).includes('Finish or cancel the base instructions edit first.'), [await a.run(`document.querySelector('#announcement')?.dataset.text`), await a.text('#ins-head-claude-cli')]);
+  check('drawn again, the card says why it is locked, and a click on its text says it and opens nothing', !(await a.exists('#ins-text-claude-cli')) && (await a.run(`document.querySelector('#base-text').value`)).includes('- Not saved.')
+    && (await a.run(`document.querySelector('#announcement')?.dataset.text`)) === lockedWhy && (await a.text('#ins-head-claude-cli')).includes(lockedWhy), [await a.run(`document.querySelector('#announcement')?.dataset.text`), await a.text('#ins-head-claude-cli')]);
   await a.click('#nav-skills');
   await a.click('#home-actual');
   check('a home switch with a typed base draft asks first and stays', await a.exists('#base-discard') && (await a.run(`document.querySelector('#base-text')?.value`) ?? '').includes('- Not saved.') && await a.run(`document.querySelector('#home-fixture')?.getAttribute('aria-current') === 'true'`), await a.text('.bands'));
