@@ -254,13 +254,12 @@ export function afterActing() {
 /**
  * One piece of work at a time: every mutating control is disabled while it runs. Its "Reading…" message gives way, when
  * the work said nothing of its own, to what the status bar said before. A background refresh that arrived meanwhile runs
- * once it is done. The last result stays on screen while it runs only with `keepResult` (a row's click, so its band neither
- * goes nor comes back above the list: renderer.ts), until the work says its own.
+ * once it is done.
  */
-export async function busy(message: string, work: () => Promise<void>, { keepResult = false } = {}) {
+export async function busy(message: string, work: () => Promise<void>) {
   const focused = document.activeElement?.id;
   const before = state.said;
-  if (!keepResult) state.outcome = undefined;
+  state.outcome = undefined;
   state.undoMoved = undefined;
   state.busy = message;
   showActing();
@@ -408,7 +407,7 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned,
     text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
-}, { keepResult: true });
+});
 
 /** Whether each History entry a click made still offers its own action, so the click's Undo can run them all. */
 async function allUndoable(made: string[]) {
@@ -440,7 +439,7 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
     text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, ...failed].join(' ') });
   for (const item of click.items) flashRow(item);
-}, { keepResult: true });
+});
 
 /** What a run of plugin switches couldn't do, in words ("issue-tracker: couldn’t turn it on in Codex."), or ''. */
 const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [ran.stopped, ...ran.failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)].filter(Boolean).join(' ');

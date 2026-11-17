@@ -15,7 +15,7 @@ import { andList, fewNames, kindNouns, sentence, toolList as toolsInWords, toolN
 import { lastUse, leftToItsRow, noUseSeen, onIn, rowFigure, startsLate, toolSays, USAGE_DAYS, type CantSay, type ToolSays, type UsageFacts } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { acting, leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, pin, placeIn, timeIn, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
@@ -674,13 +674,20 @@ function outcomeShown(outcome: Outcome, matrixPage: boolean): boolean {
 }
 
 /**
+ * The pages whose last result is in the window's header (renderer.ts resultHere), never in a band above their list: the item
+ * pages, Harnesses (but a tool's Instructions tab, whose result sits on its card) and Plugins (pluginspage.ts pluginsResult).
+ */
+export const resultInHeader = () => state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || state.page === 'plugins'
+  || (state.page === 'harnesses' && !(state.harness && state.harnessTab === 'instructions'));
+
+/**
  * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar.
  * `table`: a table is on screen, so its open copy choice hides an older result (guessed from the page;
- * a harness tab without a table passes false).
+ * a harness tab without a table passes false). `header`: drawn in the header, the one place on a list page (resultInHeader).
  */
-export function outcomeBand(table = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || !!harnessKindShown()): HTMLElement | null {
+export function outcomeBand(table = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || !!harnessKindShown(), header = false): HTMLElement | null {
   const outcome = state.outcome;
-  if (!outcome || !outcomeShown(outcome, table) || saidInStatusBar(outcome)) return null;
+  if (!outcome || header !== resultInHeader() || !outcomeShown(outcome, table) || saidInStatusBar(outcome)) return null;
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
@@ -699,8 +706,8 @@ export function outcomeBand(table = state.page === 'skills' || state.page === 'm
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
     outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
     h('span.band-actions', {},
-      outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: outcome.act.whyOff?.() ?? acting(), attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
-        : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined, !!acting())
+      outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: outcome.act.whyOff?.(), attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
+        : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
         : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
     closeButton(() => { state.outcome = undefined; rerender(); }, { id: 'outcome-dismiss' }));
@@ -737,9 +744,7 @@ export function caughtUpBand(home: HomeView): HTMLElement | null {
 function listNotices() {
   const mcp = listView()!;
   const bands: HTMLElement[] = [];
-  // A row's click takes the result's room at once, before its result is said (renderer.ts keeps the rows where they are).
-  const room = state.busy && pinnedHere().rows.size ? h('div.band.band-room', { 'aria-hidden': 'true' }) : null;
-  for (const band of [syncOffBand(), outcomeBand() ?? room, walkthroughBand(kind, copyQuestion)]) if (band) bands.push(band);
+  for (const band of [syncOffBand(), walkthroughBand(kind, copyQuestion)]) if (band) bands.push(band);
   if (!mcp.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, mcp.access.reason)));
   // A record that stops every write (damaged, newer, another generation): said once, unless a problem below says it already.
   if (mcp.gate.state === 'stopped' && !mcp.problems.includes(mcp.gate.reason)) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, mcp.gate.reason)));
@@ -748,10 +753,6 @@ function listNotices() {
   for (const problem of mcp.problems) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));
   const unread = unreadBand();
   if (unread) bands.push(unread);
-  const result = lastResult(kind);
-  // What a background pass could not do (any kind's), until the next click's result is said instead.
-  const background = result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed');
-  if (background.length) bands.push(problemsBand(background));
   const told = toldNotices();
   const shownNotices = told.filter(notice => !state.dismissed.has(notice.history));
   // An earlier result's Undo that stepped aside for this notice: one faint closing line inside the notice, not a band of its own.
@@ -766,11 +767,23 @@ function listNotices() {
     }
     bands.push(h('div.band.sync-notices', { role: 'status' }, h('div.sync-notice-lines', {}, lines), dismissNotices(shownNotices)));
   }
-  if (result?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, result.stopped)));
+  return bands.length ? h('div.bands', {}, bands) : null;
+}
+
+/**
+ * A list page's last result, for the header (renderer.ts resultHere): the result's band, then, under a table, what its click
+ * could not do, or else what a background pass could not do (any kind's), until a click's result is said instead.
+ */
+export function listResult(): HTMLElement[] {
+  const table = state.page !== 'harnesses' || !!harnessKindShown();
+  const result = table ? lastResult(kind) : undefined;
+  const background = !table || result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed');
   // A click's refusal is its result, said once, in the result's band (app.ts applyClick leaves it out of these).
   const problems = (result?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !result.differs));
-  if (problems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · '))));
-  return bands.length ? h('div.bands', {}, bands) : null;
+  return [outcomeBand(table, true), background.length ? problemsBand(background) : null,
+    result?.stopped ? h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, result.stopped)) : null,
+    problems.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · '))) : null,
+  ].filter((band): band is HTMLElement => !!band);
 }
 
 /** The record is intact but this app has no memory of it: Resume carries on from it (any switch does too). */
@@ -841,11 +854,11 @@ function toldNotices(): Told[] {
   let folded = foldedNotices.get(kind);
   if (!folded) foldedNotices.set(kind, folded = new Set());
   const keyOf = (notice: SyncNotice) => notice.history;
-  // A newer event, or a newer click's result, folds what was said before into History, where it stays with its Undo: notices never
-  // pile up. Turning sync on or off retires the ones it no longer lists.
+  // A newer event folds what was said before into History, where it stays with its Undo: notices never pile up. A click's result
+  // folds none (it is said in the header), so a notice never goes from above the list at a click. Turning sync on or off retires
+  // the ones it no longer lists.
   const news = fresh.filter(notice => !kept!.has(keyOf(notice)) && !folded!.has(keyOf(notice)));
-  const clicked = state.outcome?.band && state.outcome.page === state.page ? state.outcome.said ?? 0 : 0;
-  for (const [key, notice] of [...kept]) if (news.length || notice.seq < clicked) { folded.add(key); kept.delete(key); }
+  for (const key of [...kept.keys()]) if (news.length) { folded.add(key); kept.delete(key); }
   if (keptSync.get(kind) !== state.home.syncOn) for (const key of [...kept.keys()]) if (!fresh.some(notice => keyOf(notice) === key)) kept.delete(key);
   keptSync.set(kind, state.home.syncOn);
   // The wording is fixed when the notice first shows: a Sync once stays "Synced once" after sync is turned on.

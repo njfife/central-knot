@@ -236,8 +236,16 @@ ul { list-style: none; }
   #sidebar-end { padding-bottom: 6px; }
 }
 
-#header { height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line); }
+#header { position: relative; z-index: 2; height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line); }
 .page-title { flex: 1; min-width: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A list page's last result (renderer.ts resultHere), between the page's name and Refresh: the header keeps its height, so no
+   row moves. Taller than the header, the result covers the toolbar under it and ends on the header's line; in narrow content
+   the page's name steps aside for it (the sidebar names the page). */
+.header-result { flex: 1 1 0; min-width: 0; align-self: flex-start; min-height: 47px; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 0; background: var(--surface); box-shadow: 0 1px 0 var(--line); }
+.header-result > .band { padding: 0; border: 0; background: none; }
+.header-result > .toolbar-result .band-dismiss { margin-left: auto; }
+#header:has(.header-result) > .page-title { flex: none; }
+@container content (width < 900px) { #header:has(.header-result) > .page-title { display: none; } }
 .header-end { display: flex; gap: 8px; }
 
 #status { container: status / inline-size; height: 28px; flex: none; display: flex; align-items: center; gap: 26px; padding: 0 16px 0 24px; background: var(--chrome); border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 12px; line-height: 16px; white-space: nowrap; }
@@ -369,8 +377,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 /* ---------- Bands and notices under the toolbar ---------- */
 .bands { display: flex; flex-direction: column; }
-/* The room a row's click takes for its result before it is said (matrix.ts listNotices): a band with its button's height. */
-.band-room { visibility: hidden; min-height: calc(26px + 2 * 6px + 1px); }
 .band { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 16px; min-width: 0; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 16px; }
 /* A band that only informs about the page's own read (dom.ts rereadBand): softer than one that asks for something. */
 .band-quiet { color: var(--ink-soft); background: var(--chrome); }
@@ -1069,8 +1075,6 @@ span.ins-confirm { margin-top: 0; }
 .market-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 6px auto; min-width: 0; }
 .market-filter .market-find { flex: none; width: 220px; height: 26px; }
 .market-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
-/* A result that doesn't fit beside where you are takes its own line (fitBars). */
-.bar-wrap .toolbar-result { flex-shrink: 1; min-width: 0; }
 .plugins-toolbar.bar-wrap { padding-top: 6px; padding-bottom: 6px; }
 .market-chip { all: unset; flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--ink-soft); cursor: pointer; }
 .market-chip.selected { border-color: var(--accent); color: var(--accent-ink); background: color-mix(in oklab, var(--accent) 10%, transparent); }
@@ -1296,11 +1300,6 @@ span.ins-confirm { margin-top: 0; }
   .plugin-row-name { padding: 7px 12px 7px 0; }
   /* The strip above names the marketplace: the toolbar keeps only a result or the way back, and isn't drawn without one. */
   .market-title-line, .toolbar-title-only { display: none; }
-  /* With nothing at its left, a result reads from the left, its × at the right, like every band. Changes waiting for Apply
-     all keep the right end, as on every page. */
-  .plugins-toolbar:has(> .market-title-line):has(> .toolbar-result) > .toolbar-spacer { display: none; }
-  .plugins-toolbar:has(> .market-title-line) > .toolbar-result { flex: 1 1 auto; }
-  .plugins-toolbar > .toolbar-result > .band-dismiss { margin-left: auto; }
   /* The plugins get the height: the hint wraps within the header's name column, the description moves under About. */
   .plugin-table .ov-head .plugin-hint { white-space: normal; line-height: 15px; padding-right: 12px; }
   .market-page > .market-page-about { display: none; }

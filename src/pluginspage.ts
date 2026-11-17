@@ -12,7 +12,7 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, pinnedPlugins, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
@@ -361,10 +361,16 @@ function undoTitle(back: PluginOp[]): string {
 const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclick(); rerender(); }, { id });
 
 /**
- * The toolbar's right side: what just happened (each plugin named a link to its page, with Undo), or else the last notice
- * ("… added"). Shown in place, so nothing on the page moves.
+ * The page's last result, for the window's header (renderer.ts resultHere), where nothing on the page moves for it: what just
+ * happened, with Undo (lastRun), then what went wrong (problemBand).
  */
-function toolbarRight(lines: ResultLine[]): HTMLElement | null {
+export function pluginsResult(): HTMLElement[] {
+  const lines = lastLines();
+  return [lastRun(lines), problemBand(lines)].filter((part): part is HTMLElement => !!part);
+}
+
+/** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */
+function lastRun(lines: ResultLine[]): HTMLElement | null {
   // A result is said here only while it offers something to do (Undo, or its own button); one that only tells is in the
   // status bar (app.ts saidInStatusBar).
   const last = market.lastRun;
@@ -409,23 +415,18 @@ function problemBand(lines: ResultLine[]) {
 const openPlugin = (entry: MarketplaceView) => (market.nav.plugin ? entry.plugins.find(candidate => candidate.name === market.nav.plugin) : undefined);
 
 /**
- * The toolbar over the marketplace pane (beside the list of marketplaces, which runs the full height): where the person is
- * inside a plugin (← team-tools › document-tools) at the left, toolbarRight at the right. It shows only when it has one of
- * them, so an empty strip never stands above the marketplace; with no marketplaces it spans the page.
+ * The toolbar over the marketplace pane (beside the list of marketplaces, which runs the full height): where the person is,
+ * the marketplace or inside a plugin (← team-tools › document-tools).
  */
-function toolbar(shown: { entry: MarketplaceView; index: number } | undefined, lines: ResultLine[]) {
-  const right = toolbarRight(lines);
-  if (!shown) return right ? h('div.toolbar.plugins-toolbar.fit-bar', {}, h('span.toolbar-spacer'), right) : null;
+function toolbar(shown: { entry: MarketplaceView; index: number }) {
   const plugin = openPlugin(shown.entry);
   const left = plugin
     ? h('nav.market-crumbs', { 'aria-label': 'You are here' },
       h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, icon('arrow-left', 13), marketTitle(shown.entry)),
       icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, pluginTitle(plugin)))
     : titleLine(shown.entry);
-  // In narrow content the marketplace strip already names it, so a toolbar with only the name isn't drawn (style.css); but once
-  // a plugin is pinned on the list, it is, so the result's room is there from the click (renderer.ts keeps the rows put).
-  const room = !plugin && pinnedPlugins(shown.entry).rows.size > 0;
-  return h(`div.toolbar.plugins-toolbar.fit-bar${!plugin && !right && !room ? '.toolbar-title-only' : ''}`, {}, left, h('span.toolbar-spacer'), right);
+  // In narrow content the marketplace strip already names it, so a toolbar with only the name isn't drawn (style.css).
+  return h(`div.toolbar.plugins-toolbar.fit-bar${!plugin ? '.toolbar-title-only' : ''}`, {}, left);
 }
 
 /**
@@ -448,7 +449,6 @@ export function pluginsPage() {
   if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Once one is installed, Central Knot finds it on its own, or at once with Refresh at the top.',
     button({ variant: 'outline', label: 'See Harnesses', id: 'plugins-no-tools', onclick: () => showPage('harnesses') })));
   const shown = current();
-  const lines = lastLines();
   // With no marketplaces, adding one is the only thing to do: its box sits in the middle of the page, with examples.
   const empty = emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Adding one installs nothing.',
     h('div.market-empty-add', {},
@@ -457,17 +457,15 @@ export function pluginsPage() {
       suggestions(view, true),
       h('p.empty-aside', {}, `Marketplaces you added in ${orList(view.tools.filter(takesPlugins).map(tool => names[tool]))} show up here by themselves.`)));
   return h('div.page.plugins-page', {},
-    shown ? null : toolbar(undefined, lines),
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
       market.activity ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, ACTIVITIES[market.activity].band))
         // Reading the marketplaces again (Git can take seconds) while the last read stays on screen, or that it failed.
-        : rereadBand(market.read, 'Reading marketplaces… Nothing is installed by this.'),
-      problemBand(lines)),
+        : rereadBand(market.read, 'Reading marketplaces… Nothing is installed by this.')),
     // The note of what was updated by itself scrolls with the page, so however long it is, the list is never squeezed. It
     // heads a marketplace's list, not a plugin's own page.
     shown
       ? h('div.market-layout', {}, marketList(view, shown.entry),
-        h('div.market-pane', {}, toolbar(shown, lines), h('div.scroll.market-main', { id: 'plugins-scroll' }, openPlugin(shown.entry) ? null : pluginUpdateNotes(), marketPage(view, shown.entry, shown.index))))
+        h('div.market-pane', {}, toolbar(shown), h('div.scroll.market-main', { id: 'plugins-scroll' }, openPlugin(shown.entry) ? null : pluginUpdateNotes(), marketPage(view, shown.entry, shown.index))))
       : h('div.scroll.market-main', { id: 'plugins-scroll' }, pluginUpdateNotes(), empty));
 }

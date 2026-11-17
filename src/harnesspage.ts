@@ -15,7 +15,7 @@ import { agentsKeptIn, hasCowork, takesPlugins } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
-import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyKind, outcomeBand, showFiltered } from './matrix.ts';
+import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyKind, showFiltered } from './matrix.ts';
 import { kindSource } from './itemrow.ts';
 import { instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, loadPlugins, market } from './pluginstate.ts';
@@ -205,7 +205,6 @@ function otherApps(home: HomeView) {
 }
 
 function everyHarness(home: HomeView) {
-  const done = outcomeBand();
   const cards = listed(home);
   // What the passes since the last read copied where it was missing, every kind's: news on this list.
   const caught = caughtUpBand(home);
@@ -213,9 +212,9 @@ function everyHarness(home: HomeView) {
   // (A home whose tools are all left out lists them, each with its switch.)
   if (!home.sync.present.length) {
     const looked = home.mode === 'actual' ? `Not found on ${thisMachine}: ${andList(home.snapshots.map(snapshot => names[snapshot.harness]))}. Central Knot looks for them again each time it reads this home.` : undefined;
-    return h('div.page', {}, done ? h('div.bands', {}, done) : null, noToolsState('harnesses', looked));
+    return h('div.page', {}, noToolsState('harnesses', looked));
   }
-  return h('div.page', {}, done || caught ? h('div.bands', {}, done, caught) : null,
+  return h('div.page', {}, caught ? h('div.bands', {}, caught) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'),
         h('span', {}, home.sync.managed.length ? 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins; its switch says whether Central Knot manages it at all.'
@@ -357,11 +356,6 @@ function oneHarness(snapshot: Snapshot, home: HomeView) {
   const tab = state.harnessTab;
   const body = isKind(tab) ? kindTab(home, tab, tool) : tab === 'instructions' ? instructionsTab(tool) : tab === 'plugins' ? pluginsTab(tool) : aboutTab(snapshot, home);
   body.classList.add('harness-tab-body');
-  // Tabs without bands of their own (Plugins, About, a kind the tool doesn't use) still show the last result, such as a home switch.
-  // (Kind tabs draw the table's bands; Instructions draws instructionBands, which keeps a save's result on its card.)
-  const bandless = tab === 'plugins' || tab === 'about' || (isKind(tab) && !supports(home, tab, tool));
-  const done = bandless ? outcomeBand(false) : null;
-  if (done) body.prepend(h('div.bands', {}, done));
   // The window's header names the harness (harnessTitle); its tabs and the switcher to the others share one row below it.
   return h('div.page.harness-page', {}, h('div.harness-bar', {}, tabs(home, tool), switcher(home, tool)), body);
 }
