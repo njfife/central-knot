@@ -985,7 +985,7 @@ if (wanted('sync-everything')) {
   await a.click('#nav-skills');
   await atEverySize('skills-on', 'Opened Skills: one notice names the skills it took in and the tools it found them in; the Found heading says Synchronize everything leaves these, the opened row saying why, and counts what waits for a choice', true);
   await openRow('review');
-  await atEverySize('skills-on-review', 'Opened review, left found: its copies differ, so it asks which copy every tool uses, as Add would; the question starts below the pinned row', false, '.ov-row.open + .details', 'start');
+  await atEverySize('skills-on-review', 'Opened review, left found: its copies differ, so it asks which copy every tool uses, as Add would; the row and its question are one block, its bar the warning colour', false, '.ov-row.open', 'start');
   await closeRow('review');
   await a.click('#nav-mcp');
   await atEverySize('mcp-on', 'Opened MCP servers: its notice names the servers it took in and where, and that History can undo each; Claude Code has them too', true);
@@ -2081,15 +2081,19 @@ if (wanted('scroll')) {
   for (const page of ['plugins', 'overview', 'skills', 'mcp', 'agents', 'settings']) {
     if (!(await a.has(`#nav-${page}`))) continue;
     await a.click(`#nav-${page}`);
+    // On an item page the first row is opened first, so the scroll goes past an opened row: it goes up with the list.
+    const first = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+    if (first) await a.click(`#${first}`);
     for (const [width, height, scale] of sizes) {
       await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false });
       for (const theme of ['dark', 'light']) {
         await a.theme(theme);
         const what = await scroll(Math.round(height * 0.4)); await wait(100);
-        await shot(a, `${page}-${width}-${theme}`, `${page} at ${width}×${height}, ${theme}, main list scrolled down ${Math.round(height * 0.4)}px (${what}).`);
+        await shot(a, `${page}-${width}-${theme}`, `${page} at ${width}×${height}, ${theme}, ${first ? 'its first row opened, ' : ''}main list scrolled down ${Math.round(height * 0.4)}px (${what}).`);
       }
       await scroll(0);
     }
+    if (first) await a.click(`#${first}`);
   }
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
   await a.theme('dark');
