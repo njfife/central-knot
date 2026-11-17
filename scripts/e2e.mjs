@@ -4076,8 +4076,9 @@ async function firstSetupFlow() {
 
 /**
  * Force-kills the app part-way through real copies, then checks nothing half-written is visible to a tool. Each round takes in
- * what the kills before it left found: on the Mac runner all 40 have been on record by the last open in every grouped run, so
- * opening alone completes them; elsewhere a few may still be found then (33 of 40 once on picoder), each turned on by its Add.
+ * what the kills before it left found: on the Mac runner all 40 were on record by the last open in each grouped run of
+ * 2026-11-17, so opening alone completed them; elsewhere a few may still be found then (7 of 40 once on picoder, with 33 on
+ * record), each turned on by its Add.
  */
 async function crashFlow() {
   // Its checks are one or two per skill folder in place at each kill, so their count changes from run to run: said apart.
@@ -5000,8 +5001,8 @@ async function usageFlow() {
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
-// Every flow, in groups. A run with no --flows starts this script once per group, so each group has a throwaway home, data
-// folders, stand-ins and debug ports of its own, and several run at once (runGroups). Four groups, as the Mac runner was
+// Every flow is in one of these groups or in afterTheGroups. A run with no --flows starts this script once per group, so each
+// group has a throwaway home, data folders, stand-ins and debug ports of its own, and several run at once (runGroups). Four groups, as the Mac runner was
 // measured with four apps at once, balanced by each flow's seconds there with four at once (each flow's line in a run gives
 // them): practiceFlow, the longest, has little beside it. realHomeFlow is in its group, as both open the default data folder
 // (launch) and realHomeFlow's preview-only branch reads the History window practiceFlow set there. crashFlow comes last in its
@@ -5013,32 +5014,36 @@ const groups = [
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [harnessFlow, manageFlow, otherBuildFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
-// Each by itself, once the groups have ended. rowsKeepTheirPlacesFlow's quick switch clicks lose a press when another app's
-// load makes a redraw land between the press and the release (judges/ci1-builder-report.md, "For the LIST step"); it goes
-// back into a group when the LIST step lands.
+// Each by itself, once the groups have ended. rowsKeepTheirPlacesFlow: with other apps' load beside it, a press on a plugin's
+// switch is lost when the list redraws between the press and the release, so the switch does not turn (its checks "five
+// plugins clicked quickly …" and "through a list of clicks with one failure …" fail). It goes back into a group once a switch
+// pressed while its list redraws still turns, and those checks pass in groups.
 const afterTheGroups = [rowsKeepTheirPlacesFlow];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
 const everyFlow = [...groups.flat(), ...afterTheGroups], listed = everyFlow.map(flow => flow.name);
 const written = [...readFileSync(import.meta.filename, 'utf8').matchAll(/^async function (\w+Flow)\(/gm)].map(([, name]) => name);
-const refused = [...written.filter(name => listed.filter(each => each === name).length !== 1).map(name => `${name} is in no group or in two`),
+const refused = [...written.filter(name => listed.filter(each => each === name).length !== 1).map(name => `${name} is not in groups or afterTheGroups exactly once`),
   ...(named ?? []).filter(name => !listed.includes(name)).map(name => `--flows names ${name}, which is no flow`),
   ...(Number.isInteger(crashRounds) && crashRounds >= 0 ? [] : [`--crash-rounds takes a whole number, and was given ${option('--crash-rounds') ?? 'none'}`])];
 if (refused.length) { rmSync(scratch, { recursive: true, force: true }); throw new Error(`Refused to start: ${refused.join('; ')}.`); }
 
 /**
  * What a copy's output and its end say: its passes (undefined without a total line), its FAIL lines, among them one more when
- * the copy died (it ended without its total line, or with an exit other than its total's, or by a signal), and the flows it
- * did not finish (one that began and stopped) and did not run. `number` names the copy for a death after all its flows.
+ * the copy died (it ended without its total line, or with an exit other than its total's, or by a signal) or its total counts
+ * more failures than its FAIL lines, and the flows it did not finish (one that began and stopped) and did not run. `label`
+ * names the copy where no one flow can be named: `group 2`, or the flow of a copy that runs one by itself.
  */
-function readCopy(names, number, output, code, signal) {
+function readCopy(names, label, output, code, signal) {
   const total = /^e2e: (\d+) passed, (\d+) failed/m.exec(output), ended = signal ? `ended by ${signal}` : `exit code ${code}`;
   const missed = names.filter(name => !new RegExp(`^${name}: \\d+s$`, 'm').test(output)), ran = names.filter(name => !missed.includes(name));
   const aborted = /^FAIL \[(\w+)\] aborted: /m.exec(output)?.[1];
+  const failLines = output.split('\n').filter(line => line.startsWith('FAIL ')).length;
   let death;
   if (!total && missed.length) death = `FAIL [${missed[0]}] its copy ended in this flow without a total line (${ended})`;
-  else if (!total) death = `FAIL [group ${number}] its copy ended after its flows without a total line (${ended})`;
+  else if (!total) death = `FAIL [${label}] its copy ended after its flows without a total line (${ended})`;
   else if (signal || code !== (Number(total[2]) ? 1 : 0)) death = `FAIL [${ran.at(-1) ?? names[0]}] its copy died after its total (${ended})`;
+  else if (Number(total[2]) > failLines) death = `FAIL [${label}] its total says ${total[2]} failed, and only ${failLines} of its lines say FAIL`;
   const unfinished = total ? missed.filter(name => name === aborted) : missed.slice(0, 1);
   const shown = death ? `${output.trimEnd()}\n${death}` : output.trimEnd();
   const fails = shown.split('\n').filter(line => line.startsWith('FAIL '));
@@ -5049,39 +5054,43 @@ function readCopy(names, number, output, code, signal) {
  * The run with no --flows: this script once per group with that group's --flows and the run's other options,
  * CK_E2E_GROUPS_AT_ONCE copies at a time (default 1), then once for each flow in afterTheGroups, one at a time. Each copy's
  * stdout and stderr, in the order they came, print as one block when it ends; then the run's total, the flows not finished and
- * not run, and every FAIL line again. The run's failures are its copies' FAIL lines, one more for each copy that died
- * (readCopy); the passes of a copy without a total line are not known, and the total says so. A signal is passed on to every
+ * not run, and every FAIL line again. The run's failures are its copies' FAIL lines, one more for each copy that died or
+ * whose total counts more failures than its FAIL lines (readCopy); the passes of a copy without a total line are not known,
+ * and the total says so. A signal is passed on to every
  * copy, and each one's block printed as it ends. Returns the exit code.
  */
 async function runGroups() {
   const atOnce = Math.max(1, Number(process.env.CK_E2E_GROUPS_AT_ONCE) || 1);
-  const waiting = groups.map(group => group.filter(runs).map(flow => flow.name)).filter(names => names.length);
-  const alone = afterTheGroups.filter(runs).map(flow => [flow.name]), count = waiting.length + alone.length;
+  // Each copy: its flows, and what the output calls it: `group 2 of 4` (label `group 2`), or `by itself` (label its flow).
+  const grouped = groups.map(group => group.filter(runs).map(flow => flow.name)).filter(names => names.length);
+  const waiting = grouped.map((names, index) => ({ names, label: `group ${index + 1}`, heading: `group ${index + 1} of ${grouped.length}` }));
+  const alone = afterTheGroups.filter(runs).map(flow => ({ names: [flow.name], label: flow.name, heading: 'by itself' }));
   const running = new Set(), unfinished = [], notRun = [], failLines = [], uncounted = [];
-  let passed = 0, begun = 0, stoppedBy;
+  let passed = 0, stoppedBy;
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stoppedBy = signal; for (const copy of running) copy.kill(signal); });
-  const runOne = names => new Promise(done => {
-    const from = Date.now(), number = ++begun;
+  const runOne = ({ names, label, heading }) => new Promise(done => {
+    const from = Date.now();
     const copy = spawn(process.execPath, [...process.execArgv, import.meta.filename, ...args, '--flows', names.join(',')], { stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     for (const stream of [copy.stdout, copy.stderr]) stream.on('data', chunk => { output += chunk; });
     running.add(copy);
     copy.on('close', (code, signal) => {
       running.delete(copy);
-      const read = readCopy(names, number, output, code, signal);
-      if (read.passes === undefined) uncounted.push(number); else passed += read.passes;
+      const read = readCopy(names, label, output, code, signal);
+      if (read.passes === undefined) uncounted.push(label); else passed += read.passes;
       unfinished.push(...read.unfinished);
       notRun.push(...read.notRun);
       failLines.push(...read.fails);
-      console.log(`\n── group ${number} of ${count}, ${Math.round((Date.now() - from) / 1000)}s${stoppedBy ? `, stopped by ${stoppedBy}` : ''}: ${names.join(', ')}\n${read.shown}`);
+      console.log(`\n── ${heading}, ${Math.round((Date.now() - from) / 1000)}s${stoppedBy ? `, stopped by ${stoppedBy}` : ''}: ${names.join(', ')}\n${read.shown}`);
       done();
     });
   });
-  console.log(`${waiting.length} groups of flows, ${atOnce} at a time, then ${alone.length} by itself; each group's output follows when it ends.`);
+  const thenAlone = alone.length ? `, then by itself: ${alone.map(copy => copy.label).join(', ')}` : '';
+  console.log(`${waiting.length} groups of flows, ${atOnce} at a time${thenAlone}; each copy's output follows when it ends.`);
   await Promise.all(Array.from({ length: atOnce }, async () => { while (waiting.length && !stoppedBy) await runOne(waiting.shift()); }));
   while (alone.length && !stoppedBy) await runOne(alone.shift());
-  notRun.push(...waiting.flat(), ...alone.flat());
-  const notCounted = uncounted.length ? ` (the passes of group ${uncounted.join(' and group ')} are not counted: no total line)` : '';
+  notRun.push(...[...waiting, ...alone].flatMap(copy => copy.names));
+  const notCounted = uncounted.length ? ` (the passes of ${uncounted.join(' and ')} are not counted: no total line)` : '';
   console.log(`\ne2e: ${passed} passed, ${failLines.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}${notCounted}`);
   if (unfinished.length) console.error(`not finished: ${unfinished.join(', ')}`);
   if (notRun.length) console.error(`not run: ${notRun.join(', ')}`);
