@@ -121,7 +121,7 @@ What every engine stands on: `.central-knot/` and its record, the gates on writi
 
 ## Test and tour scripts
 How each is run: `AGENTS.md` ("Checking a change") and README ("For developers"); the Mac run is `.github/workflows/mac.yml`, the Linux run `.github/workflows/linux.yml`. Unit tests are `tests/*.test.ts`. Every script that opens the app names a stand-in for /Applications, the running apps and the Trash (`tests/macstandins.ts`, set as CK_TEST_APPS: `platform.ts macPlaces`), so none looks at or removes the real ones; off a Mac, where there are none, `scripts/e2e.mjs` names one only in its flows about another build.
-- `scripts/e2e.mjs` the end-to-end checks on the real app in a throwaway home · `scripts/ui-tour.mjs` the screenshot tour · `scripts/cdp.mjs` the DevTools client the scripts drive the app with, and the wait for an AppImage's mount to go (`mountsGone`)
+- `scripts/e2e.mjs` the end-to-end checks on the real app in a throwaway home, every flow in one of its `groups` or in `afterTheGroups`, a run being one copy of the script per group (`runGroups`) · `scripts/ui-tour.mjs` the screenshot tour · `scripts/cdp.mjs` the DevTools client the scripts drive the app with, and the wait for an AppImage's mount to go (`mountsGone`)
 - `scripts/fixture-market.mjs` a realistic marketplace · `scripts/git-http-fixture.mjs` Git repos served here · `scripts/update-fixture.mjs` a stand-in for GitHub's releases
 - `scripts/update-proof.mjs` a real signed update, on a Mac · `scripts/alpha-check.mjs` the alpha beside the standard app · `scripts/bundled-check.mjs` a bundled build end to end
 - `scripts/real-home-trial.ts` the two-way trial on a real home its owner opened for it
