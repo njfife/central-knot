@@ -12,7 +12,7 @@ concurrency:
 jobs:
   mac:
     runs-on: [self-hosted, macOS, ARM64, ck-mac]
-    # A run of PR #152 took about 10 minutes (2026-11-17): about 3½ for its first phase, 6½ for the end-to-end checks (the end of
+    # A run of PR #152 took about 9 minutes (2026-11-17): about 3 for its first phase, 6 for the end-to-end checks (the end of
     # scripts/mac-run.mjs's output gives each part's time). The limit leaves room for a slow one.
     timeout-minutes: 30
     steps:
