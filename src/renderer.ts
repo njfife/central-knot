@@ -1,18 +1,21 @@
 // The page's entry: the window's frame around the page (the sidebar, the header, the status bar and the Sync switch), which page
 // draws (renderPage: while another build holds this one, the held screen of otherbuildview.ts instead of every page, with the
-// sidebar's update control kept), and drawing again on a change. The page's state and actions are app.ts's; each page is drawn by its own
+// sidebar's update control kept), and drawing again on a change. On a list page the last result is in the header (resultHere),
+// whose room is always there, so a result never moves a row; one taller than the header lies over the toolbar as a panel
+// (style.css #header::after). The page's state and actions are app.ts's; each page is drawn by its own
 // module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, acting, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
-import { button, fitBars, h, icon, runAfterLayout, whyOff } from './dom.ts';
+import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { afterLayout, button, fitBars, h, icon, runAfterLayout, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
 import { kindNouns } from './words.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage } from './pages.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
-import { pluginsPage } from './pluginspage.ts';
+import { pluginsPage, pluginsResult } from './pluginspage.ts';
+import { listResult, resultInHeader } from './matrix.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
@@ -140,8 +143,9 @@ function renderHeader(rail: boolean) {
       onclick: () => { state.sidebar = rail ? 'open' : 'rail'; rerender(); },
     }),
     h('h1.page-title', {}, heldBy(state.home) ? 'One build at a time' : (state.page === 'harnesses' && harnessTitle()) || titles[state.page]),
+    ...resultHere(),
     // The same Refresh on every page: it reads the home again, then the page's own data (on Plugins, every marketplace).
-    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
+    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again, and put the rows back in order' : 'Read this home again, and put the rows back in order', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain() })),
   );
 }
@@ -206,6 +210,21 @@ function renderStatus() {
   paintStatusMessage();
 }
 
+/** A list page's last result (matrix.ts resultInHeader), in the header: its room is always there, so no row ever moves for it. */
+function resultHere() {
+  const parts = state.home && !heldBy(state.home) && resultInHeader() ? (state.page === 'plugins' ? pluginsResult() : listResult()) : [];
+  return parts.length ? [h('div.header-result', {}, parts)] : [];
+}
+
+// Laid out, and at each resize: Show all where a problem line is cut; a result taller than the header gets its panel (style.css).
+afterLayout(() => {
+  const header = region('header'), result = header.querySelector<HTMLElement>('.header-result'), more = header.querySelector<HTMLElement>('[data-when-cut]');
+  if (more) { more.hidden = true; more.hidden = ![...header.querySelectorAll('.problem-text')].some(text => text.scrollWidth > text.clientWidth); }
+  header.classList.remove('result-taller');
+  header.classList.toggle('result-taller', !!result && result.offsetHeight > header.clientHeight - 8);
+  header.style.setProperty('--result-height', `${result?.offsetHeight ?? 0}px`);
+});
+
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
 
 function render() {
@@ -214,13 +233,14 @@ function render() {
   const { rail } = applyLayout();
   renderSidebar();
   renderHeader(rail);
-  renderPage();
+  drawPage(renderPage);
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
   runAfterLayout();
   renderStatus();
   fitBars();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
-  if (focused) document.getElementById(focused)?.focus();
+  // Back on the control that had it, without scrolling to it: a redraw never pulls the page to a row scrolled away from.
+  if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
   if (state.home) document.body.dataset.ready = 'true';
 }
 

@@ -1,9 +1,10 @@
 // The order of the rows under a heading on the Skills, MCP servers and Agents pages (src/itemrow.ts inOrder), as worked
 // examples: by name, or by last updated, newest first. An item's versions change only through library.ts's keepVersion and
-// setCurrent, so each example makes them that way.
+// setCurrent, so each example makes them that way. Then the rows a click pins where they were (Pinned), as the MCP servers
+// page draws them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inOrder, type ItemRow } from '../src/itemrow.ts';
+import { inOrder, noPins, pin, pinsOn, placeIn, type ItemRow, type Pinned } from '../src/itemrow.ts';
 import { keepVersion, newItem, setCurrent, type LibraryItem, type Shelf } from '../src/library.ts';
 
 /** A shelf that keeps nothing: these examples read only the item's record. */
@@ -70,4 +71,50 @@ test('By last used, once usage is read: the newest use first, an item with no us
   const lastUse: Record<string, number> = { notes: Date.parse(daysAgo(5)), standup: Date.parse(daysAgo(1)) };
   const rows = [row('release-notes'), row('alpha'), row('notes'), row('standup')];
   assert.deepEqual(keys(inOrder(rows, 'used', from({}), each => lastUse[each.key])), ['standup', 'notes', 'alpha', 'release-notes']);
+});
+
+// ---------- Rows pinned where they were ----------
+
+/** Servers On and Off, as their rows' own state says (matrix.ts sectionOf): `on` names the On ones. */
+const servers = (on: string[], off: string[]) => new Map([...on.map(key => [key, 'on'] as const), ...off.map(key => [key, 'off'] as const)]);
+/** The page as drawn, heading by heading (matrix.ts itemsTable): each row under the heading it is pinned under, else its own, by name. */
+const drawn = (own: Map<string, string>, pins: Pinned<string>) => ['on', 'off'].map(heading =>
+  [heading, keys(inOrder([...own.keys()].filter(key => placeIn(pins, key, own.get(key)!) === heading).map(key => row(key)), 'name', from({})))]);
+const byName = 'MCP servers by name';
+
+test('A server turned off by its own switch stays where it was under On, drawn Off; a second click keeps that place', () => {
+  const pins = pinsOn(noPins<string>(), byName);
+  // beta's switch is clicked: it is pinned under the heading it is under now, then the click turns it Off.
+  pin(pins, 'beta', 'on');
+  assert.deepEqual(drawn(servers(['alpha', 'gamma'], ['beta', 'delta']), pins), [['on', ['alpha', 'beta', 'gamma']], ['off', ['delta']]]);
+  // Clicked again, from under On where it is drawn: its own heading is Off now, and it stays where it was.
+  pin(pins, 'beta', 'off');
+  assert.deepEqual(drawn(servers(['alpha', 'gamma'], ['beta', 'delta']), pins), [['on', ['alpha', 'beta', 'gamma']], ['off', ['delta']]]);
+  // A change by another route (a profile switch turns gamma Off): gamma was never clicked here, so it goes under Off.
+  assert.deepEqual(drawn(servers(['alpha'], ['beta', 'delta', 'gamma']), pins), [['on', ['alpha', 'beta']], ['off', ['delta', 'gamma']]]);
+});
+
+test('A server new to the list goes where its own heading and the order put it', () => {
+  const pins = pinsOn(noPins<string>(), byName);
+  pin(pins, 'beta', 'on');
+  assert.deepEqual(drawn(servers(['aardvark', 'alpha'], ['beta', 'zeta']), pins), [['on', ['aardvark', 'alpha', 'beta']], ['off', ['zeta']]]);
+});
+
+test('Another Sort, or another list drawn in between, lets the pinned rows go, and every row takes its own heading again', () => {
+  const own = servers(['alpha'], ['beta']), regrouped = [['on', ['alpha']], ['off', ['beta']]];
+  const clicked = () => { const pins = pinsOn(noPins<string>(), byName); pin(pins, 'beta', 'on'); return pins; };
+  // Sort by Last updated: the page asks for another list's rows.
+  assert.deepEqual(drawn(own, pinsOn(clicked(), 'MCP servers by last updated')), regrouped);
+  // Agents, then back on MCP servers: the Agents page let them go, so none are pinned on coming back.
+  assert.deepEqual(drawn(own, pinsOn(pinsOn(clicked(), 'Agents by name'), byName)), regrouped);
+});
+
+test('Sorted by last updated, a found item taken in by its Add keeps its place among its neighbours: it goes by the time it had when clicked', () => {
+  // Found, with no time, they go by name; Add takes beta in with today's time.
+  const rows = [row('alpha'), row('beta'), row('gamma')], library = { beta: takenIn('beta', 0) };
+  const pins = pinsOn(noPins<string>(), 'MCP servers by last updated');
+  pin(pins, 'beta', 'found', undefined);
+  assert.deepEqual(keys(inOrder(rows, 'updated', from(library), undefined, pins)), ['alpha', 'beta', 'gamma']);
+  // Not pinned (the list drawn afresh), it goes first, by its time.
+  assert.deepEqual(keys(inOrder(rows, 'updated', from(library))), ['beta', 'alpha', 'gamma']);
 });

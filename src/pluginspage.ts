@@ -12,8 +12,9 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
+import { problemLines } from './matrix.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
@@ -112,19 +113,20 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         h('span.plugin-row-title', {}, pluginTitle(plugin)), offered ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, offered) : null,
         noLongerOffered(entry, plugin) ? h('span.plugin-chip.plugin-chip-gone', {}, 'No longer offered') : null,
         plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
-      // The description first, then what it holds: when room runs out the description shortens or steps aside (style.css).
-      plugin.description || holds || left ? h('span.plugin-row-line', {},
+      // The description first, then what it holds: when room runs out the description shortens or steps aside (style.css). While
+      // the list's news says how a click on it stands, that note is the row's line instead, in one line: a row with neither
+      // still has its line, so a click never changes the row's height and the rows below keep their places.
+      clickNote(entry, plugin.name, true) ?? h('span.plugin-row-line', {},
         plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
         plugin.description && (holds || left) ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
         holds ? h('span.plugin-row-holds', { title: holds }, holds) : null,
         // The link sits beside the words: a long app name shortens the words, never the link.
         left ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: `Can’t be installed from ${entry.bundled!.app}` }, `Can’t be installed from ${entry.bundled!.app}`), h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·'),
-            h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null) : null,
+            h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null),
       // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
       behind || updates.length ? h('span.plugin-row-update', {},
         behind ? versionNote(h('span', {}, behind.charAt(0).toUpperCase() + behind.slice(1)), '.plugin-row-warning') : null,
-        updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`, { row: true }) : null) : null,
-      clickNote(entry, plugin.name)),
+        updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`, { row: true }) : null) : null),
     view.tools.map(tool => markCell(view, entry, plugin, tool, marketIndex, compareTo)),
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
 }
@@ -360,10 +362,16 @@ function undoTitle(back: PluginOp[]): string {
 const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclick(); rerender(); }, { id });
 
 /**
- * The toolbar's right side: what just happened (each plugin named a link to its page, with Undo), or else the last notice
- * ("… added"). Shown in place, so nothing on the page moves.
+ * The page's last result, for the window's header (renderer.ts resultHere), where nothing on the page moves for it: what just
+ * happened, with Undo and its × (runLine), then what went wrong (problemBand), with the one × when it stands alone.
  */
-function toolbarRight(lines: ResultLine[]): HTMLElement | null {
+export function pluginsResult(): HTMLElement[] {
+  const lines = lastLines(), run = runLine(lines);
+  return [run, problemBand(lines, !run)].filter((part): part is HTMLElement => !!part);
+}
+
+/** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */
+function runLine(lines: ResultLine[]): HTMLElement | null {
   // A result is said here only while it offers something to do (Undo, or its own button); one that only tells is in the
   // status bar (app.ts saidInStatusBar).
   const last = market.lastRun;
@@ -385,36 +393,33 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
     // What a switch's Undo can't put back is said with the result, so the promise beside Undo is the whole of it.
     const limits = !last.undo && last.turn?.limits.length ? ` ${last.turn.limits.join(' ')}` : '';
     return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'),
-      h('span.toolbar-result-text', { title: `${resultSentence(lines, last.undo)}${limits}` }, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null), back, dismiss(() => { market.lastRun = undefined; }, 'report-dismiss'));
+      h('span.toolbar-result-text', { title: `${resultSentence(lines, last.undo)}${limits}` }, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null), back, dismiss(closeRun, 'report-dismiss'));
   }
   // An Undo that undid nothing still offers its way back here, whether or not its failures are still shown.
-  if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(() => { market.lastRun = undefined; }, 'report-dismiss'));
+  if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(closeRun, 'report-dismiss'));
   const outcome = app.outcome?.page === 'plugins' && app.outcome.act ? app.outcome : undefined;
   if (!outcome?.act) return null;
   const action = button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: acting(), onclick: () => outcome.act!.run() });
   return h('div.toolbar-result', { role: 'status', id: 'plugins-result', 'data-outcome': '' }, icon('check', 14, 'tone-success'), h('span.toolbar-result-text', { title: outcome.text }, outcome.text), action, dismiss(clearNotice, 'report-dismiss'));
 }
 
-/** What went wrong in the last run, or why a marketplace couldn't be added: a band, because it needs reading. */
-function problemBand(lines: ResultLine[]) {
-  const failures = market.lastRun?.problemsClosed ? [] : lines.filter(line => !line.ok);
+/** What went wrong in the last run, or why a marketplace couldn't be added, with the result's × when it stands `alone`. */
+function problemBand(lines: ResultLine[], alone: boolean) {
+  const failures = lines.filter(line => !line.ok);
   if (!market.problem && !failures.length) return null;
   return h('div.band.plugin-problems', { role: 'alert' }, icon('triangle-alert', 14, 'tone-warning'),
-    h('span.band-text.band-lines', {}, failures.map(line => h('span', {}, h('strong.item-name', {}, line.plugin), `: ${line.text}`)), market.problem ? h('span', {}, market.problem) : null),
-    dismiss(dismissProblems));
+    problemLines([...failures.map(line => [h('strong.item-name', {}, line.plugin), `: ${line.text}`]), ...(market.problem ? [market.problem] : [])], market.lastRun ?? market.problem),
+    alone ? dismiss(closeRun, 'report-dismiss') : null);
 }
 
 /** The plugin whose page is open in this marketplace, if one is. */
 const openPlugin = (entry: MarketplaceView) => (market.nav.plugin ? entry.plugins.find(candidate => candidate.name === market.nav.plugin) : undefined);
 
 /**
- * The toolbar over the marketplace pane (beside the list of marketplaces, which runs the full height): where the person is
- * inside a plugin (← team-tools › document-tools) at the left, toolbarRight at the right. It shows only when it has one of
- * them, so an empty strip never stands above the marketplace; with no marketplaces it spans the page.
+ * The toolbar over the marketplace pane (beside the list of marketplaces, which runs the full height): where the person is,
+ * the marketplace or inside a plugin (← team-tools › document-tools).
  */
-function toolbar(shown: { entry: MarketplaceView; index: number } | undefined, lines: ResultLine[]) {
-  const right = toolbarRight(lines);
-  if (!shown) return right ? h('div.toolbar.plugins-toolbar.fit-bar', {}, h('span.toolbar-spacer'), right) : null;
+function toolbar(shown: { entry: MarketplaceView; index: number }) {
   const plugin = openPlugin(shown.entry);
   const left = plugin
     ? h('nav.market-crumbs', { 'aria-label': 'You are here' },
@@ -422,7 +427,7 @@ function toolbar(shown: { entry: MarketplaceView; index: number } | undefined, l
       icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, pluginTitle(plugin)))
     : titleLine(shown.entry);
   // In narrow content the marketplace strip already names it, so a toolbar with only the name isn't drawn (style.css).
-  return h(`div.toolbar.plugins-toolbar.fit-bar${!plugin && !right ? '.toolbar-title-only' : ''}`, {}, left, h('span.toolbar-spacer'), right);
+  return h(`div.toolbar.plugins-toolbar.fit-bar${!plugin ? '.toolbar-title-only' : ''}`, {}, left);
 }
 
 /**
@@ -445,7 +450,6 @@ export function pluginsPage() {
   if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Once one is installed, Central Knot finds it on its own, or at once with Refresh at the top.',
     button({ variant: 'outline', label: 'See Harnesses', id: 'plugins-no-tools', onclick: () => showPage('harnesses') })));
   const shown = current();
-  const lines = lastLines();
   // With no marketplaces, adding one is the only thing to do: its box sits in the middle of the page, with examples.
   const empty = emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Adding one installs nothing.',
     h('div.market-empty-add', {},
@@ -454,17 +458,15 @@ export function pluginsPage() {
       suggestions(view, true),
       h('p.empty-aside', {}, `Marketplaces you added in ${orList(view.tools.filter(takesPlugins).map(tool => names[tool]))} show up here by themselves.`)));
   return h('div.page.plugins-page', {},
-    shown ? null : toolbar(undefined, lines),
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
       market.activity ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, ACTIVITIES[market.activity].band))
         // Reading the marketplaces again (Git can take seconds) while the last read stays on screen, or that it failed.
-        : rereadBand(market.read, 'Reading marketplaces… Nothing is installed by this.'),
-      problemBand(lines)),
+        : rereadBand(market.read, 'Reading marketplaces… Nothing is installed by this.')),
     // The note of what was updated by itself scrolls with the page, so however long it is, the list is never squeezed. It
     // heads a marketplace's list, not a plugin's own page.
     shown
       ? h('div.market-layout', {}, marketList(view, shown.entry),
-        h('div.market-pane', {}, toolbar(shown, lines), h('div.scroll.market-main', { id: 'plugins-scroll' }, openPlugin(shown.entry) ? null : pluginUpdateNotes(), marketPage(view, shown.entry, shown.index))))
+        h('div.market-pane', {}, toolbar(shown), h('div.scroll.market-main', { id: 'plugins-scroll' }, openPlugin(shown.entry) ? null : pluginUpdateNotes(), marketPage(view, shown.entry, shown.index))))
       : h('div.scroll.market-main', { id: 'plugins-scroll' }, pluginUpdateNotes(), empty));
 }
