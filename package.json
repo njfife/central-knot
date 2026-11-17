@@ -1,6 +1,6 @@
 {
   "name": "central-knot",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "Shows the skills, MCP servers, agents, instructions and plugins each AI coding tool on your computer has, and keeps the ones you choose the same across those tools",
   "type": "module",
