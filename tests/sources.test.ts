@@ -713,7 +713,7 @@ test('Gone, read whole: a skill renamed at the source turns Off once, said in Hi
     assert.deepEqual(Object.values(await everywhere(box)).filter(Boolean), [], 'removed from every tool, kept in Central Knot');
     assert.equal((await sentences(box, 'notes')).at(-1), 'github.com/team/notes no longer has it, so it is off and removed from all 3 tools, and no longer from that source. Central Knot keeps it.');
     const turnOn = libraryAction((await readHistory(box.context)).filter(event => event.key === 'notes').at(-1)!, item, { managed: box.tools, pending: [] })!;
-    assert.equal(turnOn.label, 'Turn on');
+    assert.equal(turnOn.label, 'Turn it on');
     await applySkills(box.context, box.tools, [turnOn.change]);
     assert.deepEqual(answered(await check(box, id)), [], 'the next check leaves it');
     assert.equal((await itemOf(box, 'notes'))!.on, true);
@@ -794,7 +794,7 @@ test('Turned On again, the revert: the notice goes, the next read changes nothin
   } finally { await box.cleanup(); }
 });
 
-test('History’s Turn on and a profile that includes it are reverts too: each turns it On, and the notice goes', async () => {
+test('History’s Turn it on and a profile that includes it are reverts too: each turns it On, and the notice goes', async () => {
   const { saveProfile, switchProfile } = await import('../src/profiles.ts');
   const box = await sandbox();
   try {
@@ -1296,7 +1296,7 @@ test('A source can’t also be the Git repo Pull and Push use, either way round,
   try {
     await oneSkill(box, 'kit', { skill: 'notes' });
     const said = await connectRepo(box.context, 'git@github.com:team/kit.git', '');
-    assert.equal(said.stopped, 'That repo is a source here, so it can’t be the Git repo Pull and Push use too. A source is only ever read; that repo stays on the Sources page.');
+    assert.equal(said.stopped, 'That repo is a source here, so it can’t be the Git repo Pull and Push use too. A source is only ever read; that repo stays on the Library sources page.');
     assert.equal(await readFile(join(box.home, '.central-knot/repo.json'), 'utf8').catch(() => 'none'), 'none', 'nothing is connected');
   } finally { await box.cleanup(); }
 });
