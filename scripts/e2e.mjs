@@ -985,6 +985,16 @@ async function practiceFlow() {
   const backgroundSaid = await a.text('#header .header-result');
   await a.run(`document.querySelector('#header .band-dismiss')?.click()`); await a.settle();
   same('a background pass’s problem, alone in the header, is closed by its ×', [/standup \(Copilot CLI\)/.test(backgroundSaid ?? ''), await a.exists('#header .header-result')], [true, false]);
+  await a.click('#header-refresh');
+  same('reported again by the next read, it stays closed', await a.exists('#header .header-result'), false);
+  for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o644 : 0o755);
+  await a.click('#switch-standup');
+  // Cleared (standup On again, nothing left to remove), then the same failure later: it is said again.
+  for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o444 : 0o555);
+  await a.click('#switch-standup');
+  await a.click('#nav-overview'); await wait(4000); await a.click('#nav-skills');
+  for (let tries = 0; tries < 40 && !/standup \(Copilot CLI\)/.test(await a.text('#header .header-result') ?? ''); tries++) await wait(250);
+  same('the same failure, after it cleared, is said again', /standup \(Copilot CLI\)/.test(await a.text('#header .header-result') ?? ''), true);
   for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o644 : 0o755);
   await a.click('#switch-standup');
   // Sync off: edits are noted, not spread; the page shows them pending; Sync once spreads them once.
@@ -1721,6 +1731,14 @@ async function practiceFlow() {
   same('so does its MCP server, on MCP servers, and its mark is no button', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /has it with the plugin issue-tracker/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? ''), document.querySelector('#cell-issues-claude-cli')?.tagName]`), ['plugin', true, 'SPAN']);
   if (!(await a.exists('#enable-issues-claude-cli'))) await a.click('#open-issues');
   same('the opened row has its switch in Claude Code, on', [await a.run(`document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-checked')`), /Click to turn it off in Claude Code\.$/.test(await a.run(`document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-label')`) ?? '')], ['true', true]);
+  // That switch while Claude Code's settings can't be written: the sentence says what happened, and the reason is a problem line.
+  for (const [path, mode] of [[pluginSettings, 0o444], [dirname(pluginSettings), 0o555]]) if (existsSync(path)) chmodSync(path, mode);
+  await a.click('#enable-issues-claude-cli');
+  for (let tries = 0; tries < 40 && !(await a.exists('#header [data-outcome]')); tries++) await wait(100);
+  const failedSwitch = [await a.text('#header [data-outcome] .band-text'), await a.text('#header .problem-text')];
+  for (const [path, mode] of [[pluginSettings, 0o644], [dirname(pluginSettings), 0o755]]) if (existsSync(path)) chmodSync(path, mode);
+  same('a plugin item’s switch that fails: its sentence names no reason; the reason is its problem line', [!!failedSwitch[1], !!failedSwitch[1] && (failedSwitch[0] ?? '').includes(failedSwitch[1].split(': ').at(-1))], [true, false]);
+  await a.run(`document.querySelector('#outcome-dismiss')?.click()`); await a.settle();
   await a.click('#enable-issues-claude-cli');
   for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin-off'; tries++) await wait(100);
   check('a click turns that one server off at once with Claude Code’s own switch, and the page says so, with Undo', JSON.stringify(JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers) === '[{"serverName":"plugin:issue-tracker:issues"}]'
@@ -4518,9 +4536,10 @@ fs.writeFileSync(record, JSON.stringify(now));
   await putAt(table, row('srv-02'), 200);
   await clickAt(await middleOf('#switch-srv-02')); await done();
   const lineCut = () => a.run(`[...document.querySelectorAll('#header .problem-text')].some(text => text.scrollWidth > text.clientWidth)`);
-  same('a click no tool took: the sentence says so, with no reason; the reason once, cut to its line, with Show all', [await sentence(), await reasonsIn(), await lineCut(), await a.text('#problems-show-all')], ['srv-02 is not on in any tool yet.', 1, true, 'Show all']);
+  const expanded = () => a.run(`document.querySelector('#problems-show-all')?.getAttribute('aria-expanded')`);
+  same('a click no tool took: the sentence says so, with no reason; the reason once, cut to its line, with Show all', [await sentence(), await reasonsIn(), await lineCut(), await a.text('#problems-show-all'), await expanded()], ['srv-02 is not on in any tool yet.', 1, true, 'Show all', 'false']);
   await press('#problems-show-all');
-  same('Show all: the reason whole, then Show less', [await lineCut(), await a.text('#problems-show-all')], [false, 'Show less']);
+  same('Show all: the reason whole, then Show less', [await lineCut(), await a.text('#problems-show-all'), await expanded()], [false, 'Show less', 'true']);
   await press('#outcome-dismiss');
   } finally { clearInterval(holdLock); rmSync(lock, { recursive: true }); }
   await sizeTo(a, 1280, 800);

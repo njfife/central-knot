@@ -15,7 +15,7 @@ import { andList, fewNames, kindNouns, sentence, toolList as toolsInWords, toolN
 import { lastUse, leftToItsRow, noUseSeen, onIn, rowFigure, startsLate, toolSays, USAGE_DAYS, type CantSay, type ToolSays, type UsageFacts } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { acting, closeResult, isKind, leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { acting, closeResult, isKind, problemKey, leftOutTools, readUsage, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, pin, placeIn, timeIn, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
@@ -790,15 +790,14 @@ export function listResult(): HTMLElement[] {
   return [done, lines.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, done ? state.outcome : result ?? background[0]), done ? null : closeButton(close, { id: 'problems-dismiss' })) : null]
     .filter((band): band is HTMLElement => !!band);
 }
-const problemKey = (entry: DestinationResult) => `problem:${entry.item}:${entry.harness ?? ''}:${entry.message}`;
 
 /**
  * What went wrong, under a result in the header: two lines, each on one line, Show all on the last when one is cut (renderer.ts)
  * or more remain; shown, every line whole until Show less, × or the next result (`of`, their result: app.ts state.shownWhole).
  */
-export function problemLines(lines: (Child | Child[])[], of: unknown): HTMLElement {
+export function problemLines(lines: (Child | Child[])[], of: typeof state.shownWhole): HTMLElement {
   const whole = of !== undefined && state.shownWhole === of, more = lines.length > 2, shown = whole ? lines : lines.slice(0, 2);
-  const toggle = h('button.inline-link', { type: 'button', id: 'problems-show-all', 'data-when-cut': whole || more ? undefined : '', onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
+  const toggle = h('button.inline-link', { type: 'button', id: 'problems-show-all', 'aria-expanded': String(whole), 'data-when-cut': whole || more ? undefined : '', onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
     whole ? 'Show less' : `Show all${more ? ` ${lines.length}` : ''}`);
   return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, h('span.problem-text', {}, line), at === shown.length - 1 ? toggle : null)));
 }
