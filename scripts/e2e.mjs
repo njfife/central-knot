@@ -2,7 +2,7 @@
 // Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,…]
 // `--flows` runs only the named flows, here, on one HOME, for working on one. Without it the run is every flow that can run here
 // (crashFlow needs a home the app writes and --crash-rounds above 0: `runs`): this script once per group (`groups`, at the end)
-// with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time, then once for each flow in `afterTheGroups` (runGroups).
+// with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time (runGroups).
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -4468,6 +4468,7 @@ async function rowsKeepTheirPlacesFlow() {
 const fs = require('fs'), dir = process.env.HOME + '/.claude/plugins', record = dir + '/installed_plugins.json', [, verb, id] = process.argv.slice(2);
 if (process.argv[2] === '--version') { console.log('2.1.322 (Claude Code)'); process.exit(0); }
 if (fs.existsSync(process.env.HOME + '/slow')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+while (fs.existsSync(process.env.HOME + '/hold')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
 fs.mkdirSync(dir, { recursive: true });
 const now = fs.existsSync(record) ? JSON.parse(fs.readFileSync(record, 'utf8')) : { version: 2, plugins: {} };
 if (verb === 'marketplace') fs.writeFileSync(dir + '/known_marketplaces.json', JSON.stringify({ 'rows-market': { source: { source: 'git', url: process.argv[5] } } }));
@@ -4502,8 +4503,21 @@ fs.writeFileSync(record, JSON.stringify(now));
   const focused = () => a.run(`document.activeElement?.id`);
   const done = async () => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   const headerSays = () => a.text('#header [data-outcome] .band-text');
-  /** Claude Code's settings file held by its lock, fresh: a click on a server waits for it (up to 2 s), so the clicks after it wait their turn in the page's list. */
-  const lock = `${claudeJson}.lock`, holdClaude = () => mkdirSync(lock), letGo = () => rmSync(lock, { recursive: true, force: true });
+  /** While `hold` is there, Claude Code's stand-in waits before any plugin command: a plugin click stays running, however long. */
+  const hold = () => writeFileSync(join(home, 'hold'), ''), letGo = () => rmSync(join(home, 'hold'), { force: true });
+  /**
+   * Holds the page's run of clicks open, however far apart the clicks after it land: a click on plug-03's skill on Skills, whose
+   * command waits (hold), so each click made after it waits its turn behind it. Let go, it fails (the stand-in has no disable)
+   * and changes nothing. It ends on MCP servers, the list at its top.
+   */
+  const holdRun = async () => {
+    hold();
+    await a.click('#nav-skills');
+    await a.run(`document.querySelector('.ov-row[data-key$="/plug-03-skill"] .switch').click()`);
+    await a.run(`document.getElementById('nav-mcp').click()`);
+    for (let tries = 0; tries < 50 && !(await a.exists('#switch-srv-30')); tries++) await wait(100);
+  };
+  const letRunGo = async () => { letGo(); await done(); };
 
   // A list too short to scroll, on a fresh visit: four rows clicked one after another before the first is done (in one go: an agent
   // file is written faster than a pointer moves here) are the four that change, each Off in every tool, no row moves, and the
@@ -4535,13 +4549,13 @@ fs.writeFileSync(record, JSON.stringify(now));
   // Four rows at the top of a long list, the page's first clicks, 150 ms apart, each clicked where it was before the first: each
   // is drawn Off at once, they are the four that change, Off in every tool, no row moves, the scroll stays, and the header, which
   // keeps its height, says the four once.
+  // The run held open while they are clicked, so all four are one run however far apart they land, as on a home slow enough to be felt.
+  await holdRun();
   const atTop = ['srv-03', 'srv-04', 'srv-05', 'srv-06'], topPoints = [], topBefore = await placesNow(table, 'data-key'), topStates = await states('.ov-row[data-key]');
   for (const key of atTop) topPoints.push(await middleOf(`#switch-${key}`));
   const resultIn = () => a.run(`document.querySelector('#header [data-outcome]') ? 'header' : document.querySelector('[data-outcome]') ? 'elsewhere' : 'none'`), drawnAtOnce = [];
-  // Claude Code's file held by its lock while they are clicked, so all four are one run, as on a home slow enough to be felt.
-  holdClaude();
   for (const point of topPoints) { await clickAt(point); drawnAtOnce.push(await a.run(`document.activeElement?.getAttribute('aria-checked')`)); await wait(150); }
-  letGo(); await done();
+  await letRunGo();
   await a.shot('rows-mcp-top');
   const topAfter = await placesNow(table, 'data-key'), inClaude = () => Object.keys(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers ?? {});
   same('at the top of a long list, four rows clicked 150 ms apart are drawn Off at once and are the four that change, Off in every tool; no row moves, the scroll stays, and the header says the four once',
@@ -4606,30 +4620,33 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.click('#header-refresh');
   same('a row turned Off stays under On until Refresh, which puts it under Off', [pinnedThere, (await sectionsNow(a)).at(-1)], [true, ['off', ['srv-02', ...offNow].sort()]]);
 
-  // Clicks behind one that still runs (Claude Code's file held by its lock, then let go) wait their turn. Clicked again while its
-  // click waits, a row is taken back at once, and nothing is written for it.
+  // Clicks behind one that still runs (holdRun) wait their turn. Clicked again while its click waits, a row is taken back at once,
+  // and nothing is written for it.
+  await holdRun();
   await putAt(table, row('srv-30'), 200);
   const [at30, at31] = [await middleOf('#switch-srv-30'), await middleOf('#switch-srv-31')], entry31 = () => JSON.stringify(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers['srv-31']);
   const was31 = entry31();
-  holdClaude();
   await clickAt(at30); await clickAt(at31);
   const drawnOff = await switchOn(a, 'srv-31');
   await clickAt(at31);
   const drawnBack = await switchOn(a, 'srv-31');
-  letGo(); await done();
+  await letRunGo();
   same('clicked again while its click waits, a row is taken back: drawn as it was at once, and nothing is written for it', [drawnOff, drawnBack, await switchOn(a, 'srv-31'), entry31(), inClaude().includes('srv-30')], [false, true, true, was31, false]);
-  // Clicked again while its click runs, it ends as the second click says, and nothing is refused.
+  // Clicked twice, 150 ms apart: whether the second lands while the first runs or after it, the row ends as the second says, and
+  // nothing is refused (the second asks from the state its row was drawn in).
   const at33 = await middleOf('#switch-srv-33');
-  holdClaude(); await clickAt(at33); await wait(150); await clickAt(at33); letGo(); await done();
-  same('clicked again while its click runs, a row ends as the second click says, and nothing is refused', [await switchOn(a, 'srv-33'), inClaude().includes('srv-33'), await a.exists('#header .problem-line'), await headerSays()], [true, true, false, '1 MCP server is on: srv-33.']);
+  await clickAt(at33); await wait(150); await clickAt(at33); await done();
+  same('clicked twice, a row ends as the second click says, and nothing is refused, however far apart the clicks land', [await switchOn(a, 'srv-33'), inClaude().includes('srv-33'), await a.exists('#header .problem-line')], [true, true, false]);
   // Three clicks, the second refused in its turn: srv-35 is turned Off behind the page's back (as another window would) before its
   // click runs, so its click, made from the page as it was, is refused. The first and third are done; its row shows what is true.
+  // The change behind the page's back waits in main's queue behind the click that holds the run, so it lands before srv-35's turn.
+  await holdRun();
+  await putAt(table, row('srv-34'), 200);
   const three = ['srv-34', 'srv-35', 'srv-36'], threePoints = [];
   for (const key of three) threePoints.push(await middleOf(`#switch-${key}`));
-  holdClaude();
   for (const point of threePoints) { await clickAt(point); await wait(150); }
   await a.run(`void window.centralKnot.applyServers([{ key: 'srv-35', on: false, except: [] }], false, ${JSON.stringify(home)})`);
-  letGo(); await done();
+  await letRunGo();
   await a.shot('rows-mcp-one-refused');
   same('three clicks where the second is refused: the first and third are done, its row is as it truly is, and the header’s problem line names it',
     [three.map(key => inClaude().includes(key)), await switchOn(a, 'srv-35'), await headerSays(), await a.all('#header .problem-text')], [[false, false, false], false, '2 MCP servers are off: srv-34 and srv-36.', ['srv-35 changed since the page was read. Nothing was changed; read again.']]);
@@ -4639,10 +4656,11 @@ fs.writeFileSync(record, JSON.stringify(now));
   check('a result with a problem line stays past the 8 seconds', await a.exists('#header .problem-line'));
   await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
   // A run left for another page carries on there; its result is said in the status bar, never in that page's header.
+  await holdRun();
   await putAt(table, row('srv-37'), 200);
-  holdClaude(); await clickAt(await middleOf('#switch-srv-37'));
+  await clickAt(await middleOf('#switch-srv-37'));
   await a.run(`document.getElementById('nav-agents').click()`);
-  letGo(); await done();
+  await letRunGo();
   same('a run left for Agents: its result is in the status bar, never in the Agents header', [await a.exists('#header [data-outcome]'), (await a.text('#announcement'))?.startsWith('srv-37 is off')], [false, true]);
   await a.click('#nav-mcp');
   // A press on a switch whose release comes after a redraw replaced it (another switch clicked between) still counts.
@@ -4663,7 +4681,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   await clickAt(await middleOf(`#switch-${firstOn}`)); await a.settle();
   same('an ordinary result fits in the header: the top edges of Find and Sort take their own clicks', [await reaches('.find input'), await reaches('#item-order')], [true, true]);
   // Claude Code's file held by its lock: the result says what happened and where, and the reason once, under it.
-  const header = () => a.text('#header .header-result'), sentence = () => a.text('#header [data-outcome] .band-text'), reasonsIn = async () => ((await header()) ?? '').split('locked').length - 1;
+  const lock = `${claudeJson}.lock`, header = () => a.text('#header .header-result'), sentence = () => a.text('#header [data-outcome] .band-text'), reasonsIn = async () => ((await header()) ?? '').split('locked').length - 1;
   /** A click on a control of this round's, which may not be there (the check after it then fails). */
   const press = async selector => { await a.run(`document.querySelector(${JSON.stringify(selector)})?.click()`); await done(); };
   mkdirSync(lock); const holdLock = setInterval(() => { const now = new Date(); utimesSync(lock, now, now); }, 1000);
@@ -4703,13 +4721,13 @@ fs.writeFileSync(record, JSON.stringify(now));
   addServers('another-server');
   for (let tries = 0; tries < 80 && await a.run(`document.getElementById('${list}')?.dataset.drawnBefore === 'yes'`); tries++) await wait(100);
   same('a redraw after he scrolls on leaves his scroll alone, the focus on that switch', [(await placesNow(list, 'data-plugin')).scroll, await focused()], [pluginsScrolled, 'pswitch-0-plug-20']);
-  // While its click waits and runs (Claude Code's stand-in takes a second from here on), its switch is off yet keeps the focus.
+  // While its click runs (held), its switch is off yet keeps the focus. Claude Code's stand-in takes a second from here on.
   await putAt(list, '[data-plugin="plug-22"]', 300);
   writeFileSync(join(home, 'slow'), '');
+  hold();
   await clickAt(await middleOf('#pswitch-0-plug-22'));
-  await wait(300);
   same('while its click runs, a plugin’s switch is off and keeps the focus', [await a.run(`document.querySelector('#pswitch-0-plug-22').getAttribute('aria-disabled')`), await focused()], ['true', 'pswitch-0-plug-22']);
-  await done();
+  letGo(); await done();
   // Five plugins clicked quickly, one after another, each where it was before the first click: they wait their turn in one
   // list, each row saying how its click stands in place of its line, so no row grows and none below moves. In the table's
   // narrow form (here) and its wide one (1728), where a row's line sits beside its name.
@@ -4727,6 +4745,19 @@ fs.writeFileSync(record, JSON.stringify(now));
   await sizeTo(a, 1728, 1117);
   const fiveWide = await fiveQuickly('plug-31');
   same('…and so in the wide table', ...fiveWide);
+  // A press on plug-24's switch, plug-30's switch clicked before the release (the list redrawn: plug-24's switch replaced), then the
+  // release: still plug-24's click (judges/ci1-builder-report.md, "For the LIST step"). Both are put back after.
+  await putAt(list, '[data-plugin="plug-24"]', 200);
+  const pressedBefore = await states('[data-plugin]'), [x24, y24] = await middleOf('#pswitch-0-plug-24');
+  await a.run(`document.getElementById('pswitch-0-plug-24').dataset.pressed = 'yes'`);
+  for (const type of ['mouseMoved', 'mousePressed']) await a.send('Input.dispatchMouseEvent', { type, x: x24, y: y24, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 });
+  await a.run(`document.getElementById('pswitch-0-plug-30').click()`);
+  const replaced = await a.run(`document.getElementById('pswitch-0-plug-24').dataset.pressed !== 'yes'`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x24, y: y24, button: 'left', clickCount: 1 });
+  await done();
+  same('a press on a plugin’s switch released after a redraw replaced it still counts: plug-24 and plug-30 both change', [replaced, changed(pressedBefore, await states('[data-plugin]'))], [true, ['plug-24', 'plug-30']]);
+  for (const name of ['plug-24', 'plug-30']) await a.run(`document.getElementById('pswitch-0-${name}').click()`);
+  await done();
   // A list of four clicks, one failing (a plugin of its own at each size) and one on a plugin with no description (plug-08), at
   // each of the four sizes: every row is as tall while its click waits and runs, and after it ends or fails, as before it.
   const heights = () => a.run(`Object.fromEntries([...document.querySelectorAll('[data-plugin]')].map(row => [row.dataset.plugin, Math.round(row.getBoundingClientRect().height)]))`);
@@ -4736,8 +4767,11 @@ fs.writeFileSync(record, JSON.stringify(now));
     await sizeTo(a, width, height);
     await putAt(list, '[data-plugin="plug-07"]', 80);
     const heightsBefore = await heights();
+    // Held, so the four are one list however far apart they land: a new list clears the last one's notes.
+    hold();
     for (const name of clicked(width)) { await clickAt(await middleOf(`#pswitch-0-${name}`)); await wait(150); }
     const whileWaiting = await heights();
+    letGo();
     for (let tries = 0; tries < 40 && !(await a.exists('[data-plugin="plug-08"] .plugin-click[data-click="ended"]')); tries++) await wait(100);
     await a.shot(`rows-plugins-states-${width}`);
     const whileRunning = await heights();
@@ -4759,7 +4793,9 @@ fs.writeFileSync(record, JSON.stringify(now));
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
   await putAt(list, '[data-plugin="plug-04"]', 20);
   const fourPoints = []; for (const name of ['plug-04', 'plug-05', 'plug-08', 'plug-10']) fourPoints.push(await middleOf(`#pswitch-0-${name}`));
+  hold();
   for (const point of fourPoints) { await clickAt(point); await wait(150); }
+  letGo();
   for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
   await done();
   for (const name of failNow) rmSync(join(home, `fail-${name}`));
@@ -5085,17 +5121,13 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group passes on its own.
 const groups = [
   [practiceFlow, suggestedFlow, realHomeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, sourcesFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
-  [harnessFlow, manageFlow, otherBuildFlow, usageFlow, firstSetupFlow, crashFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, repoBaseFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
+  [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
-// Each by itself, once the groups have ended. rowsKeepTheirPlacesFlow's quick switch clicks lose a press when another app's
-// load makes a redraw land between the press and the release (judges/ci1-builder-report.md, "For the LIST step"); it goes
-// back into a group when the LIST step lands.
-const afterTheGroups = [rowsKeepTheirPlacesFlow];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
-const everyFlow = [...groups.flat(), ...afterTheGroups], listed = everyFlow.map(flow => flow.name);
+const listed = groups.flat().map(flow => flow.name);
 const written = [...readFileSync(import.meta.filename, 'utf8').matchAll(/^async function (\w+Flow)\(/gm)].map(([, name]) => name);
 const refused = [...written.filter(name => listed.filter(each => each === name).length !== 1).map(name => `${name} is in no group or in two`),
   ...(named ?? []).filter(name => !listed.includes(name)).map(name => `--flows names ${name}, which is no flow`),
@@ -5123,7 +5155,7 @@ function readCopy(names, number, output, code, signal) {
 
 /**
  * The run with no --flows: this script once per group with that group's --flows and the run's other options,
- * CK_E2E_GROUPS_AT_ONCE copies at a time (default 1), then once for each flow in afterTheGroups, one at a time. Each copy's
+ * CK_E2E_GROUPS_AT_ONCE copies at a time (default 1). Each copy's
  * stdout and stderr, in the order they came, print as one block when it ends; then the run's total, the flows not finished and
  * not run, and every FAIL line again. The run's failures are its copies' FAIL lines, one more for each copy that died
  * (readCopy); the passes of a copy without a total line are not known, and the total says so. A signal is passed on to every
@@ -5132,7 +5164,7 @@ function readCopy(names, number, output, code, signal) {
 async function runGroups() {
   const atOnce = Math.max(1, Number(process.env.CK_E2E_GROUPS_AT_ONCE) || 1);
   const waiting = groups.map(group => group.filter(runs).map(flow => flow.name)).filter(names => names.length);
-  const alone = afterTheGroups.filter(runs).map(flow => [flow.name]), count = waiting.length + alone.length;
+  const count = waiting.length;
   const running = new Set(), unfinished = [], notRun = [], failLines = [], uncounted = [];
   let passed = 0, begun = 0, stoppedBy;
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stoppedBy = signal; for (const copy of running) copy.kill(signal); });
@@ -5153,10 +5185,9 @@ async function runGroups() {
       done();
     });
   });
-  console.log(`${waiting.length} groups of flows, ${atOnce} at a time, then ${alone.length} by itself; each group's output follows when it ends.`);
+  console.log(`${waiting.length} groups of flows, ${atOnce} at a time; each group's output follows when it ends.`);
   await Promise.all(Array.from({ length: atOnce }, async () => { while (waiting.length && !stoppedBy) await runOne(waiting.shift()); }));
-  while (alone.length && !stoppedBy) await runOne(alone.shift());
-  notRun.push(...waiting.flat(), ...alone.flat());
+  notRun.push(...waiting.flat());
   const notCounted = uncounted.length ? ` (the passes of group ${uncounted.join(' and group ')} are not counted: no total line)` : '';
   console.log(`\ne2e: ${passed} passed, ${failLines.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}${notCounted}`);
   if (unfinished.length) console.error(`not finished: ${unfinished.join(', ')}`);
@@ -5175,7 +5206,7 @@ if (!named) {
   try {
     seedHome();
     // Each flow's time is printed, so a run that grows slow says where (and a grouped run, which flows ran).
-    for (const flow of everyFlow.filter(each => named.includes(each.name) && runs(each))) {
+    for (const flow of groups.flat().filter(each => named.includes(each.name) && runs(each))) {
       flowRunning = flow.name;
       const from = Date.now();
       await flow();
