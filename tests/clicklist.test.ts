@@ -361,6 +361,23 @@ test('A result with no problem goes 8 seconds after the run’s last click has f
   } finally { mock.timers.reset(); }
 });
 
+test('A result whose time runs out while the next run’s first click runs stays until that click says its own', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    onSkills();
+    flip('a', false);
+    await settled();
+    await main.pass(did('a'));
+    mock.timers.tick(7000);
+    flip('b', false);
+    await settled();
+    mock.timers.tick(2000);
+    assert.equal(app.outcome?.text, 'a is off.');
+    await main.pass(did('b'));
+    assert.equal(app.outcome?.text, 'b is off.');
+  } finally { mock.timers.reset(); }
+});
+
 // ---------- Rows pinned where they were ----------
 
 /** The keys pinned on the list on screen now. */
