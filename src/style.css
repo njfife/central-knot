@@ -1843,6 +1843,15 @@ button.harness-card-main:focus-visible { outline: 0; }
 /* While the rows go by last updated, each says when (matrix.ts whenCell) in a column of its own before the marks, at least 6.5em wide. */
 .ov-row.ov-switch-row.ov-dated { grid-template-columns: auto minmax(0, 1fr) minmax(6.5em, auto) auto auto; }
 .ov-when { font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; }
+/* Once usage is read (matrix.ts usedCell), each row says its figure in a column of its own before the marks, one width on
+   every row so the marks stay in line; an opened row says each tool's (matrix.ts usageLine). */
+.ov-row.ov-switch-row.ov-usage { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
+.ov-row.ov-switch-row.ov-dated.ov-usage { grid-template-columns: auto minmax(0, 1fr) minmax(6.5em, auto) auto auto auto; }
+.ov-used { width: 12em; font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-used-faint { color: var(--ink-faint); }
+.usage-turn-note { color: var(--ink-soft); }
+.details-usage { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; color: var(--ink-soft); }
+.details-usage > svg { flex: none; align-self: center; }
 .ov-switch-row > .ov-managed { justify-content: flex-start; }
 .ov-name-fit.ov-name-bare { padding-left: 0; }
 .ov-marks, .ov-open { display: flex; align-items: center; }

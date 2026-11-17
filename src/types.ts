@@ -190,6 +190,8 @@ export interface DesktopApi {
   instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** One version of an agent as Central Knot's library holds it: its name, description and prompt; null when it is no longer kept. */
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
+  /** Reads which skills, agents and MCP servers the tools' session history shows were used (usage.ts readUsage), on a click; null for another home than the open one. */
+  readUsage(home: string): Promise<UsageReading | null>;
   /** A skill edit's SKILL.md before and after, for "See change". */
   eventChange(eventId: string): Promise<{ before: string; after: string } | undefined>;
   /** Shows a file in the system file manager (Finder, Explorer); nothing is opened or changed. */
@@ -789,6 +791,30 @@ export interface PluginsView {
   /** Why the move of the parts written before the library waits, as the last pass gave it (homepass.ts partsWait), while it does. */
   partsWait?: string;
 }
+
+// ---------- Usage, read from the tools' session history (usage.ts) ----------
+
+/**
+ * What one tool's records say of each kind (usage.ts readers): `sure`, every use leaves a record, so none seen means none;
+ * `seen`, a record found is a use, but a use may leave none. A kind left out has no record there.
+ */
+export type UsageTells = Partial<Record<ItemKind, 'sure' | 'seen'>>;
+/**
+ * One name a tool's sessions used, in that tool's own spelling: the sessions within USAGE_DAYS that used it, by their number
+ * in that tool's reading (so a session that used two spellings of one item counts once), and its newest use at any time.
+ */
+export interface UsedName { kind: ItemKind; name: string; sessions: number[]; last: string }
+/**
+ * One tool's history as read: what it can tell, how many sessions it keeps, when its history starts (none: no session), each
+ * name used, and `unread` when its history is there and couldn't be read at all.
+ */
+export interface ToolUsage {
+  tool: HarnessId; tells: UsageTells; sessions: number; from?: string; used: UsedName[]; unread?: true;
+  /** Its session files that are there and couldn't be read: skipped, the rest counted. */
+  skipped?: number;
+}
+/** One reading of a home's session history, made on a click: when, how long it took, and every tool's. */
+export interface UsageReading { at: string; tookMs: number; tools: ToolUsage[] }
 
 // ---------- A kind on Central Knot's library (library.ts): its page's view ----------
 
