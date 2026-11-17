@@ -4728,6 +4728,9 @@ fs.writeFileSync(record, JSON.stringify(now));
   check('a result with a problem line stays past the 8 seconds', await a.exists('#header .problem-line'));
   await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
   // A run left for another page carries on there; its result is said in the status bar, never in that page's header.
+  // Instructions read once first: while a run holds main, the page shows that read (a page keeps its data while it reads again).
+  await a.click('#nav-instructions');
+  for (let tries = 0; tries < 50 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);
   await holdRun();
   await putAt(table, row('srv-37'), 200);
   await clickAt(await middleOf('#switch-srv-37'));
