@@ -4364,7 +4364,7 @@ esac
   same('the second click waits its turn while the first runs, and another plugin’s switch stays usable', [await rowSays('release-helper'), await rowSays('starter-skills'), await a.exists('#pswitch-0-issue-tracker:not([disabled]):not([aria-disabled])')], ['running', 'waiting', true]);
   for (let tries = 0; tries < 50 && await rowSays('starter-skills') !== 'running'; tries++) await wait(100);
   same('the first is read back as soon as it ends: its row says so, and its switch is On and free while the second runs', [await rowSays('release-helper'), await switchIs('#pswitch-0-release-helper:not([disabled]):not([aria-disabled])'), await rowSays('starter-skills')], ['ended', 'true', 'running']);
-  check('a control the list turns off says why', await a.run(`document.querySelector('#open-add-marketplace')?.title`) === 'Waits until the plugin clicks are done.', await a.run(`document.querySelector('#open-add-marketplace')?.outerHTML`));
+  check('a control the list turns off says why', await a.run(`document.querySelector('#open-add-marketplace')?.title`) === 'Waits until the switches clicked are done.', await a.run(`document.querySelector('#open-add-marketplace')?.outerHTML`));
   await a.run(`document.querySelector('#nav-skills').click()`);
   check('an item page’s switch can be used meanwhile', await a.run(`!!document.querySelector('#switch-triage[aria-checked="true"]:not([disabled])')`), await a.text('.page'));
   await a.run(`document.querySelector('#switch-triage').click()`);
