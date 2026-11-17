@@ -8,7 +8,7 @@
 // stays only in each tool's file, and the draft is reviewed and saved like any other base change, each file's own text included.
 // Its panel (draftPanel) opens under the base's text and says, before anything runs, which tool runs, on which model, and the
 // whole prompt it is sent; the text above stays as it is while the tool writes.
-import { applyBaseChange, closeDraftPick, draftFile, startDraft, draftStale, draftable, openDraftPick, savingOff, startTakeOut, stopDraft, baseDraftTyped, baseSaveDoesSomething, loadBaseVersion, ownText, rerender, showPage, toolDraftTyped, shownPath, startBaseEdit, state, type BaseEdit, type DraftPick } from './app.ts';
+import { acting, applyBaseChange, closeDraftPick, draftFile, startDraft, draftStale, draftable, openDraftPick, savingOff, startTakeOut, stopDraft, baseDraftTyped, baseSaveDoesSomething, loadBaseVersion, ownText, rerender, showPage, toolDraftTyped, shownPath, startBaseEdit, state, type BaseEdit, type DraftPick } from './app.ts';
 import { baseAction, draftedOwn, fileWithBase, linesNotCarried, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText } from './dom.ts';
@@ -238,7 +238,7 @@ function reviewView(files: InstructionFile[], edit: BaseEdit): Stage {
       ? h('div.ins-actions', {}, discardConfirm(draftedBy(edit) ? `${draftedBy(edit)}’s draft` : 'the base instructions', { discard: 'base-review-discard-yes', keep: 'base-review-keep' }, 'Keep reviewing',
         { run: () => { state.baseEdit = undefined; }, focus: restingFocus() }, { run: () => { edit.confirmDiscard = false; }, focus: 'base-save' }, !!draftedBy(edit)))
       : h('div.ins-actions', {},
-        button({ variant: 'primary', size: 'small', label: save, id: 'base-save', disabled: !!state.busy || stale, attrs: lockAttrsFor(stale ? 'Something changed after this draft was written. Discard it and have it written again.' : undefined), onclick: () => {
+        button({ variant: 'primary', size: 'small', label: save, id: 'base-save', disabled: acting() || stale, attrs: lockAttrsFor(stale ? 'Something changed after this draft was written. Discard it and have it written again.' : undefined), onclick: () => {
           // Exactly the files listed above, as they were when listed: anything else changed since stops the save.
           const seen = Object.fromEntries(plans.map(({ file }) => [file.tool, { path: file.path, hash: file.hash }]));
           void applyBaseChange({ text: edit.text, tools: edit.text.trim() ? edit.tools : [], seen, ...requestOf(edit), ...(draftedBy(edit) ? { own: edit.own } : {}) }, done);
@@ -291,7 +291,7 @@ function draftPanel(pick: DraftPick): HTMLElement {
     pick.problem ? h('p.ins-note.ins-warn', { id: 'base-draft-problem', role: 'alert', tabindex: '-1' }, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, pick.problem)) : null,
     writing ? h('p.ins-review-title.base-writing', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), `${toolNames[writing]} is writing a draft of the base instructions. This can take a minute or two.`) : null,
     h('div.ins-actions', {}, writing ? button({ variant: 'outline', size: 'small', label: 'Stop', id: 'base-draft-stop', onclick: stopDraft })
-      : [button({ variant: 'primary', size: 'small', label: 'Start', id: 'base-draft-start', disabled: !!state.busy, onclick: () => void startDraft() }),
+      : [button({ variant: 'primary', size: 'small', label: 'Start', id: 'base-draft-start', disabled: acting() ?? false, onclick: () => void startDraft() }),
         button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'base-draft-cancel', onclick: closeDraftPick })]));
 }
 
@@ -331,7 +331,7 @@ export function baseCard(files: InstructionFile[]) {
   const toolDraft = toolDraftTyped() ? state.instructionEdit : undefined;
   const lockedWhy = readOnly ? 'Saving is off in this home.' : !toolDraft ? undefined
     : files.some(file => file.tool === toolDraft.tool) ? `Finish or cancel the ${fileName(toolDraft.from.path)} edit first.` : 'Copy or discard the unsaved draft above first.';
-  const locked = !!state.busy || !!lockedWhy;
+  const locked = !!acting() || !!lockedWhy;
   const lockAttrs = lockAttrsFor(lockedWhy);
   const chosen = files.filter(file => file.base?.chosen && isFirstReader(file, files));
   const behind = chosen.filter(file => file.base!.state === 'older' || file.base!.state === 'missing');
@@ -372,7 +372,7 @@ export function baseCard(files: InstructionFile[]) {
           h('div.base-column', {},
             edited.length ? h('p.base-subhead', {}, 'The base instructions') : null,
             // A click or Enter on the text opens it as Edit text or tools does, under the same lock.
-            previewBlock(base.text, 'base', 'Base instructions', 'base-more', { start: caret => startBaseEdit({ text: base.text, tools: base.tools }, caret), locked: lockedWhy ?? !!state.busy }))),
+            previewBlock(base.text, 'base', 'Base instructions', 'base-more', { start: caret => startBaseEdit({ text: base.text, tools: base.tools }, caret), locked: lockedWhy ?? acting() }))),
       ],
     };
   // While a draft is set up or written, its panel takes the actions' place, under the text, which stays as it is.
@@ -410,7 +410,7 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
       } }) : null,
       // Not on the list any more: its block (an edited copy the list change left) can be taken out here, after a review.
       // Hidden under its own open review, so that review is the one decision on screen.
-      !base.chosen && !state.instructionEdit?.takeOut ? button({ variant: 'link', size: 'micro', label: 'Take the block out…', id: `ins-base-out-${file.tool}`, disabled: !!state.busy || !!lockedWhy, attrs: lockAttrsFor(lockedWhy), onclick: () => startTakeOut(file) }) : null,
+      !base.chosen && !state.instructionEdit?.takeOut ? button({ variant: 'link', size: 'micro', label: 'Take the block out…', id: `ins-base-out-${file.tool}`, disabled: acting() || !!lockedWhy, attrs: lockAttrsFor(lockedWhy), onclick: () => startTakeOut(file) }) : null,
       button({ variant: 'link', size: 'micro', label: shown.has(key) ? 'Hide' : 'Show', id: `ins-base-${file.tool}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) })),
     shown.has(key) ? h('pre.ins-preview.base-copy', { tabindex: '0', 'aria-label': `Base instructions in ${fileName(file.path)}` }, base.copy.replace(/\n$/, '')) : null);
 }

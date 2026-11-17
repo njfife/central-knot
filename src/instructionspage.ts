@@ -5,7 +5,7 @@
 // text never hides them (the base card's, too, except while its Draft panel is open: basecard.ts). There is no turn-off switch:
 // instruction files are edited, never disabled or emptied by Central Knot (the one deletion is an Undo of a base save removing a
 // file that save created, while unchanged).
-import { announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keepCaret, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { fileName, lineCount, toolNames } from './words.ts';
@@ -62,7 +62,7 @@ function editor(file: InstructionFile): Stage {
         ? h('div.ins-actions', {}, discardConfirm(name, { discard: `ins-review-discard-yes-${file.tool}`, keep: `ins-review-keep-${file.tool}` }, 'Keep reviewing',
           { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-save-${file.tool}` }))
         : h('div.ins-actions', {},
-          button({ variant: 'primary', size: 'small', label: edit.takeOut ? 'Take the block out' : edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
+          button({ variant: 'primary', size: 'small', label: edit.takeOut ? 'Take the block out' : edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: acting() || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
           button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => leaveReview(file.tool) }),
           edit.restoring ? null : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-keep-${file.tool}`)?.focus(); } })),
       body: [h('div.ins-editor', {},
@@ -117,20 +117,21 @@ const savedHere = (file: InstructionFile) => draftFile() !== file && state.outco
 const holdsBase = (file: InstructionFile) => file.base?.copy !== undefined;
 
 /**
- * A card at rest: its own text, which a click or Enter opens in the editor as Edit does, under the same lock (`lockedWhy`, and
- * while something is under way), then the base block it holds; and its one action, with the lock's reason and `goTo` beside
- * it. With no text of its own, the action says whose instructions it adds, and whether they come on top of the base.
+ * A card at rest: its own text, which a click or Enter opens in the editor as Edit does, under the same lock (`lockedWhy`, or else
+ * whatever the page is doing: app.ts acting), then the base block it holds; and its one action, with the card's own reason and
+ * `goTo` beside it. With no text of its own, the action says whose instructions it adds, and whether they come on top of the base.
  */
 function resting(file: InstructionFile, lockedWhy: string | undefined, goTo: Node | null): Stage {
   const own = ownText(file);
   const name = toolNames[file.tool];
   const label = own.trim() ? 'Edit' : holdsBase(file) ? `Add additional instructions for ${name}` : `Add instructions for ${name}`;
+  const held = lockedWhy ?? acting();
   return {
     actions: h('div.ins-actions', {},
-      button({ variant: 'outline', size: 'small', label, id: `ins-edit-${file.tool}`, disabled: !!state.busy || !!lockedWhy, attrs: lockAttrs(lockedWhy), onclick: () => startInstructionEdit(file) }),
+      button({ variant: 'outline', size: 'small', label, id: `ins-edit-${file.tool}`, disabled: held ?? false, attrs: lockAttrs(held), onclick: () => startInstructionEdit(file) }),
       lockedWhy ? h('span.ins-locked', {}, lockedWhy, goTo ? [' ', goTo] : null) : null),
     body: [h('div.ins-body', {},
-      file.exists && own.trim() ? previewBlock(own, file.tool, `${fileName(file.path)} contents`, `ins-more-${file.tool}`, { start: caret => startInstructionEdit(file, caret), locked: lockedWhy ?? !!state.busy })
+      file.exists && own.trim() ? previewBlock(own, file.tool, `${fileName(file.path)} contents`, `ins-more-${file.tool}`, { start: caret => startInstructionEdit(file, caret), locked: held })
         : file.exists && !holdsBase(file) ? h('p.ins-empty', {}, 'The file is empty.') : null,
       baseStrip(file, lockedWhy))],
   };
@@ -164,7 +165,7 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
         editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: !draftUnsaved() }, 'Unsaved changes') : null),
       stage.actions),
     stage.body,
-    versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!state.busy || readOnly || otherDirty || (editing && draftUnsaved()),
+    versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!acting() || readOnly || otherDirty || (editing && draftUnsaved()),
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));
 }
 

@@ -14,7 +14,7 @@
 // handOff), the look's one action is the hand-off button (words.ts toPluginsLabel), the Plugins page's own add (pluginstate.ts
 // addMarketplace), run on that page, which tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way
 // and in Central Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
-import { announce, applyClick, busy, rerender, showPage, state, type PageKind } from './app.ts';
+import { acting, announce, applyClick, busy, rerender, showPage, state, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { asItIs } from './libraryrow.ts';
 import { dayAndTime, plural } from './model.ts';
@@ -293,7 +293,7 @@ function handOffPanel(preview: Extract<SourcePreview, { token: string }>, handed
     h('div.source-preview-head', {}, h('strong.source-link', { title: preview.link }, label), h('span.source-where.tone-muted', {}, whereWords(preview))),
     sayLine('puzzle', 'tone-muted', `${preview.refused ?? ''} ${toPluginsLabel} adds ${handed.name} there, with its ${plural(handed.plugins, 'plugin')}, none turned on.${folders}`),
     h('div.source-preview-actions', {},
-      button({ variant: 'primary', size: 'small', icon: 'plus', label: toPluginsLabel, id: 'source-to-plugins', disabled: !state.home?.sync.access.allowed || !!state.busy, onclick: () => void toPlugins(handed.address) }),
+      button({ variant: 'primary', size: 'small', icon: 'plus', label: toPluginsLabel, id: 'source-to-plugins', disabled: !state.home?.sync.access.allowed || acting(), onclick: () => void toPlugins(handed.address) }),
       cancel,
       h('span.source-note', {}, `Nothing is installed, and nothing is kept on ${pageNames.sources}.`)));
 }
@@ -315,14 +315,14 @@ function previewPanel(preview: SourcePreview) {
     notComingWords(preview.notComing) ? sayLine('circle-minus', 'tone-muted', notComingWords(preview.notComing)!) : null,
     preview.names.length ? h('ul.source-names', {}, preview.names.map(name => nameRow(name, true))) : null,
     h('div.source-preview-actions', {},
-      preview.refused ? null : button({ variant: 'primary', size: 'small', icon: 'plus', label: addLabel, id: 'source-add', disabled: !allowed || !!state.busy, onclick: () => void add(preview.token, label) }),
+      preview.refused ? null : button({ variant: 'primary', size: 'small', icon: 'plus', label: addLabel, id: 'source-add', disabled: !allowed || acting(), onclick: () => void add(preview.token, label) }),
       cancel,
       preview.refused ? null : h('span.source-note', {}, 'What comes in is Off: in Central Knot, in no tool, until you turn it on. Nothing is ever written to the source.')));
 }
 
 /** The field and Look. */
 function addForm(allowed: boolean) {
-  const ready = () => !state.busy && allowed && !!sources.draft.trim();
+  const ready = () => !acting() && allowed && !!sources.draft.trim();
   const go = () => { if (ready()) void look(); };
   return h('section.source-add', { 'aria-labelledby': 'source-add-title' },
     h('h2.eyebrow', { id: 'source-add-title' }, 'Add from a GitHub or GitLab link'),
@@ -330,7 +330,7 @@ function addForm(allowed: boolean) {
       h('label.market-add-label', { for: 'source-link' }, 'GitHub or GitLab link'),
       h('div.source-field-row', {},
         h('input.market-add-input', { id: 'source-link', type: 'text', placeholder: 'github.com/owner/repo, or a link to a folder or a file in it', value: sources.draft, spellcheck: 'false', autocomplete: 'off',
-          disabled: !!state.busy || !allowed, 'aria-describedby': 'source-link-below',
+          disabled: !!acting() || !allowed, 'aria-describedby': 'source-link-below',
           oninput: (event: Event) => { sources.draft = (event.target as HTMLInputElement).value; const control = document.getElementById('source-look') as HTMLButtonElement | null; if (control) control.disabled = !ready(); },
           onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
         button({ variant: 'outline', size: 'small', icon: 'search', label: 'Look', id: 'source-look', disabled: !ready(), onclick: go })),
@@ -340,7 +340,7 @@ function addForm(allowed: boolean) {
 
 /** One source's row: its link and where it reads, why its last check failed, each item there, Check now and Remove. */
 function sourceRow(source: SourceView) {
-  const label = linkLabel(source.link), locked = !!state.busy || !state.home?.sync.access.allowed;
+  const label = linkLabel(source.link), locked = !!acting() || !state.home?.sync.access.allowed;
   const asking = sources.confirmRemove === source.id;
   const read = source.readAt ? `read ${dayAndTime(source.readAt)}` : '';
   const actions = asking ? null : h('span.source-actions', {},
@@ -368,7 +368,7 @@ function sourceRow(source: SourceView) {
     h('span.source-where.tone-muted', {}, [whereWords(source), read].filter(Boolean).join(' · ')),
     h('span.source-does.tone-muted', {}, `Check now reads the link again, as Central Knot does once a day while Automatic sync is on: ${orList((sources.view?.kinds ?? []).map(kind => nouns(kind).a))} changed there is updated in the tools it is on in, unless you changed it here (then it waits for you); one no longer there is turned off and taken out of them.`),
     asking ? h('div.band.source-confirm', { role: 'alert' }, h('span.band-text', {}, `Remove this source? ${removeWords()}`),
-      button({ variant: 'outline', size: 'small', label: 'Remove', id: `source-remove-confirm-${source.id}`, disabled: !!state.busy, onclick: () => void remove(source) }),
+      button({ variant: 'outline', size: 'small', label: 'Remove', id: `source-remove-confirm-${source.id}`, disabled: acting(), onclick: () => void remove(source) }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `source-remove-cancel-${source.id}`, onclick: () => { sources.confirmRemove = undefined; rerender(); } })) : null,
     source.problem ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, `Couldn’t fetch it at the last check: ${source.problem} What came from it stays as it is; below is its last read.`)) : null,
     source.unread ? sayLine('triangle-alert', 'tone-warning', source.holds === 'marketplace' || source.holds === 'listed'

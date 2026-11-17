@@ -97,10 +97,10 @@ const openInfo = new Set<string>();
  * How a shown text opens its editor: a plain click on it, with the caret where the click landed, or Enter while it has focus,
  * with the caret at the start. A click that ends with text selected in it (a drag, a double-click's word) leaves that selection
  * to be copied. `start` gets the caret's place as an offset into the text as its editor holds it (each line break one
- * character, as a text box keeps them). `locked`: the editor can't open now, with the reason its Edit button gives (said in the
- * status bar on a click), or `true` with none to give (something is under way).
+ * character, as a text box keeps them). `locked`: why the editor can't open now, the same reason its Edit button gives (the
+ * card's own, or what the page is doing: app.ts acting), said in the status bar on a click.
  */
-export interface EditOnClick { start: (caret: number) => void; locked?: string | boolean }
+export interface EditOnClick { start: (caret: number) => void; locked?: string }
 
 /** The offset of the point (x, y) into `pre`'s text as an editor holds it (a \r\n line break is one character there, so a \r
  *  that ends a line, before its \n or where the point stops between the two, isn't counted); its end when the point is past every
@@ -125,7 +125,7 @@ export function previewBlock(text: string, key: string, label: string, moreId: s
   const all = shownWhole.has(key);
   const begin = (caret: number) => {
     if (!edit?.locked) edit?.start(caret);
-    else if (typeof edit.locked === 'string') announce(edit.locked);
+    else announce(edit.locked);
   };
   const editable = !!edit && !edit.locked;
   return [h(`pre.ins-preview${editable ? '.ins-editable' : ''}`, { tabindex: '0', 'aria-label': label, 'aria-description': editable ? 'Click or press Enter to edit' : undefined,
