@@ -1,6 +1,7 @@
 // The page's element builder (h) and the small controls every page draws with: buttons, switches (toggle), checkboxes, icons,
-// empty states, section headings, shortened paths and file blocks, and the layout steps run after a render (afterLayout). No
-// words of the app's own: what a control says is its caller's, and the styles are style.css's.
+// empty states, section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout), and a
+// press released on a control a redraw replaced counting as its click (keepClicksAcrossRedraws). No words of the app's own: what
+// a control says is its caller's, and the styles are style.css's.
 import { icons, type IconName } from './icons.ts';
 import { groupBy } from './model.ts';
 
@@ -89,6 +90,27 @@ export const pathText = (text: string, full = text): HTMLElement => {
 
 /** A disabled control's reason, as its tooltip and its accessible description. */
 export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
+
+/**
+ * A press and its release on one control count as its click even when a redraw replaced the control between them (the lists
+ * redraw as clicks run): the browser fires no click on it then, so the release clicks the control now there, found by its id,
+ * only while it says what the pressed one said (its `aria-checked`) and the pressed one was not disabled, so a switch whose state
+ * changed under the press is never flipped the other way.
+ */
+export function keepClicksAcrossRedraws(): void {
+  let pressed: { control: Element; checked: string | null; disabled: boolean } | undefined;
+  const control = (event: Event) => (event.target as Element | null)?.closest?.('button[id]') ?? null;
+  document.addEventListener('pointerdown', event => {
+    const at = control(event);
+    pressed = at ? { control: at, checked: at.getAttribute('aria-checked'), disabled: (at as HTMLButtonElement).disabled } : undefined;
+  }, true);
+  document.addEventListener('pointerup', event => {
+    const now = control(event), was = pressed;
+    pressed = undefined;
+    if (!was || !now || was.control.isConnected || was.disabled || now.id !== was.control.id || now.getAttribute('aria-checked') !== was.checked) return;
+    (now as HTMLButtonElement).click();
+  }, true);
+}
 
 /**
  * An on/off switch; its label is also its tooltip. `mixed`: neither, drawn in between (its knob in the middle); a click turns
