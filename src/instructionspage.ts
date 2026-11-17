@@ -1,7 +1,7 @@
 // Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled or emptied by Central Knot (the one
 // deletion is an Undo of a base save removing a file that save created, while unchanged).
-import { announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, keepCaret, keys, legend, previewBlock, versionsList } from './editparts.ts';
 import { fileName, lineCount, toolNames } from './words.ts';
@@ -63,7 +63,7 @@ function editor(file: InstructionFile) {
         ? h('div.ins-actions', { id: `ins-actions-${file.tool}` }, discardConfirm(name, { discard: `ins-review-discard-yes-${file.tool}`, keep: `ins-review-keep-${file.tool}` }, 'Keep reviewing',
           { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-save-${file.tool}` }))
         : h('div.ins-actions', { id: `ins-actions-${file.tool}` },
-          button({ variant: 'primary', size: 'small', label: edit.takeOut ? 'Take the block out' : edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
+          button({ variant: 'primary', size: 'small', label: edit.takeOut ? 'Take the block out' : edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: acting() || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
           button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => leaveReview(file.tool) }),
           edit.restoring ? null : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-keep-${file.tool}`)?.focus(); } })));
   }
@@ -133,10 +133,10 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
           : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
         baseStrip(file, lockedWhy),
         h('div.ins-actions', {},
-          button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || editing, attrs: lockAttrs(lockedWhy), onclick: () => startInstructionEdit(file) }),
+          button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: acting() || readOnly || otherDirty || editing, attrs: lockAttrs(lockedWhy), onclick: () => startInstructionEdit(file) }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy,
             otherDirty && goToOther && draftFile() ? [' ', button({ variant: 'link', size: 'micro', label: `Go to ${toolNames[draftFile()!.tool]}’s file`, id: `ins-go-${draftFile()!.tool}`, disabled: !!state.busy, onclick: () => goToOther(draftFile()!.tool) })] : null) : null)),
-    versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!state.busy || readOnly || otherDirty || (editing && draftUnsaved()),
+    versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!acting() || readOnly || otherDirty || (editing && draftUnsaved()),
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));
 }
 

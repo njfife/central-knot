@@ -8,7 +8,7 @@
 // copyQuestion, which listNotices hands it, so this module needs nothing of matrix.ts), the latest copy preselected (library.ts latestCopy, in the take-in answer). Settings' Synchronize everything row
 // counts as the question does and leads in too (settingspage.ts). What Yes does in the engine, and its one Undo in History, are
 // everything.ts's.
-import { applyClick, busy, clickResumes, noToolManaged, rerender, setHome, showPage, state, syncNow, tell, whyReadOnly, type PageKind } from './app.ts';
+import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, setHome, showPage, state, syncNow, tell, whyReadOnly, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { rowClicks } from './libraryrow.ts';
 import { plural } from './model.ts';
@@ -52,13 +52,13 @@ function question(home: HomeView) {
     h('div.setup-text', {}, ...[now, choosing, oneUndoCovers, later].map(line => line.trim()).filter(Boolean).map((line, at, lines) => h('p.setup-line', {}, at < lines.length - 1 ? `${line} ` : line))),
     h('p.setup-text', { id: 'setup-no-says' }, no),
     h('div.setup-actions', {},
-      button({ variant: 'primary', label: 'Synchronize everything', id: 'setup-yes', disabled: !!state.busy, onclick: () => void answer(true) }),
-      button({ variant: 'outline', label: 'No, I’ll add items myself', id: 'setup-no', disabled: !!state.busy, attrs: { title: no, 'aria-describedby': 'setup-no-says' }, onclick: () => void answer(false) })));
+      button({ variant: 'primary', label: 'Synchronize everything', id: 'setup-yes', disabled: acting(), onclick: () => void answer(true) }),
+      button({ variant: 'outline', label: 'No, I’ll add items myself', id: 'setup-no', disabled: acting(), attrs: { title: no, 'aria-describedby': 'setup-no-says' }, onclick: () => void answer(false) })));
 }
 
 /** A home that waits for Resume: Resume comes first (any click resumes, as on the item pages), and the question after it. */
 const resumeFirst = (reason: string) => h('p.overview-line', { id: 'setup-resume' }, icon('circle-alert', 14, 'tone-warning'), `${reason} `,
-  button({ variant: 'link', size: 'micro', label: 'Resume', id: 'setup-resume-button', disabled: !!state.busy, onclick: () => void applyClick({ kind: 'skills', changes: [], items: [], said: 'Resumed: sync carries on from the record as it is.' }) }),
+  button({ variant: 'link', size: 'micro', label: 'Resume', id: 'setup-resume-button', disabled: acting(), onclick: () => void applyClick({ kind: 'skills', changes: [], items: [], said: 'Resumed: sync carries on from the record as it is.' }) }),
   ' Then Central Knot asks whether to synchronize everything.');
 
 /** The answer, refused where the home was answered meanwhile (another window). Yes opens the walkthrough where an item waits. */
@@ -148,8 +148,8 @@ export function walkthroughBand(kind: PageKind, question: (key: string, then: ()
   const note = `${at.latest ? '' : 'No dates to go by: choose one, or skip it. '}Skip changes no copy.`;
   return band(true, h('div.walk-top', {}, head(`${number} of ${of}`), h('span.walk-note', { id: 'walk-note' }, note),
     h('span.band-actions', {},
-      button({ variant: 'outline', size: 'small', label: 'Use the latest for the rest', id: 'walk-use-latest', disabled: !dated || !!state.busy, attrs: { title: latestTitle }, onclick: () => void useLatest(left) }),
-      button({ variant: 'outline', size: 'small', label: 'Skip', id: 'walk-skip', disabled: !!state.busy, attrs: { title: `Leave ${at.name} found, its copies as they are`, 'aria-describedby': 'walk-note' }, onclick: () => skip(at) }),
+      button({ variant: 'outline', size: 'small', label: 'Use the latest for the rest', id: 'walk-use-latest', disabled: !dated || acting(), attrs: { title: latestTitle }, onclick: () => void useLatest(left) }),
+      button({ variant: 'outline', size: 'small', label: 'Skip', id: 'walk-skip', disabled: acting(), attrs: { title: `Leave ${at.name} found, its copies as they are`, 'aria-describedby': 'walk-note' }, onclick: () => skip(at) }),
       close)),
     question(at.key, () => passChosen([at])));
 }

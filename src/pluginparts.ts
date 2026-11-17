@@ -143,7 +143,7 @@ export function clickNote(entry: MarketplaceView, plugin: string, onRow = false)
   const click = clickOn(entry.source, plugin);
   if (!click) return null;
   const { text, failed } = clickWords(click, onRow);
-  const glyph = click.state === 'waiting' ? icon('clock', 12) : click.state === 'running' ? icon('refresh-cw', 12, 'spin') : icon(failed ? 'triangle-alert' : 'check', 12);
+  const glyph = click.state === 'waiting' ? icon('clock', 12) : !click.ran ? icon('refresh-cw', 12, 'spin') : icon(failed ? 'triangle-alert' : 'check', 12);
   return h(`span.plugin-click${failed ? '.failed' : ''}`, { 'data-click': click.state }, glyph, h('span', {}, text));
 }
 
