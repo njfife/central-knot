@@ -171,14 +171,20 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   await send('Runtime.enable');
   await send('Log.enable');
   // A page that never settles (a renderer error at start, a read that never ends) fails the run instead of holding it open.
+  /** A click on the control `selector` names, then the page settled; `closing`: a row's own switch or Add starts a run of its own. */
+  const clickRow = async (selector, closing) => {
+    await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); if (${closing} && e.matches('.switch, .add-item') && e.closest('[data-key], [data-plugin]') && !e.closest('.details')) document.querySelector('#outcome-dismiss, #report-dismiss')?.click(); e.click(); })()`);
+    await settle();
+  };
   const settle = async () => { await wait(120); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s.')) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors,
     inspect, main: inspect && (() => mainProcess(inspect)),
-    // A row's own switch or Add clicked here is a run of its own: the header's result is closed first, as a person's would have
-    // gone, since a click joins the run whose result is on screen (app.ts queueClick). The checks of runs click by pointer
-    // (clickAt) or in the page.
-    click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); if (e.matches('.switch, .add-item') && e.closest('[data-key], [data-plugin]') && !e.closest('.details')) document.querySelector('#outcome-dismiss, #report-dismiss')?.click(); e.click(); })()`); await settle(); },
+    // A row's own switch or Add clicked here is a run of its own: the header's result is closed first, which ends the run on screen
+    // (clicklist.ts runAt), so each step reads its own click's result. clickInRun leaves it open, so a click soon after the last
+    // one joins its run, as a person's usually does; the checks of runs click that way, by pointer (clickAt) or in the page.
+    click: selector => clickRow(selector, true),
+    clickInRun: selector => clickRow(selector, false),
     exists: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     text: selector => run(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`),
     all: (selector, field = 'e.textContent') => run(`[...document.querySelectorAll(${JSON.stringify(selector)})].map(e => ${field})`),
@@ -799,6 +805,14 @@ async function practiceFlow() {
   await a.click('#add-notes');
   await a.click('#outcome-undo');
   same('Undo of taking a found skill in leaves every folder as before, and it is found again, the focus on its Add as Undo goes', [folders('notes'), await a.exists('#add-notes'), /^Undone: notes is as before\./.test(await a.text('.band-done') ?? ''), await a.run(`document.activeElement?.id`)], [notesFound, true, true, 'add-notes']);
+  // Add, then Off on the same row soon after: one run. The header says notes is off, as the run left it, and the run's one Undo
+  // takes both back: notes is found again, every folder as before.
+  await a.clickInRun('#add-notes');
+  await a.clickInRun('#switch-notes');
+  const mixedSaid = await a.text('#header [data-outcome] .band-text');
+  await a.click('#outcome-undo');
+  same('Add then Off in one run: the header says notes is off, and the run’s Undo leaves notes found, every folder as before',
+    [mixedSaid, await a.exists('#add-notes'), folders('notes'), /^Undone: notes is as before\./.test(await a.text('#header [data-outcome] .band-text') ?? '')], ['1 skill is off: notes.', true, notesFound, true]);
   await pointerOver('.ov-row[data-key="notes"]');
   await a.click('#add-notes');
   same('adding a found skill takes it in and writes it to every tool at once, byte for byte', [await switchOn(a, 'notes'), folders('notes')[2], folders('notes')[1]], [true, folders('notes')[0], folders('notes')[0]]);
@@ -830,7 +844,9 @@ async function practiceFlow() {
   await a.click('#delete-same-everywhere');
   await a.click('#delete-confirm-same-everywhere');
   same('Delete from Central Knot takes it out of every tool and off the page', [sameStats(), (await rowKeys(a)).includes('same-everywhere')], [[null, null, null], false]);
-  for (const key of ['release-notes', 'standup']) await a.click(`#add-${key}`);
+  // Two Adds, the second soon after the first: one run, said once.
+  for (const key of ['release-notes', 'standup']) await a.clickInRun(`#add-${key}`);
+  same('two Adds in a row are one run, said once', await a.text('#header [data-outcome] .band-text'), '2 skills are on: release-notes and standup.');
   await a.click('#header-refresh');
   same('Refresh regroups the rows: the three are On', (await sectionsNow(a))[0], ['on', ['notes', 'release-notes', 'standup']]);
   same('copies written every way', [existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.claude/skills/standup/SKILL.md')), existsSync(join(practice, '.codex/skills/standup/SKILL.md'))], [true, true, true]);
@@ -1321,7 +1337,7 @@ async function practiceFlow() {
   // release-notes is added from the keyboard: the rows are shared with Skills and MCP servers, so it stays where it was too.
   await a.run(`document.querySelector('#add-release-notes').focus()`);
   await a.press('Shift');
-  await a.click('#add-release-notes');
+  await a.clickInRun('#add-release-notes');
   same('after a click each agent stays where it was, under Found, from the keyboard too', await sectionsNow(a), [['found', ['code-reviewer', 'release-notes']]]);
   const reviewerFiles = ['.claude/agents/code-reviewer.md', '.copilot/agents/code-reviewer.agent.md', '.codex/agents/code-reviewer.toml'].map(file => join(practice, file));
   const [claudeAgent, , codexAgent] = reviewerFiles;
@@ -1330,7 +1346,7 @@ async function practiceFlow() {
   check('code-reviewer reached Copilot with name, description and prompt, without Claude Code’s own fields', taken[1].includes('description: Reviews a change') && taken[1].includes('You are a careful code reviewer.') && !taken[1].includes('tools:') && !taken[1].includes('model:'), taken[1]);
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', taken[2].includes('developer_instructions = """'));
-  same('taken in, they are On, and the result says where', [await switchOn(a, 'code-reviewer'), /release-notes is in Central Knot now, and on in all 3 tools/.test(await a.text('#header') ?? '')], [true, true]);
+  same('taken in, they are On, and the two Adds, one soon after the other, are said once', [await switchOn(a, 'code-reviewer'), await a.text('#header [data-outcome] .band-text')], [true, '2 agents are on: code-reviewer and release-notes.']);
   // Off takes the agent out of every harness. Central Knot keeps it: its row stays, off, with its description; On (here the
   // result's Undo) writes every harness's file back byte for byte, Claude Code's own fields included.
   await a.click('#switch-code-reviewer');
@@ -4958,9 +4974,11 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.run(`document.getElementById('${list}').scrollTop = 0`);
   const atItsTop = await placesNow(list, 'data-plugin'), bandBefore = await a.exists('.plugin-problems');
   await a.run(`document.querySelector('#header .band-dismiss')?.click()`); await a.settle();
-  const stillAtTop = await placesNow(list, 'data-plugin');
+  const afterClose = await placesNow(list, 'data-plugin');
   await clickAt(await middleOf('#pswitch-0-plug-06')); await done();
-  same('at the top of the list, a failure that goes from the header moves no row', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])], [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
+  const stillAtTop = await placesNow(list, 'data-plugin');
+  same('at the top of the list, a failure that goes from the header moves no row, nor does the click after it', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => afterClose.at[name]), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])],
+    [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name]), ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
   // Three failing plugins (plug-04, -05, -08) and one that installs (plug-10), in one list (each takes a second): one ×, two
   // reasons and Show all 3; shown, each reason whole; × closes it all.
   const failNow = ['plug-04', 'plug-05', 'plug-08'];
@@ -5241,11 +5259,13 @@ async function usageFlow() {
   await a.click('#switch-standup');
   const chipOn = () => a.run(`document.querySelector('.chip-on')?.dataset.tip`);
   const afterOne = [await sectionsNow(a), await chipOn()];
-  await a.click('#switch-spare');
+  await a.clickInRun('#switch-spare');
+  same('spare, clicked soon after standup, joins its run: said once', await a.text('#header [data-outcome] .band-text'), '2 skills are off: standup and spare.');
   await a.shot('usage-chip-pinned');
   same('with the chip on, rows turned Off by their own switch stay listed where they were, and the chip stays on', [afterOne, [await sectionsNow(a), await chipOn()], [await switchOn(a, 'standup'), await switchOn(a, 'spare')]],
     [[[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [false, false]]);
-  for (const key of ['standup', 'spare']) await a.click(`#switch-${key}`);
+  for (const key of ['standup', 'spare']) await a.clickInRun(`#switch-${key}`);
+  same('turned on again in the same run, each row is said as the run left it', await a.text('#header [data-outcome] .band-text'), '2 skills are on: standup and spare.');
   // Turn these off, with standup already pinned on the chip's list: every row takes its own group, and the chip falls back to All.
   await a.click('#switch-standup');
   await a.click('#turn-unused-off');

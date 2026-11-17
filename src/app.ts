@@ -32,7 +32,7 @@ import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
-import { clickList, drop, join, type Turn } from './clicklist.ts';
+import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { resultInHeader } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -204,7 +204,7 @@ const spoken = (outcome: Outcome) => [outcome.text, ...outcome.reasons ?? []].jo
  * one with no problem line, whose Undo stays in History (Plugins' run too, whose Undo goes with it: pluginstate.ts fadeRun); on
  * another page, an Undo's confirmation (Outcome fade).
  */
-const FADE_MS = 8000;
+export const FADE_MS = 8000;
 let fading: ReturnType<typeof setTimeout> | undefined;
 /** The result's time starts again from now; none runs while the page acts, whose end starts it (afterActing). */
 function fadeLater(): void {
@@ -270,10 +270,13 @@ let focusAfterBusy: string | undefined;
 export const focusWhenDone = (id: string) => { focusAfterBusy = id; };
 
 /**
- * Why the page is acting, while it is: work under busy (its line), or a run of clicks in the page's list (clicklist.ts). Meanwhile
- * no route opens another home, and every write but a row's switch or Add (on the item pages and Plugins, which join the list) is
- * off, each such control saying why (dom.ts button and toggle take the reason as `disabled`); a background refresh waits;
- * body[data-busy] says it (showActing), and the end-to-end checks wait on it.
+ * Why the page is acting, while it is: work under busy (its line), or clicks in the page's list (clicklist.ts). Meanwhile no
+ * route opens another home, a background refresh waits, and the writes to the home are off, each saying why (dom.ts button and
+ * toggle take the reason as `disabled`): Refresh, Automatic sync, Turn these off, Resume, an opened row's controls, History's
+ * actions, Profiles, Library sources, Instructions, the Git repo, a tool's Manage switch, first setup's choices, Settings'
+ * Synchronize everything, the Plugins page's other actions and the other-build screen. A row's switch or Add (the item pages and
+ * Plugins) joins the list instead; Settings' own switches, which write the app's settings, stay on. body[data-busy] says it
+ * (showActing), and the end-to-end checks wait on it.
  */
 export const acting = (): string | undefined => state.busy || (clickList.running ? 'Waits until the switches clicked are done.' : undefined);
 export const showActing = () => { document.body.dataset.busy = String(!!acting()); };
@@ -295,6 +298,8 @@ const couldNotFinish = () => (state.home ? `That could not finish. Still on ${st
 export async function busy(message: string, work: () => Promise<void>) {
   const focused = document.activeElement?.id;
   const before = state.said;
+  // Any other action, an Undo too, ends the run of clicks (clicklist.ts).
+  endRun();
   state.outcome = undefined;
   state.undoMoved = undefined;
   state.busy = message;
@@ -338,6 +343,7 @@ function accept(view: HomeView) {
   resetPageData(state.history);
   resetPageData(state.usage, 'unasked');
   drop(turn => turn.state === 'waiting');
+  endRun();
   resetMarket();
   // The note of what plugin updates did by themselves is about one home.
   void loadPluginUpdates();
@@ -391,7 +397,9 @@ export interface Click {
    * plugin's item: carryOut). `said`: what that part brought with it, said when it all worked.
    */
   plugins?: { ops: PluginOp[]; said?: string };
-  /** A click of `plugins` alone: what its Undo says once done ("Undone: triage is back on in Codex."). */
+  /** A click of its `plugins` part alone, with no change of the person's own (a plugin's own row, a tool's switch for a plugin's
+   * item): carryOut runs only those switches (switchesOnly); `undone` is what its Undo says once done ("Undone: triage is back on in Codex."). */
+  pluginsOnly?: boolean;
   undone?: string;
 }
 
@@ -437,7 +445,7 @@ export interface Done {
  * History entries the click itself made (never what sync did alongside), each by its own action (historyactions.ts).
  */
 async function carryOut(click: Click, page: Page): Promise<Done> {
-  if (click.plugins && !click.changes.length) return switchesOnly(click, click.plugins.ops, page);
+  if (click.pluginsOnly) return switchesOnly(click, click.plugins?.ops ?? [], page);
   const names = [...click.items, ...click.changes.map(change => change.key)];
   // Any click is a pass, even with no change (Resume).
   const result = await send(click.kind, click.changes);
@@ -473,9 +481,9 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
   const ran = await runSwitches(ops, click.undoing);
   setHome(await api().refresh());
   const worked = !ran.failed.length && !ran.stopped, said = typeof click.said === 'string' ? click.said : click.said([], []);
-  const text = (worked && said ? [said, click.plugins?.said].filter(Boolean).join(' ') : resultSentence(ran.lines, !!click.undoing)) || 'Nothing changed.';
+  const text = (worked && said ? [said, click.plugins?.said].filter(Boolean).join(' ') : resultSentence(ran.lines, !!click.undoing)) || `${click.items.length ? `${fewNames(click.items)}: n` : 'N'}othing changed.`;
   const undo = ran.back.length ? { made: [], back: ran.back } : undefined;
-  const back = { kind: click.kind, items: click.items, changes: [], said: click.undone ?? '', undoing: true, plugins: { ops: ran.back } };
+  const back = { kind: click.kind, items: click.items, changes: [], said: click.undone ?? '', undoing: true, pluginsOnly: true, plugins: { ops: ran.back } };
   return { did: ran.done.some(entry => succeeded(entry.report)), along: worked ? click.plugins?.said : undefined, undo,
     outcome: { page, items: click.items, text, reasons: switchReasons(ran, click.also), warn: !worked || !!click.also, band: true, fade: click.undoing && worked,
       act: undo && { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyClick(back) } } };
@@ -493,34 +501,29 @@ function sayDone(done: Done) {
 }
 
 /**
- * An item page's click in the page's list (clicklist.ts): its row's name, the page and place it was made on (`where`: the page,
- * and on Harnesses the tool whose page is open), whether its row is On now (`isOn`, read from the view), and once carried out,
- * what it did.
+ * An item page's click in the page's list (clicklist.ts): its row's name, the page it was made on (its run's place says which
+ * table there: placeOf), whether its row is On now (`isOn`, read from the view), and once carried out, what it did.
  */
-interface ItemTurn extends Turn { row: NonNullable<Turn['row']>; name: string; page: Page; where: string; isOn: () => boolean | undefined; done?: Done }
-const isItemTurn = (turn: Turn): turn is ItemTurn => 'where' in turn;
-/** Where the page is, as a click on it names it: the page, and on Harnesses the tool whose page is open, which has a header of its own. */
-const placeNow = () => (state.page === 'harnesses' ? `harnesses ${state.harness ?? ''}` : state.page);
-/** A run of clicks is the clicks of one place and kind (a harness's tab), said once there with one Undo. */
-const runOf = (turn: ItemTurn) => `${turn.where} ${turn.row.kind}`;
-const itemTurns = (run: string) => clickList.turns.filter((turn): turn is ItemTurn => isItemTurn(turn) && runOf(turn) === run);
+interface ItemTurn extends Turn { row: NonNullable<Turn['row']>; name: string; page: Page; isOn: () => boolean | undefined; done?: Done }
+const isItemTurn = (turn: Turn): turn is ItemTurn => 'isOn' in turn;
+/** A kind's table where the page is now, as a run names its place: the page, and on Harnesses the tool whose page is open (each has a header of its own). */
+const placeOf = (kind: PageKind) => `${state.page === 'harnesses' ? `harnesses ${state.harness ?? ''}` : state.page} ${kind}`;
+const itemTurns = (run: Run) => clickList.turns.filter((turn): turn is ItemTurn => isItemTurn(turn) && turn.run === run);
 
 /**
  * A row's switch or Add on an item page (matrix.ts flip, pluginRowSwitch): its click joins the page's list and is carried out in
  * its turn, worked out then from the view as it is (`make`; none when nothing is left to change), so the page stays live
- * meanwhile. Its row is drawn in the state it asks for at once (clicklist.ts wantedOn). It joins the run whose result is on
- * screen there, or starts one; the run's clicks are said as one result (sayRun).
+ * meanwhile. Its row is drawn in the state it asks for at once (clicklist.ts wantedOn). It joins the run on its table's place, or
+ * starts one (clicklist.ts runAt); the run's clicks are said as one result (sayRun).
  */
 export function queueClick(row: ItemTurn['row'], name: string, make: () => Click | undefined, isOn: ItemTurn['isOn']): void {
-  const turn: ItemTurn = { state: 'waiting', row, name, page: state.page, where: placeNow(), isOn, run: async () => {
+  const turn: ItemTurn = { state: 'waiting', row, name, page: state.page, isOn, run: runAt(placeOf(row.kind)), work: async () => {
     const click = make();
     // Nothing left to change in its turn (the click before it took its whole plugin with it, say): as asked already.
     if (!click) turn.done = { did: false, outcome: { page: turn.page, items: [name], text: `${name}: nothing left to change.` } };
     else turn.done = await carryOut(click, turn.page).catch((): Done => ({ did: false, outcome: { page: turn.page, items: [name], warn: true, band: true, text: `${name}: ${couldNotFinish()}` } }));
     sayRun(turn);
   } };
-  // A run lasts while its result is on screen: once that is gone, this click starts a new run, and the last one's clicks go.
-  if (state.outcome?.run !== runOf(turn)) drop(other => other.state === 'ended' && isItemTurn(other) && runOf(other) === runOf(turn));
   join(turn);
   rerender();
 }
@@ -531,9 +534,9 @@ export function queueClick(row: ItemTurn['row'], name: string, make: () => Click
  * only the status bar says it.
  */
 function sayRun(turn: ItemTurn) {
-  const done = turn.done!, run = runOf(turn), turns = itemTurns(run);
-  const outcome: Outcome = { ...(turns.length === 1 ? done.outcome : runOutcome(turns)), run };
-  if (placeNow() !== turn.where) { announce(spoken(outcome)); return; }
+  const done = turn.done!, turns = itemTurns(turn.run);
+  const outcome = turns.length === 1 ? done.outcome : runOutcome(turns);
+  if (placeOf(turn.row.kind) !== turn.run.place) { announce(spoken(outcome)); return; }
   if (done.kept) kindPages[done.kept.kind].keep(turns.flatMap(each => each.done?.kept?.results ?? []), done.kept.notices);
   tell(outcome);
   flashRow(turn.name);
@@ -767,13 +770,15 @@ export const homeToolNames = (): string[] => homeTools().map(toolName);
 export const touchedToolsPhrase = (touched: string[]): string => toolsPhrase(touched, homeTools());
 
 /** × on a result: it goes, and with it what its click could not do (the item pages' last click's problems). */
-export function closeResult() { state.outcome = undefined; state.skillsResult = state.mcpResult = state.agentsResult = undefined; rerender(); }
+export function closeResult() { endRun(); state.outcome = undefined; state.skillsResult = state.mcpResult = state.agentsResult = undefined; rerender(); }
 
 /**
  * Lets go of what the last action showed (its result, Apply results, the spoken line): for moving to another place.
  * A home switch's result survives one move, since switching is often followed by a click elsewhere; `page` is where it lands.
  */
 export function leaveResults(page = state.page) {
+  // Another page, or another tool's page, ends the run of clicks (clicklist.ts).
+  endRun();
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   state.skillsResult = undefined; state.mcpResult = undefined; state.agentsResult = undefined;
   tell(carried);
@@ -968,8 +973,6 @@ export interface Outcome {
   next?: { label: string; id: string; run: () => void; title?: string };
   /** When it was said (state.said.seq): a result newer than a table's pending changes still shows there. */
   said?: number;
-  /** A run of clicks' result (app.ts sayRun): its place and kind; a click there joins the run while this is on screen. */
-  run?: string;
 }
 
 /**

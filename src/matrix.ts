@@ -74,7 +74,7 @@ function switchPluginItem(item: PluginItemAt) {
   const on = !itemOn(item);
   clickPluginItem(draft, item);
   const ops = [...draft.values()];
-  void applyClick({ kind, items: [item.name], changes: [], said: itemSaid(item, on, ops), plugins: { ops }, undone: undoneWords(item.name, on, names[item.tool]) });
+  void applyClick({ kind, items: [item.name], changes: [], said: itemSaid(item, on, ops), pluginsOnly: true, plugins: { ops }, undone: undoneWords(item.name, on, names[item.tool]) });
 }
 
 /** Why an item a tool has through a plugin can't be switched on this page now, if it can't: the switch itself (pluginswitch.cantSwitch), or a home that can't be written. */
@@ -1139,8 +1139,8 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
 function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string, focus?: () => string): Click {
   const along = plugins.turned.map(item => alongWords(item, plugins.ops)).filter(Boolean).join(' ') || undefined;
   const table = tableNow(), here = (notIn: HarnessId[]) => onTable(table, () => said(notIn));
-  const undone = changes.length ? undefined : undoneWords(name, on, toolsPhrase(plugins.turned.map(item => item.tool), toolList()));
-  return { kind, items: [name], changes, said: here, also, focus: focus && (() => onTable(table, focus)), plugins: plugins.ops.length || !changes.length ? { ops: plugins.ops, said: along } : undefined, undone };
+  const pluginsOnly = !changes.length, undone = pluginsOnly ? undoneWords(name, on, toolsPhrase(plugins.turned.map(item => item.tool), toolList())) : undefined;
+  return { kind, items: [name], changes, said: here, also, focus: focus && (() => onTable(table, focus)), pluginsOnly, plugins: plugins.ops.length || pluginsOnly ? { ops: plugins.ops, said: along } : undefined, undone };
 }
 
 /** The table on screen, as a click made on it names it: its kind and the harness whose page it is on. */

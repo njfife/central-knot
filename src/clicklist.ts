@@ -1,20 +1,27 @@
 // The page's one list of clicks, carried out one at a time in the order clicked: a row's switch or Add on the item pages
 // (app.ts queueClick) and a plugin's switch or tool's box on Plugins (pluginstate.ts turnPlugin) join it, each a Turn. While
-// clicks wait or run, the page acts (app.ts acting): every write but these switches is off and says why, the page stays live (it
-// scrolls, rows open, switches take clicks), and the background refresh waits: the home is read once when the list is empty and
-// anything owes it a read (app.ts readHomeOnce). A run of clicks, said once with one Undo, lasts while its result is on screen:
-// the list keeps a run's ended clicks until that route's next click finds the result gone and lets them go (drop; app.ts
-// queueClick, pluginstate.ts turnPlugin). Here: the list, a click's place in it, taking a waiting click back, and the state a row's
-// switch is drawn in meanwhile (wantedOn). Each route keeps its own work, its row while its click waits (the item pages draw the
-// new state; Plugins say "Waiting to…": pluginparts.ts clickNote) and its result with its Undo (app.ts sayRun; pluginstate.ts
-// market.lastRun).
-import { afterActing, homeReadOwed, readHomeOnce, rerender, showActing, type PageKind } from './app.ts';
+// clicks wait or run, the page acts (app.ts acting): the writes it names are off and say why, the page stays live (it scrolls,
+// rows open, switches take clicks), and the background refresh waits: the home is read once when the list is empty and anything
+// owes it a read (app.ts readHomeOnce). A run of clicks, said once with one Undo, is decided here for both routes (runAt): a click
+// joins the run on its place while that run still has a click waiting or running, or within FADE_MS after its last click ended,
+// unless something ended it (endRun: its result's ×, its Undo or any other action, another page or tool's page, another home).
+// Here: the list, the runs, a click's place in them, taking a waiting click back, and the state a row's switch is drawn in
+// meanwhile (wantedOn). Each route keeps its own work, its row while its click waits (the item pages draw the new state; Plugins
+// say "Waiting to…": pluginparts.ts clickNote) and its result with its Undo (app.ts sayRun; pluginstate.ts market.lastRun).
+import { afterActing, FADE_MS, homeReadOwed, readHomeOnce, rerender, showActing, type PageKind } from './app.ts';
+
+/**
+ * A run of clicks: its place (an item page's kind on one page, or one tool's page; or Plugins), and when its last click ended
+ * (0 before one has). Its clicks are the turns that name it.
+ */
+export interface Run { place: string; lastAt: number }
 
 /** One click in the list: waiting its turn, running (its work, through main, and the read after it), or ended. */
 export interface Turn {
   state: 'waiting' | 'running' | 'ended';
-  /** Its work, run in its turn. Each route says its own failures; a click whose work throws ends all the same. */
-  run: () => Promise<void>;
+  /** Its work, done in its turn. Each route says its own failures; a click whose work throws ends all the same. */
+  work: () => Promise<void>;
+  run: Run;
   /** An item page's row (its kind and key) and the state its switch asks for, which the row is drawn in until the click ends. */
   row?: { kind: PageKind; key: string; on: boolean };
   /** Said when the list empties after it ran (Plugins: its run's clicks said as a whole). */
@@ -22,6 +29,28 @@ export interface Turn {
 }
 
 export const clickList = { turns: [] as Turn[], running: false };
+/** The run still taking clicks, on the place last clicked; none once ended. */
+let open: Run | undefined;
+
+const unended = (run: Run) => clickList.turns.filter(turn => turn.run === run && turn.state !== 'ended');
+
+/**
+ * The run a click made now on `place` joins: the open one there, while a click of it waits or runs or for FADE_MS after its
+ * last click ended; else a new one, and the clicks of earlier runs there that have ended leave the list. A run with no click
+ * yet is new (the route clears what the last one said: pluginstate.ts turnPlugin).
+ */
+export function runAt(place: string): Run {
+  if (open?.place === place && (unended(open).length || Date.now() - open.lastAt < FADE_MS)) return open;
+  drop(turn => turn.state === 'ended' && turn.run.place === place);
+  return (open = { place, lastAt: 0 });
+}
+
+/** The open run ends; its clicks still waiting or running go on as a run of their own, which says only them. */
+export function endRun(): void {
+  const left = open ? unended(open) : [];
+  open = left.length ? { place: open!.place, lastAt: 0 } : undefined;
+  for (const turn of left) turn.run = open!;
+}
 
 /** A click joins the list, which starts running if it was not. */
 export function join(turn: Turn): void {
@@ -29,7 +58,7 @@ export function join(turn: Turn): void {
   if (!clickList.running) void runList();
 }
 
-/** These clicks leave the list: a run's ended clicks once its result is gone, or every click another home leaves behind. */
+/** These clicks leave the list: a run's ended clicks once a new run starts on their place, or what another home leaves behind. */
 export function drop(which: (turn: Turn) => boolean): void { clickList.turns = clickList.turns.filter(turn => !which(turn)); }
 
 /** The latest unended click on an item page's row, if one is there. */
@@ -56,8 +85,9 @@ async function runList(): Promise<void> {
       // Not drawn: a row looks the same while its click waits and while it runs (Plugins' runClick draws its own row's words).
       next.state = 'running';
       ran.push(next);
-      await next.run().catch(() => undefined);
+      await next.work().catch(() => undefined);
       next.state = 'ended';
+      next.run.lastAt = Date.now();
       rerender();
     } else if (homeReadOwed()) await readHomeOnce();
     // A click made during that read runs too, and the home is read again after it.
