@@ -1368,8 +1368,10 @@ async function practiceFlow() {
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 60 && (outsideOff() || !/Undone: outside-skill/.test(await a.text('#header') ?? '')); tries++) await wait(100);
   check('its one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside) && /Undone: outside-skill is back on in Claude Code\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
-  // Two of its skills turned off 150 ms apart (clip 04): the first takes the whole plugin off in Claude Code; the second, worked out
-  // in its turn, finds nothing left to change there, so it neither fails nor turns the plugin back on; the run's one Undo puts it back.
+  // Two of its skills turned off 150 ms apart (clip 04), the second while the first still runs (Claude Code's stand-in takes a
+  // second to disable it): the first takes the whole plugin off in Claude Code; the second, worked out in its turn, finds nothing
+  // left to change there, so it neither fails nor turns the plugin back on; the run's one Undo puts it back.
+  writeFileSync(outsideStub, readFileSync(outsideStub, 'utf8').replace('--scope user") printf', '--scope user") sleep 1; printf'));
   await a.run(`document.querySelector('${outsideRow} .switch').click()`); await wait(150);
   await a.run(`document.querySelector('.ov-row[data-key="${other}"] .switch').click()`);
   await a.settle();
