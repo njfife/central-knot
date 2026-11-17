@@ -1,6 +1,7 @@
 // The editing pieces the Instructions page's tool cards and its Base instructions card share: diffs with a legend, change
-// counts, previews, earlier-version lists, the discard question and the keyboard hint.
-import { machine, rerender } from './app.ts';
+// counts, previews (a click on one opens its editor), earlier-version lists, the discard question, the keyboard hint, and the
+// info box that holds what explains the page.
+import { announce, machine, rerender } from './app.ts';
 import { lineDiff, folded } from './diff.ts';
 import { button, h, icon } from './dom.ts';
 import { plural } from './model.ts';
@@ -84,13 +85,51 @@ export function changeCounts(diff: { kind: string }[]) {
   return { total: added + removed + altered, text: [altered ? `${plural(altered, 'line')} changed` : '', added ? `${plural(added, 'line')} added` : '', removed ? `${plural(removed, 'line')} removed` : ''].filter(Boolean).join(', ') };
 }
 
-/** Cards whose whole file is shown, for reading without editing. */
+/** What is open across redraws (every redraw rebuilds the page): texts shown whole, by their key, and the info box (infoBox). */
 const open = new Set<string>();
 
-/** A text shown 14 lines at a time, with "Show all N lines" / "Show less" (remembered by `key`). */
-export function previewBlock(text: string, key: string, label: string, moreId: string) {
+/**
+ * How a shown text opens its editor: a click on it, with the caret where the click landed, or Enter while it has focus, with
+ * the caret at the start. `start` gets that place as an offset into the text. `locked`: the editor can't open now, with the
+ * reason its Edit button gives (said in the status bar on a click), or `true` with none to give (something is under way).
+ */
+export interface EditOnClick { start: (caret: number) => void; locked?: string | boolean }
+
+/** The offset into `pre`'s text of the point (x, y); its end when the point is past every character. */
+function offsetAt(pre: HTMLElement, x: number, y: number): number {
+  const at = document.caretRangeFromPoint(x, y);
+  if (!at || !pre.contains(at.startContainer)) return pre.textContent?.length ?? 0;
+  const before = document.createRange();
+  before.setStart(pre, 0);
+  before.setEnd(at.startContainer, at.startOffset);
+  return before.toString().length;
+}
+
+/**
+ * A text shown 14 lines at a time, with "Show all N lines" / "Show less" (remembered by `key`). What is shown is the text's
+ * start, so an offset into it is an offset into the text. With `edit`, the text opens its editor (EditOnClick).
+ */
+export function previewBlock(text: string, key: string, label: string, moreId: string, edit?: EditOnClick) {
   const lines = linesOf(text);
   const all = open.has(key);
-  return [h('pre.ins-preview', { tabindex: '0', 'aria-label': label }, (all ? lines : lines.slice(0, 14)).join('\n')),
-    lines.length > 14 ? button({ variant: 'link', size: 'micro', label: all ? 'Show less' : `Show all ${lines.length} lines`, id: moreId, onclick: () => { if (all) open.delete(key); else open.add(key); rerender(); } }) : null];
+  const begin = (caret: number) => {
+    if (!edit?.locked) edit?.start(caret);
+    else if (typeof edit.locked === 'string') announce(edit.locked);
+  };
+  const editable = !!edit && !edit.locked;
+  return [h(`pre.ins-preview${editable ? '.ins-editable' : ''}`, { tabindex: '0', 'aria-label': label, 'aria-description': editable ? 'Click or press Enter to edit' : undefined,
+    onclick: edit ? (event: MouseEvent) => begin(offsetAt(event.currentTarget as HTMLElement, event.clientX, event.clientY)) : undefined,
+    onkeydown: edit ? (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault(); begin(0); } } : undefined },
+  (all ? lines : lines.slice(0, 14)).join('\n')),
+  lines.length > 14 ? button({ variant: 'link', size: 'micro', label: all ? 'Show less' : `Show all ${lines.length} lines`, id: moreId, onclick: () => { if (all) open.delete(key); else open.add(key); rerender(); } }) : null];
+}
+
+/**
+ * One line that opens on a click or Enter to say more (a disclosure, never a hover tooltip), open or shut across redraws by
+ * `key`. Holds what explains a page, so the page itself keeps what a person acts on.
+ */
+export function infoBox(key: string, id: string, label: string, ...body: (Node | null)[]) {
+  return h('details.info-box', { id, open: open.has(key), ontoggle: (event: Event) => { if ((event.currentTarget as HTMLDetailsElement).open) open.add(key); else open.delete(key); } },
+    h('summary', {}, icon('info', 14, 'tone-muted'), h('span', {}, label), icon('chevron-right', 12, 'tone-faint info-box-chevron')),
+    h('div.info-box-body', {}, ...body));
 }

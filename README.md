@@ -68,7 +68,7 @@ Skills: each tool's own skills folder. OpenCode 1.x leaves out a skill with no `
 
 ### Instructions
 
-Opens each tool's own instruction file to read and edit in place, with **Undo save**. OpenCode's card says when OpenCode 1.x is reading Claude Code's `CLAUDE.md` because it has no `AGENTS.md` yet.
+Opens each tool's own instruction file to read and edit in place, one card a row: a click on the text (or **Edit**) opens it with the caret there, and a card's buttons stay in its head while you edit, with **Undo save** after. **How these files are read**, at the top, says who reads each file and each tool's own notes, such as OpenCode 1.x reading Claude Code's `CLAUDE.md` while it has no `AGENTS.md`.
 
 **Base instructions**: you write a base once and choose which tools get it. It is added after each tool's own instructions as one marked block; the tool's own text is never rewritten. Every write is reviewed first (**Review changes**), a copy edited outside the app is found, and each save can be undone. A typed draft is not lost when you switch homes: the app asks first.
 

@@ -953,17 +953,39 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
   tell(result.stopped ? undefined : { page, item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` }, result.stopped);
 });
 
-/** Opens one file in the editor; any earlier result band belongs to the last task, not this one. */
-export function startInstructionEdit(file: InstructionFile) {
+/**
+ * Focus in an editor once it is drawn (`id`), with its card's head in view (`headId`: its actions are there). With `caret`
+ * (where a click on the text landed) the caret goes there, and the box scrolls within itself to show that line under the head.
+ */
+function focusEditor(id: string, headId: string, caret?: number) {
+  document.getElementById(headId)?.scrollIntoView({ block: 'nearest' });
+  const area = document.getElementById(id) as HTMLTextAreaElement | null;
+  if (!area) return;
+  area.focus({ preventScroll: true });
+  if (caret === undefined) return;
+  area.setSelectionRange(caret, caret);
+  // How far down the caret's line ends: the height of the text up to it in a one-row box, wrapped lines counted.
+  const [text, rows] = [area.value, area.rows];
+  Object.assign(area, { value: text.slice(0, caret), rows: 1 });
+  const lineEnd = area.scrollHeight;
+  Object.assign(area, { value: text, rows });
+  area.setSelectionRange(caret, caret);
+  // The part of the box on screen, from its top to the foot of the page's scroll area: the line goes halfway down it when below.
+  const box = area.getBoundingClientRect(), page = area.closest('.scroll')?.getBoundingClientRect();
+  const shown = Math.min(box.bottom, page?.bottom ?? innerHeight) - box.top;
+  area.scrollTop = lineEnd > shown ? lineEnd - shown / 2 : 0;
+}
+
+/** Opens one file in the editor, the caret at `caret` when a click on its text opened it; any earlier result band belongs to
+ *  the last task, not this one. */
+export function startInstructionEdit(file: InstructionFile, caret?: number) {
   if (askAboutOpenDraft()) return;
   // A save on another card keeps its Undo there; any other result belongs to the last task.
   if (!(state.outcome?.kind === 'saved' && state.outcome.tool !== file.tool)) state.outcome = undefined;
   if (!openDraft(file, ownText(file), 'edit')) { rerender(); return; }
   state.baseEdit = undefined;
   rerender();
-  const area = document.getElementById(`ins-text-${file.tool}`) as HTMLTextAreaElement | null;
-  area?.focus();
-  document.getElementById(`ins-actions-${file.tool}`)?.scrollIntoView({ block: 'nearest' });
+  focusEditor(`ins-text-${file.tool}`, `ins-head-${file.tool}`, caret);
 }
 
 /** Loads an earlier version into the editor; putting it back is an ordinary save, with its diff first. */
@@ -1048,16 +1070,16 @@ function leftText(result: BaseResult, undoing = false) {
     result.problem ? ` ${result.problem}` : ''].join('');
 }
 
-/** Opens the base in its editor; a clean tool editor closes, since only one thing is edited at a time. */
-export function startBaseEdit(draft: Omit<BaseEdit, 'hash' | 'stage'> & { stage?: BaseEdit['stage'] }) {
+/** Opens the base in its editor (the caret at `caret` when a click on its text opened it); a clean tool editor closes, since
+ *  only one thing is edited at a time. */
+export function startBaseEdit(draft: Omit<BaseEdit, 'hash' | 'stage'> & { stage?: BaseEdit['stage'] }, caret?: number) {
   if (askAboutOpenDraft()) return;
   if (state.outcome?.kind !== 'saved') state.outcome = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
   state.draftPick = undefined;
   state.baseEdit = { stage: 'edit', ...draft, hash: state.base?.hash ?? '' };
   rerender();
-  document.getElementById(state.baseEdit.stage === 'edit' ? 'base-text' : 'base-save')?.focus();
-  document.getElementById('base-card')?.scrollIntoView({ block: 'nearest' });
+  focusEditor(state.baseEdit.stage === 'edit' ? 'base-text' : 'base-save', 'base-head', caret);
 }
 
 /**

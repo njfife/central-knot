@@ -87,7 +87,7 @@ A Git link the person gave, read on a click and once a day, and never written: e
 
 ## Instructions
 Each tool's own instruction file, edited in place; and one base text kept in a marked block in the chosen tools' files.
-- `instructions.ts` the files: read, checked save, versions, the base applied (`applyBase`) · `instructionspage.ts` the page · `editparts.ts` diffs, versions, the discard question
+- `instructions.ts` the files: read, checked save, versions, the base applied (`applyBase`) · `instructionspage.ts` the page: what explains the files in one info box (`aboutInstructions`), the base card, then each tool's card (`instructionCard`, also a harness's Instructions tab) · `editparts.ts` what both kinds of card share: a text a click opens for editing (`previewBlock`), diffs, versions, the discard question, the info box (`infoBox`)
 - `basecard.ts` the base instructions card · `basetext.ts` the base's block in a tool's file · `draftbase.ts` a first draft by one of the person's tools · `drafts.ts` when a draft is replaced
 - **Start:** `instructions.ts`'s header. **Examples:** `tests/instructions.test.ts`, `tests/baseinstructions.test.ts`, `tests/draftbase.test.ts`, `tests/drafts.test.ts`.
 
