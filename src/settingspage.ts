@@ -391,7 +391,7 @@ function pluginUpdatesRow(): HTMLElement {
   const view = pluginUpdates.view;
   const hint = 'Central Knot checks your marketplaces every four hours, with its window closed too, and updates the plugins your tools have, through each tool’s own command. A plugin you turned off stays off. An update can’t be undone.';
   const checked = on ? checkedWords(pluginUpdates.asked && view ? { ...view, checking: true } : view) : undefined;
-  const notice: RowMessage | undefined = checked && { text: checked.text, tone: checked.tone, action: checked.note ? { label: 'See Plugins', run: () => showPage('plugins') } : undefined };
+  const notice: RowMessage | undefined = checked && { text: checked.text, tone: checked.tone, action: checked.note ? { label: 'See Plugin marketplaces', run: () => showPage('plugins') } : undefined };
   return settingRow('plugin-updates', 'Update plugins automatically', hint,
     h('div.setting-actions', {},
       on ? button({ variant: 'outline', label: 'Check now', id: 'check-plugin-updates', disabled: !view || view.checking || pluginUpdates.asked, onclick: () => void checkPluginsNow(), attrs: { 'aria-describedby': 'setting-plugin-updates-hint' } }) : null,

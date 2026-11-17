@@ -208,9 +208,9 @@ async function resolve(context: ShareContext, link: string): Promise<{ where: Re
  */
 function handOff(where: Resolved, head: string | undefined, found: Holds): { toPlugins: ToPlugins } | { why: string } | undefined {
   if ((found.holds !== 'marketplace' && found.holds !== 'listed') || !found.market || 'problem' in found.market) return undefined;
-  const rule = 'the Plugins page adds a marketplace from its repository’s default branch, at its root';
-  if (found.holds === 'marketplace' && where.folder) return { why: `It is in the folder ${where.folder}, not at its repository’s root, and ${rule}. To use it, clone the repository and add that folder in it with Folder… on Plugins.` };
-  if (where.ref !== head) return { why: `It was read on ${where.ref}, not ${head ? `the default branch, ${head}` : 'a default branch'}, and ${rule}. To use it, clone that branch and add the clone’s folder with Folder… on Plugins.` };
+  const rule = 'the Plugin marketplaces page adds a marketplace from its repository’s default branch, at its root';
+  if (found.holds === 'marketplace' && where.folder) return { why: `It is in the folder ${where.folder}, not at its repository’s root, and ${rule}. To use it, clone the repository and add that folder in it with Folder… on Plugin marketplaces.` };
+  if (where.ref !== head) return { why: `It was read on ${where.ref}, not ${head ? `the default branch, ${head}` : 'a default branch'}, and ${rule}. To use it, clone that branch and add the clone’s folder with Folder… on Plugin marketplaces.` };
   return { toPlugins: { address: githubRepo(where.repository) ?? where.repository, name: found.market.name, plugins: found.market.plugins } };
 }
 

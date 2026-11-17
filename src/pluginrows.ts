@@ -108,7 +108,7 @@ function missingWhy(row: PluginRow, tool: HarnessId): string {
   if (install && tool === 'codex-cli' && row.kind === 'agent') return `${name} has ${row.plugin} installed, but Codex doesn’t load a plugin’s agents.`;
   if (install) return `${name} has ${row.plugin} installed, but its copy doesn’t have this ${row.kind === 'mcp' ? 'MCP server' : row.kind}.`;
   if (!takesPlugins(tool)) return `${name} takes no plugins.${handledWhere(row).listed ? ` Tick ${name} on ${row.plugin}’s page to put its skills, agents and MCP servers there, as items that follow it.` : ''}`;
-  return `Not installed in ${name}.${handledWhere(row).listed ? ' The plugin’s page on Plugins installs it there.' : ''}`;
+  return `Not installed in ${name}.${handledWhere(row).listed ? ' The plugin’s page on Plugin marketplaces installs it there.' : ''}`;
 }
 
 /** One tool's cell, in words: there through the plugin (on or off), or why not. */

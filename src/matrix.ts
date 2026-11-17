@@ -102,7 +102,7 @@ function openWhole(row: PluginRow) {
 function handledNote(row: PluginRow, lead: string, id: string) {
   const where = handledWhere(row);
   return h('p.details-limits.details-note.details-part', {}, icon('puzzle', 12, 'tone-muted'), h('span', {}, lead, where.text,
-    ...(where.listed ? [h('button.inline-link', { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); openWhole(row); } }, `${row.plugin}’s page on Plugins`), '. '] : [' ']),
+    ...(where.listed ? [h('button.inline-link', { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); openWhole(row); } }, `${row.plugin}’s page on Plugin marketplaces`), '. '] : [' ']),
     'Central Knot doesn’t copy it between tools; the switches below turn it on or off in each tool.'));
 }
 
@@ -620,11 +620,11 @@ function sourceTag(skill: ItemRow) {
   const tag = skill.fromSource && fromSourceWords(skill.fromSource).tag, plugin = skill.fromSource && pluginOf(skill.fromSource.link);
   return tag ? h(`span.row-tag.row-tag-source${plugin ? '.row-tag-plugin' : ''}`, { title: tag.title }, icon('link-2', 12, plugin ? 'tone-muted' : 'tone-warning'), tag.text) : null;
 }
-/** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to Sources. */
+/** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to that source's page. */
 function fromSourceLine(key: string, from: NonNullable<ItemRow['fromSource']>) {
   const said = fromSourceWords(from);
   return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits || from.removed ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
-    h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage(said.page) }, said.page === 'plugins' ? 'Plugins' : 'Library sources'), said.after));
+    h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage(said.page) }, said.page === 'plugins' ? 'Plugin marketplaces' : 'Library sources'), said.after));
 }
 
 /**

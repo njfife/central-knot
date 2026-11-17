@@ -204,7 +204,7 @@ test('A marketplace’s link, bare or /tree/<its default branch>, is offered to 
     for (const link of ['https://github.com/team/market', 'https://github.com/team/market/tree/main']) {
       const seen = await look(box, link);
       assert.deepEqual([seen.holds, seen.toPlugins, seen.names], ['marketplace', { address: 'team/market', name: 'acme-tools', plugins: 2 }, []], link);
-      assert.equal(seen.refused, 'The link holds a marketplace, acme-tools, with 2 plugins: it goes on the Plugins page, where each of its plugins has a switch of its own, so a source doesn’t read it.');
+      assert.equal(seen.refused, 'The link holds a marketplace, acme-tools, with 2 plugins: it goes on the Plugin marketplaces page, where each of its plugins has a switch of its own, so a source doesn’t read it.');
       const added = await addSource(box.context, box.tools, seen.token);
       assert.equal(added.stopped, seen.refused, 'Add of its look is refused');
     }
@@ -215,7 +215,7 @@ test('A marketplace’s link, bare or /tree/<its default branch>, is offered to 
     repo.branch('main', false);
     const dev = await look(box, 'https://github.com/team/market/tree/dev');
     assert.equal(dev.toPlugins, undefined);
-    assert.match(dev.refused ?? '', / It was read on dev, not the default branch, main, and the Plugins page adds a marketplace from its repository’s default branch, at its root\. To use it, clone that branch and add the clone’s folder with Folder… on Plugins\.$/);
+    assert.match(dev.refused ?? '', / It was read on dev, not the default branch, main, and the Plugin marketplaces page adds a marketplace from its repository’s default branch, at its root\. To use it, clone that branch and add the clone’s folder with Folder… on Plugin marketplaces\.$/);
 
     const nested = await repository(hosts, 'https://github.com/team/nested');
     await nested.commit({ 'market/.claude-plugin/marketplace.json': JSON.stringify({ name: 'inner', plugins: [] }) });
@@ -234,7 +234,7 @@ test('A plugin its repository’s marketplace lists is refused and handed to the
     const repo = await acme();
     const kit = await look(box, 'https://github.com/team/market/tree/main/plugins/kit');
     assert.deepEqual([kit.holds, kit.names, kit.toPlugins], ['listed', [], { address: 'team/market', name: 'acme-tools', plugins: 2 }]);
-    assert.equal(kit.refused, 'The link’s folder is the plugin kit, which its repository’s marketplace, acme-tools, lists: it goes on the Plugins page with that marketplace (2 plugins), where it has a switch of its own, so a source doesn’t read it.');
+    assert.equal(kit.refused, 'The link’s folder is the plugin kit, which its repository’s marketplace, acme-tools, lists: it goes on the Plugin marketplaces page with that marketplace (2 plugins), where it has a switch of its own, so a source doesn’t read it.');
     assert.equal((await look(box, 'https://github.com/team/market/tree/main/plugins/lean')).holds, 'listed', 'listed with no plugin.json of its own');
 
     repo.branch('dev');
@@ -274,7 +274,7 @@ function pluginsPage(box: Box, tools: HarnessId[]) {
   return { calls, markets: createMarketplaces(host, use, []) };
 }
 
-test('Add to Plugins is the Plugins page’s own add: the marketplace is listed, no installer or tool command runs, no plugin gets an entry, no tool’s record changes, and Sources keeps nothing; added again, or added in a tool before, it is listed once and said to be there already; its Remove there leaves Sources as it was', async () => {
+test('Add to Plugin marketplaces is that page’s own add: the marketplace is listed, no installer or tool command runs, no plugin gets an entry, no tool’s record changes, and Sources keeps nothing; added again, or added in a tool before, it is listed once and said to be there already; its Remove there leaves Sources as it was', async () => {
   const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli']);
   try {
     await acme();
@@ -301,7 +301,7 @@ test('Add to Plugins is the Plugins page’s own add: the marketplace is listed,
   } finally { await box.cleanup(); }
 });
 
-test('Look succeeds, then the repository can’t be read when Add to Plugins runs: the Plugins page’s words, nothing listed', async () => {
+test('Look succeeds, then the repository can’t be read when Add to Plugin marketplaces runs: that page’s words, nothing listed', async () => {
   const box = await sandbox(['claude-cli']);
   try {
     const repo = await acme('https://github.com/team/private');
@@ -461,7 +461,7 @@ test('A source whose link now holds a marketplace turns nothing Off, and its row
     const done = await check(box, id);
     assert.deepEqual([answered(done), done.notWhole], [[], ['skill', 'agent', 'mcp']]);
     const row = (await sourcesView(box.context, box.tools)).sources[0];
-    assert.deepEqual([row.holds, row.unread, (await library(box)).skill.notes.source], ['marketplace', 'The link holds a marketplace, notes-market, with 0 plugins: it goes on the Plugins page, where each of its plugins has a switch of its own, so a source doesn’t read it.', id]);
+    assert.deepEqual([row.holds, row.unread, (await library(box)).skill.notes.source], ['marketplace', 'The link holds a marketplace, notes-market, with 0 plugins: it goes on the Plugin marketplaces page, where each of its plugins has a switch of its own, so a source doesn’t read it.', id]);
   } finally { await box.cleanup(); }
 });
 

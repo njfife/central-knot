@@ -83,7 +83,7 @@ export const kindNouns: Record<HomeKind, { one: string; many: string; title: str
   mcp: { one: 'MCP server', many: 'MCP servers', title: 'MCP servers', short: ['server', 'servers'], a: 'an MCP server' },
   agents: { one: 'agent', many: 'agents', title: 'Agents', short: ['agent', 'agents'], a: 'an agent' },
   instructions: { one: 'instruction file', many: 'instruction files', title: 'Instructions', short: ['file', 'files'], a: 'an instruction file' },
-  plugins: { one: 'plugin', many: 'plugins', title: 'Plugins', short: ['plugin', 'plugins'], a: 'a plugin' },
+  plugins: { one: 'plugin', many: 'plugins', title: 'Plugin marketplaces', short: ['plugin', 'plugins'], a: 'a plugin' },
 };
 
 /** Each kind as a sentence names it, many of it: "MCP servers". */

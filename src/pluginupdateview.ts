@@ -45,7 +45,7 @@ function take(view: PluginUpdatesView, news?: 'updated' | 'failed') {
     const updated = latest(view.updated), failed = latest(view.failed);
     const said = [updated.length ? `Updated automatically: ${andList(updated)}.` : '', failed.length ? `Couldn’t update ${andList(failed)} automatically.` : ''].filter(Boolean).join(' ');
     // On Plugins the note itself says it; elsewhere the status bar does, with the way there.
-    if (said) announce(said, app.page === 'plugins', app.page === 'plugins' ? undefined : { label: 'See Plugins', run: () => showPage('plugins') });
+    if (said) announce(said, app.page === 'plugins', app.page === 'plugins' ? undefined : { label: 'See Plugin marketplaces', run: () => showPage('plugins') });
     // The list is read again either way: after a failure it shows the marketplace's newer version beside the note.
     if (market.view && !app.busy) void loadPlugins();
   }

@@ -374,12 +374,12 @@ export function unreadWhy(found: Holds, where: Pick<SourceRecord, 'ref' | 'folde
   if (found.holds === 'plugin' && !found.kinds.some(each => each.items.length)) return `The plugin at ${at} holds no ${anyItem(found)}.`;
   return undefined;
 }
-/** Why a marketplace, or a plugin one lists, isn't read here: it goes on the Plugins page, with a switch for each plugin. */
+/** Why a marketplace, or a plugin one lists, isn't read here: it goes on the Plugin marketplaces page, with a switch for each plugin. */
 function marketWhy({ holds, market }: Holds): string {
-  if (!market || 'problem' in market) return `The link holds a marketplace, which goes on the Plugins page, but it can’t be read: ${market?.problem ?? 'its marketplace.json is missing'}`;
+  if (!market || 'problem' in market) return `The link holds a marketplace, which goes on the Plugin marketplaces page, but it can’t be read: ${market?.problem ?? 'its marketplace.json is missing'}`;
   const plugins = `${market.plugins} plugin${market.plugins === 1 ? '' : 's'}`;
-  if (holds === 'listed') return `The link’s folder is the plugin ${market.plugin}, which its repository’s marketplace, ${market.name}, lists: it goes on the Plugins page with that marketplace (${plugins}), where it has a switch of its own, so a source doesn’t read it.`;
-  return `The link holds a marketplace, ${market.name}, with ${plugins}: it goes on the Plugins page, where each of its plugins has a switch of its own, so a source doesn’t read it.`;
+  if (holds === 'listed') return `The link’s folder is the plugin ${market.plugin}, which its repository’s marketplace, ${market.name}, lists: it goes on the Plugin marketplaces page with that marketplace (${plugins}), where it has a switch of its own, so a source doesn’t read it.`;
+  return `The link holds a marketplace, ${market.name}, with ${plugins}: it goes on the Plugin marketplaces page, where each of its plugins has a switch of its own, so a source doesn’t read it.`;
 }
 /** Why Look refuses Add: nothing there can be read (unreadWhy), or nothing there can be brought in (each item's line says why). */
 export const nothingToAddWhy = (found: Holds, where: Pick<SourceRecord, 'ref' | 'folder'>) =>

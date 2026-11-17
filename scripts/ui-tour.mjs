@@ -13,7 +13,7 @@
 // remove-build (one install at a time: the held screen while another build of Central Knot is on this Mac, as made-up
 // bundles), sources (a Git link read on a click, made-up repositories standing in for GitHub), source-agents (agents from a
 // link, beside a skill), source-servers (MCP servers from a link, reaching Claude Code as every tool), source-plugins
-// (a link to a plugin's own folder, a marketplace or a plugin one lists, and Add to Plugins), plugin-library
+// (a link to a plugin's own folder, a marketplace or a plugin one lists, and Add to Plugin marketplaces), plugin-library
 // (a plugin's items in Pi as library items), parts-migration (a plugin's parts an earlier version put into Pi, moved to the
 // library at one look), sort (the item pages sorted by last updated) and usage (Read usage on made-up session history: each row's
 // figure, an opened row's line per tool, and the "No use seen in 30 days" chip with its band).
@@ -678,7 +678,7 @@ if (wanted('plugins')) {
   begin('plugins');
   const market = join(scratch, 'market');
   writeMarket(market);
-  await a.click('#nav-plugins'); await shot(a, 'plugins-empty', 'Clicked "Plugins" before adding a marketplace.');
+  await a.click('#nav-plugins'); await shot(a, 'plugins-empty', 'Clicked "Plugin marketplaces" before adding a marketplace.');
   await addMarketplace(a, market); await shot(a, 'plugins-added', 'Typed a marketplace folder (a local copy of a team marketplace) into "Add a marketplace" and clicked Add.');
   await a.click('#market-tab-about'); await waitFor(a, `!!document.querySelector('.plugin-readme, .plugin-muted')`); await shot(a, 'plugins-about', 'Clicked the "About" tab.');
   await a.click('#market-tab-plugins');
@@ -1117,7 +1117,7 @@ esac
   await atSizes('settings-checked', 'Clicked "Check now" (what the schedule does by itself every four hours): one update was made, one couldn’t be.');
   await a.click('#setting-plugin-updates-notice-action');
   await waitFor(a, `!!document.querySelector('#plugin-updates-updated')`, 20000); await a.settle();
-  await atSizes('plugins-note', 'Clicked "See Plugins": the note says issue-tracker was updated to 2.0.0 in Claude Code, and that document-tools couldn’t be, in Claude Code’s own words. Being the first such note, it says once that plugins now update by themselves and that Settings turns that off.');
+  await atSizes('plugins-note', 'Clicked "See Plugin marketplaces": the note says issue-tracker was updated to 2.0.0 in Claude Code, and that document-tools couldn’t be, in Claude Code’s own words. Being the first such note, it says once that plugins now update by themselves and that Settings turns that off.');
   await a.click('#popen-0-release-helper'); await waitFor(a, `!!document.querySelector('.plugin-page')`); await a.settle();
   await shot(a, 'plugin-no-longer-offered', 'Opened release-helper, which the marketplace dropped: its page says so, shows what Claude Code still holds, and can still uninstall it.');
   await a.size(860, 560); await shot(a, 'plugin-no-longer-offered-860', 'The same at 860×560.'); await a.size(1280, 800);
@@ -1132,7 +1132,7 @@ esac
   await a.size(860, 560); await shot(a, 'settings-paused-860', 'The same at 860×560.'); await a.size(1280, 800);
   await a.click('#sync-switch'); await waitFor(a, `!/Paused/.test(document.querySelector('#setting-plugin-updates')?.textContent ?? '')`); await a.settle();
   await a.click('#plugin-updates-on'); await waitFor(a, `document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked') === 'false'`); await a.settle();
-  await shot(a, 'settings-off', 'Turned "Update plugins automatically" off: plugins are updated only with Update on the Plugins page.');
+  await shot(a, 'settings-off', 'Turned "Update plugins automatically" off: plugins are updated only with Update on the Plugin marketplaces page.');
 }
 
 // ---------- Plugin versions and skill text ----------
@@ -1513,7 +1513,7 @@ if (wanted('sizes')) {
     await ensureMarket();
     await main.slow('plugins:view', 4000);
     await a.click('#header-refresh');
-    if (await waitFor(a, `!!document.querySelector('.rereading')`, 2000)) await shot(a, '1728-plugins-rereading', 'Clicked Refresh on Plugins at 1728×1117: while the marketplaces are read again (slowed here to show it), the last read stays, with a quiet band saying so.');
+    if (await waitFor(a, `!!document.querySelector('.rereading')`, 2000)) await shot(a, '1728-plugins-rereading', 'Clicked Refresh on Plugin marketplaces at 1728×1117: while the marketplaces are read again (slowed here to show it), the last read stays, with a quiet band saying so.');
     await main.restore('plugins:view');
     await waitFor(a, `!document.querySelector('.rereading')`, 8000);
     await a.click('#nav-history');
@@ -1831,6 +1831,7 @@ if (wanted('settings')) {
   await size(1280, 800); await a.run(`window.dispatchEvent(new Event('resize'))`);
   await a.theme('light'); await a.click('#log-refresh'); await shot(a, 'settings-show-log-light', 'The same at 1280×800, light.'); await a.theme('dark');
   await size(860, 600); await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.click('#sidebar-toggle'); await shot(a, 'settings-sidebar-open-860', 'At 860×600, the sidebar opened from its rail: every page’s name shows whole, Plugin marketplaces and Library sources too.'); await a.click('#sidebar-toggle');
   await a.run(`document.querySelector('#log-earlier').scrollIntoView({ block: 'start' }); document.querySelector('#settings-scroll').scrollTop -= 120`);
   await shot(a, 'settings-log-earlier', 'Scrolled up to the top of the lines at 860×600: "Show 200 earlier lines" above them.');
   while (await a.has('#log-earlier')) await a.click('#log-earlier');
@@ -2126,7 +2127,7 @@ if (wanted('harnesses')) {
     if (await a.has('#pswitch-page-0-document-tools[aria-checked="false"]:not([disabled])')) { await a.click('#pswitch-page-0-document-tools'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
     await a.click('#nav-harnesses'); await a.click('#harness-claude-cli');
   }
-  await a.click('#harness-tab-plugins'); await waitFor(a, `!/Reading/.test(document.querySelector('#harness-body')?.textContent ?? '')`); await shot(a, 'claude-plugins', 'Clicked the "Plugins" tab: plugins installed in Claude Code, each opening its page on Plugins.');
+  await a.click('#harness-tab-plugins'); await waitFor(a, `!/Reading/.test(document.querySelector('#harness-body')?.textContent ?? '')`); await shot(a, 'claude-plugins', 'Clicked the "Plugins" tab: plugins installed in Claude Code, each opening its page on Plugin marketplaces.');
   await a.click('#harness-tab-about'); await shot(a, 'claude-about', 'Clicked the "About" tab: how it was found and where its files are.');
   await sizes('claude-about', 'The About tab.');
   await a.click('#harness-switch-copilot-cli'); await a.click('#harness-tab-skills'); await shot(a, 'copilot-skills', 'Clicked Copilot CLI in the switcher at the top right, then the Skills tab.');
@@ -2426,7 +2427,7 @@ if (wanted('sources')) {
   const lookAt = async link => { await type(link); await a.click('#source-look'); await busyDone(); await a.settle(); };
   const DESLOP = 'https://github.com/stephenturner/skill-deslop/tree/main';
   await a.click('#nav-sources');
-  await atEverySize('empty', 'Clicked Sources in the sidebar: the link field, whose placeholder and the line under it name the forms a link takes (a SKILL.md’s link and github.com/owner/repo among them), Look, and a line saying what a source is');
+  await atEverySize('empty', 'Clicked Library sources in the sidebar: the link field, whose placeholder and the line under it name the forms a link takes (a SKILL.md’s link and github.com/owner/repo among them), Look, and a line saying what a source is');
   await lookAt(`https://github.com/stephenturner/skill-deslop/blob/main/SKILL.md`);
   await atEverySize('look-file-link', 'Pasted the link to the skill’s own SKILL.md (…/blob/main/SKILL.md) and clicked Look: it reads the folder that holds the file, the repository’s root, on branch main, and offers deslop as the folder link does', false, '#source-preview');
   await lookAt(DESLOP);
@@ -2648,21 +2649,21 @@ if (wanted('source-plugins')) {
   const type = text => a.run(`(() => { const input = document.querySelector('#source-link'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   const lookAt = async link => { await type(link); await a.click('#source-look'); await busyDone(); await a.settle(); };
   await a.click('#nav-sources');
-  await atEverySize('empty', 'Clicked Sources: the heading says any GitHub or GitLab link goes here; the line under the field says a plugin’s own folder brings its skills, agents and MCP servers and a marketplace goes to Plugins; the aside says a marketplace’s link is handed to Plugins');
+  await atEverySize('empty', 'Clicked Library sources: the heading says any GitHub or GitLab link goes here; the line under the field says a plugin’s own folder brings its skills, agents and MCP servers and a marketplace goes to Plugins; the aside says a marketplace’s link is handed to Plugins');
   await lookAt('https://github.com/acme/incident-response-toolkit');
   await atEverySize('look-plugin', 'Looked at a plugin’s own folder: that it holds a plugin, whose skills, agents and MCP servers come in as this source’s, each with its own switch; that its 4 commands, its hooks, its 1 LSP server and its bin folder are not brought in, and what to do to have the whole plugin; two skills (one in a folder its plugin.json names), an agent, a server from .mcp.json and one from plugin.json, coming in Off; the server that runs from the plugin’s folder left out', true, '#source-preview', 'start');
   await a.click('#source-add'); await busyDone(); await a.settle();
   await atEverySize('plugin-row', 'Clicked Add: the band says what came in, Off; the source’s row lists them and says what of the plugin is not brought in', false, '.source-row', 'start');
   await lookAt('https://github.com/acme/engineering-plugins');
-  await atEverySize('look-marketplace', 'Looked at a marketplace’s link: what it is (acme-engineering-plugins, with 12 plugins), that it goes on the Plugins page where each plugin has its own switch, and Add to Plugins adds it with its 12 plugins, none turned on; and that a link to one of its other folders brings that folder’s items here; Add to Plugins, Cancel, and that nothing is installed or kept here', true, '#source-preview');
-  await a.size(860, 560); await focusOn('#source-to-plugins'); await shot(a, 'look-marketplace-focus-860', 'Tabbed to Add to Plugins at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
+  await atEverySize('look-marketplace', 'Looked at a marketplace’s link: what it is (acme-engineering-plugins, with 12 plugins), that it goes on the Plugin marketplaces page where each plugin has its own switch, and Add to Plugins adds it with its 12 plugins, none turned on; and that a link to one of its other folders brings that folder’s items here; Add to Plugins, Cancel, and that nothing is installed or kept here', true, '#source-preview');
+  await a.size(860, 560); await focusOn('#source-to-plugins'); await shot(a, 'look-marketplace-focus-860', 'Tabbed to Add to Plugin marketplaces at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
   await lookAt('https://github.com/acme/engineering-plugins/tree/release-2026-q4');
-  await atEverySize('look-marketplace-branch', 'Looked at the same marketplace on its branch release-2026-q4: refused, with why (the Plugins page adds a marketplace from its repository’s default branch, main, at its root) and what to do instead (clone it and add the folder with Folder… on Plugins); no Add to Plugins', false, '#source-preview');
+  await atEverySize('look-marketplace-branch', 'Looked at the same marketplace on its branch release-2026-q4: refused, with why (the Plugin marketplaces page adds a marketplace from its repository’s default branch, main, at its root) and what to do instead (clone it and add the folder with Folder… on Plugins); no Add to Plugins', false, '#source-preview');
   await lookAt('https://github.com/acme/engineering-plugins/tree/main/plugins/release-notes-writer');
-  await atEverySize('look-listed', 'Looked at one plugin’s folder in that marketplace: it is the plugin release-notes-writer, which its repository’s marketplace lists, so it goes on Plugins with that marketplace, where it has its own switch; Add to Plugins for acme-engineering-plugins', false, '#source-preview');
+  await atEverySize('look-listed', 'Looked at one plugin’s folder in that marketplace: it is the plugin release-notes-writer, which its repository’s marketplace lists, so it goes on Plugin marketplaces with that marketplace, where it has its own switch; Add to Plugin marketplaces for acme-engineering-plugins', false, '#source-preview');
   await lookAt('https://github.com/acme/engineering-plugins');
   await a.click('#source-to-plugins'); await busyDone(); await a.settle();
-  await atEverySize('plugins-after', 'Clicked Add to Plugins: the Plugins page opens on acme-engineering-plugins with its 12 plugins, each with its switch off, and the band says the marketplace was added and nothing was installed', true);
+  await atEverySize('plugins-after', 'Clicked Add to Plugin marketplaces: the Plugin marketplaces page opens on acme-engineering-plugins with its 12 plugins, each with its switch off, and the band says the marketplace was added and nothing was installed', true);
   if (await a.has('#open-add-marketplace')) await a.click('#open-add-marketplace');
   await atEverySize('plugins-add-box', 'Clicked Add marketplace: the box, and under it the line that any other link, to a folder of skills, agents or MCP servers, or to one plugin, goes on Sources, with a link to that page', true, '.market-add-note');
   await a.click('#nav-sources');
@@ -2670,7 +2671,7 @@ if (wanted('source-plugins')) {
   await a.click('#source-add'); await busyDone(); await a.settle();
   handbook({ '.claude-plugin/marketplace.json': JSON.stringify({ name: 'team-handbook-plugins', plugins: [] }), 'writing-style/SKILL.md': null }, 'Become a marketplace');
   await a.click('.source-rows > li:last-child .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('row-now-marketplace', 'acme/team-handbook became a marketplace; clicked Check now on its row: under a warning mark, the row says the link now holds a marketplace, which goes on Plugins, that this source turns nothing off, and to remove this source, then look at its link again to see how it can go on Plugins; writing-style stays as it was', false, '.source-rows > li:last-child', 'start');
+  await atEverySize('row-now-marketplace', 'acme/team-handbook became a marketplace; clicked Check now on its row: under a warning mark, the row says the link now holds a marketplace, which goes on Plugin marketplaces, that this source turns nothing off, and to remove this source, then look at its link again to see how it can go on Plugin marketplaces; writing-style stays as it was', false, '.source-rows > li:last-child', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 

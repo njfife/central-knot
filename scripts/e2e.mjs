@@ -2431,6 +2431,20 @@ async function sourcesFlow() {
 
   same('the sidebar names the page Library sources, between Plugins and Profiles', [await a.text('#nav-sources .nav-label'),
     await a.run(`[document.querySelector('#nav-sources').previousElementSibling?.id, document.querySelector('#nav-sources').nextElementSibling?.id]`)], ['Library sources', ['nav-plugins', 'nav-profiles']]);
+  // The Plugins page is Plugin marketplaces: its row, just above Library sources, and its title. Every row's name shows whole
+  // wherever the sidebar shows names (at the smallest window only once it is opened: its rail shows the marks alone).
+  same('the sidebar names the Plugins page Plugin marketplaces', await a.text('#nav-plugins .nav-label'), 'Plugin marketplaces');
+  for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await sizeTo(a, width, height);
+    const rail = await a.run(`document.body.classList.contains('rail')`);
+    if (rail) await a.click('#sidebar-toggle');
+    same(`every sidebar row’s name shows whole at ${width}×${height}${rail ? ', the sidebar opened' : ''}`,
+      await a.run(`[...document.querySelectorAll('#nav .nav-label')].filter(label => !label.offsetWidth || label.scrollWidth > label.clientWidth).map(label => label.textContent)`), []);
+    if (rail) await a.click('#sidebar-toggle');
+  }
+  await fullSize(a);
+  await a.click('#nav-plugins');
+  same('the Plugins page’s title says Plugin marketplaces', await a.text('.page-title'), 'Plugin marketplaces');
   await a.click('#nav-sources');
   same('the page’s title says Library sources', await a.text('.page-title'), 'Library sources');
   check('the Sources page opens empty, with its field', await a.exists('#source-link') && /No sources yet/.test(await a.text('.page') ?? ''), await a.text('.page'));
@@ -2677,23 +2691,23 @@ async function sourcesFlow() {
   await a.click('#switch-pdf');
   check('turned On, pdf’s SKILL.md is in Claude Code', await until(() => existsSync(join(home, roots['claude-cli'], 'pdf/SKILL.md'))), readdirSync(join(home, roots['claude-cli'])));
 
-  // A marketplace: Look offers Add to Plugins, never Add. While the repository can't be read, Add to Plugins opens Plugins with
+  // A marketplace: Look offers Add to Plugin marketplaces, never Add. While the repository can't be read, Add to Plugin marketplaces opens Plugin marketplaces with
   // that page's words and the link stays; once it can, the marketplace is listed there, nothing is installed, no tool record is made.
   await a.click('#nav-sources');
   await type('https://github.com/team/market');
   await a.click('#source-look');
   await until(() => a.exists('#source-to-plugins'));
   const marketLook = await a.text('#source-preview') ?? '';
-  check('a marketplace’s link: Look names it with its plugin count and offers Add to Plugins, not Add', /The link holds a marketplace, acme-tools, with 1 plugin/.test(marketLook) && /none turned on/.test(marketLook) && !(await a.exists('#source-add')), marketLook);
+  check('a marketplace’s link: Look names it with its plugin count and offers Add to Plugin marketplaces, not Add', /The link holds a marketplace, acme-tools, with 1 plugin/.test(marketLook) && /none turned on/.test(marketLook) && !(await a.exists('#source-add')), marketLook);
   renameSync(market, `${market}.away`);
   await a.click('#source-to-plugins');
-  check('the repository unreadable: Add to Plugins opens Plugins with its words, nothing listed', await until(async () => /No access, or no repository there/.test(await a.text('.plugin-problems') ?? '')) && !(await a.text('.market-list') ?? '').includes('acme-tools'), await a.text('.page'));
+  check('the repository unreadable: Add to Plugin marketplaces opens Plugin marketplaces with its words, nothing listed', await until(async () => /No access, or no repository there/.test(await a.text('.plugin-problems') ?? '')) && !(await a.text('.market-list') ?? '').includes('acme-tools'), await a.text('.page'));
   await a.click('#nav-sources');
   check('and the link and its look stay on Sources', await a.run(`document.querySelector('#source-link').value`) === 'https://github.com/team/market' && await a.exists('#source-to-plugins'), await a.text('.page'));
   renameSync(`${market}.away`, market);
   await a.click('#source-to-plugins');
   const pluginsSaid = async () => `${await a.text('.plugins-page') ?? ''} ${await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`) ?? ''}`;
-  check('Add to Plugins opens Plugins with acme-tools listed and says nothing was installed; no tool record is made', await until(async () => (await a.text('.market-list') ?? '').includes('acme-tools') && /Marketplace added: 1 plugin, nothing installed \(acme-tools\)\./.test(await pluginsSaid()))
+  check('Add to Plugin marketplaces opens Plugin marketplaces with acme-tools listed and says nothing was installed; no tool record is made', await until(async () => (await a.text('.market-list') ?? '').includes('acme-tools') && /Marketplace added: 1 plugin, nothing installed \(acme-tools\)\./.test(await pluginsSaid()))
     && !existsSync(join(home, '.claude/plugins')) && !existsSync(join(home, '.copilot/config.json')) && !(JSON.parse(readNow(join(home, '.central-knot/plugins.json')) || '{}').plugins ?? []).length,
     [await pluginsSaid(), existsSync(join(home, '.claude/plugins')), readNow(join(home, '.central-knot/plugins.json'))]);
   await a.click('#nav-sources');
@@ -3121,7 +3135,7 @@ async function openCodeFlow() {
   await pictures(a, 'opencode-page-skills');
   await a.click('#harness-tab-plugins');
   await pictures(a, 'opencode-page-plugins');
-  check('its Plugins tab says where plugins install and that a plugin’s items can go in', /installs marketplace plugins into Claude Code\. A plugin’s page on Plugins puts its skills, agents and MCP servers in OpenCode as items of Central Knot’s that follow the plugin\./.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
+  check('its Plugins tab says where plugins install and that a plugin’s items can go in', /installs marketplace plugins into Claude Code\. A plugin’s page on Plugin marketplaces puts its skills, agents and MCP servers in OpenCode as items of Central Knot’s that follow the plugin\./.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
   await a.click('#harness-tab-about');
   const about = await a.text('#harness-body');
   check('About names its folders and its settings file', ['~/.config/opencode/skills', '~/.claude/skills', '~/.config/opencode/opencode.json', '~/.config/opencode/agents', '~/.config/opencode/AGENTS.md'].every(path => about.includes(path)), about);
@@ -4810,7 +4824,7 @@ esac
   await a.click('#nav-settings');
   await a.click('#check-plugin-updates');
   for (let tries = 0; tries < 100 && !/couldn’t be made/.test(await a.text('#setting-plugin-updates-notice') ?? ''); tries++) await wait(100);
-  check('Check now says what it came to: one update couldn’t be made, with the way to the note', /Last checked today at .*\. 1 update couldn’t be made\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && (await a.text('#setting-plugin-updates-notice-action')) === 'See Plugins', await a.text('#setting-plugin-updates'));
+  check('Check now says what it came to: one update couldn’t be made, with the way to the note', /Last checked today at .*\. 1 update couldn’t be made\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && (await a.text('#setting-plugin-updates-notice-action')) === 'See Plugin marketplaces', await a.text('#setting-plugin-updates'));
   check('Check now takes the focus back once it can be pressed again', await a.run(`document.activeElement?.id`) === 'check-plugin-updates', await a.run(`document.activeElement?.id`));
   await a.click('#setting-plugin-updates-notice-action');
   for (let tries = 0; tries < 50 && !(await a.exists('#plugin-updates-failed')); tries++) await wait(100);
