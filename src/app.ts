@@ -76,6 +76,13 @@ export interface BaseEdit {
   ticksBeforeStop?: HarnessId[];
 }
 
+/**
+ * The panel that sets up a draft of the base, while it is open under the base's text (basecard.ts draftPanel): the tool that
+ * will write it, the model typed for it ('' for the tool's own default), the prompt it will be sent as main read it when the
+ * panel opened (or when a Start found the files changed), and why the last try gave no draft. Nothing of it is stored.
+ */
+export interface DraftPick { tool: HarnessId; model: string; prompt: string; problem?: string }
+
 /** The text a tool's editor works on: its own instructions, without the base block when it gets the base. */
 export const ownText = (file: InstructionFile) => (file.base ? file.base.own : file.text);
 
@@ -120,8 +127,8 @@ export const state = {
   base: undefined as BaseView | undefined,
   /** The base being edited: its text and tools so far, the hash it was opened at, and where the draft came from. */
   baseEdit: undefined as BaseEdit | undefined,
-  /** The question of which tool writes a draft of the base is open on its card; `problem`: why the last try gave no draft. */
-  draftPick: undefined as { problem?: string } | undefined,
+  /** The panel that sets up a draft of the base, while it is open (DraftPick). */
+  draftPick: undefined as DraftPick | undefined,
   /** The tool writing a draft of the base right now. */
   drafting: undefined as HarnessId | undefined,
   /** Sync notices the person has dismissed, by History event or item, and a background pass's problems (matrix.ts listResult). */
@@ -1168,16 +1175,19 @@ export const draftStale = (edit: BaseEdit) => ({
   base: edit.readBase !== undefined && edit.readBase !== (state.base?.hash ?? ''),
 });
 
-/** Opens the question of which tool writes the draft; an editor holding typed work is asked about first. */
+/** Opens the panel that sets up a draft, with the prompt main would send now; nothing runs yet. An editor holding typed work is
+ *  asked about first. */
 export function openDraftPick() {
   if (askAboutOpenDraft()) return;
   if (state.outcome?.kind !== 'saved') state.outcome = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
   state.baseEdit = undefined;
-  state.draftPick = {};
-  rerender();
-  document.getElementById(`base-draft-by-${state.base?.drafters[0]}`)?.focus();
-  document.getElementById('base-card')?.scrollIntoView({ block: 'nearest' });
+  void busy('Reading the instruction files…', async () => {
+    const now = await api().draftPrompt(state.home!.home);
+    if ('stopped' in now) { announce(now.stopped); return; }
+    state.draftPick = { tool: state.base!.drafters[0], model: '', prompt: now.prompt };
+    focusAfterBusy = 'base-draft-start';
+  }, { keepResult: true }).then(() => document.getElementById('base-draft-panel')?.scrollIntoView({ block: 'nearest' }));
 }
 export function closeDraftPick() {
   state.draftPick = undefined;
@@ -1186,19 +1196,27 @@ export function closeDraftPick() {
 }
 
 /**
- * Has `tool` write a draft of the base from every tool's instructions, then opens it as a review: saving it there sets the
- * base and updates each file in one step. Nothing is written before that. A failure is said where the tools are chosen, in
- * the tool's own words, so another tool can be tried.
+ * Has the panel's tool write a draft of the base from every tool's instructions, on the model typed, sent the prompt the panel
+ * shows; then opens the draft as a review: saving it there sets the base and updates each file in one step. Nothing is written
+ * before that. Anything short of a draft leaves the panel as it was, saying why: a failure in the tool's own words, so another
+ * tool or model can be tried, or (the files changed since the prompt was shown) the prompt as it would be sent now.
  */
-export const draftBaseWith = (tool: HarnessId) => {
+export const startDraft = () => {
+  const pick = state.draftPick!;
+  const tool = pick.tool;
   state.drafting = tool;
-  state.draftPick = {};
+  pick.problem = undefined;
   return busy(`${namedTools[tool]} is writing a draft of the base instructions…`, async () => {
     try {
-      const result = await api().draftBase(tool, state.home!.home);
+      const result = await api().draftBase(tool, state.home!.home, pick.model, pick.prompt);
       await rereadInstructions();
-      // A failure is read where it is said, so no tool's button looks chosen; after Stop, focus is back on the tool that was stopped.
-      const none = (why: string, problem = true) => { if (problem) state.draftPick = { problem: why }; focusAfterBusy = problem ? 'base-draft-problem' : `base-draft-by-${tool}`; announce(why); };
+      // A failure is read where it is said; after Stop, focus is back on Start.
+      const none = (why: string, problem = true) => { if (problem) pick.problem = why; focusAfterBusy = problem ? 'base-draft-problem' : 'base-draft-start'; announce(why); };
+      if (result.promptNow !== undefined) {
+        pick.prompt = result.promptNow;
+        none('The instruction files changed after this prompt was shown, so nothing was sent. The prompt below is as it would be sent now: Start sends it.');
+        return;
+      }
       const draft = result.draft;
       if (!draft) { none(result.cancelled ? 'Stopped. No draft was written, and nothing was changed.' : result.stopped ?? 'No draft was written.', !result.cancelled); return; }
       // Written from the files as they were when it started: saving it over one that changed since would lose what is new there.
