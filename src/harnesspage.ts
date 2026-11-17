@@ -3,7 +3,7 @@
 // tool first, plus its instruction file and its plugins. A tool left out has its card and switch here, and no other page shows
 // it as a tool (History's entries and the Overview's first line still name it). Nothing here has its own engine: every change
 // goes through the pages it mirrors, or the switch's toolchoice.ts.
-import { KINDS, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
+import { KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
@@ -223,7 +223,7 @@ function everyHarness(home: HomeView) {
           // Where no Manage switch can be turned, said once here (each disabled switch's tooltip says it too).
           manageLocked(home) ? ` ${manageLocked(home)}` : null,
           home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' Practice copy: installed apps aren’t checked; ' : ' A folder: installed apps aren’t checked; ',
-            button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows their versions.'],
+            button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', disabled: acting(), onclick: () => void loadHome('actual') }), ' shows their versions.'],
           // A profile switches items in every tool at once, so the one in use is said once here, as Profiles names it.
           home.profiles.profiles.length ? [' Profile in use: ', button({ variant: 'link', size: 'micro', label: inUseName(home.profiles.profiles, homeItems(home)), id: 'harnesses-profile', onclick: () => showPage('profiles') }), '.'] : null)),
       h('div.harness-cards', { 'data-count': String(cards.length) }, cards.map(snapshot => summaryCard(snapshot, home))),

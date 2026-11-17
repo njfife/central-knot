@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
@@ -15,7 +15,8 @@
 // link, beside a skill), source-servers (MCP servers from a link, reaching Claude Code as every tool), source-plugins
 // (a link to a plugin's own folder, a marketplace or a plugin one lists, and Add to Plugins), plugin-library
 // (a plugin's items in Pi as library items), parts-migration (a plugin's parts an earlier version put into Pi, moved to the
-// library at one look) and sort (the item pages sorted by last updated).
+// library at one look), sort (the item pages sorted by last updated) and usage (Read usage on made-up session history: each row's
+// figure, an opened row's line per tool, and the "No use seen in 30 days" chip with its band).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -24,8 +25,9 @@ import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
-import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
+import { packagedApp } from './package-app.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -33,7 +35,7 @@ const flag = name => args.includes(name);
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',') : undefined;
 const full = flag('--full');
 const root = resolve(import.meta.dirname, '..');
-const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : join(root, 'release/Central Knot-darwin-arm64/Central Knot.app/Contents/MacOS/Central Knot');
+const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : packagedApp();
 const scratch = mkdtempSync(join(tmpdir(), 'ck-tour-'));
 const HOME = join(scratch, 'home');
 mkdirSync(HOME, { recursive: true });
@@ -689,6 +691,113 @@ if (wanted('plugins')) {
   if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'plugins-undone', 'Clicked "Undo" on the result of the switch.'); }
 }
 
+// ---------- A plugin's switch clicks waiting their turn ----------
+// A folder with Claude Code only. Three plugins' switches clicked in a row while Claude Code's stand-in takes 8 s over
+// issue-tracker's install: document-tools ends and is read back, issue-tracker runs, release-helper waits (Claude Code then
+// refuses it). Then the ends, each plugin's own page, and an uninstall the stand-in is slow over.
+if (wanted('plugin-clicks')) {
+  // From fresh data: a marketplace an earlier section added would come first in the list and take these ids.
+  await fresh();
+  begin('plugin-clicks');
+  const folder = join(scratch, 'clicks-home'), market = join(scratch, 'clicks-market'), slow = join(scratch, 'slow');
+  mkdirSync(join(folder, '.claude/plugins'), { recursive: true });
+  writeMarket(market);
+  const versions = JSON.stringify({ 'document-tools': '1.2.0', 'issue-tracker': '2.0.0' }).replaceAll('"', "'");
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  writeFileSync(join(HOME, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
+case "$*" in
+  "plugin marketplace add "*) printf '{"team-tools":{"source":{"source":"directory","path":"${market}"},"installLocation":"${market}"}}' > "$HOME/.claude/plugins/known_marketplaces.json" ;;
+  *release-helper*) echo 'Plugin "release-helper" not found in marketplace "team-tools".'; exit 1 ;;
+  "plugin install "*|"plugin uninstall "*)
+    case "$2 $3" in "install issue-tracker@team-tools"|"uninstall document-tools@team-tools") [ -f '${slow}' ] && sleep 8 ;; esac
+    "${process.execPath}" -e "const fs = require('fs'), [verb, id] = process.argv.slice(1), file = process.env.HOME + '/.claude/plugins/installed_plugins.json'; let now = { version: 2, plugins: {} }; try { now = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {} if (verb === 'install') now.plugins[id] = [{ scope: 'user', installPath: '${market}/plugins/' + id.split('@')[0], version: ${versions}[id.split('@')[0]] }]; else delete now.plugins[id]; fs.writeFileSync(file, JSON.stringify(now))" "$2" "$3" ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  a.quit();
+  await wait(500);
+  const settings = join(scratch, 'data/app-settings.json');
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: folder } }));
+  a = await launch();
+  await a.click('#nav-plugins');
+  await addMarketplace(a, market);
+  // Sized, and themed, without settling: the page acts until the list ends.
+  const sizeNow = async (width, height) => { Object.assign(a.viewport, { width, height }); await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.run(`window.dispatchEvent(new Event('resize'))`); await wait(300); };
+  const themeNow = async value => { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await wait(300); };
+  const rowIs = (name, state) => waitFor(a, `document.querySelector('[data-plugin="${name}"] .plugin-click')?.dataset.click === '${state}'`, 15000);
+  const pageOf = async name => { await a.run(`document.querySelector('#plugin-back')?.click(); document.querySelector('#popen-0-${name}').click()`); await wait(400); };
+  writeFileSync(slow, '');
+  await a.run(`['document-tools', 'issue-tracker', 'release-helper'].forEach(name => document.querySelector('#pswitch-0-' + name).click())`);
+  await rowIs('document-tools', 'ended'); await rowIs('issue-tracker', 'running');
+  for (const [width, height] of SIZES) { await sizeNow(width, height); await shot(a, `running-${width}`, `Clicked three plugins’ switches in a row: document-tools ended and was read back (its switch On and free again, its mark ✓), issue-tracker says Installing… (Claude Code’s stand-in is slow), release-helper says Waiting to install; only those two switches are held (${width}×${height})`); }
+  await sizeNow(1280, 800);
+  await themeNow('light'); await shot(a, 'running-light', 'The same, light: the held switches beside the free ones.'); await themeNow('dark');
+  await pageOf('release-helper');
+  await shot(a, 'waiting-page', 'Opened release-helper’s page meanwhile: its panel says Waiting to install, and its switch and boxes are held.');
+  await a.run(`document.querySelector('#plugin-back').click()`);
+  rmSync(slow);
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await atEverySize('ended', 'The list ran: each row says its own result, release-helper’s why Claude Code refused it (the problems band has it whole). The status line says the whole list; there is no Undo, since the last click, release-helper’s, changed nothing', true);
+  await pageOf('document-tools'); await a.settle();
+  await shot(a, 'ended-page', 'document-tools’ own page after its click: its panel says Installed in Claude Code.');
+  await pageOf('release-helper'); await a.settle();
+  await shot(a, 'failed-page', 'release-helper’s own page after its click: its panel says why Claude Code refused it, starting with the tool.');
+  await a.click('#plugin-back');
+  writeFileSync(slow, '');
+  await a.run(`document.querySelector('#pswitch-0-document-tools').click()`);
+  await rowIs('document-tools', 'running');
+  await shot(a, 'uninstalling', 'Turned document-tools off: its row says Uninstalling… while Claude Code’s stand-in takes its time; the earlier list’s rows are gone, as a new list starts.');
+  rmSync(slow);
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  // A tool's box on a plugin's page joins the same list: ticked while issue-tracker's install runs, it waits its turn, then runs.
+  await a.run(`document.querySelector('#pswitch-0-issue-tracker').click()`);
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  writeFileSync(slow, '');
+  await a.run(`document.querySelector('#pswitch-0-issue-tracker').click()`);
+  await rowIs('issue-tracker', 'running');
+  await pageOf('document-tools');
+  await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli').click()`);
+  const panelIs = state => waitFor(a, `document.querySelector('.plugin-panel .plugin-click')?.dataset.click === '${state}'`, 30000);
+  await panelIs('waiting');
+  for (const [width, height] of [[1280, 800], [860, 560]]) { await sizeNow(width, height); await shot(a, `box-waiting-${width}`, `At ${width}×${height}: document-tools is Off; ticked Claude Code’s box on its page while issue-tracker’s install runs: the panel says Waiting to install in Claude Code, and the box and the switch are held.`); }
+  await sizeNow(1280, 800);
+  await panelIs('ended'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'box-ticked', 'Its turn came: document-tools is On in Claude Code alone (its switch striped, as partial: kept out of the tools it wasn’t ticked in), its box ticked, and the panel says Installed in Claude Code.');
+  await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli').click()`);
+  await panelIs('running');
+  for (const [width, height] of [[1280, 800], [860, 560]]) { await sizeNow(width, height); await shot(a, `box-running-${width}`, `At ${width}×${height}: unticked Claude Code’s box: the panel says Uninstalling from Claude Code… while the stand-in takes its time, and the box shows it working.`); }
+  await sizeNow(1280, 800);
+  rmSync(slow);
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'box-unticked', 'It ended: the box is empty, and the panel says Uninstalled from Claude Code, with Undo.');
+  // The sections after this one start from the Practice copy.
+  await fresh();
+}
+
+// ---------- A tool's box on a plugin's page, with three working tools ----------
+// The Practice copy with stand-in CLIs: Claude Code has document-tools (so the first read keeps it out of the others), and Copilot
+// CLI's own add refuses the marketplace, as Copilot CLI 1.0.109 refuses the official one.
+if (wanted('plugin-boxes')) {
+  await fresh();
+  begin('plugin-boxes');
+  const market = join(scratch, 'boxes-market');
+  writeMarket(market);
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  for (const [cli, version] of [['claude', '2.1.322 (Claude Code)'], ['codex', 'codex-cli 0.167.0']]) writeFileSync(join(HOME, '.local/bin', cli), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  writeFileSync(join(HOME, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.109." && exit 0\necho 'Invalid marketplace.json: plugins.302.source' >&2\nexit 1\n`, { mode: 0o755 });
+  writeClaudeInstall(practice, 'team-tools', 'document-tools', '1.2.0', { 'skills/pdf-reader/SKILL.md': readFileSync(join(market, 'plugins/document-tools/skills/pdf-reader/SKILL.md'), 'utf8') });
+  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'team-tools': { source: { source: 'directory', path: market }, installLocation: market } }));
+  await refresh();
+  await a.click('#nav-plugins');
+  await addMarketplace(a, market);
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#pbox-0-document-tools-copilot-cli')`, 15000);
+  await atEverySize('boxes', 'document-tools’ page with three working tools: Claude Code’s box ticked (installed there), Copilot CLI’s and Codex’s empty, each saying “Kept out: tick to put it back” (the first read kept it out of the tools that lacked it)', true, '.plugin-panel', 'start');
+  await a.click('#pbox-0-document-tools-copilot-cli'); await waitFor(a, `document.body.dataset.busy !== 'true' && !document.querySelector('.plugin-click[data-click="waiting"], .plugin-click[data-click="running"]')`, 30000); await a.settle();
+  await atEverySize('boxes-refused', 'Ticked Copilot CLI’s box: its own add refused the marketplace (“Invalid marketplace.json”), so its box is off and its line says “Copilot CLI refused this marketplace” (the tooltip has its words, and that it isn’t tried again until Refresh); Claude Code’s stays ticked, Codex’s says Kept out', true, '.plugin-panel', 'start');
+  await fresh();
+}
+
 // ---------- Profiles ----------
 // Profiles are sets of library items (src/profiles.ts): every state of the Profiles page at four sizes, with the light
 // appearance once, on a practice copy whose skills, MCP servers and agents are taken into Central Knot first.
@@ -1161,28 +1270,25 @@ if (wanted('plugin-items')) {
   await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560: the tools’ lines and their switches, then its SKILL.md under the link.');
   await a.theme('light'); await shot(a, 'skill-open-860-light', 'The same at 860×560, light.'); await a.theme('dark');
   await size(1728, 1117); await shot(a, 'skill-open-1728', 'The open row at 1728×1117.'); await size(1280, 800);
-  // The row's own switch turns it off in every tool with a switch for one skill of a plugin. Copilot CLI and Codex have it off
-  // already, and Claude Code has none, so nothing changes: said plainly, with the whole plugin's switch offered (not clicked
-  // here: it is Claude Code's own command). The row's switch never turns a whole plugin off itself.
-  await a.click('[id="switch-document-tools@team-tools/pdf-reader"]'); await a.settle();
-  await shot(a, 'main-switch-left', 'Clicked pdf-reader’s own switch (on in Claude Code): Copilot CLI and Codex have it off already, and Claude Code has no switch for one skill of a plugin, so nothing changed. The band says so in its normal tone, naming pdf-reader, with the information mark, and offers “Turn document-tools off in Claude Code”.');
-  await size(860, 560); await shot(a, 'main-switch-left-860', 'The same at 860×560.'); await size(1280, 800);
-  if (await a.has('#outcome-whole')) {
-    await a.click('#outcome-whole'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
-    await shot(a, 'main-switch-whole', 'Clicked “Turn document-tools off in Claude Code”: the whole plugin is off there, with Claude Code’s own command, and the band names what went with it, with Undo.');
-    await a.click('#outcome-undo-plugin'); await a.settle();
-    await shot(a, 'main-switch-whole-undone', 'Clicked Undo: document-tools is on in Claude Code again.');
-  }
+  // The row's own switch turns it off in every tool that has it. Copilot CLI and Codex have it off already, and Claude Code has
+  // no switch for one skill of a plugin, so there it turns the whole plugin off, as the switch's name and tooltip say first.
+  const pdfSwitch = '[id="switch-document-tools@team-tools/pdf-reader"]';
+  await shot(a, 'main-switch-before', `Before the row's switch is clicked (pdf-reader open, on in Claude Code only): its name and tooltip say “${await a.run(`document.querySelector('${pdfSwitch}').getAttribute('aria-label')`)}”`);
+  await a.click(pdfSwitch); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+  await shot(a, 'main-switch-whole', 'Clicked pdf-reader’s own switch: the whole plugin document-tools is off in Claude Code, with Claude Code’s own command, and the band says pdf-reader is off there and names what went with it, with one Undo and no second button.');
+  await size(860, 560); await shot(a, 'main-switch-whole-860', 'The same at 860×560.'); await size(1280, 800);
+  await a.click('#outcome-undo-plugin'); await a.settle();
+  await shot(a, 'main-switch-whole-undone', 'Clicked Undo: document-tools is on in Claude Code again.');
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
-  // spreadsheet is on in all three: its switch turns it off in Copilot CLI and Codex with their own switches, leaves Claude
-  // Code on (and says so), and its Undo turns both back on.
+  // spreadsheet is on in all three: its switch turns it off in Copilot CLI and Codex with their own switches and the whole
+  // plugin in Claude Code, and its one Undo turns them all back on.
   await a.click('[id="switch-document-tools@team-tools/spreadsheet"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
-  await shot(a, 'main-switch-changed', 'Clicked spreadsheet’s own switch: off in Copilot CLI and Codex at once, each with its own switch; still on in Claude Code, which has no switch for one skill of a plugin, so “Turn document-tools off in Claude Code” is offered beside Undo.');
+  await shot(a, 'main-switch-changed', 'Clicked spreadsheet’s own switch: off in Copilot CLI and Codex at once, each with its own switch, and in Claude Code, which has no switch for one skill of a plugin, with the whole plugin document-tools; the band names what went with it, with Undo.');
   await size(860, 560); await a.click('#sidebar-toggle');
-  await shot(a, 'main-switch-changed-860-sidebar', 'The same at 860×560 with the sidebar open: the two buttons drop under the sentence, which keeps the width.');
+  await shot(a, 'main-switch-changed-860-sidebar', 'The same at 860×560 with the sidebar open: the sentence keeps the width, Undo beside or under it.');
   await a.click('#sidebar-toggle'); await size(1280, 800);
   await a.click('#outcome-undo-plugin'); await a.settle();
-  await shot(a, 'main-switch-changed-undone', 'Clicked Undo: “Undone: spreadsheet is back on in Copilot CLI and Codex.”');
+  await shot(a, 'main-switch-changed-undone', 'Clicked Undo: “Undone: spreadsheet is back on in Claude Code, Copilot CLI and Codex.”');
   if (await a.has('#open-triage')) {
     await a.click('#open-triage'); await shot(a, 'copy-and-plugin', 'Opened triage: the copy in Pi and the plugin installed in Codex share the row, its SKILL.md being the same; Codex’s line has its switch.');
     // Each tool's switch for the item is in its opened row, and applies at once. issue-tracker is off in Codex: its switch
@@ -2612,7 +2718,7 @@ if (wanted('plugin-library')) {
   await a.click('#nav-plugins');
   writeFileSync(join(market, 'plugins/issue-tracker/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp', '--v2'] } } }));
   await refresh(); await waitFor(a, `/An update is ready/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
-  await atEverySize('items-page', 'issue-tracker turned on in a home with Pi and no tool’s command-line tool: Your tools has Pi’s line, “1 of its 1 items is on” (triage, dropped, is no longer the plugin’s), and Claude Code’s, Copilot CLI’s and Codex’s, each “Not available” (its command-line tool wasn’t found, so its plugin commands can’t run); the plugin then dropped triage (Update turned it off) and changed issues: Its items lists MCP server issues, “An update is ready: Update brings it in”, and skill triage, “Removed by the plugin’s update, so it is off. Turning it on keeps it as yours”, with Update at the top', true, '.plugin-items-section');
+  await atEverySize('items-page', 'issue-tracker turned on in a home with Pi and no tool’s command-line tool: Your tools has Pi’s line, “1 of its 1 items is on” (triage, dropped, is no longer the plugin’s), and Claude Code’s, Copilot CLI’s and Codex’s boxes off, each line saying “No … command-line tool here”; the plugin then dropped triage (Update turned it off) and changed issues: Its items lists MCP server issues, “An update is ready: Update brings it in”, and skill triage, “Removed by the plugin’s update, so it is off. Turning it on keeps it as yours”, with Update at the top', true, '.plugin-items-section');
   await a.click('#nav-mcp'); await openRow('issues');
   // document-tools on too, with a third skill, charts; pdf-reader then edited in Pi (let go as his own) and spreadsheet deleted from Central Knot.
   mkdirSync(join(market, 'plugins/document-tools/skills/charts'), { recursive: true });
@@ -2626,12 +2732,13 @@ if (wanted('plugin-library')) {
   await atEverySize('let-go-row', 'pdf-reader was edited in Pi: on Skills the notice says it is your own now, no longer following the plugin document-tools, that it stays in the tools that have it and its row lets it into the others; its row says Pi only, with no “from the plugin”, and its versions keep the plugin’s', true, '.ov-row[data-key="pdf-reader"]', 'start');
   await openRow('spreadsheet'); await a.click('#delete-spreadsheet'); await a.click('#delete-confirm-spreadsheet'); await a.settle();
   await a.click('#nav-plugins'); await refresh(); await waitFor(a, `/you deleted it/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
-  await atEverySize('own-and-deleted', 'document-tools’ page: Its items lists skill charts (plain: on in Pi), skill pdf-reader “Not brought in: you have your own”, and skill spreadsheet, deleted from Central Knot, “Not brought in: you deleted it; History’s Restore, or the plugin’s next On, brings it back”', true, '.plugin-items-section');
+  await atEverySize('own-and-deleted', 'document-tools’ page: Its items lists skill charts (plain: on in Pi), skill pdf-reader “Not brought in: you have your own”, and skill spreadsheet, deleted from Central Knot, “Deleted here: tick to bring it back”', true, '.plugin-items-section');
   // charts deleted too: nothing of document-tools is linked any more, and its page still says why each isn't brought in.
   await a.click('#nav-skills'); await openRow('charts'); await a.click('#delete-charts'); await a.click('#delete-confirm-charts'); await a.settle();
   await a.click('#nav-plugins'); await refresh(); await waitFor(a, `(document.querySelector('.plugin-items-section')?.textContent.match(/Not brought in/g) ?? []).length === 3`, 15000);
   await show('.plugin-items-section');
-  await shot(a, 'none-linked-1280', 'charts deleted too, so no item of document-tools is linked any more: its page still lists all three under Its items (charts and spreadsheet deleted, pdf-reader your own), and Pi’s line says “Not in it, though on” with Install there, which brings back the two you deleted (1280×800)');
+  await shot(a, 'none-linked-1280', 'charts deleted too, so no item of document-tools is linked any more: its page still lists all three under Its items (charts and spreadsheet “Deleted here: tick to bring it back”, pdf-reader your own), and Pi’s box is empty, with why under it: a tick brings back the two you deleted (1280×800)');
+  await atEverySize('not-in-pi', 'The same page’s Your tools: Claude Code, Copilot CLI and Codex have no CLI here, so their boxes are off and each line says “No … command-line tool here”; Pi’s box is empty, and under it one sentence per reason none of document-tools’ items is on in Pi: charts and spreadsheet were deleted here (tick to bring them back), and pdf-reader is a skill of your own by that name (delete yours on its row to take the plugin’s)', true, '.plugin-panel', 'start');
   await a.click('#nav-mcp'); await openRow('issues');
   await atEverySize('item-row', 'On MCP servers, issues is on in Pi with “from the plugin issue-tracker” after its name; opened, Claude Code’s, Copilot CLI’s and Codex’s lines say it comes only with the plugin, which isn’t installed there, and the line at the end says it is from the plugin issue-tracker, follows it in the tools that take no plugins, and that a change made here makes it yours, with a link to Plugins', true, '.ov-row[data-key="issues"]', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
@@ -2707,7 +2814,44 @@ if (wanted('sort')) {
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
+// ---------- Usage read from the tools' session history (usage.ts, usagerow.ts) ----------
+if (wanted('usage')) {
+  begin('usage');
+  await fresh();
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  // Made-up session history in the Practice copy's tool folders: Claude Code called notes 2 days ago and had review typed 9 days
+  // ago; Copilot CLI invoked standup 3 days ago, its history starting 20 days ago; Codex has none. Each skill's copies were saved 40
+  // days ago, so each is old enough for the chip.
+  const lines = (path, records) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n') + '\n'); };
+  const ago = days => new Date(Date.now() - days * DAY).toISOString();
+  lines(join(practice, '.claude/projects/-work/s1.jsonl'), [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'notes' } }] }, timestamp: ago(2) }]);
+  lines(join(practice, '.claude/projects/-work/s2.jsonl'), [{ type: 'user', message: { content: '<command-name>/review</command-name>' }, timestamp: ago(9) }]);
+  lines(join(practice, '.copilot/session-state/c1/events.jsonl'), [{ type: 'session.start', data: {}, timestamp: ago(20) }]);
+  lines(join(practice, '.copilot/session-state/c2/events.jsonl'), [{ type: 'skill.invoked', data: { name: 'standup' }, timestamp: ago(3) }]);
+  for (const key of ['notes', 'release-notes', 'standup', 'review']) {
+    const folders = ['.claude', '.copilot', '.codex'].map(root => join(practice, root, 'skills', key)).filter(existsSync);
+    for (const path of folders.flatMap(folder => [join(folder, 'SKILL.md'), folder])) utimesSync(path, new Date(), new Date(Date.now() - 40 * DAY));
+  }
+  await refresh();
+  await a.click('#nav-skills');
+  for (const key of ['notes', 'release-notes', 'standup', 'review']) { await turnOnRow(key); await switchOn(key); }
+  await shot(a, 'before', 'Skills before any reading: the page as it was, but for Read usage at the toolbar’s end');
+  await a.click('#read-usage');
+  await waitFor(a, `/^Usage read/.test(document.querySelector('#usage-line .band-text')?.textContent ?? '')`);
+  await atEverySize('read', 'Clicked Read usage: the line under the toolbar says when it was read and how far back each tool goes; each row says used how long ago, or no use seen since the date its tools’ history starts (release-notes)', true);
+  await openRow('release-notes');
+  await atEverySize('opened', 'Opened release-notes, docked beside the table from 1728: each tool’s line says its figure, a history that starts 20 days ago, or that it keeps no sessions here', false, '.details-usage');
+  await closeRow('release-notes');
+  await a.click('.chip[data-tip="No use seen in 30 days"]');
+  await atEverySize('chip', 'Clicked the chip No use seen in 30 days: the rows it holds, and its short band: how many, what it left out, and beside Turn these off what it does', true);
+  await a.click('#nav-agents');
+  await shot(a, 'agents', 'Agents after the same reading: each agent’s figure, or a faint can’t say where no tool that has it on can tell (release-notes, only in Codex, which keeps no sessions here); no chip, as none is in it');
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
 a.quit();
-// The app was stopped just now and its helper processes may still be writing: the folder goes once they are done.
+// The app was stopped just now and its helper processes may still be writing, and an AppImage's mount goes after it: the
+// folder goes once they are done.
+await mountsGone(scratch);
 rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 console.log(`tour in ${out}`);

@@ -318,7 +318,7 @@ test('A tool new here gets each install it is owed at the check, said with why, 
   assert.deepEqual(box.calls, ['install issue-tracker codex-cli', 'install spark codex-cli']);
   assert.deepEqual(view.updated.map(line => [line.plugin, line.text]), [['issue-tracker', 'installed in Codex (new here; the plugin is on)']]);
   assert.deepEqual(box.joined, [['codex-cli', 'pi-cli']], 'both join, whatever each install came to');
-  assert.deepEqual(view.failed.map(failure => [failure.plugin, failure.text, failure.again]), [['spark', 'Codex is not signed in. It isn’t tried again by itself: Install there on the plugin’s page puts it in.', undefined]]);
+  assert.deepEqual(view.failed.map(failure => [failure.plugin, failure.text, failure.again]), [['spark', 'Codex is not signed in. It isn’t tried again by itself: ticking that tool on the plugin’s page puts it in.', undefined]]);
 });
 
 test('The installs a tool new here is owed run only while plugins change by themselves: with the switch or Automatic sync off, nothing installs and the tool waits off the list', async () => {

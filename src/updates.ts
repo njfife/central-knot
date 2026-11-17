@@ -1,7 +1,8 @@
 // Updates (PLT-02): the release lines (alpha, preview, final) and the app each line's builds are, which GitHub release this
 // build would update to, whether this copy can replace itself, and what the sidebar's update control and Settings say about
 // it. No Node imports: the main process (updater.ts, updateflow.ts) checks and installs, the page (updateview.ts) shows these
-// words, and packaging (scripts/package-mac.mjs, scripts/mac-dmg.mjs) names the app and its downloads from the same rules.
+// words, and packaging (scripts/package-app.mjs, package-mac.mjs, package-linux.mjs, mac-dmg.mjs) names the app and its
+// downloads from the same rules.
 import { PRODUCT, STANDARD_BUILD, compareVersions, isHttps, record, text } from './values.ts';
 import type { UpdateReason, UpdateRelease, UpdateView } from './types.ts';
 
@@ -83,6 +84,12 @@ export const downloadName = (name: string) => name.trim().replace(/\s+/g, '-');
  * is the one the app's own updater downloads; the disk image is for people.
  */
 export const macDownload = (appName: string, version: string, kind: 'zip' | 'dmg') => `${downloadName(appName)}-${version}-mac-arm64.${kind}`;
+/**
+ * An app's Linux download for one version: "Central-Knot-Alpha-0.6.0-linux-x86_64.AppImage" (scripts/package-linux.mjs). No
+ * Mac rule takes it (otherDownloads, isMacZip), so Mac packaging leaves it be and no Mac build is ever offered it. Nothing in
+ * the app reads it yet: Linux has no updates.
+ */
+export const linuxDownload = (appName: string, version: string) => `${downloadName(appName)}-${version}-linux-x86_64.AppImage`;
 /**
  * The Mac downloads among `files` (the names in packaging's release folder) other than `keep`, the two being written:
  * packaging removes them first (scripts/package-mac.mjs), so the folder holds exactly the files a release carries. An alpha's

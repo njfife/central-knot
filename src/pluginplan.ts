@@ -2,7 +2,7 @@
 // (pluginstate.ts applyPluginOps), a plugin's one switch (marketplaces.ts turn), the item pages' switches (app.ts) and the
 // automatic updates (pluginupdates.ts). What a switch owes each tool is pluginrecord.ts's. Also the item pages' scratch for one
 // click (PluginDraft). Pure functions over plain data, so a run can be read, tested and changed without the page or the engine.
-import { partWords } from './pluginstatus.ts';
+import { partWords, toolSaid } from './pluginstatus.ts';
 import type { ItemState } from './pluginlibrary.ts';
 import type { PluginEntry } from './pluginrecord.ts';
 import type { ActionReport, HarnessId, PartRef, PluginActionResult } from './types.ts';
@@ -191,7 +191,7 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb, after = '']) => `${verb} ${counted && !item && list.length > 2 ? `${list.length} tools` : andList(list)}${after}`).join('; ');
     if (said(false)) lines.push({ source, plugin, ...named, ok: true, text: said(false), short: said(true) });
     for (const entry of mine.filter(candidate => !succeeded(candidate.report))) {
-      const text = `${names[entry.tool]}${item ? `, ${item}` : ''}: ${entry.report.message}`;
+      const text = item ? `${names[entry.tool]}, ${item}: ${entry.report.message}` : toolSaid(entry.tool, entry.report.message);
       lines.push({ source, plugin, ...named, ok: false, text, short: text });
     }
     // A note on a step that worked (an update that couldn't turn a server off again, plugins.ts) needs reading, like a failure.
@@ -226,13 +226,15 @@ function updatedGroups(mine: PluginDone[], warn = true): Group[] {
 
 /**
  * The successful lines as one sentence, in pieces (`short`: tools counted, for the toolbar; `here`: the plugin whose page is
- * open, named by its breadcrumb, so its lines leave its name out): "document-tools: installed in Codex." or, for an Undo, "Undone:
+ * open, named by its breadcrumb, so its lines leave its name out where it is the only plugin named): "document-tools: installed in Codex." or, for an Undo, "Undone:
  * document-tools removed from Codex." Each plugin is its own piece so the page can link it. Empty when nothing succeeded.
  */
 export function resultParts(lines: ResultLine[], undo: boolean, { short = false, here }: { short?: boolean; here?: { plugin: string; source: string } } = {}): (string | { plugin: string; source: string })[] {
   const ok = lines.filter(line => line.ok);
   if (!ok.length) return [];
   const parts: (string | { plugin: string; source: string })[] = undo ? ['Undone: '] : [];
+  // A sentence that names another plugin too names the open one as well, so each result is said once, by its plugin.
+  if (ok.some(line => line.plugin !== here?.plugin || line.source !== here.source)) here = undefined;
   ok.forEach((line, at) => {
     const text = short ? line.short : line.text;
     if (at) parts.push('; ');

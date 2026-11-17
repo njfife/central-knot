@@ -3,7 +3,7 @@
 // empty states (kindEmpty). Every other page has a module of its own (harnesspage.ts, historypage.ts, profilespage.ts,
 // sourcespage.ts, repopage.ts, pluginspage.ts, instructionspage.ts, settingspage.ts); which page draws is renderer.ts
 // renderPage, and the page's state and actions are app.ts's.
-import { absentKinds, announce, noToolManaged, noToolManagedSentence, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { absentKinds, acting, announce, noToolManaged, noToolManagedSentence, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
@@ -29,7 +29,7 @@ const emptyBands = () => {
   return done || preview ? h('div.bands', {}, done, preview) : null;
 };
 /** Opens another home: a folder chosen now (the Practice copy and this computer's home are in the sidebar too). */
-const chooseHomeButton = (id: string) => button({ variant: 'outline', icon: 'folder-open', label: 'Choose another home…', id, onclick: () => void loadHome('custom') });
+const chooseHomeButton = (id: string) => button({ variant: 'outline', icon: 'folder-open', label: 'Choose another home…', id, disabled: acting(), onclick: () => void loadHome('custom') });
 
 /**
  * A home with no tool managed, wherever it shows: one sentence (none installed, or every one left out: app.ts
@@ -51,7 +51,7 @@ const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, bod
   return h('div.page', {}, emptyBands(), emptyState(glyph, title, body,
     h('div.empty-actions', {},
       button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('harnesses') }),
-      state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
+      state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, disabled: acting(), onclick: () => void loadHome('fixture') }) : null)));
 };
 /**
  * An empty page's way forward. `holders` is this home's tools that can hold this kind of item (the kind's own view lists only

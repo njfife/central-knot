@@ -58,7 +58,7 @@ export interface ShareContext {
   settingsPath: string;
   /** The person's real home, written only when reached by explicitly choosing it. */
   realHome: string;
-  /** Real-home writes are on only where Nathan accepted them: macOS, and never in a smoke test. */
+  /** Whether the real home may be written: where machine.ts writesRealHome says (macOS and Linux), never in a smoke test (main.ts). */
   allowActualWrites?: boolean;
   /** Why nothing at all may be written now: another build of Central Knot is on this Mac, one install at a time (main.ts heldReason). Unset: not held. */
   held?: string;
@@ -494,7 +494,7 @@ export async function syncsHere(context: ShareContext): Promise<boolean> {
 export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   if (context.held) return { allowed: false, reason: context.held };
   if (context.mode === 'actual') {
-    if (!context.allowActualWrites) return { allowed: false, reason: 'Preview only: writing to real folders works only on macOS in this version. You can look around; nothing is written.' };
+    if (!context.allowActualWrites) return { allowed: false, reason: 'Preview only: writing to real folders works only on macOS and Linux in this version. You can look around; nothing is written.' };
     for (const id of Object.keys(harnesses) as HarnessId[]) {
       const override = context.overrides?.[id];
       if (override !== undefined && !isAbsolute(override)) return { allowed: false, reason: `Preview only: ${harnesses[id].configEnv} is not an absolute path, so its folder is unknown.` };

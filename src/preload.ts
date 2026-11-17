@@ -6,7 +6,7 @@ import type { DesktopApi } from './types.ts';
 
 const api: DesktopApi = {
   selectHome: mode => ipcRenderer.invoke('discovery:select', mode),
-  refresh: () => ipcRenderer.invoke('discovery:refresh'),
+  refresh: asked => ipcRenderer.invoke('discovery:refresh', asked === true),
   applySkills: (changes, resume, home) => ipcRenderer.invoke('skills:apply', changes, resume, home),
   clearSkillSwitch: (key, tool, resume, home) => ipcRenderer.invoke('skills:clear-switch', key, tool, resume, home),
   takeOverSkill: (key, tool, resume, home) => ipcRenderer.invoke('skills:take-over', key, tool, resume, home),
@@ -14,6 +14,7 @@ const api: DesktopApi = {
   history: () => ipcRenderer.invoke('history:list'),
   instructions: readId => ipcRenderer.invoke('instructions:view', readId),
   agentVersion: (key, hash) => ipcRenderer.invoke('agents:version', key, hash),
+  readUsage: home => ipcRenderer.invoke('usage:read', home),
   eventChange: eventId => ipcRenderer.invoke('history:change', eventId),
   showFile: path => ipcRenderer.invoke('file:show', path),
   marketplaceReadme: source => ipcRenderer.invoke('plugins:readme', source),

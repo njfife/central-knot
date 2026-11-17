@@ -1,0 +1,41 @@
+name: Linux package
+# The Linux checks, for the Linux plan's steps (AGENTS.md, "Checking a change"): never a required check for a Mac change, and
+# nothing here is released or uploaded but the light tour's pictures.
+on:
+  push:
+    branches: [next]
+  workflow_dispatch:
+permissions:
+  contents: read
+# A group of its own: groups are shared by every workflow in the repository, so the Mac run's name would cancel Mac runs.
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    # A run takes about 12½ minutes, most of it the end-to-end checks (about 8, their crash rounds 1½); the limit leaves room.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      # A display for the app (Xvfb), FUSE for the AppImage to mount itself, and mksquashfs to make it.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb fuse3 squashfs-tools
+      - run: npm ci
+      - run: npm test
+      - run: npm run package:linux
+      # Every launch passes --no-sandbox: Ubuntu 24.04 and later keep Chromium's sandbox from the user namespaces it needs.
+      - run: xvfb-run -a release/Central-Knot-*-linux-x86_64.AppImage --smoke-test --no-sandbox
+      # The light tour: the packaged app opens and so does each page, one picture each (gh run download <run> -n light-tour).
+      - run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/ui-tour.mjs light-tour --no-sandbox
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: light-tour
+          path: light-tour
+          if-no-files-found: ignore
+          retention-days: 7
+      - run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/e2e.mjs --no-sandbox

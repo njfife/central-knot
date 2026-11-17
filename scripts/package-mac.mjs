@@ -1,14 +1,15 @@
-import { packager } from '@electron/packager';
+// The Mac package (npm run package:mac): the app and its two downloads under release/, signed, and a custom build's zip. What
+// it shares with the Linux package (the version, the release tag, dist/ built as the app and the packager's folder of it) is
+// scripts/package-app.mjs.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { copyFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
+import { copyFile, mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildInputs, isCustom } from '../src/bundlepack.ts';
 import { downloadName, lineApp, macDownload, otherDownloads, releaseLine } from '../src/updates.ts';
-import { STANDARD_BUILD } from '../src/values.ts';
 import { stage } from './custom-build.mjs';
 import { buildDmg } from './mac-dmg.mjs';
-import { releaseTagHere } from './release-tag.mjs';
+import { packageFolder, plainly, tagHere, version } from './package-app.mjs';
 
 if (process.platform !== 'darwin') throw new Error('Mac packaging runs on the selected Mac, not a cross-platform stand-in.');
 
@@ -17,7 +18,6 @@ if (process.platform !== 'darwin') throw new Error('Mac packaging runs on the se
 // `--release` refuses to fall back: a release must be Developer ID signed and notarized.
 // The optional build inputs (ORG-01; listed at the top of scripts/custom-build.mjs). Any one of them makes this a custom
 // build: its own name and identity, and with --marketplace, that marketplace packed inside. None: the standard app.
-const plainly = message => { console.error(message); process.exit(2); };
 let inputs, rest;
 try { ({ inputs, rest } = buildInputs(process.argv.slice(2))); } catch (error) { plainly(error.message); }
 const unknown = rest.filter(arg => arg !== '--release');
@@ -36,26 +36,17 @@ const notarize = !!identity && process.env.CK_NOTARIZE !== '0';
 if (release && !identity) throw new Error('No “Developer ID Application” certificate in this Mac’s keychain (or CK_SIGN=0), so a release can’t be signed.');
 if (release && !notarize) throw new Error('A release must be notarized; CK_NOTARIZE=0 is only for local tries.');
 
-// The version is package.json's: a release bumps it there and nowhere else.
-const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
-
 // A custom build is staged first (its identity file, the marketplace it carries, its pictures and its report), then the
 // app's code is built again around it: it calls itself by its own name and carries the staged files (scripts/build.mjs).
 const custom = isCustom(inputs) ? await stage(inputs).catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); }) : undefined;
 
-// The release tag this build is made from, recorded inside the app so it can tell a newer release (updates.ts): CK_RELEASE_TAG,
-// or the highest version tag on the commit being built. A checkout with changes of its own doesn't take the commit's tag, and
-// can't be a release (release-tag.mjs), nor can a tag whose pre-release part names no line (v0.6.0-alpha1: said plainly, and
-// nothing is built). A build with no tag never offers updates. A custom build records none: the standard app's releases are
-// not its own, and it never updates from them (ORG-07).
-const tagHere = () => { try { return releaseTagHere(release); } catch (error) { return plainly(error.message); } };
-const tag = custom ? '' : tagHere();
+// The release tag this build is made from (package-app.mjs tagHere). A custom build records none: the standard app's releases
+// are not its own, and it never updates from them (ORG-07).
+const tag = custom ? '' : tagHere(release);
 // The app this package is: a custom build's own, or the one the tag's release line is (src/updates.ts lineApp). An alpha tag
 // (v0.6.0-alpha.1) makes "Central Knot Alpha", with its own bundle id and downloads; any other tag, or none, the standard app.
 const own = custom?.build ?? lineApp(releaseLine(tag));
 const appName = own.name;
-/** An alpha: the standard app's code under the alpha's name (scripts/build.mjs CK_APP_NAME). */
-const renamed = !custom && own.bundleId !== STANDARD_BUILD;
 let icon = 'assets/icon.icns';
 if (custom) {
   const given = custom.icon && join(custom.out, custom.icon);
@@ -75,16 +66,6 @@ if (custom) {
   }
   execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: custom.out, ...(given?.endsWith('.icns') ? { CK_CUSTOM_LOGO: join(custom.out, 'app-logo.png') } : {}) } });
 }
-/** dist/ as the plain standard app: no custom build's files, the standard name. */
-const plainBuild = () => execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: '', CK_APP_NAME: '' } });
-if (renamed) execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: '', CK_APP_NAME: appName } });
-// A standard package is never a custom build or an alpha by accident: dist/ left as one (CK_CUSTOM_BUILD or CK_APP_NAME set
-// for the build step) is built again without it.
-else if (!custom && (existsSync('dist/custom-build.json') || process.env.CK_APP_NAME)) plainBuild();
-// Written for this package only, then removed, so a dev run or a later untagged build never claims the tag.
-await rm('dist/build-info.json', { force: true });
-if (tag) await writeFile('dist/build-info.json', `${JSON.stringify({ tag })}\n`);
-
 await mkdir('release', { recursive: true });
 // The two downloads a release line's package writes. Every other Mac download in release/ (the other line's, an earlier
 // version's, a custom build's) is removed first and named, so release/ holds exactly the files its release carries: an alpha's
@@ -94,15 +75,9 @@ const downloads = [macDownload(appName, version, 'zip'), macDownload(appName, ve
 const removed = custom ? [] : otherDownloads(await readdir('release'), downloads);
 for (const file of removed) await rm(join('release', file), { force: true });
 if (removed.length) console.log(`Removed from release/, as not this package's: ${removed.join(', ')}`);
-const packages = await packager({
-  dir: '.', out: 'release', name: appName, executableName: appName,
-  // Its own bundle id (an alpha's, a custom build's) is what lets it sit beside the standard app, with its own settings and login item.
-  appBundleId: own.bundleId, appVersion: version, platform: 'darwin', arch: 'arm64',
-  asar: true, overwrite: true, prune: true,
+const folder = await packageFolder({ own, tag, custom, platform: 'darwin', arch: 'arm64', options: {
   // The default app icon, or the one a custom build was given (--app-icon).
   icon,
-  // Optional: a folder already holding the Electron zip, for when GitHub's downloads are failing (CK_ELECTRON_ZIP_DIR).
-  ...(process.env.CK_ELECTRON_ZIP_DIR ? { electronZipDir: process.env.CK_ELECTRON_ZIP_DIR } : {}),
   // Tests only: environment the app is always opened with (LSEnvironment), so an update's restart stays in a test's throwaway
   // folders (scripts/update-proof.mjs). A JSON object of variables; never set for a release.
   ...(process.env.CK_TEST_ENVIRONMENT && !release ? { extendInfo: { LSEnvironment: JSON.parse(process.env.CK_TEST_ENVIRONMENT) } } : {}),
@@ -110,13 +85,8 @@ const packages = await packager({
   ...(identity ? { osxSign: { identity } } : {}),
   // notarytool with a stored keychain profile; the app is stapled, so it opens offline on first launch.
   ...(notarize ? { osxNotarize: { keychainProfile: notaryProfile } } : {}),
-  ignore: [/^\/src(?:\/|$)/, /^\/tests(?:\/|$)/, /^\/scripts(?:\/|$)/, /^\/.github(?:\/|$)/, /^\/release(?:\/|$)/, /^\/build(?:\/|$)/, /^\/docs(?:\/|$)/, /^\/LEDGER\.md$/, /^\/README\.md$/],
-}).finally(async () => {
-  await rm('dist/build-info.json', { force: true });
-  // dist/ goes back to the standard app, so a later run or package of this checkout is never the custom build or the alpha by accident.
-  if (custom || renamed) plainBuild();
-});
-const bundle = `${packages[0]}/${appName}.app`;
+} });
+const bundle = `${folder}/${appName}.app`;
 // Unsigned builds: packager leaves Electron's stock signature, whose seal no longer matches the renamed bundle.
 if (!identity) execFileSync('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', bundle]);
 execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle]);

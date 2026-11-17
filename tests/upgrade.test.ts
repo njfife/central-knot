@@ -530,7 +530,7 @@ async function docsWhileWaiting(box: Box) {
     return { ...toolMark(shown, entry, 'docs', 'pi-cli', entry.switches?.docs?.tools['pi-cli']), waiting: entry.waiting, items: entry.items?.docs };
   };
   const before = await piLine();
-  for (const [what, tool] of [['on', undefined], ['fix', 'pi-cli']] as const) await markets.turn(market, 'docs', what, tool, box.home);
+  for (const [what, tool] of [['on', undefined], ['let-in', 'pi-cli']] as const) await markets.turn(market, 'docs', what, tool, box.home);
   let clock = 1_000_000;
   const updates = autoUpdates({ home: () => box.home, on: () => true, paused: () => false, pending: home => markets.pendingUpdates(home), log: () => {}, now: () => clock, every: 60_000,
     api: { install: markets.install, update: markets.update, items: markets.items }, noteJoined: markets.noteJoined, load: async () => undefined, save: async () => {}, changed: () => {} });
@@ -567,7 +567,7 @@ describe('Upgrading alpha-1-parts with no sync record: docs waits in Pi and Open
   });
   after(() => rm(box.base, { recursive: true, force: true }));
 
-  test('while it waits, Pi’s line says so and why, and On, Install there, the checks and Off write and take in nothing of a part’s name, anywhere', () => {
+  test('while it waits, Pi’s line says so and why, and On, a tick on Pi’s box, the checks and Off write and take in nothing of a part’s name, anywhere', () => {
     const why = 'This home has no sync record yet: answer the question on the Overview, and they are moved at the next look.';
     assert.equal(clicked.partsWait, why);
     assert.deepEqual([clicked.before.mark, clicked.before.words, clicked.before.items, clicked.before.waiting?.includes('docs')],

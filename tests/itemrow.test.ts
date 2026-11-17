@@ -65,3 +65,9 @@ test('A deleted item, found again, goes by its copy’s time, not by the version
   const notes = { ...takenIn('notes', 0), deleted: { at: daysAgo(0) } }, standup = takenIn('standup', 1);
   assert.deepEqual(keys(inOrder([row('notes', { 'claude-cli': 9 }), row('standup')], 'updated', from({ notes, standup }))), ['standup', 'notes']);
 });
+
+test('By last used, once usage is read: the newest use first, an item with no use seen after every one with a use, by name among those', () => {
+  const lastUse: Record<string, number> = { notes: Date.parse(daysAgo(5)), standup: Date.parse(daysAgo(1)) };
+  const rows = [row('release-notes'), row('alpha'), row('notes'), row('standup')];
+  assert.deepEqual(keys(inOrder(rows, 'used', from({}), each => lastUse[each.key])), ['standup', 'notes', 'alpha', 'release-notes']);
+});

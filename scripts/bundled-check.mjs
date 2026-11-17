@@ -18,6 +18,7 @@ import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { applySkills } from '../src/skills.ts';
 import { managedNow } from '../src/share.ts';
+import { writesRealHome } from '../src/machine.ts';
 import { standInMac } from '../tests/macstandins.ts';
 
 const args = process.argv.slice(2);
@@ -161,8 +162,8 @@ check('the unpacked marketplace has no fetch folder', !existsSync(join(marketFol
 
 // At the first open the build adds its marketplace to each tool's own list: Claude Code and Codex here. Copilot CLI
 // refuses a marketplace that lists an npm plugin, so it is left alone. Nothing is installed.
-// (Only where the home can be written: on a Mac. Elsewhere it is preview only, and nothing is added.)
-const writes = process.platform === 'darwin';
+// (Only where the home can be written: machine.ts writesRealHome. Elsewhere it is preview only, and nothing is added.)
+const writes = writesRealHome(process.platform);
 const waitFor = async (test, ms = 20000) => { for (const end = Date.now() + ms; Date.now() < end; await wait(200)) if (test()) return true; return false; };
 if (writes) {
   check('the marketplace was added to Claude Code’s and Codex’s own lists, by their own commands', await waitFor(() => addedBy('claude').length === 1 && addedBy('codex').length === 1), { claude: addedBy('claude'), codex: addedBy('codex') });

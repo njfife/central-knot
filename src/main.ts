@@ -15,7 +15,7 @@ import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { discover, findOtherApps } from './discovery.ts';
+import { discover, findOtherApps, forgetVersions } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
@@ -25,7 +25,7 @@ import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
-import { installedPlugins } from './plugins.ts';
+import { forgetRefusals, installedPlugins } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
@@ -38,6 +38,7 @@ import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draft
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { addSource, checkDue, checkSource, previewSource, removeSource, rowClick, sourcesView } from './sources.ts';
+import { readUsage } from './usage.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
@@ -47,7 +48,7 @@ import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profil
 import { defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
-import { machineNames } from './machine.ts';
+import { machineNames, writesRealHome } from './machine.ts';
 import { joinedWords, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
@@ -152,7 +153,7 @@ function context(): ShareContext {
   return {
     home: current!.home, mode: current!.mode, read, build: BUILD, buildName: own.name,
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
-    allowActualWrites: process.platform === 'darwin' && !smoke,
+    allowActualWrites: writesRealHome(process.platform) && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
     historyDays: historyDays(), held: heldReason(),
   };
@@ -1247,7 +1248,7 @@ app.whenReady().then(async () => {
     return selectHome(mode as HomeMode);
   });
   handle('discovery:start', async () => startHome());
-  handle('discovery:refresh', async () => (current ? syncThenView() : null));
+  handle('discovery:refresh', async asked => { if (asked === true) { forgetVersions(); forgetRefusals(); } return current ? syncThenView() : null; });
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
     typeof change?.key === 'string' && typeof change.on === 'boolean' && Array.isArray(change.except)
@@ -1347,6 +1348,10 @@ app.whenReady().then(async () => {
   // Reveal only: the file manager selects it; nothing is opened, run or written.
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? skillChange(context(), eventId) : undefined));
+  // The tools' session history, read on the page's click: outside the queue, since usage.ts changes nothing in the home. This
+  // computer's home reads OpenCode's data where XDG_DATA_HOME moves it, as each tool's folder follows its own variable.
+  handleNow('usage:read', async home => (current && home === current.home
+    ? readUsage({ home: current.home, overrides: context().overrides, dataHome: current.mode === 'actual' ? process.env.XDG_DATA_HOME : undefined }) : null));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'

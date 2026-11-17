@@ -1,6 +1,7 @@
-// The Skills, MCP servers and Agents pages' switch for an item a tool has through an installed plugin: the item's own
-// switch where the tool has one (a skill in Copilot CLI or Codex, ENB-06; an MCP server in Claude Code, Copilot CLI or
-// Codex and an agent in Claude Code, partswitch.ts), else the whole plugin's. A click applies at once: it is worked out as
+// The Skills, MCP servers and Agents pages' switches for an item a tool has through an installed plugin, a tool's line in the
+// opened row (click) and the row's own switch in every tool (turnEvery): the item's own switch where the tool has one (a skill
+// in Copilot CLI or Codex, ENB-06; an MCP server in Claude Code, Copilot CLI or Codex and an agent in Claude Code,
+// partswitch.ts), else the whole plugin's there. A click applies at once: it is worked out as
 // the plugin choices it needs (pluginplan), which run, report and undo like the Plugins page's.
 // Pure functions over plain data; the page draws and applies.
 import { choose, chosenPart, chosenSkill, chosenWhole, clear, wholeChoice, type PluginDraft, type PluginOp } from './pluginplan.ts';
@@ -106,25 +107,30 @@ export function click(draft: PluginDraft, item: PluginItemAt): void {
 }
 
 /**
- * A main switch's part for one item in every tool that has it through a plugin, toward `on`: each turns with that tool's own
- * switch for one item (click; `turned`). A tool with no such switch (a skill in Claude Code) is left as it is and said plainly
- * (`whole`, `limit`): the main switch never turns a whole plugin off; that is the tool's own switch. One whose switch can't be
- * written is left too, and said as a problem (`left`). `leftIn`: every tool left.
+ * A main switch's part for one item in every tool that has it through a plugin, toward `on`: each turns as its tool's line in
+ * the opened row turns it (click; `turned`), so where the tool has no switch for one item (a skill in Claude Code, an agent in
+ * Copilot CLI) the whole plugin turns there (wholeWords says so on the switch). One whose switch can't be written is left, and
+ * said as a problem (`left`, `leftIn`).
  */
-export function turnEvery(items: PluginItemAt[], on: boolean): { draft: PluginDraft; ops: PluginOp[]; turned: PluginItemAt[]; whole: PluginItemAt[]; limit?: string; left?: string; leftIn: HarnessId[] } {
+export function turnEvery(items: PluginItemAt[], on: boolean): { draft: PluginDraft; ops: PluginOp[]; turned: PluginItemAt[]; left?: string; leftIn: HarnessId[] } {
   const draft: PluginDraft = new Map();
   const turned: PluginItemAt[] = [];
-  const whole: PluginItemAt[] = [];
   const left: string[] = [];
   for (const item of items.filter(entry => standing(draft, entry).now !== on)) {
     const held = cantSwitch(item);
-    if (!held && ownSwitch(item)) { click(draft, item); turned.push(item); continue; }
-    if (held) left.push(`Still ${on ? 'off' : 'on'} in ${names[item.tool]}: ${held}`); else whole.push(item);
+    if (held) left.push(`Still ${on ? 'off' : 'on'} in ${names[item.tool]}: ${held}`); else { click(draft, item); turned.push(item); }
   }
-  const limit = whole.map(item => `Still ${on ? 'off' : 'on'} in ${names[item.tool]}: it has no switch for one ${partWords[item.kind][0]} of a plugin, only one for the whole plugin, ${item.install.plugin}.`).join(' ');
   const leftIn = items.filter(item => !turned.includes(item) && onNow(item) !== on).map(item => item.tool);
-  return { draft, ops: [...draft.values()], turned, whole, limit: limit || undefined, left: left.join(' ') || undefined, leftIn };
+  return { draft, ops: [...draft.values()], turned, left: left.join(' ') || undefined, leftIn };
 }
+
+/**
+ * What a main switch's click toward `on` turns beyond the item, said on the switch before the click: in each tool with no
+ * switch for one item of a plugin, the whole plugin ("In Claude Code, which has no switch for one skill of a plugin, it turns
+ * off everything document-tools brings there."); '' where there is none.
+ */
+export const wholeWords = (items: PluginItemAt[], on: boolean) => items.filter(item => onNow(item) !== on && !ownSwitch(item) && !cantSwitch(item))
+  .map(item => `In ${names[item.tool]}, which has no switch for one ${partWords[item.kind][0]} of a plugin, it turns ${on ? `the whole plugin ${item.install.plugin} on` : `off everything ${item.install.plugin} brings`} there.`).join(' ');
 
 /** One of a plugin's items by name, as a result says it: a skill's own name, or "MCP server issues". */
 const named = (op: PluginOp) => (op.part ? `${partWords[op.part.kind][0]} ${op.part.name}` : `skill ${op.skill!}`);

@@ -6,6 +6,7 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathBeside } from './platform.ts';
+import { probeVersion } from './discovery.ts';
 import { configRoot, harnesses } from './harnesses.ts';
 import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, installedContents, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
@@ -1035,13 +1036,28 @@ const installArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin'
 const uninstallArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin', 'uninstall', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'uninstall', id], 'codex-cli': ['plugin', 'remove', id, '--json'] })[tool];
 
 /**
+ * The marketplaces a tool's own add refused while the app runs, by tool and source, with the tool's version then and why in its
+ * own words: not tried there again until the person's Refresh empties this (forgetRefusals, from main.ts, beside
+ * discovery.ts forgetVersions) or that tool's version changes. Nothing is stored; the Plugins page says it where that tool's
+ * state is said (refusedBy, read into MarketplaceView refusedBy).
+ */
+const refusals = new Map<string, { version?: string; said: string }>();
+export const forgetRefusals = () => refusals.clear();
+const refusalKey = (tool: HarnessId, source: string) => `${tool}\u0000${source}`;
+/** Why a tool can't take this marketplace now, as its own add said, while that tool is the version that said it. */
+export async function refusedBy(context: Pick<PluginContext, 'binaries'>, tool: HarnessId, source: string): Promise<string | undefined> {
+  const known = refusals.get(refusalKey(tool, source)), binary = context.binaries[tool];
+  return known && binary && known.version === (await probeVersion(binary)).version ? known.said : undefined;
+}
+
+/**
  * Adds a marketplace to one tool's own list, with the tool's own command, unless it is there already: `there` (nothing ran),
- * `added`, `held` (the tool can't take it, or has a different marketplace under its name, which is never replaced) or
- * `failed`, each with words to show. Nothing is installed.
+ * `added`, `held` (the tool can't take it, refused it already (refusedBy), or has a different marketplace under its name, which
+ * is never replaced) or `failed`, each with words to show. Nothing is installed.
  */
 export async function addMarketplace(context: PluginContext, catalog: Catalog, tool: PluginTool): Promise<{ outcome: 'there' | 'added' | 'held' | 'failed'; message: string; runs: NativeRun[] }> {
   const name = toolNames[tool];
-  const refusal = tool === 'codex-cli' ? undefined : catalog.codexOnly ?? (tool === 'copilot-cli' ? catalog.copilotRefuses : undefined);
+  const refusal = tool === 'codex-cli' ? undefined : catalog.codexOnly ?? (tool === 'copilot-cli' ? catalog.copilotRefuses : undefined) ?? await refusedBy(context, tool, catalog.source);
   if (refusal) return { outcome: 'held', message: `${refusal} Nothing was added to ${name}.`, runs: [] };
   const held = await heldBy(context, tool, catalog.name, catalog.source);
   if (held) return { outcome: 'held', message: heldReason(tool, catalog.name, held), runs: [] };
@@ -1054,6 +1070,10 @@ export async function addMarketplace(context: PluginContext, catalog: Catalog, t
   const add = await native(context, tool, ['plugin', 'marketplace', 'add', catalog.source]);
   // Only the tool's own record counts: a command that said it worked and listed nothing did not add it.
   if (add.ok && (await registeredSource(context, tool, catalog.name))) return { outcome: 'added', message: `Added to ${name}’s own plugin list.`, runs: [add] };
+  // The tool itself refused the marketplace: its own words name the marketplace's file, so it read the marketplace and said no
+  // ("Invalid marketplace.json"). Kept, so no later click runs it again (refusedBy). Any other failure (no network, a timeout) is
+  // said as it was, and tried again at the next click.
+  if (!add.ok && context.binaries[tool] && /marketplace\.json/i.test(add.output)) refusals.set(refusalKey(tool, catalog.source), { version: (await probeVersion(context.binaries[tool]!)).version, said: `${name} refused this marketplace: “${lastLines(add.output)}” It isn’t tried there again until Refresh, or a new version of ${name}.` });
   return { outcome: 'failed', message: `Could not add the marketplace${add.ok ? `: ${name} doesn’t list it` : ''}. ${lastLines(add.output)}`.trim(), runs: [add] };
 }
 

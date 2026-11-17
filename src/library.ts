@@ -234,7 +234,7 @@
 //                                                                   with a copy of that name (librarypass.ts fromSourceStep), so
 //                                                                   arriving On writes over nothing
 //   a name of its own he deleted        deleted, linked             stays deleted (`deleted`) but at a click that turns its
-//                                                                   items On (`bringBack`: its On, Add, Install there, Update)
+//                                                                   items On (`bringBack`: its On, Add, a box ticked, Update)
 //   a name the library has              not linked, same content    never linked (`differs`: Central Knot has its own)
 //                                       or not
 //   anything, read or not               linked, changed here        let go (`let-go`): unlinked, the person's own item from then on,
