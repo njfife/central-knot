@@ -763,7 +763,7 @@ esac
   for (const [width, height] of [[1280, 800], [860, 560]]) { await sizeNow(width, height); await shot(a, `box-waiting-${width}`, `At ${width}×${height}: document-tools is Off; ticked Claude Code’s box on its page while issue-tracker’s install runs: the panel says Waiting to install in Claude Code, and the box and the switch are held.`); }
   await sizeNow(1280, 800);
   await panelIs('ended'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
-  await shot(a, 'box-ticked', 'Its turn came: document-tools is On in Claude Code alone (its switch striped, as partial: kept out of the tools it wasn’t ticked in), its box ticked, and the panel says Installed in Claude Code.');
+  await shot(a, 'box-ticked', 'Its turn came: document-tools is On in Claude Code, the one tool in this folder, its box ticked, and the panel says Installed in Claude Code.');
   await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli').click()`);
   await panelIs('running');
   for (const [width, height] of [[1280, 800], [860, 560]]) { await sizeNow(width, height); await shot(a, `box-running-${width}`, `At ${width}×${height}: unticked Claude Code’s box: the panel says Uninstalling from Claude Code… while the stand-in takes its time, and the box shows it working.`); }
@@ -1594,63 +1594,25 @@ if (wanted('shared-copies')) {
     }
     await a.theme('dark'); await a.size(1280, 800);
   };
-  const open = async () => { if (!(await a.has(`#outside-${name}, #delete-${name}`))) await a.click(`#open-${name}`); };
+  const open = () => openRow(name);
   await open();
-  await everySize('unmanaged', `Opened ${name}: the real folder is in ~/.agents/skills, Copilot CLI's skills folder has a link to it, Pi reads the shared folder. The details say where the copies are and what turning it on and Delete everywhere do; the rows say how each tool gets it.`, `#outside-${name}`, true);
+  await everySize('unmanaged', `Opened ${name}, found: the real folder is in ~/.agents/skills, Copilot CLI's skills folder has a link to it, Pi reads the shared folder. Its status says Copilot CLI and Pi have it another way and that Add puts it in Claude Code; each tool's line says how it gets it; no Delete, as it isn't in Central Knot.`, '.details', true);
   const turnOn = async () => { await turnOnRow(name); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); };
   await turnOn();
-  await everySize('turned-on', 'Clicked its switch: it is on in every tool at once; the band says what was done to the link and the shared copy, with Undo; the skill is an ordinary synced one.', '.bands', true);
+  await everySize('turned-on', 'Clicked its Add: it is in Central Knot and on in Claude Code; Copilot CLI and Pi keep the shared copy, their lines saying “Another way” with Take over…; the band says so, with Undo.', '.bands', true);
   await a.click('#outcome-undo'); await a.settle();
+  await everySize('undone', 'Clicked Undo in that band: it says opus-sol-loop is as before: found again, the link and the shared copy untouched.', '.bands');
+  // Taken in again; Take over… on a line removes the shared copy and gives each tool that read it Central Knot's copy.
+  await turnOn(); await open();
+  await a.click(`#take-over-${name}-copilot-cli`);
+  await everySize('take-over-armed', 'Clicked “Take over…” on Copilot CLI’s line: the armed line says which copy goes, which tools get Central Knot’s copy instead, that other apps won’t find it there, and that it has no Undo.', `#take-over-note-${name}-copilot-cli`, true);
+  await a.click(`#take-over-confirm-${name}-copilot-cli`); await a.settle();
   await open();
-  await everySize('undone', 'Clicked Undo in that band: it says the skill is as before, and that the link and the shared copy are back.', '.bands');
+  await everySize('taken-over', 'Clicked “Take over now”: the shared copy is gone and Copilot CLI and Pi have Central Knot’s copy; the band says so, and that it has no Undo.', '.bands', true);
   await a.click(`#delete-${name}`);
-  await everySize('delete-armed', `Clicked "Delete everywhere…" on the skill that isn't synced: the second click is offered, and it says it also removes the link and the shared copy.`, `#delete-note-${name}`, true);
-  await a.click(`#delete-confirm-${name}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  await everySize('deleted', 'Clicked "Delete from every tool now": every copy is gone, the link removed as a link, the shared copy too; the band names the skill and the shared folder, with Undo.', '.bands', true);
-  // Installed again and turned on; then the installer puts the shared copy and the link back: the page offers to deal with them.
-  install();
-  await a.click('#header-refresh');
-  await turnOn();
-  install();
-  await a.click('#header-refresh');
-  await open();
-  await everySize('came-back', 'Turned on, then the installer put the shared copy and the link back ("Refresh"): the status says which tools read the shared copy, which Central Knot doesn’t write, and the details say they came back and offer "Replace with managed copies…".', `#outside-${name}`, true);
-  await a.click(`#remove-${name}-copilot-cli`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  await everySize('came-back-remove', 'Clicked "Remove" on Copilot CLI’s row (the link): only the link goes, at once; nothing says it becomes a real copy.', '.bands', true);
-  await a.click('#outcome-undo'); await a.settle();
-  await open();
-  await a.click(`#takeover-${name}`);
-  await everySize('came-back-armed', 'Clicked "Replace with managed copies…": the second click is offered, saying what goes.', `#takeover-note-${name}`);
-  await a.click(`#takeover-confirm-${name}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  await everySize('came-back-replaced', 'Clicked "Replace them now": the link is a real copy again and the shared copy is gone, with Undo.', '.bands');
-  await open();
-  await a.click(`#delete-${name}`);
-  await everySize('managed-delete-armed', 'Clicked "Delete everywhere…" on the synced skill: it asks once more.', `#delete-confirm-${name}`);
-  await a.click(`#delete-confirm-${name}`);
-  await everySize('managed-deleted', 'Clicked "Delete from every tool now": deleted everywhere, with Restore.', '.band-done');
-  // Undo refused: on again (taken over), then Claude Code's new copy edited before any sync: nothing is undone, and the band says why.
-  install();
-  await a.click('#header-refresh');
-  await open();
-  await turnOn();
-  writeFileSync(join(claude, name, 'SKILL.md'), `${readFileSync(join(claude, name, 'SKILL.md'), 'utf8')}\nEdited in Claude Code.\n`);
-  await a.click('#outcome-undo'); await a.settle();
-  await everySize('undo-refused', 'Turned it on again, edited Claude Code’s new copy, then clicked Undo: nothing is undone, and the band says why.', '.bands', true);
-  // Came back, then deleted while synced: Restore gives each tool its own copy and says the link and the shared copy aren't put back.
-  await open();
-  await a.click(`#delete-${name}`);
-  await a.click(`#delete-confirm-${name}`);
-  install();
-  await a.click('#header-refresh');
-  await open();
-  await turnOn();
-  install();
-  await a.click('#header-refresh');
-  await open();
-  await a.click(`#delete-${name}`);
-  await a.click(`#delete-confirm-${name}`);
-  await a.click('#outcome-restore-delete');
-  await everySize('came-back-deleted-restored', 'Came back again (turned on, then the installer put the shared copy and the link back), deleted everywhere, then "Restore": back in every tool, and the band says the link and the shared copy aren’t put back.', '.bands');
+  await everySize('delete-armed', 'Clicked “Delete from Central Knot…”: it says what happens, and for how long History can restore it.', `#delete-note-${name}`);
+  await a.click(`#delete-confirm-${name}`); await a.settle();
+  await everySize('deleted', 'Clicked “Delete it now”: opus-sol-loop is out of every tool and off the page; the band says so.', '.bands');
   // Layout 4: Copilot CLI's whole skills folder is a link to the shared folder, so the copy there is the only one it can have.
   const linked = join(scratch, 'shared-root');
   for (const [path, version] of [['.local/bin/claude', '2.1.309 (Claude Code)'], ['.local/bin/copilot', 'GitHub Copilot CLI 1.0.107.'], ['.pi/agent/bin/pi', 'pi 1.5.0']]) { mkdirSync(join(linked, path, '..'), { recursive: true }); writeFileSync(join(linked, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(linked, path), 0o755); }
@@ -1658,19 +1620,15 @@ if (wanted('shared-copies')) {
   skillAt(join(linked, '.agents/skills'), 'gamma', 'A skill the installer keeps in the shared folder.');
   symlinkSync('../.agents/skills', join(linked, '.copilot/skills'));
   await openFolder(linked);
-  if (!(await a.has('#outside-gamma'))) await a.click('#open-gamma');
-  await everySize('linked-skills-folder', 'A folder whose Copilot CLI skills folder is itself a link to ~/.agents/skills: opened gamma. The details say the shared copy is the only one Copilot CLI can have, what turning it on does and what that means for edits; no action is offered that could not work.', '#outside-gamma', true, 'gamma');
-  await a.click('#delete-gamma');
-  await everySize('linked-skills-folder-delete-armed', 'Clicked "Delete everywhere…" there: it says what it removes.', '#delete-note-gamma', false, 'gamma');
-  await a.click('#delete-cancel-gamma');
+  await openRow('gamma');
+  await everySize('linked-skills-folder', 'A folder whose Copilot CLI skills folder is itself a link to ~/.agents/skills: opened gamma, found. Its status and each tool’s line say how each tool gets it; no action is offered that could not work.', '.details', true, 'gamma');
   await turnOnRow('gamma'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  if (!(await a.has('#outside-gamma'))) await a.click('#open-gamma');
-  await everySize('linked-skills-folder-managed', 'Turned gamma on there: Claude Code has its own copy, Copilot CLI and Pi keep the shared copy, and the details say edits made in Claude Code don’t reach them.', '#outside-gamma', true, 'gamma');
+  await openRow('gamma');
+  await everySize('linked-skills-folder-managed', 'Added gamma there: Claude Code has Central Knot’s copy, Copilot CLI and Pi keep the shared copy, their lines saying “Another way”.', '.details', true, 'gamma');
   await a.click('#delete-gamma');
-  await a.click('#delete-confirm-gamma');
-  await everySize('linked-skills-folder-deleted', 'Clicked "Delete from every tool now" there: deleted from all three tools and from ~/.agents/skills, with Restore.', '.band-done', false, 'gamma');
-  await a.click('#outcome-restore-delete');
-  await everySize('linked-skills-folder-restored', 'Clicked "Restore": the band says the shared copy is back, the only copy Copilot CLI can have.', '.bands', false, 'gamma');
+  await a.click('#delete-confirm-gamma'); await a.settle();
+  await everySize('linked-skills-folder-deleted', 'Clicked “Delete from Central Knot…”, then “Delete it now” there: gamma is out of Central Knot; the band says so.', '.bands', false, 'gamma');
+  if (await a.has('#outcome-undo')) { await a.click('#outcome-undo'); await a.settle(); await everySize('linked-skills-folder-restored', 'Clicked Undo in that band: gamma is back in Central Knot, on in Claude Code, Copilot CLI and Pi keeping the shared copy.', '.bands', false, 'gamma'); }
 }
 
 if (wanted('missing')) {
@@ -2697,7 +2655,8 @@ if (wanted('source-plugins')) {
 
 // ---------- A plugin's items in Pi as library items (library.ts A PLUGIN, pluginlibrary.ts) ----------
 if (wanted('plugin-library')) {
-  await fresh();
+  // CLIs are looked for only in the throwaway home, so the ones this machine has installed don't take the plugin.
+  await fresh({ CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
   begin('plugin-library');
   // A home with Pi and no tool's CLI: Claude Code, Copilot CLI and Codex can't take the plugin, and say why on their lines.
   const market = join(scratch, 'library-market');
