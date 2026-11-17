@@ -102,14 +102,15 @@ const openInfo = new Set<string>();
  */
 export interface EditOnClick { start: (caret: number) => void; locked?: string | boolean }
 
-/** The offset of the point (x, y) into `pre`'s text as an editor holds it (a \r\n line break is one character there); its end
- *  when the point is past every character. */
+/** The offset of the point (x, y) into `pre`'s text as an editor holds it (a \r\n line break is one character there, so a \r
+ *  that ends a line, before its \n or where the point stops between the two, isn't counted); its end when the point is past every
+ *  character. */
 function offsetAt(pre: HTMLElement, x: number, y: number): number {
   const at = document.caretRangeFromPoint(x, y);
   const before = document.createRange();
   before.selectNodeContents(pre);
   if (at && pre.contains(at.startContainer)) before.setEnd(at.startContainer, at.startOffset);
-  return before.toString().replace(/\r\n/g, '\n').length;
+  return before.toString().replace(/\r(?=\n|$)/g, '').length;
 }
 
 /** Text is selected inside `pre` (by a drag, or a double-click on a word). */

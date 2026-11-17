@@ -2076,11 +2076,12 @@ async function practiceFlow() {
   // again, the card is locked and the click says why. Either way nothing opens and the typed work stays. Kept, a click on the
   // text says why.
   const lockedWhy = 'Finish or cancel the base instructions edit first.';
+  // The status line emptied before each click, so what it says after is that click's.
+  await a.run(`document.querySelector('#announcement').dataset.text = ''`);
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', 'Prefer small commits');
   check('a click on a tool’s text while the base editor holds typed work opens nothing: it asks about the base’s changes as Edit does, or, once the page is drawn again, says why', !(await a.exists('#ins-text-claude-cli')) && (await a.run(`document.querySelector('#base-text').value`)).includes('- Not saved.')
     && (await a.exists('#base-keep') || (await a.run(`document.querySelector('#announcement')?.dataset.text`)) === lockedWhy), [await a.text('#base-card'), await a.run(`document.querySelector('#announcement')?.dataset.text`)]);
   if (await a.exists('#base-keep')) await a.click('#base-keep');
-  // The status line emptied, so what it says next is this click's.
   await a.run(`document.querySelector('#announcement').dataset.text = ''`);
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', 'Prefer small commits');
   check('drawn again, the card says why it is locked, and a click on its text says it and opens nothing', !(await a.exists('#ins-text-claude-cli')) && (await a.run(`document.querySelector('#base-text').value`)).includes('- Not saved.')
@@ -4391,6 +4392,15 @@ async function draftFlow() {
   const crlf = 'Run codex review before pushing.\r\nline one\r\nline two\r\nTARGET here\r\nlast line\r\n';
   writeFileSync(agentsMd, crlf);
   await a.click('#header-refresh');
+  // A click past a line's end lands at that line's end, not on the next line.
+  await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'line two');
+  const pastEnd = await a.run(`(() => { const pre = document.querySelector('[aria-label="Codex instructions"] pre.ins-preview'), node = pre.firstChild, at = node.textContent.indexOf('line two');
+    const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 8); const line = range.getBoundingClientRect();
+    return { x: Math.min(pre.getBoundingClientRect().right - 16, line.right + 200), y: line.top + line.height / 2 }; })()`);
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: pastEnd.x, y: pastEnd.y, button: 'left', clickCount: 1 });
+  await a.settle();
+  same('in that file a click past a line’s end puts the caret at that line’s end', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart - 8, area.selectionStart), area.value[area.selectionStart]]; })()`), ['ins-text-codex-cli', 'line two', '\n']);
+  await a.press('Escape');
   await clickText(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
   same('in a file with Windows line endings a click puts the caret where it landed', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionStart + 6)]; })()`), ['ins-text-codex-cli', 'TARGET']);
   await a.send('Input.insertText', { text: 'NEW ' });
@@ -4558,7 +4568,6 @@ async function draftFlow() {
   await sizeTo(a, 1316, 819);
   await a.click('#base-draft');
   same('opened with a base at 1316×819, the panel’s Start is in view and focused', [...await inView(['base-draft-start']), await a.run(`document.activeElement?.id`)], [true, 'base-draft-start']);
-  await a.shot('draft-panel-with-base-1316');
   await fullSize(a);
   await typeModel('gpt-5');
   writeFileSync(mode, 'slow');
@@ -4623,6 +4632,30 @@ async function draftFlow() {
   await a.shot('long-text-860-review');
   await a.click('#ins-review-discard-claude-cli'); await a.click('#ins-review-discard-yes-claude-cli');
   same('discarding leaves the long file as it was', readNow(claudeMd), long);
+
+  // His case (clip 08): a base of 16 lines, and the Draft panel opened at his window's size and smaller. Start sits at the
+  // window's foot every time, with the panel's title and the base text's last lines above it: the text is plainly still there.
+  const base16 = Array.from({ length: 16 }, (_, line) => `- Base line ${line + 1}: a rule every tool reads.`).join('\n') + '\n';
+  await fullSize(a);
+  await a.click('#base-edit');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value = ${JSON.stringify(base16)}; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-review'); await a.click('#base-save');
+  const panelPlaced = () => a.run(`(() => {
+    const page = document.querySelector('#instructions-scroll').getBoundingClientRect(), pre = document.querySelector('#base-card pre.ins-preview'), style = getComputedStyle(pre);
+    const bottom = pre.getBoundingClientRect().bottom - parseFloat(style.paddingBottom), lastLines = { top: bottom - 3 * parseFloat(style.lineHeight), bottom };
+    const shows = box => box.top >= page.top - 1 && box.bottom <= page.bottom + 1;
+    return [shows(lastLines), shows(document.querySelector('#base-draft-panel h3').getBoundingClientRect()), shows(document.querySelector('#base-draft-start').getBoundingClientRect())];
+  })()`);
+  for (const [width, height] of [[1316, 819], [1280, 800], [860, 600]]) {
+    await sizeTo(a, width, height);
+    await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+    await a.click('#base-draft');
+    const placed = await panelPlaced();
+    if (width > 860) same(`opened at ${width}×${height} with a 16-line base: the base text’s last three lines, the panel’s title and Start are in view`, placed, [true, true, true]);
+    else same('opened at 860×600 with a 16-line base: Start is in view', placed[2], true);
+    await a.shot(`draft-panel-with-base-${width}`);
+    await a.click('#base-draft-cancel');
+  }
   await fullSize(a);
   same('no page errors, draft', a.pageErrors, []);
   await a.quit();

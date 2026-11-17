@@ -1485,9 +1485,10 @@ span.ins-confirm { margin-top: 0; }
 .draft-model-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .draft-model-input { width: min(100%, 280px); height: 28px; padding: 0 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); color: var(--ink); font: 400 12.5px/20px var(--mono); user-select: text; cursor: text; }
 .draft-model-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-.draft-prompt { max-height: clamp(120px, 100vh - 440px, 360px); overflow: auto; user-select: text; cursor: text; }
-/* (The 440 px is the window's header and status bar and the panel's other rows: on a short window the prompt gives way, so
-   Start and Cancel show with the panel; its end is reached by scrolling within it.) */
+.draft-prompt { max-height: clamp(120px, 100vh - 520px, 360px); overflow: auto; user-select: text; cursor: text; }
+/* (The 520 px is the window's header and status bar, the panel's other rows and a few lines of the base's text above the panel:
+   on a short window the prompt gives way, so Start, the panel's title and the end of that text show together; the prompt's end
+   is reached by scrolling within it.) */
 .base-writing { display: flex; align-items: center; gap: 8px; }
 /* A wide base card puts the tools beside the text. */
 @container ins-card (width >= 1100px) { .base-columns { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }

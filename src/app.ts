@@ -1191,10 +1191,10 @@ export function openDraftPick() {
     if ('stopped' in now) { announce(now.stopped); return; }
     state.draftPick = { tool: state.base!.drafters[0], model: '', prompt: now.prompt };
   }, { keepResult: true }).then(() => {
-    // Focus on Start, brought just into view: as much as fits above it stays (the base's text, the panel's top).
+    // Focus on Start, placed at the window's foot every time: above it the panel, and over the panel the base's text, still there.
     const start = document.getElementById('base-draft-start');
     start?.focus({ preventScroll: true });
-    start?.scrollIntoView({ block: 'nearest' });
+    start?.scrollIntoView({ block: 'end' });
   });
 }
 export function closeDraftPick() {
