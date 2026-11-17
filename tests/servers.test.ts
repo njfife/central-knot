@@ -174,7 +174,7 @@ test('A home alpha 2 left with Claude Code’s steps owed: the first pass takes 
 });
 const hashes = (row: LibraryFacts) => Object.fromEntries(Object.entries(row.copies).map(([tool, copy]) => [tool, copy!.hash]));
 
-test('`codex mcp remove` of Codex’s only server turns it Off everywhere; Central Knot keeps it, and Turn on puts each entry back', async () => {
+test('`codex mcp remove` of Codex’s only server turns it Off everywhere; Central Knot keeps it, and History’s Turn it on puts each entry back', async () => {
   const box = await sandbox();
   try {
     await writeFile(box.path('codex-cli'), 'model = "gpt-6"\n\n[mcp_servers.docs]\ncommand = "npx"\nargs = ["-y", "docs"]\n');
@@ -188,7 +188,7 @@ test('`codex mcp remove` of Codex’s only server turns it Off everywhere; Centr
     const view = await box.view();
     assert.deepEqual([view.items[0]?.on, view.library.docs.versions.length], [false, 1]);
     const entry = (await readHistory(box.context)).find(event => event.cause === 'deleted-by-hand')!;
-    assert.equal(libraryAction(entry, view.library.docs, settled)?.label, 'Turn on');
+    assert.equal(libraryAction(entry, view.library.docs, settled)?.label, 'Turn it on');
     await restoreServer(box.context, all, entry.id);
     assert.deepEqual([await argsIn(box, 'codex-cli'), await argsIn(box, 'copilot-cli')], [['-y', 'docs'], ['-y', 'docs']]);
   } finally { await box.cleanup(); }
@@ -523,7 +523,7 @@ test('An entry deleted by hand turns the server Off, sparing a same-named server
   assert.deepEqual([await commandIn(box, 'codex-cli'), await commandIn(box, 'claude-cli')], ['UNRELATED', undefined]);
 }));
 
-test('Turn on after an entry was deleted by hand in Codex gives it back with Codex’s own switch as it was (enabled = false)', () => inBox(async box => {
+test('History’s Turn it on after an entry was deleted by hand in Codex gives it back with Codex’s own switch as it was (enabled = false)', () => inBox(async box => {
   const codex = box.path('codex-cli');
   await fs.writeFile(box.path('copilot-cli'), docsRuns('BASE'));
   await applyServers(box.context, copilotAndCodex, [on('docs')]);

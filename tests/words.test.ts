@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { capitalToolsPhrase, fewNames, toolsPhrase } from '../src/words.ts';
+import { capitalToolsPhrase, fewNames, pageNames, toolsPhrase } from '../src/words.ts';
+
+test('A page named otherwise on screen is spelled once, in words.ts pageNames: every other sentence, link and button reads it from there', () => {
+  const src = new URL('../src/', import.meta.url);
+  const files = readdirSync(src).filter(file => file.endsWith('.ts') && file !== 'words.ts');
+  for (const name of Object.values(pageNames)) {
+    assert.deepEqual(files.filter(file => readFileSync(new URL(file, src), 'utf8').includes(name)), [], `“${name}” is spelled outside words.ts`);
+  }
+});
 
 test('"all N tools" means exactly the home’s tools, compared by which tools they are', () => {
   const event = ['claude-cli', 'copilot-cli', 'codex-cli'];

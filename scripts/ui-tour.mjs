@@ -13,7 +13,7 @@
 // remove-build (one install at a time: the held screen while another build of Central Knot is on this Mac, as made-up
 // bundles), sources (a Git link read on a click, made-up repositories standing in for GitHub), source-agents (agents from a
 // link, beside a skill), source-servers (MCP servers from a link, reaching Claude Code as every tool), source-plugins
-// (a link to a plugin's own folder, a marketplace or a plugin one lists, and Add to Plugins), plugin-library
+// (a link to a plugin's own folder, a marketplace or a plugin one lists, and Add to Plugin marketplaces), plugin-library
 // (a plugin's items in Pi as library items), parts-migration (a plugin's parts an earlier version put into Pi, moved to the
 // library at one look), sort (the item pages sorted by last updated) and usage (usage collected from made-up session history:
 // the button and its band, each row's figure, an opened row's line per tool, and the "No use seen in 30 days" chip with its band).
@@ -184,7 +184,7 @@ const turnOnRow = async key => { if (await a.has(`#add-${key}, #switch-${key}:no
 if (only ? only.includes('light') : !full) {
   begin('light');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  for (const name of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']) {
+  for (const name of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']) {
     if (!(await a.has(`#nav-${name}`))) throw new Error(`The sidebar has no ${name} page.`);
     await a.click(`#nav-${name}`);
     if (!(await waitFor(a, `document.querySelector('#nav-${name}')?.getAttribute('aria-current') === 'page'`))) throw new Error(`The ${name} page did not open.`);
@@ -267,10 +267,10 @@ if (wanted('skills')) {
   writeFileSync(join(folderIn('codex', 'standup'), 'SKILL.md'), `${readFileSync(join(folderIn('codex', 'standup'), 'SKILL.md'), 'utf8')}\nEdited in Codex.\n`);
   await refresh();
   await atEverySize('edit-notice', 'Outside the app, standup’s SKILL.md was edited in Codex, then Refresh: the edit is the current version now, in Claude Code and Copilot CLI too; the notice offers Undo', false, '.sync-notices');
-  // A folder deleted by hand turns the skill off everywhere; Central Knot keeps it, and the notice offers Turn on.
+  // A folder deleted by hand turns the skill off everywhere; Central Knot keeps it, and the notice offers Turn it on.
   rmSync(folderIn('copilot', 'release-notes'), { recursive: true, force: true });
   await refresh(); await wait(2300); await refresh();
-  await atEverySize('deleted-by-hand', 'Outside the app, release-notes’s folder was deleted in Copilot CLI, then Refresh (twice, past the settle window): it is off everywhere, kept in Central Knot; the notice offers Turn on', true, '.sync-notices');
+  await atEverySize('deleted-by-hand', 'Outside the app, release-notes’s folder was deleted in Copilot CLI, then Refresh (twice, past the settle window): it is off everywhere, kept in Central Knot; the notice offers Turn it on', true, '.sync-notices');
   await a.click('#switch-release-notes'); await switchOn('release-notes');
   // Found skills that can't go everywhere: a folder that can't be copied as it is, and a name Copilot CLI won't load.
   putSkill('claude', 'has-link', 'A skill with a link inside.');
@@ -308,9 +308,14 @@ if (wanted('skills')) {
   await a.click('#files-standup'); await a.settle();
   await atEverySize('files-view', 'Clicked "Files and contents" in standup’s details: the list of skills beside standup’s switch; stacked, its SKILL.md comes first, then each tool’s line and where each copy is ("← Skills" goes back)', true);
   await a.click('#skills-table');
+  // For History's switch actions (the owner asked what its "Turn on" means): the first skill that is on is kept out of Codex in
+  // its opened row, and the second turned off, so History offers "Turn it on in Codex" and "Turn it on".
+  const [outOfCodex, turnedOff] = await a.run(`[...document.querySelectorAll('[id^="switch-"][aria-checked="true"]')].map(each => each.id.slice('switch-'.length))`);
+  await openRow(outOfCodex); await a.click(`#enable-${outOfCodex}-codex-cli`); await a.settle(); await closeRow(outOfCodex);
+  await a.click(`#switch-${turnedOff}`); await a.settle();
   // History.
   await a.click('#nav-history'); await a.settle();
-  await atEverySize('history', 'Clicked "History": each skill’s entries in words, each with its own Undo, Turn on, Restore or Use … copy where one can still be done, all in the actions column', true);
+  await atEverySize('history', 'Clicked "History": each skill’s entries in words, each with its own Undo, Turn it on, Turn it on in Codex, Restore or Use … copy where one can still be done, all in the actions column', true);
   await a.click('#nav-skills');
   if (existsSync(claudeSettings)) writeFileSync(claudeSettings, settingsBefore);
 }
@@ -394,10 +399,10 @@ if (wanted('mcp')) {
   await atEverySize('version-read', 'Clicked Read on the version found in Claude Code: what it runs, part by part, what differs from the current version marked', false, '.version-read');
   await a.click('#version-read-docs-1');
   await closeRow('docs');
-  // What `codex mcp remove docs` leaves: docs turns off, its entry leaving every tool; Central Knot keeps it, and the notice offers Turn on.
+  // What `codex mcp remove docs` leaves: docs turns off, its entry leaving every tool; Central Knot keeps it, and the notice offers Turn it on.
   edit(settings.codex, text => text.replace(/\n?\[mcp_servers\.docs\][^[]*/, '\n'));
   await refresh(); await wait(2300); await refresh();
-  await atEverySize('deleted-by-hand', 'Outside the app, docs was removed from Codex’s settings (as `codex mcp remove docs` does), then Refresh past the settle window: it is off and taken out of Copilot CLI and Claude Code, kept in Central Knot; the notice offers Turn on', true, '.sync-notices');
+  await atEverySize('deleted-by-hand', 'Outside the app, docs was removed from Codex’s settings (as `codex mcp remove docs` does), then Refresh past the settle window: it is off and taken out of Copilot CLI and Claude Code, kept in Central Knot; the notice offers Turn it on', true, '.sync-notices');
   const restore = await a.run(`document.querySelector('[id^="notice-restore-"]')?.id ?? ''`);
   if (restore) { await a.click(`#${restore}`); await a.settle(); }
   // A server a tool can't hold (SSE, in Codex), and a server whose copies differ (the copy question).
@@ -414,7 +419,7 @@ if (wanted('mcp')) {
   await a.click('#use-search-copilot-cli'); await switchOn('search');
   await atEverySize('chosen', 'Clicked "Use this copy" on Copilot CLI’s: search is in Central Knot, on in all 3 tools; Codex’s entry is kept as a version', false, '.bands');
   await a.click('#nav-history');
-  await atEverySize('history', 'History: each server’s entries in the library’s words, with what each still offers (Turn on, Restore, Undo, Use Codex’s copy)', true);
+  await atEverySize('history', 'History: each server’s entries in the library’s words, with what each still offers (Turn it on, Restore, Undo, Use Codex’s copy)', true);
 }
 
 // ---------- Agents ----------
@@ -543,7 +548,7 @@ if (wanted('agents')) {
   await a.click('#delete-confirm-changelog'); await a.settle();
   await shot(a, 'agents-deleted', 'Clicked "Delete it now": changelog left every tool and this page; the result offers Undo.');
   await a.click('#nav-history'); await a.settle();
-  await atEverySize('agents-history', 'History: each click and each edit taken in, in the library’s words, with its action: Restore on the deletion, Undo on the latest change, "Go back before this" on older ones (the full sentence its tooltip), Turn off or Turn on on a switch', true);
+  await atEverySize('agents-history', 'History: each click and each edit taken in, in the library’s words, with its action: Restore on the deletion, Undo on the latest change, "Go back before this" on older ones (the full sentence its tooltip), Turn it off or Turn it on on a switch', true);
   await a.run(`[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('changelog'))?.querySelector('.history-actions button')?.click()`);
   await waitFor(a, `/Restored/.test(document.querySelector('#history-scroll')?.textContent ?? '')`, 15000);
   await atEverySize('agents-history-restored', 'Clicked Restore on the deletion: changelog is back in Central Knot and in every tool; the deletion’s row reads Restored');
@@ -678,7 +683,7 @@ if (wanted('plugins')) {
   begin('plugins');
   const market = join(scratch, 'market');
   writeMarket(market);
-  await a.click('#nav-plugins'); await shot(a, 'plugins-empty', 'Clicked "Plugins" before adding a marketplace.');
+  await a.click('#nav-plugins'); await shot(a, 'plugins-empty', 'Clicked "Plugin marketplaces" before adding a marketplace.');
   await addMarketplace(a, market); await shot(a, 'plugins-added', 'Typed a marketplace folder (a local copy of a team marketplace) into "Add a marketplace" and clicked Add.');
   await a.click('#market-tab-about'); await waitFor(a, `!!document.querySelector('.plugin-readme, .plugin-muted')`); await shot(a, 'plugins-about', 'Clicked the "About" tab.');
   await a.click('#market-tab-plugins');
@@ -980,7 +985,7 @@ if (wanted('sync-everything')) {
   await a.click('#nav-skills');
   await atEverySize('skills-on', 'Opened Skills: one notice names the skills it took in and the tools it found them in; the Found heading says Synchronize everything leaves these, the opened row saying why, and counts what waits for a choice', true);
   await openRow('review');
-  await atEverySize('skills-on-review', 'Opened review, left found: its copies differ, so it asks which copy every tool uses, as Add would; the question starts below the pinned row', false, '.ov-row.open + .details', 'start');
+  await atEverySize('skills-on-review', 'Opened review, left found: its copies differ, so it asks which copy every tool uses, as Add would; the row and its question are one block, its bar the warning colour', false, '.ov-row.open', 'start');
   await closeRow('review');
   await a.click('#nav-mcp');
   await atEverySize('mcp-on', 'Opened MCP servers: its notice names the servers it took in and where, and that History can undo each; Claude Code has them too', true);
@@ -1117,7 +1122,7 @@ esac
   await atSizes('settings-checked', 'Clicked "Check now" (what the schedule does by itself every four hours): one update was made, one couldn’t be.');
   await a.click('#setting-plugin-updates-notice-action');
   await waitFor(a, `!!document.querySelector('#plugin-updates-updated')`, 20000); await a.settle();
-  await atSizes('plugins-note', 'Clicked "See Plugins": the note says issue-tracker was updated to 2.0.0 in Claude Code, and that document-tools couldn’t be, in Claude Code’s own words. Being the first such note, it says once that plugins now update by themselves and that Settings turns that off.');
+  await atSizes('plugins-note', 'Clicked "See Plugin marketplaces": the note says issue-tracker was updated to 2.0.0 in Claude Code, and that document-tools couldn’t be, in Claude Code’s own words. Being the first such note, it says once that plugins now update by themselves and that Settings turns that off.');
   await a.click('#popen-0-release-helper'); await waitFor(a, `!!document.querySelector('.plugin-page')`); await a.settle();
   await shot(a, 'plugin-no-longer-offered', 'Opened release-helper, which the marketplace dropped: its page says so, shows what Claude Code still holds, and can still uninstall it.');
   await a.size(860, 560); await shot(a, 'plugin-no-longer-offered-860', 'The same at 860×560.'); await a.size(1280, 800);
@@ -1132,7 +1137,7 @@ esac
   await a.size(860, 560); await shot(a, 'settings-paused-860', 'The same at 860×560.'); await a.size(1280, 800);
   await a.click('#sync-switch'); await waitFor(a, `!/Paused/.test(document.querySelector('#setting-plugin-updates')?.textContent ?? '')`); await a.settle();
   await a.click('#plugin-updates-on'); await waitFor(a, `document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked') === 'false'`); await a.settle();
-  await shot(a, 'settings-off', 'Turned "Update plugins automatically" off: plugins are updated only with Update on the Plugins page.');
+  await shot(a, 'settings-off', 'Turned "Update plugins automatically" off: plugins are updated only with Update on the Plugin marketplaces page.');
 }
 
 // ---------- Plugin versions and skill text ----------
@@ -1513,7 +1518,7 @@ if (wanted('sizes')) {
     await ensureMarket();
     await main.slow('plugins:view', 4000);
     await a.click('#header-refresh');
-    if (await waitFor(a, `!!document.querySelector('.rereading')`, 2000)) await shot(a, '1728-plugins-rereading', 'Clicked Refresh on Plugins at 1728×1117: while the marketplaces are read again (slowed here to show it), the last read stays, with a quiet band saying so.');
+    if (await waitFor(a, `!!document.querySelector('.rereading')`, 2000)) await shot(a, '1728-plugins-rereading', 'Clicked Refresh on Plugin marketplaces at 1728×1117: while the marketplaces are read again (slowed here to show it), the last read stays, with a quiet band saying so.');
     await main.restore('plugins:view');
     await waitFor(a, `!document.querySelector('.rereading')`, 8000);
     await a.click('#nav-history');
@@ -1819,13 +1824,35 @@ if (wanted('settings')) {
   // The tour's clicks don't move focus as a real click would: let the keyboard focus go so no card keeps its ring.
   await a.run(`document.activeElement?.blur()`);
   await a.click('#appearance-system');
+  // The log. Made longer than a page first, its oldest line a stack trace with no space to break at, so earlier lines and wrapping show.
+  const logFile = join(scratch, 'data/central-knot.log');
+  const stackLine = `2026-11-17T09:00:00.000Z request sync:apply failed: Error: ENOENT at ${'/very/long/path/without/a/space'.repeat(12)}`;
+  writeFileSync(logFile, [stackLine, ...Array.from({ length: 450 }, (_, n) => `2026-11-17T09:00:01.000Z filler line ${n + 1}`)].join('\n') + '\n' + (existsSync(logFile) ? readFileSync(logFile, 'utf8') : ''));
   await a.theme('dark'); await a.click('#show-log');
-  await shot(a, 'settings-show-log', 'Clicked "Show log file". On Linux the app opens the log\'s folder (here a stand-in file manager) and the row says which file to look for. macOS and Windows select the file instead and add no line.');
-  await a.theme('light'); await shot(a, 'settings-show-log-light', 'The same, light.'); await a.theme('dark');
+  for (const [width, height] of [[860, 600], [1280, 800], [1728, 1080], [2560, 1440]]) {
+    await size(width, height); await a.run(`window.dispatchEvent(new Event('resize'))`); await a.click('#log-refresh');
+    await shot(a, `settings-show-log-${width}`, `Clicked "Show log" at ${width}×${height}: the log's last 200 lines under the Log row, oldest first, the page scrolled so the newest is in view; under them, that the times are UTC and Refresh log, Hide log and Open log folder (the row's own Hide log and Open log folder are far above).`);
+  }
+  await size(1280, 800); await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.theme('light'); await a.click('#log-refresh'); await shot(a, 'settings-show-log-light', 'The same at 1280×800, light.'); await a.theme('dark');
+  await size(860, 600); await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.click('#sidebar-toggle'); await shot(a, 'settings-sidebar-open-860', 'At 860×600, the sidebar opened from its rail: every page’s name shows whole, Plugin marketplaces and Library sources too.'); await a.click('#sidebar-toggle');
+  await a.run(`document.querySelector('#log-earlier').scrollIntoView({ block: 'start' }); document.querySelector('#settings-scroll').scrollTop -= 120`);
+  await shot(a, 'settings-log-earlier', 'Scrolled up to the top of the lines at 860×600: "Show 200 earlier lines" above them.');
+  while (await a.has('#log-earlier')) await a.click('#log-earlier');
+  await shot(a, 'settings-log-start', 'Clicked it until the log’s start (at 860×600): each click brought its lines in under the button, which stayed where it was; now the line says this is the start of the log, and the first line, a stack trace with no space in it, wraps: nothing is wider than the page.');
+  renameSync(logFile, `${logFile}.aside`); await a.click('#log-refresh');
+  await shot(a, 'settings-log-empty', 'With no log file yet (moved aside), Refresh log: "Nothing has been logged yet.", with Refresh log, Hide log and Open log folder.');
+  renameSync(`${logFile}.aside`, logFile);
+  await size(1280, 800); await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.click('#log-foot-show-log'); await a.click('#open-log-folder');
+  await shot(a, 'settings-open-log-folder', 'Hid the log, then clicked "Open log folder". On Linux the app opens the log\'s folder (here a stand-in file manager) and the row says which file to look for. macOS and Windows select the file instead and add no line.');
+  await a.theme('light'); await shot(a, 'settings-open-log-folder-light', 'The same, light.'); await a.theme('dark');
+  await size(860, 560); await a.run(`window.dispatchEvent(new Event('resize'))`);
   // Keep history for. History is given changes 3, 12 and 25 days old; shortening to 7 days asks first, then History keeps only the newest.
   // Nothing is managed yet, so this home has no sync record: a shorter window is saved, and its History is cut the next time Central Knot records a change there.
   await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
-  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says (with the neutral info glyph) that older History no longer shows and goes the next time Central Knot records a change in this home, not that it was removed. The Show log file note from the step before is gone: one finished note at a time.');
+  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says (with the neutral info glyph) that older History no longer shows and goes the next time Central Knot records a change in this home, not that it was removed. The Open log folder note from the step before is gone: one finished note at a time.');
   await keepFor(a, 30);
   // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
   await a.click('#nav-skills');
@@ -2054,15 +2081,19 @@ if (wanted('scroll')) {
   for (const page of ['plugins', 'overview', 'skills', 'mcp', 'agents', 'settings']) {
     if (!(await a.has(`#nav-${page}`))) continue;
     await a.click(`#nav-${page}`);
+    // On an item page the first row is opened first, so the scroll goes past an opened row: it goes up with the list.
+    const first = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+    if (first) await a.click(`#${first}`);
     for (const [width, height, scale] of sizes) {
       await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false });
       for (const theme of ['dark', 'light']) {
         await a.theme(theme);
         const what = await scroll(Math.round(height * 0.4)); await wait(100);
-        await shot(a, `${page}-${width}-${theme}`, `${page} at ${width}×${height}, ${theme}, main list scrolled down ${Math.round(height * 0.4)}px (${what}).`);
+        await shot(a, `${page}-${width}-${theme}`, `${page} at ${width}×${height}, ${theme}, ${first ? 'its first row opened, ' : ''}main list scrolled down ${Math.round(height * 0.4)}px (${what}).`);
       }
       await scroll(0);
     }
+    if (first) await a.click(`#${first}`);
   }
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
   await a.theme('dark');
@@ -2105,7 +2136,7 @@ if (wanted('harnesses')) {
     if (await a.has('#pswitch-page-0-document-tools[aria-checked="false"]:not([disabled])')) { await a.click('#pswitch-page-0-document-tools'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
     await a.click('#nav-harnesses'); await a.click('#harness-claude-cli');
   }
-  await a.click('#harness-tab-plugins'); await waitFor(a, `!/Reading/.test(document.querySelector('#harness-body')?.textContent ?? '')`); await shot(a, 'claude-plugins', 'Clicked the "Plugins" tab: plugins installed in Claude Code, each opening its page on Plugins.');
+  await a.click('#harness-tab-plugins'); await waitFor(a, `!/Reading/.test(document.querySelector('#harness-body')?.textContent ?? '')`); await shot(a, 'claude-plugins', 'Clicked the "Plugins" tab: plugins installed in Claude Code, each opening its page on Plugin marketplaces.');
   await a.click('#harness-tab-about'); await shot(a, 'claude-about', 'Clicked the "About" tab: how it was found and where its files are.');
   await sizes('claude-about', 'The About tab.');
   await a.click('#harness-switch-copilot-cli'); await a.click('#harness-tab-skills'); await shot(a, 'copilot-skills', 'Clicked Copilot CLI in the switcher at the top right, then the Skills tab.');
@@ -2405,7 +2436,7 @@ if (wanted('sources')) {
   const lookAt = async link => { await type(link); await a.click('#source-look'); await busyDone(); await a.settle(); };
   const DESLOP = 'https://github.com/stephenturner/skill-deslop/tree/main';
   await a.click('#nav-sources');
-  await atEverySize('empty', 'Clicked Sources in the sidebar: the link field, whose placeholder and the line under it name the forms a link takes (a SKILL.md’s link and github.com/owner/repo among them), Look, and a line saying what a source is');
+  await atEverySize('empty', 'Clicked Library sources in the sidebar: the link field, whose placeholder and the line under it name the forms a link takes (a SKILL.md’s link and github.com/owner/repo among them), Look, and a line saying what a source is');
   await lookAt(`https://github.com/stephenturner/skill-deslop/blob/main/SKILL.md`);
   await atEverySize('look-file-link', 'Pasted the link to the skill’s own SKILL.md (…/blob/main/SKILL.md) and clicked Look: it reads the folder that holds the file, the repository’s root, on branch main, and offers deslop as the folder link does', false, '#source-preview');
   await lookAt(DESLOP);
@@ -2463,20 +2494,20 @@ if (wanted('sources')) {
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Rename to unslop');
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('dropped', 'The skill was renamed unslop at the source; clicked Check now: the band leads, under a warning mark, with deslop no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn deslop on; then unslop in Central Knot, Off; the row lists unslop, and deslop, not in its last read, under a warning mark: no longer at this source, Off, and no longer from it, with Turn on', true, '.source-row');
+  await atEverySize('dropped', 'The skill was renamed unslop at the source; clicked Check now: the band leads, under a warning mark, with deslop no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn deslop on; then unslop in Central Knot, Off; the row lists unslop, and deslop, not in its last read, under a warning mark: no longer at this source, Off, and no longer from it, with Turn it on', true, '.source-row');
   deslop({ 'SKILL.md': '---\nname: [unslop\n---\nBroken.\n' }, 'Break the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so the source turned no skill, agent or MCP server off (nothing there can be read), and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can this source turns no skill off; deslop’s line, no longer at this source, with Turn on, stays as it was', false, '.source-row');
+  await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so the source turned no skill, agent or MCP server off (nothing there can be read), and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can this source turns no skill off; deslop’s line, no longer at this source, with Turn it on, stays as it was', false, '.source-row');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Mend the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await a.click('#nav-skills'); await openRow('deslop');
   await atEverySize('dropped-skill', 'On Skills, deslop is Off, out of every tool, kept in Central Knot with its versions, and “removed at its source” after its name, under a warning mark; its opened row’s line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and that should the source have it again, it follows the source if unchanged here and stays as you have it if you changed it; its versions still say where each came from', false, '.ov-row[data-key="deslop"]', 'start');
   await a.click('#nav-history');
-  await shot(a, 'dropped-history', 'History: github.com/stephenturner/skill-deslop (main) no longer has it, so it is off and removed from all 3 tools, and no longer from that source, with Turn on; and unslop brought in, Off, with Turn on (1280×800)');
+  await shot(a, 'dropped-history', 'History: github.com/stephenturner/skill-deslop (main) no longer has it, so it is off and removed from all 3 tools, and no longer from that source, with Turn it on; and unslop brought in, Off, with Turn it on (1280×800)');
   await a.click('#nav-sources');
-  await a.size(860, 560); await show('.source-row'); await focusOn('#source-turn-on-skill-deslop'); await shot(a, 'removed-focus-860', 'Tabbed to Turn on on deslop’s line at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
+  await a.size(860, 560); await show('.source-row'); await focusOn('#source-turn-on-skill-deslop'); await shot(a, 'removed-focus-860', 'Tabbed to Turn it on on deslop’s line at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
   await a.click('#source-turn-on-skill-deslop'); await busyDone(); await a.settle();
-  await atEverySize('turned-on', 'Clicked Turn on on deslop’s line: the band says deslop is on in all 3 tools, with Undo; deslop’s line is gone from the source’s row', false, '.source-row');
+  await atEverySize('turned-on', 'Clicked Turn it on on deslop’s line: the band says deslop is on in all 3 tools, with Undo; deslop’s line is gone from the source’s row', false, '.source-row');
   await lookAt('https://github.com/nobody/missing');
   await atEverySize('cannot-read', 'Looked at a link with no repository there (or none this computer can read): why, in plain words, and Cancel', false, '#source-preview');
   await a.click('#source-cancel');
@@ -2536,7 +2567,7 @@ if (wanted('source-agents')) {
   await atEverySize('agent-merged', 'Clicked Merge on reviewer’s line: its edit (the prompt) and the source’s change (the description) are apart, so the band says reviewer now has your changes and the source’s, merged, in the tools it is on in, with Undo the merge, Open Agents, and History’s note', false, '.source-row');
   commit({ 'agents/reviewer.md': null }, 'Drop reviewer');
   await checkNow();
-  await atEverySize('agent-removed', 'reviewer was taken out of the source; clicked Check now: the band leads, under a warning mark, with reviewer no longer at the source, turned off and taken out of the tools, Central Knot keeping it, with Turn reviewer on; the source’s row has reviewer’s line, an agent not in its last read: no longer at this source, Off, and no longer from it, with Turn on', true, '.source-row');
+  await atEverySize('agent-removed', 'reviewer was taken out of the source; clicked Check now: the band leads, under a warning mark, with reviewer no longer at the source, turned off and taken out of the tools, Central Knot keeping it, with Turn reviewer on; the source’s row has reviewer’s line, an agent not in its last read: no longer at this source, Off, and no longer from it, with Turn it on', true, '.source-row');
   await a.click('#nav-agents'); await openRow('reviewer');
   await atEverySize('agent-removed-agents', 'On Agents, reviewer is Off, out of every tool, with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and what happens should the source have it again', true, '.ov-row[data-key="reviewer"]', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
@@ -2585,7 +2616,7 @@ if (wanted('source-servers')) {
   await a.click('.source-row button[id$="-mcp-relay"][id^="source-merge-"]'); await busyDone(); await a.settle();
   commit({ '.mcp.json': servers({ 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Drop relay');
   await checkNow();
-  await atEverySize('server-removed', 'relay was taken out of the source; clicked Check now: the band leads, under a warning mark, with relay no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn relay on; the source’s row has relay’s line: no longer at this source, Off, no longer from it, with Turn on', true, '.source-row');
+  await atEverySize('server-removed', 'relay was taken out of the source; clicked Check now: the band leads, under a warning mark, with relay no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn relay on; the source’s row has relay’s line: no longer at this source, Off, no longer from it, with Turn it on', true, '.source-row');
   await a.click('#nav-mcp'); await openRow('relay');
   await atEverySize('server-removed-mcp', 'On MCP servers, relay is Off with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, and what happens should the source have it again', true, '.ov-row[data-key="relay"]', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
@@ -2627,21 +2658,21 @@ if (wanted('source-plugins')) {
   const type = text => a.run(`(() => { const input = document.querySelector('#source-link'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   const lookAt = async link => { await type(link); await a.click('#source-look'); await busyDone(); await a.settle(); };
   await a.click('#nav-sources');
-  await atEverySize('empty', 'Clicked Sources: the heading says any GitHub or GitLab link goes here; the line under the field says a plugin’s own folder brings its skills, agents and MCP servers and a marketplace goes to Plugins; the aside says a marketplace’s link is handed to Plugins');
+  await atEverySize('empty', 'Clicked Library sources: the heading says any GitHub or GitLab link goes here; the line under the field says a plugin’s own folder brings its skills, agents and MCP servers and a marketplace goes to Plugins; the aside says a marketplace’s link is handed to Plugins');
   await lookAt('https://github.com/acme/incident-response-toolkit');
   await atEverySize('look-plugin', 'Looked at a plugin’s own folder: that it holds a plugin, whose skills, agents and MCP servers come in as this source’s, each with its own switch; that its 4 commands, its hooks, its 1 LSP server and its bin folder are not brought in, and what to do to have the whole plugin; two skills (one in a folder its plugin.json names), an agent, a server from .mcp.json and one from plugin.json, coming in Off; the server that runs from the plugin’s folder left out', true, '#source-preview', 'start');
   await a.click('#source-add'); await busyDone(); await a.settle();
   await atEverySize('plugin-row', 'Clicked Add: the band says what came in, Off; the source’s row lists them and says what of the plugin is not brought in', false, '.source-row', 'start');
   await lookAt('https://github.com/acme/engineering-plugins');
-  await atEverySize('look-marketplace', 'Looked at a marketplace’s link: what it is (acme-engineering-plugins, with 12 plugins), that it goes on the Plugins page where each plugin has its own switch, and Add to Plugins adds it with its 12 plugins, none turned on; and that a link to one of its other folders brings that folder’s items here; Add to Plugins, Cancel, and that nothing is installed or kept here', true, '#source-preview');
-  await a.size(860, 560); await focusOn('#source-to-plugins'); await shot(a, 'look-marketplace-focus-860', 'Tabbed to Add to Plugins at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
+  await atEverySize('look-marketplace', 'Looked at a marketplace’s link: what it is (acme-engineering-plugins, with 12 plugins), that it goes on the Plugin marketplaces page where each plugin has its own switch, and Add to Plugin marketplaces adds it with its 12 plugins, none turned on; and that a link to one of its other folders brings that folder’s items here; Add to Plugin marketplaces, Cancel, and that nothing is installed or kept here', true, '#source-preview');
+  await a.size(860, 560); await focusOn('#source-to-plugins'); await shot(a, 'look-marketplace-focus-860', 'Tabbed to Add to Plugin marketplaces at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
   await lookAt('https://github.com/acme/engineering-plugins/tree/release-2026-q4');
-  await atEverySize('look-marketplace-branch', 'Looked at the same marketplace on its branch release-2026-q4: refused, with why (the Plugins page adds a marketplace from its repository’s default branch, main, at its root) and what to do instead (clone it and add the folder with Folder… on Plugins); no Add to Plugins', false, '#source-preview');
+  await atEverySize('look-marketplace-branch', 'Looked at the same marketplace on its branch release-2026-q4: refused, with why (the Plugin marketplaces page adds a marketplace from its repository’s default branch, main, at its root) and what to do instead (clone it and add the folder with Folder… on Plugins); no Add to Plugin marketplaces', false, '#source-preview');
   await lookAt('https://github.com/acme/engineering-plugins/tree/main/plugins/release-notes-writer');
-  await atEverySize('look-listed', 'Looked at one plugin’s folder in that marketplace: it is the plugin release-notes-writer, which its repository’s marketplace lists, so it goes on Plugins with that marketplace, where it has its own switch; Add to Plugins for acme-engineering-plugins', false, '#source-preview');
+  await atEverySize('look-listed', 'Looked at one plugin’s folder in that marketplace: it is the plugin release-notes-writer, which its repository’s marketplace lists, so it goes on Plugin marketplaces with that marketplace, where it has its own switch; Add to Plugin marketplaces for acme-engineering-plugins', false, '#source-preview');
   await lookAt('https://github.com/acme/engineering-plugins');
   await a.click('#source-to-plugins'); await busyDone(); await a.settle();
-  await atEverySize('plugins-after', 'Clicked Add to Plugins: the Plugins page opens on acme-engineering-plugins with its 12 plugins, each with its switch off, and the band says the marketplace was added and nothing was installed', true);
+  await atEverySize('plugins-after', 'Clicked Add to Plugin marketplaces: the Plugin marketplaces page opens on acme-engineering-plugins with its 12 plugins, each with its switch off, and the band says the marketplace was added and nothing was installed', true);
   if (await a.has('#open-add-marketplace')) await a.click('#open-add-marketplace');
   await atEverySize('plugins-add-box', 'Clicked Add marketplace: the box, and under it the line that any other link, to a folder of skills, agents or MCP servers, or to one plugin, goes on Sources, with a link to that page', true, '.market-add-note');
   await a.click('#nav-sources');
@@ -2649,7 +2680,7 @@ if (wanted('source-plugins')) {
   await a.click('#source-add'); await busyDone(); await a.settle();
   handbook({ '.claude-plugin/marketplace.json': JSON.stringify({ name: 'team-handbook-plugins', plugins: [] }), 'writing-style/SKILL.md': null }, 'Become a marketplace');
   await a.click('.source-rows > li:last-child .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('row-now-marketplace', 'acme/team-handbook became a marketplace; clicked Check now on its row: under a warning mark, the row says the link now holds a marketplace, which goes on Plugins, that this source turns nothing off, and to remove this source, then look at its link again to see how it can go on Plugins; writing-style stays as it was', false, '.source-rows > li:last-child', 'start');
+  await atEverySize('row-now-marketplace', 'acme/team-handbook became a marketplace; clicked Check now on its row: under a warning mark, the row says the link now holds a marketplace, which goes on Plugin marketplaces, that this source turns nothing off, and to remove this source, then look at its link again to see how it can go on Plugin marketplaces; writing-style stays as it was', false, '.source-rows > li:last-child', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
@@ -2673,7 +2704,7 @@ if (wanted('plugin-library')) {
   await refresh(); await waitFor(a, `!!document.querySelector('#pupdate-0-issue-tracker')`, 15000);
   await a.click('#pupdate-0-issue-tracker'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   await a.click('#nav-skills'); await waitFor(a, `!!document.querySelector('.sync-notice[data-kind="dropped"]')`, 15000);
-  await atEverySize('dropped-notice', 'Update read issue-tracker, which no longer has triage: on Skills the notice says triage: the plugin issue-tracker no longer has it, so it is off, Central Knot keeps it, with Turn on (as your own) and History', true, '.sync-notice[data-kind="dropped"]');
+  await atEverySize('dropped-notice', 'Update read issue-tracker, which no longer has triage: on Skills the notice says triage: the plugin issue-tracker no longer has it, so it is off, Central Knot keeps it, with Turn it on (as your own) and History', true, '.sync-notice[data-kind="dropped"]');
   await a.click('#nav-plugins');
   writeFileSync(join(market, 'plugins/issue-tracker/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp', '--v2'] } } }));
   await refresh(); await waitFor(a, `/An update is ready/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);

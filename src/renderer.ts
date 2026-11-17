@@ -10,7 +10,7 @@ import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, lo
 import { afterLayout, button, fitBars, h, icon, runAfterLayout, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
-import { kindNouns } from './words.ts';
+import { kindNouns, pageNames } from './words.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage } from './pages.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
@@ -30,7 +30,7 @@ import { forgetHeldResult, heldBy, heldScreen } from './otherbuildview.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** Each page's title, in the header and the sidebar: a kind's page by its kind's title (words.ts kindNouns). */
-const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', sources: 'Sources', repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
+const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', sources: pageNames.sources, repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
 /** From this content width (laptop full screen and up), an open row's details dock beside its table instead of under the row. */
@@ -115,12 +115,12 @@ function renderSidebar() {
     row('agents', 'bot', home && home.agents.items.length + pluginItemCount(home, 'agents')),
     row('instructions', 'pencil-line'),
     row('plugins', 'puzzle'),
+    // Where items come from, beside the plugins' page: how many links are added, once there is one.
+    navRow('sources', titles.sources, 'link-2', sources.view?.sources.length || undefined, sources.view?.sources.length ? plural(sources.view.sources.length, 'source') : undefined),
     // Profiles switch skills and MCP servers, so like the kinds' rows it needs a tool to switch them in.
     !noToolManaged() ? navRow('profiles', titles.profiles, 'sliders-horizontal') : null,
     !noToolManaged() ? h('div.nav-divider', { role: 'separator' }) : null,
     navRow('history', titles.history, 'history'),
-    // Sources: how many links are added, once there is one.
-    navRow('sources', titles.sources, 'link-2', sources.view?.sources.length || undefined, sources.view?.sources.length ? plural(sources.view.sources.length, 'source') : undefined),
     repoRow(),
     navRow('settings', titles.settings, 'settings'),
   ].filter((entry): entry is HTMLElement => !!entry));

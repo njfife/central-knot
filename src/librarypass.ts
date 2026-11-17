@@ -571,7 +571,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   await guardFolders(pass, items, pass.shelf);
   for (const item of items) await syncItem(pass, item);
   if (pass.takenIn.length) pass.notices.push(takenInNotice(pass.takenIn));
-  // A plugin's update that dropped an item says so on its page once (library.ts A PLUGIN): History holds its Turn on.
+  // A plugin's update that dropped an item says so on its page once (library.ts A PLUGIN): History holds its Turn it on.
   if (options.source?.plugin) for (const [key, said] of pass.sourced) if (said.answer === 'drop' && said.history) pass.notices.push({ kind: 'dropped', key, item: said.name, link: options.source.link, history: said.history });
   // A file noted away that this pass made (a kind of files: Kind.folderSeen) is noted as it is now, so the next pass doesn't
   // take Central Knot's own write for a file made again (keepFolders: a click's pass still moves no known identity on).
