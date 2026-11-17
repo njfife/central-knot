@@ -1348,7 +1348,7 @@ app.whenReady().then(async () => {
   // Reveal only: the file manager selects it; nothing is opened, run or written.
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? skillChange(context(), eventId) : undefined));
-  // The tools' session history, read on the page's click: outside the queue, since usage.ts changes nothing in the home. This
+  // The tools' session history, read when the page collects usage: outside the queue, since usage.ts changes nothing in the home. This
   // computer's home reads OpenCode's data where XDG_DATA_HOME moves it, as each tool's folder follows its own variable.
   handleNow('usage:read', async home => (current && home === current.home
     ? readUsage({ home: current.home, overrides: context().overrides, dataHome: current.mode === 'actual' ? process.env.XDG_DATA_HOME : undefined }) : null));

@@ -1,7 +1,8 @@
 // The usage reading, in main: which skills, agents and MCP servers each tool's own session history shows were used, and
-// when. It runs on a click (main.ts usage:read, DesktopApi.readUsage) and at no other time, outside main's queue: it changes
-// nothing in the home (OpenCode's database is read from a temporary copy, removed after), so it never holds up a pass. Nothing
-// is stored: the page keeps the answer in its own slot (app.ts state.usage) until the home changes or the app closes.
+// when. It runs when the page collects usage (main.ts usage:read, DesktopApi.readUsage, from app.ts collectUsage: when a home
+// opens, and on Update usage statistics), outside main's queue: it changes nothing in the home (OpenCode's database is read from
+// a temporary copy, removed after), so it never holds up a pass. Nothing is stored: the page keeps the answer in its own slot
+// (app.ts state.usage) until the home changes or the app closes.
 //
 // `readers` is the one table, a row per tool: where its sessions are (under the same folders, moved by the same variables,
 // as its other files: harnesses.ts), which kinds its records can tell (`tells`, the same table for the page: types.ts
@@ -216,12 +217,12 @@ export const readers: Record<HarnessId, Reader> = {
   'opencode-cli': { tells: { skill: 'sure', agent: 'sure' }, read: openCodeSessions },
 };
 
-/** One tool's sessions, read and counted: per name, the sessions since `since` that used it (by number) and its newest use. */
+/** One tool's sessions, read and counted: how many it keeps and how many started since `since`; per name, the sessions since `since` that used it (by number) and its newest use. */
 async function readTool(tool: HarnessId, at: UsageWhere, now: number): Promise<ToolUsage> {
   const reader = readers[tool], since = now - USAGE_DAYS * DAY_MS;
   let read: Read | undefined;
   try { read = await reader.read(at, now); }
-  catch { return { tool, tells: reader.tells, sessions: 0, used: [], unread: true }; }
+  catch { return { tool, tells: reader.tells, sessions: 0, recent: 0, used: [], unread: true }; }
   const sessions = read?.sessions;
   const used = new Map<string, UsedName & { newest: number }>();
   sessions?.forEach((session, index) => {
@@ -236,14 +237,14 @@ async function readTool(tool: HarnessId, at: UsageWhere, now: number): Promise<T
   const oldest = starts.length ? Math.min(...starts) : undefined;
   const from = sessions?.length ? (reader.reach ? await reader.reach(at, now, oldest) : oldest) : undefined;
   return {
-    tool, tells: reader.tells, sessions: sessions?.length ?? 0, ...(from !== undefined ? { from: new Date(from).toISOString() } : {}), ...(read?.skipped ? { skipped: read.skipped } : {}),
+    tool, tells: reader.tells, sessions: sessions?.length ?? 0, recent: starts.filter(start => start >= since).length,
+    ...(from !== undefined ? { from: new Date(from).toISOString() } : {}), ...(read?.skipped ? { skipped: read.skipped } : {}),
     used: [...used.values()].map(({ newest, ...entry }) => ({ ...entry, last: new Date(newest).toISOString() })),
   };
 }
 
 /** Reads every tool's session history in a home: the page's one reading (types.ts UsageReading). */
 export async function readUsage(at: UsageWhere, now = Date.now()): Promise<UsageReading> {
-  const started = performance.now();
   const tools = await Promise.all(harnessIds.map(tool => readTool(tool, at, now)));
-  return { at: new Date(now).toISOString(), tookMs: Math.round(performance.now() - started), tools };
+  return { at: new Date(now).toISOString(), tools };
 }

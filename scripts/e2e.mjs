@@ -1190,6 +1190,9 @@ async function practiceFlow() {
   same('a server off in Copilot CLI is marked there', await offMarks(a, 'docs'), ['copilot-cli']);
   await a.click('#open-docs');
   await a.shot('practice-mcp-disabled');
+  // The practice copy's tools keep no sessions, so every row would say "can't say": usage, collected as the home opened, draws no column.
+  for (let tries = 0; tries < 50 && !/^Collected /.test(await a.text('#usage-when') ?? ''); tries++) await wait(100);
+  same('usage collected on a home whose tools keep no sessions: no Used column, the time beside the button', [await a.exists('.ov-used'), /^Collected /.test(await a.text('#usage-when') ?? '')], [false, true]);
   // Full screen on a 1728×1117 display: the details dock beside the table, and a row's line, its tag and URL here, still shows whole.
   await sizeTo(a, 1728, 1117);
   same('docked at full screen, a row’s line is shortened only when it has no room', await a.all('.ov-row[data-key] .ov-name-about', 'e.scrollWidth <= e.clientWidth'), [true, true]);
@@ -4796,10 +4799,12 @@ esac
 }
 
 /**
- * Read usage (usage.ts, usagerow.ts) on a folder home whose tools have made-up session history: nothing is read until the click,
- * then each row says its figure, an opened row each tool's, and Sort can put the rows by last used. Three skills were taken in
- * from copies saved 40 days ago, old enough for "No use seen in 30 days"; fresh, saved 2 days ago, is left out as new. The chip
- * lists the two with no use seen, and Turn these off turns them off in one click whose Undo puts every file back.
+ * Usage (usage.ts, usagerow.ts, app.ts collectUsage) on a folder home whose tools have made-up session history: collected by
+ * itself when the home opens, so each row says its figure without a click, an opened row each tool's, and Sort can put the rows
+ * by last used. Update usage statistics collects again, with a band that says what collecting does and closes; a reading that
+ * lands moves no row. Three skills were taken in from copies saved 40 days ago, old enough for "No use seen in 30 days"; fresh,
+ * saved 2 days ago, is left out as new. The chip lists the two with no use seen, and Turn these off turns them off in one click
+ * whose Undo puts every file back.
  */
 async function usageFlow() {
   const home = join(scratch, 'usage-home'), data = join(scratch, 'usage-data'), ago = days => new Date(Date.now() - days * 86_400_000);
@@ -4812,17 +4817,25 @@ async function usageFlow() {
   for (const [name, days] of [['notes', 40], ['standup', 40], ['idle', 40], ['spare', 40], ['fresh', 2]]) { const folder = skill(claude, name); for (const path of [folder, join(folder, 'SKILL.md')]) utimesSync(path, ago(days), ago(days)); }
   const lines = (path, records) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n') + '\n'); };
   const skillCall = (name, days) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: name } }] }, timestamp: ago(days).toISOString() });
-  // Claude Code: notes called 2 days ago; standup typed 40 days ago; a listing that names idle, which is no use.
+  // Claude Code: notes called in 13 sessions, the newest 2 days ago; standup typed 40 days ago; a listing that names idle, which is no use.
   lines(join(home, '.claude/projects/-work/s1.jsonl'), [{ type: 'attachment', attachment: { type: 'skill_listing', content: '- idle: x' }, timestamp: ago(2).toISOString() }, skillCall('notes', 2)]);
+  for (let session = 2; session <= 13; session++) lines(join(home, `.claude/projects/-work/notes-${session}.jsonl`), [skillCall('notes', 2 + session)]);
   lines(join(home, '.claude/projects/-work/s2.jsonl'), [{ type: 'user', message: { content: '<command-name>/standup</command-name>' }, timestamp: ago(40).toISOString() }]);
   // Copilot CLI, not installed here so not managed: idle invoked 3 days ago, which counts all the same.
   lines(join(home, '.copilot/session-state/c1/events.jsonl'), [{ type: 'skill.invoked', data: { name: 'idle' }, timestamp: ago(3).toISOString() }]);
-  // OpenCode, not installed here (no settings folder), with a database left from a year ago: not named in the line.
+  // OpenCode, not installed here (no settings folder), with a database left from a year ago, of a realistic size: 20,000
+  // messages, each with a text part and a tool part. Not named among the tools; read all the same.
   const { DatabaseSync } = await import('node:sqlite');
   mkdirSync(join(home, '.local/share/opencode'), { recursive: true });
   const leftover = new DatabaseSync(join(home, '.local/share/opencode/opencode.db'));
-  leftover.exec('CREATE TABLE session (id text PRIMARY KEY, agent text, time_created integer NOT NULL); CREATE TABLE part (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, data text NOT NULL)');
-  leftover.prepare('INSERT INTO session VALUES (?, ?, ?)').run('old', null, ago(365).getTime());
+  leftover.exec('CREATE TABLE session (id text PRIMARY KEY, agent text, time_created integer NOT NULL); CREATE TABLE part (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, data text NOT NULL); BEGIN');
+  const yearAgo = ago(365).getTime(), part = leftover.prepare('INSERT INTO part VALUES (?, ?, ?, ?)'), output = 'x'.repeat(1500);
+  for (let session = 0; session < 1000; session++) leftover.prepare('INSERT INTO session VALUES (?, ?, ?)').run(`old${session}`, null, yearAgo);
+  for (let message = 0; message < 20000; message++) {
+    part.run(`t${message}`, `old${message % 1000}`, yearAgo, JSON.stringify({ type: 'text', text: output.slice(0, 600) }));
+    part.run(`c${message}`, `old${message % 1000}`, yearAgo, JSON.stringify({ type: 'tool', tool: message % 2 ? 'bash' : 'read', state: { input: { command: 'ls' }, output } }));
+  }
+  leftover.exec('COMMIT');
   leftover.close();
   // Codex: its history starts 12 days ago; notes's SKILL.md read 5 days ago.
   lines(join(home, '.codex/sessions/2026/11/01/rollout-a.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(12).toISOString() },
@@ -4834,49 +4847,91 @@ async function usageFlow() {
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
   const real = join(scratch, 'usage-real');
   mkdirSync(real, { recursive: true });
-  const a = await launch(data, [], real);
+  let a = await launch(data, [], real);
   await a.click('#nav-settings');
   for (let tries = 0; tries < 30 && !(await a.exists('#sync-everything-on')); tries++) await wait(100);
   await a.click('#sync-everything-on');
   await a.click('#nav-skills');
   for (let tries = 0; tries < 50 && (await sectionsNow(a))[0]?.[1]?.length !== 5; tries++) { await wait(100); await a.settle(); }
   same('the five skills are On, taken in by Synchronize everything', await sectionsNow(a), [['on', ['fresh', 'idle', 'notes', 'spare', 'standup']]]);
+  const figures = () => a.run(`Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => [row.dataset.key, row.querySelector('.ov-used')?.textContent]))`);
+  const collected = () => a.run(`/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`);
+  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+  // Collected when the home opened, while the page took the clicks above: no click on the button, and no band.
+  same('the home’s first opening collects usage by itself: the time beside Update usage statistics, a figure on each row, no band',
+    [await collected(), (await a.text('#collect-usage'))?.trim(), await a.exists('#usage-line'), (await figures()).notes], [true, 'Update usage statistics', false, 'used 2 days ago, in 14 sessions']);
   // Copilot CLI left out with its Manage switch: its sessions are still read, and a use there still counts.
   await a.click('#nav-harnesses');
   await a.click('#manage-copilot-cli');
   for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#manage-copilot-cli')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(100);
   await a.click('#nav-skills');
-  same('before a reading: the one click, and no line, figure, chip or Last used', [await a.text('#read-usage'), await a.exists('#usage-line'), await a.exists('.ov-used'), await a.all('.chip', 'e.dataset.tip'), await a.all('#item-order option', 'e.value')],
-    ['Read usage', false, false, [], ['name', 'updated']]);
-  await a.click('#read-usage');
-  for (let tries = 0; tries < 50 && !/^Usage read/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
-  const line = (await a.text('#usage-line .band-text') ?? '').replace(/\u00a0/g, ' ');
-  check('the line says when it was read (a quick reading says no time) and how far back each tool goes, Copilot CLI too, not OpenCode’s year-old leftover, with Read again',
-    /^Usage read today at [^,]+\. Claude Code: 30 days or more; Copilot CLI: history from \w+ \d+; Codex: history from \w+ \d+\.$/.test(line) && (await a.text('#read-usage-again')) === 'Read again', line);
-  const figures = () => a.run(`Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => [row.dataset.key, row.querySelector('.ov-used')?.textContent]))`);
-  same('each row says its figure: used (in Copilot CLI too, not managed here), or no use seen in 30 days (a listing is no use, nor a use 40 days ago)', await figures(),
-    { fresh: 'no use seen in 30 days', idle: 'used 3 days ago', notes: 'used 2 days ago', spare: 'no use seen in 30 days', standup: 'no use seen in 30 days' });
+  await a.click('#collect-usage');
+  const bandText = async () => (await a.text('#usage-line .band-text') ?? '').replace(/ /g, ' ');
+  for (let tries = 0; tries < 100 && !/^Usage statistics collected/.test(await bandText()); tries++) await wait(100);
+  check('Update usage statistics opens the band: when it was collected and how far back each tool’s history goes, Copilot CLI too, not OpenCode’s year-old leftover',
+    /^Usage statistics collected today at [^.]+\. Each tool’s history: Claude Code, 30 days or more; Copilot CLI, from \w+ \d+; Codex, from \w+ \d+\.$/.test(await bandText()), await bandText());
+  same('each row says its figure: used, and in how many sessions (in Copilot CLI too, not managed here), or no use seen in 30 days (a listing is no use, nor a use 40 days ago)', await figures(),
+    { fresh: 'no use seen in 30 days', idle: 'used 3 days ago, in 1 session', notes: 'used 2 days ago, in 14 sessions', spare: 'no use seen in 30 days', standup: 'no use seen in 30 days' });
+  await a.click('#open-notes');
+  same('a skill used in two tools: its opened row says each tool’s count, 13 and 1, which the row adds up to 14',
+    await a.all('.details-usage', 'e.textContent.trim()'), ['Used in 13 sessions in the last 30 days, last used 2 days ago.', 'Used in 1 session in the last 30 days, last used 5 days ago.']);
+  await a.click('#open-notes');
   await a.click('#open-standup');
-  same('an opened row says each tool’s figure: its last use beyond the 30 days, and that Codex doesn’t always record a skill',
+  same('an opened row says each tool’s figure: its last use beyond the 30 days, and that Codex doesn’t always record a skill (can’t say, no number)',
     await a.all('.details-usage', 'e.textContent.trim()'), ['No use seen in the last 30 days; last used 5 weeks ago.', 'Can’t say: it doesn’t always record which skill was used.']);
   await a.click('#open-standup');
   await a.click('#open-idle');
   same('and a use in a tool not managed here has its own line', (await a.text('#usage-idle-copilot-cli'))?.trim(), 'Copilot CLI, not managed here: used in 1 session in the last 30 days, last used 3 days ago.');
   await a.click('#open-idle');
-  await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = 'used'; select.dispatchEvent(new Event('change')); })()`);
-  await a.settle();
+  // Closing the band is a click on the band: the rows move up by its own height and no more, and it stays closed.
+  const tops = () => a.run(`[...document.querySelectorAll('.ov-row[data-key]')].map(row => row.getBoundingClientRect().top)`);
+  const [beforeClose, bandHeight] = [await tops(), await a.run(`document.querySelector('#usage-line').getBoundingClientRect().height`)];
+  await a.click('#usage-line-close');
+  const afterClose = await tops();
+  same(`closing the band moves every row up by its height (${Math.round(bandHeight)} px) and nothing else`,
+    [afterClose.length === beforeClose.length && afterClose.every((top, index) => Math.abs(beforeClose[index] - top - bandHeight) < 0.5), await a.exists('#usage-line')], [true, false]);
+  const chooseOrder = async value => { await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })()`); await a.settle(); };
+  await chooseOrder('used');
   same('Sort by Last used: the newest use first, then the one used 40 days ago, then those never seen, by name', (await sectionsNow(a))[0][1], ['notes', 'idle', 'standup', 'fresh', 'spare']);
-  await a.click('#read-usage-again');
-  for (let tries = 0; tries < 50 && !/^Usage read/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
-  same('Read again reads afresh and keeps the order chosen', [(await sectionsNow(a))[0][1], (await figures()).notes], [['notes', 'idle', 'standup', 'fresh', 'spare'], 'used 2 days ago']);
-  await fitsAtMinimum(a, 'Skills with usage read and its figures');
+  // spare used just now: the reading that lands moves no row (its cell fills where it is); the next Sort draws the new order.
+  lines(join(home, '.claude/projects/-work/s4.jsonl'), [skillCall('spare', 0)]);
+  await a.click('#collect-usage');
+  for (let tries = 0; tries < 100 && (await figures()).spare !== 'used just now, in 1 session'; tries++) await wait(100);
+  same('a reading that lands moves no row: spare, used just now, says so where it was; the band opened again by Update',
+    [(await sectionsNow(a))[0][1], (await figures()).spare, await a.exists('#usage-line')], [['notes', 'idle', 'standup', 'fresh', 'spare'], 'used just now, in 1 session', true]);
+  await chooseOrder('name'); await chooseOrder('used');
+  same('the next draw that may reorder (Sort chosen again) puts it first', (await sectionsNow(a))[0][1], ['spare', 'notes', 'idle', 'standup', 'fresh']);
+  rmSync(join(home, '.claude/projects/-work/s4.jsonl'));
+  await a.click('#collect-usage');
+  for (let tries = 0; tries < 100 && (await figures()).spare !== 'no use seen in 30 days'; tries++) await wait(100);
+  await a.click('#usage-line-close');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && (await sectionsNow(a))[0]?.[1]?.[0] !== 'notes'; tries++) { await wait(100); await a.settle(); }
+  same('Refresh lets the held order go', (await sectionsNow(a))[0][1], ['notes', 'idle', 'standup', 'fresh', 'spare']);
+  await sizeTo(a, 860, 600);
+  same('at 860×600 every figure is whole, "used 2 days ago, in 14 sessions" too', await a.run(`[...document.querySelectorAll('.ov-used')].filter(cell => cell.scrollWidth > cell.clientWidth + 1).map(cell => cell.textContent)`), []);
+  await fullSize(a);
+  await fitsAtMinimum(a, 'Skills with usage collected and its figures');
   await a.shot('usage-read');
+  // A switch clicked while a reading runs is carried out without waiting for it: OpenCode's 20,000 messages are read in main,
+  // where the click's pass runs. Timed against the same click with no reading.
+  const flipTime = async key => a.run(`(async () => { const was = document.querySelector('#switch-${key}').getAttribute('aria-checked'), started = performance.now();
+    document.querySelector('#switch-${key}').click();
+    while (document.querySelector('#switch-${key}').getAttribute('aria-checked') === was || document.body.dataset.busy === 'true') await new Promise(done => setTimeout(done, 5));
+    return Math.round(performance.now() - started); })()`);
+  const alone = [await flipTime('fresh'), await flipTime('fresh')];
+  await a.click('#collect-usage');
+  const whileCollecting = await a.text('#usage-when');
+  const during = [await flipTime('fresh'), await flipTime('fresh')];
+  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+  check(`a switch clicked while usage is collected waits under 300 ms longer than alone (alone ${alone.join(', ')} ms; while “${whileCollecting}”: ${during.join(', ')} ms)`, Math.max(...during) - Math.max(...alone) < 300, JSON.stringify({ alone, during, whileCollecting }));
+  await a.click('#usage-line-close');
   // The chip: standup and spare, old enough with no use seen; fresh, 2 days old, left out and counted; idle, used in Copilot CLI, not in it.
   same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['All', null], ['No use seen in 30 days', '2']]);
   await a.click('.chip[data-tip="No use seen in 30 days"]');
   same('with the chip on, the table holds standup and spare', await sectionsNow(a), [['on', ['standup', 'spare']]]);
-  same('its band says how many, that a use elsewhere isn’t seen, what Codex doesn’t always record, the new one left out, the profile it ends, and beside the button what it does',
-    await a.text('#unused-band .band-text'), '2 skills with no use seen in the last 30 days. A use on another computer or in a tool not read isn’t seen. Codex doesn’t always record which skill was used. Left out: 1 skill under 30 days old. With these off, Everyday stops being the profile in use. Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on.');
+  same('its band says how many, that a use elsewhere isn’t seen, how far back each tool’s history goes, what Codex doesn’t always record, the new one left out, the profile it ends, and beside the button what it does',
+    (await a.text('#unused-band .band-text'))?.replace(/ /g, ' ').replace(/from \w+ \d+/g, 'from <day>'), '2 skills with no use seen in the last 30 days. A use on another computer or in a tool not read isn’t seen. Each tool’s history: Claude Code, 30 days or more; Copilot CLI, from <day>; Codex, from <day>. Codex doesn’t always record which skill was used. Left out: 1 skill under 30 days old. With these off, Everyday stops being the profile in use. Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on.');
   await fitsAtMinimum(a, 'Skills with the No use seen chip on and its band');
   await a.shot('usage-chip');
   const filesOf = names => Object.fromEntries(names.flatMap(name => [claude, codex].map(root => [join(root, name), readNow(join(root, name, 'SKILL.md'))])));
@@ -4908,14 +4963,15 @@ async function usageFlow() {
   await a.click('#outcome-undo');
   await a.click('#switch-standup');
   same('its Undo puts spare back; standup is turned on again by its switch', [await switchOn(a, 'standup'), await switchOn(a, 'spare'), await chipOn()], [true, true, 'All']);
-  // A reading that fails shows nothing from the one before (a dev run only: it reaches main to make the request fail).
+  // A reading that fails shows nothing from the one before, and opens the band to say so (a dev run only: it reaches main to make the request fail).
   const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
   if (main) {
     await main.failRequest('usage:read');
-    await a.click('#read-usage-again');
-    for (let tries = 0; tries < 50 && !/couldn’t be read/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
-    same('a reading that fails: the line says so, and no figure or chip from the reading before stays', [await a.text('#usage-line .band-text'), await a.exists('.ov-used'), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
-      ['The tools’ session history couldn’t be read.', false, false]);
+    await a.click('#collect-usage');
+    for (let tries = 0; tries < 50 && !/couldn’t be collected/.test(await a.text('#usage-line') ?? ''); tries++) await wait(100);
+    same('a reading that fails: the band says so, the button offers to collect again, and no figure or chip from the reading before stays',
+      [await a.text('#usage-line .band-text'), (await a.text('#collect-usage'))?.trim(), await a.exists('.ov-used'), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
+      ['Usage statistics couldn’t be collected: the tools’ session history couldn’t be read.', 'Collect usage statistics', false, false]);
     await main.restore('usage:read');
     main.close();
   }
@@ -4925,13 +4981,23 @@ async function usageFlow() {
   const kit = 'review-kit@ck-usage/checks';
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${kit}"]`)); tries++) await wait(100);
-  await a.click('#read-usage-again');
+  await a.click('#collect-usage');
   for (let tries = 0; tries < 50 && !(await a.run(`document.querySelector('.ov-row[data-key="${kit}"] .ov-used')?.textContent`)); tries++) await wait(100);
   await a.click(`[id="open-${kit}"]`);
   same('a From plugins row says its figure, and its opened row Claude Code’s, by the same match', [await a.run(`document.querySelector('.ov-row[data-key="${kit}"] .ov-used')?.textContent`), (await a.text(`[id="usage-${kit}-claude-cli"]`))?.trim()],
-    ['used 4 days ago', 'Used in 1 session in the last 30 days, last used 4 days ago.']);
+    ['used 4 days ago, in 1 session', 'Used in 1 session in the last 30 days, last used 4 days ago.']);
   await a.shot('usage-plugin-row');
+  // Sort by Last used, kept from this launch to the next: the reading that comes by itself as the home opens moves no row.
+  await chooseOrder('used');
   same('no page errors, usage', a.pageErrors, []);
+  await a.quit();
+  a = await launch(data, [], real);
+  await a.click('#nav-skills');
+  for (let tries = 0; tries < 50 && (await sectionsNow(a))[0]?.[1]?.length !== 5; tries++) { await wait(100); await a.settle(); }
+  const firstDrawn = await sectionsNow(a);
+  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+  same('the next launch keeps Sort by Last used, and the reading that comes by itself moves no row', [await a.run(`document.querySelector('#item-order').value`), await sectionsNow(a)], ['used', firstDrawn]);
+  same('no page errors, usage after a relaunch', a.pageErrors, []);
   await a.quit();
 }
 

@@ -2,9 +2,9 @@
 // state (`state`), the page shown (showPage), what is said after a click (tell, announce), the busy line (busy) and whether the
 // page is acting (acting: busy, or the Plugins page's switch clicks running); a click on an item page sent to its kind's engine
 // (applyClick, through kindPages) and its result kept for the page (lastResult); History's actions (restoreEvent); the reads of
-// the home (loadHome, readAgain, readHomeOnce), the usage reading on a click (readUsage), and the Sync switch, Sync once and
-// Synchronize everything's row; the rows a click pins where they were (pinnedRows, drawPage); and the Instructions, base
-// instructions and Profiles pages' actions.
+// the home (loadHome, readAgain, readHomeOnce), usage collected when a home opens and on Update (collectUsage), and the Sync
+// switch, Sync once and Synchronize everything's row; the rows a click pins where they were (pinnedRows, drawPage); and the
+// Instructions, base instructions and Profiles pages' actions.
 // A sync notice lives across reads here, until its page shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it. Not here: drawing (renderer.ts and each
 // page's module), the Plugins page's state (pluginstate.ts), the Sources and Git repo pages' (sourcespage.ts, repopage.ts), and
 // every rule a page shows (the engines' answers in the view: libraryrow.ts, historyactions.ts, profileplan.ts).
@@ -31,6 +31,7 @@ import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
+import { holdOrder } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -110,8 +111,10 @@ export const state = {
   outcome: undefined as Outcome | undefined,
   /** The result whose problem lines are shown whole (Show all: matrix.ts problemLines): an item page's outcome, kept result or first background problem; Plugins' run or problem. */
   shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | undefined,
-  /** What the tools' session history shows was used (usage.ts): read only on the item pages' Read usage click (readUsage), for this home. */
-  usage: pageData<UsageReading>('unasked'),
+  /** What the tools' session history shows was used (usage.ts), for this home: collected when it opens and on Update usage statistics (collectUsage). */
+  usage: pageData<UsageReading>(),
+  /** Whether the usage band shows above an item page's list (matrix.ts usageBand): opened by Update usage statistics and by a reading that fails, closed by its close button and when a home opens. */
+  usageBand: false,
   /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
   instructions: pageData<InstructionFile[]>(),
   /** The one instruction file being edited (InstructionDraft). */
@@ -312,12 +315,15 @@ function accept(view: HomeView) {
   state.draftPick = undefined;
   resetPageData(state.instructions);
   resetPageData(state.history);
-  resetPageData(state.usage, 'unasked');
+  resetPageData(state.usage);
+  state.usageBand = false;
   resetMarket();
   // The note of what plugin updates did by themselves is about one home.
   void loadPluginUpdates();
   setHome(view, { reload: false });
   void loadPageData(state.page, { readId: view.readId });
+  // Usage is collected for every home it opens, in the background (collectUsage).
+  void collectUsage();
   // The sidebar counts what waits each way for the repo, so it is read with the home (no fetch: that waits for the page).
   if (state.page !== 'repo') void loadRepo(false);
   // The sidebar counts the sources too (their last reads: no network).
@@ -325,15 +331,20 @@ function accept(view: HomeView) {
 }
 
 /**
- * Reads the open home's session history (main's usage:read), on Read usage. Not `busy`: it changes nothing, so the page stays
- * usable and its line says it is reading; an answer for a home switched meanwhile is dropped (accept resets the slot).
+ * Collects usage: main's usage:read reads the tools' own session history on this computer, and nothing leaves it. By itself
+ * when a home opens (accept), and on Update usage statistics (`asked`), whose click opens the band (state.usageBand), as a
+ * reading that fails does. Not `busy`: it changes nothing, so the page stays usable meanwhile. An answer for a home switched
+ * meanwhile is dropped (accept resets the slot). A reading that lands moves no row: the list on screen is held first (matrix.ts holdOrder).
  */
-export async function readUsage() {
+export async function collectUsage({ asked = false } = {}) {
   const home = state.home?.home;
   if (!home) return;
-  const reading = readPageData(state.usage, () => api().readUsage(home));
+  if (asked) state.usageBand = true;
+  const reading = readPageData(state.usage, () => api().readUsage(home).then(answer => { if (answer) holdOrder(); return answer; }));
   rerender();
-  if ((await reading) !== 'dropped') rerender();
+  const landed = await reading;
+  if (landed === 'failed') state.usageBand = true;
+  if (landed !== 'dropped') rerender();
 }
 
 /** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */

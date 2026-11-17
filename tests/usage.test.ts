@@ -9,9 +9,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { readers, readUsage } from '../src/usage.ts';
-import { leftToItsRow, noUseSeen, onIn, rowFigure, toolSays, USAGE_DAYS } from '../src/usagerow.ts';
+import { leftToItsRow, noUseSeen, onIn, rowFigure, toolHistories, toolSays, usageSummary, USAGE_DAYS } from '../src/usagerow.ts';
 import { newItem, type LibraryItem } from '../src/library.ts';
-import type { HarnessId, LibraryFacts, ToolCopy, UsageReading } from '../src/types.ts';
+import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, ToolCopy, UsageReading } from '../src/types.ts';
 
 const NOW = Date.parse('2026-11-16T12:00:00Z');
 const DAY = 86_400_000;
@@ -165,8 +165,9 @@ test('A session file that can\'t be read is skipped and counted as such; the res
   await symlink(join(project, 'nowhere.jsonl'), join(project, 'gone.jsonl'));
   const reading = await readUsage({ home }, NOW), history = historyOf(reading, 'claude-cli');
   await chmod(join(project, 'locked.jsonl'), 0o644);
-  assert.deepEqual([history.sessions, history.skipped, history.unread, Object.keys(usedIn(reading, 'claude-cli')), toolSays(reading, 'skill', facts('gamma', {}), 'claude-cli')!.cantSay],
-    [1, 1, undefined, ['skill:alpha'], 'unread']);
+  const says = toolSays(reading, 'skill', facts('gamma', {}), 'claude-cli')!;
+  assert.deepEqual([history.sessions, history.skipped, history.unread, Object.keys(usedIn(reading, 'claude-cli')), says.cantSay, says.skipped],
+    [1, 1, undefined, ['skill:alpha'], 'unread', 1]);
 });
 
 test('A record dated after the reading (a wrong clock) is dated by its file\'s time instead', async () => {
@@ -176,9 +177,16 @@ test('A record dated after the reading (a wrong clock) is dated by its file\'s t
   assert.deepEqual(usedIn(await readUsage({ home }, NOW), 'claude-cli'), { 'skill:later': [1, daysAgo(3)] });
 });
 
+test('A tool\'s sessions in the 30 days: those that started within them, out of all it keeps, by each session\'s first record', async () => {
+  const home = await newHome(), started = (days: number) => [{ type: 'user', message: { content: 'hello' }, timestamp: daysAgo(days) }, { type: 'user', message: { content: 'later' }, timestamp: daysAgo(1) }];
+  for (const [name, days] of [['a', 2], ['b', USAGE_DAYS], ['c', USAGE_DAYS + 1]] as const) await put(join(home, `.claude/projects/p/${name}.jsonl`), started(days));
+  const claude = historyOf(await readUsage({ home }, NOW), 'claude-cli');
+  assert.deepEqual([claude.sessions, claude.recent], [3, 2]);
+});
+
 test('A home with no session folder: every tool keeps no sessions, has no start and used nothing', async () => {
   const reading = await readUsage({ home: await newHome() }, NOW);
-  assert.deepEqual(reading.tools.map(each => [each.tool, each.sessions, each.from, each.used, each.unread]), reading.tools.map(each => [each.tool, 0, undefined, [], undefined]));
+  assert.deepEqual(reading.tools.map(each => [each.tool, each.sessions, each.recent, each.from, each.used, each.unread]), reading.tools.map(each => [each.tool, 0, 0, undefined, [], undefined]));
 });
 
 test('A tool whose sessions can\'t be read says so (unread), and the other tools are read as usual', async () => {
@@ -205,7 +213,7 @@ const facts = (key: string, copies: Partial<Record<HarnessId, ToolCopy>>, more: 
   ({ key, name: key, description: '', copies, on: true, except: [], cannot: {}, edited: [], ...more });
 /** A reading of every tool, made by hand: `used` per tool, as `kind:name` with the session numbers that used it, and when each history starts. */
 function readingOf(used: Partial<Record<HarnessId, Record<string, number[]>>>, from: Partial<Record<HarnessId, string>> = {}): UsageReading {
-  return { at: daysAgo(0), tookMs: 5, tools: (Object.keys(readers) as HarnessId[]).map(tool => ({ tool, tells: readers[tool].tells, sessions: 10, from: from[tool] ?? daysAgo(90),
+  return { at: daysAgo(0), tools: (Object.keys(readers) as HarnessId[]).map(tool => ({ tool, tells: readers[tool].tells, sessions: 10, recent: 4, from: from[tool] ?? daysAgo(90),
     used: Object.entries(used[tool] ?? {}).map(([id, sessions]) => ({ kind: id.split(':')[0] as 'skill', name: id.slice(id.indexOf(':') + 1), sessions, last: daysAgo(sessions.length ? 2 : 45) })) })) };
 }
 const sessionsIn = (reading: UsageReading, kind: 'skill' | 'agent' | 'mcp', row: LibraryFacts, tool: HarnessId) => toolSays(reading, kind, row, tool)!.sessions;
@@ -245,7 +253,7 @@ test('Can\'t say, by reach: a tool with no session can\'t; one whose history sta
     [{ tool: 'pi-cli', sessions: 0, since: daysAgo(12) }, { tool: 'claude-cli', sessions: 0, cantSay: 'no-sessions' }]);
 });
 
-test('A row\'s figure: used, with its newest use; no use seen, when a tool that has it on can tell; nothing when none can', () => {
+test('A row\'s figure: used, with its newest use and its sessions; no use seen, when a tool that has it on can tell; nothing when none can', () => {
   const figure = (row: LibraryFacts, used: Partial<Record<HarnessId, Record<string, number[]>>>, tools: HarnessId[]) =>
     rowFigure(tools.flatMap(tool => toolSays(readingOf(used), 'agent', row, tool) ?? []), onIn(row, tools));
   const inClaude = facts('reviewer', { 'claude-cli': copy('reviewer') }), inCopilot = facts('reviewer', { 'copilot-cli': copy('reviewer') });
@@ -256,7 +264,15 @@ test('A row\'s figure: used, with its newest use; no use seen, when a tool that 
     figure(inClaude, { 'claude-cli': { 'agent:reviewer': [] } }, ['claude-cli']),
     figure(inCopilot, {}, ['claude-cli', 'copilot-cli']),
     figure(switchedOff, {}, ['claude-cli']),
-  ], [{ used: daysAgo(2) }, { noneSeen: true }, { noneSeen: true }, undefined, undefined]);
+  ], [{ used: daysAgo(2), sessions: 1 }, { noneSeen: true }, { noneSeen: true }, undefined, undefined]);
+});
+
+test('A skill used in 3 sessions in two tools: the row says 3 sessions, each tool its own count; a use older than 30 days adds no session', () => {
+  const notes = facts('notes', { 'claude-cli': copy('notes'), 'codex-cli': copy('notes') });
+  const reading = readingOf({ 'claude-cli': { 'skill:notes': [1, 2] }, 'codex-cli': { 'skill:notes': [7] }, 'pi-cli': { 'skill:notes': [] } });
+  const says = reading.tools.flatMap(each => toolSays(reading, 'skill', notes, each.tool) ?? []);
+  assert.deepEqual([rowFigure(says, onIn(notes, ['claude-cli', 'codex-cli'])), says.filter(each => each.sessions).map(each => [each.tool, each.sessions])],
+    [{ used: daysAgo(2), sessions: 3 }, [['claude-cli', 2], ['codex-cli', 1]]]);
 });
 
 // ---------- "No use seen in 30 days" (usagerow.ts noUseSeen): a row for each line of the rule ----------
@@ -302,4 +318,43 @@ test('Off, deleted or only found: never in', () => {
 test('Turn these off leaves to its own row a plugin\'s item and one linked to a plugin, not one from a Git link', () => {
   assert.deepEqual([leftToItsRow(facts('triage', {}, { plugin: { 'claude-cli': { plugin: 'tracker', marketplace: 'm' } } })), leftToItsRow(facts('triage', {}, { fromSource: { link: 'plugin:tracker@m' } })),
     leftToItsRow(facts('notes', {}, { fromSource: { link: 'https://github.com/o/r' } })), leftToItsRow(inClaude)], [true, true, false, false]);
+});
+
+// ---------- A reading in sum (usagerow.ts toolHistories, usageSummary): what the Overview and the chip's count read ----------
+
+/** A home's view as the summary reads it: one kind's items and its tools, the others empty, the plugins installed, and which tools are managed and installed. */
+function homeOf(skills: { facts: LibraryFacts[]; library: Record<string, LibraryItem> }, managed: HarnessId[], present = managed, pluginItems: InstalledPlugin[] = []) {
+  const none = { tools: managed, items: [], library: {} };
+  return { skills: { tools: managed, items: skills.facts, library: skills.library }, mcp: none, agents: none, sync: { managed, present }, pluginItems } as unknown as HomeView;
+}
+
+test('Each tool\'s history: its sessions in the 30 days, and how far back it goes (30 days or more, from its first session, none or unread), for every managed tool, another installed one with sessions, and one not installed only with a use in 30 days', () => {
+  const reading = readingOf({ 'opencode-cli': { 'skill:notes': [1] } }, { 'claude-cli': daysAgo(90), 'pi-cli': daysAgo(12) });
+  const tool = (id: HarnessId) => reading.tools.find(each => each.tool === id)!;
+  Object.assign(tool('codex-cli'), { sessions: 0, recent: 0 });
+  Object.assign(tool('copilot-cli'), { sessions: 0, recent: 0, unread: true });
+  tool('pi-cli').recent = 3;
+  // Claude Code, Codex and Copilot CLI managed; Pi installed with sessions; OpenCode not installed, with a use in 30 days.
+  assert.deepEqual(toolHistories(reading, homeOf({ facts: [], library: {} }, ['claude-cli', 'codex-cli', 'copilot-cli'], ['claude-cli', 'codex-cli', 'copilot-cli', 'pi-cli'])), [
+    { tool: 'claude-cli', recent: 4, goes: 'whole' }, { tool: 'codex-cli', recent: 0, goes: 'none' }, { tool: 'copilot-cli', recent: 0, goes: 'unread' },
+    { tool: 'pi-cli', recent: 3, goes: 'from', from: daysAgo(12) }, { tool: 'opencode-cli', recent: 4, goes: 'whole' }]);
+  // Not installed and no use in 30 days: a leftover folder, not named.
+  assert.deepEqual(toolHistories(readingOf({}), homeOf({ facts: [], library: {} }, ['claude-cli'])).map(each => each.tool), ['claude-cli']);
+});
+
+test('A reading in sum: the rows used, as the page lists them (Off, found and a plugin\'s own too), its three most used; of the On items not used, no use seen, too new for the chip, can\'t say', () => {
+  const inClaude = (key: string) => facts(key, { 'claude-cli': copy(key) }), inCopilot = (key: string) => facts(key, { 'copilot-cli': copy(key) });
+  const rows = [inClaude('used'), inClaude('idle'), inClaude('young'), inCopilot('mute'), inClaude('off'), inClaude('gone'), inClaude('found'), inClaude('daily')];
+  const library = { used: kept('used', 40), idle: kept('idle', 40), young: kept('young', 5), mute: kept('mute', 40), off: kept('off', 40, { on: false }), gone: kept('gone', 40, { deleted: { at: daysAgo(1) } }), daily: kept('daily', 40) };
+  // A plugin's skill in Claude Code, a row of its own on the page; Claude Code calls it tracker:triage.
+  const tracker: InstalledPlugin = { tool: 'claude-cli', plugin: 'tracker', marketName: 'm', listed: true, items: [{ kind: 'skill', name: 'triage', description: '' }] };
+  const reading = readingOf({ 'claude-cli': { 'skill:used': [1, 2], 'skill:off': [3], 'skill:found': [4], 'skill:daily': [5, 6, 7, 8], 'skill:tracker:triage': [9, 10, 11] } });
+  // Copilot CLI records every skill it runs but keeps no sessions here, so it can't say for mute.
+  reading.tools.find(each => each.tool === 'copilot-cli')!.sessions = 0;
+  const sum = usageSummary(reading, homeOf({ facts: rows, library }, ['claude-cli', 'copilot-cli'], ['claude-cli', 'copilot-cli'], [tracker]));
+  assert.deepEqual(sum.kinds.skills, {
+    used: ['used', 'off', 'found', 'daily', 'tracker@m/triage'],
+    mostUsed: [{ key: 'daily', name: 'daily', sessions: 4 }, { key: 'tracker@m/triage', name: 'triage', sessions: 3 }, { key: 'used', name: 'used', sessions: 2 }],
+    noUseSeen: ['idle'], tooNew: ['young'], cantSay: ['mute'] });
+  assert.deepEqual([sum.kinds.mcp, sum.tools.map(each => [each.tool, each.goes])], [{ used: [], mostUsed: [], noUseSeen: [], tooNew: [], cantSay: [] }, [['claude-cli', 'whole'], ['copilot-cli', 'none']]]);
 });
