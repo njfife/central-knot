@@ -1062,6 +1062,8 @@ async function practiceFlow() {
   check('the deletion spreads in the background', spread);
   await a.click('#nav-history');
   const standupDeleted = `[...document.querySelectorAll('.history-row[data-kind="off"]')].find(row => row.textContent.includes('standup'))`;
+  // Its Turn on comes with the page's read after the pass that spread the deletion.
+  for (let tries = 0; tries < 50 && !(await a.run(`!!${standupDeleted}?.querySelector('.history-actions button')`)); tries++) await wait(100);
   same('History says the deletion turned it off everywhere, and offers Turn on', await a.run(`[${standupDeleted}?.querySelector('.history-about')?.textContent, ${standupDeleted}?.querySelector('.history-actions button')?.textContent]`),
     ['Its copy was deleted in Claude Code, so it was turned off and removed from Copilot CLI and Codex. Central Knot keeps it.', 'Turn on']);
   await a.run(`${standupDeleted}.querySelector('.history-actions button').click()`);
