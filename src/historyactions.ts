@@ -19,10 +19,12 @@
 //     `source-dropped`: no longer there)
 //   on, off or deleted by a pass no click    none: nothing was asked (a deleted item's Restore is its Delete's
 //     asked (`in-line`)                      entry's; what an `on` wrote over is kept among the item's versions)
-//   off in one harness (`only`)              Turn it on in <harness> the item is On and kept out of that harness
+//   off in one harness (`only`)              Turn it on in          the item is On and kept out of that harness
+//                                            <harness>
 //   on: the switch, or an item Pull          Turn it off            the item is On
 //     brought
-//   on in one harness (`only`)               Turn it off in <harness> the item is On and in that harness
+//   on in one harness (`only`)               Turn it off in         the item is On and in that harness
+//                                            <harness>
 //   on or off whose click took tools' own    Undo: that action,     the item is as the click left it (asTheClickLeftIt);
 //     copies over (`tookFrom`)               each such copy given   after that, the plain action above, which gives
 //                                            back                   nothing back
@@ -68,7 +70,7 @@ import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import { asItIs, noTimeTells, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts } from './types.ts';
-import { andList, sentence, toolName, toolsPhrase } from './words.ts';
+import { andList, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
 
 /**
  * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key.
@@ -367,13 +369,13 @@ function switchAction(turnOn: boolean, only: HarnessId | undefined, item: Librar
   const name = item.name, now = asItIs(item.key, item);
   if (!only) {
     if (item.on === turnOn) return undefined;
-    return turnOn ? { label: 'Turn it on', help: `Put ${name} back in every tool it is not kept out of, each file as it was`, change: { ...now, on: true } }
-      : { label: 'Turn it off', help: `Take ${name} out of every tool; Central Knot keeps it`, change: { ...now, on: false } };
+    return turnOn ? { label: turnIt(true), help: `Put ${name} back in every tool it is not kept out of, each file as it was`, change: { ...now, on: true } }
+      : { label: turnIt(false), help: `Take ${name} out of every tool; Central Knot keeps it`, change: { ...now, on: false } };
   }
   const there = toolName(only), out = item.except.includes(only);
   if (!item.on || out !== turnOn) return undefined;
-  return turnOn ? { label: `Turn it on in ${there}`, help: `Put ${name} back in ${there}, as it was`, change: { ...now, except: item.except.filter(tool => tool !== only) } }
-    : { label: `Turn it off in ${there}`, help: `Take ${name} out of ${there}; Central Knot keeps it`, change: { ...now, except: [...item.except, only] } };
+  return turnOn ? { label: turnIt(true, there), help: `Put ${name} back in ${there}, as it was`, change: { ...now, except: item.except.filter(tool => tool !== only) } }
+    : { label: turnIt(false, there), help: `Take ${name} out of ${there}; Central Knot keeps it`, change: { ...now, except: [...item.except, only] } };
 }
 
 /** The copies an entry says gave way, each of which is a version that can be made current now: one "Use <harness>’s" each. */

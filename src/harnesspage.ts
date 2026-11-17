@@ -10,7 +10,7 @@ import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
-import { andList, coworkWords, fileName, kindNouns, toolNames as names } from './words.ts';
+import { andList, coworkWords, fileName, kindNouns, pageNames, toolNames as names } from './words.ts';
 import { agentsKeptIn, hasCowork, takesPlugins } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
@@ -23,7 +23,7 @@ import { homeItems, inUseName } from './profileplan.ts';
 import { copyButton, fact, kindEmpty, noToolsState, notRead } from './pages.ts';
 
 const TABS: HarnessTab[] = ['skills', 'mcp', 'agents', 'instructions', 'plugins', 'about'];
-/** A tab's name: the page of the same name's title, but Plugins for the plugins installed in that tool (their page is Plugin marketplaces). */
+/** A tab's name: the page of the same name's title, but Plugins for the plugins installed in that tool (their page's is pageNames.plugins). */
 const tabLabel = (tab: HarnessTab) => (tab === 'about' ? 'About' : tab === 'plugins' ? 'Plugins' : kindNouns[tab].title);
 
 /** A backslash separates folders only on Windows; elsewhere it can be part of a skill's name. */
@@ -288,14 +288,14 @@ function instructionsTab(tool: HarnessId) {
   return h('div.page', {}, instructionBands(), h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
 }
 
-/** One installed plugin: its name, version and marketplace, and Open, which shows it on the Plugin marketplaces page. */
+/** One installed plugin: its name, version and marketplace, and Open, which shows it on the plugins' page. */
 function pluginRow({ entry, plugin }: MarketPlugin) {
   const note = [entry.name, plugin.description].filter(Boolean).join(' · ');
   return h('div.harness-plugin', { role: 'listitem' },
     h('div.harness-plugin-text', {},
       h('strong', {}, pluginTitle(plugin), plugin.version ? h('span.harness-plugin-version', {}, ` ${plugin.version}`) : null),
       h('span.harness-plugin-note', { title: note }, note)),
-    button({ variant: 'ghost', size: 'small', label: 'Open', name: `Open ${pluginTitle(plugin)} in Plugin marketplaces`, id: `harness-plugin-${entry.name}-${plugin.name}`,
+    button({ variant: 'ghost', size: 'small', label: 'Open', name: `Open ${pluginTitle(plugin)} in ${pageNames.plugins}`, id: `harness-plugin-${entry.name}-${plugin.name}`,
       onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined }); } }));
 }
 
@@ -307,12 +307,12 @@ function pluginsTab(tool: HarnessId) {
   if (plugins.state === 'unsupported') {
     // Only the tools that take a plugin whole are named as where plugins install; this one takes a plugin's items.
     const takers = (market.view?.tools ?? []).filter(takesPlugins);
-    return page(emptyState('puzzle', pluginsNotHandled(tool), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on Plugin marketplaces puts its skills, agents and MCP servers in ${names[tool]} as items of Central Knot’s that follow the plugin. ` : ''}${names[tool]}’s own packages stay as they are.`));
+    return page(emptyState('puzzle', pluginsNotHandled(tool), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on ${pageNames.plugins} puts its skills, agents and MCP servers in ${names[tool]} as items of Central Knot’s that follow the plugin. ` : ''}${names[tool]}’s own packages stay as they are.`));
   }
   // What could not be checked is said, so the list is never taken for everything installed.
   const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${pluginTitle(plugin)}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];
   const unsureNote = unsure.length ? h('p.tools-note', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span', {}, `Not known for ${plural(unsure.length, 'plugin')}: ${unsure.join(' ')} `,
-    button({ variant: 'link', size: 'micro', label: 'Open Plugin marketplaces', id: 'harness-plugins-unsure', onclick: () => showPage('plugins') }))) : null;
+    button({ variant: 'link', size: 'micro', label: `Open ${pageNames.plugins}`, id: 'harness-plugins-unsure', onclick: () => showPage('plugins') }))) : null;
   if (!plugins.installed.length) return page(unsureNote, emptyState('puzzle', `No plugins in ${names[tool]}`, `None of the plugins in your marketplaces is installed in ${names[tool]}.`,
     button({ variant: 'outline', label: 'Browse plugins', id: 'harness-browse-plugins', onclick: () => showPage('plugins') })));
   return page(h('p.tools-note', {}, icon('info', 14, 'tone-muted'), `Installed in ${names[tool]} from your marketplaces. Open one to uninstall it, or to install it in another tool.`),

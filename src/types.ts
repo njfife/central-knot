@@ -1122,8 +1122,8 @@ export interface SourceView extends SourceFound { id: string; addedAt: string; r
 export interface SourcesView { sources: SourceView[]; kinds: ItemKind[]; access: WriteAccess; problem?: string }
 /**
  * A link read before anything is kept: what Add would do (`token` names it for Add), or why it can't be added; for a marketplace
- * the Plugins page can add (sources.ts handOff), what Add to Plugins hands it (`toPlugins`: the address it adds, the catalog's
- * name and how many plugins it lists), Add itself still refused.
+ * the Plugins page can add (sources.ts handOff), what the hand-off button (words.ts toPluginsLabel) gives it (`toPlugins`: the
+ * address it adds, the catalog's name and how many plugins it lists), Add itself still refused.
  */
 export type SourcePreview = (SourceFound & { token: string; refused?: string; toPlugins?: ToPlugins }) | { refused: string; link: string };
 /** A marketplace handed from Sources to the Plugins page (SourcePreview `toPlugins`). */

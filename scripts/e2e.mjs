@@ -949,7 +949,7 @@ async function practiceFlow() {
   await wait(2200);
   await a.click('#header-refresh');
   same('then the skill turns off everywhere', releaseNotesIn(), [false, false, false]);
-  check('with a notice that Central Knot keeps it, offering Turn on', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && /Turn on/.test(await a.text('.sync-notices') ?? ''), await a.text('.bands'));
+  check('with a notice that Central Knot keeps it, offering Turn it on', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && /Turn it on/.test(await a.text('.sync-notices') ?? ''), await a.text('.bands'));
   check('and the table keeps it under Off, in Central Knot only', ((await sectionsNow(a)).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && /in Central Knot only/.test(await a.text('.ov-row[data-key="release-notes"]') ?? '') && !(await switchOn(a, 'release-notes')), await sectionsNow(a));
   await a.click('#nav-history');
   check('History lists it', (await a.text('#history-scroll') ?? '').includes('release-notes'), await a.text('#history-scroll'));
@@ -2068,6 +2068,12 @@ async function practiceFlow() {
   same('Refresh log shows the log’s last 200 lines as in the file, scrolled so the newest is in view; Show log is now Hide log, Open log folder a second button',
     [shown?.count, shown?.last, shown?.newestInView, shown?.scrolled, await a.text('#show-log'), await a.text('#open-log-folder'), await a.text('#log-earlier')],
     [200, linesOnFile().at(-1), true, true, 'Hide log', 'Open log folder', 'Show 200 earlier lines']);
+  // Where the page lands, the foot: that the times are UTC, and the log's buttons again (the row's are far above), all in view.
+  same('the foot of the lines says the times are UTC and has Refresh log, Hide log and Open log folder, in view; the row says Log', await a.run(`(() => {
+    const foot = document.querySelector('#log-end'), view = document.querySelector('#settings-scroll').getBoundingClientRect(), box = foot.getBoundingClientRect();
+    return [foot.querySelector('.setting-log-note')?.textContent, [...foot.querySelectorAll('button')].map(button => button.textContent), box.top >= view.top && box.bottom <= view.bottom,
+      document.querySelector('#setting-log-title').textContent];
+  })()`), ['Times are in UTC, as the file has them.', ['Refresh log', 'Hide log', 'Open log folder'], true, 'Log']);
   // A click that logs (Update plugins automatically, turned off), then Refresh log: its line is the newest, in view.
   await a.click('#plugin-updates-on');
   await a.click('#log-refresh');
@@ -2101,8 +2107,10 @@ async function practiceFlow() {
   await a.run(`getSelection().removeAllRanges()`);
   await fullSize(a);
   await fitsAtMinimum(a, 'Settings with the whole log shown');
-  await a.click('#show-log');
-  same('Hide log takes the lines away', [await a.exists('#setting-log-lines'), await a.text('#show-log')], [false, 'Show log']);
+  await a.run(`document.querySelector('#log-foot-show-log').focus()`);
+  await a.click('#log-foot-show-log');
+  same('Hide log at the foot takes the lines away; the row’s button says Show log again, with the focus', [await a.exists('#setting-log-lines'), await a.text('#show-log'), await a.run(`document.activeElement?.id`)],
+    [false, 'Show log', 'show-log']);
   // Open log folder opens the folder the log is in, and says so (macOS and Windows select the file: the Mac check covers that).
   if (process.platform === 'linux') {
     await a.click('#open-log-folder');
@@ -2500,7 +2508,8 @@ async function sourcesFlow() {
   await a.click('#nav-plugins');
   same('the Plugins page’s title says Plugin marketplaces', await a.text('.page-title'), 'Plugin marketplaces');
   await a.click('#nav-sources');
-  same('the page’s title says Library sources', await a.text('.page-title'), 'Library sources');
+  same('the page’s title says Library sources, and its last line says a marketplace’s link goes to Plugin marketplaces instead', [await a.text('.page-title'), await a.text('.repo-aside')],
+    ['Library sources', 'A marketplace’s link isn’t a library source: Look offers Add to Plugin marketplaces instead, where each of its plugins has its own switch.']);
   check('the Sources page opens empty, with its field', await a.exists('#source-link') && /No sources yet/.test(await a.text('.page') ?? ''), await a.text('.page'));
   await type('https://github.com/stephenturner/skill-deslop/tree/main');
   await a.click('#source-look');
@@ -2617,7 +2626,7 @@ async function sourcesFlow() {
   check('History says the source dropped it', await until(async () => /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it, so it is off and removed from all 3 tools/.test(await a.text('.page') ?? '')), await a.text('.page'));
   // The notice that stays: deslop's line on the source's row, and its row on Skills, until it is turned on.
   await a.click('#nav-sources');
-  check('the source’s row keeps a line for deslop, removed there, with Turn on', await until(async () => /No longer at this source: it is Off, and no longer from it\./.test(await a.text('.source-row .source-name[data-key="deslop"][data-state="removed"]') ?? '')) && await a.exists('#source-turn-on-skill-deslop'), await a.text('.source-row'));
+  check('the source’s row keeps a line for deslop, removed there, with Turn it on', await until(async () => /No longer at this source: it is Off, and no longer from it\./.test(await a.text('.source-row .source-name[data-key="deslop"][data-state="removed"]') ?? '')) && await a.text('#source-turn-on-skill-deslop') === 'Turn it on', await a.text('.source-row'));
   await a.shot('sources-removed');
   await a.click('#nav-skills');
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
@@ -2626,7 +2635,7 @@ async function sourcesFlow() {
   await a.shot('skills-removed');
   await a.click('#nav-sources');
   await a.click('#source-turn-on-skill-deslop');
-  check('Turn on puts deslop in every tool, says so with Undo, and its line goes', await until(() => Object.values(roots).every(root => existsSync(join(home, root, 'deslop/SKILL.md'))))
+  check('Turn it on puts deslop in every tool, says so with Undo, and its line goes', await until(() => Object.values(roots).every(root => existsSync(join(home, root, 'deslop/SKILL.md'))))
     && await until(async () => /deslop is on in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '')) && await a.exists('#outcome-undo') && !(await a.exists('#source-turn-on-skill-deslop')) && record()?.on === true, [await a.text('.band-done'), await a.text('.source-row')]);
   await a.shot('sources-turned-on');
   // Add on a name the library holds deleted: unslop, deleted from Central Knot on Skills, comes back Off from its line.

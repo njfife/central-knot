@@ -1385,6 +1385,8 @@ span.ins-confirm { margin-top: 0; }
 .setting-log { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 8px; border-bottom: 1px solid var(--line); }
 .setting-log-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .setting-log > .btn.link { height: auto; padding: 0; }
+/* The foot of the shown lines, where a read leaves the page: the times' zone, then the same buttons as the row's, Refresh log first. */
+.setting-log-foot { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .setting-log-text { align-self: stretch; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--chrome);
   font-family: var(--mono); font-size: 12px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
 /* A setting that can't be changed here dims its switch, as disabled buttons dim, with an outline so the pale light-theme track

@@ -16,6 +16,7 @@ import { libraryWords, sentences } from './libraryrow.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, settingUpdateButton, unsavedWork, updates } from './updateview.ts';
 import { checkPluginsNow, checkedWords, pluginUpdates } from './pluginupdateview.ts';
+import { pageNames } from './words.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
@@ -102,9 +103,10 @@ export function openSettings() {
 
 /**
  * Runs one row's action (a save, a read of the log, Open log folder) and shows its outcome in that row: `work` returns a
- * message to show (or nothing), or throws, and `failure` puts why in plain words. A failure is about the value the row showed when it began (still
- * in effect). Only the row's newest attempt changes the row, and an outcome a newer read has settled says nothing. It first clears
- * the other rows' finished notes, so the page says one thing at a time. True when it worked.
+ * message to show (or nothing), or throws, and `failure` puts why in plain words. A failure is about the value the row
+ * showed when it began (still in effect). Only the row's newest attempt changes the row, and an outcome a newer read has
+ * settled says nothing. It first clears the other rows' finished notes, so the page says one thing at a time. True when it
+ * worked.
  */
 async function act(row: string, work: () => Promise<RowMessage | undefined>, failure: (error: string) => string): Promise<boolean> {
   const mine = ++attempted;
@@ -304,19 +306,41 @@ async function showLog(count: number, toNewest: boolean) {
     return undefined;
   }, () => 'Couldn’t read the log. Try again, or open its folder.');
 }
-/** Hide log: the lines go, and a read still under way no longer shows them. */
-function hideLog() { logAsked++; shownLog = undefined; rerender(); }
+/** Hide log: the lines go, and a read still under way no longer shows them. From the foot, the focus goes to the row's Show log. */
+function hideLog() {
+  const fromFoot = document.activeElement?.id === 'log-foot-show-log';
+  logAsked++;
+  shownLog = undefined;
+  rerender();
+  if (fromFoot) document.getElementById('show-log')?.focus();
+}
 
-/** The log under its row: a button for earlier lines (or that this is its start), the lines as they are in the file, and Refresh log. */
+/**
+ * The log's buttons, built here for both places they show: its row (Show log or Hide log, Open log folder), and, while the log
+ * is shown, the foot of its lines, where the page lands after a read (Refresh log first). The foot's ids start `log-foot-`.
+ */
+function logButtons(at: 'row' | 'foot'): HTMLElement {
+  const shown = shownLog, id = (name: string) => (at === 'row' ? name : `log-foot-${name}`);
+  return h('div.setting-actions', {},
+    at === 'foot' && shown ? button({ variant: 'outline', icon: 'refresh-cw', label: 'Refresh log', id: 'log-refresh', onclick: () => void showLog(shown.count, true) }) : null,
+    button({ variant: 'outline', label: shown ? 'Hide log' : 'Show log', id: id('show-log'), onclick: () => (shown ? hideLog() : void showLog(LOG_LINES, true)),
+      attrs: { 'aria-expanded': String(!!shown), 'aria-controls': shown ? 'setting-log-lines' : undefined, 'aria-describedby': 'setting-log-hint' } }),
+    button({ variant: 'outline', label: 'Open log folder', id: id('open-log-folder'), onclick: () => void openLogFolder(), attrs: { 'aria-describedby': 'setting-log-hint' } }));
+}
+
+/**
+ * The log under its row: a button for earlier lines (or that this is its start), the lines as they are in the file, and its
+ * foot (`log-end`, which a read brings into view): that the times are UTC, as the file has them, and the log's buttons.
+ */
 function logBlock({ count, tail: { lines, earlier } }: NonNullable<typeof shownLog>): HTMLElement {
-  const refresh = button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Refresh log', id: 'log-refresh', onclick: () => void showLog(count, true) });
-  if (!lines.length) return h('div.setting-log', { id: 'setting-log-lines' }, h('p.setting-log-note', {}, 'Nothing has been logged yet.'), h('div', { id: 'log-end' }, refresh));
+  const foot = h('div.setting-log-foot', { id: 'log-end' }, lines.length ? h('p.setting-log-note', {}, 'Times are in UTC, as the file has them.') : null, logButtons('foot'));
+  if (!lines.length) return h('div.setting-log', { id: 'setting-log-lines' }, h('p.setting-log-note', {}, 'Nothing has been logged yet.'), foot);
   return h('div.setting-log', { id: 'setting-log-lines' },
     earlier
       ? button({ variant: 'link', size: 'small', label: `Show ${plural(Math.min(earlier, LOG_LINES), 'earlier line')}`, id: 'log-earlier', onclick: () => void showLog(count + LOG_LINES, false) })
       : h('p.setting-log-note', {}, 'This is the start of the log.'),
     h('pre.setting-log-text', { id: 'log-text', tabindex: '0', 'aria-label': 'Central Knot’s log' }, lines.join('\n')),
-    h('div', { id: 'log-end' }, refresh));
+    foot);
 }
 
 const messageLook: Record<RowMessage['tone'], { glyph: IconName; role: 'status' | 'alert' }> = {
@@ -391,7 +415,7 @@ function pluginUpdatesRow(): HTMLElement {
   const view = pluginUpdates.view;
   const hint = 'Central Knot checks your marketplaces every four hours, with its window closed too, and updates the plugins your tools have, through each tool’s own command. A plugin you turned off stays off. An update can’t be undone.';
   const checked = on ? checkedWords(pluginUpdates.asked && view ? { ...view, checking: true } : view) : undefined;
-  const notice: RowMessage | undefined = checked && { text: checked.text, tone: checked.tone, action: checked.note ? { label: 'See Plugin marketplaces', run: () => showPage('plugins') } : undefined };
+  const notice: RowMessage | undefined = checked && { text: checked.text, tone: checked.tone, action: checked.note ? { label: `See ${pageNames.plugins}`, run: () => showPage('plugins') } : undefined };
   return settingRow('plugin-updates', 'Update plugins automatically', hint,
     h('div.setting-actions', {},
       on ? button({ variant: 'outline', label: 'Check now', id: 'check-plugin-updates', disabled: !view || view.checking || pluginUpdates.asked, onclick: () => void checkPluginsNow(), attrs: { 'aria-describedby': 'setting-plugin-updates-hint' } }) : null,
@@ -474,10 +498,6 @@ export function settingsPage(): HTMLElement {
         shortening ? shortenConfirmation(shortening) : undefined)),
     // Help stays the last section, so the log's lines lengthen the page's own scroll.
     settingsSection('help', 'Help',
-      settingRow('log', 'Log file', 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t here.',
-        h('div.setting-actions', {},
-          button({ variant: 'outline', label: shownLog ? 'Hide log' : 'Show log', id: 'show-log', onclick: () => (shownLog ? hideLog() : void showLog(LOG_LINES, true)),
-            attrs: { 'aria-expanded': String(!!shownLog), 'aria-controls': shownLog ? 'setting-log-lines' : undefined, 'aria-describedby': 'setting-log-hint' } }),
-          button({ variant: 'outline', label: 'Open log folder', id: 'open-log-folder', onclick: () => void openLogFolder(), attrs: { 'aria-describedby': 'setting-log-hint' } }))),
+      settingRow('log', 'Log', 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t here.', logButtons('row')),
       shownLog ? logBlock(shownLog) : null)));
 }

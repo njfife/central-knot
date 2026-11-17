@@ -49,7 +49,7 @@ import { defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from 
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
 import { machineNames, writesRealHome } from './machine.ts';
-import { joinedWords, toolList } from './words.ts';
+import { joinedWords, pageNames, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
@@ -267,7 +267,10 @@ async function openLogFolder(): Promise<LogFolderOpened> {
   if (failed) throw new Error(failed);
   return { selected: false, logged };
 }
-/** The log's last `count` lines for Settings' Show log, read whole (trimLog keeps it near a megabyte); none before anything was logged. */
+/**
+ * The log's last `count` lines for Settings' Show log, read whole (trimLog halves it at each start once it passes a megabyte);
+ * none before anything was logged.
+ */
 async function readLog(count: unknown): Promise<LogTail> {
   if (!Number.isInteger(count) || (count as number) < 1) throw new Error('Invalid line count.');
   const text = await readFile(logPath(), 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error; });
@@ -810,7 +813,7 @@ function addCarriedSoon(present: HarnessId[]) {
     // The page reads the tools again, and the status bar says once what was done on the person's behalf: first, that nothing
     // was installed, and short enough to be read whole (About names every tool).
     send('sync:changed');
-    send('said', `Nothing was installed: ${custom?.marketplace?.displayName ?? bundle?.release.marketplace} is listed in ${added.length > 2 ? 'your tools' : toolList(added)} (see Plugin marketplaces).`);
+    send('said', `Nothing was installed: ${custom?.marketplace?.displayName ?? bundle?.release.marketplace} is listed in ${added.length > 2 ? 'your tools' : toolList(added)} (see ${pageNames.plugins}).`);
   }, error => logFailure('adding the carried marketplace to the tools', error));
 }
 

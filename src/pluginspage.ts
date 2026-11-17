@@ -1,4 +1,5 @@
-// Plugins: browse marketplaces, and turn each plugin on or off with its one switch (pluginrecord.ts).
+// Plugins (titled on screen as words.ts pageNames says; `plugins` in the code): browse marketplaces, and turn each plugin on
+// or off with its one switch (pluginrecord.ts).
 // The list of marketplaces sits at the left; the chosen one shows its plugins or its README, and a plugin opens its own page
 // (pluginpage.ts). A switch's click waits its turn in the page's list (pluginstate.ts turnPlugin), its row saying how it stands;
 // Update, Update all and the switches under a plugin's What it holds act at once (pluginstate.ts applyPluginOps). Each tool's
@@ -18,7 +19,7 @@ import { problemLines } from './matrix.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
-import { andList, byToolOrder, orList, toolName, toolNames as names } from './words.ts';
+import { andList, byToolOrder, orList, pageNames, toolName, toolNames as names } from './words.ts';
 
 /** "9:20 AM" today, else "Nov 8". */
 const when = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clockTime(iso) : new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
@@ -45,7 +46,7 @@ function addBox(first: boolean) {
 
 /** Under the open add box: a link that is no marketplace goes on Sources. */
 const toSources = () => h('p.market-add-note', {}, `Any other link, to a folder of skills, agents or MCP servers, or to one plugin, goes on `,
-  button({ variant: 'link', size: 'micro', label: 'Library sources', id: 'market-add-to-sources', onclick: () => showPage('sources') }), '.');
+  button({ variant: 'link', size: 'micro', label: pageNames.sources, id: 'market-add-to-sources', onclick: () => showPage('sources') }), '.');
 
 /**
  * Marketplaces offered without being looked for (suggested.ts): each named with the tools here it is the default of, an

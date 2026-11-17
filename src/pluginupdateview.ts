@@ -5,7 +5,7 @@ import { closeButton, h, icon } from './dom.ts';
 import { dayAndTime, plural } from './model.ts';
 import { browse, loadPlugins, market } from './pluginstate.ts';
 import type { PluginUpdateLine, PluginUpdatesView } from './types.ts';
-import { andList } from './words.ts';
+import { andList, pageNames } from './words.ts';
 
 /** Automatic plugin updates as main last told them (undefined until read); `asked`: a Check now is under way; `all`: the note shows every line. */
 export const pluginUpdates = { view: undefined as PluginUpdatesView | undefined, asked: false, all: { updated: false, failed: false } };
@@ -45,7 +45,7 @@ function take(view: PluginUpdatesView, news?: 'updated' | 'failed') {
     const updated = latest(view.updated), failed = latest(view.failed);
     const said = [updated.length ? `Updated automatically: ${andList(updated)}.` : '', failed.length ? `Couldn’t update ${andList(failed)} automatically.` : ''].filter(Boolean).join(' ');
     // On Plugins the note itself says it; elsewhere the status bar does, with the way there.
-    if (said) announce(said, app.page === 'plugins', app.page === 'plugins' ? undefined : { label: 'See Plugin marketplaces', run: () => showPage('plugins') });
+    if (said) announce(said, app.page === 'plugins', app.page === 'plugins' ? undefined : { label: `See ${pageNames.plugins}`, run: () => showPage('plugins') });
     // The list is read again either way: after a failure it shows the marketplace's newer version beside the note.
     if (market.view && !app.busy) void loadPlugins();
   }

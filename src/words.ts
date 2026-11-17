@@ -1,7 +1,7 @@
-// Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns), "a, b
-// and c" lists, and a few sentences more than one module says (a tool left out or not managed, through a plugin). A page's
-// own words are its module's; a library row's are libraryrow.ts libraryWords, a History entry's historyactions.ts and
-// historypage.ts.
+// Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns), the
+// names of the pages called otherwise on screen (pageNames), "Turn it on" (turnIt), "a, b and c" lists, and a few sentences
+// more than one module says (a tool left out or not managed, through a plugin). A page's own words are its module's; a
+// library row's are libraryrow.ts libraryWords, a History entry's historyactions.ts and historypage.ts.
 import type { HomeKind } from './presence.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
 
@@ -75,15 +75,29 @@ export const joinedWords = (tools: HarnessId[]) => `${toolList(tools)} ${tools.l
 export const problemText = (problem: SwitchProblem, show = (path: string) => path) => `${show(problem.file)} ${problem.reason}`;
 
 /**
- * Each kind's words, the one place they are spelled: one of it and many as a sentence names them, the page's title, the
- * short noun a count uses ("2 servers"), and one of it with its article ("an MCP server").
+ * The two pages named on screen otherwise than in the code (`Page 'plugins'`, `Page 'sources'`): the one place each name is
+ * spelled, read by the sidebar and the header (renderer.ts titles) and by every sentence, link and button that points a
+ * person to the page. The things themselves keep their plain words ("a plugin", "a source").
+ */
+export const pageNames = { plugins: 'Plugin marketplaces', sources: 'Library sources' } as const;
+/** The button on the sources' page that hands a marketplace's link to the plugins' page (sourcespage.ts toPlugins). */
+export const toPluginsLabel = `Add to ${pageNames.plugins}`;
+/**
+ * An item's switch turned On or Off from outside its row, "it" being the item the line names: History's action
+ * (historyactions.ts switchAction), an item's notice (matrix.ts libraryNotice) and a removed item's line on the sources' page.
+ */
+export const turnIt = (on: boolean, inTool?: string) => `Turn it ${on ? 'on' : 'off'}${inTool ? ` in ${inTool}` : ''}`;
+
+/**
+ * Each kind's words, the one place they are spelled: one of it and many as a sentence names them, the page's title (plugins':
+ * pageNames), the short noun a count uses ("2 servers"), and one of it with its article ("an MCP server").
  */
 export const kindNouns: Record<HomeKind, { one: string; many: string; title: string; short: [string, string]; a: string }> = {
   skills: { one: 'skill', many: 'skills', title: 'Skills', short: ['skill', 'skills'], a: 'a skill' },
   mcp: { one: 'MCP server', many: 'MCP servers', title: 'MCP servers', short: ['server', 'servers'], a: 'an MCP server' },
   agents: { one: 'agent', many: 'agents', title: 'Agents', short: ['agent', 'agents'], a: 'an agent' },
   instructions: { one: 'instruction file', many: 'instruction files', title: 'Instructions', short: ['file', 'files'], a: 'an instruction file' },
-  plugins: { one: 'plugin', many: 'plugins', title: 'Plugin marketplaces', short: ['plugin', 'plugins'], a: 'a plugin' },
+  plugins: { one: 'plugin', many: 'plugins', title: pageNames.plugins, short: ['plugin', 'plugins'], a: 'a plugin' },
 };
 
 /** Each kind as a sentence names it, many of it: "MCP servers". */
