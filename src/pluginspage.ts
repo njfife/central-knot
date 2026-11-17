@@ -12,7 +12,7 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, pinnedPlugins, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
@@ -113,15 +113,15 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         noLongerOffered(entry, plugin) ? h('span.plugin-chip.plugin-chip-gone', {}, 'No longer offered') : null,
         plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
       // The description first, then what it holds: when room runs out the description shortens or steps aside (style.css). While
-      // the list's news says how a click on it stands, that note is the row's line instead, so a click never changes the
-      // row's height and the rows below keep their places (pluginstate.ts turnPlugin).
-      clickNote(entry, plugin.name) ?? (plugin.description || holds || left ? h('span.plugin-row-line', {},
+      // the list's news says how a click on it stands, that note is the row's line instead, in one line: a row with neither
+      // still has its line, so a click never changes the row's height and the rows below keep their places.
+      clickNote(entry, plugin.name, true) ?? h('span.plugin-row-line', {},
         plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
         plugin.description && (holds || left) ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
         holds ? h('span.plugin-row-holds', { title: holds }, holds) : null,
         // The link sits beside the words: a long app name shortens the words, never the link.
         left ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: `Can’t be installed from ${entry.bundled!.app}` }, `Can’t be installed from ${entry.bundled!.app}`), h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·'),
-            h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null) : null),
+            h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null),
       // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
       behind || updates.length ? h('span.plugin-row-update', {},
         behind ? versionNote(h('span', {}, behind.charAt(0).toUpperCase() + behind.slice(1)), '.plugin-row-warning') : null,
@@ -422,8 +422,10 @@ function toolbar(shown: { entry: MarketplaceView; index: number } | undefined, l
       h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, icon('arrow-left', 13), marketTitle(shown.entry)),
       icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, pluginTitle(plugin)))
     : titleLine(shown.entry);
-  // In narrow content the marketplace strip already names it, so a toolbar with only the name isn't drawn (style.css).
-  return h(`div.toolbar.plugins-toolbar.fit-bar${!plugin && !right ? '.toolbar-title-only' : ''}`, {}, left, h('span.toolbar-spacer'), right);
+  // In narrow content the marketplace strip already names it, so a toolbar with only the name isn't drawn (style.css); but once
+  // a plugin is pinned on the list, it is, so the result's room is there from the click (renderer.ts keeps the rows put).
+  const room = !plugin && pinnedPlugins(shown.entry).rows.size > 0;
+  return h(`div.toolbar.plugins-toolbar.fit-bar${!plugin && !right && !room ? '.toolbar-title-only' : ''}`, {}, left, h('span.toolbar-spacer'), right);
 }
 
 /**

@@ -369,6 +369,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 /* ---------- Bands and notices under the toolbar ---------- */
 .bands { display: flex; flex-direction: column; }
+/* The room a row's click takes for its result before it is said (matrix.ts listNotices): a band with its button's height. */
+.band-room { visibility: hidden; min-height: calc(26px + 2 * 6px + 1px); }
 .band { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 16px; min-width: 0; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 16px; }
 /* A band that only informs about the page's own read (dom.ts rereadBand): softer than one that asks for something. */
 .band-quiet { color: var(--ink-soft); background: var(--chrome); }
@@ -1126,7 +1128,10 @@ span.ins-confirm { margin-top: 0; }
  * Under the name, one line: the description, then what it holds. When room runs out the description shortens, then steps
  * aside with its "·" (below 700px of table); the facts keep their words. A wide table puts the line beside the name.
  */
-.plugin-row-line { display: flex; align-items: baseline; min-width: 0; max-width: 100%; }
+.plugin-row-line { display: flex; align-items: center; min-width: 0; max-width: 100%; }
+/* That one line, or a click's note in its place (pluginspage.ts pluginRow), is one line high, an empty one too: a click never
+   changes the row's height. */
+.plugin-row-name > .plugin-row-line, .plugin-row-name > .plugin-click { height: 20px; white-space: nowrap; }
 .plugin-row-about { flex: 0 1 auto; min-width: 0; font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-sep { flex: none; margin: 0 8px; color: var(--ink-faint); }
 .plugin-row-holds { flex: 0 0 auto; max-width: 100%; font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1141,7 +1146,7 @@ span.ins-confirm { margin-top: 0; }
   .plugin-row-open { flex: none; max-width: 50%; margin-right: 14px; }
   /* A long note (a copy that differs, several versions) wraps beside the line rather than pushing what it holds out of view. */
   .plugin-row-update { flex: 0 1 auto; margin-left: 14px; }
-  /* A click's state takes the line's place, its words whole, wrapping only where the room runs out. */
+  /* A click's state takes the line's place beside the name, as the line does. */
   .plugin-row-name > .plugin-click { flex: 1 1 0; max-width: max-content; }
 }
 /* The header's hint keeps to whole lines: a narrow table says it shorter. */
@@ -1255,8 +1260,7 @@ span.ins-confirm { margin-top: 0; }
 /* The list row's version warning: its own line under the plugin's description, wrapping between words */
 .plugin-row-warning { font-size: 11.5px; }
 .plugin-row-warning > .icon { align-self: flex-start; margin-top: 2px; }
-/* A switch click's line on its plugin's row and page (pluginparts.ts clickNote): shortened with "…", its tooltip whole */
-/* A click's state, in its whole words, wrapping where room runs out; its glyph beside the first line. */
+/* A click's state (pluginparts.ts clickNote), in its whole words; on its plugin's page they wrap where room runs out, its glyph beside the first line. */
 .plugin-click { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; font-size: 11.5px; color: var(--ink-soft); }
 .plugin-click > span { min-width: 0; overflow-wrap: anywhere; }
 .plugin-click > .icon { flex: none; align-self: flex-start; margin-top: 2px; }

@@ -1,5 +1,6 @@
 // The Plugins page's switch clicks waiting their turn (pluginstate.ts turnPlugin), on the page's own code with a stand-in for
-// main: each test clicks, then answers main's calls one at a time and reads what the page holds in between.
+// main: each test clicks, then answers main's calls one at a time and reads what the page holds in between. Then, on the same
+// code, when the rows a click pins are let go (app.ts pinnedRows, drawPage).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { HarnessId, PluginTurn, PluginTurnResult, PluginsView } from '../src/types.ts';
@@ -30,8 +31,9 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyPluginSwitches, readAgain, state: app } = await import('../src/app.ts');
-const { clickOn, lastLines, market, pluginBusy, resetMarket, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
+const { acting, applyPluginSwitches, drawPage, pinnedRows, readAgain, state: app } = await import('../src/app.ts');
+const { clickOn, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
+const { pin } = await import('../src/itemrow.ts');
 const { clickWords } = await import('../src/pluginparts.ts');
 
 /** Lets the page's awaits run on to the next call to main. */
@@ -107,6 +109,8 @@ test('A row says its click’s aim while it waits and runs, then what main retur
   await main.answer(refused('gamma'));
   assert.deepEqual([words('beta'), words('gamma')], [stopped, 'Claude Code: Not installed. Plugin "gamma" not found.']);
   assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!).failed), [false, true, true]);
+  // On the list's row, in one short line: what it did and where; the reasons are in the band above and on the plugin's page.
+  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!, true).text), ['Installed in Claude Code', 'Not done', 'Not put in Claude Code']);
 });
 
 test('A click that fails in the middle says why on its row, the clicks after it still run, and the list’s end is said as a whole', async () => {
@@ -227,4 +231,47 @@ test('After two clicks on one plugin’s boxes, Undo names the click it reverses
   await main.answer(installed('alpha'));
   await main.answer(installed('alpha'));
   assert.equal(undoLabel(), 'Undo alpha in Claude Code');
+});
+
+// ---------- Rows pinned where they were ----------
+
+/** The keys pinned on the list on screen now. */
+const pinnedNow = () => [...app.pinned.rows.keys()];
+/** A draw of MCP servers on which docs's own switch was clicked. */
+const docsPinned = () => drawPage(() => pin(pinnedRows('MCP servers'), 'docs', 'on'));
+
+test('A draw of the same list keeps the rows pinned on it; a draw of another list, or of none, lets them go', () => {
+  start();
+  docsPinned();
+  drawPage(() => pinnedRows('MCP servers'));
+  assert.deepEqual(pinnedNow(), ['docs']);
+  drawPage(() => pinnedRows('Agents'));
+  assert.deepEqual(pinnedNow(), []);
+  docsPinned();
+  drawPage(() => {});
+  assert.deepEqual(pinnedNow(), []);
+});
+
+test('A read outside a draw only reads: the Plugins list read in the background leaves the rows pinned on MCP servers alone', () => {
+  start();
+  docsPinned();
+  shownPlugins(entry);
+  assert.deepEqual(pinnedNow(), ['docs']);
+});
+
+test('Refresh lets every pinned row go', async () => {
+  start();
+  docsPinned();
+  await readAgain();
+  assert.deepEqual(pinnedNow(), []);
+});
+
+test('Find keeps a pinned plugin where it was: gamma, pinned first, stays first with Find typed', () => {
+  start();
+  drawPage(() => { shownPlugins(entry); pin(app.pinned, 'gamma', 0); });
+  market.nav.find = 'a';
+  let order: string[] = [];
+  drawPage(() => { order = shownPlugins(entry).map(plugin => plugin.name); });
+  market.nav.find = '';
+  assert.deepEqual(order, ['gamma', 'alpha', 'beta']);
 });

@@ -727,7 +727,8 @@ async function practiceFlow() {
   same('adding a found skill takes it in and writes it to every tool at once, byte for byte', [await switchOn(a, 'notes'), folders('notes')[2], folders('notes')[1]], [true, folders('notes')[0], folders('notes')[0]]);
   const statusBarShows = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);
   check('the result says where it is now, in the strip at the top only', (await a.text('.band-done') ?? '').includes('notes is in Central Knot now, and on in all 3 tools.') && !(await statusBarShows()), [await a.text('.bands'), await statusBarShows()]);
-  same('and its row stays where it was, under Found, its switch On, the pointer over the list too: the heading counts the skills still found', [await sectionsNow(a), await switchOn(a, 'notes'), await a.text('.ov-section[data-section="found"] .ov-section-count')], [[['found', ['notes', 'release-notes', 'review', 'standup']]], true, '3']);
+  same('and its row stays where it was, under Found, its switch On, the pointer over the list too: the heading counts the skills still found, and says nothing over a row now On',
+    [await sectionsNow(a), await switchOn(a, 'notes'), await a.text('.ov-section[data-section="found"] .ov-section-count'), await a.exists('.ov-section[data-section="found"] .ov-section-after')], [[['found', ['notes', 'release-notes', 'review', 'standup']]], true, '3', false]);
   await pointerOver('.toolbar');
   // Off takes the folder out of every tool; Central Knot keeps it. Its Undo (On) puts every folder back, byte for byte.
   const notesOn = folders('notes');
@@ -4305,6 +4306,10 @@ esac
   // Two plugins clicked in a row without waiting: release-helper's Add, then starter-skills (Claude Code's stand-in takes 3 s over
   // it). The second waits its turn while the first runs, the first is read back as soon as it ends, and Skills stays usable.
   await a.click('#plugin-back');
+  // Add, then its Undo: the plugin is found again, and the focus goes to its Add, the control its row has now.
+  await a.click('#padd-0-release-helper'); await done();
+  await a.click('#plugins-undo'); await done();
+  same('the Undo of an Add leaves the focus on the row’s Add again', [await a.exists('#padd-0-release-helper'), await a.run(`document.activeElement?.id`)], [true, 'padd-0-release-helper']);
   writeFileSync(join(home, 'slow'), '');
   await a.run(`document.querySelector('#padd-0-release-helper').click(); document.querySelector('#pswitch-0-starter-skills').click()`);
   const rowSays = name => a.run(`document.querySelector('[data-plugin="${name}"] .plugin-click')?.dataset.click ?? 'nothing'`);
@@ -4328,7 +4333,7 @@ esac
 }
 
 /**
- * A click never moves a row (itemrow.ts Held), on lists long enough to scroll: MCP servers, then Plugins. A switch clicked in
+ * A click never moves a row (itemrow.ts Pinned), on lists long enough to scroll: MCP servers, then Plugins. A switch clicked in
  * the middle leaves the scroll and the next row's place on screen as they were, and a redraw after he scrolls on leaves his
  * scroll alone; five rows clicked one after another, each where it was before the first click, are the five that change; the
  * next visit, a plugin's page and back, and Refresh put every row in its place in the order again.
@@ -4336,14 +4341,15 @@ esac
 async function rowsKeepTheirPlacesFlow() {
   const home = join(scratch, 'home-rows'), data = join(scratch, 'rows-data'), market = join(scratch, 'market-rows'), tools = join(scratch, 'tools-rows');
   const numbered = prefix => Array.from({ length: 40 }, (_, at) => `${prefix}-${String(at + 1).padStart(2, '0')}`);
-  const servers = numbered('srv'), plugins = numbered('plug'), claudeJson = join(home, '.claude.json');
-  // Claude Code holds 40 servers; a folder marketplace lists 40 plugins, and Claude Code's stand-in installs them on files alone.
+  const servers = numbered('srv'), plugins = numbered('plug'), found = ['fnd-a', 'fnd-b', 'fnd-c', 'fnd-d'], claudeJson = join(home, '.claude.json');
+  // Claude Code holds 40 servers and 4 more found there; a folder marketplace lists 40 plugins (plug-08 with no description and nothing in it),
+  // and Claude Code's stand-in installs them on files alone, but for plug-07, -13, -14 and -16, whose installs fail with a long reason.
   mkdirSync(join(home, '.claude'), { recursive: true });
   const addServers = (...names) => { const now = existsSync(claudeJson) ? JSON.parse(readFileSync(claudeJson, 'utf8')) : {}; writeFileSync(claudeJson, JSON.stringify({ ...now, mcpServers: { ...now.mcpServers, ...Object.fromEntries(names.map(name => [name, { command: name, args: [] }])) } })); };
-  addServers(...servers);
-  for (const plugin of plugins) skill(join(market, 'plugins', plugin, 'skills'), `${plugin}-skill`);
+  addServers(...servers, ...found);
+  for (const plugin of plugins) if (plugin === 'plug-08') mkdirSync(join(market, 'plugins', plugin), { recursive: true }); else skill(join(market, 'plugins', plugin, 'skills'), `${plugin}-skill`);
   mkdirSync(join(market, '.claude-plugin'), { recursive: true });
-  writeFileSync(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'rows-market', owner: { name: 'Rows' }, plugins: plugins.map(name => ({ name, source: `./plugins/${name}`, version: '1.0.0', description: `The ${name} plugin.` })) }));
+  writeFileSync(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'rows-market', owner: { name: 'Rows' }, plugins: plugins.map(name => ({ name, source: `./plugins/${name}`, version: '1.0.0', ...(name === 'plug-08' ? {} : { description: `The ${name} plugin.` }) })) }));
   mkdirSync(join(tools, '.local/bin'), { recursive: true });
   writeFileSync(join(tools, '.local/bin/claude'), `#!${process.execPath}
 const fs = require('fs'), dir = process.env.HOME + '/.claude/plugins', record = dir + '/installed_plugins.json', [, verb, id] = process.argv.slice(2);
@@ -4352,6 +4358,7 @@ if (fs.existsSync(process.env.HOME + '/slow')) Atomics.wait(new Int32Array(new S
 fs.mkdirSync(dir, { recursive: true });
 const now = fs.existsSync(record) ? JSON.parse(fs.readFileSync(record, 'utf8')) : { version: 2, plugins: {} };
 if (verb === 'marketplace') fs.writeFileSync(dir + '/known_marketplaces.json', JSON.stringify({ 'rows-market': { source: { source: 'git', url: process.argv[5] } } }));
+else if (/^plug-(07|13|14|16)@/.test(id ?? '')) { console.error('Error: failed to install plugin ' + id + ': the marketplace entry points at a folder whose plugin manifest could not be parsed (unexpected token at line 3, column 14); fix the manifest and try again.'); process.exit(1); }
 else if (verb === 'install') now.plugins[id] = [{ scope: 'user', installPath: ${JSON.stringify(market)} + '/plugins/' + id.split('@')[0], version: '1.0.0' }];
 else if (verb === 'uninstall') delete now.plugins[id];
 else process.exit(9);
@@ -4384,12 +4391,26 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.click('#nav-mcp');
   const table = 'table-mcp', row = key => `.ov-row[data-key="${key}"]`;
   // The two Off servers turned On, at the bottom of the list: they stay under Off, which counts none and says nothing of them.
-  // The next visit puts them under On.
+  // Refresh, with the list at its top and that result's band above it, puts them under On.
   await putAt(table, row('srv-40'), 500);
   for (const key of ['srv-39', 'srv-40']) { await clickAt(await middleOf(`#switch-${key}`)); await a.settle(); }
+  await a.shot('rows-mcp-heading-no-note');
   same('MCP servers: rows turned On stay under Off, which says 0 and has no note', [(await sectionsNow(a)).at(-1), await switchOn(a, 'srv-40'), await a.text('.ov-section[data-section="off"] .ov-section-label')], [['off', ['srv-39', 'srv-40']], true, 'Off0']);
+  await a.run(`document.getElementById('${table}').scrollTop = 0`);
+  await a.click('#header-refresh');
+  same('Refresh puts them under On', await sectionsNow(a), [['on', servers], ['found', found]]);
+  // Five rows at the top of the list, the page's first clicks, each clicked where it was before the first: the result's band
+  // takes its room with the first click, and no row moves.
+  const atTop = ['srv-03', 'srv-04', 'srv-05', 'srv-06', 'srv-07'], topPoints = [], topBefore = await placesNow(table, 'data-key'), topStates = await states('.ov-row[data-key]');
+  for (const key of atTop) topPoints.push(await middleOf(`#switch-${key}`));
+  // At the instant of each click, before its result: the first takes the result's room, each later one keeps the result before.
+  const atClick = [];
+  for (const point of topPoints) { await clickAt(point); atClick.push(await a.run(`document.querySelector('[data-outcome]') ? 'result' : document.querySelector('.band-room') ? 'room' : 'none'`)); await a.settle(); }
+  await a.shot('rows-mcp-top');
+  const topAfter = await placesNow(table, 'data-key');
+  same('at the top of the list, five rows clicked one after another are the five that change, no row moves, and the result’s band neither goes nor comes back',
+    [changed(topStates, await states('.ov-row[data-key]')), ['srv-03', 'srv-08'].map(key => topAfter.at[key]), atClick], [atTop, ['srv-03', 'srv-08'].map(key => topBefore.at[key]), ['room', 'result', 'result', 'result', 'result']]);
   await a.click('#nav-overview'); await a.click('#nav-mcp');
-  same('the next visit puts them under On', await sectionsNow(a), [['on', servers]]);
   // A switch in the middle of the list, the page's first click: the result's band comes above the list, and the rows stay.
   await putAt(table, row('srv-20'), 300);
   const before = await placesNow(table, 'data-key');
@@ -4405,7 +4426,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   const scrolled = (await placesNow(table, 'data-key')).scroll;
   addServers('new-server');
   for (let tries = 0; tries < 80 && !(await a.exists(row('new-server'))); tries++) await wait(100);
-  same('a background refresh after he scrolls on leaves his scroll alone, the focus on that switch, and the new server under Found', [(await placesNow(table, 'data-key')).scroll, await focused(), (await sectionsNow(a)).find(([role]) => role === 'found')?.[1]], [scrolled, 'switch-srv-20', ['new-server']]);
+  same('a background refresh after he scrolls on leaves his scroll alone, the focus on that switch, and the new server under Found', [(await placesNow(table, 'data-key')).scroll, await focused(), (await sectionsNow(a)).find(([role]) => role === 'found')?.[1]], [scrolled, 'switch-srv-20', [...found, 'new-server']]);
   // Five rows, one after another, each clicked where it was on screen before the first click.
   await putAt(table, row('srv-22'), 200);
   const five = ['srv-22', 'srv-23', 'srv-24', 'srv-25', 'srv-26'], points = [];
@@ -4414,14 +4435,30 @@ fs.writeFileSync(record, JSON.stringify(now));
   for (const point of points) { await clickAt(point); await a.settle(); }
   await a.shot('rows-mcp-five');
   same('five rows clicked one after another, each where it was before the first click, are the five that change', changed(statesBefore, await states('.ov-row[data-key]')), five);
+  // Sorted by Last updated, Add on a found server in the middle of Found: Add gives it a time, and it keeps its place all the same.
+  const sortBy = async value => { await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })()`); await a.settle(); };
+  await sortBy('updated');
+  await putAt(table, row('fnd-b'), 300);
+  const foundBefore = await placesNow(table, 'data-key');
+  await clickAt(await middleOf('#add-fnd-b')); await a.settle();
+  const foundAfter = await placesNow(table, 'data-key');
+  same('sorted by Last updated, a found server taken in by its Add keeps its place among its neighbours', [await switchOn(a, 'fnd-b'), [...found, 'new-server'].map(key => foundAfter.at[key])],
+    [true, [...found, 'new-server'].map(key => foundBefore.at[key])]);
+  // So does a server with a time of its own, turned Off.
+  await putAt(table, row('srv-10'), 300);
+  const timedBefore = await placesNow(table, 'data-key');
+  await clickAt(await middleOf('#switch-srv-10')); await a.settle();
+  const timedAfter = await placesNow(table, 'data-key');
+  same('…and so does a server with a time, turned Off', [await switchOn(a, 'srv-10'), ['srv-10', 'srv-11'].map(key => timedAfter.at[key])], [false, ['srv-10', 'srv-11'].map(key => timedBefore.at[key])]);
+  await sortBy('name');
   // The next visit, then Refresh, put every row under its own heading.
-  const offNow = ['srv-20', ...five];
+  const offNow = [...atTop, 'srv-10', 'srv-20', ...five];
   await a.click('#nav-overview'); await a.click('#nav-mcp');
-  same('the next visit puts each row under its own heading', await sectionsNow(a), [['on', servers.filter(key => !offNow.includes(key))], ['found', ['new-server']], ['off', offNow]]);
+  same('the next visit puts each row under its own heading', await sectionsNow(a), [['on', ['fnd-b', ...servers.filter(key => !offNow.includes(key))]], ['found', ['fnd-a', 'fnd-c', 'fnd-d', 'new-server']], ['off', offNow]]);
   await clickAt(await middleOf('#switch-srv-02')); await a.settle();
-  const heldThere = (await sectionsNow(a))[0][1].includes('srv-02') && !(await switchOn(a, 'srv-02'));
+  const pinnedThere = (await sectionsNow(a))[0][1].includes('srv-02') && !(await switchOn(a, 'srv-02'));
   await a.click('#header-refresh');
-  same('a row turned Off stays under On until Refresh, which puts it under Off', [heldThere, (await sectionsNow(a)).at(-1)], [true, ['off', ['srv-02', ...offNow]]]);
+  same('a row turned Off stays under On until Refresh, which puts it under Off', [pinnedThere, (await sectionsNow(a)).at(-1)], [true, ['off', ['srv-02', ...offNow].sort()]]);
 
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-plug-20')); tries++) await wait(100);
@@ -4467,19 +4504,44 @@ fs.writeFileSync(record, JSON.stringify(now));
   await sizeTo(a, 1728, 1117);
   const fiveWide = await fiveQuickly('plug-31');
   same('…and so in the wide table', ...fiveWide);
+  // A list of four clicks, one failing (a plugin of its own at each size) and one on a plugin with no description (plug-08), at
+  // each of the four sizes: every row is as tall while its click waits and runs, and after it ends or fails, as before it.
+  const heights = () => a.run(`Object.fromEntries([...document.querySelectorAll('[data-plugin]')].map(row => [row.dataset.plugin, Math.round(row.getBoundingClientRect().height)]))`);
+  const tall = [];
+  const failing = { 860: 'plug-07', 1280: 'plug-13', 1728: 'plug-14', 2560: 'plug-16' }, clicked = width => [failing[width], 'plug-08', 'plug-10', 'plug-11'];
+  for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await sizeTo(a, width, height);
+    await putAt(list, '[data-plugin="plug-07"]', 80);
+    const heightsBefore = await heights();
+    for (const name of clicked(width)) { await clickAt(await middleOf(`#pswitch-0-${name}`)); await wait(150); }
+    const whileWaiting = await heights();
+    for (let tries = 0; tries < 40 && !(await a.exists('[data-plugin="plug-08"] .plugin-click[data-click="ended"]')); tries++) await wait(100);
+    await a.shot(`rows-plugins-states-${width}`);
+    const whileRunning = await heights();
+    await done();
+    const noted = await a.all('[data-plugin] .plugin-click', 'e.closest("[data-plugin]").dataset.plugin + " " + e.dataset.click');
+    tall.push([width, noted, ...[whileWaiting, whileRunning, await heights()].map(now => Object.keys(now).filter(name => now[name] !== heightsBefore[name]))]);
+  }
+  same('through a list of clicks with one failure, every row keeps its height, at the four sizes', tall, [SMALLEST, [1280], [1728], [2560]].map(([width]) => [width, clicked(width).sort().map(name => `${name} ended`), [], [], []]));
   await sizeTo(a, 1280, 800);
+  // The list at its top: a click starts a new list, so the last list's failure leaves the band above; the rows stay where they are.
+  await a.run(`document.getElementById('${list}').scrollTop = 0`);
+  const atItsTop = await placesNow(list, 'data-plugin'), bandBefore = await a.exists('.plugin-problems');
+  await clickAt(await middleOf('#pswitch-0-plug-06')); await done();
+  const stillAtTop = await placesNow(list, 'data-plugin');
+  same('at the top of the list, the band a click closes leaves its room: no row moves', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])], [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
   rmSync(join(home, 'slow'));
   // A plugin's page and back, then Refresh: the list in its order again, installed first.
   const inOrder = on => [...plugins.filter(name => on.includes(name)), ...plugins.filter(name => !on.includes(name))];
-  const installedNow = [...installedFirst, 'plug-01', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
+  const installedNow = [...installedFirst.filter(name => name !== 'plug-06'), 'plug-01', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
   await a.click('#popen-0-plug-20'); await a.click('#plugin-back');
   same('back from a plugin’s page, every plugin is in its place in the order', await order(), inOrder(installedNow));
   await putAt(list, '[data-plugin="plug-02"]', 300);
   await clickAt(await middleOf('#pswitch-0-plug-02')); await done();
-  const heldInList = [(await order()).indexOf('plug-02') === inOrder(installedNow).indexOf('plug-02'), await a.run(`document.querySelector('#pswitch-0-plug-02').getAttribute('aria-checked')`)];
+  const pinnedInList = [(await order()).indexOf('plug-02') === inOrder(installedNow).indexOf('plug-02'), await a.run(`document.querySelector('#pswitch-0-plug-02').getAttribute('aria-checked')`)];
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && (await order()).length !== plugins.length; tries++) await wait(100);
-  same('a plugin turned On stays where it was until Refresh, which puts it with the installed ones', [heldInList, await order()], [[true, 'true'], inOrder([...installedNow, 'plug-02'])]);
+  same('a plugin turned On stays where it was until Refresh, which puts it with the installed ones', [pinnedInList, await order()], [[true, 'true'], inOrder([...installedNow, 'plug-02'])]);
   same('no page errors, rows keep their places', a.pageErrors, []);
   await a.quit();
 }
@@ -4725,6 +4787,19 @@ async function usageFlow() {
   await a.click('#outcome-undo');
   for (let tries = 0; tries < 50 && Object.values(filesOf(['standup', 'spare'])).some(text => text === ''); tries++) await wait(100);
   same('its one Undo puts both back On, every file byte for byte', [filesOf(['standup', 'spare']), (await sectionsNow(a))[0][1]], [before, ['notes', 'idle', 'standup', 'fresh', 'spare']]);
+  // With the chip on, rows turned Off by their own switch stay listed where they were, and the chip stays on, until the list is
+  // drawn afresh; then All again for what follows.
+  const chipNamed = name => a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.dataset.tip === ${JSON.stringify(name)})?.click()`);
+  await chipNamed('No use seen in 30 days'); await a.settle();
+  await a.click('#switch-standup');
+  const chipOn = () => a.run(`document.querySelector('.chip-on')?.dataset.tip`);
+  const afterOne = [await sectionsNow(a), await chipOn()];
+  await a.click('#switch-spare');
+  await a.shot('usage-chip-pinned');
+  same('with the chip on, rows turned Off by their own switch stay listed where they were, and the chip stays on', [afterOne, [await sectionsNow(a), await chipOn()], [await switchOn(a, 'standup'), await switchOn(a, 'spare')]],
+    [[[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [false, false]]);
+  for (const key of ['standup', 'spare']) await a.click(`#switch-${key}`);
+  await chipNamed('All'); await a.settle();
   // A reading that fails shows nothing from the one before (a dev run only: it reaches main to make the request fail).
   const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
   if (main) {

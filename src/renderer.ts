@@ -1,6 +1,8 @@
 // The page's entry: the window's frame around the page (the sidebar, the header, the status bar and the Sync switch), which page
 // draws (renderPage: while another build holds this one, the held screen of otherbuildview.ts instead of every page, with the
-// sidebar's update control kept), and drawing again on a change. The page's state and actions are app.ts's; each page is drawn by its own
+// sidebar's update control kept), and drawing again on a change. A draw keeps each scrolling region's rows where they were on
+// screen when a band above it comes or goes, and while the list on screen has pinned rows (app.ts pinnedRows) it never moves up:
+// a band that closes leaves its room (render). The page's state and actions are app.ts's; each page is drawn by its own
 // module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
@@ -141,7 +143,7 @@ function renderHeader(rail: boolean) {
     }),
     h('h1.page-title', {}, heldBy(state.home) ? 'One build at a time' : (state.page === 'harnesses' && harnessTitle()) || titles[state.page]),
     // The same Refresh on every page: it reads the home again, then the page's own data (on Plugins, every marketplace).
-    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
+    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again, and put the rows back in order' : 'Read this home again, and put the rows back in order', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain() })),
   );
 }
@@ -206,13 +208,10 @@ function renderStatus() {
   paintStatusMessage();
 }
 
-/**
- * What the last draw couldn't scroll each region by, past its top (a band went while a list sat near its top, as at a click's
- * start), given back by the next draw as the band comes back, unless the region has been scrolled since.
- */
-let owed = new Map<string, number>();
-/** Each scrolling region before a draw: its scroll (what is owed it, while it sits at its top) and its top on screen. */
-const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => ({ id: node.id, scroll: node.scrollTop || (owed.get(node.id) ?? 0), at: node.getBoundingClientRect().top }));
+/** The window's size at the last draw: a resize lays the page out anew, so no band's room is kept across it. */
+let drawnIn = '';
+/** Each scrolling region before a draw: its scroll and its top on screen. */
+const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => ({ id: node.id, scroll: node.scrollTop, at: node.getBoundingClientRect().top }));
 
 function render() {
   const focused = document.activeElement?.id;
@@ -225,15 +224,17 @@ function render() {
   runAfterLayout();
   renderStatus();
   fitBars();
-  owed = new Map();
+  const size = `${innerWidth}×${innerHeight}`, keepRoom = state.pinned.rows.size > 0 && size === drawnIn;
+  drawnIn = size;
   for (const { id, scroll, at } of scrolled) {
     const node = document.getElementById(id);
     if (!node) continue;
-    // A band coming or going above a region moves its top: its scroll moves as much, so its rows stay where they were on
-    // screen. A region at its very top stays there, so a band that comes never scrolls its first row out of sight.
-    const want = scroll && scroll + node.getBoundingClientRect().top - at;
-    node.scrollTop = want;
-    if (want < 0) owed.set(id, want);
+    // While the list has pinned rows, a band that closes above a region leaves its room: a margin, until the pins are let go.
+    const lost = at - node.getBoundingClientRect().top;
+    if (keepRoom && lost > 0) node.style.marginTop = `${parseFloat(getComputedStyle(node).marginTop) + lost}px`;
+    // A band coming or going above a region moves its top: its scroll moves as much, at every scroll position, so its rows
+    // stay where they were on screen (but where the region can't scroll that far).
+    node.scrollTop = scroll + node.getBoundingClientRect().top - at;
   }
   // Back on the control that had it, without scrolling to it: a redraw never pulls the page to a row scrolled away from.
   if (focused) document.getElementById(focused)?.focus({ preventScroll: true });

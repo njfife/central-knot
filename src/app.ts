@@ -3,7 +3,7 @@
 // page is acting (acting: busy, or the Plugins page's switch clicks running); a click on an item page sent to its kind's engine
 // (applyClick, through kindPages) and its result kept for the page (lastResult); History's actions (restoreEvent); the reads of
 // the home (loadHome, readAgain, readHomeOnce), the usage reading on a click (readUsage), and the Sync switch, Sync once and
-// Synchronize everything's row; the rows a click holds where they were (heldRows, drawPage); and the Instructions, base
+// Synchronize everything's row; the rows a click pins where they were (pinnedRows, drawPage); and the Instructions, base
 // instructions and Profiles pages' actions.
 // A sync notice lives across reads here, until its page shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it. Not here: drawing (renderer.ts and each
 // page's module), the Plugins page's state (pluginstate.ts), the Sources and Git repo pages' (sourcespage.ts, repopage.ts), and
@@ -14,7 +14,7 @@ import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice, UsageReading } from './types.ts';
-import { anyOn, heldOn, kindSource, noneHeld, type Held } from './itemrow.ts';
+import { anyOn, kindSource, noPins, pinsOn, type Pinned } from './itemrow.ts';
 import { caughtUpNames, noticeNames, plural, withSetAside } from './model.ts';
 import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -135,20 +135,24 @@ export const state = {
   harnessTab: 'skills' as HarnessTab,
   /** The window chooses the sidebar shape until the person uses the toggle, which holds until the window crosses the rail breakpoint. */
   sidebar: undefined as 'open' | 'rail' | undefined,
-  /** The rows a click holds where they were, on the list on screen (heldRows). */
-  held: noneHeld(),
+  /** The rows a click pins where they were, on the list on screen (pinnedRows). */
+  pinned: noPins(),
 };
 
 /**
- * The rows held on the list on screen (itemrow.ts Held): the list asks for them each time it is drawn, by its own name, and a
- * click on a row's own switch holds that row (itemrow.ts hold). They are let go when a draw asks for another list or for none
- * (another page, tab, view or plugin's page, another Sort or chip: drawPage) and at Refresh (readAgain); Find keeps them.
- * In memory only. `Group`: what the list groups its rows by (matrix.ts its headings, pluginstate.ts a plugin's place), one list to a name.
+ * The rows pinned on the list on screen (itemrow.ts Pinned): the list asks for them each time it is drawn, by its own name, and a
+ * click on a row's own switch pins that row (itemrow.ts pin). Only a draw lets them go: one that asks for another list or for
+ * none (another page, tab, view or plugin's page, another Sort or chip: drawPage); and Refresh (readAgain). Find keeps them.
+ * Asked for outside a draw (a click, a read in the background), they are only read: another list's name gets none. In memory
+ * only. `Group`: what the list groups its rows by (matrix.ts its headings, pluginstate.ts a plugin's place).
  */
-let asked = false;
-export const heldRows = <Group extends string | number>(list: string): Held<Group> => { asked = true; return (state.held = heldOn(state.held, list)) as Held<Group>; };
-/** Draws the page (renderer.ts render): a draw that asked for no held rows lets them go. */
-export function drawPage(draw: () => void) { asked = false; draw(); if (!asked) state.held = noneHeld(); }
+let drawing = false, asked = false;
+export const pinnedRows = <Group extends string | number>(list: string): Pinned<Group> => {
+  if (drawing) { asked = true; state.pinned = pinsOn(state.pinned, list); }
+  return (state.pinned.list === list ? state.pinned : noPins()) as Pinned<Group>;
+};
+/** Draws the page (renderer.ts render): a draw that asked for no pinned rows lets them go. */
+export function drawPage(draw: () => void) { drawing = true; asked = false; try { draw(); } finally { drawing = false; } if (!asked) state.pinned = noPins(); }
 
 let render = () => {};
 export const setRenderer = (next: () => void) => { render = next; };
@@ -250,12 +254,13 @@ export function afterActing() {
 /**
  * One piece of work at a time: every mutating control is disabled while it runs. Its "Reading…" message gives way, when
  * the work said nothing of its own, to what the status bar said before. A background refresh that arrived meanwhile runs
- * once it is done.
+ * once it is done. The last result stays on screen while it runs only with `keepResult` (a row's click, so its band neither
+ * goes nor comes back above the list: renderer.ts), until the work says its own.
  */
-export async function busy(message: string, work: () => Promise<void>) {
+export async function busy(message: string, work: () => Promise<void>, { keepResult = false } = {}) {
   const focused = document.activeElement?.id;
   const before = state.said;
-  state.outcome = undefined;
+  if (!keepResult) state.outcome = undefined;
   state.undoMoved = undefined;
   state.busy = message;
   showActing();
@@ -403,7 +408,7 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned,
     text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
-});
+}, { keepResult: true });
 
 /** Whether each History entry a click made still offers its own action, so the click's Undo can run them all. */
 async function allUndoable(made: string[]) {
@@ -435,7 +440,7 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
     text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, ...failed].join(' ') });
   for (const item of click.items) flashRow(item);
-});
+}, { keepResult: true });
 
 /** What a run of plugin switches couldn't do, in words ("issue-tracker: couldn’t turn it on in Codex."), or ''. */
 const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [ran.stopped, ...ran.failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)].filter(Boolean).join(' ');
@@ -555,14 +560,14 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
 /** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */
 export async function readAgain() {
   let read = false;
+  // Every row takes its place in the order again.
+  state.pinned = noPins();
   // What a list of plugin clicks said is not restated over a home read again.
   endListNews();
   await busy(noToolManaged() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
     const view = await api().refresh(true);
     if (!view) return;
     state.skillsResult = undefined;
-    // Every row takes its place in the order again.
-    state.held = noneHeld();
     // Said first, so a page that leaves (setHome) adds its reason after what was read.
     announce(readSummary(view));
     setHome(view, { reload: false });

@@ -5,11 +5,11 @@ import { acting } from './app.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import { pluginKey, resultLines, type PluginOp } from './pluginplan.ts';
+import { pluginKey, resultLines, succeeded, type PluginOp } from './pluginplan.ts';
 import { applyPluginOps, clickOn, market, openLink, pluginBusy, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
 import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
-import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, MarketplaceView, NamedPart, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, toolNames as names } from './words.ts';
 
@@ -115,20 +115,34 @@ export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: 
 
 /**
  * What a plugin's click in the page's list says on its row and its page: its aim while it waits ("Waiting to install") and while
- * main runs it ("Installing…"), then what main returned, a failure once, starting with its tool (the problems band has each
- * whole). It stays until the list's news ends (pluginstate.ts endListNews).
+ * main runs it ("Installing…"), then what main returned. On its page, every step whole, a failure starting with its tool (the
+ * problems band has each whole too). On the list's row (`onRow`), what fits the row's one line: what it did and where, past one
+ * tool counted ("Installed in 3 tools", "Installed in 2 tools, not in Codex", "Not installed in Codex"); each tool's reason and
+ * the items put in Pi and OpenCode are in the band above and on its page. It stays until the list's news ends
+ * (pluginstate.ts endListNews).
  */
-export function clickWords(click: PluginClick): { text: string; failed: boolean } {
+export function clickWords(click: PluginClick, onRow = false): { text: string; failed: boolean } {
   if (!click.ran) return { text: click.state === 'waiting' ? click.said.waiting : click.said.running, failed: false };
-  const lines = resultLines(click.ran.done), text = [...lines.map(line => line.short), click.ran.stopped].filter(Boolean).join('; ') || 'Nothing changed';
-  return { text: `${text.charAt(0).toUpperCase()}${text.slice(1)}`, failed: !!click.ran.stopped || lines.some(line => !line.ok) };
+  const lines = resultLines(click.ran.done), failed = !!click.ran.stopped || lines.some(line => !line.ok);
+  if (onRow) return { text: rowWords(click.what, click.ran), failed };
+  const text = [...lines.map(line => line.short), click.ran.stopped].filter(Boolean).join('; ') || 'Nothing changed';
+  return { text: `${text.charAt(0).toUpperCase()}${text.slice(1)}`, failed };
+}
+/** Each click's verb on a row, and the word before its tools. */
+const ROW_VERBS: Record<PluginTurn, [string, string]> = { on: ['Installed', 'in'], 'let-in': ['Put', 'in'], add: ['Added', 'in'], off: ['Uninstalled', 'from'], 'keep-out': ['Taken out', 'of'] };
+function rowWords(what: PluginTurn, { done, stopped }: NonNullable<PluginClick['ran']>): string {
+  const [verb, to] = ROW_VERBS[what], missed = [...new Set(done.filter(step => !succeeded(step.report)).map(step => step.tool))];
+  const went = [...new Set(done.map(step => step.tool))].filter(tool => !missed.includes(tool));
+  const tools = (list: HarnessId[]) => (list.length === 1 ? names[list[0]!] : `${list.length} tools`);
+  if (!went.length) return missed.length ? `Not ${verb.toLowerCase()} ${to} ${tools(missed)}` : stopped ? 'Not done' : 'Nothing changed';
+  return `${verb} ${to} ${tools(went)}${missed.length ? `, not ${to} ${tools(missed)}` : ''}`;
 }
 
-/** A plugin's latest click in the page's list, on its row and its page (clickWords), in its whole words (style.css .plugin-click wraps them). */
-export function clickNote(entry: MarketplaceView, plugin: string): HTMLElement | null {
+/** A plugin's latest click in the page's list, on its row (`onRow`: in one line, clickWords) and its page (its whole words, wrapping: style.css .plugin-click). */
+export function clickNote(entry: MarketplaceView, plugin: string, onRow = false): HTMLElement | null {
   const click = clickOn(entry.source, plugin);
   if (!click) return null;
-  const { text, failed } = clickWords(click);
+  const { text, failed } = clickWords(click, onRow);
   const glyph = click.state === 'waiting' ? icon('clock', 12) : click.state === 'running' ? icon('refresh-cw', 12, 'spin') : icon(failed ? 'triangle-alert' : 'check', 12);
   return h(`span.plugin-click${failed ? '.failed' : ''}`, { 'data-click': click.state }, glyph, h('span', {}, text));
 }
