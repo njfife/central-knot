@@ -11,8 +11,9 @@
 // aside; none of 13,243 in place. Those unlocked writes are the gap left, both ways: one landing between Central Knot's check
 // and its rename is written over, and Claude Code's own change in it is lost (not measured); one that read the file before the
 // rename and lands after it puts the older file back, which the next pass reads as the server turned off by hand or an older
-// version come back as an edit, each with its click back (the measures above: none of 13,243). The kit that measures it again:
-// /home/picoder/work/ck-next/claude-write-kit (race-ck.sh).
+// version come back as an edit (each with its click back), or, where it undoes a removal, as the server back in Claude Code with
+// nothing applied there, left alone as a copy Central Knot didn't put there, which its row says (the measures above: none of
+// 13,243). The kit that measures it again: /home/picoder/work/ck-next/claude-write-kit (race-ck.sh).
 import { record, withoutBom } from './values.ts';
 import { lstat, mkdir, readFile, readlink, realpath, rmdir, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';

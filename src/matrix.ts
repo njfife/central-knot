@@ -1410,12 +1410,15 @@ function foundNote(list: ItemRow[]) {
   return `in a tool, not in Central Knot: Synchronize everything leaves these (open a row to see why)${choosing ? `. ${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : ''}`;
 }
 
-/** The Off heading's note: no tool has these, or the tools that still have some on through a plugin, or whose removal is still to come. */
+/**
+ * The Off heading's note: no tool has these, or the tools that still have some on through a plugin, or how many are still in a
+ * tool until sync runs, whose removal there was held (Claude Code's lock, a file that couldn't be written).
+ */
 function offNote(list: ItemRow[]) {
   const through = [...new Set(list.flatMap(skill => skill.pluginOn ?? []))];
   if (through.length) return `in Central Knot; some on in ${andList(through.map(tool => names[tool]))} through a plugin`;
-  const still = [...new Set(list.flatMap(skill => skill.plan?.remove ?? []))];
-  return still.length ? `in Central Knot; still in ${andList(still.map(tool => names[tool]))} until sync runs` : leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
+  const owed = list.filter(skill => skill.plan?.remove.length), still = [...new Set(owed.flatMap(skill => skill.plan!.remove))];
+  return owed.length ? `in Central Knot; ${owed.length} still in ${andList(still.map(tool => names[tool]))} until sync runs` : leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
 }
 
 /** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */
