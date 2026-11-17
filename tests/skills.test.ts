@@ -9,7 +9,7 @@ import { chmod, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
-import { addLabel, canAdd, harnessIs, isPartial, libraryWords, placeOf, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
+import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
 import { pruneDeleted } from '../src/skillstore.ts';
@@ -285,6 +285,28 @@ test('A tool that reads Claude Code’s folder has the skill one way: from Claud
     const out = await seen(box);
     assert.ok(await bytes(folderOf(box, 'claude-cli')));
     assert.match(say.harnessLine(out.row, out.item, 'opencode-cli', 'OpenCode'), /^Kept out of this tool, but it still has it another way\. OpenCode reads Claude Code’s copy/);
+  } finally { await box.cleanup(); }
+});
+
+test('A skill found in OpenCode’s own folder, taken in and turned Off: while OpenCode keeps that copy, the row, its tag and its switch say OpenCode has it, as its mark does', async () => {
+  const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli']);
+  try {
+    await put(box, 'opencode-cli');
+    await turnOn(box);
+    const before = await seen(box);
+    await turnOff(box);
+    // OpenCode had it another way once it was on (it reads Claude Code's copy), so the copy it was found with was never
+    // recorded as applied there, and Off leaves it as OpenCode's own.
+    assert.ok(await bytes(folderOf(box, 'opencode-cli')), 'OpenCode still has the copy it was found with');
+    const { fact, item, row } = await seen(box);
+    assert.equal(harnessIs(row, item, 'opencode-cli'), 'own-copy');
+    assert.match(say.harnessLine(row, item, 'opencode-cli', 'OpenCode'), /^Has a copy Central Knot didn’t put there\. It is left alone while the skill is off;/);
+    assert.equal(statusLine(row, item, box.tools), 'Off · in Central Knot and OpenCode. Turn it on to put it in every tool. OpenCode has a copy Central Knot didn’t put there.');
+    assert.deepEqual(say.placeTag(fact!, item, box.tools), { text: 'in Central Knot and OpenCode', title: 'Central Knot keeps this skill and its versions. OpenCode has a copy Central Knot didn’t put there, left alone while the skill is off.' });
+    assert.equal(switchLabel(row, item, box.tools), 'notes: off, in Central Knot and OpenCode. Click to put it in every tool; OpenCode has a copy of its own, which is kept as versions first.');
+    // The Off click's result, from the row it was clicked on (matrix.ts turnOff): the copy OpenCode keeps there too.
+    assert.equal(say.said.off('notes', [], box.tools, [], ownCopies(before.row, before.item, box.tools)),
+      'notes is off, but OpenCode has a copy Central Knot didn’t put there. Central Knot keeps it, and turning it on puts each folder back as it was.');
   } finally { await box.cleanup(); }
 });
 

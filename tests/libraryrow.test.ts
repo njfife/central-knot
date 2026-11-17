@@ -60,8 +60,9 @@ test('A tool whose whole settings file can’t be read has every MCP server unse
   const rowOf = (key: string): LibraryRow => ({ key, name: key, hashes: both, unseen: typo });
   const docs = { ...newItem('docs', 'docs'), on: true, except: ['codex-cli'] as HarnessId[], applied: both };
   const relay = { ...newItem('relay', 'relay'), on: true, applied: { ...both, 'codex-cli': 'a' } };
+  // After Off, Claude Code's and Copilot CLI's entries are gone; Codex's can't be read.
   const says = (key: string, on: LibraryItem, afterOff: LibraryItem) => [servers.said.off(key, stillIn(rowOf(key), on, noneFailed, tools), tools),
-    servers.said.deleted(key, true, stillIn(rowOf(key), on, noneFailed, tools), tools), servers.placeTag(rowOf(key), afterOff, tools)?.text];
+    servers.said.deleted(key, true, stillIn(rowOf(key), on, noneFailed, tools), tools), servers.placeTag({ ...rowOf(key), hashes: {} }, afterOff, tools)?.text];
   assert.deepEqual(says('docs', docs, { ...docs, on: false, applied: {} }), [
     'docs is off: no tool has it. Central Knot keeps it, and turning it on puts each entry back as it was.',
     'docs is deleted from Central Knot, and out of every tool. History can restore it.', 'in Central Knot only']);
@@ -188,7 +189,7 @@ test('The status line says where the agent stands, and in which harnesses', () =
   assert.equal(statusLine(row(all, {}, item()), item(), tools), 'On in all 3 tools');
   assert.equal(statusLine(...withItem({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } })), tools), 'On in Claude Code and Copilot CLI · kept out of Codex');
   assert.equal(statusLine(...withItem({ 'claude-cli': 'b' }, item({ applied: { 'claude-cli': 'b' } })), tools), 'On in Claude Code · Copilot CLI and Codex get it when sync runs');
-  assert.equal(statusLine(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'Off · in Central Knot only. Turn it on to put it in every tool. Codex has a copy Central Knot didn’t put there.');
+  assert.equal(statusLine(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'Off · in Central Knot and Codex. Turn it on to put it in every tool. Codex has a copy Central Knot didn’t put there.');
   const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { takeInAnswers: { click: { wait: 'choice' }, rule: { wait: 'choice' } } });
   assert.equal(statusLine(differing, undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool.');
   // With Synchronize everything on, a found row says what the rule does with it.
@@ -199,11 +200,11 @@ test('The status line says where the agent stands, and in which harnesses', () =
 
 test('The switch says what a click does: off everywhere, or on everywhere; a found agent’s Add says it takes it in, or asks which copy', () => {
   assert.equal(switchLabel(...withItem({ 'claude-cli': 'b' }, item()), tools), 'reviewer: on. Click to take it out of every tool; Central Knot keeps it.');
-  assert.equal(switchLabel(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'reviewer: off, in Central Knot only. Click to put it in every tool; Codex has a copy of its own, which is kept as versions first.');
+  assert.equal(switchLabel(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'reviewer: off, in Central Knot and Codex. Click to put it in every tool; Codex has a copy of its own, which is kept as versions first.');
   assert.equal(addLabel(row({ 'claude-cli': 'a' }), undefined, tools), 'Add reviewer to Central Knot and put it in every tool');
   assert.equal(addLabel(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, tools, 'closed'), 'Add reviewer: its copies differ. Click to choose which one Central Knot takes in.');
   const all = row({ 'claude-cli': 'b' });
-  assert.deepEqual([placeTag(all, item(), tools)?.text, placeTag(all, item({ on: false }), tools)?.text, placeTag(all, undefined, tools)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);
+  assert.deepEqual([placeTag(all, item(), tools)?.text, placeTag(row({}), item({ on: false, applied: {} }), tools)?.text, placeTag(all, undefined, tools)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);
   // Kept out of a tool (partial) shows on the closed row too: where it is, so it never reads as on everywhere.
   assert.deepEqual(placeTag(all, item({ except: ['codex-cli'] }), tools), { text: 'in 2 of 3 tools · kept out of Codex', title: 'Kept out of Codex. Its switch there, in the opened row, puts it back.' });
   assert.equal(switchLabel(all, item({ except: ['codex-cli'] }), tools), 'reviewer: on in 2 of 3 tools. Click to take it out of every tool; Central Knot keeps it.');
@@ -216,6 +217,17 @@ test('The switch says what a click does: off everywhere, or on everywhere; a fou
   // A tool that still holds an older copy (its folder can't be written) has it, so the tag doesn't say "only".
   const locked = row({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'a' }, { cannot: { 'codex-cli': 'Codex’s agents folder can’t be written.' } }, item());
   assert.equal(placeTag(locked, item(), tools), undefined);
+});
+
+test('The switch counts the tools an item is on in as its tag does: a tool that can’t take it is not one of them', () => {
+  // triage, a skill of the plugin issue-tracker, which is kept out of every tool but OpenCode: the three tools that install
+  // plugins can't be given it (the plugin isn't there), Pi keeps it out, and OpenCode has it.
+  const five = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
+  const away = 'Its plugin issue-tracker is kept out of this tool.';
+  const triage: LibraryRow = { key: 'triage', name: 'triage', hashes: { 'opencode-cli': 'b' }, cannot: { 'claude-cli': away, 'copilot-cli': away, 'codex-cli': away } };
+  const kept = item({ except: ['pi-cli'], applied: { 'opencode-cli': 'b' } });
+  assert.equal(placeTag(triage, kept, five)?.text, 'in 1 of 5 tools · kept out of Pi');
+  assert.equal(switchLabel(triage, kept, five), 'triage: on in 1 of 5 tools. Click to take it out of every tool; Central Knot keeps it.');
 });
 
 test('A click’s result says what happened, and never claims a harness where it didn’t', () => {

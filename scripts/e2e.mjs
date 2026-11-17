@@ -426,6 +426,16 @@ const CUT_OFF = `(() => {
   return out;
 })()`;
 
+/**
+ * On Plugins, each place a click's result is said in words (a row's or a plugin page's note, pluginparts.ts clickNote; the
+ * toolbar's line, pluginspage.ts toolbarRight) that shows less than its words: shortened, or reaching past the box it is in.
+ * Empty when every one shows whole. CUT_OFF looks at controls only.
+ */
+const WORDS_CUT = `[...document.querySelectorAll('.plugin-click, .toolbar-result-text')].flatMap(node => {
+  const words = node.matches('.plugin-click') ? node.lastElementChild : node, own = node.getBoundingClientRect(), box = node.parentElement.getBoundingClientRect();
+  return own.width && (words.scrollWidth > words.clientWidth + 1 || own.right > box.right + 1) ? [node.textContent.slice(0, 60)] : [];
+})`;
+
 /** Sizes the page to width × height, and lets the app hear the resize. A real window that size leaves its page shorter (SMALLEST). */
 async function sizeTo(a, width, height) {
   await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -3028,6 +3038,17 @@ async function openCodeFlow() {
   same('a Claude Code skill is one OpenCode already reads', await cellState(p, 'notes', 'opencode-cli'), 'another-way');
   await p.click('#add-oc-only');
   check('adding OpenCode’s own skill copies it to the other tools', readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only') && readNow(join(practice, '.copilot/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
+  // Turned Off, it leaves the other tools; OpenCode keeps the copy it was found with (left alone as its own while the skill is
+  // off). Its tag and the Off heading say OpenCode has it, as OpenCode's mark does. Undo turns it back on.
+  await p.click('#switch-oc-only');
+  same('Off, OpenCode keeps the copy it was found with, and the result, the tag and the Off heading say so, as its mark does',
+    [existsSync(join(practice, '.claude/skills/oc-only')), existsSync(join(mine, 'skills/oc-only/SKILL.md')), await cellState(p, 'oc-only', 'opencode-cli'),
+      /^oc-only is off, but OpenCode has a copy Central Knot didn’t put there\./.test(await p.text('.band-done') ?? ''),
+      await p.text('.ov-row[data-key="oc-only"] .row-tag'), (await p.text('.ov-section[data-section="off"] .ov-section-after'))?.replace(/^·\s*/, '')],
+    [false, true, 'own-copy', true, 'in Central Knot and OpenCode', 'in Central Knot; 1 also in OpenCode, a copy Central Knot didn’t put there']);
+  await pictures(p, 'opencode-off-own-copy');
+  await p.click('#outcome-undo');
+  check('Undo turns it back on', await switchOn(p, 'oc-only') && readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
   // Taken in, notes goes to every tool but OpenCode, which reads Claude Code's copy: OpenCode's line says so, with no switch
   // of Central Knot's (nothing of it goes there), and its settings are untouched.
   await p.click('#add-notes');
@@ -3047,18 +3068,27 @@ async function openCodeFlow() {
   await p.click('#nav-plugins');
   await p.click('#header-refresh');
   const box = plugin => `[id^="pcell-"][id$="-${plugin}-opencode-cli"]`;
-  const turnOn = async plugin => { await p.click(`.plugin-row[data-plugin="${plugin}"] .plugin-row-switch .switch`); for (let tries = 0; tries < 80 && await p.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); };
   for (let tries = 0; tries < 50 && !(await p.exists(box('issue-tracker'))); tries++) await wait(100);
   same('OpenCode is a column; the plugins, off, are in none of the tools', [await p.run(`document.querySelector('${box('issue-tracker')}')?.dataset.state`), await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)], ['absent', 'absent']);
-  // Each switch On: the plugin's items go into OpenCode (Claude Code's installer, a stand-in, refuses, and says so).
-  await turnOn('issue-tracker');
-  await turnOn('release-helper');
+  // Three switches On, in one list: the plugins' items go into OpenCode (Claude Code's installer, a stand-in, refuses, and says so).
+  await p.run(`['document-tools', 'issue-tracker', 'release-helper'].forEach(name => document.querySelector('.plugin-row[data-plugin="' + name + '"] .plugin-row-switch .switch').click())`);
+  const listRuns = () => p.run(`document.body.dataset.busy === 'true' || [...document.querySelectorAll('.plugin-click')].some(note => note.dataset.click !== 'ended')`);
+  for (let tries = 0; tries < 100 && await listRuns(); tries++) await wait(100);
   for (let tries = 0; tries < 50 && (await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)) !== 'items'; tries++) await wait(100);
   const withParts = readNow(join(mine, 'opencode.json'));
   check('the plugin’s skill and MCP server are in OpenCode, the server in OpenCode’s form', existsSync(join(mine, 'skills/triage/SKILL.md')) && /"issues": \{\s*"type": "local",\s*"command": \[\s*"npx",\s*"-y",\s*"@example\/issues-mcp"\s*\]\s*\}/.test(withParts) && withParts.includes('// mine'), withParts || await p.text('.bands'));
   const partAgent = readNow(join(mine, 'agents/release-reviewer.md'));
   check('and a plugin’s agent is an OpenCode agent', partAgent.includes('description: Reviews a release branch before it ships.') && partAgent.includes('mode: all') && partAgent.includes('Review it.'), partAgent || await p.text('.bands'));
   await pictures(p, 'opencode-items-four-tools');
+  // Each row's words on how its click ended (Claude Code's refusal, then its items in OpenCode) show whole at every size, as does
+  // the toolbar's line on the whole list, wrapping where the room runs out.
+  same('each row says how its click ended, and the toolbar what the whole list did', [await p.all('.plugin-row .plugin-click', 'e.dataset.click'), /document-tools: .*; issue-tracker: .*; release-helper: /.test(await p.text('#plugins-result') ?? '')], [['ended', 'ended', 'ended'], true]);
+  for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(p, width, height); same(`a click’s words on Plugins show whole at ${width}×${height}`, await p.run(WORDS_CUT), []); }
+  await fullSize(p);
+  // document-tools was there for the length of that line: Off again, so what follows has the two plugins it had.
+  await p.click('.plugin-row[data-plugin="document-tools"] .plugin-row-switch .switch');
+  for (let tries = 0; tries < 100 && await listRuns(); tries++) await wait(100);
+  same('document-tools is off again, its items out of OpenCode', [await p.run(`document.querySelector('${box('document-tools')}')?.dataset.state`), existsSync(join(mine, 'skills/pdf-reader'))], ['absent', false]);
   // Five tools is the widest table: nothing is cut off at the smallest window. Pi is installed with Harnesses open, whose
   // Refresh is the one read that finds it (Plugins' own read would find it first and start a second).
   await p.click('#nav-harnesses');
