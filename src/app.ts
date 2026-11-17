@@ -273,9 +273,10 @@ export const focusWhenDone = (id: string) => { focusAfterBusy = id; };
  * Why the page is acting, while it is: work under busy (its line), or clicks in the page's list (clicklist.ts). Meanwhile no
  * route opens another home, a background refresh waits, and the writes to the home are off, each saying why (dom.ts button and
  * toggle take the reason as `disabled`): Refresh, Automatic sync, Turn these off, Resume, an opened row's controls, History's
- * actions, Profiles, Library sources, Instructions, the Git repo, a tool's Manage switch, first setup's choices, Settings'
- * Synchronize everything, the Plugins page's other actions and the other-build screen. A row's switch or Add (the item pages and
- * Plugins) joins the list instead; Settings' own switches, which write the app's settings, stay on. body[data-busy] says it
+ * actions, Profiles, the sources page (words.ts pageNames), Instructions, the Git repo, a tool's Manage switch, first setup's
+ * choices, Settings' Synchronize everything, the Plugins page's other actions and the other-build screen. A row's switch or Add
+ * (the item pages and Plugins) joins the list instead; Settings' own switches, which write the app's settings, stay on.
+ * body[data-busy] says it
  * (showActing), and the end-to-end checks wait on it.
  */
 export const acting = (): string | undefined => state.busy || (clickList.running ? 'Waits until the switches clicked are done.' : undefined);
