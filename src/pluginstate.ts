@@ -50,7 +50,7 @@ export const market = {
   /** Why a marketplace could not be added, or why a run stopped. */
   problem: undefined as string | undefined,
   activity: undefined as MarketActivity | undefined,
-  /** The last run (a click or its Undo), so the toolbar can say what happened and offer the way back, in that home only. */
+  /** The last run (a click or its Undo), so the header can say what happened and offer the way back, in that home only. */
   lastRun: undefined as LastRun | undefined,
   /** The plugin and tools a command is running for, so their marks show it is working. */
   working: undefined as { source: string; plugin: string; tools: HarnessId[] } | undefined,
@@ -516,18 +516,8 @@ export function undoLast(): void {
   else void applyPluginOps(undoOps(), true);
 }
 
-/** × on the run's result: it goes, and its problem lines with it. */
+/** × on the run's result in the header: it goes, and its problem lines with it. */
 export function closeRun(): void { market.lastRun = undefined; market.problem = undefined; }
-
-/**
- * Closes the problem band: the stop reason and the problem lines go, and the run itself stays, so the toolbar keeps its
- * result line and Undo (for what a run that partly failed did change).
- */
-export function dismissProblems(): void {
-  market.problem = undefined;
-  // Closed, not dropped: a run that partly failed keeps its Undo for what it did change.
-  if (market.lastRun) market.lastRun = { ...market.lastRun, problemsClosed: true };
-}
 
 /** The way back from the last run, while it is for the home on screen: its reversal (a switch's, as main gave it), or what an Undo didn't get to. */
 export function undoOps(): PluginOp[] {

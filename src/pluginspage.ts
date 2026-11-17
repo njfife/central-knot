@@ -12,7 +12,7 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { problemLines } from './matrix.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
@@ -363,15 +363,15 @@ const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclic
 
 /**
  * The page's last result, for the window's header (renderer.ts resultHere), where nothing on the page moves for it: what just
- * happened, with Undo (lastRun), then what went wrong (problemBand).
+ * happened, with Undo and its × (runLine), then what went wrong (problemBand), with the one × when it stands alone.
  */
 export function pluginsResult(): HTMLElement[] {
-  const lines = lastLines();
-  return [lastRun(lines), problemBand(lines)].filter((part): part is HTMLElement => !!part);
+  const lines = lastLines(), run = runLine(lines);
+  return [run, problemBand(lines, !run)].filter((part): part is HTMLElement => !!part);
 }
 
 /** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */
-function lastRun(lines: ResultLine[]): HTMLElement | null {
+function runLine(lines: ResultLine[]): HTMLElement | null {
   // A result is said here only while it offers something to do (Undo, or its own button); one that only tells is in the
   // status bar (app.ts saidInStatusBar).
   const last = market.lastRun;
@@ -403,13 +403,13 @@ function lastRun(lines: ResultLine[]): HTMLElement | null {
   return h('div.toolbar-result', { role: 'status', id: 'plugins-result', 'data-outcome': '' }, icon('check', 14, 'tone-success'), h('span.toolbar-result-text', { title: outcome.text }, outcome.text), action, dismiss(clearNotice, 'report-dismiss'));
 }
 
-/** What went wrong in the last run, or why a marketplace couldn't be added: a band, because it needs reading. */
-function problemBand(lines: ResultLine[]) {
-  const failures = market.lastRun?.problemsClosed ? [] : lines.filter(line => !line.ok);
+/** What went wrong in the last run, or why a marketplace couldn't be added, with the result's × when it stands `alone`. */
+function problemBand(lines: ResultLine[], alone: boolean) {
+  const failures = lines.filter(line => !line.ok);
   if (!market.problem && !failures.length) return null;
   return h('div.band.plugin-problems', { role: 'alert' }, icon('triangle-alert', 14, 'tone-warning'),
-    problemLines([...failures.map(line => h('span', {}, h('strong.item-name', {}, line.plugin), `: ${line.text}`)), ...(market.problem ? [h('span', {}, market.problem)] : [])]),
-    dismiss(dismissProblems));
+    problemLines([...failures.map(line => [h('strong.item-name', {}, line.plugin), `: ${line.text}`]), ...(market.problem ? [market.problem] : [])], market.lastRun ?? market.problem),
+    alone ? dismiss(closeRun, 'report-dismiss') : null);
 }
 
 /** The plugin whose page is open in this marketplace, if one is. */

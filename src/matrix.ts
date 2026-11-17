@@ -24,6 +24,7 @@ import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary,
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
+import { keptBack } from './clickplan.ts';
 import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, SyncNotice, HarnessId, TakenInNotice, ThroughPlugin, ToolUsage, UsageReading } from './types.ts';
 import { pluginOf } from './sourcelink.ts';
 import { market } from './pluginstate.ts';
@@ -692,7 +693,8 @@ export function outcomeBand(table = state.page === 'skills' || state.page === 'm
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
-  let rest = outcome.text;
+  // In the header its reasons are its problem lines (listResult); in a band, they follow it.
+  let rest = resultInHeader() ? outcome.text : [outcome.text, ...outcome.reasons ?? []].join(' ');
   // Quoted text (a commit's subject, say) is shown as written: a name inside it isn't an item named.
   const quoted = (at: number) => { const open = rest.lastIndexOf('“', at); return open >= 0 && rest.indexOf('”', open) > at; };
   while (rest) {
@@ -772,28 +774,33 @@ function listNotices() {
 }
 
 /**
- * A list page's last result, for the header (renderer.ts resultHere): the result's band, then, under a table, what its click
- * could not do, or else what a background pass could not do (any kind's), until a click's result is said instead.
+ * A list page's last result, for the header (renderer.ts resultHere): its band, then its problem lines (what its click could not
+ * do, then its reasons: app.ts Outcome), or else what a background pass could not do (any kind's), until a click or × ends them.
  */
 export function listResult(): HTMLElement[] {
   // The table it is about is the page's (or the harness tab's), set here as the page will draw it: the header is drawn first.
   const table = isKind(state.page) ? state.page : harnessKindShown();
   if (table) useTable(table, state.page === 'harnesses' ? state.harness : undefined);
-  const result = table ? lastResult(table) : undefined;
-  const background = !table || result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed');
-  // A click's refusal is its result, said once, in the result's band (app.ts applyClick leaves it out of these).
-  const problems = [...background, ...(result?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !result.differs))];
-  return [outcomeBand(!!table),
-    result?.stopped ? h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, result.stopped)) : null,
-    problems.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(problems.map(problem => h('span', {}, `${problem.item}${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`)))) : null,
-  ].filter((band): band is HTMLElement => !!band);
+  const result = table ? lastResult(table) : undefined, done = outcomeBand(!!table);
+  const background = !table || result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed' && !state.dismissed.has(problemKey(entry)));
+  const lines = [...background, ...(result?.results ?? []).filter(keptBack)].map(problem => `${problem.item}${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`)
+    .concat(done ? state.outcome?.reasons ?? [] : []);
+  // With no result above them, their × closes them and the click's result they belong to.
+  const close = () => { for (const entry of background) state.dismissed.add(problemKey(entry)); closeResult(); };
+  return [done, lines.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, done ? state.outcome : result ?? background[0]), done ? null : closeButton(close, { id: 'problems-dismiss' })) : null]
+    .filter((band): band is HTMLElement => !!band);
 }
+const problemKey = (entry: DestinationResult) => `problem:${entry.item}:${entry.harness ?? ''}:${entry.message}`;
 
-/** What went wrong, under a result in the header: two lines, each cut to one (whole in its tooltip), and how many more. */
-export function problemLines(lines: HTMLElement[]): HTMLElement {
-  for (const line of lines) line.title = line.textContent ?? '';
-  const more = lines.slice(2).map(line => line.title);
-  return h('span.band-text.band-lines', {}, lines.slice(0, 2), more.length ? h('span', { title: more.join('\n') }, `and ${more.length} more`) : null);
+/**
+ * What went wrong, under a result in the header: two lines, each on one line, Show all on the last when one is cut (renderer.ts)
+ * or more remain; shown, every line whole until Show less, × or the next result (`of`, their result: app.ts state.shownWhole).
+ */
+export function problemLines(lines: (Child | Child[])[], of: unknown): HTMLElement {
+  const whole = of !== undefined && state.shownWhole === of, more = lines.length > 2, shown = whole ? lines : lines.slice(0, 2);
+  const toggle = h('button.inline-link', { type: 'button', id: 'problems-show-all', 'data-when-cut': whole || more ? undefined : '', onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
+    whole ? 'Show less' : `Show all${more ? ` ${lines.length}` : ''}`);
+  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, h('span.problem-text', {}, line), at === shown.length - 1 ? toggle : null)));
 }
 
 /** The record is intact but this app has no memory of it: Resume carries on from it (any switch does too). */
@@ -1098,7 +1105,8 @@ function turnOn(skill: ItemRow, use?: Tool): Promise<void> {
     // A tool that has it another way gets nothing of Central Knot's: said apart, never as on (a plugin's item is on through it).
     const another = using.filter(tool => skill.anotherWay?.[tool] && skill.copies[tool] === undefined && !throughPluginHere(skill, tool));
     if (found) return lib.say.said.takenIn(name, using.filter(tool => !another.includes(tool)), toolList(), use, another);
-    return `${name} is on in ${onPhrase(skill, left)}.`;
+    const where = onPhrase(skill, left);
+    return where ? `${name} is on in ${where}${notIn.length ? `; not in ${toolsPhrase(notIn, toolList())}` : ''}.` : `${name} is not on in any tool yet.`;
   };
   return mainClick(name, true, [rowClicks.on(skill, itemOf(skill), use)], plugins, said, plugins.left, focusOn(skill));
 }

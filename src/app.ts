@@ -108,6 +108,8 @@ export const state = {
   said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void } },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
+  /** The result whose problem lines are shown whole (Show all: matrix.ts problemLines): any other shows them cut to two. */
+  shownWhole: undefined as unknown,
   /** What the tools' session history shows was used (usage.ts): read only on the item pages' Read usage click (readUsage), for this home. */
   usage: pageData<UsageReading>('unasked'),
   /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
@@ -122,7 +124,7 @@ export const state = {
   draftPick: undefined as { problem?: string } | undefined,
   /** The tool writing a draft of the base right now. */
   drafting: undefined as HarnessId | undefined,
-  /** Sync notices the person has dismissed, by History event or item. */
+  /** Sync notices the person has dismissed, by History event or item, and a background pass's problems (matrix.ts listResult). */
   dismissed: new Set<string>(),
   // The page whose Apply result (and its Undo) stepped aside for a sync notice: the notice says where the Undo went.
   undoMoved: undefined as { page: Page; notices: string[]; label: string; items: string[] } | undefined,
@@ -187,7 +189,7 @@ export function announce(text: string, quiet = false, link?: { label: string; ru
 export function tell(outcome: Outcome | undefined, otherwise = ''): void {
   state.outcome = outcome;
   if (!outcome) announce(otherwise);
-  else { announce(outcome.text, !saidInStatusBar(outcome)); outcome.said = state.said.seq; }
+  else { announce([outcome.text, ...outcome.reasons ?? []].join(' '), !saidInStatusBar(outcome)); outcome.said = state.said.seq; }
   if (outcome?.fade) setTimeout(() => { if (state.outcome !== outcome) return; state.outcome = undefined; rerender(); }, FADE_MS);
 }
 
@@ -345,7 +347,7 @@ export interface Click {
    * write failed or was held, so it never claims those, and the tools it wrote.
    */
   said: string | ((notIn: HarnessId[], wrote: HarnessId[]) => string);
-  /** Said after it, as a warning: what the click left as it is, and why ("Still on in Codex: its settings file can’t be read."). */
+  /** Said as one of its reasons, a problem line: what the click left as it is, and why ("Still on in Codex: its settings file can’t be read."). */
   also?: string;
   /** An Undo: its result is said for a few seconds, with no Undo of its own. */
   undoing?: boolean;
@@ -366,7 +368,7 @@ const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, h
   mcp: { send: (...args) => api().applyServers(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
   agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
 };
-/** Each item page's last click's result, as kindPages keeps it: what the page's bands and notices read. */
+/** Each item page's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, listNotices). */
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
 
 /**
@@ -390,7 +392,7 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   const result = await send(click.kind, click.changes);
   setHome(await api().refresh());
   const { ours, did, refusal, failed, differs, notIn } = clickResults(result.results, names);
-  // A refusal is the click's result, said in its own band, not again among the failures.
+  // A refusal is the click's result, or else one of its reasons: said once, not again among the failures.
   kindPages[click.kind].keep(ours.filter(entry => entry !== refusal), result.notices);
   if (result.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
   const made = result.made ?? [];
@@ -403,14 +405,13 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
   const said = typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])], wrote);
   const choose = differs ? ' Its copies differ: choose which copy every tool uses.' : '';
-  const plugText = !plugged ? '' : plugged.failed.length || plugged.stopped ? switchProblems(plugged) : click.plugins?.said ?? '';
-  // A hold that came after the change is said beside what was done, not dropped.
-  const text = done || !refusal ? [said, plugText, click.also, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
+  const plugProblems = plugged && (plugged.failed.length || plugged.stopped) ? switchProblems(plugged) : '';
+  const text = done || !refusal ? [said, plugged && !plugProblems ? click.plugins?.said : ''].filter(Boolean).join(' ') + choose : refusal.message;
   const switchedBack = plugged?.back ?? [];
   const undo = click.undoing || !done ? undefined : (made.length && await allUndoable(made)) || switchedBack.length ? () => void undoClick(click, made, switchedBack) : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
   tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned,
-    text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } : undefined });
+    text, reasons: [done ? refusal?.message ?? '' : '', plugProblems, click.also ?? ''].filter(Boolean), act: undo ? { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
   if (click.regroups) unpin();
 }, { keepResult: true });
@@ -439,11 +440,10 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
   focusAfterBusy = click.focus?.();
   await putHistory();
   kindPages[click.kind].keep(results, []);
-  const failed = [...results.filter(keptBack).map(entry => entry.message), ...(unswitched ? [switchProblems(unswitched)].filter(Boolean) : [])];
+  const reasons = [stopped ?? '', unswitched ? switchProblems(unswitched) : ''].filter(Boolean), undone = !reasons.length && !results.some(keptBack);
   const what = click.items.length === 1 ? click.items[0] : fewNames(click.items);
-  const lead = failed.length ? `Not all of ${what} could be put back.` : `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`;
-  tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
-    text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, ...failed].join(' ') });
+  tell({ page: state.page, items: click.items, warn: !undone, band: true, fade: undone, reasons,
+    text: undone ? `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.` : stopped ? 'Not all of it could be undone.' : `Not all of ${what} could be put back.` });
   for (const item of click.items) flashRow(item);
   if (click.regroups) unpin();
 }, { keepResult: true });
@@ -815,7 +815,10 @@ export const skillAction = (action: 'clear-switch' | 'take-over', key: string, t
 /** What an action did: its sentence, the items it names, and what it offers next (its own button, Undo, or History). */
 export interface Outcome {
   page: Page;
+  /** What happened and where, with no reason in it. */
   text: string;
+  /** Why some of it wasn't done: each said once, as a problem line under `text` (matrix.ts listResult). */
+  reasons?: string[];
   /** Something was left undone: a warning icon, not a tick. */
   warn?: boolean;
   note?: string;

@@ -974,6 +974,19 @@ async function practiceFlow() {
     for (let tries = 0; tries < 32 && !stillWatched; tries++) { await wait(250); stillWatched = readNow(standupPath('copilot')).includes('switch that failed'); }
     same('a home switch whose settings can’t be saved stays on this home, still watched', [/could not finish\. Still on Practice copy/.test(said ?? ''), await a.text('#home-label'), stillWatched], [true, 'Practice copy', true]);
   }
+  // standup turned Off while Copilot CLI's copy can't be removed: once he is on another page and back, the background pass's
+  // problem stands alone in the header, and its × closes it.
+  await a.click('#nav-overview'); await a.click('#nav-skills');
+  const copilotLocked = [standupPath('copilot'), dirname(standupPath('copilot')), dirname(dirname(standupPath('copilot')))];
+  for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o444 : 0o555);
+  await a.click('#switch-standup');
+  await a.click('#nav-overview'); await wait(4000); await a.click('#nav-skills');
+  for (let tries = 0; tries < 40 && !/standup \(Copilot CLI\)/.test(await a.text('#header .header-result') ?? ''); tries++) await wait(250);
+  const backgroundSaid = await a.text('#header .header-result');
+  await a.run(`document.querySelector('#header .band-dismiss')?.click()`); await a.settle();
+  same('a background pass’s problem, alone in the header, is closed by its ×', [/standup \(Copilot CLI\)/.test(backgroundSaid ?? ''), await a.exists('#header .header-result')], [true, false]);
+  for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o644 : 0o755);
+  await a.click('#switch-standup');
   // Sync off: edits are noted, not spread; the page shows them pending; Sync once spreads them once.
   await a.click('#sync-switch');
   same('Sync turns off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
@@ -4366,7 +4379,7 @@ if (fs.existsSync(process.env.HOME + '/slow')) Atomics.wait(new Int32Array(new S
 fs.mkdirSync(dir, { recursive: true });
 const now = fs.existsSync(record) ? JSON.parse(fs.readFileSync(record, 'utf8')) : { version: 2, plugins: {} };
 if (verb === 'marketplace') fs.writeFileSync(dir + '/known_marketplaces.json', JSON.stringify({ 'rows-market': { source: { source: 'git', url: process.argv[5] } } }));
-else if (/^plug-(07|13|14|16)@/.test(id ?? '')) { console.error('Error: failed to install plugin ' + id + ': the marketplace entry points at a folder whose plugin manifest could not be parsed (unexpected token at line 3, column 14); fix the manifest and try again.'); process.exit(1); }
+else if (/^plug-(07|13|14|16)@/.test(id ?? '') || fs.existsSync(process.env.HOME + '/fail-' + (id ?? '').split('@')[0])) { console.error('Error: failed to install plugin ' + id + ': the marketplace entry points at a folder whose plugin manifest could not be parsed (unexpected token at line 3, column 14); fix the manifest and try again.'); process.exit(1); }
 else if (verb === 'install') now.plugins[id] = [{ scope: 'user', installPath: ${JSON.stringify(market)} + '/plugins/' + id.split('@')[0], version: '1.0.0' }];
 else if (verb === 'uninstall') delete now.plugins[id];
 else process.exit(9);
@@ -4407,6 +4420,9 @@ fs.writeFileSync(record, JSON.stringify(now));
   const sixAfter = await placesNow('table-agents', 'data-key');
   await a.shot('rows-agents-short');
   same('on a list of six, five clicks on a fresh visit change exactly the five rows aimed at, and no row moves', [changed(sixStates, await states('.ov-row[data-key]')), agents.map(agent => sixAfter.at[agent])], [agents.slice(0, 5), agents.map(agent => sixBefore.at[agent])]);
+  // The last agent deleted from Central Knot: the page is empty, and the result is said once, in the header.
+  for (const agent of agents) for (const id of [`#open-${agent}`, `#delete-${agent}`, `#delete-confirm-${agent}`]) await a.click(id);
+  same('the last agent deleted: the page is empty, and its result is said once, in the header', [await a.exists('.ov-row[data-key]'), await a.run(`document.querySelectorAll('[data-outcome]').length`), await a.exists('#header [data-outcome]')], [false, 1, true]);
   await a.click('#nav-mcp');
   const table = 'table-mcp', row = key => `.ov-row[data-key="${key}"]`;
   // The two Off servers turned On, at the bottom of the list: they stay under Off, which counts none and says nothing of them.
@@ -4484,6 +4500,31 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.click('#header-refresh');
   same('a row turned Off stays under On until Refresh, which puts it under Off', [pinnedThere, (await sectionsNow(a)).at(-1)], [true, ['off', ['srv-02', ...offNow].sort()]]);
 
+  // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it.
+  await sizeTo(a, ...SMALLEST);
+  await a.run(`document.getElementById('${table}').scrollTop = 0`);
+  const firstOn = (await sectionsNow(a))[0][1][0], reaches = selector => a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(), at = document.elementFromPoint(box.left + box.width / 2, box.top + 2); return !!at?.closest(${JSON.stringify(selector)}); })()`);
+  await clickAt(await middleOf(`#switch-${firstOn}`)); await a.settle();
+  same('an ordinary result fits in the header: the top edges of Find and Sort take their own clicks', [await reaches('.find input'), await reaches('#item-order')], [true, true]);
+  // Claude Code's file held by its lock: the result says what happened and where, and the reason once, under it.
+  const lock = `${claudeJson}.lock`, header = () => a.text('#header .header-result'), sentence = () => a.text('#header [data-outcome] .band-text'), reasonsIn = async () => ((await header()) ?? '').split('locked').length - 1;
+  /** A click on a control of this round's, which may not be there (the check after it then fails). */
+  const press = async selector => { await a.run(`document.querySelector(${JSON.stringify(selector)})?.click()`); await done(); };
+  mkdirSync(lock); const holdLock = setInterval(() => { const now = new Date(); utimesSync(lock, now, now); }, 1000);
+  try {
+  const firstRowTop = () => a.run(`Math.round(document.querySelector('#${table} .ov-row[data-key]').getBoundingClientRect().top)`), resultBottom = () => a.run(`Math.round(document.querySelector('#header .header-result').getBoundingClientRect().bottom)`);
+  await a.click('#outcome-undo'); await done();
+  same('an Undo Claude Code can’t take: the reason once, and the result ends above the first row', [await reasonsIn(), (await resultBottom()) < (await firstRowTop())], [1, true]);
+  await putAt(table, row('srv-02'), 200);
+  await clickAt(await middleOf('#switch-srv-02')); await done();
+  const lineCut = () => a.run(`[...document.querySelectorAll('#header .problem-text')].some(text => text.scrollWidth > text.clientWidth)`);
+  same('a click no tool took: the sentence says so, with no reason; the reason once, cut to its line, with Show all', [await sentence(), await reasonsIn(), await lineCut(), await a.text('#problems-show-all')], ['srv-02 is not on in any tool yet.', 1, true, 'Show all']);
+  await press('#problems-show-all');
+  same('Show all: the reason whole, then Show less', [await lineCut(), await a.text('#problems-show-all')], [false, 'Show less']);
+  await press('#outcome-dismiss');
+  } finally { clearInterval(holdLock); rmSync(lock, { recursive: true }); }
+  await sizeTo(a, 1280, 800);
+
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-plug-20')); tries++) await wait(100);
   const list = 'plugins-scroll', order = () => a.all('[data-plugin]', 'e.dataset.plugin');
@@ -4555,10 +4596,26 @@ fs.writeFileSync(record, JSON.stringify(now));
   await clickAt(await middleOf('#pswitch-0-plug-06')); await done();
   const stillAtTop = await placesNow(list, 'data-plugin');
   same('at the top of the list, a failure that goes from the header moves no row', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])], [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
+  // Three failing plugins (plug-04, -05, -08) and one that installs (plug-10), in one list (each takes a second): one ×, two
+  // reasons and Show all 3; shown, each reason whole; × closes it all.
+  const failNow = ['plug-04', 'plug-05', 'plug-08'];
+  for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
+  await putAt(list, '[data-plugin="plug-04"]', 20);
+  const fourPoints = []; for (const name of ['plug-04', 'plug-05', 'plug-08', 'plug-10']) fourPoints.push(await middleOf(`#pswitch-0-${name}`));
+  for (const point of fourPoints) { await clickAt(point); await wait(150); }
+  for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
+  await done();
+  for (const name of failNow) rmSync(join(home, `fail-${name}`));
+  const plugReasons = () => a.run(`[...document.querySelectorAll('#header .problem-text')].map(text => text.scrollWidth > text.clientWidth ? 'cut' : 'whole')`);
+  same('three failing plugins: one ×, two reasons and Show all 3', [await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')], [1, 2, 'Show all 3']);
+  await press('#problems-show-all');
+  same('shown, each reason whole', await plugReasons(), ['whole', 'whole', 'whole']);
+  await press('#header .band-dismiss');
+  same('× closes it all', await a.exists('#header .header-result'), false);
   rmSync(join(home, 'slow'));
   // A plugin's page and back, then Refresh: the list in its order again, installed first.
   const inOrder = on => [...plugins.filter(name => on.includes(name)), ...plugins.filter(name => !on.includes(name))];
-  const installedNow = [...installedFirst.filter(name => name !== 'plug-06'), 'plug-01', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
+  const installedNow = [...installedFirst.filter(name => name !== 'plug-06'), 'plug-01', 'plug-10', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
   await a.click('#popen-0-plug-20'); await a.click('#plugin-back');
   same('back from a plugin’s page, every plugin is in its place in the order', await order(), inOrder(installedNow));
   await putAt(list, '[data-plugin="plug-02"]', 300);

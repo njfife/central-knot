@@ -216,8 +216,14 @@ function resultHere() {
   return parts.length ? [h('div.header-result', {}, parts)] : [];
 }
 
-// Its panel is as tall as the result (style.css #header::after), measured once it is laid out, and at each resize.
-afterLayout(() => { region('header').style.setProperty('--result-height', `${document.querySelector<HTMLElement>('#header .header-result')?.offsetHeight ?? 0}px`); });
+// Laid out, and at each resize: Show all where a problem line is cut; a result taller than the header gets its panel (style.css).
+afterLayout(() => {
+  const header = region('header'), result = header.querySelector<HTMLElement>('.header-result'), more = header.querySelector<HTMLElement>('[data-when-cut]');
+  if (more) { more.hidden = true; more.hidden = ![...header.querySelectorAll('.problem-text')].some(text => text.scrollWidth > text.clientWidth); }
+  header.classList.remove('result-taller');
+  header.classList.toggle('result-taller', !!result && result.offsetHeight > header.clientHeight - 8);
+  header.style.setProperty('--result-height', `${result?.offsetHeight ?? 0}px`);
+});
 
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
 
