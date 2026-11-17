@@ -469,13 +469,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 @container content (width >= 1000px) {
   .history-row:nth-child(even of .history-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
-.ov-row.open { background: var(--chrome); }
-/* On the item pages (one switch per row, section headings not sticky), the opened row stays at the top of the table's scroll
-   area while its details below it are scrolled and used, so its name and switch stay in view. */
-.ov-switched .ov-row.open { position: sticky; top: 0; z-index: 1; }
-/* An opened row's panel, scrolled to, starts below that pinned row, never under it. */
-.ov-switched .ov-row.open + .details { scroll-margin-top: 48px; }
-.ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
+/*
+ * An opened row and its details under it are one block: one background, one 3px bar down the left of both (the warning colour
+ * while its copy question is open: matrix.ts compareChoices) and no line between them; the block's line is under its details.
+ * The row keeps the look under the pointer, and a docked row (its details beside the table) has it too. It scrolls with the
+ * list like any row.
+ */
+.ov-row.open, .ov-row.open:hover, .details { background: var(--picked); box-shadow: inset 3px 0 0 var(--accent); }
+.ov-row.open:has(+ .details-differs), .details-differs { box-shadow: inset 3px 0 0 var(--warning); }
 .ov-head { position: sticky; top: 0; z-index: 3; height: 60px; background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 .ov-head > * { align-self: center; }
 .ov-section { position: sticky; top: 60px; z-index: 2; display: grid; grid-template-columns: 1fr auto; align-items: center; min-height: 32px; padding: 6px 12px 6px 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); }
@@ -562,7 +563,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
    server's command or URL beside its name and tag) is shortened only when even that has no room for it. */
 .ov-page.docked.dock-wide { grid-template-columns: minmax(0, 1fr) clamp(440px, 50cqw, 1200px); }
 .dock-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.docked .ov-row.open { background: var(--picked); box-shadow: inset 2px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 .dock { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--surface); }
 .dock-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 61px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .dock-title { flex: 1; min-width: 0; }
@@ -574,12 +574,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 /* ---------- A row's details, opened under it ---------- */
 /* --close-room: what shares the close button's line ends this far short of the details' right edge (the button reaches
-   16px into it, then a gap). */
-.details { --close-room: 28px; position: relative; display: flex; flex-direction: column; gap: 12px; margin: 0 0 1px; padding: 12px 16px 8px; background: var(--chrome); box-shadow: inset 3px 0 0 var(--control-line), inset 0 -1px 0 var(--line); }
-.details-differs { box-shadow: inset 3px 0 0 var(--warning), inset 0 -1px 0 var(--line); }
+   16px into it, then a gap). Their background and bar are their row's (.ov-row.open, above). */
+.details { --close-room: 28px; position: relative; display: flex; flex-direction: column; gap: 12px; margin: 0 0 1px; padding: 12px 16px 8px; border-bottom: 1px solid var(--line); }
 /* In the dock and the Files view the details are the panel's whole content: no band of their own and no close button, so
    no room is kept for one (matrix.ts details). */
-.details-bare { --close-room: 0px; margin: 0; padding: 0; background: none; box-shadow: none; }
+.details-bare { --close-room: 0px; margin: 0; padding: 0; background: none; box-shadow: none; border: 0; }
 .details-close { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-faint); cursor: pointer; }
 .details-close:hover { background: var(--hover); color: var(--ink); }
 .details-head { display: flex; flex-direction: column; gap: 2px; padding-right: var(--close-room); }
