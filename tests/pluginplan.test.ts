@@ -85,6 +85,9 @@ test('The toolbar counts three or more tools; the full sentence names them', () 
   const lines = resultLines(done);
   assert.equal(lines[0]!.text, 'installed in Claude Code, Copilot CLI and Codex');
   assert.deepEqual(resultParts(lines, false, { short: true }), [{ plugin: 'pdf', source: 'anthropics/skills' }, ': installed in 3 tools', '.']);
+  // On a plugin's own page its name is left out, but not where the sentence names another plugin too: each result said once, named.
+  const two = resultLines([{ ...done[0]!, plugin: 'docs' }, done[0]!]);
+  assert.deepEqual(resultParts(two, false, { here: { plugin: 'pdf', source: 'anthropics/skills' } }).filter(part => typeof part !== 'string').map(part => (part as { plugin: string }).plugin), ['docs', 'pdf']);
 });
 
 test('A skill’s switch runs between installs and removals, its Undo turns it back, and the report names the skill', () => {

@@ -26,7 +26,7 @@ import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
-import { installedPlugins } from './plugins.ts';
+import { forgetRefusals, installedPlugins } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
@@ -1256,7 +1256,7 @@ app.whenReady().then(async () => {
     return selectHome(mode as HomeMode);
   });
   handle('discovery:start', async () => startHome());
-  handle('discovery:refresh', async asked => { if (asked === true) forgetVersions(); return current ? syncThenView() : null; });
+  handle('discovery:refresh', async asked => { if (asked === true) { forgetVersions(); forgetRefusals(); } return current ? syncThenView() : null; });
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
     typeof change?.key === 'string' && typeof change.on === 'boolean' && Array.isArray(change.except)

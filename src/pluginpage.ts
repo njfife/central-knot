@@ -1,20 +1,20 @@
-// One plugin's page: what it is, its one switch and each tool's line (what that tool has, kept out or let in, brought into
-// line there: pluginrecord.ts), what it holds (each skill, command and agent's file as written), what each tool does with
-// it, and its README. The switch and each tool's links wait their turn in the page's list (pluginstate.ts turnPlugin), and the
-// panel says how its click stands (pluginparts.ts clickNote); Update and the skill switches under What it holds act at once
+// One plugin's page: what it is, its one switch and each tool's line (its box, ticked while the plugin is in that tool, and
+// what that tool has: pluginrecord.ts), what it holds (each skill, command and agent's file as written), what each tool does
+// with it, and its README. The switch and each tool's box wait their turn in the page's list (pluginstate.ts turnPlugin), and
+// the panel says how its click stands (pluginparts.ts clickNote); Update and the skill switches under What it holds act at once
 // (pluginstate.ts applyPluginOps).
 import { acting, state as app } from './app.ts';
 import { afterLayout, button, fileBlocks, h, icon, toggle as switchToggle, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { groupBy } from './model.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
-import { clickNote, componentsOf, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
+import { clickNote, componentsOf, dotted, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, PREVIEW_ONLY, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
+import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, takesPlugins } from './presence.ts';
-import { applyPluginOps, market, openLink, pluginBusy, shownDetail, toggleOpened, turnPlugin } from './pluginstate.ts';
-import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginTurn, PluginView, PluginsView } from './types.ts';
+import { applyPluginOps, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
+import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, toolNames as names } from './words.ts';
 import { openItem } from './matrix.ts';
@@ -55,21 +55,16 @@ function installedLine(version: string | undefined, offered: string | undefined,
 /** Each mark's short words on a tool's line (the whole sentence is its tooltip: pluginstatus.ts toolMark). */
 const MARK_WORDS: Record<ToolMark, string> = {
   installed: 'Installed', outdated: 'Installed', items: 'Its items', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
-  missing: 'Not in it, though on', 'parts-waiting': 'Waits to be moved', cannot: 'Not available', 'kept-out': 'Kept out', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
+  missing: 'Not in it, though on', 'parts-waiting': 'Waits to be moved', cannot: 'Not available', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
 };
-
-/** Install there's words for a plugin's items: an item's On is one switch for every tool it isn't kept out of. */
-const itemsInstall = (tool: HarnessId) => `Turns its items on and puts them in ${names[tool]} now. An item’s On is for every tool it isn’t kept out of, so they come on in those too, and items of its you deleted come back. Undo puts them back as they were.`;
 
 /**
  * Your tools: the plugin's switch at the heading, Update at its right where a copy or its items are behind, and a line per
- * tool: its mark, what it has (always there; a tool on another version than the marketplace offers adds "Marketplace has …"),
- * and what can be done there, at once: Install there or Take out there where the plugin's table owes that tool something,
- * Keep out or Let in for a plugin on record. `compareTo`: the version an installed copy is compared with (see versionToCompare).
+ * tool: its box (pluginparts.ts toolBox: ticked while the plugin is there; a click uninstalls or installs it there) and what it
+ * has (always there; a tool on another version than the marketplace offers adds "Marketplace has …"). `compareTo`: the
+ * version an installed copy is compared with (see versionToCompare).
  */
 function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, compareTo: string | undefined, components?: Components) {
-  const sw = entry.switches?.[plugin.name];
-  const stopped = !view.canWrite ? PREVIEW_ONLY : view.switchProblem;
   // A tool where some part won't fully work names it under its mark; "In each tool" has the detail.
   const limits = (tool: HarnessId) => (components ? outcomes(tool, components).filter(outcome => outcome.result !== 'works') : []);
   const status = (tool: HarnessId, mark: ToolMark) => {
@@ -83,19 +78,6 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     if (mark === 'items') return itemsOnWords(entry, plugin.name, tool);
     return [MARK_WORDS[mark], mark === 'absent' || mark === 'missing' ? limitNote(limits(tool)) : ''].filter(Boolean).join(' · ');
   };
-  // At most two actions on a line: bring it into line there, and keep it out or let it in.
-  const actions = (tool: HarnessId, mark: ToolMark) => {
-    const owed = sw?.tools[tool], kept = !!sw?.entry?.except.includes(tool);
-    const act = (label: string, what: PluginTurn, id: string, title: string) => button({ variant: 'link', size: 'micro', label, id: `${id}-${marketIndex}-${plugin.name}-${tool}`, disabled: pluginBusy(entry.source, plugin.name) || !!stopped,
-      attrs: { title: stopped ?? title }, onclick: () => turnPlugin(entry, plugin.name, what, tool) });
-    const fix = owed?.act && (mark === 'missing' || mark === 'waits' || mark === 'not-brought' || mark === 'stays')
-      ? (owed.act === 'install' || owed.act === 'install-items' ? act('Install there', 'fix', 'pfix', owed.act === 'install-items' ? itemsInstall(tool)
-        : `Puts it in ${names[tool]} now. Undo takes it out again.`)
-        : act('Take out there', 'fix', 'pfix', `Takes it out of ${names[tool]} now; the result says what Undo can put back.`)) : null;
-    const keep = !sw?.entry || !owed?.takes ? null : kept ? act('Let in', 'let-in', 'pkeep', `Lets it into ${names[tool]} again${sw.entry.on ? ', and puts it in there now' : ''}. Undo keeps it out again.`)
-      : act('Keep out', 'keep-out', 'pkeep', `Keeps it out of ${names[tool]}${owed.has !== 'none' ? ', and takes it out there now' : ''}; the automatic updates leave it out too. Undo lets it back in.`);
-    return fix || keep ? h('span.plugin-tool-actions', {}, fix, keep) : null;
-  };
   const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
   const notIncluded = whyNotCarried(entry, plugin.name);
   // Parts of it from before the library wait to be moved: why, and what ends it, said once on the page, not only on hover.
@@ -108,12 +90,15 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     notIncluded ? h('p.plugin-panel-hint', { id: 'plugin-not-included' }, notIncluded) : null,
     waiting.length ? h('p.plugin-panel-hint', { id: 'plugin-parts-waiting' }, waitingWords(view, entry, plugin.name, waiting)) : null,
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
-      const { mark, words } = markOf(view, entry, plugin, tool, compareTo);
-      return h('div.plugin-tool', { 'data-tool': tool }, markCell(view, entry, plugin, tool, marketIndex, compareTo),
-        h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: words }, status(tool, mark)),
+      const { mark, words } = markOf(view, entry, plugin, tool, compareTo), box = boxOf(view, entry, plugin.name, tool, { mark, words });
+      // Under the box: what it has, or what the box says more (why it is off, that he unticked it); in Pi and OpenCode, where none
+      // of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its run's report says.
+      const reasons = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons;
+      return h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
+        h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]),
+          reasons ? reasons.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason)) : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark)),
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
-          view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null,
-          actions(tool, mark)));
+          view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null));
     })), view.tools.length),
     // Cowork has no box: with Claude desktop here, one line says which plugins it uses instead.
     hasCowork(app.home?.snapshots ?? []) ? h('p.plugin-panel-note', { id: 'plugin-cowork-note' }, coworkWords.plugin) : null);
@@ -131,7 +116,7 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const out = tools.filter(tool => line.except?.includes(tool)).map(tool => names[tool]);
     const where = line.on === false ? 'Off' : out.length ? `Kept out of ${andList(out)}` : '';
     const said = { linked: where, update: 'An update is ready: Update brings it in', going: 'No longer in the plugin: Update turns it off', new: 'New in the plugin: Update brings it in',
-      removed: 'Removed by the plugin’s update, so it is off. Turning it on keeps it as yours', deleted: 'Not brought in: you deleted it; History’s Restore, or the plugin’s next On, brings it back',
+      removed: 'Removed by the plugin’s update, so it is off. Turning it on keeps it as yours', deleted: 'Deleted here: tick to bring it back',
       'not-brought': `Not brought in: ${line.why ?? ''}` }[line.state];
     return [said, line.state === 'update' ? where : ''].filter(Boolean).join(' · ');
   };

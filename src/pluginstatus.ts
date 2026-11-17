@@ -32,14 +32,14 @@ export const whyNotCarried = (entry: MarketplaceView, plugin: string): string | 
   return left && `${notCarried(entry.bundled!.app, left.reason)}${entry.owner ? ` Ask ${entry.owner} if you need it.` : ''}`;
 };
 
-/** Why a tool can't take this marketplace's plugins, if it can't: no CLI and no copy in its desktop app, a Codex-only marketplace, or Copilot refusing it. */
+/** Why a tool can't take this marketplace's plugins, if it can't: no CLI and no copy in its desktop app, a Codex-only marketplace, Copilot refusing it, or the tool's own add having refused it (refusedBy). */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
   if (!takesPlugins(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
   const app = view.desktopOnly?.[tool];
   // Plugins install through the tool's own CLI or, with none, the copy its desktop app carries (PLG-04): here, neither is.
   if (!view.clis[tool]) return app ? `Only ${app} was found here, and the copy of ${names[tool]} it carries isn’t there yet (the app adds it once it has run). ${cliMissing(tool)} either.` : noCli(tool);
   if (entry.codexOnly && tool !== 'codex-cli') return entry.codexOnly;
-  return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
+  return (tool === 'copilot-cli' ? entry.copilotRefuses : undefined) ?? entry.refusedBy?.[tool];
 }
 
 /**
@@ -108,11 +108,12 @@ export function toolNow(view: PluginsView, entry: MarketplaceView, plugin: strin
   // A tool with no installer (Pi) is held back only by what it can't hold of the plugin, unless the plugin can go nowhere new at all.
   const elsewhere = takesPlugins(tool) || why !== blocked(view, entry, tool) ? why : undefined;
   const items = !takesPlugins(tool) && (!components || !!(components.skills || components.agents || components.mcp));
-  // Read, and every name it has is his own, another source's, removed or unreadable: nothing a click could bring in.
-  const brings = entry.items?.[plugin]?.lines.some(line => line.state !== 'not-brought' && line.state !== 'removed') ?? true;
+  // Read, and every name it has is his own, another source's, removed or unreadable, or (On) none a tick can bring in: why.
+  const notIn = entry.items?.[plugin]?.notIn?.[tool];
+  const brings = (entry.items?.[plugin]?.lines.some(line => line.state !== 'not-brought' && line.state !== 'removed') ?? true) && (notIn?.tickHelps ?? true);
   const route: ToolNow['route'] = takesPlugins(tool) && !why ? 'whole'
     : items && !elsewhere && brings ? 'items'
-    : { cannot: elsewhere ?? (items ? `${names[tool]} gets none of its items: Its items, below, says why each isn’t brought in.` : `${names[tool]} takes no plugins, and this one has no skill, agent or MCP server to put there.`) };
+    : { cannot: elsewhere ?? (items ? notIn?.reasons.join(' ') ?? `${names[tool]} gets none of its items: Its items, below, says why each isn’t brought in.` : notInWhy(tool, plugin, [], components && andList(summaryOf(components).split(' · ').filter(Boolean)))[0]!) };
   // What is installed whole is known from the tool's own record; items only once the record of parts from before is read.
   if (unknown && !(whole && takesPlugins(tool))) return { has: 'unknown', route };
   return { has: whole ? 'whole' : itemsIn(entry, plugin, tool) ? 'items' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool) } : {}) };
@@ -385,11 +386,11 @@ export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: s
  * One managed tool's mark for a plugin, from the table's answer (`owed`) and the tool's copy: installed (`outdated` when an
  * Update is offered), its items on there (`items`: Pi, OpenCode), installed though not wanted (`stays`: Off, or kept out of
  * it), not in it though wanted (`waits` for the automatic updates' check; `not-brought`, new here while some tool has it off
- * in its own settings; `missing` for Install there), its parts from before the library waiting to be moved (`parts-waiting`:
- * Pi, OpenCode), wanted where it can't go (`cannot`), `kept-out`, not in it (`absent`), its record unreadable (`unknown`), or
- * listed with its files gone (`not-known`).
+ * in its own settings; `missing`), its parts from before the library waiting to be moved (`parts-waiting`: Pi, OpenCode), a
+ * tool that can't take it (`cannot`), not in it (`absent`, kept out of it or not), its record unreadable (`unknown`), or
+ * listed with its files gone (`not-known`). The plugin's page draws each as its tool's box (boxOf).
  */
-export type ToolMark = 'installed' | 'outdated' | 'items' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'parts-waiting' | 'cannot' | 'kept-out' | 'absent' | 'unknown' | 'not-known';
+export type ToolMark = 'installed' | 'outdated' | 'items' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'parts-waiting' | 'cannot' | 'absent' | 'unknown' | 'not-known';
 
 /**
  * A tool's mark and the sentence its tooltip and the plugin page's line say. `outdated`: an Update is offered there
@@ -403,7 +404,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   if (!takesPlugins(tool) && waitsToMove(entry, plugin)) return { mark: 'parts-waiting', words: waitingWords(view, entry, plugin, [tool]) };
   const kept = entry.switches?.[plugin]?.entry?.except.includes(tool);
   // Installed though the person doesn't want it there: said with what takes it out, or why nothing can here.
-  const unwanted = recorded && !owed.wanted ? ` ${kept ? `It is kept out of ${name}` : 'The plugin is off'}; ${owed.held ? owed.held : 'Take out there takes it out.'}` : '';
+  const unwanted = recorded && !owed.wanted ? ` ${kept ? `It is kept out of ${name}` : 'The plugin is off'}${owed.held ? `; ${owed.held}` : '.'}` : '';
   if (state.state === 'not-known') return { mark: 'not-known', words: `${state.reason}${unwanted}` };
   if (state.state === 'installed') {
     const version = state.version ? ` ${state.version}` : '';
@@ -415,20 +416,21 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   if (owed.has === 'items') {
     const ready = entry.items?.[plugin]?.ready ? ' An update is ready: Update.' : '';
     const words = `${name}: ${itemsOnWords(entry, plugin, tool)} there, as items of Central Knot’s that follow the plugin.${ready}`;
-    return unwanted ? { mark: 'stays', words: `${words}${unwanted.replace('Take out there takes it out.', 'Take out there turns them off there.')}` } : { mark: 'items', words };
+    return unwanted ? { mark: 'stays', words: `${words}${unwanted}` } : { mark: 'items', words };
   }
-  if (owed.wanted && owed.held) return { mark: 'cannot', words: `${name}: ${owed.held}` };
+  if (owed.wanted && owed.held) return { mark: 'cannot', words: toolSaid(tool, owed.held) };
   if (owed.wanted && owed.act) {
-    const [what, goes, them] = owed.act === 'install' ? ['it', 'goes', 'it'] : ['its items', 'go', 'them'];
+    const [what, goes] = owed.act === 'install' ? ['it', 'goes'] : ['its items', 'go'];
     const when = auto ? 'at the next automatic check' : 'once plugins update by themselves again (Settings, and Automatic sync)';
-    if (owed.background) return { mark: 'waits', words: `Not in ${name} yet: ${what} ${goes} in ${when}. Install there puts ${them} in now.` };
+    if (owed.background) return { mark: 'waits', words: `Not in ${name} yet: ${what} ${goes} in ${when}.` };
     const offIn = view.tools.filter(other => { const there = stateOf(entry, plugin, other); return there.state === 'installed' && !!there.off; }).map(other => names[other]);
-    if (owed.offElsewhere) return { mark: 'not-brought', words: `Not in ${name}: the plugin is off in ${andList(offIn)}’s own settings, so it isn’t brought to a tool new here by itself. Install there puts ${them} in.` };
-    return { mark: 'missing', words: `Not in ${name}, though the plugin is on. Install there puts ${what} in.` };
+    if (owed.offElsewhere) return { mark: 'not-brought', words: `Not in ${name}: the plugin is off in ${andList(offIn)}’s own settings, so it isn’t brought to a tool new here by itself.` };
+    return { mark: 'missing', words: [`Not in ${name}, though the plugin is on.`, ...entry.items?.[plugin]?.notIn?.[tool]?.reasons ?? []].join(' ') };
   }
-  if (kept) return { mark: 'kept-out', words: `Kept out of ${name}.` };
+  // A tool that can't take it says why, kept out of it or not.
   const why = unavailable(view, entry, plugin, tool);
-  return why && !owed.takes ? { mark: 'cannot', words: `${name}: ${why}` } : { mark: 'absent', words: `Not installed in ${name}.` };
+  if (why && !owed.takes) return { mark: 'cannot', words: toolSaid(tool, why) };
+  return { mark: 'absent', words: kept ? `Not installed in ${name}, and kept out of it: nothing puts it there by itself.` : `Not installed in ${name}.` };
 }
 
 /**
@@ -475,4 +477,54 @@ export function undoLimits(view: PluginsView, entry: MarketplaceView, plugin: st
     return (state.state === 'installed' && !!state.skillsOff?.length) || !!item?.serversOff?.length || !!item?.agentsOff?.length; });
   return [gone ? `Undo can’t install it again: ${unavailable(view, entry, plugin, removed[0]!) ?? MARKET_UNREAD}` : 'Undo installs the marketplace’s copy as it is now.',
     switched.length ? `${andList(switched.map(tool => names[tool]))}’s own switches for its single items aren’t put back.` : ''].filter(Boolean);
+}
+
+/** Why one of a plugin's items is not on in a tool (OUT), or a reason of its own: it couldn't be read, or the tool can't hold it. */
+export type ItemOut = keyof typeof OUT | { cannot: string };
+/** "a skill", "an agent", or several: "MCP servers". */
+const kindWords = (kind: PartKind, several: boolean) => (several ? partWords[kind][1] : `${kind === 'skill' ? 'a' : 'an'} ${partWords[kind][0]}`);
+/** What each reason says of `list` (its names; `several`), one plain sentence with the way to have the plugin's there instead. */
+const OUT = {
+  own: (list: string, several: boolean, kind: PartKind, tool: string) => `${list}: ${tool} has ${kindWords(kind, several)} of its own by that name, never written over; turn ${several ? 'each' : 'it'} on in ${tool} on its row to put the plugin’s there, keeping ${tool}’s as a version.`,
+  kept: (list: string, several: boolean, _kind: PartKind, tool: string) => `${list} ${several ? 'are' : 'is'} kept out of ${tool}: tick to let ${several ? 'them' : 'it'} in, unless ${tool} has its own by that name.`,
+  off: (list: string, several: boolean) => `${list} ${several ? 'were' : 'was'} turned off on ${several ? 'their rows' : 'its row'}: tick to turn ${several ? 'them' : 'it'} on.`,
+  deleted: (list: string, several: boolean) => `${list} ${several ? 'were' : 'was'} deleted here: tick to bring ${several ? 'them' : 'it'} back.`,
+  yours: (list: string, several: boolean, kind: PartKind) => `${list}: you have ${kindWords(kind, several)} of your own by that name; delete yours on ${several ? 'their rows' : 'its row'} to take the plugin’s.`,
+  another: (list: string, several: boolean, kind: PartKind) => `${list}: another source has ${kindWords(kind, several)} by that name here; delete ${several ? 'them' : 'it'} on ${several ? 'their rows' : 'its row'} to take the plugin’s.`,
+};
+
+/**
+ * Why none of a plugin's items is on in a tool with no installer, one plain sentence per reason (`outs`: each item's, from
+ * pluginlibrary.ts outsIn; those alike together, a long list of names cut), which the page says under that tool's box and the
+ * run's report after its lead; or, with no item at all, that the plugin brings nothing such a tool takes (`brings`: what it does).
+ */
+export function notInWhy(tool: HarnessId, plugin: string, outs: { name: string; kind: PartKind; out: ItemOut }[], brings?: string): string[] {
+  const where = names[tool];
+  if (!outs.length) return [`${plugin} has no skill, agent or MCP server, which is all ${where} takes of a plugin: what it brings${brings ? ` (${brings})` : ''} stays with the tools that take plugins.`];
+  return [...groupBy(outs, ({ out, kind }) => (typeof out === 'string' ? `${out} ${kind}` : out.cannot)).values()].map(group => {
+    const list = group.map(each => each.name), { out, kind } = group[0]!, named = andList(list.length > 4 ? [...list.slice(0, 3), `${list.length - 3} more`] : list);
+    return typeof out === 'string' ? OUT[out](named, list.length > 1, kind, where) : `${named}: ${out.cannot}`;
+  });
+}
+
+/** Words a tool's result or line says, starting with the tool's name unless they already do ("Codex: …", never "Codex: Codex’s …"). */
+export const toolSaid = (tool: HarnessId, words: string) => (words.startsWith(names[tool]) ? words : `${names[tool]}: ${words}`);
+
+/** The marks a tool's box on the plugin's page shows ticked (the plugin is in that tool), and those it can't act on. */
+const TICKED: readonly ToolMark[] = ['installed', 'outdated', 'items', 'stays'], HELD: readonly ToolMark[] = ['cannot', 'unknown', 'not-known', 'parts-waiting'];
+/**
+ * A tool's box on the plugin's page (pluginparts.ts toolBox; what a click records: pluginrecord.ts A TOOL'S BOX), from its mark
+ * (toolMark): ticked or not; off where it can't act, with why (`off`): its mark held, a ticked copy that can't be taken out here
+ * (cantUninstall: never an untick that couldn't be taken back), or a home that can't change; and its line where that says more
+ * than the mark (`line`): why it is off, short, or that he unticked it.
+ */
+export function boxOf(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, { mark, words }: { mark: ToolMark; words: string }): { ticked: boolean; held?: true; off?: string; line?: string } {
+  const name = names[tool], ticked = TICKED.includes(mark), held = HELD.includes(mark), recorded = entry.switches?.[plugin];
+  const kept = !!recorded?.entry?.on && recorded.entry.except.includes(tool);
+  const stuck = ticked && takesPlugins(tool) && view.canWrite ? cantUninstall(view, entry, plugin, tool) : undefined;
+  const off = held ? words : stuck ? `${stuck}${kept ? ` It is kept out of ${name}: uninstall it in ${name} itself, then tick to put it back.` : ''}` : !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
+  const line = !held && !stuck ? (mark === 'absent' && kept ? 'Kept out: tick to put it back' : undefined)
+    : takesPlugins(tool) && !view.clis[tool] ? `No ${name} command-line tool here` : entry.refusedBy?.[tool] ? `${name} refused this marketplace`
+    : stuck ? 'Can’t be taken out here' : mark === 'cannot' ? recorded?.tools[tool]?.held ?? unavailable(view, entry, plugin, tool) : undefined;
+  return { ticked, ...(held ? { held: true as const } : {}), ...(off ? { off } : {}), ...(line ? { line } : {}) };
 }

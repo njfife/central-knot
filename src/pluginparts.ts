@@ -1,13 +1,13 @@
-// Pieces the marketplace and plugin pages draw alike: a plugin's one switch and its click's line (clickNote), a tool's mark,
-// Update, a README, and "a · b · c" lines. The switch's click waits its turn (pluginstate.ts turnPlugin); Update acts at once
-// (pluginstate.ts applyPluginOps). What the marks and the switch say comes from pluginstatus.ts.
+// Pieces the marketplace and plugin pages draw: a plugin's switch and its click's line (clickNote), a tool's mark on the list
+// and its box on the plugin's page, Update, a README, and "a · b · c" lines. The switch's and a box's click wait their turn
+// (pluginstate.ts turnPlugin); Update acts at once (applyPluginOps). What they say comes from pluginstatus.ts.
 import { acting } from './app.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, resultLines, type PluginOp } from './pluginplan.ts';
 import { applyPluginOps, clickOn, market, openLink, pluginBusy, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
-import { PREVIEW_ONLY, addWords, cantUninstall, copyStale, foundIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
+import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
@@ -31,11 +31,10 @@ const MARK_LOOKS: Record<ToolMark, { look: string; glyph: () => Element }> = {
   items: { look: 'cell-synced.cell-on', glyph: () => icon('check', 16) },
   stays: { look: 'cell-differs.cell-on', glyph: () => icon('circle-alert', 14) },
   waits: { look: 'cell-waiting', glyph: () => icon('clock', 14) },
-  'not-brought': { look: 'cell-kept', glyph: () => icon('circle-off', 14) },
+  'not-brought': { look: 'cell-not-brought', glyph: () => icon('circle-off', 14) },
   missing: { look: 'cell-differs', glyph: () => icon('circle-alert', 14) },
   'parts-waiting': { look: 'cell-waiting', glyph: () => icon('clock', 14) },
   cannot: { look: 'cell-cannot', glyph: () => h('span.cannot-dash', { 'aria-hidden': 'true' }, '–') },
-  'kept-out': { look: 'cell-kept', glyph: () => icon('circle-minus', 14) },
   absent: { look: 'cell-absent', glyph: () => h('span', { 'aria-hidden': 'true' }) },
   unknown: { look: 'cell-differs', glyph: () => icon('circle-question-mark', 16) },
   'not-known': { look: 'cell-differs', glyph: () => icon('circle-question-mark', 16) },
@@ -51,21 +50,47 @@ export function markOf(view: PluginsView, entry: MarketplaceView, plugin: Plugin
     { outdated: outdated(entry, plugin.name, tool, offered, detail) && !cantUninstall(view, entry, plugin.name, tool), stale: copyStale(entry, plugin.name, tool, offered, detail), auto: updatesRun() });
 }
 
+/** A tool's cell while a command runs there for the plugin, or undefined. */
+function workingCell(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, id: string) {
+  const working = market.working;
+  if (working?.source !== entry.source || working.plugin !== plugin.name || !working.tools.includes(tool)) return undefined;
+  return h('div.ov-cell', { role: 'cell' },
+    h('span.cell-button.cell-working', { id, 'aria-label': `${names[tool]}: working…`, title: 'Running that tool’s own command…' }, icon('refresh-cw', 14, 'spin')));
+}
+/** A tool's box while its click waits its turn in the page's list: the list's clock mark (pluginparts.ts clickNote), or undefined. */
+function waitingCell(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, id: string) {
+  const click = clickOn(entry.source, plugin.name);
+  if (click?.state !== 'waiting' || (click.tool && click.tool !== tool)) return undefined;
+  return h('div.ov-cell', { role: 'cell' }, h('span.cell-button.cell-box.cell-waiting', { id, 'data-click': 'waiting', 'aria-label': `${names[tool]}: ${click.said.waiting}`, title: click.said.waiting }, icon('clock', 14)));
+}
+
 /**
- * One tool's mark for one plugin: what it has, said by its look and its tooltip; it changes nothing (the plugin's switch
- * and its page's tool lines do). `marketIndex` keeps ids unique across marketplaces; `offered` is the version to compare
- * with, when there is one (see versionToCompare).
+ * One tool's mark for one plugin on the list: what it has, said by its glyph and its tooltip, drawn plain (no box: it changes
+ * nothing; the plugin's switch and the boxes on its page do). `marketIndex` keeps ids unique across marketplaces; `offered`
+ * is the version to compare with, when there is one (see versionToCompare).
  */
 export function markCell(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number, offered: string | undefined) {
   const id = `pcell-${marketIndex}-${plugin.name}-${tool}`;
-  const working = market.working;
-  if (working?.source === entry.source && working.plugin === plugin.name && working.tools.includes(tool)) {
-    return h('div.ov-cell', { role: 'cell' },
-      h('span.cell-button.cell-working', { id, 'aria-label': `${names[tool]}: working…`, title: 'Running that tool’s own command…' }, icon('refresh-cw', 14, 'spin')));
-  }
   const { mark, words } = markOf(view, entry, plugin, tool, offered);
   const { look, glyph } = MARK_LOOKS[mark];
-  return h('div.ov-cell', { role: 'cell' }, h(`span.cell-button.cell-mark.${look}`, { id, role: 'img', title: words, 'aria-label': words, 'data-state': mark }, glyph()));
+  return workingCell(entry, plugin, tool, id) ?? h('div.ov-cell', { role: 'cell' }, h(`span.cell-button.cell-mark.cell-plain.${look}`, { id, role: 'img', title: words, 'aria-label': words, 'data-state': mark }, glyph()));
+}
+
+/**
+ * One tool's box on the plugin's page (pluginstatus.ts boxOf: ticked, or off with why), whose click joins the page's list
+ * (pluginstate.ts turnPlugin; what it records: pluginrecord.ts A TOOL'S BOX). Its name and tooltip say what a click will do.
+ */
+export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number, offered: string | undefined) {
+  const id = `pbox-${marketIndex}-${plugin.name}-${tool}`;
+  const { mark, words } = markOf(view, entry, plugin, tool, offered), box = boxOf(view, entry, plugin.name, tool, { mark, words });
+  const what = takesPlugins(tool) ? plugin.name : `${plugin.name}’s items`, where = names[tool];
+  const does = box.ticked ? `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`
+    : entry.switches?.[plugin.name]?.entry?.on ? `Click to put ${what} in ${where}. Undo takes it out again.` : `Click to turn ${plugin.name} on in ${where} alone. Undo turns it off again.`;
+  const label = box.held ? words : `${words} ${box.off ?? does}`;
+  const { look, glyph } = box.ticked || box.held ? MARK_LOOKS[mark] : { look: 'cell-absent', glyph: () => null };
+  return workingCell(entry, plugin, tool, id) ?? waitingCell(entry, plugin, tool, id) ?? h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.cell-box.${look}`, { type: 'button', id, role: 'checkbox', 'aria-checked': String(box.ticked),
+    'aria-label': label, title: label, 'data-state': mark, disabled: !!box.off || pluginBusy(entry.source, plugin.name),
+    onclick: () => turnPlugin(entry, plugin.name, box.ticked ? 'keep-out' : 'let-in', tool) }, glyph()));
 }
 
 /**

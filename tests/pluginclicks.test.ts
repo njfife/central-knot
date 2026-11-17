@@ -30,8 +30,8 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, readAgain, state: app } = await import('../src/app.ts');
-const { clickOn, lastLines, market, pluginBusy, resetMarket, turnPlugin, undoLast } = await import('../src/pluginstate.ts');
+const { acting, applyPluginSwitches, readAgain, state: app } = await import('../src/app.ts');
+const { clickOn, lastLines, market, pluginBusy, resetMarket, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickWords } = await import('../src/pluginparts.ts');
 
 /** Lets the page's awaits run on to the next call to main. */
@@ -40,8 +40,7 @@ const plugin = (name: string) => ({ name, description: '' });
 const view = {
   home: '/home', tools: ['claude-cli'] as HarnessId[], clis: {}, canWrite: true, desktopOnly: {}, via: {}, versions: {}, suggested: [],
   marketplaces: [{ source: '/market', name: 'team', origins: ['central-knot'], sourceLabel: 'team', kind: 'folder', plugins: ['alpha', 'beta', 'gamma'].map(plugin), states: {},
-    // gamma is owed an install in Claude Code: its line there offers Install there.
-    switches: { gamma: { tools: { 'claude-cli': { act: 'install' } } } } }],
+    switches: {} }],
 } as unknown as PluginsView;
 const entry = view.marketplaces[0]!;
 const report = (outcome: 'installed' | 'failed', message: string) => ({ tool: 'claude-cli' as const, outcome, changed: outcome === 'installed', message, runs: [] });
@@ -99,11 +98,11 @@ test('A row says its click’s aim while it waits and runs, then what main retur
   start();
   turnPlugin(entry, 'alpha', 'on');
   turnPlugin(entry, 'beta', 'keep-out', 'claude-cli');
-  turnPlugin(entry, 'gamma', 'fix', 'claude-cli');
+  turnPlugin(entry, 'gamma', 'let-in', 'claude-cli');
   await settled();
-  assert.deepEqual([words('alpha'), words('beta'), words('gamma')], ['Installing…', 'Waiting to keep it out of Claude Code', 'Waiting to install in Claude Code']);
+  assert.deepEqual([words('alpha'), words('beta'), words('gamma')], ['Installing…', 'Waiting to uninstall from Claude Code', 'Waiting to install in Claude Code']);
   await main.answer(installed('alpha'));
-  assert.deepEqual([words('alpha'), words('beta')], ['Installed in Claude Code', 'Keeping it out of Claude Code…']);
+  assert.deepEqual([words('alpha'), words('beta')], ['Installed in Claude Code', 'Uninstalling from Claude Code…']);
   await main.answer({ stopped, done: [] });
   await main.answer(refused('gamma'));
   assert.deepEqual([words('beta'), words('gamma')], [stopped, 'Claude Code: Not installed. Plugin "gamma" not found.']);
@@ -187,4 +186,45 @@ test('A list’s rows are its news: the person’s Refresh takes them away', asy
   await alphaInstalled();
   await readAgain();
   assert.deepEqual(states(), []);
+});
+
+test('A list’s rows are its news: an item page’s switch for a plugin’s item takes them away', async () => {
+  await alphaInstalled();
+  await applyPluginSwitches([]);
+  assert.deepEqual(states(), []);
+});
+
+test('Beside a sentence naming several plugins, Undo names the one it reverses: the last click’s', async () => {
+  start();
+  for (const name of ['alpha', 'beta']) turnPlugin(entry, name, 'on');
+  await settled();
+  await main.answer(installed('alpha'));
+  await main.answer(installed('beta'));
+  assert.equal(app.said.text, 'alpha: installed in Claude Code; beta: installed in Claude Code.');
+  assert.equal(undoLabel(), 'Undo beta');
+  // A list of one names one plugin: plain Undo.
+  await alphaInstalled();
+  assert.equal(undoLabel(), 'Undo');
+});
+
+test('A plugin that partly failed is said once at the list’s end, with where it went and where not', async () => {
+  start();
+  for (const name of ['alpha', 'beta']) turnPlugin(entry, name, 'on');
+  await settled();
+  await main.answer(installed('alpha'));
+  const codexRefused = { ...report('failed', 'Not installed. Codex refused it.'), tool: 'codex-cli' as const };
+  await main.answer({ done: [...installed('beta').done, { source: '/market', marketName: 'team', plugin: 'beta', tool: 'codex-cli', action: 'install', report: codexRefused }], before: null, back: [] });
+  assert.equal(app.said.text, 'alpha: installed in Claude Code; beta: installed in Claude Code, not in Codex.');
+  // Its failure, with why, is in the problems band, as any failure is.
+  assert.deepEqual(lastLines().filter(line => !line.ok).map(line => `${line.plugin}: ${line.text}`), ['beta: Codex: Not installed. Codex refused it.']);
+});
+
+test('After two clicks on one plugin’s boxes, Undo names the click it reverses: the plugin and its tool', async () => {
+  start();
+  turnPlugin(entry, 'alpha', 'let-in', 'claude-cli');
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(installed('alpha'));
+  await main.answer(installed('alpha'));
+  assert.equal(undoLabel(), 'Undo alpha in Claude Code');
 });

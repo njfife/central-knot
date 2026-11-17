@@ -230,7 +230,7 @@ export interface DesktopApi {
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
   updatePlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
-  /** A whole plugin's switch (`on`, `off`), Add, a tool kept out or let in, or one tool brought into line (`fix`): recorded first, then run as its table owes (marketplaces.ts turn). */
+  /** A whole plugin's switch (`on`, `off`), Add, or one tool's box on its page (`keep-out`, `let-in`): recorded first, then run as its table owes (marketplaces.ts turn). */
   turnPlugin(source: string, plugin: string, what: PluginTurn, tool: HarnessId | undefined, home: string): Promise<PluginTurnResult>;
   /** The Undo of a turn: its record put back, then `back` run (marketplaces.ts undoTurn). */
   undoPluginTurn(source: string, plugin: string, before: PluginEntry | null, back: PluginOp[], home: string): Promise<{ stopped?: string; done: PluginDone[] }>;
@@ -272,8 +272,8 @@ export interface DesktopApi {
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
-/** What a click on a whole plugin asks (DesktopApi.turnPlugin). */
-export type PluginTurn = 'on' | 'off' | 'add' | 'keep-out' | 'let-in' | 'fix';
+/** What a click on a whole plugin asks (DesktopApi.turnPlugin): its switch On or Off, Add, or one tool's box on its page unticked (`keep-out`: uninstalled there, and kept out) or ticked (`let-in`: let in, and installed there). */
+export type PluginTurn = 'on' | 'off' | 'add' | 'keep-out' | 'let-in';
 /** What a turn did: each tool's report (`done`), the plugin's entry before it (`before`, null: none), and its Undo (`back`). */
 export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before?: PluginEntry | null; back?: PluginOp[] }
 
@@ -710,6 +710,8 @@ export interface MarketplaceView {
   copilotRefuses?: string;
   /** Why only Codex can take this marketplace's plugins (it is in Codex's own format), if so. */
   codexOnly?: string;
+  /** Tools whose own add refused this marketplace while the app runs, each with why in its words (plugins.ts refusedBy). */
+  refusedBy?: Partial<Record<HarnessId, string>>;
   /**
    * The plugins of this marketplace with a part on the record of the parts written before the library, while that record waits to
    * be moved (partsmigrate.ts): such a plugin waits in Pi and OpenCode until it is (pluginstatus.ts waitsToMove).
@@ -728,9 +730,10 @@ export interface MarketplaceView {
 export interface PluginItemLine { kind: ItemKind; key: string; name: string; state: 'linked' | 'update' | 'going' | 'new' | 'removed' | 'deleted' | 'not-brought'; on?: boolean; except?: HarnessId[]; why?: string }
 /**
  * A plugin's items as its page shows them: its lines, how many of its `of` items linked to it are on in each tool with no installer
- * (`on`), whether Update has something to do, and why the plugin can't be read now.
+ * (`on`), whether Update has something to do, and why the plugin can't be read now. `notIn`: for a plugin On, each tool it is
+ * wanted in where none is on, why, one sentence per reason (pluginstatus.ts notInWhy), and whether a tick on that tool's box brings some in (`tickHelps`).
  */
-export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; of: number; ready?: true; problem?: string }
+export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; of: number; ready?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean }>> }
 
 /**
  * One named part of a plugin (a skill, command or agent): what it says it does, its whole file (SKILL.md or NAME.md) as

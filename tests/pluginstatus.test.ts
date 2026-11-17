@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { clickRuns, owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
-import type { MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
+import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
 const entry: MarketplaceView = { source: 'a/b', origins: ['central-knot'], name: 'm', kind: 'git', sourceLabel: 'GitHub: a/b', plugins: [{ name: 'p', description: '' }],
   states: { p: { 'claude-cli': { state: 'installed', path: '/x' }, 'codex-cli': { state: 'held', reason: 'other' } } } };
@@ -15,6 +16,7 @@ test('A tool takes a plugin by its own installer only when its CLI is there and 
   assert.match(blocked({ ...view, clis: {}, desktopOnly: { 'claude-cli': 'Claude desktop' } }, entry, 'claude-cli') ?? '', /^Only Claude desktop was found here, and the copy of Claude Code it carries isn’t there yet \(the app adds it once it has run\). Claude Code’s command-line tool wasn’t found either.$/);
   assert.equal(blocked(view, { ...entry, copilotRefuses: 'Copilot refuses npm.' }, 'copilot-cli'), 'Copilot refuses npm.');
   assert.deepEqual(route('copilot-cli', { ...entry, copilotRefuses: 'x' }), { cannot: 'x' }, 'Copilot CLI refusing the marketplace takes nothing of it');
+  assert.deepEqual(route('copilot-cli', { ...entry, refusedBy: { 'copilot-cli': 'Copilot CLI refused this marketplace.' } }), { cannot: 'Copilot CLI refused this marketplace.' }, 'nor does a tool whose own add refused it');
   assert.equal(toolNow({ ...view, tools: [...view.tools, 'pi-cli'] }, entry, 'p', 'pi-cli', undefined, false).route, 'items', 'Pi takes a plugin as library items');
   // Parts of it from before the library wait to be moved: Pi and OpenCode have none of it and can take none, so nothing is owed
   // there; the tools with an installer are as for any plugin.
@@ -29,6 +31,31 @@ test('A tool takes a plugin by its own installer only when its CLI is there and 
   assert.equal(unavailable(view, entry, 'p', 'codex-cli'), 'other');
   assert.equal(unavailable({ ...view, clis: {} }, entry, 'p', 'claude-cli'), undefined);
   assert.match(unavailable({ ...view, clis: {} }, entry, 'p', 'copilot-cli') ?? '', /wasn’t found/);
+});
+
+test('A tool the plugin is kept out of is said as not installed there, kept out; one that can’t take it says why, kept out of it or not', () => {
+  const except: HarnessId[] = ['copilot-cli', 'codex-cli'], kept: MarketplaceView = { ...entry, switches: { p: { entry: { on: true, except }, tools: {} } } };
+  const mark = (tool: HarnessId) => toolMark(view, kept, 'p', tool, owedTo({ on: true, except }, tool, toolNow(view, kept, 'p', tool, undefined, false), view.tools));
+  assert.deepEqual(mark('copilot-cli'), { mark: 'absent', words: 'Not installed in Copilot CLI, and kept out of it: nothing puts it there by itself.' });
+  assert.deepEqual(mark('codex-cli'), { mark: 'cannot', words: 'Codex: other' }, 'Codex holds another marketplace of this name: its box is off, saying why');
+});
+
+test('A tool’s box: ticked where the plugin is; off before the click where its copy can’t be taken out here, saying why on its line; one he unticked says so', () => {
+  const on = (except: HarnessId[] = []): MarketplaceView => ({ ...entry, switches: { p: { entry: { on: true, except }, tools: {} } } });
+  const box = (at: MarketplaceView, tool: HarnessId, shown = view) => boxOf(shown, at, 'p', tool, toolMark(shown, at, 'p', tool, owedTo({ on: true, except: at.switches!.p!.entry!.except }, tool, toolNow(shown, at, 'p', tool, undefined, false), shown.tools)));
+  assert.deepEqual(box(on(), 'claude-cli'), { ticked: true });
+  // The Anthropic Directory's copy, or no command-line tool: the box is off before any click, never a kept-out it can't undo.
+  const directory: MarketplaceView = { ...on(), states: { p: { 'claude-cli': { state: 'installed', path: '/x', directory: 'x' } } } };
+  assert.deepEqual(box(directory, 'claude-cli'), { ticked: true, off: FROM_DIRECTORY, line: 'Can’t be taken out here' });
+  assert.deepEqual(box(on(), 'claude-cli', { ...view, clis: {} }), { ticked: true, off: 'Claude Code’s command-line tool wasn’t found.', line: 'No Claude Code command-line tool here' });
+  // Already kept out of a tool holding such a copy: the box says the way out, in words.
+  assert.equal(box({ ...directory, switches: { p: { entry: { on: true, except: ['claude-cli'] }, tools: {} } } }, 'claude-cli').off, `${FROM_DIRECTORY} It is kept out of Claude Code: uninstall it in Claude Code itself, then tick to put it back.`);
+  // Unticked: kept out, said on its line. A tool whose own add refused the marketplace says so on its line.
+  assert.deepEqual(box(on(['copilot-cli']), 'copilot-cli'), { ticked: false, line: 'Kept out: tick to put it back' });
+  assert.deepEqual(box({ ...on(), refusedBy: { 'copilot-cli': 'Copilot CLI refused this marketplace: “Invalid marketplace.json”' } }, 'copilot-cli').line, 'Copilot CLI refused this marketplace');
+  // On, kept out of Claude Code, which has its copy again: the mark `stays`, the box ticked and free, and its untick takes the copy out (row 9).
+  const keptOut: MarketplaceView = on(['claude-cli']), owed = owedTo({ on: true, except: ['claude-cli'] }, 'claude-cli', toolNow(view, keptOut, 'p', 'claude-cli', undefined, false), view.tools);
+  assert.deepEqual([toolMark(view, keptOut, 'p', 'claude-cli', owed).mark, box(keptOut, 'claude-cli'), clickRuns('keep-out', owed)], ['stays', { ticked: true }, 'uninstall']);
 });
 
 test('Only a known version that names another release is a difference', () => {

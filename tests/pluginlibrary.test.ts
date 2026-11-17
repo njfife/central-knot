@@ -10,6 +10,7 @@ import { agentKind } from '../src/agents.ts';
 import { pluginFiles } from '../src/catalogdetail.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
+import { notInWhy } from '../src/pluginstatus.ts';
 import { readHistory } from '../src/history.ts';
 import * as engine from '../src/plugins.ts';
 import { serverKind } from '../src/servers.ts';
@@ -157,7 +158,7 @@ test('A read that isn’t whole turns nothing off: a plugin.json that can’t be
 
 // ---------- The switch on its items ----------
 
-test('On makes its items and turns them On in Pi; Keep out of Pi takes them out of Pi only; Off takes them out and keeps them; each Undo leaves every file as it was', async () => {
+test('On makes its items and turns them On in Pi; Pi’s box unticked takes them out of Pi only; Off takes them out and keeps them; each Undo leaves every file as it was', async () => {
   const box = await kitHome();
   try {
     const before = await files(box.pi(''));
@@ -170,13 +171,13 @@ test('On makes its items and turns them On in Pi; Keep out of Pi takes them out 
     assert.deepEqual(Object.values(items.skill).map(item => [item.key, item.on, item.except, item.source === items.agent.helper!.source]), [['notes', true, [], true], ['review', true, [], true], ['tools', true, [], true]]);
     assert.equal(await exists(join(box.home, '.claude/skills/notes')), false, 'Claude Code has it with the plugin: no copy of its own');
     const onBytes = await files(box.pi(''));
-    // Keep out of Pi, and its Undo.
+    // Pi's box unticked, and its Undo.
     const out = await box.turn('keep-out', 'pi-cli');
     assert.deepEqual(out.done.map(step => [step.tool, step.action, step.report.changed]), [['pi-cli', 'remove-items', true]]);
     assert.deepEqual([await exists(box.pi('skills/notes')), box.calls.filter(call => call.startsWith('uninstall'))], [false, []], 'Pi only');
     assert.deepEqual(Object.values((await box.library()).skill).map(item => [item.on, item.except]), [[true, ['pi-cli']], [true, ['pi-cli']], [true, ['pi-cli']]]);
     await box.undo(out);
-    assert.deepEqual(await files(box.pi('')), onBytes, 'Keep out undone: every file as it was');
+    assert.deepEqual(await files(box.pi('')), onBytes, 'the untick undone: every file as it was');
     // Off, and its Undo.
     const off = await box.turn('off');
     assert.equal(await exists(box.pi('skills/notes')), false);
@@ -203,7 +204,7 @@ test('Arriving On writes over nothing: Pi’s own skill review keeps Pi out of t
     assert.deepEqual((await box.lines())['skill:notes'], 'not-brought', 'Its items says the name is his');
     await box.turn('off');
     assert.deepEqual([(await box.library()).skill.notes!.on, await exists(box.pi('skills/notes/SKILL.md'))], [true, true], 'his own notes stays On, in Pi');
-    // Let in on one tool changes its except alone, and still not where Pi has a copy of its own.
+    // A tick on one tool's box changes its except alone, and still not where Pi has a copy of its own.
     await box.turn('on');
     await box.turn('keep-out', 'pi-cli');
     await box.turn('let-in', 'pi-cli');
@@ -315,7 +316,7 @@ test('A copy that can’t be read just now lets nothing go', async () => {
 
 // ---------- New items and where they go ----------
 
-test('A new item the check brings is kept out of each tool the plugin isn’t in: Pi kept out, Pi taken out by Take out there; one item switched off by itself keeps it in; the background never turns an item On', async () => {
+test('A new item the check brings is kept out of each tool the plugin isn’t in: Pi kept out, Pi’s items each kept out on their own rows; one item switched off by itself keeps it in; the background never turns an item On', async () => {
   const box = await kitHome();
   try {
     await box.turn('on');
@@ -324,7 +325,7 @@ test('A new item the check brings is kept out of each tool the plugin isn’t in
     await box.update();
     assert.deepEqual([(await box.library()).skill.fresh!.except, await exists(box.pi('skills/fresh'))], [['pi-cli'], false], 'kept out of Pi');
     await box.turn('let-in', 'pi-cli');
-    // Every item kept out of Pi on its own row (as Take out there leaves them, the entry still wanting Pi): the plugin is not in Pi.
+    // Every item kept out of Pi on its own row, the entry still wanting Pi: the plugin is not in Pi.
     const { applyAgents } = await import('../src/agents.ts'), { applyServers } = await import('../src/servers.ts');
     await applySkills(box.share, box.tools, ['notes', 'review', 'tools', 'fresh'].map(key => ({ key, on: true, except: ['pi-cli'] })));
     await applyAgents(box.share, box.tools, [{ key: 'helper', on: true, except: ['pi-cli'] }]);
@@ -457,7 +458,7 @@ test('On, its Undo, then On again: every item is On in Pi again', async () => {
   } finally { await box.cleanup(); }
 });
 
-test('Every item switched off on its own row: Install there on Pi turns them on there', async () => {
+test('Every item switched off on its own row: ticking Pi’s box turns them on there', async () => {
   const box = await kitHome();
   try {
     await box.turn('on');
@@ -465,9 +466,9 @@ test('Every item switched off on its own row: Install there on Pi turns them on 
     await applySkills(box.share, box.tools, ['notes', 'review', 'tools'].map(key => ({ key, on: false, except: [] })));
     await applyAgents(box.share, box.tools, [{ key: 'helper', on: false, except: [] }]);
     await applyServers(box.share, box.tools, [{ key: 'relay', on: false, except: [] }]);
-    assert.equal((await box.view()).switches?.kit?.tools['pi-cli']?.act, 'install-items', 'its line offers Install there');
-    const fix = await box.turn('fix', 'pi-cli');
-    assert.deepEqual([fix.done.map(step => step.report.outcome), await exists(box.pi('skills/notes/SKILL.md'))], [['installed'], true]);
+    assert.equal((await box.view()).switches?.kit?.tools['pi-cli']?.act, 'install-items', 'its box is empty, though the plugin is on');
+    const tick = await box.turn('let-in', 'pi-cli');
+    assert.deepEqual([tick.done.map(step => step.report.outcome), await exists(box.pi('skills/notes/SKILL.md'))], [['installed'], true]);
   } finally { await box.cleanup(); }
 });
 
@@ -486,18 +487,20 @@ test('An edit in Pi lets notes go, kept where it is: nothing of it reaches Claud
 
 // ---------- Found by the confirming read ----------
 
-test('Let in brings back no name he deleted: only a click that turns the items On does', async () => {
+test('Ticking Pi’s box turns its items On there as the plugin’s On does, so a name he deleted comes back; the automatic check never brings it back', async () => {
   const box = await kitHome();
   try {
     await box.turn('on');
     await box.turn('keep-out', 'pi-cli');
     await applySkills(box.share, box.tools, [{ key: 'review', on: false, except: [], deleted: true }]);
+    await box.update();
+    assert.deepEqual([(await box.library()).skill.review!.deleted !== undefined, await exists(box.pi('skills/review'))], [true, false], 'the check leaves it deleted');
     await box.turn('let-in', 'pi-cli');
-    assert.deepEqual([(await box.library()).skill.review!.deleted !== undefined, await exists(box.pi('skills/review'))], [true, false]);
+    assert.deepEqual([(await box.library()).skill.review!.deleted, await exists(box.pi('skills/review'))], [undefined, true]);
   } finally { await box.cleanup(); }
 });
 
-test('Every item of a plugin let go: its page still lists them, Pi says why none goes in, and offers no Install there; the check finds nothing', async () => {
+test('Every item of a plugin let go: its page still lists them, Pi says why none goes in, and its box is off, saying so; the check finds nothing', async () => {
   const box = await kitHome();
   try {
     // kit holding one skill, notes, alone.
@@ -507,7 +510,7 @@ test('Every item of a plugin let go: its page still lists them, Pi says why none
     await applySkills(box.share, box.tools, []);
     assert.deepEqual(await box.lines(), { 'skill:notes': 'not-brought' });
     const pi = (await box.view()).switches!.kit!.tools['pi-cli']!;
-    assert.deepEqual([pi.act, /Its items, below, says why/.test(pi.held ?? '')], [undefined, true]);
+    assert.deepEqual([pi.act, pi.held], [undefined, 'notes: you have a skill of your own by that name; delete yours on its row to take the plugin’s.']);
     assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops, []);
   } finally { await box.cleanup(); }
 });
@@ -528,4 +531,74 @@ test('An item that is Off when it is let go keeps its except as it was: turned O
     await applySkills(box.share, box.tools, [{ key: 'notes', on: true, except: [] }]);
     assert.equal(await exists(box.pi('skills/notes/SKILL.md')), true);
   } finally { await box.cleanup(); }
+});
+
+// ---------- Why none of its items is on in a tool (pluginstatus.ts notInWhy), as the run's report and the page say it ----------
+
+/** kit holding one skill, notes, alone; `piSays`: what Pi's report says after `click`, and what its line on the plugin's page says. */
+async function notesOnly() {
+  const box = await kitHome();
+  for (const path of ['skills/review', 'extra', 'agents', '.mcp.json']) await rm(join(box.kit, path), { recursive: true, force: true });
+  const piSays = async (done: Awaited<ReturnType<typeof box.turn>>) => {
+    const owed = (await box.view()).switches!.kit!.tools['pi-cli']!;
+    return { report: done.done.filter(step => step.tool === 'pi-cli').map(step => `${step.report.outcome}: ${step.report.message}`), box: owed.act ? 'empty, a tick acts' : `off: ${owed.held}` };
+  };
+  return { ...box, piSays };
+}
+/** The run's report leads with this; the page says the reasons alone, under Pi's box. */
+const LEAD = 'Nothing of kit is on in Pi.';
+const OWN = 'notes: Pi has a skill of its own by that name, never written over; turn it on in Pi on its row to put the plugin’s there, keeping Pi’s as a version.';
+const KEPT = 'notes is kept out of Pi: tick to let it in, unless Pi has its own by that name.';
+
+test('Pi has a skill of its own named as the plugin’s: never written over; the report and its box, off, name it and the way', async () => {
+  const box = await notesOnly();
+  try {
+    await put(box.pi('skills/notes/SKILL.md'), skill('notes', 'mine'));
+    assert.deepEqual(await box.piSays(await box.turn('on')), { report: [`held: ${LEAD} ${OWN}`], box: `off: ${OWN}` });
+    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), skill('notes', 'mine'));
+  } finally { await box.cleanup(); }
+});
+
+test('Pi’s own copy gone since, the plugin Off and On again: kept out of Pi, said so, and a tick on Pi’s box lets it in', async () => {
+  const box = await notesOnly();
+  try {
+    await put(box.pi('skills/notes/SKILL.md'), skill('notes', 'mine'));
+    await box.turn('on');
+    await rm(box.pi('skills/notes'), { recursive: true });
+    await box.turn('off');
+    assert.deepEqual(await box.piSays(await box.turn('on')), { report: [`held: ${LEAD} ${KEPT}`], box: 'empty, a tick acts' });
+    assert.deepEqual((await box.view()).items!.kit!.notIn!['pi-cli']!.reasons, [KEPT], 'the page says it under Pi’s box');
+    assert.deepEqual((await box.piSays(await box.turn('let-in', 'pi-cli'))).report, ['installed: 1 of its 1 items is on in Pi.']);
+  } finally { await box.cleanup(); }
+});
+
+test('His own skill of that name already in Central Knot: the plugin’s isn’t brought in; Its items lists it, and the report and its box, off, say why and the way', async () => {
+  const box = await notesOnly();
+  try {
+    await put(box.pi('skills/notes/SKILL.md'), skill('notes', 'mine'));
+    await applySkills(box.share, box.tools, [{ key: 'notes', on: true, except: [] }]);
+    const yours = 'notes: you have a skill of your own by that name; delete yours on its row to take the plugin’s.';
+    assert.deepEqual(await box.piSays(await box.turn('on')), { report: [`held: ${LEAD} ${yours}`], box: `off: ${yours}` });
+    assert.deepEqual(await box.lines(), { 'skill:notes': 'not-brought' });
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin with no skill, agent or MCP server: nothing of it goes into Pi, and its page says what it brings stays with the tools that take plugins', async () => {
+  const box = await notesOnly();
+  try {
+    await rm(join(box.kit, 'skills'), { recursive: true });
+    await put(join(box.kit, 'commands/ship.md'), '---\ndescription: Ship it.\n---\nShip.\n');
+    const nothing = 'kit has no skill, agent or MCP server, which is all Pi takes of a plugin: what it brings (1 command) stays with the tools that take plugins.';
+    assert.deepEqual(await box.piSays(await box.turn('on')), { report: [`held: ${nothing}`], box: `off: ${nothing}` });
+  } finally { await box.cleanup(); }
+});
+
+test('Each reason said once for the names it holds, a long list cut, the reasons of a mix in turn', () => {
+  const names = (out: Parameters<typeof notInWhy>[2][number]['out'], kind: 'skill' | 'mcp', ...list: string[]) => list.map(name => ({ name, kind, out }));
+  assert.deepEqual(notInWhy('opencode-cli', 'kit', [...names('another', 'skill', 'notes'), ...names({ cannot: 'OpenCode can’t hold an SSE server.' }, 'mcp', 'relay'), ...names('own', 'skill', 'a', 'b', 'c', 'd', 'e'), ...names('deleted', 'skill', 'charts', 'sheets')]), [
+    'notes: another source has a skill by that name here; delete it on its row to take the plugin’s.',
+    'relay: OpenCode can’t hold an SSE server.',
+    'a, b, c and 2 more: OpenCode has skills of its own by that name, never written over; turn each on in OpenCode on its row to put the plugin’s there, keeping OpenCode’s as a version.',
+    'charts and sheets were deleted here: tick to bring them back.']);
+  assert.deepEqual(notInWhy('pi-cli', 'kit', names({ cannot: 'Its SKILL.md isn’t valid.' }, 'skill', 'broken')), ['broken: Its SKILL.md isn’t valid.']);
 });

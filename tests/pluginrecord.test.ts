@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { firstRecord, owedTo, readPluginRecord, savePluginRecord, type Holding, type ToolNow } from '../src/pluginrecord.ts';
+import { clickHeld, clickRuns, firstRecord, owedTo, readPluginRecord, savePluginRecord, type Holding, type ToolNow } from '../src/pluginrecord.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const on = { on: true, except: [] }, off = { on: false, except: [] };
@@ -31,7 +31,19 @@ test('Rows 3 to 6: wanted (On, not kept out): in line where it is; installed by 
   assert.deepEqual(owedTo(on, 'copilot-cli', now('none', { cannot: 'Copilot CLI refuses this marketplace.' }), ['copilot-cli']), { wanted: true, has: 'none', takes: false, held: 'Copilot CLI refuses this marketplace.' });
 });
 
-test('An install is owed to the automatic updates only in a tool not on the home’s tools: one removed by hand in a tool already there waits for Install there', () => {
+test('A tool’s box: once its entry is changed, a tick runs only an install the table owes there, an untick only an uninstall; a hold is said on the click’s way alone', () => {
+  const kept = { on: true, except: ['codex-cli' as HarnessId] };
+  // Ticked: Codex leaves `except`, so row 4 owes the install. Unticked: it joins `except`, so row 9 owes the uninstall.
+  assert.equal(clickRuns('let-in', owedTo(on, 'codex-cli', now('none'), ['codex-cli'])), 'install');
+  assert.equal(clickRuns('keep-out', owedTo(kept, 'codex-cli', now('whole'), ['codex-cli'])), 'uninstall');
+  // Neither runs the other way, and a tool owed nothing runs nothing.
+  assert.deepEqual([clickRuns('keep-out', owedTo(on, 'codex-cli', now('none'), ['codex-cli'])), clickRuns('let-in', owedTo(kept, 'codex-cli', now('whole'), ['codex-cli'])), clickRuns('let-in', owedTo(on, 'codex-cli', now('whole'), ['codex-cli']))], [undefined, undefined, undefined]);
+  // Copilot CLI refuses the marketplace: a tick says why; an untick has nothing to take out, and says nothing.
+  const refused = owedTo(on, 'copilot-cli', now('none', { cannot: 'Copilot CLI refuses it.' }), ['copilot-cli']);
+  assert.deepEqual([clickHeld('let-in', refused), clickHeld('keep-out', refused)], ['Copilot CLI refuses it.', undefined]);
+});
+
+test('An install is owed to the automatic updates only in a tool not on the home’s tools: one removed by hand in a tool already there waits for a tick on its box', () => {
   assert.equal(codex(on, now('none'), ['claude-cli']).background, true, 'Codex is new here');
   assert.equal(codex(on, now('none'), ['claude-cli', 'codex-cli']).background, undefined, 'Codex has had it: taken out by hand since');
   assert.equal(codex({ on: true, except: ['codex-cli'] }, now('none'), ['claude-cli']).act, undefined, 'kept out of Codex: nothing at all');

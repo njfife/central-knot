@@ -178,7 +178,7 @@ export function autoUpdates(host: AutoUpdateHost) {
     const { done, stopped } = ops.length ? await runPlan(ops, api, home) : { done: [] as PluginDone[], stopped: undefined };
     if (stopped) host.log(`plugin updates: stopped: ${stopped}`);
     // A tool new here is new for this one check: it joins the record's `tools` whatever its installs came to. One that didn't
-    // go in is said in the note, and on the plugin's page with Install there; nothing tries it again by itself.
+    // go in is said in the note, and on the plugin's page, where its tool's box puts it in; nothing tries it again by itself.
     const joined = auto && !stopped ? due.newTools ?? [] : [];
     if (joined.length) await host.noteJoined(joined, home).catch(error => host.log(`plugin updates: the plugins record couldn’t be saved: ${error instanceof Error ? error.message : String(error)}`));
     // The version before's selections that waited (`seenTools`, `waiting`, `joins`) were read by this check's plugins record
@@ -211,7 +211,7 @@ export function autoUpdates(host: AutoUpdateHost) {
       // The tool's own words usually name it; where they don't, its name goes first. A tool new here is new for one check only.
       const once = ops.some(op => op.newHere && keyOf(op) === key && op.action === entry.action);
       const said = entry.report.message.includes(names[entry.tool]) ? entry.report.message : `${names[entry.tool]}: ${entry.report.message}`;
-      const text = once ? `${said} It isn’t tried again by itself: Install there on the plugin’s page puts it in.` : said;
+      const text = once ? `${said} It isn’t tried again by itself: ticking that tool on the plugin’s page puts it in.` : said;
       // A note the person closed stays closed while the same update fails for the same reason.
       const closed = !!before?.closed && before.text === text && before.offered === offered;
       if (!closed) failedNew = true;

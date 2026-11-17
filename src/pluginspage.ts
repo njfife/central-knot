@@ -12,7 +12,7 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
@@ -311,8 +311,8 @@ function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: numb
 }
 
 /**
- * What the marks mean, only for marks on screen that need saying: a check, a plus-less empty box and a striped one explain
- * themselves with their tooltips, so the key names the rest.
+ * What the marks mean, only for marks on screen that need saying: a check, nothing and a striped one explain themselves with
+ * their tooltips, so the key names the rest.
  */
 function legend(view: PluginsView, entry: MarketplaceView) {
   const marks = new Set<ToolMark>(entry.plugins.flatMap(plugin => view.tools.map(tool => markOf(view, entry, plugin, tool, versionToCompare(plugin, shownDetail(pluginKey(entry.source, plugin.name)))).mark)));
@@ -320,10 +320,9 @@ function legend(view: PluginsView, entry: MarketplaceView) {
     [['outdated'], 'Out of date: Update on its row', 'cell-differs.cell-on', 'refresh-cw'],
     [['waits'], 'Goes in at the next automatic check', 'cell-waiting', 'clock'],
     [['parts-waiting'], 'Waits to be moved: parts from an earlier version', 'cell-waiting', 'clock'],
-    [['not-brought'], 'Not brought by itself: off in a tool’s own settings', 'cell-kept', 'circle-off'],
-    [['missing'], 'Not in that tool: Install there, on its page', 'cell-differs', 'circle-alert'],
+    [['not-brought'], 'Not brought by itself: off in a tool’s own settings', 'cell-not-brought', 'circle-off'],
+    [['missing'], 'Not in that tool, though on: tick it on its page', 'cell-differs', 'circle-alert'],
     [['stays'], 'Still there, though off or kept out', 'cell-differs.cell-on', 'circle-alert'],
-    [['kept-out'], 'Kept out', 'cell-kept', 'circle-minus'],
     [['unknown', 'not-known'], 'Unknown: its record can’t be read', 'cell-differs', 'circle-question-mark'],
   ];
   const shown = keyed.filter(([which]) => which.some(mark => marks.has(mark)));
@@ -334,11 +333,11 @@ function legend(view: PluginsView, entry: MarketplaceView) {
     marks.has('cannot') ? item('Can’t go there', h('span.legend-cell.cell-cannot', {})) : null);
 }
 
-/** The way back from the last run, as a button: "Undo", or "Undo the rest" after an Undo that didn't finish. */
+/** The way back from the last run, as a button labelled by undoLabel. */
 function undoButton(): HTMLElement | null {
   const back = undoOps();
   if (!back.length) return null;
-  const undo = button({ variant: 'outline', size: 'small', label: market.lastRun?.undo ? 'Undo the rest' : 'Undo', id: 'plugins-undo', disabled: acting(), onclick: undoLast });
+  const undo = button({ variant: 'outline', size: 'small', label: undoLabel(), id: 'plugins-undo', disabled: acting(), onclick: undoLast });
   undo.title = acting() ?? undoTitle(back);
   return undo;
 }

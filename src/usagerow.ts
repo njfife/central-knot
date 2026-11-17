@@ -14,6 +14,8 @@ import type { HarnessId, LibraryFacts, ToolUsage, UsageReading } from './types.t
 /** How many days back a figure counts uses. */
 export const USAGE_DAYS = 30;
 
+/** What of a row's item the match reads (types.ts LibraryFacts; a From plugins row gives the same: matrix.ts pluginUsageFacts). */
+export type UsageFacts = Pick<LibraryFacts, 'key' | 'name' | 'copies' | 'plugin' | 'switchedOff' | 'loads'>;
 /** The names one item goes by in one tool: its own (its key and name, and that tool's copy's folder and name), and the plugin it comes through there. */
 interface ItemNames { own: string[]; plugin?: { plugin: string; name: string } }
 
@@ -39,11 +41,11 @@ export const spelledIn: Record<HarnessId, (names: ItemNames, kind: ItemKind) => 
 };
 
 /** The names a tool's own copy goes by: its folder and name, each also without a file's `.md` (Pi keeps an agent as `<name>.md`). */
-const copyNames = (facts: LibraryFacts, tool: HarnessId) =>
+const copyNames = (facts: UsageFacts, tool: HarnessId) =>
   [facts.copies[tool]?.folder, facts.copies[tool]?.name].flatMap(name => (name ? [name, name.replace(/\.md$/i, '')] : []));
 
 /** A row's names in one tool (spelledIn's input). */
-function namesOf(facts: LibraryFacts, tool: HarnessId): ItemNames {
+function namesOf(facts: UsageFacts, tool: HarnessId): ItemNames {
   const through = facts.plugin?.[tool];
   return { own: [facts.key, facts.name, ...copyNames(facts, tool)], ...(through ? { plugin: { plugin: through.plugin, name: through.name ?? facts.name } } : {}) };
 }
@@ -79,7 +81,7 @@ const keptAs = (kind: ItemKind, tool: HarnessId): ItemKind | undefined =>
  * What one tool's history in a reading says of a row's item (none: that tool wasn't read). A use counts by the kind's spelling,
  * or, in a tool that keeps the kind as another (keptAs), a use of that other kind that names the row's own copy there.
  */
-export function toolSays(reading: UsageReading, kind: ItemKind, facts: LibraryFacts, tool: HarnessId): ToolSays | undefined {
+export function toolSays(reading: UsageReading, kind: ItemKind, facts: UsageFacts, tool: HarnessId): ToolSays | undefined {
   const history = reading.tools.find(each => each.tool === tool);
   if (!history) return undefined;
   const names = new Set(spelledIn[tool](namesOf(facts, tool), kind).map(name => name.toLowerCase())), copy = new Set(copyNames(facts, tool).map(name => name.toLowerCase()));
@@ -89,7 +91,7 @@ export function toolSays(reading: UsageReading, kind: ItemKind, facts: LibraryFa
 }
 
 /** The tools that have an item on: their own copy, not switched off there by the tool's own switch, or a plugin's, not turned off there. */
-export const onIn = (facts: LibraryFacts, tools: readonly HarnessId[]) => tools.filter(tool =>
+export const onIn = (facts: UsageFacts, tools: readonly HarnessId[]) => tools.filter(tool =>
   (facts.copies[tool] && !facts.switchedOff?.includes(tool) && !facts.loads?.[tool]?.switchedOff) || (facts.plugin?.[tool] && !facts.plugin[tool]!.off));
 
 /**
