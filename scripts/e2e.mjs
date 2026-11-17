@@ -4443,16 +4443,16 @@ fs.writeFileSync(record, JSON.stringify(now));
   /** Claude Code's settings file held by its lock, fresh: a click on a server waits for it (up to 2 s), so the clicks after it wait their turn in the page's list. */
   const lock = `${claudeJson}.lock`, holdClaude = () => mkdirSync(lock), letGo = () => rmSync(lock, { recursive: true, force: true });
 
-  // A list too short to scroll, on a fresh visit: four rows clicked 150 ms apart, each where it was before the first click, are
-  // the four that change, each Off in every tool, no row moves, and the header says the four once.
+  // A list too short to scroll, on a fresh visit: four rows clicked one after another before the first is done (in one go: an agent
+  // file is written faster than a pointer moves here) are the four that change, each Off in every tool, no row moves, and the
+  // header says the four once. Clicks that each end before the next is made are runs of their own, each said on its own.
   await a.click('#nav-agents');
-  const sixBefore = await placesNow('table-agents', 'data-key'), sixStates = await states('.ov-row[data-key]'), sixPoints = [];
-  for (const agent of agents.slice(0, 4)) sixPoints.push(await middleOf(`#switch-${agent}`));
-  for (const point of sixPoints) { await clickAt(point); await wait(150); }
+  const sixBefore = await placesNow('table-agents', 'data-key'), sixStates = await states('.ov-row[data-key]');
+  await a.run(`${JSON.stringify(agents.slice(0, 4))}.forEach(agent => document.getElementById('switch-' + agent).click())`);
   await done();
   const sixAfter = await placesNow('table-agents', 'data-key');
   await a.shot('rows-agents-short');
-  same('on a list of six, four clicks 150 ms apart change exactly the four rows aimed at, Off in every tool, no row moves, and the header says the four once',
+  same('on a list of six, four clicks made before the first is done change exactly the four rows aimed at, Off in every tool, no row moves, and the header says the four once',
     [changed(sixStates, await states('.ov-row[data-key]')), agents.map(agent => existsSync(join(home, '.claude/agents', `${agent}.md`))), agents.map(agent => sixAfter.at[agent]), await headerSays()],
     [agents.slice(0, 4), [false, false, false, false, true, true], agents.map(agent => sixBefore.at[agent]), '4 agents are off: ag-1, ag-2, ag-3 and ag-4.']);
   // The last agent deleted from Central Knot: the page is empty, and the result is said once, in the header.
@@ -4476,8 +4476,10 @@ fs.writeFileSync(record, JSON.stringify(now));
   const atTop = ['srv-03', 'srv-04', 'srv-05', 'srv-06'], topPoints = [], topBefore = await placesNow(table, 'data-key'), topStates = await states('.ov-row[data-key]');
   for (const key of atTop) topPoints.push(await middleOf(`#switch-${key}`));
   const resultIn = () => a.run(`document.querySelector('#header [data-outcome]') ? 'header' : document.querySelector('[data-outcome]') ? 'elsewhere' : 'none'`), drawnAtOnce = [];
+  // Claude Code's file held by its lock while they are clicked, so all four are one run, as on a home slow enough to be felt.
+  holdClaude();
   for (const point of topPoints) { await clickAt(point); drawnAtOnce.push(await a.run(`document.activeElement?.getAttribute('aria-checked')`)); await wait(150); }
-  await done();
+  letGo(); await done();
   await a.shot('rows-mcp-top');
   const topAfter = await placesNow(table, 'data-key'), inClaude = () => Object.keys(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers ?? {});
   same('at the top of a long list, four rows clicked 150 ms apart are drawn Off at once and are the four that change, Off in every tool; no row moves, the scroll stays, and the header says the four once',
