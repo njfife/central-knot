@@ -430,6 +430,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .sync-notice { position: relative; margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; padding-right: 26px; }
 /* A long sentence wraps beside its mark (14px and the 8px gap), never on a line of its own under it. */
 .sync-notice > .notice-text { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 22px); }
+/* On the Library's All, a notice's kind mark sits between its icon and its words: the words keep the rest of the line. */
+.sync-notice > .kind-mark + .notice-text { max-width: calc(100% - 42px); }
 .sync-notice .btn { flex: none; height: 26px; padding: 0 10px; font-size: 12px; }
 .sync-notice > .notice-dismiss { position: absolute; top: 2px; right: 0; }
 .notice-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; }
@@ -441,6 +443,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Narrow content: a notice's actions take their own line under its sentence, so no button is squeezed or cut. */
 @container content (width < 880px) {
   .sync-notice > .notice-actions { flex-basis: 100%; padding-left: 22px; }
+  .sync-notice > .kind-mark ~ .notice-actions { padding-left: 42px; }
 }
 .change-removed { padding: 0 2px; border-radius: 2px; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 70%, transparent); }
 .change-added { border-radius: 2px; background: color-mix(in oklab, var(--success) 28%, transparent); }

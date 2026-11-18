@@ -310,9 +310,9 @@ const switchOn = (a, kind, key) => a.run(`document.querySelector('.ov-row[data-k
 const headingSays = (a, role) => a.run(`[...(document.querySelector('.ov-section[data-section="${role}"] .ov-section-label')?.childNodes ?? [])].filter(node => !node.classList?.contains('ov-section-room')).map(node => node.textContent).join('')`);
 /** The ids two or more elements on the page share: none on a page drawn right, each row's element ids carrying its row id. */
 const sharedIds = a => a.run(`(() => { const ids = [...document.querySelectorAll('[id]')].map(each => each.id); return [...new Set(ids.filter((id, at) => ids.indexOf(id) !== at))]; })()`);
-/** Each section on an item page of `kind`, in order, with the keys of its rows. */
+/** Each section of a list, in order, with the keys of its rows of `kind`: on the Library's All, a section with none of them is left out. */
 const sectionsNow = async (a, kind) => (await a.run(`[...document.querySelectorAll('.ov-section[data-section]')].map(head => [head.dataset.section, [...head.parentElement.querySelectorAll('.ov-row[data-key]')].map(row => row.dataset.key)])`))
-  .map(([section, ids]) => [section, keysOf(kind, ids)]);
+  .map(([section, ids]) => [section, keysOf(kind, ids.filter(id => id.startsWith(rowPart('', kind, ''))))]).filter(([, keys]) => keys.length);
 /** Read one tool's Skills counts on its card, tab and Overview row, and the sections on its tab. */
 async function skillsOf(a, tool, pictureRow) {
   await a.click(await a.exists('#harness-back') ? '#harness-back' : '#nav-harnesses');
@@ -6888,6 +6888,8 @@ async function libraryFlow() {
   saved(join(skill(B.copilot, 'review', text('review', 'Review hard.')), 'SKILL.md'), 2);
   saved(agent(B.home, 'claude-cli', 'review', agentText('review', 'You review code.')), 48);
   saved(agent(B.home, 'copilot-cli', 'review', agentText('review', 'You review code, harder.')), 2);
+  // Five only Claude Code has, which Yes takes in: its notice is long.
+  for (const name of ['weekly-summary-writer', 'commit-message-helper', 'dependency-upgrade-checker', 'incident-postmortem-drafter', 'meeting-notes']) skill(B.claude, name);
   const b = await launch(B.data, [], B.real);
   await openKind(b, 'agents');
   await find(b, 'zzz');
@@ -6906,7 +6908,13 @@ async function libraryFlow() {
   check('Yes opens the walkthrough', await until(() => b.exists('#walkthrough')));
   same('the walkthrough opens the skill review’s row on the Library, Find let go since it hid the row',
     [await b.text('.page-title'), await b.run(`document.querySelector('#find').value`), await b.text('#walkthrough .walk-place'), await opened(b)], ['Library', '', ' · 1 of 2', [rowPart('', 'skills', 'review')]]);
+  check('the notice of what Yes took in reaches the Library', await until(() => b.exists('.sync-notice')), await b.text('.bands'));
   await pictures(b, 'walkthrough-1-of-2');
+  // At 860×600, the walkthrough's band and the long notice of what Yes took in both end above the status bar.
+  await sizeTo(b, 860, 600);
+  const above = await b.run(`(() => { const bar = document.querySelector('#status').getBoundingClientRect().top, notice = document.querySelector('.sync-notice'); return [!!notice, notice ? notice.getBoundingClientRect().bottom <= bar : null, document.querySelector('#walkthrough').getBoundingClientRect().bottom <= bar]; })()`);
+  same('at 860×600, the notice of what Yes took in and the walkthrough’s band end above the status bar', above, [true, true, true]);
+  await fullSize(b);
   await b.click('#walk-skip');
   same('Skip goes on to the agent of the same name: its row is the one open', [await b.text('#walkthrough .walk-place'), await opened(b)], [' · 2 of 2', [rowPart('', 'agents', 'review')]]);
   await pictures(b, 'walkthrough-2-of-2');
