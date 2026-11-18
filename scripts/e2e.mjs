@@ -4751,8 +4751,9 @@ async function firstSetupFlow() {
     same('Undo returns every notes folder byte for byte', copies.map(folder => existsSync(folder) && tree(folder)), beforeDeletion);
     await d.click('#sync-switch');
     rmSync(copies[1], { recursive: true });
-    for (let tries = 0; tries < 80 && existsSync(copies[0]); tries++) await wait(150);
-    check('Automatic sync finishes the same hand deletion by itself', copies.every(folder => !existsSync(folder)));
+    // The watch (or its fallback poll) starts the pass, which removes each destination separately.
+    for (let tries = 0; tries < 200 && copies.some(existsSync); tries++) await wait(150);
+    same('Automatic sync finishes the same hand deletion by itself', copies.map(folder => existsSync(folder)), [false, false, false]);
   }
   await d.click('#nav-overview');
   if ((await d.run("document.querySelector('#sync-switch').getAttribute('aria-checked')")) === 'true') await d.click('#sync-switch');
