@@ -40,7 +40,7 @@ const supports = (home: HomeView, kind: PageKind, tool: HarnessId) => kindSource
 const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${names[tool]} doesn’t use ${kindNouns[kind].many}`;
 
 /**
- * What one tool has of one kind: every item with a copy there, how many of those are On, and how many have copies that
+ * What one tool has of one kind: its total, the synced subtotal (for skills, only copies managed there), and copies that
  * differ and need a choice (the same count as that tool's "Copies differ" chip). `supported`: the tool can hold this kind.
  * A tool's card here and the Overview's tools table count by it.
  */
@@ -48,7 +48,9 @@ export function tally(home: HomeView, kind: PageKind, tool: HarnessId) {
   const source = kindSource(home, kind);
   const here = source.facts.filter(item => inTool(item, tool));
   const plugins = pluginItemCount(home, kind, tool);
-  return { kind, supported: source.tools.includes(tool), total: here.length + plugins, plugins, on: here.filter(item => item.on).length, differing: differingIn(source, tool) };
+  const on = here.filter(item => item.on && (kind !== 'skills' ||
+    (item.copies[tool] && !item.except.includes(tool) && source.library[item.key]?.applied[tool] !== undefined))).length;
+  return { kind, supported: source.tools.includes(tool), total: here.length + plugins, plugins, on, differing: differingIn(source, tool) };
 }
 
 const instructionOf = (tool: HarnessId): InstructionFile | undefined => state.instructions.data?.find(file => file.tool === tool);

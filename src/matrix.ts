@@ -30,7 +30,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rowId, timeIn, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, waitsForSync, fromSourceWords, harnessIs, inLibrary, madeFrom, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, waitsForSync, fromSourceWords, harnessIs, inLibrary, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -239,7 +239,7 @@ const fromFacts = (kind: PageKind, facts: LibraryFacts): ItemRow => ({
   // An MCP entry has no lines or edit time of its own: the copy question quotes its summary alone.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.body !== undefined ? { body: copy!.body } : {}) } : { lines: '', changed: '', text: copy!.summary }])),
   ownPart: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.ownPart?.length ? [[tool, copy!.ownPart]] : []))),
-  anotherWay: facts.anotherWay, takeOver: facts.takeOver, switchedOff: facts.switchedOff,
+  loads: facts.loads, anotherWay: facts.anotherWay, takeOver: facts.takeOver, switchedOff: facts.switchedOff,
 });
 
 /** The view behind the table, whose bands are listNotices'. */
@@ -292,7 +292,7 @@ const needsChoice = (t: Table, skill: ItemRow) => inTableTool(t, skill) && diffe
  * Harnesses page, read from the facts the same way the table reads them.
  */
 export function differingIn({ facts }: KindSource, tool: Tool) {
-  return facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && asksWhichCopy(fact)).length;
+  return facts.filter(fact => inTool(fact, tool as HarnessId) && asksWhichCopy(fact)).length;
 }
 type Filter = 'all' | 'attention' | 'plugins' | 'unused';
 const newView = () => ({
@@ -1160,7 +1160,7 @@ const controlId = (skill: ItemRow, prefix: string) => elId(`${prefix}${drawnAsAd
 const focusOn = (t: Table, skill: ItemRow) => { const prefix = filesView(t) ? 'detail-' : ''; return () => controlId(skill, prefix); };
 
 /**
- * Off: it leaves every harness, and Central Knot keeps it (library.ts), with its switches in the tools that have it through a
+ * Off: Central Knot removes its copies and keeps the item (library.ts), with its switches in the tools that have it through a
  * plugin. `seen`: whether its row was drawn On when clicked (libraryrow.ts rowClicks: a click made from an older state is refused).
  */
 function turnOff(t: Table, skill: ItemRow, seen: boolean): Click {
@@ -1174,7 +1174,12 @@ function turnOff(t: Table, skill: ItemRow, seen: boolean): Click {
   // "No tool has it" only where none does: a tool whose plugin switch can't be written still has it.
   // A tool's own copy, which Off leaves alone (library.ts), is still there too: said as its mark says it.
   const own = ownCopies(skill, itemOf(skill), tools());
-  const said = (notIn: HarnessId[]) => lib.say.said.off(name, stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], tools()), tools(), leftOutTools(), own) + pluginSaid(notIn);
+  const said = (notIn: HarnessId[]) => {
+    const now = rowsOf(skill.kind).find(row => row.key === skill.key);
+    const ways = now ? otherReadLines(now, tools()) : [];
+    const still = stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], tools());
+    return lib.say.said.off(name, still, tools(), leftOutTools(), own, ways) + pluginSaid(notIn);
+  };
   return mainClick(t, skill, false, [{ ...rowClicks.off(skill, itemOf(skill)), seenOn: seen }], plugins, said, plugins.left, focusOn(t, skill));
 }
 
@@ -1692,6 +1697,8 @@ function offNote(t: Table, list: ItemRow[]) {
   const ownIn = (skill: ItemRow) => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind));
   const own = list.filter(skill => ownIn(skill).length), where = [...new Set(own.flatMap(ownIn))];
   if (own.length) return `in Central Knot; ${own.length} also in ${andList(where.map(tool => names[tool]))}, ${own.length === 1 ? 'a copy' : 'copies'} Central Knot didn’t put there`;
+  const ways = list.flatMap(row => otherReadLines(row, toolsFor(t, t.kind)));
+  if (ways.length) return list.length === 1 ? ways.join(' ') : 'in Central Knot; some tools still read copies elsewhere (see each row)';
   return leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
 }
 
