@@ -5,10 +5,13 @@
 import { mock, test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Change, HarnessId, HomeView, ItemNotice, PassResult, PluginTurn, PluginTurnResult, PluginsView } from '../src/types.ts';
+import type { PageKind } from '../src/app.ts';
 
 /** Main, as the page sees it: each switch click waits until the test answers it; every other call is counted. */
 const main = {
   sent: [] as string[], reads: { plugins: 0, home: 0 },
+  /** The History entries an Undo asked main to put back, in the order asked. */
+  restored: [] as string[],
   answers: [] as ((result: PluginTurnResult) => void)[],
   /** An item page's clicks, each a pass main runs (applySkills), answered by the test with what it did (pass). */
   passes: [] as ((result: PassResult) => void)[],
@@ -23,6 +26,8 @@ const api = {
   applySkills: (changes: Change[]) => { main.sent.push(changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}, seen ${change.seenOn ? 'on' : 'off'}`).join()); return new Promise<PassResult>(done => main.passes.push(done)); },
   history: async () => ({ events: [{ id: 'delete-bar', key: 'bar', kind: 'deleted' }], days: 30 }),
   applyAgents: (changes: Change[]) => { main.sent.push(`agent ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
+  applyServers: (changes: Change[]) => { main.sent.push(`server ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
+  restore: async (id: string) => { main.restored.push(id); return { results: [] }; },
   plugins: async () => { main.reads.plugins++; return view; },
   refresh: async (): Promise<HomeView | null> => { main.reads.home++; main.duringHomeRead?.(); return null; },
   setPluginSkill: async () => ({ reports: [report('skill-off', 'Turned off.')] }),
@@ -41,11 +46,14 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, leaveResults, pinnedRows,
+const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, leaveResults, pinnedRows, whyReadOnly,
   loadHome, queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin } = await import('../src/itemrow.ts');
+const { turnTheseOff } = await import('../src/matrix.ts');
+const { leftToItsRow } = await import('../src/usagerow.ts');
+const { newItem } = await import('../src/library.ts');
 const { clickWords } = await import('../src/pluginparts.ts');
 
 /** Lets the page's awaits run on to the next call to main (not by a timer: the fade's test holds them). */
@@ -69,7 +77,7 @@ function start() {
   drop(() => true);
   endRun();
   resetMarket();
-  Object.assign(main, { sent: [], reads: { plugins: 0, home: 0 }, answers: [], duringHomeRead: undefined });
+  Object.assign(main, { sent: [], restored: [], reads: { plugins: 0, home: 0 }, answers: [], duringHomeRead: undefined });
   app.home = { home: '/home', sync: { managed: [], gate: { state: 'open' } } } as unknown as typeof app.home;
   Object.assign(app, { page: 'plugins', outcome: undefined });
   market.read.data = view;
@@ -211,7 +219,7 @@ test('A list’s rows are its news: the person’s Refresh takes them away', asy
 
 test('A list’s rows are its news: an item page’s switch for a plugin’s item takes them away', async () => {
   await alphaInstalled();
-  await applyClick({ kind: 'skills', items: [], changes: [], said: '', pluginsOnly: true, plugins: { ops: [] } });
+  await applyClick({ kind: 'skills', items: [], rows: [], changes: [], said: '', pluginsOnly: true, plugins: { ops: [] } });
   assert.deepEqual(states(), []);
 });
 
@@ -269,11 +277,11 @@ test('A new run on Plugins clears what an earlier action’s stop said, as befor
 /** Each skill On or Off as main last answered for it (On before): what a row's state is now, as the page would read it from its view. */
 const onNow = new Map<string, boolean>();
 /** A skill's switch (or `kind`'s) clicked on the page open, as matrix.ts flip sends it: drawn as the row was (its latest unended click's state, else as it is now). */
-function flip(name: string, on: boolean, made = () => {}, kind: 'skills' | 'agents' = 'skills') {
+function flip(name: string, on: boolean, made = () => {}, kind: PageKind = 'skills') {
   const seen = wantedOn(kind, name) ?? onNow.get(name) ?? true;
   queueClick({ kind, key: name, on }, name, () => {
     made();
-    return { kind, items: [name], changes: [{ key: name, on, except: [], seenOn: seen }], said: (notIn: HarnessId[]) => `${name} is ${on ? 'on' : 'off'}${notIn.length ? ', but still in Claude Code' : ''}.` };
+    return { kind, items: [name], rows: [{ kind, key: name }], changes: [{ key: name, on, except: [], seenOn: seen }], said: (notIn: HarnessId[]) => `${name} is ${on ? 'on' : 'off'}${notIn.length ? ', but still in Claude Code' : ''}.` };
   }, () => onNow.get(name) ?? true);
 }
 /** What main did of one click: the item written or removed in Claude Code, or the click refused as a whole, or a write that failed. */
@@ -322,7 +330,7 @@ test('Refresh draws the notice a background read brought while the page was busy
 test('A deletion notice held during Delete takes the finished result’s place and points its Undo to History', async t => {
   backgroundWhileReading(t);
   main.syncChanged();
-  const click = applyClick({ kind: 'skills', items: ['bar'], changes: [{ key: 'bar', on: true, except: [], deleted: true }], said: 'Deleted bar.' });
+  const click = applyClick({ kind: 'skills', items: ['bar'], rows: [{ kind: 'skills', key: 'bar' }], changes: [{ key: 'bar', on: true, except: [], deleted: true }], said: 'Deleted bar.' });
   await main.pass({ ...did('bar'), made: ['delete-bar'] });
   await click;
   assert.equal(app.said.text, 'Sync changed notes.');
@@ -333,7 +341,7 @@ test('A deletion notice held during Delete takes the finished result’s place a
 test('An Agents notice leaves the Skills result and its Undo on screen', async t => {
   backgroundWhileReading(t, 'agents');
   main.syncChanged();
-  const click = applyClick({ kind: 'skills', items: ['bar'], changes: [{ key: 'bar', on: true, except: [], deleted: true }], said: 'Deleted bar.' });
+  const click = applyClick({ kind: 'skills', items: ['bar'], rows: [{ kind: 'skills', key: 'bar' }], changes: [{ key: 'bar', on: true, except: [], deleted: true }], said: 'Deleted bar.' });
   await main.pass({ ...did('bar'), made: ['delete-bar'] });
   await click;
   assert.equal(app.said.text, 'Sync changed notes.');
@@ -345,7 +353,7 @@ for (const pluginsOnly of [true, false]) {
   test(`A notice on Skills keeps the Undo for ${pluginsOnly ? 'a plugin item’s switch' : 'a switch that changed a copy and a plugin item'}`, async t => {
     backgroundWhileReading(t);
     main.syncChanged();
-    const click = applyClick({ kind: 'skills', items: ['bar'], said: 'Turned bar off.', pluginsOnly,
+    const click = applyClick({ kind: 'skills', items: ['bar'], rows: [{ kind: 'skills', key: 'bar' }], said: 'Turned bar off.', pluginsOnly,
       changes: pluginsOnly ? [] : [{ key: 'bar', on: false, except: [] }],
       plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', skill: 'bar', action: 'skill-off' }] } });
     if (!pluginsOnly) await main.pass({ ...did('bar'), made: ['delete-bar'] });
@@ -541,7 +549,7 @@ test('A click on Codex’s Agents tab that ends while Codex’s Skills tab is op
 test('A plugin’s skill named like your own: its switch’s click, and its Undo, ask for the plugin’s row’s flash, never your own’s', async () => {
   onSkills();
   const key = 'issue-tracker@team/release-notes', theirs = `skills-${key}`;
-  queueClick({ kind: 'skills', key, on: false }, 'release-notes', () => ({ kind: 'skills', items: ['release-notes'], keys: [key], changes: [{ key: 'release-notes', on: false, except: [] }], said: 'release-notes is off in Claude Code.' }), () => false);
+  queueClick({ kind: 'skills', key, on: false }, 'release-notes', () => ({ kind: 'skills', items: ['release-notes'], rows: [{ kind: 'skills', key }], changes: [{ key: 'release-notes', on: false, except: [] }], said: 'release-notes is off in Claude Code.' }), () => false);
   await settled();
   await main.pass({ ...did('release-notes'), made: ['event-1'] });
   assert.deepEqual([flashRequests.has(theirs), flashRequests.has('skills-release-notes')], [true, false]);
@@ -549,6 +557,95 @@ test('A plugin’s skill named like your own: its switch’s click, and its Undo
   app.outcome!.act!.run();
   await settled();
   assert.deepEqual([app.outcome?.text, flashRequests.has(theirs), flashRequests.has('skills-release-notes')], ['Undone: release-notes is as before.', true, false]);
+});
+
+// ---------- Rows of several kinds in one result ----------
+
+/**
+ * A home whose library holds these items, Off as their clicks leave them (`on`: On, before a click), each with the History entry
+ * its Off made (`off-<kind>-<key>`, in this order, a second apart): what an Undo decides its actions on (historyactions.ts
+ * libraryAction). `stopped`: a kind whose own record is damaged, which stops its writes alone.
+ */
+function homeWith(t: TestContext, items: { kind: PageKind; key: string }[], { stopped, on = false }: { stopped?: PageKind; on?: boolean } = {}) {
+  const record = { 'skills': '', mcp: 'mcp:', agents: 'agent:' };
+  const view = (kind: PageKind) => ({ tools: ['claude-cli', 'codex-cli'], items: [], notices: [], problems: [], unread: [], access: { allowed: true },
+    gate: kind === stopped ? { state: 'stopped', reason: 'The MCP record is damaged. Nothing was written or deleted.' } : { state: 'ready' },
+    library: Object.fromEntries(items.filter(item => item.kind === kind).map(item => [item.key, { ...newItem(item.key, item.key), on }])) });
+  app.home = { home: '/home', label: 'Practice', sync: { managed: ['claude-cli', 'codex-cli'], caughtUp: [], access: { allowed: true }, gate: { state: 'ready' } },
+    skills: view('skills'), mcp: view('mcp'), agents: view('agents') } as unknown as HomeView;
+  const events = items.map((item, at) => ({ id: `off-${item.kind}-${item.key}`, key: `${record[item.kind]}${item.key}`, kind: 'off', at: new Date(Date.UTC(2026, 10, 18, 9, 0, at)).toISOString() }));
+  t.mock.method(api, 'history', async () => ({ events, days: 30 }));
+}
+/** What main did of one kind's click: `name` off in Claude Code, and the History entry its Off made. */
+const offMade = (kind: PageKind, name: string): PassResult => ({ ...did(name), made: [`off-${kind}-${name}`] });
+
+test('A skill and an agent both named review, and a server, switched on one page: one run, three counted, each review with its kind, each row flashed, and one Undo puts back all three, newest first', async t => {
+  onSkills();
+  homeWith(t, [{ kind: 'skills', key: 'review' }, { kind: 'agents', key: 'review' }, { kind: 'mcp', key: 'github' }]);
+  // Three kinds clicked where the page is one place (the Library will be): one run, whatever each row's kind.
+  flip('review', false);
+  flip('review', false, undefined, 'agents');
+  flip('github', false, undefined, 'mcp');
+  // Two rows of one name are two rows: each is drawn as its own click asks.
+  assert.deepEqual([wantedOn('skills', 'review'), wantedOn('agents', 'review'), wantedOn('mcp', 'github')], [false, false, false]);
+  await settled();
+  await main.pass(offMade('skills', 'review'));
+  await main.pass(offMade('agents', 'review'));
+  await main.pass(offMade('mcp', 'github'));
+  assert.deepEqual(main.sent, ['review off, seen on', 'agent review off', 'server github off']);
+  assert.equal(app.outcome?.text, '3 items are off: review (skill), review (agent) and github.');
+  assert.deepEqual(['skills-review', 'agents-review', 'mcp-github'].map(id => flashRequests.has(id)), [true, true, true]);
+  flashRequests.clear();
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual(main.restored, ['off-mcp-github', 'off-agents-review', 'off-skills-review']);
+  assert.equal(app.outcome?.text, 'Undone: review (skill), review (agent) and github are as before.');
+  assert.deepEqual(['skills-review', 'agents-review', 'mcp-github'].map(id => flashRequests.has(id)), [true, true, true]);
+});
+
+test('Turn these off across kinds, from the No use seen chip: a skill only some tools have is turned off, an agent a plugin also brings is left to its row, a server whose record is damaged is skipped and named, and the agents after it go on; Undo puts back what went', async t => {
+  onSkills();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'mcp', key: 'github' }, { kind: 'agents', key: 'planner' }], { stopped: 'mcp', on: true });
+  const row = (kind: PageKind, name: string, copies: Record<string, string>) => ({ kind, key: name, name, description: '', copies, on: true, except: [] });
+  const notes = row('skills', 'notes', { 'claude-cli': 'notes-1' }), github = row('mcp', 'github', { 'claude-cli': 'github-1', 'codex-cli': 'github-1' });
+  const planner = row('agents', 'planner', { 'claude-cli': 'planner-1', 'codex-cli': 'planner-1' });
+  // The chip's band leaves to its own row an item a tool has through a plugin: the agent is not among what it turns off.
+  assert.equal(leftToItsRow({ key: 'reviewer', name: 'reviewer', copies: {}, plugin: { 'claude-cli': { plugin: 'kit', marketplace: 'team' } } } as never), true);
+  // A row's controls ask their own kind's gate: the server's record stops servers only.
+  assert.deepEqual([whyReadOnly(app.home!, 'mcp'), whyReadOnly(app.home!, 'skills'), whyReadOnly(app.home!)], ['The MCP record is damaged. Nothing was written or deleted.', undefined, undefined]);
+  turnTheseOff([planner, github, notes]);
+  await settled();
+  // Main turns each off; the home as it reads then has it Off, which its Undo is decided on.
+  app.home!.skills.library.notes!.on = app.home!.agents.library.planner!.on = false;
+  await main.pass(offMade('skills', 'notes'));
+  // Kind by kind, in turn: the servers' click goes once the skills' is done, and main refuses it; the agents' goes after it.
+  await main.pass({ stopped: 'The MCP record is damaged. Nothing was written or deleted.', results: [], writes: 0 });
+  await main.pass(offMade('agents', 'planner'));
+  assert.deepEqual(main.sent, ['notes off, seen on', 'server github off', 'agent planner off']);
+  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn, app.outcome?.act?.label],
+    ['Turned off 2 items with no use seen in the last 30 days: notes and planner. Central Knot keeps them, and turning one on puts it back as it was.',
+      ['MCP servers: The MCP record is damaged. Nothing was written or deleted.'], true, 'Undo']);
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([main.restored, app.outcome?.text], [['off-agents-planner', 'off-skills-notes'], 'Undone: notes and planner are as before.']);
+});
+
+test('An Undo across kinds whose agent’s entry is stopped: the agents’ entries before it are left, the skill’s and the server’s still go back, and the stop is said once', async t => {
+  onSkills();
+  homeWith(t, [{ kind: 'skills', key: 'review' }, { kind: 'agents', key: 'review' }, { kind: 'agents', key: 'notes' }, { kind: 'mcp', key: 'github' }]);
+  const stop = 'The agents record is damaged. Nothing was written or deleted.';
+  t.mock.method(api, 'restore', async (id: string) => { main.restored.push(id); return id === 'off-agents-notes' ? { stopped: stop, results: [] } : { results: [] }; });
+  flip('review', false);
+  flip('review', false, undefined, 'agents');
+  flip('notes', false, undefined, 'agents');
+  flip('github', false, undefined, 'mcp');
+  await settled();
+  for (const [kind, name] of [['skills', 'review'], ['agents', 'review'], ['agents', 'notes'], ['mcp', 'github']] as const) await main.pass(offMade(kind, name));
+  app.outcome!.act!.run();
+  await settled();
+  // Newest first: the server's, then the agent notes's, which stops; the agent review's is left, and the skill's goes back.
+  assert.deepEqual(main.restored, ['off-mcp-github', 'off-agents-notes', 'off-skills-review']);
+  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], ['Not all of it could be undone.', [stop], true]);
 });
 
 test('A notice’s ask to flash a row lapses after its time, and a fresh ask then takes its place; Undo’s ask waits for the row', () => {
