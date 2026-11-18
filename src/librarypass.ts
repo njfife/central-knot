@@ -304,6 +304,8 @@ export async function joinCounts<C, E extends Seen, D extends Disk<E>>(
   return counts;
 }
 
+/** The tools whose whole file or folder of this kind can't be seen for sure (`harness:*`): what they hold of it isn't known (LibraryView unread). */
+export const unreadIn = (disk: Disk<Seen>, tools: readonly HarnessId[]) => tools.filter(tool => disk.unseen.has(`${tool}:*`));
 export const unseenIn = (disk: Disk<Seen>, tool: HarnessId, key: string) => disk.unseen.get(`${tool}:${key}`) ?? disk.unseen.get(`${tool}:*`);
 
 /**

@@ -22,7 +22,7 @@ import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
 import { keepVersion, listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unreadIn, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { comparableText } from './pluginstatus.ts';
 import { pluginHolds, throughPlugins, type GivenByPlugin, type PluginHold } from './plugins.ts';
@@ -521,7 +521,7 @@ export async function skillsView(context: ShareContext, tools: HarnessId[], noti
   for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key), fromSource.get(key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
   const problems = problem ? [problem, ...look.disk.problems] : look.disk.problems;
-  return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, notices };
+  return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, unread: unreadIn(look.disk, managed), notices };
 }
 
 /** One copy as the page shows it (types.ts ToolCopy): the copy question quotes its first line of body text; Read both copies opens the Files view. */

@@ -395,7 +395,7 @@ test('Turn these off leaves to its own row a plugin\'s item and one linked to a 
     leftToItsRow(facts('notes', {}, { fromSource: { link: 'https://github.com/o/r' } })), leftToItsRow(inClaude)], [true, true, false, false]);
 });
 
-// ---------- A reading in sum (usagerow.ts toolHistories, usageSummary): the chip and its band read noUseSeen, tooNew and foundNoneSeen; the rest is for the Overview, the next step ----------
+// ---------- A reading in sum (usagerow.ts toolHistories, usageSummary): the item pages' chip, its band and Used column read it, and the Overview's cards and tools table ----------
 
 /** A home's view as the summary reads it: one kind's items and its tools, the others empty, the plugins installed, and which tools are managed and installed. */
 function homeOf(skills: { facts: LibraryFacts[]; library: Record<string, LibraryItem> }, managed: HarnessId[], present = managed, pluginItems: InstalledPlugin[] = []) {
@@ -417,7 +417,7 @@ test('Each tool\'s history: its sessions in the 30 days, and how far back it goe
   assert.deepEqual(toolHistories(readingOf({}), homeOf({ facts: [], library: {} }, ['claude-cli'])).map(each => each.tool), ['claude-cli']);
 });
 
-test('A reading in sum: the rows used, as the page lists them (Off, found and a plugin\'s own too), its three most used; of the On items not used, no use seen, too new for the chip, can\'t say; the found ones (a deleted one too) with no use seen', () => {
+test('A reading in sum: the rows with a figure and the rows used, as the page lists them (Off, found and a plugin\'s own too), its three most used; of the On items not used, no use seen, too new for the chip, can\'t say; the found ones (a deleted one too) with no use seen', () => {
   const inClaude = (key: string) => facts(key, { 'claude-cli': copy(key) }), inCopilot = (key: string) => facts(key, { 'copilot-cli': copy(key) });
   const rows = [inClaude('used'), inClaude('idle'), inClaude('young'), inCopilot('mute'), inClaude('off'), inClaude('gone'), inClaude('found'), inClaude('daily'), inClaude('quiet')];
   const library = { used: kept('used', 40), idle: kept('idle', 40), young: kept('young', 5), mute: kept('mute', 40), off: kept('off', 40, { on: false }), gone: kept('gone', 40, { deleted: { at: daysAgo(1) } }), daily: kept('daily', 40) };
@@ -427,9 +427,18 @@ test('A reading in sum: the rows used, as the page lists them (Off, found and a 
   // Copilot CLI records every skill it runs but keeps no sessions here, so it can't say for mute.
   reading.tools.find(each => each.tool === 'copilot-cli')!.sessions = 0;
   const sum = usageSummary(reading, homeOf({ facts: rows, library }, ['claude-cli', 'copilot-cli'], ['claude-cli', 'copilot-cli'], [tracker]));
+  // Every row has a figure but mute's, which no tool that has it on can tell about.
   assert.deepEqual(sum.kinds.skills, {
-    used: ['used', 'off', 'found', 'daily', 'tracker@m/triage'],
+    figured: 9, used: ['used', 'off', 'found', 'daily', 'tracker@m/triage'],
     mostUsed: [{ key: 'daily', name: 'daily', sessions: 4 }, { key: 'tracker@m/triage', name: 'triage', sessions: 3 }, { key: 'used', name: 'used', sessions: 2 }],
     noUseSeen: ['idle'], tooNew: ['young'], cantSay: ['mute'], foundNoneSeen: ['gone', 'quiet'] });
-  assert.deepEqual([sum.kinds.mcp, sum.tools.map(each => [each.tool, each.goes])], [{ used: [], mostUsed: [], noUseSeen: [], tooNew: [], cantSay: [], foundNoneSeen: [] }, [['claude-cli', 'whole'], ['copilot-cli', 'none']]]);
+  assert.deepEqual([sum.kinds.mcp, sum.tools.map(each => [each.tool, each.goes])], [{ figured: 0, used: [], mostUsed: [], noUseSeen: [], tooNew: [], cantSay: [], foundNoneSeen: [] }, [['claude-cli', 'whole'], ['copilot-cli', 'none']]]);
+});
+
+test('A kind no tool here can tell about has no row with a figure: no use seen is never said where no tool that has an item on keeps sessions', () => {
+  const inCopilot = (key: string) => facts(key, { 'copilot-cli': copy(key) });
+  const reading = readingOf({});
+  reading.tools.find(each => each.tool === 'copilot-cli')!.sessions = 0;
+  const sum = usageSummary(reading, homeOf({ facts: [inCopilot('notes'), inCopilot('review')], library: { notes: kept('notes', 40), review: kept('review', 40) } }, ['copilot-cli']));
+  assert.deepEqual([sum.kinds.skills.figured, sum.kinds.skills.used, sum.kinds.skills.cantSay], [0, [], ['notes', 'review']]);
 });
