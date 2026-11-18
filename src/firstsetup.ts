@@ -117,7 +117,7 @@ const skip = (item: Waiting) => { walk.passed.push(walkId(item)); rerender(); };
  * "Use the latest for the rest": for each item left with a latest copy, the click its question's main button sends (`use`, as
  * seen: `useHash`), each with its own History entry and Undo; those with no dates to go by are skipped, and said.
  */
-const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', async () => {
+const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', async page => {
   const home = state.home!, dated = left.filter(item => item.latest), undated = left.filter(item => !item.latest);
   const send = { skills: window.centralKnot.applySkills, mcp: window.centralKnot.applyServers, agents: window.centralKnot.applyAgents };
   const sent: { kind: PageKind; result: PassResult }[] = [];
@@ -128,7 +128,7 @@ const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', asy
   setHome(await window.centralKnot.refresh());
   walk.passed.push(...undated.map(walkId));
   passChosen(dated);
-  tell({ page: state.page, band: true, history: true, ...latestDone(dated, undated, sent, waitingForChoice(state.home!)) });
+  tell({ page, band: true, history: true, ...latestDone(dated, undated, sent, waitingForChoice(state.home!)) });
 });
 
 /**

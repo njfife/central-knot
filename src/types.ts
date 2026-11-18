@@ -458,7 +458,11 @@ export interface HistoryEvent {
   at: string;
   key: string;
   item: string;
-  /** The library kind of the item it is about, recorded since entries say it (historyactions.ts libraryEntry reads an older one by its key). */
+  /**
+   * The kind of library item this entry is about: a skill, an MCP server or an agent. Written with every entry about a library item
+   * since this build, because a skill's key is its folder's name and may itself start "agent:" or "mcp:"; an entry written before
+   * has none, and is read by its key's start, as it always was (historyactions.ts entryKind).
+   */
   of?: PartKind;
   /** 'profile': a profile switch, or the profiles migration (key 'profiles:switch', item the profile's name: `profile`).
    * 'switched': a skill's tool switch cleared, or its Undo (`switched`).

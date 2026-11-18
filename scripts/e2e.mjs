@@ -1028,7 +1028,8 @@ async function practiceFlow() {
   same('a switch set in Claude Code’s settings reaches the open page, and is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'skills', 'release-notes'), /switched off in Claude Code/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? ''), await switchOn(a, 'skills', 'release-notes')], [true, ['claude-cli'], true, true]);
   await opened('release-notes');
   check('its line in the opened row says the tool doesn’t load it', /Claude Code doesn’t load it, and Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
-  // While the skills record is damaged, Let Claude Code load it is off as the row's other controls are, and nothing is written.
+  // While the skills record is damaged, Let Claude Code load it is drawn and off, as the row's other controls are (that a click
+  // writes nothing then is tests/librarygate.test.ts's).
   const clearSwitch = `#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`, skillsRecordHere = join(practice, '.central-knot/skills.json'), skillsRecordGood = readFileSync(skillsRecordHere, 'utf8');
   writeFileSync(skillsRecordHere, '{ damaged');
   await a.click('#header-refresh');
@@ -1192,7 +1193,7 @@ async function practiceFlow() {
   writeFileSync(syncRecord, '{ damaged');
   await a.click('#header-refresh');
   const timesSaid = async selector => ((await a.text(selector)) ?? '').split('The sync record is damaged').length - 1;
-  same('a damaged record is said in the bands, once, and every switch is off', [await timesSaid('.bands'), await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`)], [1, true]);
+  same('a damaged record is said in the bands, once, and every switch is off', [await timesSaid('.bands'), await a.run(`(list => list.length > 0 && list.every(item => item.disabled))([...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')])`)], [1, true]);
   await a.click('#nav-overview');
   same('the Overview says it once too, first of what needs you, as the stop', [await timesSaid('#overview-needs'), await timesSaid('#overview-stopped')], [1, 1]);
   await a.click('#nav-skills');
@@ -1208,14 +1209,21 @@ async function practiceFlow() {
   same('a damaged skills record: the Skills page says why once, as the stop', [stopSays.length > 0, await saidIn('.bands')], [true, 1]);
   // A row's controls ask their own kind's gate: every skill's switch is off, and on Agents the switches still work.
   const controlsOff = () => a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].map(item => item.disabled)`);
-  same('and every skill’s switch is off', (await controlsOff()).every(Boolean), true);
+  same('and every skill’s switch is off, on a list that has some', await controlsOff().then(off => off.length > 0 && off.every(Boolean)), true);
   await a.click('#nav-agents');
   same('while the agents’ switches work', (await controlsOff()).some(off => !off), true);
+  // History's actions on skills' entries ask the skills' gate too: off while the record is damaged.
+  await a.click('#nav-history');
+  const skillActionsOff = () => a.run(`[...document.querySelectorAll('.history-row')].filter(row => row.querySelector('.history-kind')?.textContent === 'Skill').flatMap(row => [...row.querySelectorAll('.history-actions button')]).map(button => button.disabled)`);
+  same('and History’s actions on skills’ entries are there and off', await skillActionsOff().then(off => off.length > 0 && off.every(Boolean)), true);
   await a.click('#nav-overview');
   same('and the Overview once, as Skills’ problem, with the way to Skills', [await saidIn('#overview-needs'), await a.exists('#overview-stopped'), await a.exists('#overview-skills-problem-0-open')], [1, false, true]);
   await a.click('#nav-skills');
   writeFileSync(skillsRecord, goodSkills);
   await a.click('#header-refresh');
+  await a.click('#nav-history');
+  same('put back, History’s actions on skills’ entries are on again', await skillActionsOff().then(off => off.length > 0 && !off.some(Boolean)), true);
+  await a.click('#nav-skills');
   // The practice copy has no Pi folder, only a skill in the shared .agents folder that Pi (and others) read: that makes no
   // tool present, so Pi is no column, mark or control, and Tools shows no card for it.
   mkdirSync(join(practice, '.agents/skills/shared-only'), { recursive: true });

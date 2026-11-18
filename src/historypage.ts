@@ -4,7 +4,7 @@
 // instructions' and tools' Manage switches' entries, and the sentences of entries from before an item was on the library (which
 // offer only what historyactions.ts finds left to do).
 import { DAY_MS, plural, timesApart } from './model.ts';
-import { acting, noToolManaged, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
+import { acting, noToolManaged, restoreEvent, showPage, shownPath, state, touchedToolsPhrase, whyKindReadOnly } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changes, homeItems, NO_PROFILE, turnsWords, undoPlan } from './profileplan.ts';
@@ -109,8 +109,10 @@ const managingWords = ({ tool, on }: NonNullable<HistoryEvent['managing']>): { g
 const everythingOffer = (event: HistoryEvent) => (state.home && state.history.data ? everythingAction(event, state.history.data, entriesNow(state.home)) : undefined);
 
 /** Skills, MCP servers, agents, profile switches, tools' Manage switches and Synchronize everything share History; each row says which it is. */
-const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.kind === 'managing' ? 'Tool' : event.kind === 'everything' ? 'Setting' : event.base ? 'Instructions'
-  : ({ skill: 'Skill', mcp: 'MCP server', agent: 'Agent' } as const)[entryKind(event)]);
+const kindOf = (event: HistoryEvent) => {
+  const of = entryKind(event);
+  return of ? ({ skill: 'Skill', mcp: 'MCP server', agent: 'Agent' } as const)[of] : event.kind === 'profile' ? 'Profile' : event.kind === 'managing' ? 'Tool' : event.kind === 'everything' ? 'Setting' : 'Instructions';
+};
 /** Rows are grouped by day (day headings); each row shows its time, every row in one form (model.ts timesApart). */
 const day = (iso: string) => {
   const date = new Date(iso);
@@ -131,7 +133,8 @@ function libraryButtons(event: HistoryEvent) {
   const loads = entry.kind === 'skills' ? state.home?.skills.items.find(row => row.key === entry.key)?.loads : undefined;
   const own = libraryAction(event, item, entriesNow(state.home!)(event).now, undefined, loads);
   const link = (label: string, help: string, id: string, version?: string) => {
-    const control = button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: acting(), onclick: () => void restoreEvent(event.id, version) });
+    // A write to the entry's kind: off while the page acts or that kind's gate stops it, as its row's controls are (app.ts whyKindReadOnly).
+    const control = button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: acting() ?? whyKindReadOnly(state.home!, entry.kind), onclick: () => void restoreEvent(event.id, version) });
     control.title = help;
     return control;
   };
@@ -184,7 +187,7 @@ export function historyPage() {
       h('span.history-about', {}, about.text),
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' || event.everything?.undo ? 'Restored' : 'Undone'))
         : h('span.history-actions', {},
-          !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, event.key, true) : null,
+          !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, libraryEntry(event)?.kind, true) : null,
           libraryEntry(event) ? libraryButtons(event) : actions(event, about.action)),
       changePanel(event.id))];
   }))));

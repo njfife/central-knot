@@ -147,6 +147,15 @@ inBox('Clearing a tool’s own switch while the skills record is damaged is refu
   assert.deepEqual([await offInCodex(box, target), (await historyOf(box)).filter(event => event.kind === 'switched')], [true, []]);
 });
 
+inBox('The Undo of Clearing a tool’s own switch while the skills record is damaged is refused before the switch is set: it stays cleared, and no entry is added', async box => {
+  const target = await switchedOff(box);
+  assert.equal((await clearSwitch(box.context, box.tools, 'notes', 'codex-cli')).stopped, undefined);
+  const cleared = (await historyOf(box)).filter(event => event.kind === 'switched');
+  await writeFile(join(box.home, '.central-knot/skills.json'), '{ damaged');
+  assert.match((await restoreSkill(box.context, box.tools, cleared.at(-1)!.id)).stopped ?? '', /The skills record is damaged/);
+  assert.deepEqual([await offInCodex(box, target), (await historyOf(box)).filter(event => event.kind === 'switched').length], [false, cleared.length]);
+});
+
 inBox('The Undo of Clearing a tool’s own switch is refused while the home waits for Resume; after a Resume it sets the switch again', async box => {
   const target = await switchedOff(box);
   assert.equal((await clearSwitch(box.context, box.tools, 'notes', 'codex-cli')).stopped, undefined);

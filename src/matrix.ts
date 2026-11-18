@@ -894,9 +894,9 @@ function forgetOtherHomes(t: Table) {
 const changes = new Map<string, { before: string; after: string } | null>();
 const openChanges = new Set<string>();
 
-/** A quiet link that opens the edit's before and after under the notice or History row. Skills only: their store keeps SKILL.md. */
-export function seeChangeLink(eventId: string, key: string, asLink = false) {
-  if (!eventId || key.includes(':') || changes.get(eventId) === null) return null;
+/** A quiet link that opens the edit's before and after under the notice or History row. A skill's only (`kind`): its store keeps SKILL.md. */
+export function seeChangeLink(eventId: string, kind: PageKind | undefined, asLink = false) {
+  if (!eventId || kind !== 'skills' || changes.get(eventId) === null) return null;
   const open = openChanges.has(eventId);
   return h(`button.${asLink ? 'btn.link.small' : 'text-action'}.see-change`, { type: 'button', id: `see-change-${eventId}`, 'aria-expanded': String(open), onclick: (event: Event) => {
     event.stopPropagation();
@@ -1023,7 +1023,7 @@ function syncNotice(t: Table, notice: Told) {
   return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone),
     h('span.notice-text', {}, offNow && notice.kind !== 'deleted-by-hand' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history)}`)),
     h('span.notice-actions', {},
-      notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.key) : null,
+      notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, t.kind) : null,
       action, history, off ? smallAction('Turn sync on', `notice-sync-on-${notice.history}`, () => void setSync(true)) : null),
     closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history); rerender(); }, { id: `notice-dismiss-${notice.history}`, label: `Dismiss this notice about ${notice.item}`, title: 'Dismiss', look: '.notice-dismiss' }),
     notice.history ? changePanel(notice.history) : null);

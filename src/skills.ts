@@ -323,7 +323,8 @@ export async function restoreSkill(context: ShareContext, tools: HarnessId[], ev
 
 /**
  * Clear the switch's Undo: each tool's own switch has the skill off again, as before, with an entry of its own. A tool not
- * managed now (`tools`) is left as it is, as every Undo leaves one, and said; with no tool left to set, it is refused.
+ * managed now (`tools`) is left as it is, as every Undo leaves one, and said; with no tool left to set, it is refused. The skills
+ * record's own stop and the gate come before any write, as clearSwitch's do.
  */
 async function switchBack(context: ShareContext, tools: HarnessId[], past: HistoryEvent): Promise<PassResult> {
   const recorded = past.switched!.filter(entry => entry.target), away = recorded.filter(entry => !tools.includes(entry.tool));
@@ -331,6 +332,8 @@ async function switchBack(context: ShareContext, tools: HarnessId[], past: Histo
   if (!entries.length) return { stopped: away.map(entry => notManagedHere(entry.tool)).join(' '), results: [], writes: 0 };
   const already = await Promise.all(entries.map(async ({ tool, target }) => isDisabled(context, await readSwitchFile(context, tool), target!)));
   if (already.every(Boolean)) return { stopped: `${andList(entries.map(entry => toolName(entry.tool)))}’s own switch has it off already. Nothing was changed.`, results: [], writes: 0 };
+  const { problem } = await skillKind.open(context);
+  if (problem) return { stopped: problem, results: [], writes: 0 };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0 };
   for (const { tool, target } of entries) {

@@ -565,7 +565,7 @@ test('A plugin’s skill named like your own: its switch’s click, and its Undo
  * A home whose library holds these items, Off as their clicks leave them (`on`: On, before a click), each with its row's facts
  * (`plugin`: a tool has it through a plugin too) and the History entry its Off made (`off-<kind>-<key>`, in this order, a second
  * apart): what an Undo decides its actions on (historyactions.ts libraryAction). `stopped`: a kind whose own record is damaged,
- * which stops its writes alone.
+ * which stops its writes alone. Returns History's entries, which a test may change.
  */
 function homeWith(t: TestContext, items: { kind: PageKind; key: string; plugin?: true }[], { stopped, on = false }: { stopped?: PageKind; on?: boolean } = {}) {
   const record = { 'skills': '', mcp: 'mcp:', agents: 'agent:' };
@@ -577,6 +577,7 @@ function homeWith(t: TestContext, items: { kind: PageKind; key: string; plugin?:
     skills: view('skills'), mcp: view('mcp'), agents: view('agents') } as unknown as HomeView;
   const events = items.map((item, at) => ({ id: `off-${item.kind}-${item.key}`, key: `${record[item.kind]}${item.key}`, kind: 'off', at: new Date(Date.UTC(2026, 10, 18, 9, 0, at)).toISOString() }));
   t.mock.method(api, 'history', async () => ({ events, days: 30 }));
+  return events;
 }
 /** What main did of one kind's click: `name` off in Claude Code, and the History entry its Off made. */
 const offMade = (kind: PageKind, name: string): PassResult => ({ ...did(name, false, kind), made: [`off-${kind}-${name}`] });
@@ -605,10 +606,42 @@ test('Turn these off where one skill’s Off is refused as stale: the result cou
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, flashRequests.has('skills-notes'), flashRequests.has('skills-spare')],
     ['Turned off 1 skill with no use seen in the last 30 days: notes. Central Knot keeps them, and turning one on puts it back as it was.',
       ['spare changed since the page was read. Nothing was changed; read again.'], true, false]);
+  // The result kept is about notes alone too: its names and rows, which a notice that moves its Undo reads (app.ts undoMoved).
+  assert.deepEqual([app.outcome?.items, app.outcome?.rows], [['notes'], [{ kind: 'skills', key: 'notes', name: 'notes' }]]);
   flashRequests.clear();
   app.outcome!.act!.run();
   await settled();
   assert.deepEqual([main.restored, app.outcome?.text, flashRequests.has('skills-notes'), flashRequests.has('skills-spare')], [['off-skills-notes'], 'Undone: notes is as before.', true, false]);
+});
+
+test('An Undo across kinds whose plugin switch can’t be turned back and whose agent’s entry is stopped names nothing as before', async t => {
+  onSkills();
+  homeWith(t, [{ kind: 'agents', key: 'review' }]);
+  // A plugin's skill switched off in Claude Code; its Undo, turning it back on there, fails.
+  let calls = 0;
+  t.mock.method(api, 'setPluginSkill', async () => ({ reports: [calls++ ? report('failed', 'Couldn’t turn it on.') : report('skill-off', 'Turned off.')] }));
+  t.mock.method(api, 'restore', async (id: string) => { main.restored.push(id); return { stopped: 'The agents record is damaged.', results: [] }; });
+  queueClick({ kind: 'skills', key: 'bar', on: false }, 'bar', () => ({ kind: 'skills', items: ['bar'], rows: [{ kind: 'skills', key: 'bar' }], changes: [], said: 'bar is off in Claude Code.', pluginsOnly: true,
+    plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', skill: 'bar', action: 'skill-off' }] } }), () => false);
+  flip('review', false, undefined, 'agents');
+  await settled();
+  await main.pass(offMade('agents', 'review'));
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn], ['Not all of it could be undone.', true]);
+});
+
+test('An Undo started on Skills, then Agents opened before it is done: its confirmation stays Skills’', async t => {
+  onSkills();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }]);
+  flip('notes', false);
+  await settled();
+  await main.pass(offMade('skills', 'notes'));
+  app.outcome!.act!.run();
+  showPage('agents');
+  await settled();
+  // Its result names the page it was started on (app.ts busy), so Agents' header doesn't show it (matrix.ts outcomeShown).
+  assert.deepEqual([main.restored, app.outcome?.text, app.outcome?.page], [['off-skills-notes'], 'Undone: notes is as before.', 'skills']);
 });
 
 test('Turn these off where every kind refuses: nothing is turned off, and the result says each kind by its name with its reason', async t => {
@@ -624,13 +657,15 @@ test('Turn these off where every kind refuses: nothing is turned off, and the re
 
 test('An Undo one of whose History entries is gone says not all of it could be undone, and puts back the rest', async t => {
   onSkills();
-  homeWith(t, [{ kind: 'skills', key: 'notes' }]);
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'spare' }]);
   flip('notes', false);
   flip('spare', false);
   await settled();
   await main.pass(offMade('skills', 'notes'));
-  // spare's Off made an entry History no longer holds.
   await main.pass(offMade('skills', 'spare'));
+  // The Undo is offered with both entries in History; spare's then goes from it (History's days pruned it, say) before the click.
+  assert.equal(app.outcome?.act?.label, 'Undo');
+  history.splice(history.findIndex(event => event.id === 'off-skills-spare'), 1);
   app.outcome!.act!.run();
   await settled();
   assert.deepEqual([main.restored, app.outcome?.text, app.outcome?.reasons, app.outcome?.warn],
