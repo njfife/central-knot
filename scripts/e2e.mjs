@@ -5623,7 +5623,8 @@ esac
  * by last used. Update usage statistics collects again, with a band that says what collecting does and closes; a reading that
  * lands moves no row. Three skills were taken in from copies saved 40 days ago, old enough for "No use seen in 30 days"; fresh,
  * saved 2 days ago, is left out as new. The chip lists the two with no use seen, and Turn these off turns them off in one click
- * whose Undo puts every file back.
+ * whose Undo puts every file back. A switch clicked while a reading is held (a named pipe among the session files) is carried out
+ * before it lands, so no reading holds a click up: checked by order, not time, as a click and a reading slow each other on a busy machine.
  */
 async function usageFlow() {
   const home = join(scratch, 'usage-home'), data = join(scratch, 'usage-data'), ago = days => new Date(Date.now() - days * 86_400_000);
@@ -5642,19 +5643,13 @@ async function usageFlow() {
   lines(join(home, '.claude/projects/-work/s2.jsonl'), [{ type: 'user', message: { content: '<command-name>/standup</command-name>' }, timestamp: ago(40).toISOString() }]);
   // Copilot CLI, not installed here so not managed: idle invoked 3 days ago, which counts all the same.
   lines(join(home, '.copilot/session-state/c1/events.jsonl'), [{ type: 'skill.invoked', data: { name: 'idle' }, timestamp: ago(3).toISOString() }]);
-  // OpenCode, not installed here (no settings folder), with a database left from a year ago, of a realistic size: 20,000
-  // messages, each with a text part and a tool part. Not named among the tools; read all the same.
+  // OpenCode, not installed here (no settings folder), with a database left from a year ago: not named among the tools; read all the same.
   const { DatabaseSync } = await import('node:sqlite');
   mkdirSync(join(home, '.local/share/opencode'), { recursive: true });
   const leftover = new DatabaseSync(join(home, '.local/share/opencode/opencode.db'));
-  leftover.exec('CREATE TABLE session (id text PRIMARY KEY, agent text, time_created integer NOT NULL); CREATE TABLE part (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, data text NOT NULL); BEGIN');
-  const yearAgo = ago(365).getTime(), part = leftover.prepare('INSERT INTO part VALUES (?, ?, ?, ?)'), output = 'x'.repeat(1500);
-  for (let session = 0; session < 1000; session++) leftover.prepare('INSERT INTO session VALUES (?, ?, ?)').run(`old${session}`, null, yearAgo);
-  for (let message = 0; message < 20000; message++) {
-    part.run(`t${message}`, `old${message % 1000}`, yearAgo, JSON.stringify({ type: 'text', text: output.slice(0, 600) }));
-    part.run(`c${message}`, `old${message % 1000}`, yearAgo, JSON.stringify({ type: 'tool', tool: message % 2 ? 'bash' : 'read', state: { input: { command: 'ls' }, output } }));
-  }
-  leftover.exec('COMMIT');
+  leftover.exec('CREATE TABLE session (id text PRIMARY KEY, agent text, time_created integer NOT NULL)');
+  leftover.exec('CREATE TABLE part (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, data text NOT NULL)');
+  leftover.prepare('INSERT INTO session VALUES (?, ?, ?)').run('old', null, ago(365).getTime());
   leftover.close();
   // Codex: its history starts 12 days ago; notes's SKILL.md read 5 days ago.
   lines(join(home, '.codex/sessions/2026/11/01/rollout-a.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(12).toISOString() },
@@ -5737,19 +5732,6 @@ async function usageFlow() {
   await fullSize(a);
   await fitsAtMinimum(a, 'Skills with usage collected and its figures');
   await a.shot('usage-read');
-  // A switch clicked while a reading runs is carried out without waiting for it: OpenCode's 20,000 messages are read in main,
-  // where the click's pass runs. Timed against the same click with no reading.
-  const flipTime = async key => a.run(`(async () => { const was = document.querySelector('#switch-${key}').getAttribute('aria-checked'), started = performance.now();
-    document.querySelector('#switch-${key}').click();
-    while (document.querySelector('#switch-${key}').getAttribute('aria-checked') === was || document.body.dataset.busy === 'true') await new Promise(done => setTimeout(done, 5));
-    return Math.round(performance.now() - started); })()`);
-  const alone = [await flipTime('fresh'), await flipTime('fresh')];
-  await a.click('#collect-usage');
-  const whileCollecting = await a.text('#usage-when');
-  const during = [await flipTime('fresh'), await flipTime('fresh')];
-  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
-  check(`a switch clicked while usage is collected waits under 300 ms longer than alone (alone ${alone.join(', ')} ms; while “${whileCollecting}”: ${during.join(', ')} ms)`, Math.max(...during) - Math.max(...alone) < 300, JSON.stringify({ alone, during, whileCollecting }));
-  await a.click('#usage-line-close');
   // The chip: standup and spare, old enough with no use seen; fresh, 2 days old, left out and counted; idle, used in Copilot CLI, not in it.
   same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['All', null], ['No use seen in 30 days', '2']]);
   await a.click('.chip[data-tip="No use seen in 30 days"]');
@@ -5829,8 +5811,8 @@ async function usageFlow() {
   same('the next launch keeps Sort by Last used, and the reading that comes by itself moves no row', [await a.run(`document.querySelector('#item-order').value`), await sectionsNow(a)], ['used', firstDrawn]);
 
   // ---------- A reading that lands moves nothing ----------
-  // This computer's home (`real`), opened now, has history in five tools and its reading starts afresh. Each reading's answer is
-  // held back 2.5 s in the page (or in main, where the page's call can't be wrapped), so the page is looked at while it runs.
+  // This computer's home (`real`), opened now, has history in five tools and its reading starts afresh. Each reading is held
+  // back by a named pipe (below), so the page is looked at while it runs.
   const realSkills = join(real, '.claude/skills');
   mkdirSync(join(real, '.local/bin'), { recursive: true });
   for (const name of ['claude', 'codex']) cpSync(join(home, '.local/bin', name), join(real, '.local/bin', name));
@@ -5920,6 +5902,25 @@ async function usageFlow() {
     await a.click('#usage-line-close');
     await chooseOrder('name');
     await chipNamed('All'); await a.settle();
+    // bravo's switch, clicked while an Update's reading waits on the pipe, is carried out (Off, said, its copies gone) while the
+    // toolbar still says Collecting…; then the reading lands and nothing moves.
+    const bravoCopies = () => [realSkills, join(real, '.codex/skills')].map(folder => readNow(join(folder, 'bravo/SKILL.md')));
+    const copiesBefore = bravoCopies();
+    await a.click('#collect-usage');
+    for (let tries = 0; tries < 100 && !reading(); tries++) await wait(25);
+    // Not a.click, which waits for the page to be idle; the header's result is closed first, as a.click does for a row's switch.
+    await a.run(`(() => { document.querySelector('#outcome-dismiss, #report-dismiss')?.click(); document.querySelector('#switch-bravo').click(); })()`);
+    const carriedOut = () => a.run(`document.body.dataset.busy !== 'true' && !!document.querySelector('#header [data-outcome] .band-text')`);
+    // Waited for as long as a.click waits for any click (30 s): a click held until the reading lands never comes before letGo.
+    for (let tries = 0; tries < 300 && !(await carriedOut()); tries++) await wait(100);
+    const whileHeld = [await switchOn(a, 'bravo'), await a.text('#header [data-outcome] .band-text'), bravoCopies(), await lead()], heldTops = await tops();
+    await letGo();
+    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await a.settle();
+    same('a switch clicked while a reading is held is carried out before the reading lands: bravo Off, said, its copies gone, the toolbar still collecting; when it lands nothing moves',
+      [copiesBefore.every(copy => copy !== ''), whileHeld, [await switchOn(a, 'bravo'), bravoCopies(), await tops()]],
+      [true, [false, 'bravo is off: no tool has it. Central Knot keeps it, and turning it on puts each folder back as it was.', ['', ''], 'Collecting…'], [false, ['', ''], heldTops]]);
+    await a.click('#usage-line-close');
   }
   same('no page errors, usage after a relaunch', a.pageErrors, []);
   await a.quit();
