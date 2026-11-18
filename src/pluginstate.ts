@@ -121,18 +121,9 @@ export const pinnedPlugins = (entry: MarketplaceView) => pinnedRows<number>(`plu
 
 /** How many installed plugins' files the list reads at once in the background (see readShown). */
 const COMPARE_AT_ONCE = 3;
-/**
- * A redraw for a background read landing: it keeps the caret where the person is typing (the find box), since the redraw
- * makes a new box.
- */
-function redrawKeepingCaret(): void {
-  const box = document.activeElement instanceof HTMLInputElement ? document.activeElement : undefined;
-  const [start, end] = [box?.selectionStart, box?.selectionEnd];
-  rerender();
-  const now = box?.id ? document.getElementById(box.id) : null;
-  if (now instanceof HTMLInputElement && now !== box && start != null && end != null) now.setSelectionRange(start, end);
-}
-const comparing = readInTurn(market.details, COMPARE_AT_ONCE, redrawKeepingCaret);
+// A background read landing redraws; the find box keeps its caret there as everywhere (dom.ts keepSelection). Called through an
+// arrow: app.ts, which owns rerender, imports this module, so rerender is not there yet while this one loads.
+const comparing = readInTurn(market.details, COMPARE_AT_ONCE, () => rerender());
 
 /** Reads, in the background, what the place on screen shows and hasn't been read yet: a README or a plugin's contents. */
 function readShown(): void {

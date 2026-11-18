@@ -1,21 +1,18 @@
-// The Overview (overviewPage: the home's first sentence, first setup's question, a card per kind), and
-// the Skills, MCP servers and Agents pages around the tables matrix.ts draws (skillsPage, mcpPage, agentsPage), with their
-// empty states (kindEmpty). Every other page has a module of its own (harnesspage.ts, historypage.ts, profilespage.ts,
-// sourcespage.ts, repopage.ts, pluginspage.ts, instructionspage.ts, settingspage.ts); which page draws is renderer.ts
-// renderPage, and the page's state and actions are app.ts's.
-import { absentKinds, acting, announce, noToolManaged, noToolManagedSentence, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
-import { afterLayout, button, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
-import { fullToolName, plural, skillCount, toolName } from './model.ts';
-import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
-import { heldKinds } from './presence.ts';
-import { brandMark, itemsTable, outcomeBand, resultInHeader, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
-import { andList, kindNames, kindNouns, noToolsSentence, orList, pageNames, toolList } from './words.ts';
-import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
-import { asksWhichCopy } from './libraryrow.ts';
-import { anyOn, kindSource, partId, rowId } from './itemrow.ts';
-import { setupLead } from './firstsetup.ts';
+// The Skills, MCP servers and Agents pages around the tables matrix.ts draws (skillsPage, mcpPage, agentsPage), with their
+// empty states (kindEmpty); and what every page shares when it has nothing to show: a home not read (notRead), a home with no
+// tool managed (noToolsLead, noToolsState), and preview only's reason inside a sentence (previewReason). Every other page has a
+// module of its own (overview.ts, harnesspage.ts, historypage.ts, profilespage.ts, sourcespage.ts, repopage.ts, pluginspage.ts,
+// instructionspage.ts, settingspage.ts); which page draws is renderer.ts renderPage, and the page's state and actions are app.ts's.
+import { acting, announce, noToolManaged, noToolManagedSentence, homeToolNames, homeTools, loadHome, type PageKind, selectItem, shownPath, showFile, showPage, startHome, state } from './app.ts';
+import { button, emptyState, fileBlocks, h, icon, section } from './dom.ts';
+import { toolName } from './model.ts';
+import type { HarnessId, HomeView, Skill } from './types.ts';
+import { brandMark, itemsTable, outcomeBand, resultInHeader, skillsBrowser, wrappingPath } from './matrix.ts';
+import { andList, kindNouns, noToolsSentence, orList } from './words.ts';
+import { rowCount } from './pluginrows.ts';
+import { partId, rowId } from './itemrow.ts';
 
-// ---------- Overview ----------
+// ---------- What every page shares when it has nothing to show ----------
 
 const reading = () => h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
 /** The preview-only reason without its own "Preview only:" prefix or final stop, to sit inside a sentence. */
@@ -36,7 +33,7 @@ const chooseHomeButton = (id: string) => button({ variant: 'outline', icon: 'fol
  * noToolManagedSentence), `more` if a page has more to say, and the way on, at the top left, as the Overview's lead sits:
  * another home (`<page>-choose-home`), or Harnesses, where each tool's Manage switch is (`<page>-open-harnesses`).
  */
-const noToolsLead = (page: string, more?: string) => {
+export const noToolsLead = (page: string, more?: string) => {
   const leftOut = !!state.home?.sync.present.length;
   return [h('p.overview-lead', {}, state.home ? noToolManagedSentence(state.home) : noToolsSentence, more ? ` ${more}` : ''),
     h('div.overview-actions', {}, leftOut ? button({ variant: 'outline', icon: 'boxes', label: 'Open Harnesses', id: `${page}-open-harnesses`, onclick: () => showPage('harnesses') }) : chooseHomeButton(`${page}-choose-home`))];
@@ -72,171 +69,12 @@ export function kindEmpty(kind: PageKind): { glyph: Parameters<typeof emptyState
 const emptyKindPage = (kind: PageKind, id: string) => { const empty = kindEmpty(kind); return nothingHere(empty.glyph, empty.title, empty.body, id); };
 const noSkills = (id: string) => emptyKindPage('skills', id);
 
-/**
- * The Overview's first sentence: what Central Knot keeps the same, between this home's tools only, naming only the kinds
- * a tool here can hold. A kind not every tool here holds says which do, or which don't ("… in all but Codex").
- */
-function leadSentence(home: HomeView): string {
-  const tools = homeTools();
-  if (noToolManaged()) return noToolManagedSentence(home);
-  const named = andList(tools.map(toolName));
-  const holdersOf = { skills: tools, mcp: home.mcp.tools, agents: home.agents.tools };
-  const held = heldKinds(home).map(kind => [kindNouns[kind].many, holdersOf[kind]] as const);
-  // Installed tools whose Manage switch is off are named once, with where their switch is.
-  const out = home.sync.present.filter(tool => !tools.includes(tool));
-  const leftOut = out.length ? ` ${toolList(out)} ${out.length === 1 ? 'is' : 'are'} left out (${out.length === 1 ? 'its switch is' : 'their switches are'} on Harnesses).` : '';
-  if (tools.length === 1) return `Central Knot keeps the ${andList(held.map(([kind]) => kind))} you choose the same between your tools. ${out.length ? `It manages only ${named} here` : `Only ${named} is in this home`}, so there is nothing to keep in step yet.${leftOut}`;
-  const everywhere = held.filter(([, holders]) => holders.length === tools.length).map(([kind]) => kind);
-  const some = held.filter(([, holders]) => holders.length < tools.length).map(([kind, holders]) => {
-    const without = tools.filter(tool => !holders.includes(tool));
-    return holders.length >= without.length ? `${kind} in all but ${andList(without.map(toolName))}` : `${kind} in ${andList(holders.map(toolName))}`;
-  });
-  return `Central Knot keeps the ${andList(everywhere)} you choose the same in ${named}${some.map(part => `; ${part}`).join('')}.${leftOut}`;
-}
-
 /** Shown before any home has been read, or when reading failed. */
 export function notRead() {
   if (state.busy) return reading();
   return h('div.page', {}, emptyBands(), emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void (state.lastMode ? loadHome(state.lastMode) : startHome()) })));
 }
 
-
-/** The practice copy explains itself the first times it opens: what it is, that it is safe, and how to move to the real thing. */
-function practiceBanner() {
-  if (state.home?.mode !== 'fixture' || !practiceNoteOpen()) return null;
-  return h('div.intro', { role: 'note' },
-    h('div.intro-text', {},
-      h('strong', {}, 'This is a practice copy.'),
-      h('span', {}, ' Sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools, so try anything.')),
-    // The first step stays inside the sandbox; the real home is the quieter second choice.
-    button({ variant: 'primary', size: 'small', label: 'Try it: open Skills', id: 'intro-try', onclick: () => showPage('skills') }),
-    (() => { const real = button({ variant: 'link', size: 'small', label: `or use ${realHomeName}`, id: 'intro-use-real', onclick: () => void loadHome('actual') }); real.title = 'Only reads your tools; nothing is written there until you say so.'; return real; })(),
-    button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Hide this note', id: 'intro-dismiss', onclick: () => { setPracticeNote(false); rerender(); } }));
-}
-
-/** What a kind card needs from one item: whether it is On, has edits waiting or differs, and which tools hold a copy. */
-interface KindFact { on: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown>; plugin?: Record<string, unknown> }
-
-/**
- * One kind on the Overview: how many there are and how many are On, then what needs attention in short words
- * ("1 differs"), on one summary line; under it, each tool here that holds this kind with its count, the entries wrapping
- * whole. The card opens the kind's page; "differs" is its own link, to the page narrowed to those.
- */
-function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof icon>[0], facts: KindFact[], holders: HarnessId[]) {
-  const { title, short: noun } = kindNouns[page];
-  // A plugin's items count with the rest, said apart: nothing here manages them.
-  const home = state.home;
-  const fromPlugins = home ? pluginItemCount(home, page) : 0;
-  const total = facts.length + fromPlugins;
-  const on = facts.filter(fact => fact.on).length;
-  const differs = facts.filter(fact => fact.differs).length;
-  const edits = facts.filter(fact => fact.on && fact.edited?.length).length;
-  const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'differs' : 'differ'}`, title: `${differs} ${differs === 1 ? 'has' : 'have'} different copies. Show only these.` }
-    : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} waiting`, title: `${plural(edits, 'change')} waiting to sync` }
-      : on ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every synced one is the same in every tool it syncs to' }
-        : undefined;
-  const status = !attention ? null : differs
-    ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
-    : h(`span.kind-card-state.${attention.tone}`, { title: attention.title }, icon(attention.glyph, 13), attention.text);
-  const countFor = (tool: HarnessId) => facts.filter(fact => inTool(fact, tool)).length + (home ? pluginItemCount(home, page, tool) : 0);
-  const tools = holders.map(tool => {
-    const count = countFor(tool);
-    return h('span.kind-tool', {}, brandMark(tool, 12), h('span', {}, toolName(tool)), h('strong.kind-tool-count', {}, String(count)));
-  });
-  // The heading is the card's one button; its click area stretches over the whole card (style.css), under the differs link.
-  return h('div.kind-card', {},
-    h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
-      h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
-    h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} synced` : 'none synced'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`),
-      // The "·" goes with the status; a narrow card puts the status on a line of its own, without it (markWrappedStatus).
-      status ? h('span.kind-card-status', {}, h('span.kind-card-dot', { 'aria-hidden': 'true' }, '·'), status) : null),
-    total ? h('div.kind-card-tools', {}, tools) : null);
-}
-
-/**
- * After layout: a kind card's status that wrapped onto a line of its own drops its "·", which only separates it from
- * the counts on the same line (style.css .kind-card-status.wrapped). Run after layout (dom.ts afterLayout).
- */
-function markWrappedStatus(): void {
-  for (const status of document.querySelectorAll<HTMLElement>('.kind-card-status')) {
-    status.classList.remove('wrapped');
-    const counts = status.previousElementSibling as HTMLElement | null;
-    status.classList.toggle('wrapped', !!counts && status.offsetTop > counts.offsetTop + counts.offsetHeight / 2);
-  }
-}
-
-afterLayout(markWrappedStatus);
-
-/**
- * After layout: the tool counts sit on one line when every card has room for them; otherwise every card lays them out
- * the same way, in two columns, or one per line when two don't fit (style.css .kind-card-tools[data-layout]).
- */
-function settleToolCounts(): void {
-  const lists = [...document.querySelectorAll<HTMLElement>('.kind-card-tools')];
-  const set = (layout: string) => { for (const list of lists) list.dataset.layout = layout; };
-  const wraps = (list: HTMLElement) => { const first = list.firstElementChild as HTMLElement | null, last = list.lastElementChild as HTMLElement | null; return !!first && !!last && last.offsetTop > first.offsetTop + first.offsetHeight / 2; };
-  set('line');
-  if (!lists.some(wraps)) return;
-  set('columns');
-  if (lists.some(list => list.scrollWidth > list.clientWidth)) set('stack');
-}
-
-afterLayout(settleToolCounts);
-
-/**
- * The lead's next step, only where it can be taken: with two tools or more and nothing On, turn something on (where first
- * setup's question isn't asking: `asking`); with one tool there is nothing to keep in step, so it says how a second one joins.
- */
-function nextStep(home: HomeView, nothingOn: boolean, asking: boolean): string {
-  if (noToolManaged()) return '';
-  if (!home.skills.items.length && !home.mcp.items.length && !home.agents.items.length) return ' Nothing found in this home yet.';
-  // With a tool left out, the lead has said where its switch is.
-  if (homeTools().length === 1) return home.sync.present.length > 1 ? '' : ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
-  return nothingOn && home.sync.access.allowed && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
-}
-
-export function overviewPage() {
-  const home = state.home;
-  if (!home) return notRead();
-  // An item's copies need a choice only while it is found: one in Central Knot's library never asks (libraryrow.ts asksWhichCopy).
-  const libraryFacts = (which: 'skills' | 'mcp' | 'agents'): KindFact[] => {
-    const source = kindSource(home, which);
-    return source.facts.map(fact => ({ on: fact.on, edited: fact.edited, copies: fact.copies, differs: asksWhichCopy(fact) }));
-  };
-  // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
-  const absent = absentKinds();
-  const empty = noToolManaged();
-  const nothingOn = !anyOn(home);
-  const band = outcomeBand();
-  // First setup's one place: its question, or the way into its walkthrough (firstsetup.ts).
-  const setup = empty ? null : setupLead(home);
-  return h('div.page', {},
-    band ? h('div.bands', {}, band) : null,
-    h('div.scroll.overview-scroll', { id: 'overview-scroll' },
-      practiceBanner(),
-      // A home with no tools has nothing to count: the way forward is another home.
-      empty ? noToolsLead('overview') : h('p.overview-lead', {}, leadSentence(home),
-        // The next step only where it can be taken: something to manage, and a home that can be written.
-        nextStep(home, nothingOn, setup?.id === 'setup-question')),
-      setup,
-      empty ? null : h('div.kind-cards', { 'data-count': String(heldKinds(home).length) },
-        kindCard('skills', 'wand-sparkles', libraryFacts('skills'), homeTools()),
-        absent.includes('mcp') ? null : kindCard('mcp', 'plug', libraryFacts('mcp'), home.mcp.tools),
-        absent.includes('agents') ? null : kindCard('agents', 'bot', libraryFacts('agents'), home.agents.tools)),
-      h('div.overview-more', {},
-        absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
-        !home.sync.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.sync.access.reason)}.`)
-        // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey. With no tool managed
-        // nothing syncs at all (the status bar says so).
-        : empty || (home.syncOn && nothingOn) ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingOn ? 'tone-muted' : 'tone-success') : 'tone-warning'),
-          ...(home.syncOn ? [`Automatic sync is on: edits spread between tools in seconds${home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : ''}, with a notice and Undo.`]
-            : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes in your tools is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
-        // The two pages the cards don't cover, named once so a newcomer knows what they are; the plugins' page only where a tool here
-        // installs them, and neither in a home with no tools.
-        empty ? null : h('p.overview-line', {}, icon('info', 14, 'tone-muted'), 'Also here: ', button({ variant: 'link', size: 'micro', label: 'Instructions', id: 'overview-instructions', onclick: () => showPage('instructions') }), ' (each tool’s own instruction file)',
-          ...(!absent.includes('plugins') ? [' and ', button({ variant: 'link', size: 'micro', label: pageNames.plugins, id: 'overview-plugins', onclick: () => showPage('plugins') }), ' (plugins to install in your tools)'] : []), '.'))));
-}
 
 // ---------- MCP servers ----------
 

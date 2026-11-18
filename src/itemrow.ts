@@ -75,7 +75,8 @@ export const rowId = (kind: PageKind, key: string) => `${kind}-${key}`;
  * row it is of, a tool or a place: "switch-skills-review", "cell-skills-review-claude-cli". The one place these ids are made;
  * the scripts name them the same way (scripts/cdp.mjs rowPart). dom.ts fileBlocks extends an id made here with each block's
  * place ("-0"). Lists that are no rows of the item lists keep ids of their own: Profiles' ticks (by profileplan.ts itemId),
- * Sources' lines, a plugin page's items, the Git repo's rows, the base card, and a plugin's Open on a tool's page.
+ * Sources' lines, a plugin page's items, the Git repo's rows, the base card, a plugin's Open on a tool's page, and the
+ * Instructions page's shown texts (`shown-<key>`, editparts.ts).
  */
 export const partId = (part: string, row: string, ...within: (string | number)[]) => [part, row, ...within].join('-');
 

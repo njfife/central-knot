@@ -7,7 +7,7 @@
 // file that save created, while unchanged).
 import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
-import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keepCaret, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
+import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { fileName, lineCount, toolNames } from './words.ts';
 import { button, h, icon, lockAttrs, pathText, rereadBand } from './dom.ts';
 import { noToolsState } from './pages.ts';
@@ -82,7 +82,7 @@ function editor(file: InstructionFile): Stage {
     oninput: (event: Event) => {
       const target = event.target as HTMLTextAreaElement;
       edit.text = keepLineBreaks(edit.from.text, target.value);
-      if (edit.confirmDiscard) { edit.confirmDiscard = false; keepCaret(`ins-text-${file.tool}`, target.selectionStart, rerender); return; }
+      if (edit.confirmDiscard) { edit.confirmDiscard = false; rerender(); return; }
       // Said as you type, without redrawing the editor: the pill and Review follow whether the text differs.
       const changed = draftUnsaved();
       const review = document.getElementById(`ins-review-${file.tool}`) as HTMLButtonElement | null;

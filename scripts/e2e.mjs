@@ -178,7 +178,7 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   };
   const settle = async () => { await wait(120); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s.')) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
-    child, run, send, settle, pageErrors,
+    child, run, send, settle, pageErrors, debugUrl: targets[0].webSocketDebuggerUrl,
     inspect, main: inspect && (() => mainProcess(inspect)),
     // A row's own switch or Add clicked here is a run of its own: the header's result is closed first, which ends the run on screen
     // (clicklist.ts runAt), so each step reads its own click's result. clickInRun leaves it open, so a click soon after the last
@@ -324,8 +324,12 @@ async function harnessFlow() {
   await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-skills');
   await a.click('#nav-overview');
+  // While first setup's question is asked it says the copies that differ itself; answered No, a line of their own says them.
+  check('while first setup’s question is asked, it alone says the copies that differ', !(await a.exists('#overview-skills-differ')) && /copies that differ/.test(await a.text('#setup-question') ?? ''), await a.text('#overview-needs'));
+  await a.click('#setup-no');
+  same('answered No, one line says the found skill whose copies differ, by the page’s count', await a.text('#overview-skills-differ-line'), '1 found skill has copies that differ. Show them');
   await a.click('#overview-skills-differ');
-  check('after a harness’s Skills tab, the Overview’s “different copies” link still opens Skills narrowed to them', (await a.text('.chip-on') ?? '').startsWith('Copies differ'), await a.text('.chips'));
+  check('after a harness’s Skills tab, the Overview’s Show them still opens Skills narrowed to them', (await a.text('.chip-on') ?? '').startsWith('Copies differ'), await a.text('.chips'));
   await a.click('#nav-harnesses');
   await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-instructions');
@@ -383,7 +387,8 @@ async function manageFlow() {
   await a.click('#nav-skills');
   check('the Skills page has no Codex mark', (await a.exists('.tool-mark')) && !(await a.exists('.tool-mark[data-tool="codex-cli"]')));
   await a.click('#nav-overview');
-  check('the Overview names the managed tools and says Codex is left out', (await a.text('.overview-lead') ?? '').includes('the same in Claude Code and Copilot CLI. Codex is left out (its switch is on Harnesses).'), await a.text('.overview-lead'));
+  same('the Overview’s tools table has a row per managed tool, and the line under it says Codex is left out', [await a.all('.tools-table tbody tr', 'e.dataset.tool'), await a.text('#overview-left-out')],
+    [['claude-cli', 'copilot-cli'], 'Codex is installed and left out: its switch is on Harnesses.']);
   same('Instructions and Plugins read no Codex', [
     await a.run(`window.centralKnot.instructions().then(files => files.map(file => file.tool))`),
     await a.run(`window.centralKnot.plugins(false).then(view => view?.tools ?? [])`)], [['claude-cli', 'copilot-cli'], ['claude-cli', 'copilot-cli']]);
@@ -532,12 +537,21 @@ async function fullSize(a) {
 }
 
 /**
- * A pointer click on the shown text `selector`, at the start of `words` in it, as a mouse makes it: with its point, which a
- * click on an instruction text uses to place the editor's caret. The line is scrolled into view first.
+ * One mouse event at the point `at`, as a real mouse sends it: `buttons` 1 while the left button is held, and no button named on a
+ * move without it. `modifiers` as the protocol counts them (8: Shift held).
  */
-async function clickText(a, selector, words) {
+const mouse = (a, type, at, buttons, modifiers = 0) => a.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, modifiers, clickCount: 1 });
+/**
+ * A pointer click on the shown text `selector`, at the start of `words` in it, as a mouse makes it: with its point, which a
+ * click on an instruction text uses to place the editor's caret. The line is scrolled into view first. `whileHeld` runs between
+ * the press and the release (as redrawUnder).
+ */
+async function clickText(a, selector, words, whileHeld) {
   const point = await pointAt(a, selector, words);
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  await mouse(a, 'mouseMoved', point, 0);
+  await mouse(a, 'mousePressed', point, 1);
+  await whileHeld?.();
+  await mouse(a, 'mouseReleased', point, 0);
   await a.settle();
 }
 /** Where the start of `words` is in the shown text `selector`, as a point in the window, its line scrolled into view first. */
@@ -552,20 +566,14 @@ function pointAt(a, selector, words) {
   })()`);
 }
 /**
- * Waits until the page is not about to redraw: the flow's own settle, then no redraw of the page for longer than a background
- * pass takes to follow a file the flow wrote (main.ts DEBOUNCE_MS, then the read it starts), at most 15 s. A redraw landing in
- * the middle of a pointer gesture is a known fault of the app with a step of its own (judges/gesture-spike-notes.md in the plan
- * folder); the checks that wait here are about what a click or a drag on a text does, not about that.
+ * A redraw of the whole page that changes nothing (the sidebar's toggle clicked twice), landing in the middle of a gesture as a
+ * background pass or a usage reading may. Returns [whether the text `selector` was replaced by it, whether the one now there
+ * opens its editor on a click].
  */
-async function untilQuiet(a, quietMs = 3000) {
-  await a.settle();
-  await a.run(`new Promise(done => {
-    let last = Date.now();
-    const watch = new MutationObserver(() => { last = Date.now(); });
-    watch.observe(document.getElementById('page'), { childList: true });
-    const end = Date.now() + 15000, look = () => { if (Date.now() - last >= ${quietMs} || Date.now() > end) { watch.disconnect(); done(true); } else setTimeout(look, 100); };
-    look();
-  })`);
+async function redrawUnder(a, selector) {
+  await a.run(`document.querySelector(${JSON.stringify(selector)}).dataset.before = 'the redraw'`);
+  await a.run(`(() => { for (let times = 0; times < 2; times++) document.querySelector('#sidebar-toggle').click(); })()`);
+  return a.run(`(() => { const now = document.querySelector(${JSON.stringify(selector)}); return [now.dataset.before !== 'the redraw', now.matches('.ins-editable')]; })()`);
 }
 /** The open editor's id and where its caret is, as [id, the caret's offset]. */
 const caretAt = a => a.run(`[document.activeElement?.id, document.activeElement?.selectionStart]`);
@@ -1088,11 +1096,51 @@ async function practiceFlow() {
     [byUpdated[0], [...byUpdated].sort(), standupWhen, onAgents, await onRows(), await a.exists('.ov-when')], ['standup', [...byName].sort(), 'just now', 'updated', byName, false]);
   const releaseNotesIn = () => ['claude', 'copilot', 'codex'].map(tool => existsSync(join(practice, `.${tool}/skills/release-notes/SKILL.md`)));
   const releaseNotesOn = folders('release-notes');
-  rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
-  await a.click('#header-refresh');
-  check('a fresh deletion waits for the settle window: nothing removed or put back yet', existsSync(join(practice, '.claude/skills/release-notes')) && !existsSync(join(practice, '.copilot/skills/release-notes')));
-  await wait(2200);
-  await a.click('#header-refresh');
+  // Read the real folders at the instant the page asks: pausing its listener keeps the background reply from landing
+  // between that check and the click. The same probe reads the files at the first Refresh's draw, before its settle.
+  const probe = await connect(a.debugUrl, async event => {
+    if (event.method !== 'Debugger.paused') return;
+    await probe.send('Debugger.evaluateOnCallFrame', { callFrameId: event.params.callFrames[0].callFrameId,
+      expression: `window.releaseNotesCopies = ${JSON.stringify(releaseNotesIn())}` });
+    await probe.send('Debugger.resume');
+  });
+  let refreshNotice;
+  try {
+    await probe.send('Debugger.enable');
+    await a.run(`{
+      const copies = () => { debugger; return window.releaseNotesCopies; };
+      const clickAndRead = read => new Promise((done, fail) => {
+        const draw = new MutationObserver(() => {
+          if (document.body.dataset.busy === 'true') return;
+          draw.disconnect();
+          clearTimeout(limit);
+          done(read());
+        });
+        const limit = setTimeout(() => { draw.disconnect(); fail(new Error('Refresh did not finish.')); }, 30000);
+        draw.observe(document.body, { attributes: true, attributeFilter: ['data-busy'] });
+        document.querySelector('#header-refresh').click();
+      });
+      window.firstRefreshCopies = () => clickAndRead(copies);
+      window.deletionRefresh = new Promise((done, fail) => {
+        const limit = setTimeout(() => fail(new Error('The deletion did not trigger a completed Refresh.')), 30000);
+        let clicked = false;
+        centralKnot.onSyncChanged(() => {
+          // With the page paused, an earlier signal still finds a copy. Only the deletion pass removes the two that survived the hand deletion.
+          if (clicked || copies().some(Boolean)) return;
+          clicked = true;
+          clearTimeout(limit);
+          done(clickAndRead(() => document.querySelector('.sync-notices')?.textContent ?? null));
+        });
+      });
+      true;
+    }`);
+    rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
+    same('a fresh deletion waits for the settle window: nothing removed or put back yet', await a.run('window.firstRefreshCopies()'), [true, false, true]);
+    await a.settle();
+    refreshNotice = await a.run('window.deletionRefresh');
+  } finally { probe.close(); }
+  await a.settle();
+  check('Refresh’s own draw offers to turn the deleted skill on', /release-notes was deleted[\s\S]*Turn it on/.test(refreshNotice), refreshNotice);
   same('then the skill turns off everywhere', releaseNotesIn(), [false, false, false]);
   check('with a notice that Central Knot keeps it, offering Turn it on', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && /Turn it on/.test(await a.text('.sync-notices') ?? ''), await a.text('.bands'));
   check('and the table keeps it under Off, in Central Knot only', ((await sectionsNow(a, 'skills')).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && /in Central Knot only/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? '') && !(await switchOn(a, 'skills', 'release-notes')), await sectionsNow(a, 'skills'));
@@ -1112,10 +1160,26 @@ async function practiceFlow() {
   const syncRecord = join(practice, '.central-knot/sync.json'), goodRecord = readFileSync(syncRecord, 'utf8');
   writeFileSync(syncRecord, '{ damaged');
   await a.click('#header-refresh');
-  same('a damaged record is said in the bands, and every switch is off', [/The sync record is damaged/.test(await a.text('.bands') ?? ''), await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`)], [true, true]);
+  const timesSaid = async selector => ((await a.text(selector)) ?? '').split('The sync record is damaged').length - 1;
+  same('a damaged record is said in the bands, once, and every switch is off', [await timesSaid('.bands'), await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`)], [1, true]);
+  await a.click('#nav-overview');
+  same('the Overview says it once too, first of what needs you, as the stop', [await timesSaid('#overview-needs'), await timesSaid('#overview-stopped')], [1, 1]);
+  await a.click('#nav-skills');
   writeFileSync(syncRecord, goodRecord);
   await a.click('#header-refresh');
   check('put back, the switches work again', !(await a.run(`document.querySelector('#${rowPart('switch', 'skills', 'notes')}').disabled`)), await a.text('.bands'));
+  // A damaged skills record stops skills' writes alone, its reason both the stop and a problem: the Skills page says it once, as
+  // the stop; the Overview, whose stop line is the home's record's, once, as Skills' problem with the way there.
+  const skillsRecord = join(practice, '.central-knot/skills.json'), goodSkills = readFileSync(skillsRecord, 'utf8');
+  writeFileSync(skillsRecord, '{ damaged');
+  await a.click('#header-refresh');
+  const stopSays = await a.text('.band-danger .band-text') ?? '', saidIn = async selector => ((await a.text(selector)) ?? '').split(stopSays).length - 1;
+  same('a damaged skills record: the Skills page says why once, as the stop', [stopSays.length > 0, await saidIn('.bands')], [true, 1]);
+  await a.click('#nav-overview');
+  same('and the Overview once, as Skills’ problem, with the way to Skills', [await saidIn('#overview-needs'), await a.exists('#overview-stopped'), await a.exists('#overview-skills-problem-0-open')], [1, false, true]);
+  await a.click('#nav-skills');
+  writeFileSync(skillsRecord, goodSkills);
+  await a.click('#header-refresh');
   // The practice copy has no Pi folder, only a skill in the shared .agents folder that Pi (and others) read: that makes no
   // tool present, so Pi is no column, mark or control, and Tools shows no card for it.
   mkdirSync(join(practice, '.agents/skills/shared-only'), { recursive: true });
@@ -2218,15 +2282,41 @@ async function practiceFlow() {
   check('Save adds the base after each chosen tool’s own text, which is unchanged', baseClaude1.startsWith(baseClaude0) && baseClaude1.includes('- Shared by every tool.') && baseCodex1.startsWith(baseCodex0) && baseCodex1.includes('- Shared by every tool.'), baseClaude1);
   check('an unchosen tool is not written', !existsSync(join(practice, '.copilot/copilot-instructions.md')));
   // A click on the base's text opens its editor as Edit text or tools does, with the caret where the click landed.
-  await untilQuiet(a);
-  await clickText(a, '#base-card pre.ins-preview', 'every tool.');
+  const baseText = '#base-card pre.ins-preview';
+  await clickText(a, baseText, 'every tool.');
   same('a click on the base’s text opens its editor, the caret where it landed', await caretAt(a), ['base-text', '- Shared by '.length]);
   check('with its actions in the card’s head', await a.exists('#base-head #base-review') && await a.exists('#base-head #base-cancel'), await a.text('#base-head'));
   await a.press('Escape');
+  // A redraw landing between the press and the release (as a background pass or a usage reading may) replaces the text under the
+  // button, and the browser then sends no click: the release opens the editor of the text now there, the caret where it was aimed.
+  let underPress;
+  await clickText(a, baseText, 'every tool.', async () => { underPress = await redrawUnder(a, baseText); });
+  same('a click on the base’s text with a redraw between its press and its release: the text was replaced, and its editor opens with the caret where it was aimed',
+    [...underPress, ...await caretAt(a)], [true, true, 'base-text', '- Shared by '.length]);
+  await a.press('Escape');
+  // …on the same page in the same home only: a press on the base's text, then This Mac's home opened before the release, its base
+  // the same text (written so here), editable, and the pointer following that same character there: the release opens nothing.
+  const otherBase = join(HOME, '.central-knot/instructions/base.md'), hadInstructions = existsSync(dirname(otherBase));
+  mkdirSync(dirname(otherBase), { recursive: true });
+  writeFileSync(otherBase, '- Shared by every tool.\n');
+  const aimed = await pointAt(a, baseText, 'every tool.');
+  await mouse(a, 'mouseMoved', aimed, 0); await mouse(a, 'mousePressed', aimed, 1);
+  await a.run(`document.querySelector('#home-actual').click()`);
+  for (let tries = 0; tries < 50 && (await a.text('#home-label')) === 'Practice copy'; tries++) await wait(100);
+  await a.settle();
+  underPress = await a.run(`(() => { const text = document.querySelector('${baseText}'); return [document.querySelector('#home-label').textContent !== 'Practice copy', text?.textContent, !!text?.matches('.ins-editable')]; })()`);
+  const sameCharacter = await pointAt(a, baseText, 'every tool.');
+  await mouse(a, 'mouseMoved', sameCharacter, 1); await mouse(a, 'mouseReleased', sameCharacter, 0);
+  await a.settle();
+  same('a press on the base’s text, then another home showing the same base text opened before the release, released on that same character: nothing opens there',
+    [...underPress, await a.exists('#base-text')], [true, '- Shared by every tool.', true, false]);
+  await a.click('#home-fixture');
+  for (let tries = 0; tries < 50 && (await a.text('#home-label')) !== 'Practice copy'; tries++) await wait(100);
+  rmSync(hadInstructions ? otherBase : dirname(otherBase), { recursive: true, force: true });
+  await a.settle();
   // A tool's own instructions edited afterwards, opened by a click on their text: its base block, the base and the other files
   // stay as they are.
   const baseMd1 = readFileSync(join(practice, '.central-knot/instructions/base.md'), 'utf8');
-  await untilQuiet(a);
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', 'Prefer small commits');
   same('a click on a tool’s own text opens its editor, the caret where it landed', await caretAt(a), ['ins-text-claude-cli', baseClaude0.indexOf('Prefer small commits')]);
   check('with Review changes and Cancel in the card’s head', await a.exists('#ins-head-claude-cli #ins-review-claude-cli') && await a.exists('#ins-head-claude-cli #ins-cancel-claude-cli'), await a.text('#ins-head-claude-cli'));
@@ -2413,6 +2503,10 @@ async function practiceFlow() {
   }
   const selected = await a.run(`getSelection().toString()`);
   check('a drag over the log selects its text, to copy', selected.length > 10 && stackLine.includes(selected), selected);
+  // A redraw (Settings is redrawn whenever the window gains the focus) keeps that selection, and the focus and the scroll place.
+  const selectedNow = () => a.run(`[getSelection().toString(), document.activeElement?.id, document.querySelector('#settings-scroll').scrollTop]`);
+  const beforeRedraw = await selectedNow(), [logRedrawn] = await redrawUnder(a, '#log-text');
+  same('a redraw of Settings keeps the selection in the log’s lines, the focus and the scroll place', [logRedrawn, ...await selectedNow()], [true, ...beforeRedraw]);
   await a.run(`getSelection().removeAllRanges()`);
   await fullSize(a);
   await fitsAtMinimum(a, 'Settings with the whole log shown');
@@ -3147,6 +3241,9 @@ async function updateFlow() {
     same('it says so, and its name says which release', [offer.label, offer.name, offer.title], ['Update available', 'Update to 0.5.0 preview 5', '0.5.0 preview 5 is available. Click to download it and restart Central Knot. Your settings and data stay as they are.']);
     same('a screen reader is told of the new release', await a.text('#update-news'), 'Central Knot 0.5.0 preview 5 is available.');
     same('the status bar keeps the version', await a.text('#status-end'), 'Central Knot 0.5.0 preview 4');
+    // The Overview, where the app opens, says it too: one line, with What's new and a button in Settings' button's words.
+    same('the Overview’s line names the release, with What’s new and Update', [(await a.text('#overview-update-line .overview-update-text'))?.trim(), (await a.text('#overview-update'))?.trim()],
+      ['Central Knot 0.5.0 preview 5 is available. What’s new', 'Update to 0.5.0 preview 5']);
     await a.click('#nav-settings');
     const row = await a.text('#setting-updates') ?? '';
     check('Settings › Updates names the build and what is available', row.includes('This is Central Knot 0.5.0 preview 4.') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
@@ -3179,6 +3276,11 @@ async function updateFlow() {
     check('and the app is still running', a.child.exitCode === null);
     check('the status bar says what restarting loses, first', /^Restarting now loses your unsaved instructions draft\./.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
     check('so does the control, whose name says it too', /unsaved instructions draft\. Click to open Settings, where you can restart anyway\.$/.test((await control()).title) && /^Restart to update: Restarting now loses your unsaved instructions draft\. Opens Settings$/.test((await control()).name), await control());
+    // The Overview's button has the control's own click: held, it says so and opens Settings.
+    await a.click('#nav-overview');
+    same('on the Overview, its button says Restart to update… too', (await a.text('#overview-update'))?.trim(), 'Restart to update…');
+    await a.click('#overview-update');
+    check('and its click is the control’s: Settings opens, and the app keeps running', await a.run(`document.querySelector('#nav-settings').getAttribute('aria-current') === 'page'`) && a.child.exitCode === null);
     // A click on the held control never restarts: it opens Settings, which says what restarting loses beside its Restart button.
     await a.click('#update-control');
     check('the held control opens Settings’ Updates row, which says what would be lost, and the app keeps running', await a.run(`document.querySelector('#nav-settings').getAttribute('aria-current') === 'page'`) && /is ready\. Restarting now loses your unsaved instructions draft\./.test(await a.text('#setting-updates') ?? '') && a.child.exitCode === null, await a.text('#setting-updates'));
@@ -3358,7 +3460,7 @@ async function fewToolsFlow() {
     return;
   }
   same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
-  same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
+  same('its Overview says no tools were found, once, with another home to choose', [await a.text('.overview-lead'), await a.exists('#overview-choose-home')], ['No tools were found in this home.', true]);
   check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
   await fitsAtMinimum(a, 'a home with no tools');
@@ -4346,7 +4448,7 @@ async function syncEverythingFlow() {
   same('a notice no page has shown stays until shown: the sidebar names both passes’ notices for Skills', await unseenOnSkills(), '2 automatic changes: notes, fresh');
   await a.shot('everything-on');
   await a.click('#nav-overview');
-  check('Overview’s sync line says the rule in force', /edits spread between tools in seconds, and what turns up in a tool is taken in by Synchronize everything/.test(await a.text('.overview-more') ?? ''), await a.text('.overview-more'));
+  same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo where it can be undone.');
   await a.click('#nav-skills');
   same('on the Skills page notes and fresh are On and review stays found', await sectionsNow(a, 'skills'), [['on', ['fresh', 'notes']], ['found', ['review']]]);
   check('the Found heading says the rule in force: Synchronize everything leaves these, and how many wait for a choice', /Synchronize everything leaves these \(open a row to see why\)\. 1 waits for your choice of copy/.test(await foundNote() ?? ''), await foundNote());
@@ -4642,13 +4744,17 @@ async function draftFlow() {
   const crlf = 'Run codex review before pushing.\r\nline one\r\nline two\r\nTARGET here\r\nlast line\r\n';
   writeFileSync(agentsMd, crlf);
   await a.click('#header-refresh');
-  await untilQuiet(a);
   const target = await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
   // What is under the click's point, said if the check fails.
   const under = await a.run(`(() => { const hit = document.elementFromPoint(${target.x}, ${target.y}), at = document.caretRangeFromPoint(${target.x}, ${target.y}); return { point: ${JSON.stringify(target)}, hit: hit && (hit.id || hit.className || hit.tagName), at: at && [at.startContainer.nodeName, at.startOffset], scroll: document.querySelector('#instructions-scroll').scrollTop }; })()`);
   await clickText(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
-  const landed = await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionStart + 6)]; })()`);
+  // The focused editor's id and the six characters at its caret.
+  const atCaret = () => a.run(`(() => { const area = document.activeElement; return [area.id, area.value?.slice(area.selectionStart, area.selectionStart + 6)]; })()`);
+  const landed = await atCaret();
   check('in a file with Windows line endings a click puts the caret where it landed', landed[0] === 'ins-text-codex-cli' && landed[1] === 'TARGET', { landed, under });
+  // A redraw just after the click (a background pass, the usage reading) draws the editor again: its caret stays where it was.
+  const [boxRedrawn] = await redrawUnder(a, '#ins-text-codex-cli');
+  same('a redraw just after the click keeps the editor’s caret where the click put it', [boxRedrawn, ...await atCaret()], [true, 'ins-text-codex-cli', 'TARGET']);
   await a.send('Input.insertText', { text: 'NEW ' });
   await a.run(`(() => { const area = document.querySelector('#ins-text-codex-cli'); area.value += 'added line\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#ins-review-codex-cli');
@@ -4656,28 +4762,96 @@ async function draftFlow() {
   await a.click('#ins-save-codex-cli');
   same('and the save keeps every other line byte for byte, the new line taking the file’s own ending', readNow(agentsMd), crlf.replace('TARGET', 'NEW TARGET') + 'added line\r\n');
   // A click past a line's end lands at that line's end, not on the next line.
-  await untilQuiet(a);
   await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'line two');
   const pastEnd = await a.run(`(() => { const pre = document.querySelector('[aria-label="Codex instructions"] pre.ins-preview'), node = pre.firstChild, at = node.textContent.indexOf('line two');
     const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 8); const line = range.getBoundingClientRect();
     return { x: Math.min(pre.getBoundingClientRect().right - 16, line.right + 200), y: line.top + line.height / 2 }; })()`);
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: pastEnd.x, y: pastEnd.y, button: 'left', clickCount: 1 });
+  await mouse(a, 'mouseMoved', pastEnd, 0); await mouse(a, 'mousePressed', pastEnd, 1); await mouse(a, 'mouseReleased', pastEnd, 0);
   await a.settle();
   same('in that file a click past a line’s end puts the caret at that line’s end', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart - 8, area.selectionStart), area.value[area.selectionStart]]; })()`), ['ins-text-codex-cli', 'line two', '\n']);
   await a.press('Escape');
   for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
+  // A redraw landing between the press and the release replaces the text under the button, and the browser then sends no click:
+  // the release opens the editor of the text now there, the caret where it was aimed, in that file too.
+  const codexText = '[aria-label="Codex instructions"] pre.ins-preview';
+  let underPress;
+  await clickText(a, codexText, 'TARGET', async () => { underPress = await redrawUnder(a, codexText); });
+  same('a click on a tool’s text with a redraw between its press and its release: the text was replaced, and its editor opens with the caret where it was aimed',
+    [...underPress, ...await atCaret()], [true, true, 'ins-text-codex-cli', 'TARGET']);
+  await a.press('Escape');
+  for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
+  // …only while the text now there is the same: a press on TARGET, the file changed and read again before the release (its last
+  // line only, so TARGET is where it was), then the release: nothing opens.
+  const savedText = readNow(agentsMd);
+  await clickText(a, codexText, 'TARGET', async () => {
+    writeFileSync(agentsMd, savedText.replace('last line', 'last line, changed'));
+    await a.run(`document.querySelector('#header-refresh').click()`);
+    await a.settle();
+    underPress = await a.run(`(() => { const text = document.querySelector('${codexText}'); return [text.textContent.includes('changed'), text.matches('.ins-editable')]; })()`);
+  });
+  same('a press on a tool’s text, its text changed before the release: nothing opens', [...underPress, await a.exists('#ins-text-codex-cli')], [true, true, false]);
+  writeFileSync(agentsMd, savedText);
+  await a.click('#header-refresh');
 
   // Selecting a card's text keeps the selection, to copy it: a drag opens no editor. A double-click's first click is a plain
   // click, which opens the editor, and its second selects the word there.
-  const codexText = '[aria-label="Codex instructions"] pre.ins-preview';
   await a.run(`document.querySelector('#ins-head-codex-cli').scrollIntoView({ block: 'start' })`);
-  await untilQuiet(a);
   const from = await pointAt(a, codexText, 'line one'), to = await pointAt(a, codexText, 'last line');
-  for (const [type, at, buttons] of [['mouseMoved', from, 0], ['mousePressed', from, 1], ['mouseMoved', to, 1], ['mouseReleased', to, 0]]) await a.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', buttons, clickCount: 1 });
+  await mouse(a, 'mouseMoved', from, 0); await mouse(a, 'mousePressed', from, 1); await mouse(a, 'mouseMoved', to, 1); await mouse(a, 'mouseReleased', to, 0);
   await a.settle();
   same('a drag across a card’s text selects it and opens no editor', [await a.exists('#ins-text-codex-cli'), (await a.run(`String(getSelection())`)).includes('line two')], [false, true]);
+  // Each gesture below starts with no editor open (one a broken build opened is closed, so the next is measured on its own).
+  const noEditor = async () => { if (await a.exists('#ins-text-codex-cli')) await a.press('Escape'); for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100); };
+  // A Shift-click farther along extends that selection, as anywhere: it opens no editor, and the selection reaches the click.
+  const farther = await pointAt(a, codexText, 'added line');
+  await mouse(a, 'mouseMoved', farther, 0, 8); await mouse(a, 'mousePressed', farther, 1, 8); await mouse(a, 'mouseReleased', farther, 0, 8);
+  await a.settle();
+  same('a Shift-click farther along a selected text extends the selection and opens no editor',
+    [await a.exists('#ins-text-codex-cli'), ...await a.run(`(() => { const chosen = String(getSelection()); return [chosen.startsWith('line one'), chosen.includes('last line')]; })()`)], [false, true, true]);
+  await noEditor();
+  // A drag backwards from TARGET to line one, then the same drag with a redraw landing halfway (at line two) and carried on past
+  // where it was then: it selects what the drag with no redraw selects, backwards, and opens no editor. (Each starts with nothing
+  // selected: a press inside a selection drags the selected text instead.)
+  await a.run(`getSelection().removeAllRanges()`);
+  const fromTarget = await pointAt(a, codexText, 'TARGET'), halfway = await pointAt(a, codexText, 'line two');
+  const dragBack = async whileHeld => {
+    await mouse(a, 'mouseMoved', fromTarget, 0); await mouse(a, 'mousePressed', fromTarget, 1); await mouse(a, 'mouseMoved', halfway, 1);
+    const [replaced] = (await whileHeld?.()) ?? [false];
+    await mouse(a, 'mouseMoved', from, 1); await mouse(a, 'mouseReleased', from, 0);
+    await a.settle();
+    const chosen = await a.run(`(() => { const chosen = getSelection(); return [String(chosen), chosen.anchorOffset > chosen.focusOffset]; })()`);
+    await a.run(`getSelection().removeAllRanges()`);
+    return [replaced, await a.exists('#ins-text-codex-cli'), ...chosen];
+  };
+  const plainBack = await dragBack();
+  check('a drag backwards across a card’s text selects it backwards', plainBack[2].includes('line two') && plainBack[3], plainBack);
+  same('…and the same drag with a redraw halfway, carried on past where it was then: the text was replaced, the same selection, backwards, and no editor',
+    await dragBack(() => redrawUnder(a, codexText)), [true, false, plainBack[2], true]);
+  // A press that moves off its character and comes back before the release is a drag too (the browser's own rule): nothing opens.
+  await mouse(a, 'mouseMoved', fromTarget, 0); await mouse(a, 'mousePressed', fromTarget, 1); await mouse(a, 'mouseMoved', halfway, 1); await mouse(a, 'mouseMoved', fromTarget, 1); await mouse(a, 'mouseReleased', fromTarget, 0);
+  await a.settle();
+  same('a press that moves off its character and back before the release opens no editor', await a.exists('#ins-text-codex-cli'), false);
+  await noEditor();
+  // A release on another character of the same text, with no move between, is a drag as well: nothing opens.
+  await mouse(a, 'mouseMoved', fromTarget, 0); await mouse(a, 'mousePressed', fromTarget, 1); await mouse(a, 'mouseReleased', halfway, 0);
+  await a.settle();
+  same('a press released on another character of its text, with no move between, opens no editor', await a.exists('#ins-text-codex-cli'), false);
+  await noEditor();
+  await a.run(`getSelection().removeAllRanges()`);
+  // A drag whose text goes away under it (its file removed and the page read again while the button is held) selects nothing.
+  const dragFrom = await pointAt(a, codexText, 'line one'), dragOn = await pointAt(a, codexText, 'line two'), codexNow = readNow(agentsMd);
+  await mouse(a, 'mouseMoved', dragFrom, 0); await mouse(a, 'mousePressed', dragFrom, 1); await mouse(a, 'mouseMoved', dragOn, 1);
+  rmSync(agentsMd);
+  await a.run(`document.querySelector('#header-refresh').click()`);
+  await a.settle();
+  const textGone = !(await a.exists(codexText)), dragEnd = { x: dragOn.x, y: dragOn.y + 80 };
+  await mouse(a, 'mouseMoved', dragEnd, 1); await mouse(a, 'mouseReleased', dragEnd, 0);
+  await a.settle();
+  same('a drag whose text went away before its release selects nothing', [textGone, await a.run(`String(getSelection())`)], [true, '']);
+  writeFileSync(agentsMd, codexNow);
+  await a.click('#header-refresh');
   const word = await pointAt(a, codexText, 'last line');
-  for (const clickCount of [1, 2]) for (const type of ['mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: word.x + 12, y: word.y, button: 'left', clickCount });
+  for (const clickCount of [1, 2]) for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: word.x + 12, y: word.y, button: 'left', buttons, clickCount });
   await a.settle();
   same('a double-click on a word selects it, in the editor its first click opened', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionEnd)]; })()`), ['ins-text-codex-cli', 'last']);
   await a.press('Escape');
@@ -4879,7 +5053,6 @@ async function draftFlow() {
   await a.run(`document.querySelector('#ins-head-claude-cli').scrollIntoView({ block: 'start' })`);
   same('at 860×600 a 200-line text’s Edit is in view at its card’s head', await inView(['ins-edit-claude-cli']), [true]);
   await a.click('#ins-more-claude-cli');
-  await untilQuiet(a);
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', '- Line 150 ');
   same('a click on line 150 opens the editor with the caret on it', await caretAt(a), ['ins-text-claude-cli', long.indexOf('- Line 150 ')]);
   same('with Review changes and Cancel in view, and line 150 too, without scrolling the page', [...await inView(['ins-review-claude-cli', 'ins-cancel-claude-cli']), await caretLineShows(a)], [true, true, true]);
@@ -5388,6 +5561,20 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-plug-20')); tries++) await wait(100);
   const list = 'plugins-scroll', order = () => a.all('[data-plugin]', 'e.dataset.plugin');
+  // The marketplace's Find keeps its caret where he types: a letter typed in the middle of a word, across the redraw it makes;
+  // and in a long query, across another redraw, the caret and the box's sideways scroll stay where they were.
+  const findNow = () => a.run(`(() => { const box = document.querySelector('#plugin-find'); return [box.value, box.selectionStart, Math.round(box.scrollLeft)]; })()`);
+  await a.run(`(() => { const box = document.querySelector('#plugin-find'); box.focus(); box.value = 'pug'; box.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.run(`document.querySelector('#plugin-find').setSelectionRange(1, 1)`);
+  await a.send('Input.insertText', { text: 'l' });
+  await a.settle();
+  same('Plugins’ Find: a letter typed in the middle of a word leaves the caret after it', (await findNow()).slice(0, 2), ['plug', 2]);
+  await a.run(`(() => { const box = document.querySelector('#plugin-find'); box.value = 'plug ' + 'a long query that runs past the box '.repeat(6); box.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.run(`(() => { const box = document.querySelector('#plugin-find'); box.setSelectionRange(125, 125); box.blur(); box.focus(); })()`);
+  const longFind = await findNow(), [findRedrawn] = await redrawUnder(a, '#plugin-find');
+  same('…and in a long query a redraw keeps the caret and the sideways scroll', [findRedrawn, longFind[2] > 0, ...await findNow()], [true, true, ...longFind]);
+  await a.run(`(() => { const box = document.querySelector('#plugin-find'); box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); })()`);
+  await a.settle();
   // A first click, so the toolbar's result is there before the measured one, as it is when he works down a list.
   await putAt(list, '[data-plugin="plug-01"]', 300);
   await clickAt(await middleOf('#pswitch-0-plug-01')); await done();
@@ -5651,6 +5838,140 @@ esac
   await a.click('#pupdate-0-issue-tracker');
   check('Update on the page makes it, and the failure’s note goes with no check in between', await until(() => versions()['issue-tracker'] === '4.0.0' && noted().failures?.length === 0, 10000) && await until(async () => !(await a.exists('#plugin-updates-failed')), 5000), JSON.stringify([versions(), noted().failures, await a.text('#plugin-updates-failed')]));
   same('no page errors, plugin updates on a schedule', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
+ * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
+ * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
+ * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
+ * The lead never says nothing was found above a card that counts something, and why a home can't be written is said with no tool
+ * managed too. Made-up homes: Claude Code and Codex stand-ins, and a plugin from a marketplace no tool lists.
+ */
+async function overviewFlow() {
+  const home = join(scratch, 'overview-home'), data = join(scratch, 'overview-data'), real = join(scratch, 'overview-real');
+  const standIns = folder => { mkdirSync(join(folder, '.local/bin'), { recursive: true });
+    for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) writeFileSync(join(folder, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`, { mode: 0o755 }); };
+  standIns(home);
+  const [claude, codex] = [join(home, '.claude/skills'), join(home, '.codex/skills')];
+  for (const root of [claude, codex]) skill(root, 'notes');
+  skill(codex, 'review');
+  // kit, from a marketplace no tool lists, in Claude Code: checks only it brings, and review, which is Codex's own too.
+  writeClaudeInstall(home, 'orphan-market', 'kit', '1.0.0', { 'skills/checks/SKILL.md': text('checks'), 'skills/review/SKILL.md': text('review') });
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { docs: { command: 'docs' } } }));
+  writeFileSync(join(home, '.codex/config.toml'), '[mcp_servers.docs]\ncommand = "docs"\n');
+  for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  let a = await launch(data, [], real);
+  // Opening the Overview reads nothing beyond the home's view: no marketplace is read, so Central Knot's plugins record isn't started.
+  await wait(1500);
+  check('opening the Overview reads no marketplace: Central Knot’s plugins record isn’t started', !existsSync(join(home, '.central-knot/plugins.json')), existsSync(join(home, '.central-knot')) ? readdirSync(join(home, '.central-knot')) : []);
+  await a.click('#setup-no');
+  for (const [page, key] of [['skills', 'notes'], ['skills', 'review'], ['mcp', 'docs']]) { await a.click(`#nav-${page}`); await a.click(`#${rowPart('add', page, key)}`); }
+  await a.click('#nav-overview');
+  const cardSays = async kind => (await a.text(`.kind-card:has(#overview-${kind}) .kind-card-state`))?.trim() ?? null;
+  const claudeRow = () => a.all('.tools-table tr[data-tool="claude-cli"] td', 'e.textContent.trim()');
+  same('with every copy in step, each card says All in sync', [await cardSays('skills'), await cardSays('mcp')], ['All in sync', 'All in sync']);
+  // One count of plugins: kit is Claude Code's one plugin on the table and on its Plugins tab; the Skills card's "from plugins" is the chip's.
+  same('the table counts kit, Claude Code’s one plugin', (await claudeRow())[3], '1');
+  check('the Skills card counts from plugins what its page’s From plugins chip holds: checks, and review, which kit brings too', /· 2 from plugins/.test(await a.text('.kind-card:has(#overview-skills) .kind-card-summary') ?? ''), await a.text('.kind-card:has(#overview-skills) .kind-card-summary'));
+  await a.click('#overview-skills');
+  same('the Skills page’s From plugins chip holds 2', await a.run(`document.querySelector('.chip[data-tip="From plugins"] .chip-count')?.textContent`), '2');
+  await a.click('#nav-overview');
+  await a.click('#overview-tool-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && /Reading marketplaces/.test(await a.text('#harness-body') ?? ''); tries++) await wait(100);
+  const tab = await a.text('#harness-body') ?? '';
+  check('Claude Code’s Plugins tab counts kit too, from a marketplace no tool lists: never “No plugins”', (await a.text('#harness-tab-plugins'))?.includes('1') && !/No plugins in Claude Code/.test(tab) && /kit/.test(tab), [await a.text('#harness-tab-plugins'), tab]);
+  // A copy deleted by hand with Automatic sync off: the item turns off when sync runs, a change that waits.
+  await a.click('#nav-overview');
+  await a.click('#sync-switch');
+  rmSync(join(codex, 'notes'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  same('a copy deleted by hand, sync off: Skills waits for one change, not All in sync', await cardSays('skills'), '1 change waiting to sync');
+  await a.click('#overview-skills');
+  same('the Skills page counts the same one change waiting, in its toolbar and in its band', [(await a.text('.apply-state.apply-waiting'))?.trim(), /1 change waiting/.test(await a.text('.band-sync-off') ?? '')], ['1 change waiting', true]);
+  await a.click('#nav-overview');
+  skill(codex, 'notes');
+  await a.click('#header-refresh');
+  same('the copy back: All in sync again', await cardSays('skills'), 'All in sync');
+  // One copy that can't be read: whether it is in step isn't known.
+  chmodSync(join(codex, 'notes/SKILL.md'), 0o000);
+  await a.click('#header-refresh');
+  const unreadCopy = await cardSays('skills');
+  chmodSync(join(codex, 'notes/SKILL.md'), 0o644);
+  await a.click('#header-refresh');
+  same('one copy that can’t be read: the Skills card says nothing of sync', unreadCopy, null);
+  await a.click('#sync-switch');
+  // Copies that differ: said once at the top, and the card says no "All in sync".
+  skill(claude, 'clash', text('clash', 'Claude Code’s way.'));
+  skill(codex, 'clash', text('clash', 'Codex’s way.'));
+  await a.click('#header-refresh');
+  same('a found skill whose copies differ: its line at the top, and the Skills card says nothing of sync', [await a.exists('#overview-skills-differ-line'), await cardSays('skills')], [true, null]);
+  rmSync(join(codex, 'clash'), { recursive: true, force: true });
+  // A tool's MCP file that can't be read: its problem at the top, "?" for its MCP servers, and no "All in sync" on MCP servers.
+  const claudeJson = readNow(join(home, '.claude.json'));
+  writeFileSync(join(home, '.claude.json'), '{ "mcpServers": ');
+  await a.click('#header-refresh');
+  const unreadMcp = [await a.exists('[id^="overview-mcp-problem-"]'), (await claudeRow())[1], await cardSays('mcp')];
+  writeFileSync(join(home, '.claude.json'), claudeJson);
+  // Claude Code's own record of its plugins can't be read: "?" for its plugins, and the key says what "?" is.
+  const installed = join(home, '.claude/plugins/installed_plugins.json'), installedText = readNow(installed);
+  writeFileSync(installed, '{');
+  await a.click('#header-refresh');
+  const unreadPlugins = [(await claudeRow())[3], ((await a.text('#overview-tools-key')) ?? '').split('?').length - 1];
+  await a.click('#overview-tool-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && /Reading marketplaces/.test(await a.text('#harness-body') ?? ''); tries++) await wait(100);
+  const tabUnread = [await a.text('#harness-tab-plugins'), await a.run(`document.querySelector('#harness-tab-plugins')?.title ?? ''`), await a.text('#harness-body')];
+  await a.click('#nav-overview');
+  writeFileSync(installed, installedText);
+  await a.click('#header-refresh');
+  same('Claude Code’s MCP file unread: its problem at the top, "?" for its MCP servers, and MCP servers says nothing of sync', unreadMcp, [true, '?', null]);
+  same('Claude Code’s plugin record unread: "?" for its plugins, and the key names "?" once', unreadPlugins, ['?', 1]);
+  check('and its Plugins tab says what it has isn’t known: no count, no nought in its tooltip, never “No plugins”', tabUnread[0]?.trim() === 'Plugins' && !/\b0\b/.test(tabUnread[1]) && /isn’t known/.test(tabUnread[2] ?? '') && !/No plugins/.test(tabUnread[2] ?? ''), tabUnread);
+  same('no page errors, the Overview’s truths', a.pageErrors, []);
+  await a.quit();
+  // A most used name opens its row on the very first click, before its kind's page was ever drawn in this launch: an own skill, one
+  // whose copies differ (its question open), an own MCP server; then, in another home opened meanwhile, a plugin's skill.
+  skill(codex, 'clash', text('clash', 'Codex’s way.'));
+  const used = (folder, names) => { mkdirSync(join(folder, '.claude/projects/-work'), { recursive: true });
+    writeFileSync(join(folder, '.claude/projects/-work/used.jsonl'), JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(),
+      message: { content: names.map(name => (name.startsWith('mcp__') ? { type: 'tool_use', name, input: {} } : { type: 'tool_use', name: 'Skill', input: { skill: name } })) } }) + '\n'); };
+  used(home, ['notes', 'clash', 'mcp__docs__start']);
+  // This computer's home, opened second: its only item is a plugin's skill, used once.
+  standIns(real);
+  mkdirSync(join(real, '.claude/skills'), { recursive: true });
+  writeClaudeInstall(real, 'solo', 'kit', '1.0.0', { 'skills/one/SKILL.md': text('one') });
+  used(real, ['kit:one']);
+  a = await launch(data, [], real);
+  const openTop = async (kind, name) => {
+    const link = `#overview-${kind}-usage .middle[title=${JSON.stringify(name)}]`;
+    for (let tries = 0; tries < 100 && !(await a.exists(link)); tries++) await wait(100);
+    await a.click(`#${await a.run(`document.querySelector(${JSON.stringify(link)})?.closest('button')?.id`)}`);
+    const open = keysOf(kind, await a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key'));
+    await a.click('#nav-overview');
+    return open;
+  };
+  same('launched, nothing visited: a most used own skill opens its row on the first click', await openTop('skills', 'notes'), ['notes']);
+  same('one whose copies differ opens too, with its copy question', await openTop('skills', 'clash'), ['clash']);
+  same('a most used MCP server, its page never drawn either, opens its row', await openTop('mcp', 'docs'), ['docs']);
+  await a.click('#home-actual');
+  for (let tries = 0; tries < 100 && !(await a.exists('#overview-skills-usage .middle[title="one"]')); tries++) await wait(100);
+  same('another home whose only item is a plugin’s skill: the card counts it, and the lead never says nothing was found',
+    [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /Nothing found/.test(await a.text('.overview-lead') ?? '')], ['1 skill · none on · 1 from plugins', true, false]);
+  same('there, after Skills was drawn in the first home, a most used plugin’s skill opens its row on the first click', await openTop('skills', 'one'), ['kit@solo/one']);
+  same('no page errors, the most used links', a.pageErrors, []);
+  await a.quit();
+  // A home with no tool, whose record stops every write: why it can't be written is said with no tool managed too.
+  const stopped = join(scratch, 'overview-stopped'), stoppedData = join(scratch, 'overview-stopped-data');
+  mkdirSync(join(stopped, '.central-knot'), { recursive: true });
+  writeFileSync(join(stopped, '.central-knot/sync.json'), '{ damaged');
+  mkdirSync(stoppedData, { recursive: true });
+  writeFileSync(join(stoppedData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: stopped } }));
+  a = await launch(stoppedData, [], real);
+  same('no tool and a damaged record: the Overview says no tools were found, and why nothing can be written', [await a.exists('#overview-choose-home'), /damaged/.test(await a.text('#overview-stopped') ?? '')], [true, true]);
+  same('no page errors, the Overview with no tool', a.pageErrors, []);
   await a.quit();
 }
 
@@ -5962,6 +6283,40 @@ async function usageFlow() {
   }
   same('no page errors, usage after a relaunch', a.pageErrors, []);
   await a.quit();
+
+  // ---------- The Overview, the page a launch opens on: its figures land with no click, and nothing on it moves ----------
+  // Launched on this computer's home and nothing clicked: its first reading waits on the pipe. The cards, the tools table's rows
+  // and its header cells, and the usage line are measured at 1280 and 860 while it runs, then again once it has landed.
+  a = await launch(data, [], real);
+  for (let tries = 0; tries < 100 && !(await a.exists('.kind-card')); tries++) await wait(50);
+  for (let tries = 0; tries < 200 && !reading(); tries++) await wait(25);
+  const places = () => a.run(`[...document.querySelectorAll('.kind-card, .tools-table tr, .tools-table thead th, #overview-usage')].map(e => { const box = e.getBoundingClientRect(); return [box.left, box.top, box.width, box.height].map(Math.round).join(' '); })`);
+  const usageSaid = async () => (await a.text('#overview-usage .overview-usage-text:not(.band-unshown)'))?.trim();
+  const cardLines = () => a.all('#overview-skills-usage > p', 'e.textContent');
+  const sessionsSaid = () => a.all('.tools-table td.tools-sessions', 'e.textContent');
+  const placesWhile = {}, placesAfter = {};
+  for (const [width, height] of [[1280, 800], [860, 600]]) { await sizeTo(a, width, height); placesWhile[width] = await places(); }
+  const whileRunning = [await usageSaid(), await cardLines(), [...new Set(await sessionsSaid())]];
+  await letGo();
+  for (let tries = 0; tries < 100 && !/^Usage collected/.test(await usageSaid() ?? ''); tries++) await wait(100);
+  await a.settle();
+  for (const [width, height] of [[860, 600], [1280, 800]]) { await sizeTo(a, width, height); placesAfter[width] = await places(); }
+  same('launched with nothing clicked, the Overview holds each figure’s room while the first reading runs: the line says it is collecting, the Skills card … where its count will be (its five lines’ room held by style.css), every sessions cell …',
+    whileRunning, ['Collecting usage statistics: reading your tools’ session history on this computer. Nothing leaves it.', ['Used in the last 30 days: …'], ['…']]);
+  same('the figures land by themselves, and no card, table row, header cell or the usage line moved, at 1280 and at 860', [placesAfter[1280], placesAfter[860]], [placesWhile[1280], placesWhile[860]]);
+  same('the Skills card says the reading as its page does: 3 used, the No use seen chip’s 1 (delta; bravo is Off) as a link, and the three most used by sessions, equal ones by name; the line, when',
+    [await cardLines(), await a.text('#overview-skills-unused'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [['Used in the last 30 days: 3', 'No use seen in 30 days: 1', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], 'No use seen in 30 days: 1', true]);
+  check('every tool’s sessions cell has its figure, or why there is none', (await sessionsSaid()).every(said => said && said !== '…'), await sessionsSaid());
+  await a.click('#overview-skills-unused');
+  same('No use seen opens Skills on that chip, the rows the card counted', [await a.run(`document.querySelector('.chip-on')?.dataset.tip`), (await sectionsNow(a, 'skills'))[0]?.[1]], ['No use seen in 30 days', ['delta']]);
+  await a.click('#nav-overview');
+  await a.click('#overview-skills-top-1');
+  same('a most used name opens its row on Skills, under All', [await a.run(`document.querySelector('.chip-on')?.dataset.tip ?? 'All'`), await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'echo')}"]')?.getAttribute('aria-expanded')`)], ['All', 'true']);
+  await a.click('#nav-overview');
+  await fullSize(a);
+  await fitsAtMinimum(a, 'the Overview with usage collected');
+  same('no page errors, the Overview', a.pageErrors, []);
+  await a.quit();
   // Started at sign-in, with no window (--hidden): nothing is collected until the window first shows (a second launch shows it).
   a = await launch(data, ['--hidden'], real);
   await a.click('#nav-skills');
@@ -6006,7 +6361,7 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group passes on its own.
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, overviewFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];

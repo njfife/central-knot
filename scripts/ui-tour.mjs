@@ -4,7 +4,7 @@
 // - With no switch it is the light tour (folder `light`): the app opens and each page is opened once, one picture each,
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
-// - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
+// - `--full` runs every feature section, about 1,700 pictures over about forty minutes on the Mac. For a new release only.
 // Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), plugin-text (a plugin's instruction files and the hooks that can add text to sessions), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
@@ -16,7 +16,9 @@
 // (a link to a plugin's own folder, a marketplace or a plugin one lists, and Add to Plugin marketplaces), plugin-library
 // (a plugin's items in Pi as library items), parts-migration (a plugin's parts an earlier version put into Pi, moved to the
 // library at one look), sort (the item pages sorted by last updated) and usage (usage collected from made-up session history:
-// the button and its band, each row's figure, an opened row's line per tool, and the "No use seen in 30 days" chip with its band).
+// the button and its band, each row's figure, an opened row's line per tool, and the "No use seen in 30 days" chip with its band)
+// and overview (the Overview on a made-up home of ordinary size: no tool, first setup, collecting and collected, a problem, an
+// update to install, and at 1280×800 the states one line changes).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -1030,7 +1032,7 @@ if (wanted('sync-everything')) {
   await waitFor(a, `document.querySelector('#sync-everything-on')?.getAttribute('aria-checked') === 'true'`, 15000);
   await atEverySize('settings-on', 'Clicked its switch: Synchronize everything is on; under the row, what the pass right after took in, a line per kind with History, and what still waits for a choice of copy', true, '#setting-sync-everything');
   await a.click('#nav-overview');
-  await atEverySize('overview-on', 'Opened Overview: the sync line says what turns up in a tool is taken in by Synchronize everything');
+  await atEverySize('overview-on', 'Opened Overview: its question is gone, now Synchronize everything is on; what still needs you is the one found item whose copies differ, with Choose copies, and the cards count what it took in');
   await a.click('#nav-skills');
   await atEverySize('skills-on', 'Opened Skills: one notice names the skills it took in and the tools it found them in; the Found heading says Synchronize everything leaves these, the opened row saying why, and counts what waits for a choice', true);
   await openRow('skills', 'review');
@@ -1082,10 +1084,13 @@ if (wanted('plugin-skills')) {
   // Codex's switch is its config.toml, so its CLI is only asked its version (the switch is offered from a tested build).
   writeFileSync(join(HOME, '.local/bin/codex'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.167.0" && exit 0\nexit 9\n`, { mode: 0o755 });
   writeFileSync(join(HOME, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.108." && exit 0\nS="$HOME/.copilot/settings.json"\ncase "$1 $2" in\n  "skill disable") printf '{"extraKnownMarketplaces":${known},"disabledSkills":["%s"]}' "$3" > "$S" ;;\n  "skill enable") printf '${copilotSettings([])}' > "$S" ;;\n  *) exit 9 ;;\nesac\n`, { mode: 0o755 });
-  const at860 = async (name, caption) => {
+  // The switches' result goes by itself 8 s after the clicks, its Undo with it (app.ts FADE_MS), but stays while the pointer
+  // is on it. The pictures between the clicks and Undo take longer than that, so for each of them the pointer rests on its words.
+  const onResult = () => middleOf('#plugins-result .toolbar-result-text');
+  const at860 = async (name, caption, held = false) => {
     await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
     await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
-    await shot(a, name, caption);
+    await shot(a, name, caption, held ? await onResult() : undefined);
     await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
   };
   await a.click('#nav-plugins');
@@ -1098,17 +1103,17 @@ if (wanted('plugin-skills')) {
   const flip = async id => { await a.click(id); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle(); };
   await flip('#pskill-0-document-tools-pdf-reader-codex-cli');
   await flip('#pskill-0-document-tools-pdf-reader-copilot-cli');
-  await shot(a, 'skill-off', 'Clicked pdf-reader’s switch under Codex, then under Copilot CLI: each acted at once. Codex’s config.toml now names document-tools:pdf-reader with enabled = false, and Copilot CLI ran `copilot skill disable document-tools:pdf-reader`. The toolbar has the last click’s result, with its Undo.');
+  await shot(a, 'skill-off', 'Clicked pdf-reader’s switch under Codex, then under Copilot CLI: each acted at once. Codex’s config.toml now names document-tools:pdf-reader with enabled = false, and Copilot CLI ran `copilot skill disable document-tools:pdf-reader`. The header has the last click’s result, with its Undo; from here to Undo the pointer rests on the result, which keeps it.', await onResult());
   await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').focus({ focusVisible: true })`);
-  await shot(a, 'skill-focus', 'Moved keyboard focus to pdf-reader’s Codex switch (as Tab would): the focus ring.');
-  await a.theme('light'); await shot(a, 'skill-focus-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await shot(a, 'skill-focus', 'Moved keyboard focus to pdf-reader’s Codex switch (as Tab would): the focus ring.', await onResult());
+  await a.theme('light'); await shot(a, 'skill-focus-light', 'The same, in the light appearance.', await onResult()); await a.theme('dark');
   await a.run(`document.activeElement?.blur()`);
-  await at860('skill-off-860-skills', 'The same at 860×560, scrolled to the skills.');
-  await a.theme('light'); await shot(a, 'skill-off-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await at860('skill-off-860-skills', 'The same at 860×560, scrolled to the skills.', true);
+  await a.theme('light'); await shot(a, 'skill-off-light', 'The same, in the light appearance.', await onResult()); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
     await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false }); await a.settle();
-    await shot(a, `skill-off-${width}`, `The same page at ${width}×${height}.`);
-    await a.theme('light'); await shot(a, `skill-off-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
+    await shot(a, `skill-off-${width}`, `The same page at ${width}×${height}.`, await onResult());
+    await a.theme('light'); await shot(a, `skill-off-${width}-light`, `The same at ${width}×${height}, light.`, await onResult()); await a.theme('dark');
   }
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
   await flip('#plugins-undo');
@@ -1419,6 +1424,8 @@ async function instructionsAtSizes(tag, caption) {
   await shot(a, `${tag}-light`, `${caption} At 1280×800, light.`); await a.theme('dark');
 }
 if (wanted('instructions')) {
+  // Its own home, so a full tour draws what `--only instructions` draws: plugin-items, before it, leaves Pi in the home.
+  await fresh();
   begin('instructions');
   await a.click('#nav-instructions');
   await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`);
@@ -2253,11 +2260,11 @@ if (wanted('harnesses')) {
   await size(860, 560);
   const last = await a.run(`[...document.querySelectorAll('.ov-head .tool-head-button')].at(-1)?.id`);
   if (last) { await a.click(`#${last}`); await shot(a, 'last-menu-860', 'Clicked the right-most column header at 860×560: its menu stays inside the window.'); await a.click(`#${last}`); }
-  await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi doesn’t use agents.');
+  await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi holds none of them yet; the agents the other tools have are under “Not in Pi”, each with Add (in Pi an agent is a skill).');
   await a.click('#harness-tab-skills'); if (!(await a.has(`.ov-row.open[data-key="${rowPart('', 'skills', 'release-notes')}"]`))) await a.click(`#${rowPart('open', 'skills', 'release-notes')}`); await shot(a, 'pi-details-860', 'Opened release-notes on Pi’s page at 860×560: each tool’s own switch in its details.');
   await size(1280, 800);
   // This computer's home (in the tour, an empty throwaway folder on Linux): detection, a Not found card, and its header.
-  await a.click('#home-actual'); await a.click('#nav-harnesses'); await shot(a, 'this-computer-list', 'Clicked "This computer’s home" at the bottom left, then Harnesses: each tool with how it was found; tools not found have a card that does not open.');
+  await a.click('#home-actual'); await a.click('#nav-harnesses'); await shot(a, 'this-computer-list', 'Clicked "This Mac’s home" ("This computer’s home" off macOS) at the bottom left, then Harnesses: each tool with how it was found; tools not found have a card that does not open.');
 }
 
 // ---------- A tool's Manage switch (Harnesses cards; toolchoice.ts) ----------
@@ -2278,7 +2285,7 @@ if (wanted('manage')) {
   await a.click('#nav-skills'); await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
   await atEverySize('skills-one-left-out', 'Turned standup off on the Skills page with Codex left out: no Codex mark on any row; standup’s row and the band say no tool Central Knot manages has it');
   await a.click('#nav-overview');
-  await atEverySize('overview-one-left-out', 'The Overview with Codex left out: the lead names the managed tools and says where Codex’s switch is');
+  await atEverySize('overview-one-left-out', 'The Overview with Codex left out: Your tools has a row for Claude Code and Copilot CLI only, and the line under it says Codex is left out and that its switch is on Harnesses (under the fold at 860×560)');
   await a.click('#nav-harnesses'); await refresh();
   await atEverySize('codex-line-before-on', 'Edited Codex’s notes by hand, then Refresh on Harnesses: Codex’s line counts what turning it on will do there: Central Knot’s version written for one item, one copy that differs kept as a version first, one copy of an item that is off removed, and two found items', true, '#manage-codex-cli');
   await a.click('#manage-codex-cli');
@@ -2971,6 +2978,156 @@ if (wanted('usage')) {
     await requests.restore('usage:read');
     requests.close();
   }
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
+// ---------- The Overview, the page the app opens on (overview.ts) ----------
+// A made-up home of ordinary size in this run's own HOME (this computer's home, so each tool's version shows): five stand-in
+// tools, about 110 skills (10 from plugins), 12 MCP servers, 8 agents and session history in three tools. Each state at every
+// size and once in light; at 1280×800 also the states that are one line's change.
+if (wanted('overview')) {
+  const zip = join(scratch, 'update.zip');
+  writeFileSync(zip, Buffer.alloc(4_000_000, 7));
+  const releases = [];
+  const fixture = await serveReleases(releases);
+  // Tools are looked for only in this run's HOME, as e2e.mjs does: on a machine with real CLIs installed (a Mac with
+  // Homebrew's), "no tool in it" would otherwise find them.
+  await fresh({ CK_UPDATE_STUB: 'v0.7.0-alpha.1', CK_UPDATE_RELEASES: fixture.releasesUrl, CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  begin('overview');
+  const top = () => a.run(`document.getElementById('overview-scroll')?.scrollTo(0, 0)`);
+  /** Waits for a state the next pictures show; the run stops if it never comes, so no picture shows the wrong one. */
+  const must = async (expression, ms, what) => { if (!(await waitFor(a, expression, ms))) throw new Error(`The Overview's tour waited in vain for ${what}; its usage line said: ${await a.run(`document.querySelector('#overview-usage')?.innerText`)}; the page: ${(await a.run(`document.querySelector('#overview-scroll')?.innerText ?? document.body.innerText`)).slice(0, 400)}`); };
+  // No tool, and a record that stops every write: why it can't be written is said too.
+  mkdirSync(join(HOME, '.central-knot'), { recursive: true });
+  writeFileSync(join(HOME, '.central-knot/sync.json'), '{ damaged');
+  await a.click('#home-actual');
+  await must(`!!document.querySelector('#overview-choose-home') && !!document.querySelector('#overview-stopped')`, 15000, 'a home with no tool and a damaged record');
+  await atEverySize('no-tools', 'This computer’s home with no tool in it, and its record damaged: one sentence and the way on, then why nothing can be written; no cards, usage strip or table', true);
+  rmSync(join(HOME, '.central-knot/sync.json'));
+  const old = new Date(Date.now() - 40 * DAY), ago = days => new Date(Date.now() - days * DAY).toISOString();
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  for (const [name, version] of [['claude', '2.1.322 (Claude Code)'], ['copilot', '1.0.4'], ['codex', 'codex-cli 0.142.3'], ['pi', '0.68.1'], ['opencode', '1.14.2']]) writeFileSync(join(HOME, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  const words = ['api', 'audit', 'build', 'cache', 'changelog', 'ci', 'cloud', 'commit', 'config', 'cost', 'data', 'db', 'debug', 'deploy', 'design', 'docs', 'docker', 'edge', 'email', 'error', 'event', 'feature', 'flag', 'git', 'grafana', 'helm', 'incident', 'infra', 'jira', 'k8s', 'lint', 'log', 'merge', 'metric', 'migrate', 'monitor', 'note', 'oncall', 'perf', 'plan', 'pr', 'prompt', 'query', 'release', 'review', 'risk', 'schema', 'search', 'security', 'sql', 'test', 'ticket', 'trace', 'triage'];
+  const skillNames = ['check', 'draft', 'summary'].flatMap(verb => words.map(word => `${word}-${verb}`)).slice(0, 99);
+  // A long name, shortened in the middle where it is among the most used.
+  skillNames.push('kubernetes-deployment-rollout-health-check');
+  const roots = { claude: '.claude/skills', copilot: '.copilot/skills', codex: '.codex/skills', pi: '.pi/agent/skills', opencode: '.config/opencode/skills' };
+  const putSkill = (root, name, body = `Steps for ${name}.`) => {
+    const folder = join(HOME, root, name);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'SKILL.md'), `---\nname: ${name}\ndescription: Use when you need ${name.replace(/-/g, ' ')}.\n---\n\n${body}\n`);
+    for (const path of [join(folder, 'SKILL.md'), folder]) utimesSync(path, old, old);
+  };
+  skillNames.forEach((name, at) => { putSkill(roots.claude, name); if (at % 2) putSkill(roots.copilot, name); if (at % 5 === 0) putSkill(roots.codex, name); if (at % 3 === 0) putSkill(roots.pi, name); if (at % 7 === 0) putSkill(roots.opencode, name); });
+  // One found skill whose copies differ, in Claude Code and Copilot CLI.
+  putSkill(roots.claude, 'issue-triage', 'Label new issues by area and urgency.');
+  putSkill(roots.copilot, 'issue-triage', 'Label new issues by area.');
+  for (const root of Object.values(roots)) mkdirSync(join(HOME, root), { recursive: true });
+  const servers = ['github', 'linear', 'sentry', 'postgres', 'grafana', 'slack', 'notion', 'figma', 'datadog', 'kubernetes', 'stripe', 'browser'];
+  writeFileSync(join(HOME, '.claude.json'), JSON.stringify({ mcpServers: Object.fromEntries(servers.map(name => [name, { command: 'npx', args: ['-y', `@example/${name}-mcp`] }])) }, null, 2));
+  utimesSync(join(HOME, '.claude.json'), old, old);
+  mkdirSync(join(HOME, '.claude/agents'), { recursive: true });
+  for (const name of ['planner', 'debugger', 'test-writer', 'doc-writer', 'security-reviewer', 'migrator', 'reviewer', 'researcher']) { writeFileSync(join(HOME, '.claude/agents', `${name}.md`), `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nYou are the ${name}.\n`); utimesSync(join(HOME, '.claude/agents', `${name}.md`), old, old); }
+  const pluginSkills = { 'team-git': ['create-mr', 'rebase-help'], 'team-infra': ['helm-alert-audit', 'helm-alert-summary'], 'team-docs': ['publish-html'], 'team-observability': ['query-logs', 'query-traces'], 'team-risk': ['risk-handoff'], 'team-jira': ['jira-sprint', 'jira-search'] };
+  for (const [plugin, skills] of Object.entries(pluginSkills)) writeClaudeInstall(HOME, 'team-tools', plugin, '1.2.0', { '.claude-plugin/plugin.json': JSON.stringify({ name: plugin, version: '1.2.0' }), ...Object.fromEntries(skills.map(name => [`skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name} from ${plugin}.\n---\n\nSteps.\n`])) });
+  // Session history: Claude Code (40 sessions in 25 days, one 45 days ago), Copilot CLI (12 from 18 days ago), Pi (6 from 9 days ago).
+  const lines = (path, records) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n') + '\n'); };
+  const used = skillNames.filter((_, at) => at % 3 !== 2);
+  lines(join(HOME, '.claude/projects/-work/s-old.jsonl'), [{ type: 'user', message: { content: 'hello' }, timestamp: ago(45) }]);
+  for (let n = 0; n < 40; n++) {
+    const skills = [used[n % used.length], used[(n * 7) % 12], 'jira-check', ...(n % 3 ? [] : ['kubernetes-deployment-rollout-health-check'])], calls = servers.slice(0, 1 + (n % 3));
+    lines(join(HOME, `.claude/projects/-work/s${n}.jsonl`), [{ type: 'assistant', message: { content: [...skills.map(skill => ({ type: 'tool_use', name: 'Skill', input: { skill } })), ...calls.map(server => ({ type: 'tool_use', name: `mcp__${server}__call`, input: {} })),
+      ...(n % 4 ? [] : [{ type: 'tool_use', name: 'Agent', input: { subagent_type: 'planner' } }])] }, timestamp: ago((n * 25) / 40) }]);
+  }
+  for (let n = 0; n < 12; n++) lines(join(HOME, `.copilot/session-state/c${n}/events.jsonl`), [{ type: 'session.start', data: {}, timestamp: ago(18 - n) }, { type: 'skill.invoked', data: { name: used[(n * 5) % used.length] }, timestamp: ago(18 - n) }]);
+  for (let n = 0; n < 6; n++) lines(join(HOME, `.pi/agent/sessions/--w--/p${n}.jsonl`), [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: `<skill name="${used[n * 3]}">` }] }, timestamp: ago(9 - n) }]);
+  await a.click('#home-actual');
+  const opened = Date.now();
+  await must(`!!document.querySelector('#setup-question') && /Usage collected/.test(document.querySelector('#overview-usage .overview-usage-text:not(.band-unshown)')?.textContent ?? '')`, 180000, 'first setup’s question and a reading');
+  console.log(`(the made-up home's first reading landed ${Math.round((Date.now() - opened) / 1000)} s after it opened)`);
+  await top();
+  await atEverySize('first-setup', 'The same home with its tools in it, opened for the first time: first setup’s question first; the cards count what was found (nothing synced yet) and what the usage reading, collected by itself, says; a row per tool with its version', true);
+  await a.click('#setup-no');
+  await must(`!!document.querySelector('#overview-skills-differ')`, 30000, 'the line for copies that differ');
+  if (await a.has('#outcome-dismiss')) await a.click('#outcome-dismiss');
+  await top();
+  await shot(a, 'synchronize-everything-off-1280', 'Answered No: the found skill whose copies differ is said once, on a line of its own with Show them (Synchronize everything off) (1280×800)');
+  await a.click('#nav-settings');
+  await must(`!!document.querySelector('#sync-everything-on')`, 15000, 'Settings’ Synchronize everything');
+  await a.click('#sync-everything-on');
+  await waitFor(a, `!!document.querySelector('#walkthrough') || !document.querySelector('#sync-everything-on:not([aria-checked="true"])')`, 60000);
+  if (await a.has('#walk-leave')) await a.click('#walk-leave');
+  await a.click('#nav-overview');
+  if (await a.has('#outcome-dismiss')) await a.click('#outcome-dismiss');
+  // Opened again, its first reading held back: the cards' usage lines and the sessions column hold their room.
+  const requests = await requestHandles(a);
+  if (requests) {
+    await requests.slow('usage:read', 20000);
+    await a.click('#home-actual');
+    await must(`/Collecting usage/.test(document.querySelector('#overview-usage .overview-usage-text:not(.band-unshown)')?.textContent ?? '') && !!document.querySelector('.kind-card') && !document.querySelector('#walkthrough')`, 15000, 'the first reading held back');
+    await top();
+    await atEverySize('collecting', 'Synchronize everything on, the home opened again, its first reading running (held back here): every place a reading fills is drawn at its size, with … where a figure will be', true);
+    await requests.restore('usage:read');
+  }
+  await must(`/Usage collected/.test(document.querySelector('#overview-usage .overview-usage-text:not(.band-unshown)')?.textContent ?? '') && !!document.querySelector('#setup-choosing')`, 30000, 'the reading landed');
+  await top();
+  await atEverySize('collected', 'The reading landed with nothing moved: each card says how many were used in 30 days, how many the page’s No use seen chip holds (a link to it) and the three most used (links to their rows); each tool’s sessions in 30 days, and where its history starts later', true);
+  if (requests) {
+    await requests.fail('usage:read');
+    await a.click('#overview-collect-usage');
+    await must(`!!document.querySelector('.overview-usage-failed')`, 15000, 'a failed reading');
+    await top();
+    await shot(a, 'reading-failed-1280', 'Clicked Update usage statistics, and the reading failed: the line, boxed, says so with Try again; no figure from the reading before stays (1280×800)');
+    await requests.restore('usage:read');
+  }
+  // Claude Code's and Pi's history gone: Copilot CLI alone says which skills it ran, and no tool here can tell about MCP servers or agents.
+  renameSync(join(HOME, '.claude/projects'), join(HOME, '.claude/projects-away'));
+  renameSync(join(HOME, '.pi/agent/sessions'), join(HOME, '.pi/agent/sessions-away'));
+  await a.click(requests ? '#overview-collect-again' : '#overview-collect-usage');
+  await must(`/can’t say/.test(document.querySelector('#overview-mcp-usage')?.textContent ?? '')`, 30000, 'a kind no tool can tell about');
+  await top();
+  await shot(a, 'cant-say-1280', 'Only Copilot CLI’s history left: it tells which skills ran, so Skills has its figures; no tool here that has them on can tell about MCP servers or agents, so those cards say can’t say (1280×800)');
+  renameSync(join(HOME, '.claude/projects-away'), join(HOME, '.claude/projects'));
+  renameSync(join(HOME, '.pi/agent/sessions-away'), join(HOME, '.pi/agent/sessions'));
+  await a.click('#overview-collect-usage');
+  await must(`!/can’t say/.test(document.querySelector('#overview-mcp-usage')?.textContent ?? '') && /Usage collected/.test(document.querySelector('#overview-usage .overview-usage-text:not(.band-unshown)')?.textContent ?? '')`, 30000, 'the history back');
+  // A problem waiting: Copilot CLI's MCP file can't be read; and Claude Code's own record of its plugins can't either.
+  writeFileSync(join(HOME, '.copilot/mcp-config.json'), '{ "mcpServers": { "github": ');
+  const installed = join(HOME, '.claude/plugins/installed_plugins.json'), installedText = readFileSync(installed, 'utf8');
+  writeFileSync(installed, '{');
+  await refresh();
+  await a.click('#nav-overview');
+  await top();
+  await atEverySize('problem', 'A problem waiting: Copilot CLI’s MCP file couldn’t be read; it comes first, with the way to its page. In the table “?” for Copilot CLI’s MCP servers and for Claude Code’s plugins, whose record couldn’t be read, and the key says what “?” is; MCP servers says nothing of sync', true);
+  rmSync(join(HOME, '.copilot/mcp-config.json'));
+  writeFileSync(installed, installedText);
+  await refresh();
+  // An update to install: found by Check for updates, then downloaded from the Overview's own button with a draft typed.
+  releases.push({ tag: 'v0.7.1-alpha.1', zip, asset: 'Central-Knot-Alpha-0.7.1-mac-arm64.zip', bytesPerSecond: 400_000 });
+  await a.click('#nav-overview');
+  await a.click('#update-control');
+  await must(`!!document.querySelector('#overview-update')`, 20000, 'an update to install');
+  await top();
+  await atEverySize('update', 'A newer release found: its line comes first, with What’s new and Update; the sidebar’s control says it too', true);
+  await a.click('#nav-instructions');
+  await must(`!!document.querySelector('[id^="ins-edit-"]')`, 15000, 'an instruction file to edit');
+  const tool = await a.run(`document.querySelector('[id^="ins-edit-"]')?.id.slice('ins-edit-'.length) ?? ''`);
+  await a.click(`#ins-edit-${tool}`);
+  await a.run(`(() => { const area = document.querySelector('#ins-text-${tool}'); area.value += '\\n- Not saved yet.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await a.settle();
+  await a.click('#nav-overview');
+  await a.click('#overview-update');
+  await must(`/Downloading… [1-9]/.test(document.querySelector('#overview-update')?.textContent ?? '')`, 15000, 'the download under way');
+  await top();
+  await shot(a, 'downloading-1280', 'With an instructions draft typed and not saved, clicked Update on the Overview: its button says the download’s progress, as the sidebar’s ring does (1280×800)');
+  await must(`document.querySelector('#update-control')?.dataset.look === 'held' && !!document.querySelector('#overview-update')`, 40000, 'the held restart');
+  await top();
+  await shot(a, 'held-1280', 'Downloaded and prepared; the unsaved draft holds the restart: the Overview’s button, like the sidebar’s control, says Restart to update… and opens Settings, which says what would be lost (1280×800)');
+  await a.click('#overview-update');
+  await must(`!!document.querySelector('#setting-updates')`, 15000, 'Settings’ Updates row');
+  await shot(a, 'held-clicked-1280', 'Clicked Restart to update… on the Overview: Settings’ Updates row, which says what restarting would lose, beside its own Restart button (1280×800)');
+  if (requests) requests.close();
+  await fixture.close();
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 

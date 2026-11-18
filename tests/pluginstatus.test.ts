@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { clickRuns, owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
@@ -180,4 +180,16 @@ test('A plugin every tool that can take it has comes first, one some tool has ne
   // A tool that takes no plugins is no reason to wait.
   const withPi: PluginsView = { ...view, tools: [...view.tools, 'pi-cli'] };
   assert.equal(pluginPlace(withPi, at({ 'claude-cli': here, 'copilot-cli': here, 'codex-cli': here }), 'p'), 0);
+});
+
+test('A tool’s plugins are counted from its own record, each install once, the same wherever the person has been: an Anthropic Directory install is one, though a marketplace’s catalog also lists it as its own; no catalog read (or one that failed) is asked; “not known” only where that tool’s own record can’t be read', () => {
+  const install = (tool: HarnessId, plugin: string, marketName: string) => ({ tool, plugin, marketName, listed: true, items: [] });
+  // Claude Code has kit from the Directory (plugins.ts fromDirectory: a catalog that offers kit calls it installed from there) and
+  // notes from a team marketplace; Copilot CLI has notes too.
+  const home = { pluginItems: [install('claude-cli', 'kit', DIRECTORY), install('claude-cli', 'notes', 'team'), install('copilot-cli', 'notes', 'team')] };
+  assert.deepEqual(['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'].map(tool => pluginsInstalled(home, tool as HarnessId)),
+    [{ state: 'read', count: 2 }, { state: 'read', count: 1 }, { state: 'read', count: 0 }, { state: 'unsupported' }]);
+  // Claude Code's installed_plugins.json can't be read: its count is not known, the others' are still theirs.
+  const unread = { ...home, pluginRecordsUnread: ['claude-cli' as HarnessId] };
+  assert.deepEqual([pluginsInstalled(unread, 'claude-cli'), pluginsInstalled(unread, 'copilot-cli')], [{ state: 'unknown' }, { state: 'read', count: 1 }]);
 });

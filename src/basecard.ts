@@ -12,7 +12,7 @@ import { acting, applyBaseChange, closeDraftPick, draftFile, startDraft, draftSt
 import { baseAction, draftedOwn, fileWithBase, linesNotCarried, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText } from './dom.ts';
-import { changeCounts, diffView, discardConfirm, escapeTo, keepCaret, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
+import { changeCounts, diffView, discardConfirm, escapeTo, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { brandMark } from './matrix.ts';
 import { fileName, lineCount, toolList, toolNames } from './words.ts';
 import { plural } from './model.ts';
@@ -103,8 +103,8 @@ function editView(files: InstructionFile[], edit: BaseEdit): Stage {
     oninput: (event: Event) => {
       const target = event.target as HTMLTextAreaElement;
       edit.text = target.value;
-      // Typing answers an open discard question with "keep editing": it goes, and the caret stays where it was.
-      if (edit.confirmDiscard) { edit.confirmDiscard = false; keepCaret('base-text', target.selectionStart, rerender); return; }
+      // Typing answers an open discard question with "keep editing": it goes, and the caret stays where it was (dom.ts keepSelection).
+      if (edit.confirmDiscard) { edit.confirmDiscard = false; rerender(); return; }
       // Said as you type, without redrawing the editor.
       const review = document.getElementById('base-review') as HTMLButtonElement | null;
       if (review) review.disabled = !reviewable();

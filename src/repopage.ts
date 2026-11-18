@@ -1,7 +1,7 @@
 // Git repo: the Managed set kept in a git repo (GitHub, GitLab or any git server), with Pull to bring the repo's changes into the
 // tools and Push to send this computer's. The page says which repo and commit are in use, when it last pulled and pushed, and
 // what differs each way; nothing moves until Pull or Push is clicked.
-import { acting, announce, busy, rerender, setSync, showPage, state } from './app.ts';
+import { acting, announce, busy, rerender, setHome, setSync, showPage, state } from './app.ts';
 import { button, closeButton, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { outcomeBand } from './matrix.ts';
@@ -103,8 +103,7 @@ async function settle(result: RepoResult, done: string, note?: string, warn?: bo
   repo.view = result.view;
   repo.problem = result.stopped;
   repo.confirmDisconnect = false;
-  const home = await api().refresh();
-  if (home) state.home = home;
+  setHome(await api().refresh(), { reload: false });
   if (!result.stopped) state.outcome = { page: 'repo', text: done, note, warn };
   // The status bar's "…ing" ends with the action: said quietly, since the band above already shows it.
   announce(result.stopped ?? done, true);
