@@ -1,7 +1,8 @@
 // The usage reading, in main: which skills, agents and MCP servers each tool's own session history shows were used, and
-// when. It runs on a click (main.ts usage:read, DesktopApi.readUsage) and at no other time, outside main's queue: it changes
-// nothing in the home (OpenCode's database is read from a temporary copy, removed after), so it never holds up a pass. Nothing
-// is stored: the page keeps the answer in its own slot (app.ts state.usage) until the home changes or the app closes.
+// when. It runs when the page collects usage (main.ts usage:read, DesktopApi.readUsage, from app.ts collectUsage: when a home
+// opens, and on Update usage statistics), outside main's queue: it changes nothing in the home (OpenCode's database is read from
+// a temporary copy, removed after), so it never holds up a pass. Nothing is stored: the page keeps the answer in its own slot
+// (app.ts state.usage) until the home changes or the app closes.
 //
 // `readers` is the one table, a row per tool: where its sessions are (under the same folders, moved by the same variables,
 // as its other files: harnesses.ts), which kinds its records can tell (`tells`, the same table for the page: types.ts
@@ -11,11 +12,12 @@
 //
 // Not here: which item a name is, by each tool's spelling rules (usagerow.ts, the page's, with the 30 days: USAGE_DAYS),
 // and what the page shows (matrix.ts). Another tool is another row of `readers`, and of usagerow.ts spelledIn.
-import { createReadStream, existsSync } from 'node:fs';
+import { constants as fsConstants, createReadStream, existsSync } from 'node:fs';
 import { copyFile, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
 import { harnessIds, toolConfigRoot } from './harnesses.ts';
 import type { ItemKind } from './library.ts';
 import type { HarnessId, ToolUsage, UsageReading, UsageTells, UsedName } from './types.ts';
@@ -153,34 +155,57 @@ async function jsonlSessions(roots: string[], sessionOf: (path: string) => strin
  */
 const firstPart = (path: string) => path.split(sep)[1]?.replace(/\.jsonl$/, '') ?? path;
 
+/** How many of OpenCode's parts are read at once, before the read gives way to the rest of main (a click's pass). */
+const PART_SLICE = 2_000;
+
 /**
- * OpenCode keeps its sessions in SQLite: a session's own agent (its `agent` column), and its skill and task calls. The database
- * and its write-ahead log are read from a copy in a temporary folder, since SQLite opening a database in WAL mode, even read
- * only, would leave files of its own beside OpenCode's.
+ * OpenCode keeps its sessions in SQLite: a session's own agent (its `agent` column), and its skill and task calls. With no
+ * write-ahead log beside it (OpenCode not running), the database is read where it is, as a file that won't change (SQLite's
+ * `immutable`), which leaves nothing beside it; if the file changed meanwhile (OpenCode started and wrote), that reading is
+ * dropped and it is read again from a copy. With a log, the last writes are only in it, and SQLite opening a database in WAL
+ * mode, even read only, would leave files of its own beside OpenCode's, so both are read from a copy in a temporary folder (a
+ * clone where the file system makes one). Its parts can be hundreds of thousands, and node:sqlite reads synchronously, so
+ * they are read a slice of rows at a time (PART_SLICE, by rowid), giving way between slices.
  */
 async function openCodeSessions(at: UsageWhere, now: number): Promise<Read | undefined> {
   const file = join(at.dataHome ?? join(at.home, '.local/share'), 'opencode', 'opencode.db');
   if (!existsSync(file)) return undefined;
+  if (!existsSync(`${file}-wal`)) {
+    const before = await stat(file), read = await openCodeRead(file, now, false).catch(() => undefined), after = await stat(file);
+    if (read && before.size === after.size && before.mtimeMs === after.mtimeMs) return read;
+  }
+  return openCodeRead(file, now, true);
+}
+
+/** OpenCode's sessions from its database, read where it is (`copied` false) or from a copy of it and its log. */
+async function openCodeRead(file: string, now: number, copied: boolean): Promise<Read> {
   const { DatabaseSync } = await import('node:sqlite');
-  const copy = await mkdtemp(join(tmpdir(), 'ck-opencode-copy-'));
+  const copy = copied ? await mkdtemp(join(tmpdir(), 'ck-opencode-copy-')) : undefined;
   let db: InstanceType<typeof DatabaseSync> | undefined;
   try {
-    await copyFile(file, join(copy, 'opencode.db'));
-    await copyFile(`${file}-wal`, join(copy, 'opencode.db-wal')).catch(() => undefined);
-    db = new DatabaseSync(join(copy, 'opencode.db'));
+    if (copy) {
+      await copyFile(file, join(copy, 'opencode.db'), fsConstants.COPYFILE_FICLONE);
+      await copyFile(`${file}-wal`, join(copy, 'opencode.db-wal'), fsConstants.COPYFILE_FICLONE).catch(() => undefined);
+    }
+    db = copy ? new DatabaseSync(join(copy, 'opencode.db')) : new DatabaseSync(new URL(`${pathToFileURL(file).href}?immutable=1`), { readOnly: true });
     const fileTime = (await stat(file)).mtimeMs, when = (time: number) => (time > now ? fileTime : time);
     const sessions = new Map<string, Session>();
     for (const row of db.prepare('SELECT * FROM session').all() as JsonRecord[]) {
       sessions.set(row.id, { start: when(row.time_created), uses: use('agent', row.agent).map(found => ({ ...found, at: when(row.time_created) })) });
     }
-    for (const row of db.prepare(`SELECT session_id, time_created, data FROM part WHERE data LIKE '%"tool":"skill"%' OR data LIKE '%"tool":"task"%'`).iterate() as Iterable<JsonRecord>) {
-      let part: JsonRecord;
-      try { part = JSON.parse(row.data); } catch { continue; }
-      const found = part.tool === 'skill' ? use('skill', part.state?.input?.name) : part.tool === 'task' ? use('agent', part.state?.input?.subagent_type) : [];
-      sessions.get(row.session_id)?.uses.push(...found.map(each => ({ ...each, at: when(row.time_created) })));
+    const slice = db.prepare(`SELECT session_id, time_created, data FROM part WHERE rowid > ? AND rowid <= ? AND (data LIKE '%"tool":"skill"%' OR data LIKE '%"tool":"task"%')`);
+    const last = Number((db.prepare('SELECT max(rowid) AS last FROM part').get() as JsonRecord).last ?? 0);
+    for (let after = 0; after < last; after += PART_SLICE) {
+      for (const row of slice.all(after, after + PART_SLICE) as JsonRecord[]) {
+        let part: JsonRecord;
+        try { part = JSON.parse(row.data); } catch { continue; }
+        const found = part.tool === 'skill' ? use('skill', part.state?.input?.name) : part.tool === 'task' ? use('agent', part.state?.input?.subagent_type) : [];
+        sessions.get(row.session_id)?.uses.push(...found.map(each => ({ ...each, at: when(row.time_created) })));
+      }
+      await new Promise(resolve => setImmediate(resolve));
     }
     return { sessions: [...sessions.values()], skipped: 0 };
-  } finally { db?.close(); await rm(copy, { recursive: true, force: true }); }
+  } finally { db?.close(); if (copy) await rm(copy, { recursive: true, force: true }); }
 }
 
 /**
@@ -216,12 +241,12 @@ export const readers: Record<HarnessId, Reader> = {
   'opencode-cli': { tells: { skill: 'sure', agent: 'sure' }, read: openCodeSessions },
 };
 
-/** One tool's sessions, read and counted: per name, the sessions since `since` that used it (by number) and its newest use. */
+/** One tool's sessions, read and counted: how many it keeps and how many started since `since`; per name, the sessions since `since` that used it (by number) and its newest use. */
 async function readTool(tool: HarnessId, at: UsageWhere, now: number): Promise<ToolUsage> {
   const reader = readers[tool], since = now - USAGE_DAYS * DAY_MS;
   let read: Read | undefined;
   try { read = await reader.read(at, now); }
-  catch { return { tool, tells: reader.tells, sessions: 0, used: [], unread: true }; }
+  catch { return { tool, tells: reader.tells, sessions: 0, recent: 0, used: [], unread: true }; }
   const sessions = read?.sessions;
   const used = new Map<string, UsedName & { newest: number }>();
   sessions?.forEach((session, index) => {
@@ -236,14 +261,14 @@ async function readTool(tool: HarnessId, at: UsageWhere, now: number): Promise<T
   const oldest = starts.length ? Math.min(...starts) : undefined;
   const from = sessions?.length ? (reader.reach ? await reader.reach(at, now, oldest) : oldest) : undefined;
   return {
-    tool, tells: reader.tells, sessions: sessions?.length ?? 0, ...(from !== undefined ? { from: new Date(from).toISOString() } : {}), ...(read?.skipped ? { skipped: read.skipped } : {}),
+    tool, tells: reader.tells, sessions: sessions?.length ?? 0, recent: starts.filter(start => start >= since).length,
+    ...(from !== undefined ? { from: new Date(from).toISOString() } : {}), ...(read?.skipped ? { skipped: read.skipped } : {}),
     used: [...used.values()].map(({ newest, ...entry }) => ({ ...entry, last: new Date(newest).toISOString() })),
   };
 }
 
 /** Reads every tool's session history in a home: the page's one reading (types.ts UsageReading). */
 export async function readUsage(at: UsageWhere, now = Date.now()): Promise<UsageReading> {
-  const started = performance.now();
   const tools = await Promise.all(harnessIds.map(tool => readTool(tool, at, now)));
-  return { at: new Date(now).toISOString(), tookMs: Math.round(performance.now() - started), tools };
+  return { at: new Date(now).toISOString(), tools };
 }

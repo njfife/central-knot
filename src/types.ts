@@ -158,6 +158,8 @@ export interface DesktopApi {
   openSignInSettings(): Promise<void>;
   /** The settings may have changed: main saved a change (this page, a menu, a dialog), or the window came back (the system's own settings may have changed meanwhile). */
   onSettingsChanged(callback: () => void): void;
+  /** The window has shown (main.ts sends it at each show, and at each load once it has shown): a start with no window collects usage then (app.ts collectUsage). */
+  onWindowShown(callback: () => void): void;
   /** Opens the folder of Central Knot's own log in the file manager, the log selected where the system can. */
   openLogFolder(): Promise<LogFolderOpened>;
   /** Central Knot's own log, its last `count` lines (Settings' Show log). */
@@ -190,7 +192,7 @@ export interface DesktopApi {
   instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** One version of an agent as Central Knot's library holds it: its name, description and prompt; null when it is no longer kept. */
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
-  /** Reads which skills, agents and MCP servers the tools' session history shows were used (usage.ts readUsage), on a click; null for another home than the open one. */
+  /** Reads which skills, agents and MCP servers the tools' session history shows were used (usage.ts readUsage), when the page collects usage (app.ts collectUsage); null for another home than the open one. */
   readUsage(home: string): Promise<UsageReading | null>;
   /** A skill edit's SKILL.md before and after, for "See change". */
   eventChange(eventId: string): Promise<{ before: string; after: string } | undefined>;
@@ -815,16 +817,17 @@ export type UsageTells = Partial<Record<ItemKind, 'sure' | 'seen'>>;
  */
 export interface UsedName { kind: ItemKind; name: string; sessions: number[]; last: string }
 /**
- * One tool's history as read: what it can tell, how many sessions it keeps, when its history starts (none: no session), each
- * name used, and `unread` when its history is there and couldn't be read at all.
+ * One tool's history as read: what it can tell, how many sessions it keeps, how many of those started within USAGE_DAYS of the
+ * reading (`recent`), when its history starts (none: no session), each name used, and `unread` when its history is there and
+ * couldn't be read at all.
  */
 export interface ToolUsage {
-  tool: HarnessId; tells: UsageTells; sessions: number; from?: string; used: UsedName[]; unread?: true;
+  tool: HarnessId; tells: UsageTells; sessions: number; recent: number; from?: string; used: UsedName[]; unread?: true;
   /** Its session files that are there and couldn't be read: skipped, the rest counted. */
   skipped?: number;
 }
-/** One reading of a home's session history, made on a click: when, how long it took, and every tool's. */
-export interface UsageReading { at: string; tookMs: number; tools: ToolUsage[] }
+/** One reading of a home's session history, made when the page collects usage (app.ts collectUsage): when, and every tool's. */
+export interface UsageReading { at: string; tools: ToolUsage[] }
 
 // ---------- A kind on Central Knot's library (library.ts): its page's view ----------
 
