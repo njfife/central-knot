@@ -171,14 +171,14 @@ async function instructionsIn(root: string, folder: string): Promise<NamedPart[]
 
 /**
  * Each event in a plugin's hooks section with the commands its hooks run then, as written: Claude Code's and Codex's form
- * keeps them in an entry's `hooks[].command`, Copilot CLI's in an entry's `bash`, else its `powershell`.
+ * keeps them in an entry's `hooks[].command`, Copilot CLI's in an entry's `bash`, else its `powershell`, else its `command`.
  */
 const hooksOf = (hooks: Record<string, unknown>): PluginHook[] =>
   Object.keys(hooks).sort().map(event => ({ event, runs: (Array.isArray(hooks[event]) ? hooks[event] : []).flatMap(hookRuns) }));
 function hookRuns(value: unknown): string[] {
   const entry = record(value);
   if (Array.isArray(entry?.hooks)) return entry.hooks.map(hook => text(record(hook)?.command)).filter(Boolean);
-  return [text(entry?.bash) || text(entry?.powershell)].filter(Boolean);
+  return [text(entry?.bash) || text(entry?.powershell) || text(entry?.command)].filter(Boolean);
 }
 
 /** What an MCP server runs: its command and arguments, or the URL it connects to. */

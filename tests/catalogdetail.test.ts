@@ -102,7 +102,7 @@ test('A plugin’s instruction files are listed by their path in it, from the fi
   } finally { await cleanup(); }
 });
 
-test('A plugin holding only a CLAUDE.md holds that file and nothing else: no count, and no line in any tool', async () => {
+test('A plugin holding only a CLAUDE.md holds that file and nothing else, and no tool has a line for it', async () => {
   const { root, cleanup } = await box();
   try {
     await put(join(root, 'plugins/atlas/CLAUDE.md'), 'You have access to Atlas through MCP tools.\n');
@@ -123,8 +123,8 @@ test('Each hook event comes with the commands its hooks run, as written, in Clau
       SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: claudeStart }, { type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/hooks/fresh.sh' }] }],
       UserPromptSubmit: [{ hooks: [{ type: 'prompt', prompt: 'Is this safe?' }] }],
       PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'check-bash' }] }],
-      // Copilot CLI's form: the command for each shell, bash first.
-      sessionStart: [{ type: 'command', bash: './start.sh', powershell: './start.ps1' }],
+      // Copilot CLI's form: the command for each shell, bash first, then one for every shell.
+      sessionStart: [{ type: 'command', bash: './start.sh', powershell: './start.ps1' }, { type: 'command', command: './any-shell.sh' }],
       userPromptSubmitted: [{ type: 'command', powershell: './prompt.ps1' }],
     } }));
     const contents = await pluginContents(root, {}, root);
@@ -133,14 +133,14 @@ test('Each hook event comes with the commands its hooks run, as written, in Clau
       { event: 'SessionStart', runs: [claudeStart, '${CLAUDE_PLUGIN_ROOT}/hooks/fresh.sh'] },
       // A hook that runs no command (a prompt hook) is the event alone.
       { event: 'UserPromptSubmit', runs: [] },
-      { event: 'sessionStart', runs: ['./start.sh'] },
+      { event: 'sessionStart', runs: ['./start.sh', './any-shell.sh'] },
       { event: 'userPromptSubmitted', runs: ['./prompt.ps1'] },
     ]);
     const sessionText = (components: ReturnType<typeof componentsFrom>) => (['claude-cli', 'copilot-cli', 'codex-cli'] as const).map(tool => outcomes(tool, components).filter(outcome => outcome.component === 'Session text').map(outcome => [outcome.result, outcome.text]));
     assert.deepEqual(sessionText(componentsFrom(contents)), [
       [['works', 'comes from start-of-session and prompt hooks']],
-      [['limited', 'is limited: only a start-of-session hook printing JSON additionalContext adds it; prompt hooks’ output is dropped']],
-      [['limited', 'waits for trust: these hooks add it once you trust them in Codex']],
+      [['limited', 'is limited: only a start-of-session hook that prints `{"additionalContext": …}` at the top level adds it; Claude Code’s form and prompt hooks’ output are ignored']],
+      [['limited', 'waits for trust: these hooks can add it once you trust them in Codex (`/hooks`)']],
     ]);
     // A plugin whose hooks all listen elsewhere has hooks, and no Session text line.
     await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'check-bash' }] }], Stop: [] } }));

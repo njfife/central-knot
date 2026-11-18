@@ -308,7 +308,7 @@ test('A plugin kept in another repository, not installed, shows its root CLAUDE.
   } finally { await box.cleanup(); }
 });
 
-test('A start-of-session hook printing Claude Code’s JSON, installed in Claude Code and Copilot CLI: the page has its command and each copy’s AGENTS.md, and each tool’s line says what reaches its sessions', async () => {
+test('A start-of-session hook printing Claude Code’s JSON, installed in Claude Code and Copilot CLI: the page has its command and each copy’s AGENTS.md, and each tool’s line gives that tool’s rule for such hooks', async () => {
   const box = await setup();
   try {
     const root = join(box.base, 'market');
@@ -324,9 +324,10 @@ test('A start-of-session hook printing Claude Code’s JSON, installed in Claude
     const detail = (await box.markets.detail(root, 'explainer'))!;
     assert.deepEqual(detail.hooks, [{ event: 'SessionStart', runs: [start] }]);
     assert.deepEqual(Object.entries(detail.installed ?? {}).map(([tool, copy]) => [tool, copy.instructions.map(file => file.name)]), [['claude-cli', ['AGENTS.md']], ['copilot-cli', ['AGENTS.md']]]);
-    // Claude Code adds what it prints; Copilot CLI reads only a bare additionalContext, which this hook doesn't print.
+    // Each tool's line is its fixed rule for start-of-session hooks (capability data, Appendix D), never a reading of what this
+    // hook prints: Claude Code's works; Copilot CLI's says which form it takes and that Claude Code's is ignored.
     const line = (tool: HarnessId) => outcomes(tool, componentsFrom(detail)).find(outcome => outcome.component === 'Session text');
-    assert.deepEqual([line('claude-cli')?.result, line('copilot-cli')?.result, line('copilot-cli')?.text], ['works', 'limited', 'is limited: only a start-of-session hook printing JSON additionalContext adds it; prompt hooks’ output is dropped']);
+    assert.deepEqual([line('claude-cli')?.result, line('copilot-cli')?.result, line('copilot-cli')?.text], ['works', 'limited', 'is limited: only a start-of-session hook that prints `{"additionalContext": …}` at the top level adds it; Claude Code’s form and prompt hooks’ output are ignored']);
   } finally { await box.cleanup(); }
 });
 

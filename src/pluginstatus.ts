@@ -269,6 +269,13 @@ export function limitNote(limits: Outcome[]): string {
   return `${first.component} ${effect}${notWorking.length > 1 ? ` +${notWorking.length - 1}` : ''}`;
 }
 
+/**
+ * Whether all the marketplace's copy of a plugin holds is instruction files, so installing it adds nothing a tool reads (its
+ * page says so beside the tool boxes). Only a whole read of that copy can tell: a tool's copy gives no hooks or servers.
+ */
+export const onlyInstructions = (detail: PluginDetail | null | undefined) => !!detail?.offered && !detail.problem && detail.instructions.length > 0
+  && !detail.skills.length && !detail.commands.length && !detail.agents.length && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
+
 /** "3 skills · 1 MCP server", from a plugin's counts. */
 export function summaryOf(parts: Components): string {
   return [parts.skills && plural(parts.skills, 'skill'), parts.commands && plural(parts.commands, 'command'), parts.agents && plural(parts.agents, 'agent'),
@@ -333,9 +340,10 @@ export const comparableText = (text: string) => text.replace(/\r\n/g, '\n');
 
 /**
  * Whether a tool's installed copy has another text than the marketplace's copy in a skill, command or agent both hold (by
- * its place in the plugin): what the plugin page's "differs from the marketplace's copy" says per part. A part only one
- * side has is left out, since each tool reads its copy by its own rules (Codex's manifest, Copilot CLI's skills list).
- * The page and the update both ask this.
+ * its place in the plugin): what marks that tool's copy "differs from the marketplace's copy" and offers Update there. A
+ * part only one side has is left out, since each tool reads its copy by its own rules (Codex's manifest, Copilot CLI's
+ * skills list). An instruction file is left out too: no tool reads it, so a difference there offers no Update (its own row
+ * under What it holds still says which copy differs: pluginpage.ts differsNote). The page and the update both ask this.
  */
 export const copyDiffers = (offered: Pick<PluginContents, 'skills' | 'commands' | 'agents'>, copy: InstalledCopy | undefined) => !!copy && (['skills', 'commands', 'agents'] as const)
   .some(kind => offered[kind].some(part => copy[kind].some(other => other.path === part.path && comparableText(other.text) !== comparableText(part.text))));

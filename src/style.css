@@ -1208,6 +1208,8 @@ span.ins-confirm { margin-top: 0; }
 /* Running text with names set in it: spaces come from the words, so a comma sits against its name. A line led by its mark
    runs on beside it: long text wraps under itself, never leaving the mark alone on a line. */
 .plugin-outcome-item { display: block; }
+/* The kind a line is about (Skills, Session text), set apart from its sentence. */
+.plugin-outcome-kind { font-weight: 600; }
 .plugin-outcome-item:has(> svg:first-child) { position: relative; padding-left: 18px; }
 .plugin-outcome-item > svg:first-child { position: absolute; left: 0; top: 3px; }
 .plugin-outcome-tools { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
@@ -1414,7 +1416,7 @@ span.ins-confirm { margin-top: 0; }
 .plugin-panel-note { max-width: var(--measure); margin: 10px 0 0; font-size: 12px; color: var(--ink-soft); }
 .plugin-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 28px; }
 .plugin-parts-about { margin: 6px 0 10px; max-width: var(--measure); font-size: 13px; line-height: 20px; color: var(--ink-soft); }
-.plugin-outcome-what code.plugin-name { font-size: 12px; }
+.plugin-outcome-what code { font-family: var(--mono); font-size: 12px; }
 .plugin-part-link .plugin-name { color: var(--accent); }
 .plugin-part-link:hover .plugin-name { text-decoration: underline; }
 /* A short phrase and its link stay on one line, so a link never wraps away from the words that lead to it. */

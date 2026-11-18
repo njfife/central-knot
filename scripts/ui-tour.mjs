@@ -805,7 +805,8 @@ if (wanted('plugin-boxes')) {
 
 // ---------- What a plugin carries as instructions, and what can add text to sessions ----------
 // The fixture's release-helper holds an AGENTS.md and a start-of-session hook beside a PreToolUse one, and is installed in Claude
-// Code; house-notes, added here, holds only a CLAUDE.md. Three working tools, so "In each tool" has a line for each.
+// Code; house-notes, added here, holds only a CLAUDE.md; ops-kit, added here, runs scripts from its hooks and an MCP server with
+// a long command. Three working tools, so "In each tool" has a line for each.
 if (wanted('plugin-text')) {
   await fresh();
   begin('plugin-text');
@@ -813,7 +814,15 @@ if (wanted('plugin-text')) {
   writeMarket(market);
   mkdirSync(join(market, 'plugins/house-notes'), { recursive: true });
   writeFileSync(join(market, 'plugins/house-notes/CLAUDE.md'), '# House notes\n\nYou have access to the team’s house style through these notes. Prefer short sentences.\n');
-  edit(join(market, '.claude-plugin/marketplace.json'), text => { const catalog = JSON.parse(text); catalog.plugins.push({ name: 'house-notes', source: './plugins/house-notes', version: '0.1.0', category: 'productivity', description: 'The team’s house style, as a CLAUDE.md.' }); return JSON.stringify(catalog, null, 2); });
+  const ops = join(market, 'plugins/ops-kit');
+  mkdirSync(join(ops, 'hooks'), { recursive: true }); mkdirSync(join(ops, 'skills/runbook'), { recursive: true });
+  writeFileSync(join(ops, 'skills/runbook/SKILL.md'), '---\nname: runbook\ndescription: Finds the runbook for an alert.\n---\n\nLook it up.\n');
+  writeFileSync(join(ops, 'hooks/hooks.json'), JSON.stringify({ hooks: {
+    SessionStart: [{ hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs"' }, { type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/freshness.sh" --quiet' }] }],
+    PostToolUse: [{ matcher: 'Edit|Write', hooks: [{ type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/format-changed-files.sh"' }] }],
+  } }));
+  writeFileSync(join(ops, '.mcp.json'), JSON.stringify({ mcpServers: { operations: { command: 'npx', args: ['-y', '@example/operations-mcp-server@2.4.1', '--region', 'eu-west-1', '--config', '${CLAUDE_PLUGIN_ROOT}/config/servers.json', '--log-level', 'info', '--read-only', '--timeout-seconds', '120'] } } }));
+  edit(join(market, '.claude-plugin/marketplace.json'), text => { const catalog = JSON.parse(text); catalog.plugins.push({ name: 'house-notes', source: './plugins/house-notes', version: '0.1.0', category: 'productivity', description: 'The team’s house style, as a CLAUDE.md.' }, { name: 'ops-kit', source: './plugins/ops-kit', version: '2.4.1', category: 'development', description: 'Runbooks, a formatter after each edit and an operations MCP server.' }); return JSON.stringify(catalog, null, 2); });
   mkdirSync(join(HOME, '.local/bin'), { recursive: true });
   for (const [cli, version] of [['claude', '2.1.326 (Claude Code)'], ['codex', 'codex-cli 0.169.1'], ['copilot', 'GitHub Copilot CLI 1.0.113.']]) writeFileSync(join(HOME, '.local/bin', cli), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
   const helper = path => readFileSync(join(market, 'plugins/release-helper', path), 'utf8');
@@ -823,12 +832,16 @@ if (wanted('plugin-text')) {
   await a.click('#nav-plugins');
   await addMarketplace(a, market);
   await a.click('#popen-0-release-helper'); await waitFor(a, `!!document.querySelector('.plugin-outcome-list') && !!document.querySelector('#pfile-0-AGENTS-md')`, 15000);
-  await atEverySize('session-hook', 'release-helper’s page: under What it holds, Instruction files (1) lists AGENTS.md under the line that no tool reads it; Can add text to sessions (1) lists SessionStart with the command it runs, under the line that what it adds is known only when it runs; Hooks names PreToolUse', true, '.plugin-columns', 'start');
-  await show('.plugin-outcome-list'); await shot(a, 'session-hook-tools', 'The same page scrolled to In each tool: a Session text line per tool (Claude Code: comes from start-of-session and prompt hooks; Copilot CLI: limited to JSON additionalContext; Codex: waits for trust).');
+  await atEverySize('session-hook', 'release-helper’s page: under What it holds, Instruction files (1) lists AGENTS.md under the line that no tool reads it and that the model sees it only if a skill of the plugin tells it to read it; Hooks that can add text to sessions (1) lists SessionStart with the command it runs (Claude Code’s hookSpecificOutput form); Other hooks (1) lists PreToolUse with its command; In each tool follows, its Copilot CLI line saying that form is ignored there', true, '.plugin-columns', 'start');
+  await show('.plugin-outcome-list'); await shot(a, 'session-hook-tools', 'The same page scrolled to In each tool: a Session text line per tool, its kind in bold (Claude Code: comes from start-of-session and prompt hooks; Copilot CLI: only a top-level {"additionalContext": …}, Claude Code’s form ignored; Codex: can add it once trusted in /hooks).');
   await a.click('#pfile-0-AGENTS-md'); await show('#pfile-0-AGENTS-md', 'start'); await shot(a, 'instruction-file-open', 'Clicked AGENTS.md: its text as written, the marketplace’s and Claude Code’s copy the same.');
   await a.click('#plugin-back');
   await a.click('#popen-0-house-notes'); await waitFor(a, `!!document.querySelector('#pfile-0-CLAUDE-md')`, 15000);
-  await atEverySize('only-claude-md', 'house-notes’ page: it holds only a CLAUDE.md, listed as an instruction file (no longer “Nothing Central Knot recognizes”); no In each tool, since no tool does anything with it', false, '.plugin-columns', 'start');
+  await atEverySize('only-claude-md', 'house-notes’ page: it holds only a CLAUDE.md, listed as an instruction file (no longer “Nothing Central Knot recognizes”); under the tool boxes, that installing it adds nothing your tools read, with “instructions” opening the Instructions page; no In each tool, since no tool does anything with it', false, '.plugin-panel', 'start');
+  await a.click('#plugin-back');
+  await a.click('#popen-0-ops-kit'); await waitFor(a, `!!document.querySelector('.plugin-outcome-list')`, 15000);
+  for (const [width, height] of [[1280, 800], [2560, 1440]]) { await a.size(width, height); await show('.plugin-columns', 'start'); await shot(a, `scripts-and-long-command-${width}`, `ops-kit’s page: its two start-of-session hooks run scripts from the plugin’s folder (one row, a line each), its PostToolUse hook a script too, and its MCP server a long npx command, each as written and using the row’s width (${width}×${height})`); }
+  await a.size(1280, 800);
   await a.click('#plugin-back');
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`, 15000);
   await show('.plugin-columns', 'start'); await shot(a, 'nothing-of-the-kind', 'document-tools’ page, which holds no instruction file and no hook: What it holds is its two skills, as before.');

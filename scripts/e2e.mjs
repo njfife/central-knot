@@ -1762,14 +1762,16 @@ async function practiceFlow() {
   await a.click('#plugin-back');
   await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-group')); tries++) await wait(100);
-  check('a plugin page names what it holds', /release-notes[\s\S]*Drafts release notes/.test(await a.text('.plugin-page')) && (await a.text('.plugin-page')).includes('release-reviewer') && (await a.text('.plugin-page')).includes('Runs on PreToolUse'), await a.text('.plugin-page'));
+  check('a plugin page names what it holds', /release-notes[\s\S]*Drafts release notes/.test(await a.text('.plugin-page')) && (await a.text('.plugin-page')).includes('release-reviewer') && /Other hooks \(1\)\s*PreToolUse\s*echo checked/.test(await a.text('.plugin-page')), await a.text('.plugin-page'));
   // Its AGENTS.md is listed, with the line that no tool reads it, and opens to its text; its start-of-session hook is a group of
   // its own, with the command it runs, apart from its other hooks; "In each tool" says what reaches each tool's sessions.
   const holds = await a.text('.plugin-page');
   check('a plugin’s instruction file is listed and said to be read by no tool; a hook that can add text to sessions shows what it runs, apart from the rest',
-    /Instruction files \(1\)\s*No tool reads a plugin’s own instruction file into a session\. It is listed because the plugin carries it\.\s*AGENTS\.md/.test(holds)
-    && /Can add text to sessions \(1\)\s*Your tool runs these hooks when their event comes; what they add is known only when they run\.\s*SessionStart\s*echo '\{"hookSpecificOutput"/.test(holds)
-    && /Hooks\s*Runs on PreToolUse\. Hooks run/.test(holds) && /Session text (comes from|is limited|waits for trust)/.test(holds), holds);
+    /Instruction files \(1\)\s*No tool reads a plugin’s own instruction file into a session\. The model sees it only if one of the plugin’s skills tells it to read the file\.\s*AGENTS\.md/.test(holds)
+    && /Hooks that can add text to sessions \(1\)\s*Your tool runs these when a session starts or you send a prompt; what they add is known only when they run\.\s*SessionStart\s*echo '\{"hookSpecificOutput"/.test(holds)
+    && /Other hooks \(1\)\s*PreToolUse\s*echo checked/.test(holds) && /Session text\s*(comes from|is limited|waits for trust)/.test(holds), holds);
+  // It holds more than its instruction file, so its panel doesn't say that installing it adds nothing.
+  check('a plugin holding more than instruction files has no line saying installing it adds nothing', !(await a.exists('#plugin-only-instructions')), await a.text('.plugin-panel'));
   await a.click('#pfile-0-AGENTS-md');
   check('and the instruction file opens to its text, as the marketplace has it', /Instruction file · Marketplace[\s\S]*Notes for whoever works on this plugin/.test(await a.text('.plugin-page')), await a.text('.plugin-page'));
   await a.click('#plugin-back');

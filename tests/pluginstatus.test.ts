@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { FROM_DIRECTORY, WAITS_TO_MOVE, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, onlyInstructions, pluginPlace, otherVersions, otherVersionsLine, boxOf, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { clickRuns, owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
@@ -88,18 +88,34 @@ test('Update is offered only where a tool’s copy is older and can be changed h
   assert.deepEqual(copiesToCompare(view, directory), [], 'its files aren’t compared with the marketplace’s');
 });
 
-test('A copy at the marketplace’s version whose text differs is offered Update once its files are read; line endings and parts only one side has are no difference', () => {
+test('A copy at the marketplace’s version whose text differs is offered Update once its files are read; line endings, parts only one side has and an instruction file no tool reads are no difference', () => {
   const part = (text: string, path = 'skills/one') => ({ name: 'one', description: '', text, path });
   const copies = { ...entry, states: { p: { 'claude-cli': { state: 'installed' as const, path: '/x', version: '1.2.0' }, 'copilot-cli': { state: 'installed' as const, path: '/y', version: '1.2.0' }, 'codex-cli': { state: 'installed' as const, path: '/z', version: '1.2.0', live: true } } } };
-  const detail = { skills: [part('---\nname: one\n---\nB\n')], commands: [], agents: [], instructions: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: true,
-    installed: { 'claude-cli': { skills: [part('---\nname: one\n---\nA\n')], commands: [], agents: [], instructions: [], version: '1.2.0' }, 'copilot-cli': { skills: [part('---\r\nname: one\r\n---\r\nB\r\n'), part('extra', 'skills/two')], commands: [], agents: [], instructions: [], version: '1.2.0' },
+  const detail = { skills: [part('---\nname: one\n---\nB\n')], commands: [], agents: [], instructions: [part('Notes, 1.2.0.\n', 'AGENTS.md')], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: true,
+    installed: { 'claude-cli': { skills: [part('---\nname: one\n---\nA\n')], commands: [], agents: [], instructions: [], version: '1.2.0' }, 'copilot-cli': { skills: [part('---\r\nname: one\r\n---\r\nB\r\n'), part('extra', 'skills/two')], commands: [], agents: [], instructions: [part('Notes, edited.\n', 'AGENTS.md')], version: '1.2.0' },
       'codex-cli': { skills: [part('A')], commands: [], agents: [], instructions: [], version: '1.2.0' } } } as PluginDetail;
-  // Claude Code's text differs; Copilot CLI's differs only in line endings and holds an extra part; Codex loads it live.
+  // Claude Code's text differs; Copilot CLI's differs only in line endings, holds an extra part, and has another AGENTS.md,
+  // which no tool reads; Codex loads it live.
   assert.deepEqual(updateTools(view, copies, 'p', '1.2.0', detail), ['claude-cli']);
+  assert.equal(copyStale(copies, 'p', 'copilot-cli', '1.2.0', detail), false, 'an instruction file that differs offers no Update');
   assert.equal(copyStale(copies, 'p', 'claude-cli', '1.2.0', detail), true);
   assert.deepEqual(updateTools(view, copies, 'p', '1.2.0'), [], 'not known before its files are read');
   assert.deepEqual(updateTools(view, copies, 'p', '1.2.0', { ...detail, offered: false }), [], 'nor without the marketplace’s own copy');
   assert.equal(copyStale(copies, 'p', 'claude-cli', '1.3.0', detail), false, 'another version is told by its version, not its content');
+});
+
+test('A plugin whose marketplace copy holds only instruction files is one whose install adds nothing a tool reads; anything else it holds, or a copy not read whole, says nothing', () => {
+  const notes = { name: 'CLAUDE.md', description: '', text: 'House style.\n', path: 'CLAUDE.md' };
+  const only = { skills: [], commands: [], agents: [], instructions: [notes], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: true } as PluginDetail;
+  assert.equal(onlyInstructions(only), true);
+  assert.deepEqual([
+    onlyInstructions({ ...only, skills: [{ ...notes, name: 'style', path: 'skills/style' }] }),
+    onlyInstructions({ ...only, hooks: [{ event: 'SessionStart', runs: ['./start.sh'] }] }),
+    onlyInstructions({ ...only, instructions: [] }),
+    // Read from a tool's copy only (an npm plugin): its hooks and servers aren't known, so it can't be said.
+    onlyInstructions({ ...only, offered: false }),
+    onlyInstructions(undefined),
+  ], [false, false, false, false, false]);
 });
 
 test('A tool’s limits are named in a few words', () => {
