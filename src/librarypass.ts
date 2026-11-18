@@ -378,7 +378,7 @@ async function cameBack(look: AnyLook, tool: HarnessId, shelf?: Shelf<unknown>) 
     look.givingWay.set(item.key, [...(look.givingWay.get(item.key) ?? []), { harness: tool, from: version.from }]);
   }
   if (!shelf || !givingWay.length) return;
-  const told = givingWay.map(({ item, version }): HistoryEvent => ({ id: randomUUID(), at: now(), key: `${look.kind.historyPrefix}${item.key}`,
+  const told = givingWay.map(({ item, version }): HistoryEvent => ({ id: randomUUID(), at: now(), key: `${look.kind.historyPrefix}${item.key}`, of: look.kind.kind,
     item: item.name, kind: 'kept-edit', cause: 'tool-back', losers: [{ tool, hash: version.hash }], orderProved: true }));
   await appendHistory(look.context, told);
   for (const { item, version, content } of givingWay) await keepVersion(shelf, item, version, content);
@@ -708,11 +708,12 @@ async function deletionsTold(pass: Pass) {
   const cutoff = historyCutoff(pass.context), prefix = pass.kind.historyPrefix;
   const recent = Object.values(pass.library.items).filter(item => item.deleted && Date.parse(item.deleted.at) >= cutoff);
   if (!recent.length) return;
-  // A copy a pass removed later (`in-line`) is no Delete's entry: it has no Restore.
-  const told = new Set((await readHistory(pass.context)).filter(event => event.kind === 'deleted' && event.cause !== 'in-line' && !event.undoneBy).map(event => event.key));
+  // A copy a pass removed later (`in-line`) is no Delete's entry: it has no Restore. Nor is an entry that says another kind's.
+  const told = new Set((await readHistory(pass.context)).filter(event => event.kind === 'deleted' && event.cause !== 'in-line' && !event.undoneBy
+    && (event.of ?? pass.kind.kind) === pass.kind.kind).map(event => event.key));
   const untold = recent.filter(item => !told.has(`${prefix}${item.key}`));
   await appendHistory(pass.context, untold.map(item => ({
-    id: randomUUID(), at: item.deleted!.at, key: `${prefix}${item.key}`, item: item.name, kind: 'deleted', losers: [], orderProved: true })));
+    id: randomUUID(), at: item.deleted!.at, key: `${prefix}${item.key}`, of: pass.kind.kind, item: item.name, kind: 'deleted', losers: [], orderProved: true })));
 }
 
 /**
@@ -746,7 +747,7 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
    * says otherwise: the edit taken in, the one entry that chooses between edits (Plan orderProved).
    */
   const log = (fields: Omit<HistoryEvent, 'id' | 'at' | 'key' | 'item' | 'orderProved'> & { orderProved?: boolean }, writes: HarnessId[] = []) => {
-    const event: HistoryEvent = { id: randomUUID(), at: now(), key, item: item.name, orderProved: true, ...fields };
+    const event: HistoryEvent = { id: randomUUID(), at: now(), key, of: pass.kind.kind, item: item.name, orderProved: true, ...fields };
     events.push(event);
     named.set(event, writes);
     return event.id;
@@ -1082,7 +1083,7 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
       // On, it is kept where it is: out of each managed tool with no copy of it now (library.ts A PLUGIN); Off, its except stays.
       if (item.on) item.except = [...new Set([...item.except, ...pass.managed.filter(tool => !pass.disk.byKey.get(key)?.[tool] && !unseenIn(pass.disk, tool, key))])].sort(byToolOrder);
       const history = randomUUID();
-      await appendHistory(pass.context, [{ id: history, at: now(), key: `${pass.kind.historyPrefix}${key}`, item: item.name, kind: 'edit', cause: 'own-now', previous: item.hash, version: item.hash, link, losers: [], orderProved: true }]);
+      await appendHistory(pass.context, [{ id: history, at: now(), key: `${pass.kind.historyPrefix}${key}`, of: pass.kind.kind, item: item.name, kind: 'edit', cause: 'own-now', previous: item.hash, version: item.hash, link, losers: [], orderProved: true }]);
       pass.notices.push({ kind: 'let-go', key, item: item.name, link, history });
     }
     // Only a name with content is made, linked or made current.

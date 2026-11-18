@@ -1,8 +1,10 @@
-// Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns), the
-// names of the pages called otherwise on screen (pageNames), "Turn it on" (turnIt), "a, b and c" lists, and a few sentences
-// more than one module says (a tool left out or not managed, through a plugin). A page's own words are its module's; a
-// library row's are libraryrow.ts libraryWords, a History entry's historyactions.ts and historypage.ts.
+// Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns; the
+// rows of one result, of one kind or several: rowNouns, rowNames), the names of the pages called otherwise on screen
+// (pageNames), "Turn it on" (turnIt), "a, b and c" lists, and a few sentences more than one module says (a tool left out or not
+// managed, through a plugin). A page's own words are its module's; a library row's are libraryrow.ts libraryWords, a History
+// entry's historyactions.ts and historypage.ts.
 import type { HomeKind } from './presence.ts';
+import type { NamedRow } from './itemrow.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
 
 export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi', 'opencode-cli': 'OpenCode' };
@@ -102,6 +104,16 @@ export const kindNouns: Record<HomeKind, { one: string; many: string; title: str
 
 /** Each kind as a sentence names it, many of it: "MCP servers". */
 export const kindNames = Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.many])) as Record<HomeKind, string>;
+
+/** The nouns a result counts its rows with (a run's, Turn these off's): their kind's while they are of one kind, else "item". */
+export const rowNouns = (kinds: readonly HomeKind[]) => (new Set(kinds).size === 1 ? kindNouns[kinds[0]!] : { one: 'item', many: 'items' });
+/**
+ * A result's rows by name, a name with its kind after it where a row of another kind `among` the result's has that name too
+ * ("review (skill)").
+ */
+type Named = Pick<NamedRow, 'kind' | 'name'>;
+export const rowNames = (rows: readonly Named[], among: readonly Named[] = rows) =>
+  rows.map(row => (among.some(other => other.kind !== row.kind && other.name === row.name) ? `${row.name} (${kindNouns[row.kind].one})` : row.name));
 
 /** Why a tool gets no copy of an item it already has through a plugin: said in its box, its row and wherever a copy is refused. */
 export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?: string; off?: true }, item = 'skill') =>

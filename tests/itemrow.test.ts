@@ -1,7 +1,7 @@
 // The order of the rows under a heading on the Skills, MCP servers and Agents pages (src/itemrow.ts inOrder), as worked
 // examples: by name, or by last updated, newest first. An item's versions change only through library.ts's keepVersion and
 // setCurrent, so each example makes them that way. Then the rows a click pins where they were (Pinned), as the MCP servers
-// page draws them; and a skill and an agent of one name, two rows apart (rowId).
+// page draws them; and a skill and an agent of one name, two rows apart (rowId), on two lists and on one.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { inOrder, noPins, pin, pinsOn, placeIn, rowId, type ItemRow, type Pinned } from '../src/itemrow.ts';
@@ -16,8 +16,8 @@ const takenIn = (key: string, days: number): LibraryItem =>
   ({ ...newItem(key, key), on: true, hash: `${key}-1`, versions: [{ hash: `${key}-1`, at: daysAgo(days), from: { how: 'found', harness: 'claude-cli' } }] });
 /** An edit made in a tool `days` days ago, taken in as the current version. */
 const edited = (item: LibraryItem, days: number) => setCurrent(shelf, item, { hash: `${item.key}-edit-${days}`, at: daysAgo(days), from: { how: 'edited', harness: 'codex-cli' } }, null);
-/** A row as the page has it; `copyDays`: when each tool's copy was last changed, for a found item. */
-const row = (key: string, copyDays: Record<string, number> = {}): ItemRow => ({ kind: 'skills', key, description: '', copies: {}, on: true, except: [],
+/** A row as the page has it, a skill unless `kind` says; `copyDays`: when each tool's copy was last changed, for a found item. */
+const row = (key: string, copyDays: Record<string, number> = {}, kind: ItemRow['kind'] = 'skills'): ItemRow => ({ kind, key, description: '', copies: {}, on: true, except: [],
   versions: Object.fromEntries(Object.entries(copyDays).map(([tool, days]) => [tool, { lines: '3 lines', changed: '', text: '', at: daysAgo(days) }])) });
 const keys = (rows: ItemRow[]) => rows.map(each => each.key);
 /** Each row's item, as the page finds it in the kind's library (matrix.ts itemOf). */
@@ -77,18 +77,20 @@ test('By last used: the newest use first, an item with no use seen after every o
 
 /** Servers On and Off, as their rows' own state says (matrix.ts sectionOf): `on` names the On ones. */
 const servers = (on: string[], off: string[]) => new Map([...on.map(key => [key, 'on'] as const), ...off.map(key => [key, 'off'] as const)]);
+/** A server's row id, which its pin goes by. */
+const server = (key: string) => rowId('mcp', key);
 /** The page as drawn, heading by heading (matrix.ts itemsTable): each row under the heading it is pinned under, else its own, by name. */
 const drawn = (own: Map<string, string>, pins: Pinned<string>) => ['on', 'off'].map(heading =>
-  [heading, keys(inOrder([...own.keys()].filter(key => placeIn(pins, key, own.get(key)!) === heading).map(key => row(key)), 'name', from({})))]);
+  [heading, keys(inOrder([...own.keys()].filter(key => placeIn(pins, server(key), own.get(key)!) === heading).map(key => row(key, {}, 'mcp')), 'name', from({})))]);
 const byName = 'MCP servers by name';
 
 test('A server turned off by its own switch stays where it was under On, drawn Off; a second click keeps that place', () => {
   const pins = pinsOn(noPins<string>(), byName);
   // beta's switch is clicked: it is pinned under the heading it is under now, then the click turns it Off.
-  pin(pins, 'beta', 'on');
+  pin(pins, server('beta'), 'on');
   assert.deepEqual(drawn(servers(['alpha', 'gamma'], ['beta', 'delta']), pins), [['on', ['alpha', 'beta', 'gamma']], ['off', ['delta']]]);
   // Clicked again, from under On where it is drawn: its own heading is Off now, and it stays where it was.
-  pin(pins, 'beta', 'off');
+  pin(pins, server('beta'), 'off');
   assert.deepEqual(drawn(servers(['alpha', 'gamma'], ['beta', 'delta']), pins), [['on', ['alpha', 'beta', 'gamma']], ['off', ['delta']]]);
   // A change by another route (a profile switch turns gamma Off): gamma was never clicked here, so it goes under Off.
   assert.deepEqual(drawn(servers(['alpha'], ['beta', 'delta', 'gamma']), pins), [['on', ['alpha', 'beta']], ['off', ['delta', 'gamma']]]);
@@ -96,13 +98,13 @@ test('A server turned off by its own switch stays where it was under On, drawn O
 
 test('A server new to the list goes where its own heading and the order put it', () => {
   const pins = pinsOn(noPins<string>(), byName);
-  pin(pins, 'beta', 'on');
+  pin(pins, server('beta'), 'on');
   assert.deepEqual(drawn(servers(['aardvark', 'alpha'], ['beta', 'zeta']), pins), [['on', ['aardvark', 'alpha', 'beta']], ['off', ['zeta']]]);
 });
 
 test('Another Sort, or another list drawn in between, lets the pinned rows go, and every row takes its own heading again', () => {
   const own = servers(['alpha'], ['beta']), regrouped = [['on', ['alpha']], ['off', ['beta']]];
-  const clicked = () => { const pins = pinsOn(noPins<string>(), byName); pin(pins, 'beta', 'on'); return pins; };
+  const clicked = () => { const pins = pinsOn(noPins<string>(), byName); pin(pins, server('beta'), 'on'); return pins; };
   // Sort by Last updated: the page asks for another list's rows.
   assert.deepEqual(drawn(own, pinsOn(clicked(), 'MCP servers by last updated')), regrouped);
   // Agents, then back on MCP servers: the Agents page let them go, so none are pinned on coming back.
@@ -112,8 +114,8 @@ test('Another Sort, or another list drawn in between, lets the pinned rows go, a
 test('Sorted by last updated, a found item taken in by its Add keeps its place among its neighbours: it goes by the time it had when clicked', () => {
   // Found, with no time, they go by name; Add takes beta in with today's time.
   const rows = [row('alpha'), row('beta'), row('gamma')], library = { beta: takenIn('beta', 0) };
-  const pins = pinsOn(noPins<string>(), 'MCP servers by last updated');
-  pin(pins, 'beta', 'found', undefined);
+  const pins = pinsOn(noPins<string>(), 'Skills by last updated');
+  pin(pins, rowId('skills', 'beta'), 'found', undefined);
   assert.deepEqual(keys(inOrder(rows, 'updated', from(library), undefined, pins)), ['alpha', 'beta', 'gamma']);
   // Not pinned (the list drawn afresh), it goes first, by its time.
   assert.deepEqual(keys(inOrder(rows, 'updated', from(library))), ['beta', 'alpha', 'gamma']);
@@ -127,6 +129,20 @@ test('A skill and an agent both named review have two row ids, and a pin on the 
   assert.deepEqual([rowId(skill.kind, skill.key), rowId(agent.kind, agent.key)], ['skills-review', 'agents-review']);
   // The skill's switch clicked on Skills pins it there; on Agents, whose list is another, the agent goes under its own heading.
   const onSkills = pinsOn(noPins<string>(), 'Skills by name');
-  pin(onSkills, skill.key, 'on');
-  assert.deepEqual([placeIn(onSkills, skill.key, 'off'), placeIn(pinsOn(onSkills, 'Agents by name'), agent.key, 'off')], ['on', 'off']);
+  pin(onSkills, rowId(skill.kind, skill.key), 'on');
+  assert.deepEqual([placeIn(onSkills, rowId(skill.kind, skill.key), 'off'), placeIn(pinsOn(onSkills, 'Agents by name'), rowId(agent.kind, agent.key), 'off')], ['on', 'off']);
+});
+
+test('On one list, a skill and an agent both named review keep their own times and their own pins', async () => {
+  const skill = row('review'), agent = row('review', {}, 'agents'), notes = row('notes');
+  const skills: Record<string, LibraryItem> = { review: takenIn('review', 9), notes: takenIn('notes', 3) }, agents: Record<string, LibraryItem> = { review: takenIn('review', 0) };
+  const itemOf = (each: ItemRow) => (each.kind === 'agents' ? agents : skills)[each.key];
+  const ids = (rows: ItemRow[]) => rows.map(each => rowId(each.kind, each.key));
+  // By last updated: the agent, taken in today; notes, 3 days ago; the skill, 9 days ago. Each goes by its own item's time.
+  assert.deepEqual(ids(inOrder([skill, notes, agent], 'updated', itemOf)), ['agents-review', 'skills-notes', 'skills-review']);
+  // The skill's switch is clicked: it is pinned with the time it had. Edited today, it stays last; the agent keeps its own time.
+  const pins = pinsOn(noPins<string>(), 'Library by last updated');
+  pin(pins, rowId('skills', 'review'), 'on', Date.parse(daysAgo(9)));
+  await edited(skills.review!, 0);
+  assert.deepEqual(ids(inOrder([skill, notes, agent], 'updated', itemOf, undefined, pins)), ['agents-review', 'skills-notes', 'skills-review']);
 });

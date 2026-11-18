@@ -119,7 +119,7 @@ const onLine = (source: SourceView, name: SourceName, click: SourceRowClick) => 
 /** Turn on, on the line of an item its source removed: the same click as its switch on its kind's page, On (the revert: library.ts REMOVED AT ITS SOURCE). */
 const turnOn = (fact: LibraryFacts, page: PageKind) => {
   const homeTools = state.home?.sync.managed ?? [];
-  return applyClick({ kind: page, items: [fact.name], changes: [{ ...asItIs(fact.key, state.home?.[page].library[fact.key]), on: true, seenOn: false }],
+  return applyClick({ kind: page, items: [fact.name], rows: [{ kind: page, key: fact.key }], changes: [{ ...asItIs(fact.key, state.home?.[page].library[fact.key]), on: true, seenOn: false }],
     said: (_notIn, wrote) => `${fact.name} is on${wrote.length ? ` in ${toolsPhrase(wrote, homeTools)}` : ''}.` });
 };
 

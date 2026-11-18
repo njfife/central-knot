@@ -1,5 +1,6 @@
 // An item (a skill, an MCP server or an agent) as the item pages draw it (ItemRow), with its kind, a row's identity on a page
-// (rowId) and the ids of its elements (partId), each kind's items in a home as every page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
+// (rowId), a row named by its kind and key as a click and its result name it (RowKey, NamedRow, sameRow) and the ids of its
+// elements (partId), each kind's items in a home as every page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
 // orderChoice; a row's last use, usagerow.ts lastUse), and the rows a click pins where they were, on every list that orders
 // rows by their state, the Plugins list too (Pinned). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is libraryrow.ts's,
 // from the kind's view (types.ts LibraryView).
@@ -68,9 +69,15 @@ export interface ItemRow {
 
 /**
  * A row's identity on a page, from its kind and key ("skills-review"): what the page keeps of one row goes by it (the opened row,
- * the flash, the armed Delete, a plugin item's file shown), since a skill and an agent may share a key.
+ * the flash, the armed Delete, a plugin item's file shown, a pin and a row's time in the order), since a skill and an agent may
+ * share a key.
  */
 export const rowId = (kind: PageKind, key: string) => `${kind}-${key}`;
+/** A row named by its kind and key: what a click, a run, an Undo and a result say they are about (app.ts Click rows, Outcome rows). */
+export interface RowKey { kind: PageKind; key: string }
+/** A row by kind and key with the name its words give it: what a result says it changed, and its Undo puts back (app.ts Done changed). */
+export type NamedRow = RowKey & { name: string };
+export const sameRow = (first: RowKey, second: RowKey) => first.kind === second.kind && first.key === second.key;
 /**
  * The id of one of a row's elements on the item lists (the Skills, MCP servers and Agents pages, a tool's tabs of them under
  * Harnesses, and the Skills page's Files view): its part, the row's id (rowId, also the row's `data-key`), and what within the
@@ -128,11 +135,13 @@ export const timeIn = <Row extends Pick<ItemRow, 'key' | 'versions'>>(row: Row, 
 /**
  * The rows under one heading in the chosen order. Last updated or last used: newest first, an item with no time after every
  * one with a time; equal times, or none, go by name, so every look gives the same order. `itemOf`: a row's item as the library
- * holds it; `usedAt`: a row's last use (ms); `pins`: a row pinned on this list goes by the time it had when pinned (Pin).
+ * holds it; `usedAt`: a row's last use (ms); `pins`: a row pinned on this list goes by the time it had when pinned (Pin). Each
+ * row's time is kept by its row id, so a skill and an agent of one name keep their own.
  */
-export function inOrder<Row extends Pick<ItemRow, 'key' | 'versions'>>(rows: readonly Row[], order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined, usedAt: (row: Row) => number | undefined = () => undefined, pins?: Pinned<unknown>): Row[] {
-  const time = new Map(rows.map(row => { const pinned = pins?.rows.get(row.key); return [row.key, (pinned ? pinned.time : timeIn(row, order, itemOf, usedAt)) ?? -Infinity]; }));
-  return [...rows].sort((first, second) => (time.get(second.key)! - time.get(first.key)!) || byName(first, second));
+export function inOrder<Row extends Pick<ItemRow, 'kind' | 'key' | 'versions'>>(rows: readonly Row[], order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined, usedAt: (row: Row) => number | undefined = () => undefined, pins?: Pinned<unknown>): Row[] {
+  const id = (row: Row) => rowId(row.kind, row.key);
+  const time = new Map(rows.map(row => { const pinned = pins?.rows.get(id(row)); return [id(row), (pinned ? pinned.time : timeIn(row, order, itemOf, usedAt)) ?? -Infinity]; }));
+  return [...rows].sort((first, second) => (time.get(id(second))! - time.get(id(first))!) || byName(first, second));
 }
 
 // ---------- Rows pinned where they were ----------
@@ -145,16 +154,16 @@ export function inOrder<Row extends Pick<ItemRow, 'key' | 'versions'>>(rows: rea
  */
 export interface Pin<Group> { group: Group; time?: number }
 /**
- * The rows pinned on one list. `list`: which list, as its page names it: where it is, its Sort and its chip (never Find). Every
- * page that orders rows by their state reads it: the item tables (matrix.ts itemsTable), the Skills Files view's list
- * (matrix.ts skillsBrowser) and the Plugins list (pluginstate.ts shownPlugins). The one kept, and when it is let go: app.ts
- * pinnedRows.
+ * The rows pinned on one list, by the id its rows have there: an item list's row id (rowId), a plugin's name on Plugins. `list`:
+ * which list, as its page names it: where it is, its Sort and its chip (never Find). Every page that orders rows by their state
+ * reads it: the item tables (matrix.ts itemsTable), the Skills Files view's list (matrix.ts skillsBrowser) and the Plugins list
+ * (pluginstate.ts shownPlugins). The one kept, and when it is let go: app.ts pinnedRows.
  */
 export interface Pinned<Group = string | number> { list: string; rows: Map<string, Pin<Group>> }
 export const noPins = <Group = string | number>(): Pinned<Group> => ({ list: '', rows: new Map() });
 /** The rows pinned on `list`: these, or none when they were pinned on another list, which lets those go. */
 export const pinsOn = <Group>(pins: Pinned<Group>, list: string): Pinned<Group> => (pins.list === list ? pins : { list, rows: new Map() });
 /** A click on a row's own switch: it keeps the group it is drawn in now and its time, unless an earlier click on this list pinned it. */
-export function pin<Group>(pins: Pinned<Group>, key: string, group: Group, time?: number): void { if (!pins.rows.has(key)) pins.rows.set(key, { group, time }); }
+export function pin<Group>(pins: Pinned<Group>, id: string, group: Group, time?: number): void { if (!pins.rows.has(id)) pins.rows.set(id, { group, time }); }
 /** The group a row is drawn in: the one it is pinned in, else its own. A row new to the list is pinned nowhere, so it goes where its own group puts it. */
-export const placeIn = <Group>(pins: Pinned<Group>, key: string, own: Group): Group => (pins.rows.get(key)?.group ?? own);
+export const placeIn = <Group>(pins: Pinned<Group>, id: string, own: Group): Group => (pins.rows.get(id)?.group ?? own);

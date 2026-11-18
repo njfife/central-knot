@@ -62,7 +62,7 @@ function question(home: HomeView) {
 
 /** A home that waits for Resume: Resume comes first (any click resumes, as on the item pages), and the question after it. */
 const resumeFirst = (reason: string) => h('p.overview-line', { id: 'setup-resume' }, icon('circle-alert', 14, 'tone-warning'), `${reason} `,
-  button({ variant: 'link', size: 'micro', label: 'Resume', id: 'setup-resume-button', disabled: acting(), onclick: () => void applyClick({ kind: 'skills', changes: [], items: [], said: 'Resumed: sync carries on from the record as it is.' }) }),
+  button({ variant: 'link', size: 'micro', label: 'Resume', id: 'setup-resume-button', disabled: acting(), onclick: () => void applyClick({ kind: 'skills', changes: [], items: [], rows: [], said: 'Resumed: sync carries on from the record as it is.' }) }),
   ' Then Central Knot asks whether to synchronize everything.');
 
 /** The answer, refused where the home was answered meanwhile (another window). Yes opens the walkthrough where an item waits. */
@@ -117,7 +117,7 @@ const skip = (item: Waiting) => { walk.passed.push(walkId(item)); rerender(); };
  * "Use the latest for the rest": for each item left with a latest copy, the click its question's main button sends (`use`, as
  * seen: `useHash`), each with its own History entry and Undo; those with no dates to go by are skipped, and said.
  */
-const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', async () => {
+const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', async page => {
   const home = state.home!, dated = left.filter(item => item.latest), undated = left.filter(item => !item.latest);
   const send = { skills: window.centralKnot.applySkills, mcp: window.centralKnot.applyServers, agents: window.centralKnot.applyAgents };
   const sent: { kind: PageKind; result: PassResult }[] = [];
@@ -128,7 +128,7 @@ const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', asy
   setHome(await window.centralKnot.refresh());
   walk.passed.push(...undated.map(walkId));
   passChosen(dated);
-  tell({ page: state.page, band: true, history: true, ...latestDone(dated, undated, sent, waitingForChoice(state.home!)) });
+  tell({ page, band: true, history: true, ...latestDone(dated, undated, sent, waitingForChoice(state.home!)) });
 });
 
 /**

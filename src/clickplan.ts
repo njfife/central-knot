@@ -4,6 +4,8 @@ import type { DestinationResult } from './types.ts';
 
 /** A result that left something undone: failed, or held for a reason (waiting for a choice of copy is none). */
 export const keptBack = (entry: DestinationResult) => entry.outcome === 'failed' || (entry.outcome === 'held' && !entry.differs);
+/** A hold on a whole item, in no one tool (a click made from an older read, say): its click changed nothing of that item. */
+export const heldWhole = (entry: DestinationResult) => entry.outcome === 'held' && !entry.harness && !entry.differs;
 
 /**
  * A click's own results, out of a pass that may have done more (with Sync on, every click is a full pass), and what they say:
@@ -17,7 +19,7 @@ export function clickResults(results: DestinationResult[], names: readonly strin
   return {
     ours,
     did: ours.some(entry => entry.outcome === 'written' || entry.outcome === 'switched' || entry.outcome === 'removed'),
-    refusal: ours.find(entry => entry.outcome === 'held' && !entry.harness && !entry.differs),
+    refusal: ours.find(heldWhole),
     failed: ours.some(keptBack),
     notIn: [...new Set(ours.filter(entry => keptBack(entry) && entry.harness).map(entry => entry.harness!))],
     differs: ours.some(entry => entry.outcome === 'held' && entry.differs),

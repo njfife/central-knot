@@ -3,7 +3,7 @@
 // click each action runs: tests/agents.test.ts and tests/agentswalk.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { doneWords, everythingAction, everythingPlan, everythingSentence, libraryAction, libraryEntry, librarySentence, restorePlan, versionChoices, type ItemNow } from '../src/historyactions.ts';
+import { doneWords, entryKind, everythingAction, everythingPlan, everythingSentence, libraryAction, libraryEntry, librarySentence, restorePlan, versionChoices, type ItemNow } from '../src/historyactions.ts';
 import { libraryWords } from '../src/libraryrow.ts';
 import { newItem, type LibraryItem } from '../src/library.ts';
 import type { HarnessId, HistoryEvent } from '../src/types.ts';
@@ -130,9 +130,24 @@ test('Whose an entry is: an agent’s and a server’s by their prefix (a server
   assert.deepEqual([libraryEntry(entry({ key: 'mcp:docs' })), libraryEntry(entry({ key: 'mcp:GitHub' }))], [{ kind: 'mcp', key: 'docs' }, { kind: 'mcp', key: 'github' }]);
   const none = [entry({ key: 'profiles:switch', kind: 'profile' }), entry({ key: 'instructions:base', base: { text: '' } as never }), entry({ key: 'tool:codex-cli', kind: 'managing' }),
     entry({ key: 'home:everything', kind: 'everything' })];
-  for (const other of none) assert.equal(libraryEntry(other), undefined, other.key);
+  for (const other of none) assert.deepEqual([libraryEntry(other), entryKind(other)], [undefined, undefined], other.key);
   // A key with no kind's prefix is a skill's, whatever its name holds: a folder may be named with a colon.
   assert.deepEqual(libraryEntry(entry({ key: 'review:fix', kind: 'on' })), { kind: 'skills', key: 'review:fix' });
+});
+
+test('A skill whose folder is named agent:review, beside an agent review: its entry says it is a skill’s, and an entry from before entries said their kind is read by its key, as it always was', () => {
+  const skills = entry({ key: 'agent:review', of: 'skill', kind: 'off' }), agents = entry({ key: 'agent:review', of: 'agent', kind: 'off' });
+  assert.deepEqual([libraryEntry(skills), libraryEntry(agents)], [{ kind: 'skills', key: 'agent:review' }, { kind: 'agents', key: 'review' }]);
+  assert.deepEqual(libraryEntry(entry({ key: 'agent:review', kind: 'off' })), { kind: 'agents', key: 'review' });
+});
+
+test('Synchronize everything’s Restore passes over an item only for a later entry of its own kind and key: an edit to the agent review leaves the skill agent:review’s Restore in, as entries say their kind', () => {
+  const undo = rule('undo', false, { everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['gone'], left: [], keptIn: [] } } });
+  const gone = (of?: 'skill') => entry({ id: 'gone', key: 'agent:review', item: 'agent:review', kind: 'deleted', losers: [], ...(of ? { of } : {}) });
+  const agentEdit = (of?: 'agent') => entry({ id: 'agent-edit', key: 'agent:review', item: 'review', kind: 'edit', ...(of ? { of } : {}) });
+  assert.deepEqual(restorePlan(undo, [gone('skill'), undo, agentEdit('agent')], about(item({ deleted: { at } }))).back.map(event => event.id), ['gone']);
+  // Entries from before they said their kind are both read as the agent's, as they always were: the edit passes the item over.
+  assert.deepEqual(restorePlan(undo, [gone(), undo, agentEdit()], about(item({ deleted: { at } }))).passed, ['agent:review']);
 });
 
 test('A skill’s entries from before the library that no click can say again show as past: Remove, Disable, take-over, copies added', () => {
