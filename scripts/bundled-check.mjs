@@ -11,7 +11,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import { connect, debugPorts } from './cdp.mjs';
+import { connect, debugPorts, rowPart } from './cdp.mjs';
 import { stage } from './custom-build.mjs';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { discover } from '../src/discovery.ts';
@@ -327,7 +327,7 @@ if (writes) {
   check('the record is the same one, now naming this build by its id and name, with what was managed', taken.owner === `com.centralknot.custom.${ID}` && taken.ownerName === NAME && !!JSON.parse(readFileSync(join(HOME, '.central-knot/skills.json'), 'utf8')).items.notes, taken);
   check('none of the standard app’s settings were read: its folder isn’t there', !existsSync(join(appData, 'central-knot')));
   await b.click('#nav-skills');
-  check('Skills asks no Resume, and notes is On in this build', await b.run(`!document.querySelector('#resume') && document.querySelector('.ov-row[data-key="notes"] .switch')?.getAttribute('aria-checked') === 'true'`), await b.run(`document.querySelector('.bands')?.textContent`));
+  check('Skills asks no Resume, and notes is On in this build', await b.run(`!document.querySelector('#resume') && document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'notes')}"] .switch')?.getAttribute('aria-checked') === 'true'`), await b.run(`document.querySelector('.bands')?.textContent`));
 } else {
   check('where the home is preview only, the record is left as it is', record().owner === 'com.centralknot.firstlook', record());
 }

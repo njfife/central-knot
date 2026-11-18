@@ -9,6 +9,7 @@ import { readAgainst } from './diff.ts';
 import { button, h, icon, type Child } from './dom.ts';
 import { listed, theVersion, type LibraryItem, type Version, type VersionChange } from './library.ts';
 import { dayAndTime, timesApart } from './model.ts';
+import { partId } from './itemrow.ts';
 
 /**
  * One part of a version's content as Read shows it, in the kind's order: a line (left out when empty) or, `block`, a block of
@@ -20,6 +21,8 @@ export type VersionText = VersionPart[] | 'reading' | null;
 
 export interface VersionListView {
   item: LibraryItem;
+  /** Its row's id (itemrow.ts rowId), which its controls' ids carry (partId). */
+  row: string;
   canWrite: boolean;
   /** Whether the whole list shows (else its newest few: libraryrow.ts foldVersions). */
   unfolded: boolean;
@@ -34,15 +37,15 @@ export interface VersionListView {
 }
 
 function versionRow(view: VersionListView, version: Version, index: number, when: string, backWhen: (back: Version) => string) {
-  const { item } = view, id = `${item.key}-${index}`;
+  const { item } = view, id = (part: string) => partId(part, view.row, index);
   // The list starts with the current version (library.ts listed), and has each content once.
   const current = index === 0 && version.hash === item.hash;
   const read = view.reading?.index === index ? view.reading : undefined;
   const which = `${theVersion(version.from)}, ${dayAndTime(version.at)}`;
   const readLabel = read ? 'Hide' : current ? 'Read current' : 'Read';
-  const readIt = button({ variant: 'link', size: 'small', label: readLabel, id: `version-read-${id}`, name: `${read ? 'Hide' : 'Read'} ${which}`, onclick: () => view.onRead(index) });
+  const readIt = button({ variant: 'link', size: 'small', label: readLabel, id: id('version-read'), name: `${read ? 'Hide' : 'Read'} ${which}`, onclick: () => view.onRead(index) });
   const makeCurrent = current ? null
-    : button({ variant: 'outline', size: 'micro', label: 'Make current', id: `version-current-${id}`, name: `Make ${which} current`, disabled: !view.canWrite,
+    : button({ variant: 'outline', size: 'micro', label: 'Make current', id: id('version-current'), name: `Make ${which} current`, disabled: !view.canWrite,
       onclick: () => view.onMakeCurrent(version) });
   const everywhere = item.on ? ', in every tool it is on in' : '';
   if (makeCurrent) makeCurrent.title = `Make this the current version of ${item.name}${everywhere}. Undo makes today’s current again.`;
@@ -52,7 +55,7 @@ function versionRow(view: VersionListView, version: Version, index: number, when
     h('span.version-from', {}, h('span', {}, versionOrigin(item, version, backWhen)),
       note ? h('span.version-note', { title: versionChangeHelp(change) }, note) : null, current ? h('span.version-current', {}, icon('check', 12), 'Current') : null),
     h('span.version-actions', {}, readIt, makeCurrent),
-    read ? h('div.version-read', { id: `version-read-text-${id}` }, versionText(read.text, current ? undefined : read.current)) : null);
+    read ? h('div.version-read', { id: id('version-read-text') }, versionText(read.text, current ? undefined : read.current)) : null);
 }
 
 /** `text` against `current`, as diff.ts readAgainst marks it: tinted only in this one, struck only in the current one. */
@@ -86,7 +89,7 @@ export function versionList(view: VersionListView): HTMLElement {
   const said = timesApart([...shown, ...backs].map(version => version.at), view.now, true, false);
   const times = said.slice(0, shown.length), backWhen = (back: Version) => said[shown.length + backs.indexOf(back)];
   const more = `Show ${rest} earlier ${rest === 1 ? 'version' : 'versions'}`;
-  const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: more, id: `versions-all-${item.key}`, onclick: view.onUnfold }) : null;
+  const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: more, id: partId('versions-all', view.row), onclick: view.onUnfold }) : null;
   return h('div.versions', { role: 'group', 'aria-label': `Versions of ${item.name}` },
     h('p.versions-title', {}, h('strong', {}, 'Versions'), h('span.versions-count', {}, String(all.length)),
       h('span.versions-note', {}, 'Central Knot keeps every version.')),

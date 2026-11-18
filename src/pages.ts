@@ -12,7 +12,7 @@ import { brandMark, itemsTable, outcomeBand, resultInHeader, showFiltered, skill
 import { andList, kindNames, kindNouns, noToolsSentence, orList, pageNames, toolList } from './words.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { asksWhichCopy } from './libraryrow.ts';
-import { anyOn, kindSource } from './itemrow.ts';
+import { anyOn, kindSource, partId, rowId } from './itemrow.ts';
 import { setupLead } from './firstsetup.ts';
 
 // ---------- Overview ----------
@@ -284,17 +284,17 @@ function copyEntry(key: string, { tool, skill }: Found, index: number) {
   return h('div.copy-entry', {},
     h('div.copy-entry-head', {}, brandMark(tool, 12), h('span.copy-entry-tool', {}, toolName(tool)),
       h('button.inline-link.copy-entry-show', { type: 'button', title: 'Show this folder in the file manager; nothing is opened or changed', onclick: () => showFile(skill.directory) }, 'Show in folder'),
-      copyButton(skill.directory, `path for ${toolName(tool)}`, `copy-${key}-${index}`)),
+      copyButton(skill.directory, `path for ${toolName(tool)}`, partId('copy', rowId('skills', key), index))),
     h('p.copy-entry-path', {}, wrappingPath(skill.directory)),
     linkedElsewhere(skill) ? h('p.copy-entry-real', {}, h('span.copy-entry-label', {}, 'Real folder'),
       h('span.path-left', { title: skill.realDirectory }, h('span', {}, skill.realDirectory)),
-      copyButton(skill.realDirectory, `real folder for ${toolName(tool)}`, `copy-real-${key}-${index}`)) : null,
+      copyButton(skill.realDirectory, `real folder for ${toolName(tool)}`, partId('copy-real', rowId('skills', key), index))) : null,
     skill.metadataKeys.length ? h('p.copy-entry-more', {}, h('span.copy-entry-label', {}, 'Fields of note '), skill.metadataKeys.join(', ')) : null);
 }
 
 /** One block per distinct content, named by the copies that hold it. */
 const contents = (key: string, copies: Found[]) =>
-  fileBlocks(`content-${key}`, 'Skill contents', copies.map(copy => ({ ...copy, text: copy.skill.content })), holders => holders.map(({ tool, skill }) => `${toolName(tool)} (${skill.rootLabel})`).join(', '));
+  fileBlocks(partId('content', rowId('skills', key)), 'Skill contents', copies.map(copy => ({ ...copy, text: copy.skill.content })), holders => holders.map(({ tool, skill }) => `${toolName(tool)} (${skill.rootLabel})`).join(', '));
 
 export function skillsPage() {
   const home = state.home;
