@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { applyBase, baseView, instructionsView, undoBase } from '../src/instructions.ts';
-import { draftCommand, draftPrompt, draftSources, draftTools, parseDraft, writeDraft } from '../src/draftbase.ts';
+import { draftCommand, draftPrompt, draftSources, draftTools, parseDraft, promptNow, writeDraft, type DraftSources } from '../src/draftbase.ts';
 import { linesNotCarried, splitBase, withBase } from '../src/basetext.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -27,6 +27,9 @@ async function sandbox() {
   };
   return { base, home, context, snapshots, seen, cli, file: (path: string) => join(home, path), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
+
+/** What the page sends when the person saw the prompt as it is: writeDraft runs only for the prompt shown. */
+const seenAsIs = (sources: DraftSources) => ({ shown: draftPrompt(sources) });
 
 const answer = (base: string, own: Record<string, string>) => [`<<<CENTRAL KNOT: base>>>`, base, ...Object.entries(own).flatMap(([tool, text]) => [`<<<CENTRAL KNOT: ${tool}>>>`, text]), '<<<CENTRAL KNOT: end>>>'].join('\n');
 
@@ -68,6 +71,37 @@ test('Each tool is run for one answer: prompt on standard input, its own tools o
   assert.deepEqual(draftCommand('pi-cli', '/t/a.md'), { args: ['-p', '--no-tools', '--no-session'], answer: 'output' });
 });
 
+test('A model typed for the draft is asked for by name with --model; Codex’s goes inside exec, before the - that reads the prompt', () => {
+  assert.deepEqual(draftCommand('claude-cli', '/t/a.md', 'sonnet')?.args.slice(-2), ['--model', 'sonnet']);
+  assert.deepEqual(draftCommand('codex-cli', '/t/a.md', 'gpt-5-codex')?.args.slice(-3), ['--model', 'gpt-5-codex', '-']);
+  assert.deepEqual(draftCommand('copilot-cli', '/t/a.md', 'auto')?.args.slice(-2), ['--model', 'auto']);
+  assert.deepEqual(draftCommand('pi-cli', '/t/a.md', 'openai/gpt-4o')?.args.slice(-2), ['--model', 'openai/gpt-4o']);
+  // None typed: the tool's own default, with no flag at all.
+  assert.ok(!draftCommand('claude-cli', '/t/a.md', '')?.args.includes('--model'));
+});
+
+test('The prompt is shown before anything runs, and what runs is sent that prompt: a file changed since sends nothing and gives the new prompt', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(box.file('.claude/CLAUDE.md'), 'Be brief.\n');
+    const before = await draftSources(box.context, await box.snapshots());
+    const shown = promptNow(before);
+    assert.deepEqual(shown, { prompt: draftPrompt(before) });
+    // The file changes after the prompt was shown: the tool is not run, and the prompt as it is now comes back to be shown.
+    await writeFile(box.file('.claude/CLAUDE.md'), 'Be brief.\nAnd kind.\n');
+    const now = await draftSources(box.context, await box.snapshots());
+    const marker = join(box.base, 'ran');
+    const binary = await box.cli('claude', `touch '${marker}'\ncat > /dev/null\ncat <<'EOF'\n${answer('Be brief.', { 'claude-cli': '' })}\nEOF`);
+    assert.deepEqual(await writeDraft(now, 'claude-cli', binary, { shown: (shown as { prompt: string }).prompt }), { promptNow: draftPrompt(now) });
+    await assert.rejects(readFile(marker));
+    // Sent the prompt now shown, it runs.
+    assert.equal((await writeDraft(now, 'claude-cli', binary, seenAsIs(now))).draft?.base, 'Be brief.\n');
+    await readFile(marker);
+    // Nothing to sort: the panel says so instead of showing a prompt.
+    assert.deepEqual(promptNow({ base: '', baseHash: '', files: [] }), { stopped: 'No tool’s file has instructions of its own, so there is nothing to draft from.' });
+  } finally { await box.cleanup(); }
+});
+
 test('A draft sorts the files with instructions of their own, and saving it sets the base and each file’s own text in one step that Undo puts back', async () => {
   const box = await sandbox();
   const claude = box.file('.claude/CLAUDE.md'), codex = box.file('.codex/AGENTS.md'), copilot = box.file('.copilot/copilot-instructions.md');
@@ -81,7 +115,7 @@ test('A draft sorts the files with instructions of their own, and saving it sets
     // The stand-in keeps what it was sent, and answers through standard output, in an empty folder of its own.
     const got = join(box.base, 'got');
     const binary = await box.cli('claude', `cat > '${got}'\necho "$*" > '${got}.args'\npwd > '${got}.cwd'\nls -A > '${got}.ls'\ncat <<'EOF'\n${answer('# Style\nBe brief.', { 'claude-cli': '# Claude\nUse the Task tool.', 'codex-cli': 'Run codex review before pushing.' })}\nEOF`);
-    const { draft } = await writeDraft(sources, 'claude-cli', binary);
+    const { draft } = await writeDraft(sources, 'claude-cli', binary, seenAsIs(sources));
     assert.equal(await readFile(got, 'utf8'), draftPrompt(sources));
     assert.equal((await readFile(`${got}.args`, 'utf8')).trim(), '-p --tools  --strict-mcp-config --no-session-persistence');
     assert.equal((await readFile(`${got}.ls`, 'utf8')).trim(), '');
@@ -147,23 +181,23 @@ test('A tool that fails, answers out of form, takes too long or is stopped gives
     await writeFile(box.file('.claude/CLAUDE.md'), 'Be brief.\n');
     const sources = await draftSources(box.context, await box.snapshots());
     // Not signed in: it exits before reading the prompt, and what it said is passed on.
-    const signedOut = await writeDraft(sources, 'claude-cli', await box.cli('signed-out', 'echo "Not logged in · Please run /login" >&2\nexit 1'));
+    const signedOut = await writeDraft(sources, 'claude-cli', await box.cli('signed-out', 'echo "Not logged in · Please run /login" >&2\nexit 1'), seenAsIs(sources));
     assert.equal(signedOut.stopped, 'Claude Code could not write a draft: “Not logged in · Please run /login”. Nothing was changed.');
-    const chatty = await writeDraft(sources, 'codex-cli', await box.cli('chatty', 'cat > /dev/null\necho "Sure! Here are some thoughts."'));
+    const chatty = await writeDraft(sources, 'codex-cli', await box.cli('chatty', 'cat > /dev/null\necho "Sure! Here are some thoughts."'), seenAsIs(sources));
     assert.equal(chatty.stopped, 'Codex answered, but its answer stopped before the end, so there is no draft. Nothing was changed. Try again, or have another tool write it.');
     // Codex's answer is the file it is told to write, not what it prints while working.
     const codex = await box.cli('codex', `cat > /dev/null\necho "working…"\nfor last; do :; done\nprev=""\nfor arg; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done\ncat > "$out" <<'EOF'\n${answer('Be brief.', { 'claude-cli': '' })}\nEOF`);
-    assert.deepEqual((await writeDraft(sources, 'codex-cli', codex)).draft?.own, { 'claude-cli': '' });
+    assert.deepEqual((await writeDraft(sources, 'codex-cli', codex, seenAsIs(sources))).draft?.own, { 'claude-cli': '' });
     const slow = await box.cli('slow', 'cat > /dev/null\nsleep 30');
     const started = Date.now();
-    assert.equal((await writeDraft(sources, 'pi-cli', slow, { timeoutMs: 300 })).stopped, 'Pi did not finish a draft in time, so it was stopped. Nothing was changed.');
+    assert.equal((await writeDraft(sources, 'pi-cli', slow, { ...seenAsIs(sources), timeoutMs: 300 })).stopped, 'Pi did not finish a draft in time, so it was stopped. Nothing was changed.');
     const stopping = new AbortController();
     setTimeout(() => stopping.abort(), 200);
-    assert.deepEqual(await writeDraft(sources, 'pi-cli', slow, { signal: stopping.signal }), { cancelled: true });
+    assert.deepEqual(await writeDraft(sources, 'pi-cli', slow, { ...seenAsIs(sources), signal: stopping.signal }), { cancelled: true });
     assert.ok(Date.now() - started < 10_000);
-    assert.equal((await writeDraft(sources, 'copilot-cli', join(box.base, 'not-there'))).stopped, 'Copilot CLI could not be started, so there is no draft. Nothing was changed.');
+    assert.equal((await writeDraft(sources, 'copilot-cli', join(box.base, 'not-there'), seenAsIs(sources))).stopped, 'Copilot CLI could not be started, so there is no draft. Nothing was changed.');
     // Nothing to sort: no tool is run at all.
-    assert.equal((await writeDraft({ base: '', baseHash: '', files: [] }, 'claude-cli', join(box.base, 'not-there'))).stopped, 'No tool’s file has instructions of its own, so there is nothing to draft from.');
+    assert.equal((await writeDraft({ base: '', baseHash: '', files: [] }, 'claude-cli', join(box.base, 'not-there'), { shown: '' })).stopped, 'No tool’s file has instructions of its own, so there is nothing to draft from.');
     assert.equal(await readFile(box.file('.claude/CLAUDE.md'), 'utf8'), 'Be brief.\n');
     assert.deepEqual((await readdir(tmpdir())).filter(name => name.startsWith('central-knot-draft-')), []);
   } finally { await box.cleanup(); }
@@ -214,7 +248,7 @@ test('A tool that ends leaving a helper running still gives its draft at once, a
     // The helper keeps the tool's output open, as an MCP server started from the person's config would.
     const binary = await box.cli('leaves-helper', `cat > /dev/null\n(sleep 60 & echo $! > '${pidFile}'; wait) &\ncat <<'EOF'\n${answer('Be brief.', { 'claude-cli': '' })}\nEOF\nexit 0`);
     const started = Date.now();
-    assert.deepEqual((await writeDraft(sources, 'claude-cli', binary)).draft?.base, 'Be brief.\n');
+    assert.deepEqual((await writeDraft(sources, 'claude-cli', binary, seenAsIs(sources))).draft?.base, 'Be brief.\n');
     assert.ok(Date.now() - started < 10_000);
     const helper = Number((await readFile(pidFile, 'utf8')).trim());
     await new Promise(done => setTimeout(done, 300));

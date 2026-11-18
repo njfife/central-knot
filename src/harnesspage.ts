@@ -17,7 +17,7 @@ import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
 import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyKind, showFiltered } from './matrix.ts';
 import { kindSource } from './itemrow.ts';
-import { instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
+import { aboutInstructions, instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, loadPlugins, market } from './pluginstate.ts';
 import { homeItems, inUseName } from './profileplan.ts';
 import { copyButton, fact, kindEmpty, noToolsState, notRead } from './pages.ts';
@@ -295,7 +295,7 @@ function instructionsTab(tool: HarnessId) {
   const file = instructionOf(tool);
   const body = !state.instructions.data ? instructionsNotRead()
     : !file ? h('p.empty', {}, `${names[tool]} has no instruction file Central Knot reads.`)
-      : [h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Changes are reviewed before saving, and earlier versions are kept. ',
+      : [h('div.ins-about-line', {}, aboutInstructions([file], false),
         button({ variant: 'link', size: 'micro', label: 'Every tool’s file', id: 'harness-all-instructions', onclick: () => showPage('instructions') })), instructionCard(file, { titled: false, goToOther: other => goHarness(other, 'instructions') })];
   return h('div.page', {}, instructionBands(), h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
 }

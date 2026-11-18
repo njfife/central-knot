@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), plugin-text (a plugin's instruction files and the hooks that can add text to sessions), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
@@ -805,6 +805,52 @@ if (wanted('plugin-boxes')) {
   await fresh();
 }
 
+// ---------- What a plugin carries as instructions, and what can add text to sessions ----------
+// The fixture's release-helper holds an AGENTS.md and a start-of-session hook beside a PreToolUse one, and is installed in Claude
+// Code; house-notes, added here, holds only a CLAUDE.md; ops-kit, added here, runs scripts from its hooks and an MCP server with
+// a long command. Three working tools, so "In each tool" has a line for each.
+if (wanted('plugin-text')) {
+  await fresh();
+  begin('plugin-text');
+  const market = join(scratch, 'text-market');
+  writeMarket(market);
+  mkdirSync(join(market, 'plugins/house-notes'), { recursive: true });
+  writeFileSync(join(market, 'plugins/house-notes/CLAUDE.md'), '# House notes\n\nYou have access to the team’s house style through these notes. Prefer short sentences.\n');
+  const ops = join(market, 'plugins/ops-kit');
+  mkdirSync(join(ops, 'hooks'), { recursive: true }); mkdirSync(join(ops, 'skills/runbook'), { recursive: true });
+  writeFileSync(join(ops, 'skills/runbook/SKILL.md'), '---\nname: runbook\ndescription: Finds the runbook for an alert.\n---\n\nLook it up.\n');
+  writeFileSync(join(ops, 'hooks/hooks.json'), JSON.stringify({ hooks: {
+    SessionStart: [{ hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs"' }, { type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/freshness.sh" --quiet' }] }],
+    UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'uv', args: ['run', '--directory', '${CLAUDE_PLUGIN_ROOT}/hooks', 'prompt check.py'] }] }],
+    PostToolUse: [{ matcher: 'Edit|Write', hooks: [{ type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/format-changed-files.sh"' }] }],
+  } }));
+  writeFileSync(join(ops, '.mcp.json'), JSON.stringify({ mcpServers: { operations: { command: 'npx', args: ['-y', '@example/operations-mcp-server@2.4.1', '--region', 'eu-west-1', '--config', '${CLAUDE_PLUGIN_ROOT}/config/servers.json', '--log-level', 'info', '--read-only', '--timeout-seconds', '120'] } } }));
+  edit(join(market, '.claude-plugin/marketplace.json'), text => { const catalog = JSON.parse(text); catalog.plugins.push({ name: 'house-notes', source: './plugins/house-notes', version: '0.1.0', category: 'productivity', description: 'The team’s house style, as a CLAUDE.md.' }, { name: 'ops-kit', source: './plugins/ops-kit', version: '2.4.1', category: 'development', description: 'Runbooks, a formatter after each edit and an operations MCP server.' }); return JSON.stringify(catalog, null, 2); });
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  for (const [cli, version] of [['claude', '2.1.326 (Claude Code)'], ['codex', 'codex-cli 0.169.1'], ['copilot', 'GitHub Copilot CLI 1.0.113.']]) writeFileSync(join(HOME, '.local/bin', cli), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  const helper = path => readFileSync(join(market, 'plugins/release-helper', path), 'utf8');
+  writeClaudeInstall(practice, 'team-tools', 'release-helper', '0.4.1', Object.fromEntries(['AGENTS.md', 'hooks/hooks.json', 'commands/release-notes.md', 'agents/release-reviewer.md'].map(path => [path, helper(path)])));
+  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'team-tools': { source: { source: 'directory', path: market }, installLocation: market } }));
+  await refresh();
+  await a.click('#nav-plugins');
+  await addMarketplace(a, market);
+  await a.click('#popen-0-release-helper'); await waitFor(a, `!!document.querySelector('.plugin-outcome-list') && !!document.querySelector('#pfile-0-AGENTS-md')`, 15000);
+  await atEverySize('session-hook', 'release-helper’s page: under What it holds, Instruction files (1) lists AGENTS.md under the line that no tool reads it and that the model sees it only when something tells it to read the file; Hooks that can add text to sessions (2) lists SessionStart once per command: an echo of Claude Code’s hookSpecificOutput form, and node with its arguments; Other hooks (1) lists PreToolUse with its command; In each tool follows, its Copilot CLI line saying that form is ignored there', true, '.plugin-columns', 'start');
+  await show('.plugin-outcome-list'); await shot(a, 'session-hook-tools', 'The same page scrolled to In each tool: a Session text line per tool, its kind in bold (Claude Code: comes from start-of-session and prompt hooks; Copilot CLI: only a top-level {"additionalContext": …}, Claude Code’s hookSpecificOutput form ignored; Codex: can add it once trusted in /hooks).');
+  await a.click('#pfile-0-AGENTS-md'); await show('#pfile-0-AGENTS-md', 'start'); await shot(a, 'instruction-file-open', 'Clicked AGENTS.md: its text as written, the marketplace’s and Claude Code’s copy the same.');
+  await a.click('#plugin-back');
+  await a.click('#popen-0-house-notes'); await waitFor(a, `!!document.querySelector('#pfile-0-CLAUDE-md')`, 15000);
+  await atEverySize('only-claude-md', 'house-notes’ page: it holds only a CLAUDE.md, listed as an instruction file (no longer “Nothing Central Knot recognizes”); above the tool boxes, that installing it does not make your tools read these files, with “instructions” opening the Instructions page; no In each tool, since no tool does anything with it', false, '.plugin-panel', 'start');
+  await a.click('#plugin-back');
+  await a.click('#popen-0-ops-kit'); await waitFor(a, `!!document.querySelector('.plugin-outcome-list')`, 15000);
+  for (const [width, height] of [[1280, 800], [2560, 1440]]) { await a.size(width, height); await show('.plugin-columns', 'start'); await shot(a, `scripts-and-long-command-${width}`, `ops-kit’s page: Hooks that can add text to sessions (3), a row per command: two start-of-session scripts from the plugin’s folder, and a prompt hook run as uv with its arguments (the one with a space in quotes); Other hooks (1), a PostToolUse script; its MCP server a long npx command; each as written and using the row’s width (${width}×${height})`); }
+  await a.size(1280, 800);
+  await a.click('#plugin-back');
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`, 15000);
+  await show('.plugin-columns', 'start'); await shot(a, 'nothing-of-the-kind', 'document-tools’ page, which holds no instruction file and no hook: What it holds is its two skills, as before.');
+  await fresh();
+}
+
 // ---------- Profiles ----------
 // Profiles are sets of library items (src/profiles.ts): every state of the Profiles page at four sizes, with the light
 // appearance once, on a practice copy whose skills, MCP servers and agents are taken into Central Knot first.
@@ -1349,22 +1395,45 @@ if (wanted('plugin-items')) {
 }
 
 // ---------- Instructions ----------
+/** A pointer click on the shown text `selector` at the start of `words` (with its point, which places the editor's caret). */
+async function clickText(a, selector, words) {
+  const point = await a.run(`(() => {
+    const pre = document.querySelector(${JSON.stringify(selector)}), node = pre.firstChild, at = node.textContent.indexOf(${JSON.stringify(words)});
+    const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 1);
+    const page = pre.closest('.scroll'), view = page.getBoundingClientRect(), line = range.getBoundingClientRect();
+    if (line.top < view.top || line.bottom > view.bottom) page.scrollTop += line.top - view.top - view.height / 2;
+    const box = range.getBoundingClientRect();
+    return { x: box.left + 1, y: box.top + box.height / 2 };
+  })()`);
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 });
+  await a.settle();
+}
+/** The Instructions page at the four sizes (dark, and light at 1280×800), from its top. */
+async function instructionsAtSizes(tag, caption) {
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await a.size(width, height); await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+    await shot(a, `${tag}-${width}`, `${caption} At ${width}×${height}.`);
+  }
+  await a.size(1280, 800); await a.theme('light'); await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await shot(a, `${tag}-light`, `${caption} At 1280×800, light.`); await a.theme('dark');
+}
 if (wanted('instructions')) {
   begin('instructions');
   await a.click('#nav-instructions');
   await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`);
-  await shot(a, 'instructions-start', 'Clicked "Instructions" in the sidebar. The practice copy has CLAUDE.md and AGENTS.md; Copilot CLI has no file yet.');
-  await a.click('#ins-edit-claude-cli'); await shot(a, 'instructions-editing', 'Clicked Edit on Claude Code\'s file.');
+  await shot(a, 'instructions-start', 'Clicked "Instructions" in the sidebar: "How these files are read" at the top, the Base instructions card, then "Each tool’s own instructions". The practice copy has CLAUDE.md and AGENTS.md; Copilot CLI has no file yet.');
+  await a.click('#ins-about summary'); await shot(a, 'instructions-about', 'Clicked "How these files are read": how the files are read and saved, the base, and who reads each file with its tool’s own notes.');
+  await a.click('#ins-about summary');
+  await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', 'Prefer small'); await shot(a, 'instructions-editing', 'Clicked "Prefer small commits" in Claude Code\'s text: its editor opens with the caret there, Review changes and Cancel in the card\'s head.');
   await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value = area.value.replace('Prefer small commits', 'Prefer small, focused commits') + '- Never push without asking.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
+  await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes: Save is in the card\'s head.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
-  await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
-  // Near the cards' column breakpoint (each about 320px), a card's review and discard confirmation wrap within it.
+  await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Add instructions for Copilot CLI", which has no file yet.');
   await a.size(1240, 800);
   await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await shot(a, 'instructions-1240-saved-unsaved', 'At 1240×800: Claude Code\'s card says Saved with Undo save, Copilot CLI\'s says Unsaved changes, and Codex\'s card is plain; the headers line up.');
-  await a.click('#ins-review-copilot-cli'); await shot(a, 'instructions-review-1240', 'At 1240×800, three cards across: wrote a first draft for Copilot CLI and clicked Review new file.');
-  await a.click('#ins-review-discard-copilot-cli'); await shot(a, 'instructions-discard-confirm-1240', 'Clicked Discard changes: the confirmation wraps within the card.');
+  await shot(a, 'instructions-1240-saved-unsaved', 'At 1240×800: Claude Code\'s card says Saved with Undo save, Copilot CLI\'s says Unsaved changes, and Codex\'s card is plain.');
+  await a.click('#ins-review-copilot-cli'); await shot(a, 'instructions-review-1240', 'At 1240×800: wrote a first draft for Copilot CLI and clicked Review new file.');
+  await a.click('#ins-review-discard-copilot-cli'); await shot(a, 'instructions-discard-confirm-1240', 'Clicked Discard changes: the question takes the place of the card\'s actions, in its head.');
   await a.click('#ins-review-discard-yes-copilot-cli');
   await a.size(1280, 800);
   await a.click('#ins-edit-copilot-cli');
@@ -1374,8 +1443,31 @@ if (wanted('instructions')) {
   await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#ins-orphan')`);
   await shot(a, 'instructions-orphan-draft', 'Typed a draft for Copilot CLI, then moved Copilot CLI\'s folder away outside the app and clicked Refresh: the card is gone, and the draft is offered to copy or discard.');
   await a.click('#ins-orphan-discard');
+  await instructionsAtSizes('two-tools', 'Two tools (Claude Code and Codex): one card a row, two a row once the cards area is 1936 px wide (2560).');
+  // Five tools, Pi's file long: one card a row at every size, each text at a reading measure.
   renameSync(join(practice, '.copilot-away'), join(practice, '.copilot'));
-  await a.click('#header-refresh');
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  mkdirSync(join(practice, '.config/opencode'), { recursive: true });
+  writeFileSync(join(practice, '.pi/agent/AGENTS.md'), `## Driving GUI apps\n\n${Array.from({ length: 95 }, (_, line) => `- Step ${line + 1}: use the narrowest tool that reaches the outcome, and say which one was used and why it was the narrowest.`).join('\n')}\n`);
+  writeFileSync(join(practice, '.config/opencode/AGENTS.md'), '# OpenCode\n- Keep sessions short.\n');
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#ins-edit-pi-cli')`, 15000);
+  await instructionsAtSizes('five-tools', 'Five tools, Pi\'s file 97 lines long: one card a row, two a row once the cards area is 1936 px wide (2560).');
+  // A click deep in a long text at the smallest window: the caret's line is under the card's head, with its actions.
+  await a.size(860, 600);
+  await a.click('#ins-more-pi-cli');
+  await clickText(a, '[aria-label="Pi instructions"] pre.ins-preview', '- Step 80:');
+  await shot(a, 'instructions-860-long-click', 'At 860×600: clicked "Show all 97 lines" on Pi\'s card, scrolled down and clicked "- Step 80": the editor opens with the caret on that line, under the card\'s head with Review changes and Cancel.');
+  await a.click('#ins-cancel-pi-cli');
+  await a.size(1280, 800);
+  // The same card on a tool's Instructions tab under Harnesses.
+  await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-instructions');
+  await waitFor(a, `!!document.querySelector('#ins-edit-pi-cli')`);
+  await a.click('#ins-about summary');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await shot(a, `harness-tab-${width}`, `Pi's Instructions tab under Harnesses, "How these files are read" opened, at ${width}×${height}.`); }
+  await a.click('#ins-about summary');
+  await a.size(1280, 800);
+  for (const folder of ['.pi', '.config/opencode']) rmSync(join(practice, folder), { recursive: true, force: true });
+  await a.click('#nav-instructions'); await a.click('#header-refresh');
 }
 
 // ---------- Window sizes: every page from the window's minimum to a large display, full screen ----------
@@ -1658,7 +1750,7 @@ if (wanted('missing')) {
   await a.click('#nav-overview'); await shot(a, 'after-overview', 'The same folder\'s Overview: its first sentence names only the two tools.');
   await a.size(2560, 1440);
   await a.click('#nav-harnesses'); await shot(a, 'after-2560-harnesses', 'The same folder\'s Harnesses at 2560×1440: two cards, two columns.');
-  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: two cards, two columns, one height.');
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: the two tools\' cards side by side.');
   await a.size(1280, 800);
   await a.size(860, 560);
   await a.click('#nav-skills'); await shot(a, 'after-860-skills', 'The same folder\'s Skills at 860×560.');
