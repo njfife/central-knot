@@ -864,7 +864,7 @@ if (wanted('profiles')) {
   await atEverySize('empty', 'Clicked "Profiles" in the sidebar before any profile exists', true);
   for (const [page, keys] of [['skills', ['notes', 'standup', 'release-notes']], ['mcp', ['docs', 'files']], ['agents', ['code-reviewer', 'release-notes']]]) {
     await a.click(`#nav-${page}`); await a.settle();
-    for (const key of keys) { await turnOnRow('agents', key); await switchOn('agents', key); }
+    for (const key of keys) { await turnOnRow(page, key); await switchOn(page, key); }
   }
   await a.click('#nav-profiles');
   await a.click('#profile-new');
