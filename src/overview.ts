@@ -200,11 +200,12 @@ function usageStrip() {
 
 // ---------- A row per managed tool ----------
 
-/** A tool's sessions in the last USAGE_DAYS days (usagerow.ts ToolHistory), with the day its history starts where that is later. */
+/** Sessions in the last USAGE_DAYS days: "?" for unread history, a count followed by "?" for a partial read, or the count with its start day for a short history. */
 function sessionsCell(history: ToolHistory | undefined) {
   if (firstReadingRuns()) return h('td.tools-sessions.tone-faint', {}, '…');
   if (!history) return h('td.tools-sessions', {});
-  if (history.goes === 'unread') return h('td.tools-sessions.tone-muted', {}, 'couldn’t be read');
+  if (history.goes === 'unread') return h('td.tools-sessions.tone-muted', {}, '?');
+  if (history.goes === 'partial') return h('td.tools-sessions', {}, `${history.recent} ?`);
   if (history.goes === 'none') return h('td.tools-sessions.tone-muted', {}, 'no sessions');
   const since = history.goes === 'from' ? h('span.tone-muted', {}, ` · history from ${dayWords(history.from)}`) : null;
   return h('td.tools-sessions', {}, h('strong.tools-count', {}, String(history.recent)), since);
@@ -224,10 +225,13 @@ function toolsTable(home: HomeView) {
   const tools = homeTools(), kinds = heldKinds(home), plugins = !absentKinds().includes('plugins'), histories = usageSums()?.tools ?? [];
   const version = (tool: HarnessId) => (home.mode === 'actual' ? home.snapshots.find(snapshot => snapshot.harness === tool)?.probe.version : undefined);
   const kindShown = (kind: PageKind, tool: HarnessId) => { const count = tally(home, kind, tool); return !count.supported ? '—' : home[kind].unread.includes(tool) ? '?' : String(count.total); };
-  const rows = tools.map(tool => ({ tool, kinds: kinds.map(kind => kindShown(kind, tool)), plugins: plugins ? pluginsShown(pluginsInstalled(home, tool)) : undefined }));
-  const shown = rows.flatMap(row => [...row.kinds, row.plugins]), kindDash = rows.some(row => row.kinds.includes('—'));
+  const rows = tools.map(tool => ({ tool, kinds: kinds.map(kind => kindShown(kind, tool)),
+    plugins: plugins ? pluginsShown(pluginsInstalled(home, tool)) : undefined, sessions: sessionsCell(histories.find(each => each.tool === tool)) }));
+  const shown = rows.flatMap(row => [...row.kinds, row.plugins, row.sessions.textContent]), kindDash = rows.some(row => row.kinds.includes('—'));
   const dashes = [kindDash ? 'that tool can’t hold that kind' : '', rows.some(row => row.plugins === '—') ? 'Central Knot doesn’t move that tool’s plugins' : ''].filter(Boolean);
-  const key = [dashes.length ? `—: ${dashes.join(', or ')}.` : '', shown.includes('?') ? '?: not known, as what that tool keeps there couldn’t all be read.' : ''].filter(Boolean).join(' ');
+  const unknown = shown.some(value => value?.endsWith('?'));
+  const key = [dashes.length ? `—: ${dashes.join(', or ')}.` : '',
+    unknown ? '?: not known, as what that tool keeps there couldn’t all be read. A number before the mark is what was counted, and there may be more.' : ''].filter(Boolean).join(' ');
   const out = home.sync.present.filter(tool => !tools.includes(tool));
   return h('section.overview-tools', { 'aria-labelledby': 'overview-tools-title' },
     h('h2.eyebrow', { id: 'overview-tools-title' }, 'Your tools'),
@@ -238,7 +242,7 @@ function toolsTable(home: HomeView) {
         h('th', { scope: 'row' }, h('button.tools-tool', { type: 'button', id: `overview-tool-${row.tool}`, onclick: () => { showPage('harnesses'); goHarness(row.tool); } },
           brandMark(row.tool, 14), h('span.tools-tool-name', {}, toolNames[row.tool])), version(row.tool) ? h('span.tools-version', {}, version(row.tool)!) : null),
         ...row.kinds.map(countCell), row.plugins ? countCell(row.plugins) : null,
-        sessionsCell(histories.find(each => each.tool === row.tool)))))),
+        row.sessions)))),
     key ? h('p.tools-table-note', { id: 'overview-tools-key' }, key) : null,
     out.length ? h('p.tools-table-note', { id: 'overview-left-out' }, `${toolList(out)} ${out.length === 1 ? 'is' : 'are'} installed and left out: `,
       link(out.length === 1 ? 'its switch is on Harnesses' : 'their switches are on Harnesses', 'overview-left-out-open', () => showPage('harnesses')), '.') : null);

@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { recoverParked, writeFileChecked } from '../src/share.ts';
+import { recoverParked, writeDurably, writeFileChecked } from '../src/share.ts';
 
 test('A moved-aside original goes back to an empty place; ones whose place is taken become separate backups', async () => {
   const folder = await mkdtemp(join(tmpdir(), 'ck-recover-'));
@@ -56,3 +56,20 @@ for (const race of ['changed before the move', 'saved before the link', 'no hard
     }
   });
 }
+
+test('A durable write that fails after its first bytes keeps the old file and leaves no temporary file', async t => {
+  const folder = await mkdtemp(join(tmpdir(), 'ck-settings-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const path = join(folder, 'app-settings.json'), original = '{ "appearance": "dark" }\n';
+  await writeFile(path, original);
+  const handle = await fs.open(path);
+  const prototype = Object.getPrototypeOf(handle);
+  await handle.close();
+  t.mock.method(prototype, 'writeFile', async function (this: typeof handle) {
+    await this.write('{"appe');
+    throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+  });
+  await assert.rejects(writeDurably(path, '{"appearance":"light"}'), { code: 'ENOSPC' });
+  assert.deepEqual(await readFile(path), Buffer.from(original));
+  assert.deepEqual(await readdir(folder), ['app-settings.json']);
+});

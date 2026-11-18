@@ -261,8 +261,10 @@ export async function writeDurably(path: string, text: string) {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${randomUUID()}.tmp`;
   const handle = await open(temporary, 'wx', 0o600);
-  try { await handle.writeFile(text); await handle.sync(); } finally { await handle.close(); }
-  await rename(temporary, path);
+  try {
+    try { await handle.writeFile(text); await handle.sync(); } finally { await handle.close(); }
+    await rename(temporary, path);
+  } catch (error) { await rm(temporary, { force: true }); throw error; }
 }
 /** A file changed between being read and being written: nothing is written, and the next pass reads it again. */
 export const changedWhileSyncing = () => Object.assign(new Error('It changed while syncing, so it was left as it is. The next pass looks at it again.'), { code: 'CK_CHANGED' });

@@ -231,6 +231,9 @@ test('A session file that can\'t be read is skipped and counted as such; the res
   const says = toolSays(reading, 'skill', facts('gamma', {}), 'claude-cli')!;
   assert.deepEqual([history.sessions, history.skipped, history.unread, Object.keys(usedIn(reading, 'claude-cli')), says.cantSay, says.skipped],
     [1, 1, undefined, ['skill:alpha'], 'unread', 1]);
+  assert.equal(rowFigure([says], ['claude-cli']), undefined);
+  const homeView = homeOf({ facts: [], library: {} }, ['claude-cli']);
+  assert.deepEqual(toolHistories(reading, homeView), [{ tool: 'claude-cli', recent: 1, goes: 'partial' }]);
 });
 
 test('A record dated after the reading (a wrong clock) is dated by its file\'s time instead', async () => {
