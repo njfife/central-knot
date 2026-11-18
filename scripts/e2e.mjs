@@ -520,8 +520,11 @@ async function fullSize(a) {
   await a.settle();
 }
 
-/** One mouse event at the point `at`, as a real mouse sends it: `buttons` 1 while the left button is held, and no button named on a move without it. */
-const mouse = (a, type, at, buttons) => a.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: 1 });
+/**
+ * One mouse event at the point `at`, as a real mouse sends it: `buttons` 1 while the left button is held, and no button named on a
+ * move without it. `modifiers` as the protocol counts them (8: Shift held).
+ */
+const mouse = (a, type, at, buttons, modifiers = 0) => a.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, modifiers, clickCount: 1 });
 /**
  * A pointer click on the shown text `selector`, at the start of `words` in it, as a mouse makes it: with its point, which a
  * click on an instruction text uses to place the editor's caret. The line is scrolled into view first. `whileHeld` runs between
@@ -4707,6 +4710,15 @@ async function draftFlow() {
   await mouse(a, 'mouseMoved', from, 0); await mouse(a, 'mousePressed', from, 1); await mouse(a, 'mouseMoved', to, 1); await mouse(a, 'mouseReleased', to, 0);
   await a.settle();
   same('a drag across a card’s text selects it and opens no editor', [await a.exists('#ins-text-codex-cli'), (await a.run(`String(getSelection())`)).includes('line two')], [false, true]);
+  // Each gesture below starts with no editor open (one a broken build opened is closed, so the next is measured on its own).
+  const noEditor = async () => { if (await a.exists('#ins-text-codex-cli')) await a.press('Escape'); for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100); };
+  // A Shift-click farther along extends that selection, as anywhere: it opens no editor, and the selection reaches the click.
+  const farther = await pointAt(a, codexText, 'added line');
+  await mouse(a, 'mouseMoved', farther, 0, 8); await mouse(a, 'mousePressed', farther, 1, 8); await mouse(a, 'mouseReleased', farther, 0, 8);
+  await a.settle();
+  same('a Shift-click farther along a selected text extends the selection and opens no editor',
+    [await a.exists('#ins-text-codex-cli'), ...await a.run(`(() => { const chosen = String(getSelection()); return [chosen.startsWith('line one'), chosen.includes('last line')]; })()`)], [false, true, true]);
+  await noEditor();
   // A drag backwards from TARGET to line one, then the same drag with a redraw landing halfway (at line two) and carried on past
   // where it was then: it selects what the drag with no redraw selects, backwards, and opens no editor. (Each starts with nothing
   // selected: a press inside a selection drags the selected text instead.)
@@ -4729,6 +4741,25 @@ async function draftFlow() {
   await mouse(a, 'mouseMoved', fromTarget, 0); await mouse(a, 'mousePressed', fromTarget, 1); await mouse(a, 'mouseMoved', halfway, 1); await mouse(a, 'mouseMoved', fromTarget, 1); await mouse(a, 'mouseReleased', fromTarget, 0);
   await a.settle();
   same('a press that moves off its character and back before the release opens no editor', await a.exists('#ins-text-codex-cli'), false);
+  await noEditor();
+  // A release on another character of the same text, with no move between, is a drag as well: nothing opens.
+  await mouse(a, 'mouseMoved', fromTarget, 0); await mouse(a, 'mousePressed', fromTarget, 1); await mouse(a, 'mouseReleased', halfway, 0);
+  await a.settle();
+  same('a press released on another character of its text, with no move between, opens no editor', await a.exists('#ins-text-codex-cli'), false);
+  await noEditor();
+  await a.run(`getSelection().removeAllRanges()`);
+  // A drag whose text goes away under it (its file removed and the page read again while the button is held) selects nothing.
+  const dragFrom = await pointAt(a, codexText, 'line one'), dragOn = await pointAt(a, codexText, 'line two'), codexNow = readNow(agentsMd);
+  await mouse(a, 'mouseMoved', dragFrom, 0); await mouse(a, 'mousePressed', dragFrom, 1); await mouse(a, 'mouseMoved', dragOn, 1);
+  rmSync(agentsMd);
+  await a.run(`document.querySelector('#header-refresh').click()`);
+  await a.settle();
+  const textGone = !(await a.exists(codexText)), dragEnd = { x: dragOn.x, y: dragOn.y + 80 };
+  await mouse(a, 'mouseMoved', dragEnd, 1); await mouse(a, 'mouseReleased', dragEnd, 0);
+  await a.settle();
+  same('a drag whose text went away before its release selects nothing', [textGone, await a.run(`String(getSelection())`)], [true, '']);
+  writeFileSync(agentsMd, codexNow);
+  await a.click('#header-refresh');
   const word = await pointAt(a, codexText, 'last line');
   for (const clickCount of [1, 2]) for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: word.x + 12, y: word.y, button: 'left', buttons, clickCount });
   await a.settle();
@@ -5440,6 +5471,20 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-plug-20')); tries++) await wait(100);
   const list = 'plugins-scroll', order = () => a.all('[data-plugin]', 'e.dataset.plugin');
+  // The marketplace's Find keeps its caret where he types: a letter typed in the middle of a word, across the redraw it makes;
+  // and in a long query, across another redraw, the caret and the box's sideways scroll stay where they were.
+  const findNow = () => a.run(`(() => { const box = document.querySelector('#plugin-find'); return [box.value, box.selectionStart, Math.round(box.scrollLeft)]; })()`);
+  await a.run(`(() => { const box = document.querySelector('#plugin-find'); box.focus(); box.value = 'pug'; box.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.run(`document.querySelector('#plugin-find').setSelectionRange(1, 1)`);
+  await a.send('Input.insertText', { text: 'l' });
+  await a.settle();
+  same('Plugins’ Find: a letter typed in the middle of a word leaves the caret after it', (await findNow()).slice(0, 2), ['plug', 2]);
+  await a.run(`(() => { const box = document.querySelector('#plugin-find'); box.value = 'plug ' + 'a long query that runs past the box '.repeat(6); box.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.run(`(() => { const box = document.querySelector('#plugin-find'); box.setSelectionRange(125, 125); box.blur(); box.focus(); })()`);
+  const longFind = await findNow(), [findRedrawn] = await redrawUnder(a, '#plugin-find');
+  same('…and in a long query a redraw keeps the caret and the sideways scroll', [findRedrawn, longFind[2] > 0, ...await findNow()], [true, true, ...longFind]);
+  await a.run(`(() => { const box = document.querySelector('#plugin-find'); box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); })()`);
+  await a.settle();
   // A first click, so the toolbar's result is there before the measured one, as it is when he works down a list.
   await putAt(list, '[data-plugin="plug-01"]', 300);
   await clickAt(await middleOf('#pswitch-0-plug-01')); await done();

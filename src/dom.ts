@@ -1,8 +1,8 @@
 // The page's element builder (h) and the small controls every page draws with: buttons, switches (toggle), checkboxes, icons,
-// empty states, section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout), and what a
-// redraw keeps of a gesture in the middle of it: a press released on a control a redraw replaced counting as its click, a drag
-// across a text as its selection (keepClicksAcrossRedraws, pressWasDrag), and what is selected (keepSelection). No words of the
-// app's own: what a control says is its caller's, and the styles are style.css's.
+// empty states, section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout); a press and
+// its release counting as one click when a redraw replaced the control between them (keepClicksAcrossRedraws), and whether a
+// press on a text was a click or a drag, which every click on a text asks (pressWasDrag); and what a redraw keeps of what is
+// selected (keepSelection). No words of the app's own: what a control says is its caller's, and the styles are style.css's.
 import { icons, type IconName } from './icons.ts';
 import { groupBy } from './model.ts';
 
@@ -113,68 +113,85 @@ function selectIn(text: Element, anchor: number, focus: number) {
   getSelection()?.setBaseAndExtent(...place(anchor), ...place(focus));
 }
 
-/** The last press of the main button on a control a redraw may replace (keepClicksAcrossRedraws). */
-interface Press { control: Element; id: string; says: string | null; where: string; disabled: boolean; at?: number; dragged: boolean }
+/** A press of the main button on a control a redraw may replace, from the press to its release (keepClicksAcrossRedraws). */
+interface Press { control: Element; id: string; says: string | null; where: string; pointer: number; disabled: boolean; at?: number; dragged: boolean }
 let pressed: Press | undefined;
+/** A text's release whose own click is still to come, in the same task (the Mac measured it): was it a drag (pressWasDrag). */
+let released: { id: string; drag: boolean } | undefined;
 /** What a control says: a text (a `pre` with an id) its whole text, a button its `aria-checked`. */
 const says = (control: Element) => (control.matches('pre') ? control.textContent : control.getAttribute('aria-checked'));
+/**
+ * Click or drag, for a press on a text: a click only when released on the character it pressed, never having moved off it, and
+ * with Shift not held (Shift extends a selection), as the browser selects. Anything else is a drag. `releasedAt`: where the
+ * release landed in the text now there (undefined off it).
+ */
+const isDrag = (press: Press, releasedAt: number | undefined) => press.dragged || releasedAt !== press.at;
 
 /**
- * A press and its release count as one click on the control now there even when a redraw replaced the pressed one between them
- * (every redraw rebuilds the page): the browser then sends no click at all. The controls are a button with an id and a text (a
+ * A press and its release count as one click even when a redraw replaced the pressed control between them (every redraw rebuilds
+ * the page). The browser then sends no click at all, to the replaced control or the new one, so the release here is the only path
+ * (measured on the Mac: judges/gesture-builder-report.md in the plan folder). The controls are a button with an id and a text (a
  * `pre` with an id: a card's shown text, whose click opens its editor at the character clicked, the log's lines, a file's
- * contents). The press notes the control's id, what it says (`says`), `where` (the page and the home) and on a text the character
- * it landed on; the release then clicks, at its own point, the control with that id saying the same in the same place, not
- * disabled, so a switch that changed under the press is never flipped the other way. A text's press is a click only while the
- * held pointer stays on that character (the browser's own rule): once it moves off, it is a drag (pressWasDrag), which this release
- * finishes by selecting from the press to the release in the text now there, or nothing when it ends off the text.
+ * contents). The press notes the control's id, what it says (`says`), `where` it is (renderer.ts gives the page's place and the
+ * home) and on a text the character it landed on. At the release, by the pointer and the main button that pressed, the record
+ * ends, and if the pressed control is gone, the one now there with the same id, saying the same in the same place and not
+ * disabled, takes its place: a button is clicked, at the release's point, when the release lands on it; a text is clicked when
+ * the press was a click (isDrag), or else gets the drag's selection, from the press to the release, or none when the release is
+ * off it. When no such control is there, a text's selection is cleared. A text still there keeps whether its press was a drag
+ * for its own click, which comes next (pressWasDrag). A window that loses the focus keeps the record: on the Mac's four-window
+ * run another window takes the focus in the middle of presses, and the release still comes here.
  */
 export function keepClicksAcrossRedraws(where: () => string): void {
-  const textNow = (press: Press) => (press.control.isConnected ? press.control : document.getElementById(press.id));
+  const nowThere = (press: Press) => {
+    if (press.control.isConnected) return press.control;
+    const now = document.getElementById(press.id);
+    return now && !press.disabled && !now.matches(':disabled') && says(now) === press.says && where() === press.where ? now : null;
+  };
   document.addEventListener('pointerdown', event => {
     const control = event.button === 0 ? (event.target as Element | null)?.closest?.('button[id], pre[id]') : null;
     const at = control?.matches('pre') ? offsetIn(control, event.clientX, event.clientY) : undefined;
-    pressed = control ? { control, id: control.id, says: says(control), where: where(), disabled: control.matches(':disabled'), at, dragged: false } : undefined;
+    released = undefined;
+    pressed = control ? { control, id: control.id, says: says(control), where: where(), pointer: event.pointerId, disabled: control.matches(':disabled'), at, dragged: event.shiftKey } : undefined;
   }, true);
   document.addEventListener('pointermove', event => {
-    const text = pressed?.at !== undefined && event.buttons & 1 ? textNow(pressed) : null;
+    const text = pressed?.at !== undefined && event.pointerId === pressed.pointer && event.buttons & 1 ? nowThere(pressed) : null;
     if (pressed && text && offsetIn(text, event.clientX, event.clientY) !== pressed.at) pressed.dragged = true;
   }, true);
-  document.addEventListener('pointercancel', () => { pressed = undefined; }, true);
+  document.addEventListener('pointercancel', () => { pressed = released = undefined; }, true);
   document.addEventListener('pointerup', event => {
-    const was = pressed, now = was && !was.control.isConnected ? document.getElementById(was.id) : null;
-    if (!was || !now || was.disabled || now.matches(':disabled') || says(now) !== was.says || where() !== was.where) return;
+    const was = pressed;
+    if (!was || event.pointerId !== was.pointer || event.button !== 0) return;
     pressed = undefined;
-    const at = was.at === undefined ? undefined : offsetIn(now, event.clientX, event.clientY);
+    const now = nowThere(was), text = was.at !== undefined, at = text && now ? offsetIn(now, event.clientX, event.clientY) : undefined;
+    if (now === was.control) { if (text) released = { id: was.id, drag: isDrag(was, at) }; return; }
+    if (!now) { if (text) getSelection()?.removeAllRanges(); return; }
     const click = () => now.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY }));
-    if (was.at === undefined) { if (now.contains(event.target as Node)) click(); }
-    else if (!was.dragged && at === was.at) click();
+    if (!text) { if (now.contains(event.target as Node)) click(); }
+    else if (!isDrag(was, at)) click();
     else if (at === undefined) getSelection()?.removeAllRanges();
-    else selectIn(now, was.at, at);
+    else selectIn(now, was.at!, at);
   }, true);
+  // The release's own click has been heard by its text: what the release kept for it ends here.
+  window.addEventListener('click', () => { released = undefined; });
 }
-/** Whether the press on `text` was a drag (keepClicksAcrossRedraws); asked by its click, which uses the press up. */
-export function pressWasDrag(text: Element): boolean {
-  const was = pressed;
-  if (was?.id !== text.id) return false;
-  pressed = undefined;
-  return was.dragged;
-}
+/** Whether the press on `text` was a drag (keepClicksAcrossRedraws isDrag): every click on a text asks it before acting. */
+export const pressWasDrag = (text: Element): boolean => released?.id === text.id && released.drag;
 
 /**
- * A redraw keeps what is selected, as it keeps the scroll places and the focus (renderer.ts render): the focused text field's
- * caret, selection and scroll, when the field is drawn again holding the same value; else a selection inside one text (a `pre`
- * with an id), its direction kept, when that text is drawn again the same. Returns what puts it back, which neither focuses nor
- * scrolls the page.
+ * A redraw keeps what is selected, as it keeps the scroll places and the focus (renderer.ts render), and is the one place that
+ * does: the focused text field's caret, selection and own scroll (both ways), when the field is drawn again holding the same
+ * value; else a selection inside one text (a `pre` with an id), its direction kept, when that text is drawn again the same.
+ * Returns what puts it back, which neither focuses nor scrolls the page.
  */
 export function keepSelection(): () => void {
   const field = document.activeElement;
   if ((field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement) && field.id && typeof field.selectionStart === 'number') {
-    const { id, value, selectionStart, selectionEnd, selectionDirection, scrollTop } = field;
+    const { id, value, selectionStart, selectionEnd, selectionDirection, scrollTop, scrollLeft } = field;
     return () => {
       const again = document.getElementById(id);
       if (!(again instanceof HTMLTextAreaElement || again instanceof HTMLInputElement) || again.value !== value) return;
-      again.setSelectionRange(selectionStart, selectionEnd, selectionDirection ?? undefined); again.scrollTop = scrollTop;
+      again.setSelectionRange(selectionStart, selectionEnd, selectionDirection ?? undefined);
+      again.scrollTop = scrollTop; again.scrollLeft = scrollLeft;
     };
   }
   const chosen = getSelection(), holder = (node: Node | null | undefined) => (node instanceof Element ? node : node?.parentElement)?.closest('pre[id]');

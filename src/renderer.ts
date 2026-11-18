@@ -7,7 +7,7 @@
 // own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { absentKinds, acting, drawPage, placeNow, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { afterLayout, button, fitBars, h, icon, keepClicksAcrossRedraws, keepSelection, runAfterLayout, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
@@ -240,7 +240,8 @@ function render() {
   runAfterLayout();
   renderStatus();
   fitBars();
-  // What was selected, then the scroll places and the focus, each where it was (dom.ts keepSelection neither scrolls nor focuses).
+  // What was selected (a field's own scroll with it), then the scroll places and the focus, each where it was (dom.ts keepSelection
+  // neither focuses nor scrolls the page).
   selected();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
   // Back on the control that had it, without scrolling to it: a redraw never pulls the page to a row scrolled away from.
@@ -249,8 +250,9 @@ function render() {
 }
 
 setRenderer(render);
-// A press is matched to the control now there only on the same page in the same home.
-keepClicksAcrossRedraws(() => `${state.page} ${state.home?.home ?? ''}`);
+// A press is matched to the control now there only in the same place (the page's own, app.ts placeNow) in the same home, which a
+// page's place leaves out.
+keepClicksAcrossRedraws(() => `${placeNow()} ${state.home?.home ?? ''}`);
 // The status bar's mark for a message too narrow to show (app.ts paintStatusMessage): drawn once.
 region('message-mark').replaceChildren(icon('info', 14));
 

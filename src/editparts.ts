@@ -39,13 +39,6 @@ export const escapeTo = (cancelId: string, keepId: string) => (event: KeyboardEv
   event.preventDefault(); target.click();
 };
 
-/** Redraws, then puts focus and the caret back in the text box `id` at `at`. */
-export const keepCaret = (id: string, at: number, redraw: () => void) => {
-  redraw();
-  const area = document.getElementById(id) as HTMLTextAreaElement | null;
-  area?.focus(); area?.setSelectionRange(at, at);
-};
-
 /** "Discard your changes to X?" with Discard and Keep: each drops or keeps the draft, redraws, then focuses the given control.
  *  `whole`: what is dropped is a whole thing rather than changes to one ("Discard Codex’s draft?"). */
 export function discardConfirm(what: string, ids: { discard: string; keep: string }, keepLabel: string, discard: { run: () => void; focus: string }, keep: { run: () => void; focus: string }, whole = false) {
