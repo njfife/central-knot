@@ -476,6 +476,38 @@ const WORDS_CUT = `[...document.querySelectorAll('.plugin-click, .toolbar-result
   return own.width && (words.scrollWidth > words.clientWidth + 1 || own.right > box.right + 1) ? [node.textContent.slice(0, 60)] : [];
 })`;
 
+/**
+ * On Plugin marketplaces, each piece of a plugin's row that doesn't show whole: a piece of its open button (the title, the
+ * version, a chip) hidden (no box, or hidden by its visibility or opacity), reaching past the button, with words outside its
+ * row's name cell at any edge, or shortened; a version or chip broken over two lines though it fits its open button whole
+ * (only a piece wider than the button may break inside itself); the button reaching past its row's name cell; and each tool's
+ * heading wider than its column. Empty when every row's name, version and chips show whole (style.css "The plugin table").
+ * CUT_OFF looks at the button and the heading's cell, not what is in them.
+ */
+const ROW_PIECES_CUT = `(() => {
+  const within = (inner, outer) => inner.left >= outer.left - 1 && inner.right <= outer.right + 1 && inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
+  const words = node => { const range = document.createRange(); range.selectNodeContents(node); return [...range.getClientRects()]; };
+  const lines = node => new Set(words(node).map(rect => Math.round(rect.top))).size;
+  // A piece's width on one line: its wrapping is off for the moment it is measured.
+  const wholeWidth = node => { node.style.whiteSpace = 'nowrap'; const width = node.scrollWidth; node.style.whiteSpace = ''; return width; };
+  const shown = node => node.checkVisibility({ visibilityProperty: true, opacityProperty: true });
+  const out = [...document.querySelectorAll('.plugin-table .ov-tool-head')].filter(head => head.scrollWidth > head.clientWidth + 1).map(head => head.textContent + '’s heading is wider than its column');
+  for (const row of document.querySelectorAll('.plugin-table .plugin-row')) {
+    const name = row.querySelector('.plugin-row-name'), open = name.querySelector('.plugin-row-open');
+    const cell = name.getBoundingClientRect(), button = open.getBoundingClientRect();
+    if (!within(button, cell)) out.push(row.dataset.plugin + ': its open button reaches past its name cell');
+    for (const piece of open.children) {
+      const box = piece.getBoundingClientRect(), says = row.dataset.plugin + ': ' + piece.textContent;
+      if (box.width < 1 || box.height < 1 || !shown(piece)) out.push(says + ' is hidden');
+      else if (!within(box, button)) out.push(says + ' reaches past its open button');
+      else if (!words(piece).every(rect => within(rect, cell))) out.push(says + ' has words outside its name cell');
+      else if (piece.scrollWidth > piece.clientWidth + 1) out.push(says + ' is shortened');
+      else if (!piece.matches('.plugin-row-title') && lines(piece) > 1 && wholeWidth(piece) <= button.width + 1) out.push(says + ' is broken over two lines, though it fits its open button whole');
+    }
+  }
+  return out;
+})()`;
+
 /** Sizes the page to width × height, and lets the app hear the resize. A real window that size leaves its page shorter (SMALLEST). */
 async function sizeTo(a, width, height) {
   await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -2179,6 +2211,7 @@ async function practiceFlow() {
   // A tool's own instructions edited afterwards, opened by a click on their text: its base block, the base and the other files
   // stay as they are.
   const baseMd1 = readFileSync(join(practice, '.central-knot/instructions/base.md'), 'utf8');
+  await untilQuiet(a);
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', 'Prefer small commits');
   same('a click on a tool’s own text opens its editor, the caret where it landed', await caretAt(a), ['ins-text-claude-cli', baseClaude0.indexOf('Prefer small commits')]);
   check('with Review changes and Cancel in the card’s head', await a.exists('#ins-head-claude-cli #ins-review-claude-cli') && await a.exists('#ins-head-claude-cli #ins-cancel-claude-cli'), await a.text('#ins-head-claude-cli'));
@@ -3578,6 +3611,64 @@ async function openCodeFlow() {
 }
 
 /**
+ * Plugin marketplaces with four tools, then five (Pi joins): every row's name, version and chips show whole, in the smallest
+ * window with the sidebar folded and open, and at 860×600, 1280×800, 1316×819, 1728×1117 and 2560×1440 with it open (style.css
+ * "The plugin table"). The marketplace is this flow's own, registered in Claude Code: a plugin whose name is 45 characters with
+ * a run of 25 letters, a long version and a category; one whose version is a build identifier with no break in it, wider than
+ * the name's column in a narrow window; and one that Claude Code still has and the marketplace no longer lists.
+ */
+async function pluginRowsFitFlow() {
+  const home = join(scratch, 'home-rows-fit'), market = join(scratch, 'market-rows-fit');
+  const long = 'observabilitydashboarding-for-on-call-support', nightly = 'nightly-builds', gone = 'legacy-log-shipper';
+  const buildId = '2.4.0+build20261118ab12cd34ef56ab78cd90ef12ab34';
+  const file = (root, path, body) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), body); };
+  const cli = (name, version) => { file(home, `.local/bin/${name}`, `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, '.local/bin', name), 0o755); };
+  toolClis(home);
+  cli('opencode', '1.19.5');
+  file(market, '.claude-plugin/marketplace.json', JSON.stringify({ name: 'rows-fit', owner: { name: 'Platform team' }, plugins: [
+    { name: long, source: `./plugins/${long}`, version: '12.10.0-beta.3', category: 'observability', description: 'Dashboards, alerts and traces for the services a team runs, in one place.' },
+    { name: nightly, source: `./plugins/${nightly}`, version: buildId, category: 'development', description: 'The latest build of the team’s tools, every night.' },
+  ] }));
+  for (const plugin of [long, nightly]) file(market, `plugins/${plugin}/skills/dashboards/SKILL.md`, '---\nname: dashboards\ndescription: Builds a dashboard.\n---\n\nBuild it.\n');
+  file(home, '.claude/plugins/known_marketplaces.json', JSON.stringify({ 'rows-fit': { source: { source: 'directory', path: market }, installLocation: market } }));
+  writeClaudeInstall(home, 'rows-fit', gone, '1.0.0', { 'skills/ship/SKILL.md': '---\nname: ship\ndescription: Ships logs.\n---\n\nShip them.\n' });
+  const a = await launch(join(scratch, 'rows-fit-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const pieces = name => a.all(`.plugin-row[data-plugin="${name}"] .plugin-row-open > *`);
+  const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
+  const titleLines = () => a.run(`(() => { const range = document.createRange(); range.selectNodeContents(document.querySelector('.plugin-row[data-plugin="${long}"] .plugin-row-title'));
+    return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size; })()`);
+  const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const rowsWhole = async tools => {
+    for (let tries = 0; tries < 50 && await a.run(`document.querySelector('.plugin-table')?.dataset.tools`) !== String(tools); tries++) await wait(100);
+    same(`the table has ${tools} tool columns; each row has its name, version and chips: the one no longer offered says so`,
+      [await a.run(`document.querySelector('.plugin-table')?.dataset.tools`), await pieces(long), await pieces(nightly), await pieces(gone)],
+      [String(tools), [long, '12.10.0-beta.3', 'observability'], [nightly, buildId, 'development'], [gone, 'No longer offered']]);
+    for (const [width, height, open] of [[...SMALLEST, false], [...SMALLEST, true], [860, 600, true], [1280, 800, true], [1316, 819, true], [1728, 1117, true], [2560, 1440, true]]) {
+      await sizeTo(a, width, height); await sidebarOpen(open);
+      same(`with ${tools} tools at ${width}×${height}, the sidebar ${open ? 'open' : 'folded'}, every plugin’s name, version and chips show whole, nothing cut off`, [...await a.run(ROW_PIECES_CUT), ...await a.run(CUT_OFF)], []);
+      if (width === 1280) same(`with ${tools} tools at 1280×800 the 45-character name has room for one line, and takes it`, await titleLines(), 1);
+      if (open) await a.shot(`rows-fit-${tools}-tools-${width}x${height}`);
+    }
+    await theme('dark');
+    for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await sidebarOpen(true); await a.shot(`rows-fit-${tools}-tools-${width}x${height}-dark`); }
+    await theme('light');
+    await fullSize(a);
+  };
+  await theme('light');
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists(`.plugin-row[data-plugin="${gone}"]`)); tries++) await wait(100);
+  await rowsWhole(4);
+  // Pi joins at a read of the home, made where it is the one read (as openCodeFlow does: Plugins' own read would start a second).
+  cli('pi', '0.70.2');
+  await a.click('#nav-harnesses');
+  await a.click('#header-refresh');
+  await a.click('#nav-plugins');
+  await rowsWhole(5);
+  same('no page errors, the plugin rows', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
  * Marketplaces offered without being looked for: each plugin tool's own default, where that tool is here. Nothing is
  * fetched to offer one, so this flow never reaches the network (it never clicks Add).
  */
@@ -4546,6 +4637,7 @@ async function draftFlow() {
   await a.click('#ins-save-codex-cli');
   same('and the save keeps every other line byte for byte, the new line taking the file’s own ending', readNow(agentsMd), crlf.replace('TARGET', 'NEW TARGET') + 'added line\r\n');
   // A click past a line's end lands at that line's end, not on the next line.
+  await untilQuiet(a);
   await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'line two');
   const pastEnd = await a.run(`(() => { const pre = document.querySelector('[aria-label="Codex instructions"] pre.ins-preview'), node = pre.firstChild, at = node.textContent.indexOf('line two');
     const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 8); const line = range.getBoundingClientRect();
@@ -5544,7 +5636,8 @@ esac
  * by last used. Update usage statistics collects again, with a band that says what collecting does and closes; a reading that
  * lands moves no row. Three skills were taken in from copies saved 40 days ago, old enough for "No use seen in 30 days"; fresh,
  * saved 2 days ago, is left out as new. The chip lists the two with no use seen, and Turn these off turns them off in one click
- * whose Undo puts every file back.
+ * whose Undo puts every file back. A switch clicked while a reading is held (a named pipe among the session files) is carried out
+ * before it lands, so no reading holds a click up: checked by order, not time, as a click and a reading slow each other on a busy machine.
  */
 async function usageFlow() {
   const home = join(scratch, 'usage-home'), data = join(scratch, 'usage-data'), ago = days => new Date(Date.now() - days * 86_400_000);
@@ -5563,19 +5656,13 @@ async function usageFlow() {
   lines(join(home, '.claude/projects/-work/s2.jsonl'), [{ type: 'user', message: { content: '<command-name>/standup</command-name>' }, timestamp: ago(40).toISOString() }]);
   // Copilot CLI, not installed here so not managed: idle invoked 3 days ago, which counts all the same.
   lines(join(home, '.copilot/session-state/c1/events.jsonl'), [{ type: 'skill.invoked', data: { name: 'idle' }, timestamp: ago(3).toISOString() }]);
-  // OpenCode, not installed here (no settings folder), with a database left from a year ago, of a realistic size: 20,000
-  // messages, each with a text part and a tool part. Not named among the tools; read all the same.
+  // OpenCode, not installed here (no settings folder), with a database left from a year ago: not named among the tools; read all the same.
   const { DatabaseSync } = await import('node:sqlite');
   mkdirSync(join(home, '.local/share/opencode'), { recursive: true });
   const leftover = new DatabaseSync(join(home, '.local/share/opencode/opencode.db'));
-  leftover.exec('CREATE TABLE session (id text PRIMARY KEY, agent text, time_created integer NOT NULL); CREATE TABLE part (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, data text NOT NULL); BEGIN');
-  const yearAgo = ago(365).getTime(), part = leftover.prepare('INSERT INTO part VALUES (?, ?, ?, ?)'), output = 'x'.repeat(1500);
-  for (let session = 0; session < 1000; session++) leftover.prepare('INSERT INTO session VALUES (?, ?, ?)').run(`old${session}`, null, yearAgo);
-  for (let message = 0; message < 20000; message++) {
-    part.run(`t${message}`, `old${message % 1000}`, yearAgo, JSON.stringify({ type: 'text', text: output.slice(0, 600) }));
-    part.run(`c${message}`, `old${message % 1000}`, yearAgo, JSON.stringify({ type: 'tool', tool: message % 2 ? 'bash' : 'read', state: { input: { command: 'ls' }, output } }));
-  }
-  leftover.exec('COMMIT');
+  leftover.exec('CREATE TABLE session (id text PRIMARY KEY, agent text, time_created integer NOT NULL)');
+  leftover.exec('CREATE TABLE part (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, data text NOT NULL)');
+  leftover.prepare('INSERT INTO session VALUES (?, ?, ?)').run('old', null, ago(365).getTime());
   leftover.close();
   // Codex: its history starts 12 days ago; notes's SKILL.md read 5 days ago.
   lines(join(home, '.codex/sessions/2026/11/01/rollout-a.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(12).toISOString() },
@@ -5658,19 +5745,6 @@ async function usageFlow() {
   await fullSize(a);
   await fitsAtMinimum(a, 'Skills with usage collected and its figures');
   await a.shot('usage-read');
-  // A switch clicked while a reading runs is carried out without waiting for it: OpenCode's 20,000 messages are read in main,
-  // where the click's pass runs. Timed against the same click with no reading.
-  const flipTime = async key => a.run(`(async () => { const was = document.querySelector('#switch-${key}').getAttribute('aria-checked'), started = performance.now();
-    document.querySelector('#switch-${key}').click();
-    while (document.querySelector('#switch-${key}').getAttribute('aria-checked') === was || document.body.dataset.busy === 'true') await new Promise(done => setTimeout(done, 5));
-    return Math.round(performance.now() - started); })()`);
-  const alone = [await flipTime('fresh'), await flipTime('fresh')];
-  await a.click('#collect-usage');
-  const whileCollecting = await a.text('#usage-when');
-  const during = [await flipTime('fresh'), await flipTime('fresh')];
-  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
-  check(`a switch clicked while usage is collected waits under 300 ms longer than alone (alone ${alone.join(', ')} ms; while “${whileCollecting}”: ${during.join(', ')} ms)`, Math.max(...during) - Math.max(...alone) < 300, JSON.stringify({ alone, during, whileCollecting }));
-  await a.click('#usage-line-close');
   // The chip: standup and spare, old enough with no use seen; fresh, 2 days old, left out and counted; idle, used in Copilot CLI, not in it.
   same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['All', null], ['No use seen in 30 days', '2']]);
   await a.click('.chip[data-tip="No use seen in 30 days"]');
@@ -5750,8 +5824,8 @@ async function usageFlow() {
   same('the next launch keeps Sort by Last used, and the reading that comes by itself moves no row', [await a.run(`document.querySelector('#item-order').value`), await sectionsNow(a)], ['used', firstDrawn]);
 
   // ---------- A reading that lands moves nothing ----------
-  // This computer's home (`real`), opened now, has history in five tools and its reading starts afresh. Each reading's answer is
-  // held back 2.5 s in the page (or in main, where the page's call can't be wrapped), so the page is looked at while it runs.
+  // This computer's home (`real`), opened now, has history in five tools and its reading starts afresh. Each reading is held
+  // back by a named pipe (below), so the page is looked at while it runs.
   const realSkills = join(real, '.claude/skills');
   mkdirSync(join(real, '.local/bin'), { recursive: true });
   for (const name of ['claude', 'codex']) cpSync(join(home, '.local/bin', name), join(real, '.local/bin', name));
@@ -5841,6 +5915,25 @@ async function usageFlow() {
     await a.click('#usage-line-close');
     await chooseOrder('name');
     await chipNamed('All'); await a.settle();
+    // bravo's switch, clicked while an Update's reading waits on the pipe, is carried out (Off, said, its copies gone) while the
+    // toolbar still says Collecting…; then the reading lands and nothing moves.
+    const bravoCopies = () => [realSkills, join(real, '.codex/skills')].map(folder => readNow(join(folder, 'bravo/SKILL.md')));
+    const copiesBefore = bravoCopies();
+    await a.click('#collect-usage');
+    for (let tries = 0; tries < 100 && !reading(); tries++) await wait(25);
+    // Not a.click, which waits for the page to be idle; the header's result is closed first, as a.click does for a row's switch.
+    await a.run(`(() => { document.querySelector('#outcome-dismiss, #report-dismiss')?.click(); document.querySelector('#switch-bravo').click(); })()`);
+    const carriedOut = () => a.run(`document.body.dataset.busy !== 'true' && !!document.querySelector('#header [data-outcome] .band-text')`);
+    // Waited for as long as a.click waits for any click (30 s): a click held until the reading lands never comes before letGo.
+    for (let tries = 0; tries < 300 && !(await carriedOut()); tries++) await wait(100);
+    const whileHeld = [await switchOn(a, 'bravo'), await a.text('#header [data-outcome] .band-text'), bravoCopies(), await lead()], heldTops = await tops();
+    await letGo();
+    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await a.settle();
+    same('a switch clicked while a reading is held is carried out before the reading lands: bravo Off, said, its copies gone, the toolbar still collecting; when it lands nothing moves',
+      [copiesBefore.every(copy => copy !== ''), whileHeld, [await switchOn(a, 'bravo'), bravoCopies(), await tops()]],
+      [true, [false, 'bravo is off: no tool has it. Central Knot keeps it, and turning it on puts each folder back as it was.', ['', ''], 'Collecting…'], [false, ['', ''], heldTops]]);
+    await a.click('#usage-line-close');
   }
   same('no page errors, usage after a relaunch', a.pageErrors, []);
   await a.quit();
@@ -5887,7 +5980,7 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group, as it deletes its copy's HOME. Inside a copy the flows run in this order on the HOME seeded for it (seedHome), so each
 // group passes on its own.
 const groups = [
-  [practiceFlow, suggestedFlow, realHomeFlow],
+  [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
