@@ -301,7 +301,7 @@ async function harnessFlow() {
   await a.click('#harness-tab-skills');
   const firstMark = () => a.run(`document.querySelector('.ov-row[data-key] .tool-mark')?.dataset.tool ?? null`);
   same('a harness’s skills put its own mark first on each row, and have no column heads', [await firstMark(), await a.exists('.ov-head')], ['copilot-cli', false]);
-  const away = await a.run(`[...document.querySelectorAll('[role="rowgroup"]')].find(group => group.querySelector('.ov-section-label strong')?.textContent === 'Not in Copilot CLI')?.querySelector('[data-key="release-notes"]') ? true : false`);
+  const away = await a.run(`[...document.querySelectorAll('[role="rowgroup"]')].find(group => group.querySelector('.ov-section-label strong')?.textContent === 'Not in Copilot CLI')?.querySelector('[data-key="${rowPart('', 'skills', 'release-notes')}"]') ? true : false`);
   check('a skill only other tools have is under "Not in Copilot CLI"', away);
   check('a harness’s page has no menus or Add from… to bring items in: a found row’s Add does', !(await a.exists('.tool-menu, #harness-add-from, .tool-head-button')));
   await a.click(`#${rowPart('add', 'skills', 'release-notes')}`);
@@ -1252,7 +1252,7 @@ async function practiceFlow() {
   const tableOrder = await rowKeys(a, 'skills');
   await a.click(`#${rowPart('open', 'skills', 'standup')}`);
   await a.click(`#${rowPart('files', 'skills', 'standup')}`);
-  same('the Skills list has every skill, in the table’s order', await a.run(`[...document.querySelectorAll('.list-row')].map(row => row.id.replace(/^list-/, ''))`), tableOrder);
+  same('the Skills list has every skill, in the table’s order', keysOf('skills', await a.all('.list-row', 'e.dataset.key')), tableOrder);
   await a.click(`#${rowPart('list', 'skills', 'standup')}`);
   check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details-paths')), await a.text('.pane-title'));
   check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
@@ -1265,7 +1265,7 @@ async function practiceFlow() {
   const filesWide = await a.run(`(() => { const pane = document.querySelector('#detail-scroll').getBoundingClientRect(), file = document.querySelector('#detail-scroll pre.content').getBoundingClientRect(), details = document.querySelector('#detail-scroll .files-tail').getBoundingClientRect(); return { open: !!document.querySelector('#detail-scroll .files-tail .details-paths[open]'), beside: details.left > file.right, gap: Math.round(details.left - file.right), edge: Math.round(pane.right - details.right) }; })()`);
   check('at 1728 the details sit beside the file, open, with the file spanning to them', filesWide.open && filesWide.beside && filesWide.gap <= 40 && filesWide.edge <= 40, JSON.stringify(filesWide));
   await fullSize(a);
-  const listOrder = () => a.run(`[...document.querySelectorAll('.list-group, .list-row')].map(each => each.id.replace(/^list-/, '') || each.textContent)`), listBefore = await listOrder();
+  const listOrder = () => a.run(`[...document.querySelectorAll('.list-group, .list-row')].map(each => each.dataset.key || each.textContent)`), listBefore = await listOrder();
   await a.click(`#${rowPart('detail-switch', 'skills', 'standup')}`);
   same('its switch here applies at once, as the table’s does, and its row in the list stays where it was, under the same heading', [await a.run(`document.querySelector('#${rowPart('detail-switch', 'skills', 'standup')}').getAttribute('aria-checked')`), existsSync(standupPath('claude')), await listOrder()], ['false', false, listBefore]);
   await fitsAtMinimum(a, 'the Files view');
@@ -1667,8 +1667,8 @@ async function practiceFlow() {
   same('its MCP server too, on the MCP servers page', await cellState(a, 'mcp', 'outside-tools@ck-outside/outside-server', 'claude-cli'), 'plugin');
   rmSync(join(practice, '.claude/plugins'), { recursive: true, force: true });
   await a.click('#header-refresh');
-  for (let tries = 0; tries < 40 && await a.exists('[data-key="outside-tools@ck-outside/outside-server"]'); tries++) await wait(100);
-  check('and gone once the plugin is', !(await a.exists('[data-key="outside-tools@ck-outside/outside-server"]')));
+  for (let tries = 0; tries < 40 && await a.exists(`[data-key="${rowPart('', 'mcp', 'outside-tools@ck-outside/outside-server')}"]`); tries++) await wait(100);
+  check('and gone once the plugin is', !(await a.exists(`[data-key="${rowPart('', 'mcp', 'outside-tools@ck-outside/outside-server')}"]`)));
   await a.click('#nav-skills');
 
   // Plugins: a folder marketplace is browsed (its README, each plugin's contents) and installs are chosen, then applied.
