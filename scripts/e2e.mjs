@@ -1004,12 +1004,14 @@ async function practiceFlow() {
     await probe.send('Debugger.enable');
     await a.run(`{
       const copies = () => { debugger; return window.releaseNotesCopies; };
-      const clickAndRead = read => new Promise(done => {
+      const clickAndRead = read => new Promise((done, fail) => {
         const draw = new MutationObserver(() => {
           if (document.body.dataset.busy === 'true') return;
           draw.disconnect();
+          clearTimeout(limit);
           done(read());
         });
+        const limit = setTimeout(() => { draw.disconnect(); fail(new Error('Refresh did not finish.')); }, 30000);
         draw.observe(document.body, { attributes: true, attributeFilter: ['data-busy'] });
         document.querySelector('#header-refresh').click();
       });
@@ -1020,7 +1022,8 @@ async function practiceFlow() {
         centralKnot.onSyncChanged(() => {
           if (clicked || copies().some(Boolean)) return;
           clicked = true;
-          clickAndRead(() => document.querySelector('.sync-notices')?.textContent ?? null).then(text => { clearTimeout(limit); done(text); });
+          clearTimeout(limit);
+          done(clickAndRead(() => document.querySelector('.sync-notices')?.textContent ?? null));
         });
       });
       true;
