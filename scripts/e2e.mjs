@@ -1028,7 +1028,15 @@ async function practiceFlow() {
   same('a switch set in Claude Code’s settings reaches the open page, and is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'skills', 'release-notes'), /switched off in Claude Code/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? ''), await switchOn(a, 'skills', 'release-notes')], [true, ['claude-cli'], true, true]);
   await opened('release-notes');
   check('its line in the opened row says the tool doesn’t load it', /Claude Code doesn’t load it, and Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
-  await a.click(`#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`);
+  // While the skills record is damaged, Let Claude Code load it is drawn and off, as the row's other controls are (that a click
+  // writes nothing then is tests/librarygate.test.ts's).
+  const clearSwitch = `#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`, skillsRecordHere = join(practice, '.central-knot/skills.json'), skillsRecordGood = readFileSync(skillsRecordHere, 'utf8');
+  writeFileSync(skillsRecordHere, '{ damaged');
+  await a.click('#header-refresh');
+  same('with the skills record damaged, Let Claude Code load it is there and off', await a.run(`document.querySelector(${JSON.stringify(clearSwitch)})?.disabled ?? 'not drawn'`), true);
+  writeFileSync(skillsRecordHere, skillsRecordGood);
+  await a.click('#header-refresh');
+  await a.click(clearSwitch);
   same('Clear the switch clears it in Claude Code’s settings, and the mark is on again', [JSON.parse(readSwitches()[0]).skillOverrides?.['release-notes'], await offMarks(a, 'skills', 'release-notes')], [undefined, []]);
   await opened('release-notes', false);
 
@@ -1185,7 +1193,7 @@ async function practiceFlow() {
   writeFileSync(syncRecord, '{ damaged');
   await a.click('#header-refresh');
   const timesSaid = async selector => ((await a.text(selector)) ?? '').split('The sync record is damaged').length - 1;
-  same('a damaged record is said in the bands, once, and every switch is off', [await timesSaid('.bands'), await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`)], [1, true]);
+  same('a damaged record is said in the bands, once, and every switch is off', [await timesSaid('.bands'), await a.run(`(list => list.length > 0 && list.every(item => item.disabled))([...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')])`)], [1, true]);
   await a.click('#nav-overview');
   same('the Overview says it once too, first of what needs you, as the stop', [await timesSaid('#overview-needs'), await timesSaid('#overview-stopped')], [1, 1]);
   await a.click('#nav-skills');
@@ -1199,6 +1207,11 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   const stopSays = await a.text('.band-danger .band-text') ?? '', saidIn = async selector => ((await a.text(selector)) ?? '').split(stopSays).length - 1;
   same('a damaged skills record: the Skills page says why once, as the stop', [stopSays.length > 0, await saidIn('.bands')], [true, 1]);
+  // A row's controls ask their own kind's gate: every skill's switch is off, and on Agents the switches still work.
+  const controlsOff = () => a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].map(item => item.disabled)`);
+  same('and every skill’s switch is off, on a list that has some', await controlsOff().then(off => off.length > 0 && off.every(Boolean)), true);
+  await a.click('#nav-agents');
+  same('while the agents’ switches work', (await controlsOff()).some(off => !off), true);
   await a.click('#nav-overview');
   same('and the Overview once, as Skills’ problem, with the way to Skills', [await saidIn('#overview-needs'), await a.exists('#overview-stopped'), await a.exists('#overview-skills-problem-0-open')], [1, false, true]);
   await a.click('#nav-skills');
@@ -1345,10 +1358,10 @@ async function practiceFlow() {
 
   // Skills Files view: every skill in a list, and one skill's files and contents with the same switch and controls as the table.
   await a.click('#nav-skills');
-  const tableOrder = await rowKeys(a, 'skills');
+  const tableOrder = await rowKeys(a, 'skills'), tableHeadings = (await sectionsNow(a, 'skills')).filter(([, keys]) => keys.length).map(([section]) => section);
   await a.click(`#${rowPart('open', 'skills', 'standup')}`);
   await a.click(`#${rowPart('files', 'skills', 'standup')}`);
-  same('the Skills list has every skill, in the table’s order', keysOf('skills', await a.all('.list-row', 'e.dataset.key')), tableOrder);
+  same('the Skills list has every skill, in the table’s order, under the table’s headings', [keysOf('skills', await a.all('.list-row', 'e.dataset.key')), (await a.all('.list-group', 'e.textContent')).map(word => word.toLowerCase())], [tableOrder, tableHeadings]);
   await a.click(`#${rowPart('list', 'skills', 'standup')}`);
   check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details-paths')), await a.text('.pane-title'));
   check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));

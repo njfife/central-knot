@@ -9,6 +9,7 @@
 // meanwhile (wantedOn). Each route keeps its own work, its row while its click waits (the item pages draw the new state; Plugins
 // say "Waiting to…": pluginparts.ts clickNote) and its result with its Undo (app.ts sayRun; pluginstate.ts market.lastRun).
 import { afterActing, FADE_MS, homeReadOwed, readHomeOnce, rerender, showActing, type PageKind } from './app.ts';
+import type { RowKey } from './itemrow.ts';
 
 /**
  * A run of clicks: its place (an item page, or a tool's tab of one kind under Harnesses: app.ts placeNow; or Plugins), and
@@ -23,7 +24,7 @@ export interface Turn {
   work: () => Promise<void>;
   run: Run;
   /** An item page's row (its kind and key) and the state its switch asks for, which the row is drawn in until the click ends. */
-  row?: { kind: PageKind; key: string; on: boolean };
+  row?: RowKey & { on: boolean };
   /** Said when the list empties after it ran (Plugins: its run's clicks said as a whole). */
   ended?: () => void;
 }

@@ -6,10 +6,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { librarySentence } from '../src/historyactions.ts';
+import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { libraryWords, rowClicks } from '../src/libraryrow.ts';
 import * as agent from './agentclicks.ts';
-import { bytes, choose, everywhere, folderOf, historyActions, historyOf, inTool, pass, put, sandbox, seen, send, skillText, turnOn, undo } from './skillclicks.ts';
+import { bytes, choose, everywhere, folderOf, historyActions, historyOf, inTool, pass, put, sandbox, seen, send, skillText, turnOff, turnOn, undo } from './skillclicks.ts';
 
 test('Undo right after taking in a found skill: the copies it made go, the tool it was found in keeps its folder, and the skill is found again', async () => {
   const box = await sandbox();
@@ -41,6 +41,31 @@ test('Undo of taking in a found skill whose copies differed: each tool has its o
     await undo(box, click);
     await pass(box);
     assert.deepEqual(await everywhere(box), before);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of a skill’s Off (Turn these off’s, row by row) where it was kept out of Codex: it is back in the tools it had, and still not in Codex', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    await inTool(box, 'codex-cli', true);
+    const before = await everywhere(box);
+    const click = await turnOff(box);
+    assert.ok(Object.values(await everywhere(box)).every(copy => copy === undefined), 'off in every tool');
+    await undo(box, click);
+    assert.deepEqual([await everywhere(box), (await seen(box)).item!.except], [before, ['codex-cli']]);
+  } finally { await box.cleanup(); }
+});
+
+test('A skill whose folder is named agent:review: the History entry its Off makes says it is a skill’s', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Review it.', 'agent:review') }, [], 'agent:review');
+    await turnOn(box, box.context, 'agent:review');
+    await turnOff(box, box.context, 'agent:review');
+    const made = (await historyOf(box, box.context, 'agent:review')).filter(event => event.kind === 'off');
+    assert.deepEqual(made.map(event => [event.of, libraryEntry(event)]), [['skill', { kind: 'skills', key: 'agent:review' }]]);
   } finally { await box.cleanup(); }
 });
 

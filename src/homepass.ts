@@ -12,7 +12,7 @@
 // The other three one-time migrations run as each library is opened (skillstore.ts, serverstore.ts, agentstore.ts
 // openLibrary): only in memory for a reader such as the pages' views, and written by the first pass that may write.
 import { groupBy, noticeNames, plural, tookInCount } from './model.ts';
-import { kindNouns, toolList, toolName } from './words.ts';
+import { rowNames, toolList, toolName } from './words.ts';
 import { libraryWords, sentences } from './libraryrow.ts';
 import { agentKind, applyAgents } from './agents.ts';
 import { migrateParts, type PluginNow } from './partsmigrate.ts';
@@ -91,10 +91,12 @@ export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stoppe
     const notices = runs.flatMap(run => run.notices ?? []);
     return { kind, results, notices, names: new Set([...results.keys(), ...notices.flatMap(noticeNames)]) };
   });
+  // An item's kind is named where an item of another kind in the result has its name, as a run's words do (words.ts rowNames).
+  const among = kinds.flatMap(({ kind, names }) => [...names].map(name => ({ kind, name })));
   for (const { kind, results, notices, names } of kinds) {
     const say = sentences(libraryWords[kind]);
     for (const name of names) {
-      const label = kinds.some(other => other.kind !== kind && other.names.has(name)) ? `${name} (${kindNouns[kind].one})` : name;
+      const label = rowNames([{ kind, name }], among)[0]!;
       const copies = results.get(name) ?? [], parts: string[] = [];
       let taken = false, refused = false;
       for (const outcome of ['removed', 'written'] as const) {

@@ -9,7 +9,7 @@ import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changes, homeItems, NO_PROFILE, turnsWords, undoPlan } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
-import { doneWords, entriesNow, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
+import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -109,8 +109,10 @@ const managingWords = ({ tool, on }: NonNullable<HistoryEvent['managing']>): { g
 const everythingOffer = (event: HistoryEvent) => (state.home && state.history.data ? everythingAction(event, state.history.data, entriesNow(state.home)) : undefined);
 
 /** Skills, MCP servers, agents, profile switches, tools' Manage switches and Synchronize everything share History; each row says which it is. */
-const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.kind === 'managing' ? 'Tool' : event.kind === 'everything' ? 'Setting' : event.base ? 'Instructions'
-  : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
+const kindOf = (event: HistoryEvent) => {
+  const of = entryKind(event);
+  return of ? ({ skill: 'Skill', mcp: 'MCP server', agent: 'Agent' } as const)[of] : event.kind === 'profile' ? 'Profile' : event.kind === 'managing' ? 'Tool' : event.kind === 'everything' ? 'Setting' : 'Instructions';
+};
 /** Rows are grouped by day (day headings); each row shows its time, every row in one form (model.ts timesApart). */
 const day = (iso: string) => {
   const date = new Date(iso);
@@ -184,7 +186,7 @@ export function historyPage() {
       h('span.history-about', {}, about.text),
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' || event.everything?.undo ? 'Restored' : 'Undone'))
         : h('span.history-actions', {},
-          !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, event.key, true) : null,
+          !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, libraryEntry(event)?.kind, true) : null,
           libraryEntry(event) ? libraryButtons(event) : actions(event, about.action)),
       changePanel(event.id))];
   }))));

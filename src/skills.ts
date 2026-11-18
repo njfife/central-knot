@@ -323,7 +323,8 @@ export async function restoreSkill(context: ShareContext, tools: HarnessId[], ev
 
 /**
  * Clear the switch's Undo: each tool's own switch has the skill off again, as before, with an entry of its own. A tool not
- * managed now (`tools`) is left as it is, as every Undo leaves one, and said; with no tool left to set, it is refused.
+ * managed now (`tools`) is left as it is, as every Undo leaves one, and said; with no tool left to set, it is refused. The skills
+ * record's own stop and the gate come before any write, as clearSwitch's do.
  */
 async function switchBack(context: ShareContext, tools: HarnessId[], past: HistoryEvent): Promise<PassResult> {
   const recorded = past.switched!.filter(entry => entry.target), away = recorded.filter(entry => !tools.includes(entry.tool));
@@ -331,13 +332,15 @@ async function switchBack(context: ShareContext, tools: HarnessId[], past: Histo
   if (!entries.length) return { stopped: away.map(entry => notManagedHere(entry.tool)).join(' '), results: [], writes: 0 };
   const already = await Promise.all(entries.map(async ({ tool, target }) => isDisabled(context, await readSwitchFile(context, tool), target!)));
   if (already.every(Boolean)) return { stopped: `${andList(entries.map(entry => toolName(entry.tool)))}’s own switch has it off already. Nothing was changed.`, results: [], writes: 0 };
+  const { problem } = await skillKind.open(context);
+  if (problem) return { stopped: problem, results: [], writes: 0 };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0 };
   for (const { tool, target } of entries) {
     try { await setDisabled(context, tool, target!, true); }
     catch (error) { return { stopped: `Could not set ${toolName(tool)}’s switch: ${switchFailure(error)}`, results: [], writes: 0 }; }
   }
-  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: past.key, item: past.item, kind: 'switched', cause: 'switch', switched: entries.map(entry => ({ ...entry, disabled: true })), losers: [], orderProved: true };
+  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: past.key, of: 'skill', item: past.item, kind: 'switched', cause: 'switch', switched: entries.map(entry => ({ ...entry, disabled: true })), losers: [], orderProved: true };
   const history = await readHistory(context);
   for (const entry of history) if (entry.id === past.id) entry.undoneBy = event.id;
   await replaceHistory(context, [...history, event]);
@@ -352,21 +355,23 @@ async function switchBack(context: ShareContext, tools: HarnessId[], past: Histo
  * Clears a tool's own switch that turns a skill off there (the mark on its line), whoever set it, for a skill in Central Knot
  * or one found in a tool. The switch goes back to what it was before it was set where the tool kept that (Claude Code's
  * override); History's `switched` entry says so, and its Undo sets the switch again (switchBack). Ends with a pass on the skill.
- * Its own refusals first; then the gate (share.ts libraryGate), entered only to write. `resume`: the click is a Resume.
+ * Its own refusals first; then the skills record's own stop and the gate (share.ts libraryGate), entered only to write, so
+ * nothing is written before either is known. `resume`: the click is a Resume.
  */
 export async function clearSwitch(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId, resume = false): Promise<PassResult> {
   const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0 });
   if (!tools.includes(tool)) return stop(`${toolName(tool)} isn’t managed here now. Nothing was changed.`);
-  const { look, live } = await lookFor(skillKind, context, tools);
+  const { look, live, problem } = await lookFor(skillKind, context, tools);
   // A skill in Central Knot, or one found in a tool: either can have a tool's switch set.
   const name = live.find(entry => entry.key === key)?.name ?? foundCopies(look, key, [])[0]?.name ?? key;
   const target = loadTarget(look, key, name, tool);
   if (!target || !isDisabled(context, look.disk.switches.get(tool)!, target)) return stop(`${toolName(tool)}’s own switch doesn’t turn ${name} off any more. Nothing was changed.`);
+  if (problem) return stop(problem);
   const gate = await libraryGate(context, { start: true, resume });
   if ('refused' in gate) return stop(gate.refused);
   try { await setDisabled(context, tool, target, false, await overrideBefore(context, key, tool, target)); }
   catch (error) { return stop(`Could not clear ${toolName(tool)}’s switch: ${switchFailure(error)}`); }
-  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, item: name, kind: 'switched', switched: [{ tool, disabled: false, target }], losers: [], orderProved: true };
+  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, of: 'skill', item: name, kind: 'switched', switched: [{ tool, disabled: false, target }], losers: [], orderProved: true };
   await appendHistory(context, [event]);
   const done = await applySkills(context, tools, [], { only: new Set([key]) });
   const cleared: DestinationResult = { item: name, harness: tool, outcome: 'switched', disabled: false, message: `${toolName(tool)} loads it again from its next session.` };
@@ -416,7 +421,7 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   const result = await runTakeOver(context, item, keep, way);
   if (result) return stop(result);
   // Told once it happened: a take-over has no Undo, so an entry must never claim one that didn't.
-  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, item: item.name, kind: 'took-over', losers: [loser], orderProved: true };
+  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, of: 'skill', item: item.name, kind: 'took-over', losers: [loser], orderProved: true };
   await appendHistory(context, [event]);
   const done = await applySkills(context, tools, [], { only: new Set([key]) });
   // Central Knot's copy is off where the copy it replaced was: a switch that goes by the file's path names the new one.

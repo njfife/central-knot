@@ -69,7 +69,7 @@ import type { IconName } from './icons.ts';
 import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import { asItIs, noTimeTells, versionClock, type RowWords } from './libraryrow.ts';
-import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts } from './types.ts';
+import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts, PartKind } from './types.ts';
 import { andList, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
 
 /**
@@ -77,14 +77,24 @@ import { andList, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
  * No library item's: a profile's, a tool's Manage switch's and Synchronize everything's entries (by their kind), a Pull's
  * change to the base instructions (`base`) or to an agent's Claude Code settings alone (`settingsFile`), both gitrepo.ts's.
  * Of the rest, an agent's is keyed `agent:<key>`; an MCP server's `mcp:<key>` (before the library, `mcp:<name>` as written,
- * whose key is share.ts itemKey of it); and a skill's by its key alone, whatever characters its folder's name holds.
+ * whose key is share.ts itemKey of it); and a skill's by its key alone, whatever characters its folder's name holds. A skill's
+ * key is its folder's name, which may itself start `agent:` or `mcp:`, so the key alone can't say whose an entry is: an entry
+ * says its kind (`of`), and one from before that is read by its key's start, as it always was.
  */
 export function libraryEntry(event: HistoryEvent): { kind: 'agents' | 'skills' | 'mcp'; key: string } | undefined {
-  if (!event.key || event.base || event.settingsFile || ['profile', 'managing', 'everything'].includes(event.kind)) return undefined;
-  if (event.key.startsWith('agent:')) return { kind: 'agents', key: event.key.slice('agent:'.length) };
-  if (event.key.startsWith('mcp:')) return { kind: 'mcp', key: itemKey(event.key.slice('mcp:'.length)) };
+  const of = event.settingsFile ? undefined : entryKind(event);
+  if (!of) return undefined;
+  if (of === 'agent') return { kind: 'agents', key: event.key.slice('agent:'.length) };
+  if (of === 'mcp') return { kind: 'mcp', key: itemKey(event.key.slice('mcp:'.length)) };
   return { kind: 'skills', key: event.key };
 }
+/**
+ * The kind of item an entry is about: the one it records (`of`), or an older entry's, by its key's start; none for an entry about
+ * no item (a profile's, a tool's Manage switch's, Synchronize everything's, the base instructions'). An agent's Claude Code
+ * settings change, from a Pull, is about the agent, though it has no library action (libraryEntry).
+ */
+export const entryKind = (event: HistoryEvent): PartKind | undefined => (!event.key || event.base || ['profile', 'managing', 'everything'].includes(event.kind) ? undefined
+  : event.of ?? (event.key.startsWith('agent:') ? 'agent' : event.key.startsWith('mcp:') ? 'mcp' : 'skill'));
 
 /** Restore over an agent of the same name made since: what becomes of it, for Restore's result and its tooltip. */
 export function keptOver(name: string, tools: readonly string[]): string {
@@ -436,7 +446,9 @@ export function everythingPlan(switchOn: HistoryEvent, history: HistoryEvent[], 
 export function restorePlan(undo: HistoryEvent, history: HistoryEvent[], about: EntryItem) {
   const after = history.slice(history.findIndex(entry => entry.id === undo.id) + 1);
   const itemUndos = history.filter(entry => undo.everything?.undo?.itemUndos.includes(entry.id));
-  const back = itemUndos.filter(entry => !after.some(later => later.key === entry.key && later.cause !== 'in-line') && libraryAction(entry, about(entry).item, about(entry).now)?.label === 'Restore');
+  // A later entry is about the same item when it has its kind and its key (a skill may be keyed like an agent's entry: entryKind).
+  const sameItem = (later: HistoryEvent, entry: HistoryEvent) => later.key === entry.key && entryKind(later) === entryKind(entry);
+  const back = itemUndos.filter(entry => !after.some(later => sameItem(later, entry) && later.cause !== 'in-line') && libraryAction(entry, about(entry).item, about(entry).now)?.label === 'Restore');
   const switchOn = !!undo.everything?.undo?.switchedOff && !after.some(later => later.kind === 'everything' && !later.everything?.undo);
   return { back, passed: itemUndos.filter(entry => !back.includes(entry)).map(entry => entry.item), switchOn };
 }
