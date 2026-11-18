@@ -1765,7 +1765,19 @@ async function practiceFlow() {
   await a.click('#plugin-back');
   await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-group')); tries++) await wait(100);
-  check('a plugin page names what it holds', /release-notes[\s\S]*Drafts release notes/.test(await a.text('.plugin-page')) && (await a.text('.plugin-page')).includes('release-reviewer') && (await a.text('.plugin-page')).includes('Runs on PreToolUse'), await a.text('.plugin-page'));
+  check('a plugin page names what it holds', /release-notes[\s\S]*Drafts release notes/.test(await a.text('.plugin-page')) && (await a.text('.plugin-page')).includes('release-reviewer') && /Other hooks \(1\)\s*PreToolUse\s*echo checked/.test(await a.text('.plugin-page')), await a.text('.plugin-page'));
+  // Its AGENTS.md is listed, with the line that no tool reads it, and opens to its text; its start-of-session hooks are a group of
+  // their own, a row per command (the second with its arguments), apart from its other hooks; "In each tool" says what reaches
+  // each tool's sessions.
+  const holds = await a.text('.plugin-page');
+  check('a plugin’s instruction file is listed and said to be read by no tool; a hook that can add text to sessions shows what it runs, apart from the rest',
+    /Instruction files \(1\)\s*No tool reads a plugin’s own instruction file into a session\. The model sees it only when something tells it to read the file, such as one of the plugin’s skills\.\s*AGENTS\.md/.test(holds)
+    && /Hooks that can add text to sessions \(2\)\s*These run when a session starts or you send a prompt \(in Codex, once you trust them\); what they add is known only when they run\.\s*SessionStart\s*echo '\{"hookSpecificOutput"[^]*?SessionStart\s*node \$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/remind\.mjs --days 2/.test(holds)
+    && /Other hooks \(1\)\s*PreToolUse\s*echo checked/.test(holds) && /Session text\s*(comes from|is limited|waits for trust)/.test(holds), holds);
+  // It holds more than its instruction file, so its panel doesn't say that installing it won't make the tools read its files.
+  check('a plugin holding more than instruction files has no line saying installing it won’t make your tools read them', !(await a.exists('#plugin-only-instructions')), await a.text('.plugin-panel'));
+  await a.click('#pfile-0-AGENTS-md');
+  check('and the instruction file opens to its text, as the marketplace has it', /Instruction file · Marketplace[\s\S]*Notes for whoever works on this plugin/.test(await a.text('.plugin-page')), await a.text('.plugin-page'));
   await a.click('#plugin-back');
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
