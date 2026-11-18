@@ -39,7 +39,7 @@ export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'item' | unde
   return off?.some(name => samePart({ kind: row.kind, name }, row)) ? 'item' : undefined;
 }
 
-/** A tool has its own copies, items its plugins give it, and skills it loads through a link or a folder it also reads. */
+/** A tool has its own copies, items its plugins give it, and skill copies it reads through a link or another folder, even when its own switch has the copy off. */
 export const inTool = (fact: Pick<LibraryFacts, 'copies' | 'plugin' | 'loads'>, tool: HarnessId) =>
   fact.copies[tool] !== undefined || !!fact.plugin?.[tool] || !!fact.loads?.[tool];
 

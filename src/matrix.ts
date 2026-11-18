@@ -30,7 +30,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rowId, timeIn, type ItemRow, type KindSource, type Pinned, type RowOrder, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, waitsForSync, fromSourceWords, harnessIs, inLibrary, madeFrom, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, waitsForSync, fromSourceWords, harnessIs, inLibrary, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -1173,8 +1173,8 @@ function turnOff(t: Table, skill: ItemRow, seen: boolean): Click {
   // A tool's own copy, which Off leaves alone (library.ts), is still there too: said as its mark says it.
   const own = ownCopies(skill, itemOf(skill), tools());
   const said = (notIn: HarnessId[]) => {
-    const now = factsOf(skill); // After Off, only name copies a tool still reads.
-    const ways = (tools() as HarnessId[]).flatMap(tool => now?.loads?.[tool] && !now.copies[tool] ? now.anotherWay?.[tool] ?? [] : []);
+    const now = rowsOf(skill.kind).find(row => row.key === skill.key);
+    const ways = now ? otherReadLines(now, tools()) : [];
     const still = stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], tools());
     return lib.say.said.off(name, still, tools(), leftOutTools(), own, ways) + pluginSaid(notIn);
   };
@@ -1687,6 +1687,8 @@ function offNote(t: Table, list: ItemRow[]) {
   const ownIn = (skill: ItemRow) => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind));
   const own = list.filter(skill => ownIn(skill).length), where = [...new Set(own.flatMap(ownIn))];
   if (own.length) return `in Central Knot; ${own.length} also in ${andList(where.map(tool => names[tool]))}, ${own.length === 1 ? 'a copy' : 'copies'} Central Knot didn’t put there`;
+  const ways = list.flatMap(row => otherReadLines(row, toolsFor(t, t.kind)));
+  if (ways.length) return list.length === 1 ? ways.join(' ') : 'in Central Knot; some tools still read copies elsewhere (see each row)';
   return leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
 }
 

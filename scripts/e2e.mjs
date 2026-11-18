@@ -112,6 +112,7 @@ function seedHome() {
   symlinkSync('SKILL.md', join(held, 'alias'));
   const shared = skill(AGENTS, 'linked');
   symlinkSync(shared, join(CLAUDE, 'linked'));
+  symlinkSync(join(AGENTS, 'missing'), join(CLAUDE, 'from-copilot'));
   toolClis(HOME);
   writeFileSync(join(HOME, '.claude/unrelated.json'), '{ "keep":   "these bytes" }\n');
   skill(CLAUDE, `very-long-${'n'.repeat(150)}`);
@@ -4240,6 +4241,7 @@ async function realHomeFlow() {
   const codexAbout = await a.text('#harness-body');
   check('Codex says where new copies go', codexAbout.includes('/.codex/skills'), codexAbout.slice(0, 600));
   const { sections, counts } = await skillsOf(a, 'claude-cli', 'linked');
+  check('Claude Code’s broken link does not count as having the Copilot skill', sections.away?.includes('from-copilot'), sections);
   same('Claude Code counts linked under Found on its Skills tab, its card and the Overview',
     [sections.found?.includes('linked'), sections.away?.includes('linked') ?? false, counts],
     [true, false, ['12', '12', '12']]);
@@ -4285,6 +4287,14 @@ async function realHomeFlow() {
     await a.quit();
     return;
   }
+  unlinkSync(join(CLAUDE, 'from-copilot'));
+  await a.click('#header-refresh');
+  await a.click(byId(rowPart('add', 'skills', 'linked')));
+  await a.click('#nav-harnesses');
+  same('taking linked in leaves 12 skills on Claude Code’s card and none synced there',
+    [await a.text('#harness-claude-cli .harness-count-value'), await a.text('#harness-claude-cli .harness-count-note')], ['12', 'none synced']);
+  if (shots) { await sizeTo(a, 1280, 800); await a.shot('claude-card-linked-on'); await fullSize(a); }
+  await a.click('#nav-skills');
   const wrongHome = await a.run(`window.centralKnot.applySkills([{ key: 'rich', on: true, except: [] }], false, '/somewhere/else')`);
   check('an apply for another home is refused', wrongHome.writes === 0 && /not the one open/.test(wrongHome.stopped ?? ''), wrongHome);
   // Every skill turned on, one switch at a time, but private-one and those whose copies differ (each needs its own choice).
@@ -4411,6 +4421,16 @@ async function sharedCopiesFlow() {
   const reads = 'also reads a copy at …/.agents/skills, which is not Central Knot’s.';
   check('turned off, the result names each tool that still reads it, and where, rather than that no tool has it',
     (await a.text('#header') ?? '').includes(`${name} is off. Copilot CLI ${reads} Pi ${reads} Central Knot keeps it`), await a.text('#header'));
+  await a.click('#nav-harnesses');
+  await a.click('#harness-pi-cli');
+  await a.click('#harness-tab-skills');
+  await opened();
+  const elsewhere = `Pi ${reads} Copilot CLI ${reads}`;
+  check('the Off heading names the copies still read', (await headingSays(a, 'off')).includes(elsewhere), await headingSays(a, 'off'));
+  same('the Off row names the tools that still have it', await a.text(`${row} .row-tag`), 'in Central Knot, Pi and Copilot CLI');
+  check('the Off status says where the tools read it', (await a.text('.details-status') ?? '').includes(elsewhere), await a.text('.details-status'));
+  if (shots) { await sizeTo(a, 1280, 800); await a.shot('pi-skills-off'); await fullSize(a); }
+  await a.click('#nav-skills');
   await a.click(`${row} .switch`);
   for (let tries = 0; tries < 40 && !(await switchOn(a, 'skills', name)); tries++) await wait(100);
   // Delete from Central Knot removes only Central Knot's copy (Claude Code's); the link and the shared copy stay, and the
