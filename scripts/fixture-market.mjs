@@ -1,5 +1,6 @@
-// A realistic marketplace folder for the e2e run and the UI tour: a README, plugins with skills, commands, agents, hooks
-// and an MCP server, a root-level entry that lists its own skills ("strict": false), and one whose files live on GitHub.
+// A realistic marketplace folder for the e2e run and the UI tour: a README, plugins with skills, commands, agents, hooks (one
+// that can add text to sessions), an instruction file and an MCP server, a root-level entry that lists its own skills
+// ("strict": false), and one whose files live on GitHub.
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fromJson, serverHash } from '../src/mcp.ts';
@@ -63,7 +64,12 @@ export function writeMarket(root, name = 'team-tools', owner = 'Platform team') 
   file(root, 'plugins/document-tools/README.md', '# document-tools\n\nTwo skills for everyday documents.\n\n- **pdf-reader** pulls text and tables out of PDFs.\n- **spreadsheet** fixes headers and totals.\n');
   file(root, 'plugins/release-helper/commands/release-notes.md', '---\ndescription: Drafts release notes from the merged pull requests.\n---\n\nDraft the notes.\n');
   file(root, 'plugins/release-helper/agents/release-reviewer.md', '---\nname: release-reviewer\ndescription: Reviews a release branch before it ships.\n---\n\nReview it.\n');
-  file(root, 'plugins/release-helper/hooks/hooks.json', JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }] } }));
+  file(root, 'plugins/release-helper/AGENTS.md', '# release-helper\n\nNotes for whoever works on this plugin: run the checks before each release.\n');
+  file(root, 'plugins/release-helper/hooks/hooks.json', JSON.stringify({ hooks: {
+    SessionStart: [{ hooks: [{ type: 'command', command: `echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Releases go out on Tuesdays."}}'` },
+      { type: 'command', command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/hooks/remind.mjs', '--days', '2'] }] }],
+    PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }],
+  } }));
   skill(root, 'plugins/issue-tracker/skills', 'triage', 'Sorts new issues by area and urgency.');
   file(root, 'plugins/issue-tracker/.mcp.json', JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } }));
   skill(root, 'skills', 'hello', 'Says hello, as a first example.');
