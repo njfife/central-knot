@@ -40,11 +40,12 @@ export function setupLead(home: HomeView): HTMLElement | null {
 
 function question(home: HomeView) {
   const yes = whatYesDoes(home), ready = setupKinds(home);
-  const stopped = KINDS.filter(kind => !ready.includes(kind)).map(kind => kindNouns[kind].many);
+  const stopped = KINDS.filter(kind => !ready.includes(kind) && home[kind].items.some(item => item.takeInAnswers)).map(kind => kindNouns[kind].many);
+  const future = ready.length === KINDS.length ? 'what turns up later is taken in too' : 'new items are taken in when their kind’s record allows it';
   const waits = stopped.length ? `Found ${andList(stopped)} wait until their record can be used.` : '';
   // What Yes adds at once, then what waits for a choice (nothing is chosen for anyone), then what Yes leaves to a later step.
-  const now = yes.takes ? `Yes takes in now the ${plural(yes.takes, 'item')} found in your tools that Central Knot doesn’t keep yet, and puts each in the tools that lack it${yes.to.length ? ` (${andList(yes.to.map(toolName))})` : ''}; what turns up later is taken in too.`
-    : waits ? 'Yes takes in what turns up later.'
+  const now = yes.takes ? `Yes takes in now the ${plural(yes.takes, 'item')} found in your tools that Central Knot doesn’t keep yet, and puts each in the tools that lack it${yes.to.length ? ` (${andList(yes.to.map(toolName))})` : ''}; ${future}.`
+    : ready.length !== KINDS.length ? 'Yes takes in new items when their kind’s record allows it.'
     : 'Nothing found in your tools now is new to Central Knot; Yes takes in what turns up later.';
   const choosing = yes.choosing ? ` ${plural(yes.choosing, 'more item')} ${yes.choosing === 1 ? 'has' : 'have'} copies that differ and ${yes.choosing === 1 ? 'waits' : 'wait'} for you: nothing is chosen for you. You’re asked about each, one at a time, with the latest copy marked where one can be told, or you skip it and its copies stay as they are.` : '';
   const later = home.syncOn ? '' : ' Automatic sync is off, so nothing is added until you click Sync once.';

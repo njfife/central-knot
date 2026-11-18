@@ -10,7 +10,7 @@
 // through matrix.ts openKind. Not here: the empty states every page shares (pages.ts noToolsLead, notRead, previewReason) and
 // first setup's question (firstsetup.ts setupLead).
 import { absentKinds, collectUsage, homeTools, loadHome, noToolManaged, practiceNoteOpen, realHomeName, rerender, setPracticeNote } from './app.ts';
-import { showPage, state, syncNow, whyReadOnly, type PageKind } from './app.ts';
+import { acting, showPage, state, syncNow, whyReadOnly, type PageKind } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, h, icon, middle } from './dom.ts';
 import { setupLead } from './firstsetup.ts';
@@ -32,7 +32,7 @@ import { andList, kindNames, kindNouns, orList, toolList, toolNames } from './wo
 const glyphs = { skills: 'wand-sparkles', mcp: 'plug', agents: 'bot' } as const;
 /** One line of the page: its mark, then words and links that wrap under themselves. */
 const line = (id: string, glyph: Parameters<typeof icon>[0], tone: string, ...rest: (Node | string | null)[]) => h('p.overview-line', { id }, icon(glyph, 14, tone), ...rest);
-const link = (label: string, id: string, onclick: () => void) => button({ variant: 'link', size: 'micro', label, id, onclick });
+const link = (label: string, id: string, onclick: () => void, disabled?: string) => button({ disabled, variant: 'link', size: 'micro', label, id, onclick });
 
 // ---------- The lead: what Central Knot does, while nothing is on ----------
 
@@ -115,7 +115,7 @@ function needsYou(home: HomeView): HTMLElement | null {
     return !count ? null : line(`overview-${kind}-differ-line`, 'diff', 'tone-warning', words, link('Show them', `overview-${kind}-differ`, () => openKind(kind, { filter: 'attention' })));
   });
   const syncOff = empty || whyReadOnly(home) || home.syncOn ? null : line('overview-sync-off', 'circle-minus', 'tone-warning', 'Automatic sync is off: edits wait until you turn it on or ',
-    link('Sync once', 'overview-sync-now', () => void syncNow()), '.');
+    link('Sync once', 'overview-sync-now', () => void syncNow(), acting()), '.');
   const setup = empty ? null : setupLead(home);
   const setupAfterStop = asksNow(home) === 'question' && kinds.some(kind => home[kind].gate.state === 'stopped');
   const lines = [setupAfterStop ? null : setup, updateLine(), readOnlyLine(home), ...problems, setupAfterStop ? setup : null, ...differ, syncOff].filter((each): each is HTMLElement => !!each);

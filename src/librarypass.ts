@@ -419,6 +419,9 @@ function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | 
   return { is: 'absent' };
 }
 
+/** Default window shared by writing passes and the follow-up in main.ts. */
+export const SETTLE_MS = 2000;
+
 /** When each file or folder was first seen missing, kept while the app runs (the settle window). A restart forgets them, which only delays an Off. */
 const firstSeenMissingAt = new Map<string, number>();
 /** Whether something missing at `path` may still be a save in progress. Only a pass keeps the clock (Look `settle`). */
@@ -557,7 +560,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   // A write or removal a crash interrupted is finished first, so a copy moved aside is never read as deleted.
   for (const tool of managed) await kind.recover(context, tool);
   const saved = JSON.stringify(library);
-  const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? 2000, settling: false };
+  const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? SETTLE_MS, settling: false };
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
   const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [] };

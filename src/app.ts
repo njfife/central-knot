@@ -1459,20 +1459,17 @@ export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synch
   announce(!on ? 'Synchronize everything is off: what turns up in a tool waits for Add.' : state.home?.syncOn ? 'Synchronize everything is on.' : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', true);
 });
 
-export const syncNow = () => busy('Syncing…', async () => {
-  const view = await api().syncNow(state.home!.home);
-  setHome(view);
-  if (!view) return;
-  const copies = view.sync.caughtUp.flatMap(({ item, harness, outcome }) => {
-    if (!harness) return [];
-    if (outcome === 'removed') return [`Removed ${item} from ${toolName(harness)}.`];
-    return outcome === 'written' ? [`Copied ${item} to ${toolName(harness)}.`] : [];
+export async function syncNow() {
+  if (acting() || !state.home) return;
+  const home = state.home.home;
+  await busy('Syncing…', async () => {
+    const result = await api().syncNow(home);
+    if (!result) return;
+    setHome(result.view);
+    tell({ page: state.page, band: true, text: result.text, warn: result.warn });
   });
-  const problems = view.sync.caughtUp.filter(result => result.outcome === 'failed').map(result => result.message);
-  const result = [...copies, ...problems, whyReadOnly(view)].filter(Boolean).join(' ') || 'Sync once finished.';
-  tell({ page: state.page, band: true, warn: problems.length > 0 || !!whyReadOnly(view),
-    text: view.syncOn ? result : `${result} Automatic sync stays off.` });
-});
+}
+api().onSyncRequest(() => void syncNow());
 
 /** A background read is running, or one arrived while the page was acting and runs when it is done (afterActing). */
 let refreshing = false;

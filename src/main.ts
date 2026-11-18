@@ -42,7 +42,8 @@ import { readUsage } from './usage.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
-import { homePass, passTells } from './homepass.ts';
+import { SETTLE_MS } from './librarypass.ts';
+import { homePass, passTells, syncOnceReport, type HomePass } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
@@ -183,7 +184,7 @@ async function pluginUpdatesSwitched(on: boolean) {
 }
 
 /** Sends the page a message, when there is a window to send it to. */
-function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'said' | 'window:shown', ...args: unknown[]) {
+function send(channel: 'sync:changed' | 'sync:request' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'said' | 'window:shown', ...args: unknown[]) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
@@ -436,7 +437,10 @@ function syncItems(): MenuItemConstructorOptions[] {
   const usable = homeWritable && !heldReason();
   return [
     { label: usable || heldReason() ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && usable, enabled: usable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-    { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && usable, enabled: !!current, click: () => void syncOnce() },
+    { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && usable, enabled: !!current && !syncOnceRunning, click: () => {
+      if (!window.isDestroyed()) send('sync:request');
+      else void syncOnce(current?.home).catch(error => logFailure('Sync once', error));
+    } },
   ];
 }
 
@@ -468,8 +472,22 @@ function refreshTray() {
   const short = profile && profile.length > 20 ? `${profile.slice(0, 19)}…` : profile;
   if (process.platform === 'darwin') tray.setTitle(`${unseen || unseenPlugins ? '•' : ''}${short ? ` ${short}` : ''}`.trim());
 }
-/** Sync once, from either menu: including the settling reread, with Automatic sync left off. */
-const syncOnce = () => fromTray(async () => { keepPass(await explicitPass(await read())); });
+/** Page and menu share one request, admitted before the queue so repeat clicks cannot start another. */
+let syncOnceRunning = false;
+async function syncOnce(home: unknown) {
+  if (syncOnceRunning || !current || current.home !== home) return null;
+  syncOnceRunning = true;
+  refreshTray();
+  try {
+    return await queued(async () => {
+      if (home !== current?.home) return null;
+      const { view, passes } = await syncAndView(true);
+      const { access, gate } = view.sync;
+      const stopped = !access.allowed ? access.reason : 'reason' in gate ? gate.reason : undefined;
+      return { view, ...syncOnceReport(passes.flatMap(pass => pass.synced ?? []), stopped) };
+    });
+  } finally { syncOnceRunning = false; refreshTray(); }
+}
 /** Menu bar actions take their turn like the page's, then tell the page. */
 async function fromTray(work: () => Promise<void>) {
   await queued(work).catch(() => undefined);
@@ -527,7 +545,7 @@ interface ServersAndAgentsResult { serverNotices: SyncNotice[]; agentNotices: Sy
  * `told`: what the page is told of the pass, every kind alike (homepass.ts passTells); `done`: every result of the pass, all
  * three kinds, for a caller that says what it did (a tool's Manage switch).
  */
-interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; told?: ReturnType<typeof passTells>; done?: DestinationResult[] }
+interface BackgroundPass { synced?: HomePass['synced']; skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; told?: ReturnType<typeof passTells>; done?: DestinationResult[] }
 
 /** Each reason the move of plugin parts waited that the log has had this launch (pass). */
 const partsWaitsLogged = new Set<string>();
@@ -553,7 +571,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   if (partsWait && !partsWaitsLogged.has(partsWait)) { partsWaitsLogged.add(partsWait); log(`plugin parts: waiting to be moved to the library: ${partsWait}`); }
   if (!synced) return {};
   const { skills, servers, agents } = synced;
-  return { skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
+  return { synced, skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
     found: [...(servers?.found ?? []).map(key => `mcp:${key}`), ...(agents?.found ?? []).map(key => `agent:${key}`)],
     changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) } };
@@ -571,19 +589,20 @@ function keepPass({ told, skills, serversAndAgents }: BackgroundPass) {
   pendingAgentNotices.push(...(serversAndAgents?.agentNotices ?? []));
 }
 
-async function syncThenView(explicit = false): Promise<HomeView> {
-  return (await syncAndView(explicit)).view;
+async function syncThenView(): Promise<HomeView> {
+  return (await syncAndView()).view;
 }
 
-/** The look for other builds, sync, then the view built from the home as sync left it; `passed`: what the pass did. */
-async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: BackgroundPass }> {
+/** The look for other builds, sync, then the view built from the home as sync left it, with the passes that built it in order. */
+async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: BackgroundPass[] }> {
   // First, so the held screen is shown before any pass could write: held, the pass below meets writeAccess's refusal. A record
   // taken over on the way is said with the view (a click on the held screen says it itself: carryOn).
   const tookOver = await lookForOthers();
   const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
-  const passed = explicit ? await explicitPass(before) : await pass(before), { skills } = passed;
-  keepPass(passed);
+  const passes = explicit ? await explicitPass(before) : [await pass(before)];
+  const passed = passes[passes.length - 1], { skills } = passed;
+  passes.forEach(keepPass);
   lookAgainSoon(passed);
   foundGained(passed);
   const caughtUp = pendingResults.splice(0), notices = pendingNotices.splice(0);
@@ -625,7 +644,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: 
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs (nothing does with no tool managed).
   lastManagedCount = managed.length ? [...made.skills.items, ...made.mcp.items, ...made.agents.items].filter(fact => fact.on).length : 0;
-  return { view: made, passed };
+  return { view: made, passes };
 }
 
 /** For each installed tool left out, what turning its Manage switch on would do there now (toolchoice.ts whatJoiningDoes): its card says it. */
@@ -846,21 +865,22 @@ function foundGained({ skills, serversAndAgents }: BackgroundPass): boolean {
   lastFound = found;
   return gained;
 }
-const AFTER_SETTLE_MS = 2_500;
+const AFTER_SETTLE_MS = SETTLE_MS + 500;
 const settling = ({ skills, serversAndAgents }: BackgroundPass) => skills?.settling || serversAndAgents?.settling;
 
-/** Sync once waits for a save in progress, then reads afresh once, even with background writes off. */
-async function explicitPass(snapshots: Snapshot[]): Promise<BackgroundPass> {
+/** Only when a kind reports settling, Sync once waits out the window and reads afresh once. */
+async function explicitPass(snapshots: Snapshot[]): Promise<BackgroundPass[]> {
   const first = await pass(snapshots, true);
-  if (!settling(first)) return first;
-  keepPass(first);
+  if (!settling(first)) return [first];
+  send('said', 'Waiting briefly in case a tool is still saving its files…');
   await new Promise(done => setTimeout(done, AFTER_SETTLE_MS));
-  return pass(await read(), true);
+  return [first, await pass(await read(), true)];
 }
 
 /**
  * Something a pass left inside its settle window (a copy missing just now, or a new one Synchronize everything waits to take
- * in while it is still being saved): look again just after it, so it finishes without a click. Otherwise an event or the poll.
+ * in while it is still being saved): look again just after the window. This follow-up writes only with Automatic sync on.
+ * Sync once waits for its own reread (explicitPass).
  */
 function lookAgainSoon(passed: BackgroundPass) {
   if (settling(passed)) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, AFTER_SETTLE_MS); }
@@ -1466,7 +1486,7 @@ app.whenReady().then(async () => {
     if (!set.stopped) log(`sync: Synchronize everything ${on === true ? 'on' : 'off'} in ${home}`);
     return { ...set, view: await syncThenView() };
   });
-  handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
+  handleNow('sync:now', syncOnce);
   // One install at a time: the build the held screen names (by its id, and for Replace its bundle) replaced, or quit where it only
   // runs; then this build carries on (carryOn). On a click alone.
   const notHere = { said: 'Another build is replaced or quit only by the installed app on a Mac.', done: false, view: null };
@@ -1492,8 +1512,8 @@ app.whenReady().then(async () => {
       if (on) await markets.toolManaged(tool, home).catch(error => logFailure('plugins record', error));
       if (on && pluginChecksRun) void pluginUpdates?.toolJoined().catch(error => logFailure('plugin updates', error));
     }
-    const { view, passed } = await syncAndView();
-    return { ...chosen, view, did: (passed.done ?? []).filter(result => result.harness === tool) };
+    const { view, passes } = await syncAndView();
+    return { ...chosen, view, did: passes.flatMap(pass => pass.done ?? []).filter(result => result.harness === tool) };
   });
   // With Sync off, a click writes exactly the items it is about; spreading anything else waits for Sync.
   handle('servers:apply', async (list, resume, home) => (home === current?.home

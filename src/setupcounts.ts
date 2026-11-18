@@ -20,10 +20,10 @@ export function asksNow(home: HomeView): 'question' | 'resume' | undefined {
   return gate.state === 'needs-resume' ? 'resume' : 'question';
 }
 
-/** The kinds first setup counts, in the pages' order. */
+/** The library kinds, in the pages' order. */
 export const KINDS: PageKind[] = ['skills', 'mcp', 'agents'];
 
-/** Kinds whose library pass can run in this home. */
+/** The kinds whose found items Yes can take in now. */
 export const setupKinds = (home: HomeView) => KINDS.filter(kind => home.sync.access.allowed && home[kind].gate.state !== 'stopped');
 
 /** A found item that waits for a choice of copy. `latest`: a tool holding its latest copy (library.ts latestCopy), and that content. */

@@ -8,8 +8,12 @@
 //      This is the pass of the whole home, the one in which Synchronize everything takes found items in
 //      (librarypass.ts PassOptions background).
 // What such a pass tells the page is decided here too, for every kind alike (passTells): main.ts keeps it until the page reads.
+// Sync once reports just its own passes (syncOnceReport), with each kind's results still apart.
 // The other three one-time migrations run as each library is opened (skillstore.ts, serverstore.ts, agentstore.ts
 // openLibrary): only in memory for a reader such as the pages' views, and written by the first pass that may write.
+import { groupBy, noticeNames } from './model.ts';
+import { kindNouns, toolList, toolName } from './words.ts';
+import { libraryWords, sentences } from './libraryrow.ts';
 import { agentKind, applyAgents } from './agents.ts';
 import { migrateParts, type PluginNow } from './partsmigrate.ts';
 import { migrateProfiles } from './profilemigrate.ts';
@@ -71,4 +75,46 @@ export function passTells(synced: NonNullable<HomePass['synced']>): { copies: De
     copies: kinds.flatMap(([, done]) => (done?.results ?? []).filter(told)),
     stopped: [...synced.crashes, ...kinds.flatMap(([item, done]) => (done?.stopped ? [{ item, outcome: 'failed' as const, message: done.stopped }] : []))],
   };
+}
+
+/** The result of one explicit request. Keep each kind apart and name the tools from the writes themselves.
+ * A refusal that the reread overcame is no longer owed. A change confined to the library still has its notice. */
+export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stopped?: string) {
+  const lines: string[] = [], problems = new Set(passes.flatMap(pass => pass.crashes.map(crash => crash.message)));
+  if (stopped) problems.add(stopped);
+  const kinds = (['skills', 'mcp', 'agents'] as const).map(kind => {
+    const key = kind === 'mcp' ? 'servers' : kind;
+    const runs = passes.flatMap(pass => pass[key] ?? []);
+    for (const run of runs) if (run.stopped) problems.add(run.stopped);
+    const results = groupBy(runs.flatMap(run => run.results), result => result.item);
+    const notices = runs.flatMap(run => run.notices ?? []);
+    return { kind, results, notices, names: new Set([...results.keys(), ...notices.flatMap(noticeNames)]) };
+  });
+  let refused = false;
+  for (const { kind, results, notices, names } of kinds) {
+    const say = sentences(libraryWords[kind]);
+    for (const name of names) {
+      const label = kinds.some(other => other.kind !== kind && other.names.has(name)) ? `${name} (${kindNouns[kind].one})` : name;
+      const copies = results.get(name) ?? [], parts: string[] = [];
+      for (const outcome of ['removed', 'written'] as const) {
+        const tools = [...new Set(copies.flatMap(copy => copy.harness && copy.outcome === outcome ? [copy.harness] : []))];
+        if (tools.length) parts.push(outcome === 'removed' ? `Removed ${label} from ${toolList(tools)}.` : `Copied ${label} to ${toolList(tools)}.`);
+      }
+      for (const copy of new Map(copies.map(copy => [copy.harness, copy])).values()) {
+        if (copy.outcome !== 'held' && copy.outcome !== 'failed') continue;
+        refused = true;
+        parts.push(`Couldn’t change ${label}${copy.harness ? ` in ${toolName(copy.harness)}` : ''}. ${copy.message}`);
+      }
+      for (const notice of notices) {
+        if (notice.kind === 'taken-in' && notice.items.includes(name)) parts.push(`Took in ${label}.`);
+        else if (notice.kind !== 'taken-in' && notice.item === name && (!parts.length || notice.kind !== 'deleted-by-hand')) {
+          parts.push(say.noticeWords({ ...notice, item: label }).text);
+        }
+      }
+      if (parts.length) lines.push(parts.join(' '));
+    }
+  }
+  const last = passes.at(-1);
+  if (last?.skills?.settling || last?.servers?.settling || last?.agents?.settling) problems.add('Some copies are still settling. Sync again after they finish saving.');
+  return { text: [...lines, ...problems].join('\n') || 'Nothing to do.', warn: refused || problems.size > 0 };
 }
