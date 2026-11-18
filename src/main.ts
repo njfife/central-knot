@@ -348,6 +348,8 @@ function showWindow() {
   window.show();
   window.focus();
   joinDock();
+  // Said here, not from the window's own show event, which macOS sends only once the window is seen on a screen.
+  send('window:shown');
 }
 /**
  * On a Mac, Central Knot is in the Dock (and the ⌘Tab list) only while it has a window: closed, it runs from its menu bar icon
@@ -1160,8 +1162,7 @@ function createWindow(show: boolean) {
   // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
   // are rebuilt and the page re-reads, both from this one event. A release published meanwhile shows then too (updateflow.ts).
   window.on('focus', () => { unseen = false; unseenPlugins = undefined; refreshTray(); send('settings:changed'); void updater?.checkIfStale(); });
-  // A start with no window tells the page so, and when the window shows: it collects usage then (app.ts collectUsage).
-  window.on('show', () => send('window:shown'));
+  // A start with no window tells the page so; showWindow tells it when the window shows: it collects usage then (app.ts collectUsage).
   loading = window.loadFile(join(__dirname, 'index.html'), show ? {} : { query: { start: 'hidden' } });
 }
 
