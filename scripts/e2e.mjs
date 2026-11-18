@@ -4707,6 +4707,11 @@ async function firstSetupFlow() {
   const c = await launch(second, [], real);
   await c.click('#nav-overview');
   same('a home this app has no memory of: Resume comes first, and the question after it', [await c.exists('#setup-resume'), await c.exists('#setup-question')], [true, false]);
+  await c.click('#sync-switch');
+  await c.click('#overview-sync-now');
+  check('Sync once in a home waiting for Resume shows the gate reason as a warning',
+    /Resuming keeps every recorded choice/.test(await c.text('[data-outcome] .band-text')) && await c.exists('[data-outcome] .tone-warning'));
+  await c.click('#sync-switch');
   await c.click('#setup-resume-button');
   check('resumed: the question', await c.exists('#setup-question'), await c.text('.overview-scroll'));
   const sync = join(other.home, '.central-knot/sync.json');
@@ -4720,6 +4725,7 @@ async function firstSetupFlow() {
 
   // A third home, with Automatic sync off: Yes says nothing is added until Sync once, and offers it.
   const third = homeFor('home-setup-three');
+  mkdirSync(join(third.home, '.copilot/skills'), { recursive: true });
   saved(skill(third.claude, 'notes', text('notes', 'Take notes.')), 5);
   mkdirSync(third.codex, { recursive: true });
   const thirdData = join(scratch, 'setup-data-four');
@@ -4734,8 +4740,147 @@ async function firstSetupFlow() {
   await d.click('#setup-sync-once');
   for (let tries = 0; tries < 40 && !readNow(join(third.codex, 'notes/SKILL.md')); tries++) await wait(100);
   same('and its Sync once takes notes in', readNow(join(third.codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
+  const copies = [third.claude, third.codex, join(third.home, '.copilot/skills')].map(folder => join(folder, 'notes'));
+  const beforeDeletion = copies.map(folder => tree(folder));
+  rmSync(copies[1], { recursive: true });
+  await d.click('#header-refresh');
+  await sizeTo(d, 1280, 800);
+  const inspector = d.inspect && await mainHelpers(d.inspect);
+  if (inspector) await inspector.noteCalls('sync:now');
+  else console.log('No main-process inspector: skipping the Sync once request count and native menu checks.');
+  const clickOnce = "document.querySelector('#overview-sync-now').click()";
+  await d.run(`${clickOnce}; ${clickOnce}; true`);
+  for (let n = 0; n < 40 && !/still saving its files/i.test(await d.text('#announcement')); n++) await wait(50);
+  check('Sync once is disabled while it waits and the status bar explains the wait',
+    await d.run("document.querySelector('#overview-sync-now').disabled") && /still saving its files/i.test(await d.text('#announcement')));
+  await d.shot('sync-once-waiting');
+  await d.run(clickOnce + '; true');
+  await d.settle();
+  await d.run('window.centralKnot.refresh().then(() => true)');
+  if (inspector) {
+    same('rapid clicks send one sync request', (await inspector.calls()).length, 1);
+    await inspector.restore('sync:now'); inspector.close();
+  }
+  const removed = copies.every(folder => !existsSync(folder));
+  check('one Sync once removes both remaining copies and names notes in its result',
+    removed && /Removed notes from Claude Code and Copilot CLI/.test(await d.text('[data-outcome] .band-text')), copies.map(folder => existsSync(folder)));
+  await d.shot('sync-once-removed');
+  if (removed) {
+    await d.click('#overview-sync-now');
+    check('the next Sync once reports no further removal', /nothing to do/i.test(await d.text('[data-outcome] .band-text') ?? ''));
+    await d.click('#nav-history');
+    await d.click('.history-row[data-kind="off"] .history-actions button');
+    same('Undo returns every notes folder byte for byte', copies.map(folder => existsSync(folder) && tree(folder)), beforeDeletion);
+    await d.click('#sync-switch');
+    rmSync(copies[1], { recursive: true });
+    // The watch (or its fallback poll) starts the pass, which removes each destination separately.
+    for (let tries = 0; tries < 200 && copies.some(existsSync); tries++) await wait(150);
+    same('Automatic sync finishes the same hand deletion by itself', copies.map(folder => existsSync(folder)), [false, false, false]);
+  }
+  await d.click('#nav-overview');
+  if ((await d.run("document.querySelector('#sync-switch').getAttribute('aria-checked')")) === 'true') await d.click('#sync-switch');
+  saved(skill(third.claude, 'report'), 5);
+  const agent = join(third.home, '.claude/agents/report.md'), settings = join(third.home, '.claude.json');
+  for (const tool of ['.claude', '.codex', '.copilot']) mkdirSync(join(third.home, tool, 'agents'), { recursive: true });
+  writeFileSync(agent, '---\nname: report\ndescription: Write a report.\n---\nReport.\n');
+  writeFileSync(settings, JSON.stringify({ mcpServers: { report: { command: 'report' }, locked: { command: 'locked' } } }));
+  for (const file of [agent, settings]) utimesSync(file, ago(5), ago(5));
+  await d.click('#overview-sync-now');
+  rmSync(join(third.codex, 'report'), { recursive: true });
+  rmSync(join(third.home, '.codex/agents/report.toml'));
+  const copilot = join(third.home, '.copilot/mcp-config.json');
+  const dropServer = name => {
+    const config = JSON.parse(readNow(copilot));
+    delete config.mcpServers[name];
+    writeFileSync(copilot, JSON.stringify(config));
+  };
+  dropServer('report');
+  await d.click('#header-refresh');
+  await d.click('#nav-skills');
+  await d.run("document.querySelector('#sync-now').click(); true");
+  check('the list’s Sync once is also off during the click', await d.run("document.querySelector('#sync-now')?.disabled"));
+  if (d.inspect) {
+    const menu = await mainHelpers(d.inspect);
+    try { await menu.clickMenu('Automatic sync', false); } finally { menu.close(); }
+  }
+  await d.settle();
+  const names = await d.text('[data-outcome] .band-text');
+  check('same-named removals list each kind with both destinations',
+    ['skill', 'agent', 'MCP server'].every(kind => names?.includes(`report (${kind}) from Claude Code and ${kind === 'MCP server' ? 'Codex' : 'Copilot CLI'}`)), names);
+  if (d.inspect) {
+    for (let n = 0; n < 50 && !await d.exists('#sync-switch[aria-checked="true"]'); n++) await wait(100);
+  }
+  await d.shot('sync-once-same-names');
+  if (d.inspect) await d.click('#sync-switch');
+  await d.click('#nav-mcp');
+  dropServer('locked');
+  for (let n = 1; n <= 8; n++) saved(skill(third.claude, 'guide-' + n), 5);
+  await d.click('#header-refresh');
+  await sizeTo(d, ...SMALLEST);
+  mkdirSync(settings + '.lock');
+  try {
+    await d.click('#sync-now');
+    const words = await d.text('[data-outcome] .band-text');
+    check('a held removal names the surviving tool and its lock alongside the removal, with a warning',
+      /locked from Codex/.test(words) && /remove locked from Claude Code.*lock/i.test(words) && await d.exists('[data-outcome] .tone-warning')
+      && !!JSON.parse(readNow(settings)).mcpServers.locked, words);
+    check('a large Sync once shows two successful items, counts the rest and offers their History',
+      (words?.match(/Took in guide-/g) ?? []).length === 2 && /took in 6 more items/i.test(words)
+      && await d.exists('#outcome-history'), words);
+    same('the folded result fits the smallest window and covers no controls below the header', [
+      await d.run(CUT_OFF), await d.run("document.querySelector('.header-result').getBoundingClientRect().bottom <= document.querySelector('#page').getBoundingClientRect().top + 1"),
+    ], [[], true]);
+    await d.shot('sync-once-folded-minimum');
+    await d.click('#outcome-history');
+    const guides = (await d.all('.history-row[data-kind="on"] .history-what strong')).filter(name => name.startsWith('guide-'));
+    same('History lists all eight guides, including the six folded into the count', new Set(guides).size, 8);
+  } finally { rmSync(settings + '.lock', { recursive: true }); }
+  if (d.inspect) {
+    await d.click('#nav-overview');
+    const menu = await mainHelpers(d.inspect);
+    try {
+      await menu.slowReply('discovery:refresh', 800);
+      await d.run("document.querySelector('#header-refresh').click(); true");
+      await menu.tellPage('sync:request');
+      await d.settle();
+      check('the menu’s Sync once during Refresh runs after it and reports the remaining removal',
+        /Removed locked from Claude Code/.test(await d.text('[data-outcome] .band-text')));
+    } finally { await menu.restore('discovery:refresh'); menu.close(); }
+  }
   same('no page errors, first setup with Automatic sync off', d.pageErrors, []);
   await d.quit();
+
+  for (const scenario of ['damaged', 'readonly']) {
+    const blocked = homeFor('setup-' + scenario), store = join(blocked.home, '.central-knot');
+    mkdirSync(blocked.claude, { recursive: true });
+    saved(skill(blocked.codex, 'plan'), 5);
+    mkdirSync(store);
+    if (scenario === 'damaged') {
+      writeFileSync(join(store, 'skills.json'), '{');
+      writeFileSync(join(store, 'agents.json'), '{');
+    }
+    else { chmodSync(store, 0o555); chmodSync(blocked.home, 0o555); }
+    const data = join(scratch, 'data-' + scenario);
+    opened(blocked.home, data);
+    const page = await launch(data, [], real);
+    try {
+      await sizeTo(page, 1280, 800);
+      if (scenario === 'damaged') {
+        const words = await page.text('#setup-question');
+        check('setup says found skills wait for their problem and promises no copy from the damaged kind',
+          /Found skills wait/.test(words) && !/agents wait|Yes takes in what turns up later|takes in now the 1 item/.test(words)
+          && /damaged[\s\S]*Synchronize everything\?/.test(await page.text('#overview-needs')), words);
+      } else {
+        check('a read-only store explains the stop before setup and offers no Yes',
+          !(await page.exists('#setup-yes')) && /read-only|Permission was denied/i.test(await page.text('#overview-stopped'))
+          && !/Open one below and turn on/.test(await page.text('.overview-lead')), await page.text('#overview-needs'));
+      }
+      await page.shot('setup-' + scenario);
+    } finally {
+      chmodSync(blocked.home, 0o755); chmodSync(store, 0o755);
+      await page.quit();
+    }
+  }
 }
 
 /**

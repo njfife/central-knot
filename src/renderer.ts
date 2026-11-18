@@ -1,7 +1,7 @@
 // The page's entry: the window's frame around the page (the sidebar, the header, the status bar and the Sync switch), which page
 // draws (renderPage: while another build holds this one, the held screen of otherbuildview.ts instead of every page, with the
 // sidebar's update control kept), and drawing again on a change. On a list page the last result is in the header (resultHere),
-// whose room is always there, so a result never moves a row; one taller than the header lies over the toolbar as a panel
+// which grows for Sync once. For row clicks its room is fixed and a taller result lies over the toolbar as a panel
 // (style.css #header::after). A redraw keeps what is selected, the scroll places and the focus (render), and a press on a control
 // it replaces still counts (dom.ts keepClicksAcrossRedraws). The page's state and actions are app.ts's; each page is drawn by its
 // own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
@@ -212,7 +212,7 @@ function renderStatus() {
   paintStatusMessage();
 }
 
-/** A list page's last result (matrix.ts resultInHeader), in the header: its room is always there, so no row ever moves for it. */
+/** A list page's last result (matrix.ts resultInHeader), in the header. Sync once makes room for its lines (style.css). */
 function resultHere() {
   const parts = state.home && !heldBy(state.home) && resultInHeader() ? (state.page === 'plugins' ? pluginsResult() : listResult()) : [];
   return parts.length ? [h('div.header-result', {}, parts)] : [];

@@ -7,7 +7,7 @@
 // Synchronize everything: tests/firstsetup.test.ts; a profile switch: tests/profiles.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { saveProfile, switchProfile } from '../src/profiles.ts';
@@ -52,6 +52,17 @@ async function answer(state: HomeState, asked: Entering): Promise<string> {
 const ways: [string, Entering][] = [['only asked', {}], ['start', { start: true }], ['resume', { resume: true }], ['ownFile', { ownFile: true }]];
 const row = async (state: HomeState) => Object.fromEntries(await Promise.all(ways.map(async ([way, asked]) => [way, await answer(state, asked)] as const)));
 const refusedEveryWay = (said: Record<string, string>, why: RegExp) => { for (const [way, text] of Object.entries(said)) assert.match(text, why, way); };
+
+inBox('First setup requires write access to the existing store, or to the home that will contain it', async box => {
+  const store = join(box.home, '.central-knot');
+  for (const folder of [box.home, store]) {
+    if (folder === store) await mkdir(store);
+    await chmod(folder, 0o555);
+    try { assert.equal((await syncGate(box.context)).state, 'stopped'); }
+    finally { await chmod(folder, 0o755); }
+    assert.deepEqual(await syncGate(box.context), { state: 'first-setup' });
+  }
+});
 
 test('The gate in a home with no sync record: lets every write in; only `start` makes the record and remembers it', async () => {
   assert.deepEqual(await row('no record'), { 'only asked': 'let in', start: 'let in, with its record, record made, remembered', resume: 'let in', ownFile: 'let in' });

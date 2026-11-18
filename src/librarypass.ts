@@ -419,6 +419,9 @@ function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | 
   return { is: 'absent' };
 }
 
+/** Default window shared by writing passes and the follow-up in main.ts. */
+export const SETTLE_MS = 2000;
+
 /** When each file or folder was first seen missing, kept while the app runs (the settle window). A restart forgets them, which only delays an Off. */
 const firstSeenMissingAt = new Map<string, number>();
 /** Whether something missing at `path` may still be a save in progress. Only a pass keeps the clock (Look `settle`). */
@@ -557,7 +560,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   // A write or removal a crash interrupted is finished first, so a copy moved aside is never read as deleted.
   for (const tool of managed) await kind.recover(context, tool);
   const saved = JSON.stringify(library);
-  const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? 2000, settling: false };
+  const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? SETTLE_MS, settling: false };
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
   const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [] };
@@ -572,6 +575,12 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const items = Object.values(library.items).filter(item => inScope(item.key));
   await guardFolders(pass, items, pass.shelf);
   for (const item of items) await syncItem(pass, item);
+  const unread: DestinationResult[] = [];
+  if (options.background) for (const item of items) for (const harness of managed) {
+    const message = unseenIn(pass.disk, harness, item.key), wanted = wantedIn(item, harness);
+    if (message && item.applied[harness] !== (wanted ? item.hash : undefined))
+      unread.push({ item: item.name, harness, outcome: 'held', removal: !wanted, message });
+  }
   if (pass.takenIn.length) pass.notices.push(takenInNotice(pass.takenIn));
   // A plugin's update that dropped an item says so on its page once (library.ts A PLUGIN): History holds its Turn it on.
   if (options.source?.plugin) for (const [key, said] of pass.sourced) if (said.answer === 'drop' && said.history) pass.notices.push({ kind: 'dropped', key, item: said.name, link: options.source.link, history: said.history });
@@ -581,7 +590,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   keepFolders(library, pass.foldersNow, managed, !options.only && !sourceScope);
   await saveIfChanged(pass);
   return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made,
-    ...(options.background ? { found: foundKeys(pass) } : {}), ...(options.source ? { sourced: [...pass.sourced.values()] } : {}) };
+    ...(options.background ? { found: foundKeys(pass), unread } : {}), ...(options.source ? { sourced: [...pass.sourced.values()] } : {}) };
 }
 
 /**
@@ -663,7 +672,7 @@ async function removeCopy(pass: Pass, item: LibraryItem, here: Seen): Promise<bo
   if (done !== 'removed') {
     // A save that landed between the read and the removal stays; the next pass keeps it as a version and removes it then.
     const message = typeof done === 'object' ? done.held : done === 'changed' ? `${where}’s copy changed just now, so it stays until the next look.` : `Could not remove ${where}’s copy yet. Central Knot will try again.`;
-    pass.results.push({ item: item.name, harness: here.tool, outcome: done === 'failed' ? 'failed' : 'held', message });
+    pass.results.push({ item: item.name, harness: here.tool, outcome: done === 'failed' ? 'failed' : 'held', removal: true, message });
     return false;
   }
   pass.writes++;

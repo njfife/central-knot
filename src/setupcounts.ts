@@ -20,8 +20,11 @@ export function asksNow(home: HomeView): 'question' | 'resume' | undefined {
   return gate.state === 'needs-resume' ? 'resume' : 'question';
 }
 
-/** The kinds first setup counts, in the pages' order. */
+/** The library kinds, in the pages' order. */
 export const KINDS: PageKind[] = ['skills', 'mcp', 'agents'];
+
+/** The kinds whose found items Yes can take in now. */
+export const setupKinds = (home: HomeView) => KINDS.filter(kind => home.sync.access.allowed && home[kind].gate.state !== 'stopped');
 
 /** A found item that waits for a choice of copy. `latest`: a tool holding its latest copy (library.ts latestCopy), and that content. */
 export interface Waiting { kind: PageKind; key: string; name: string; latest?: { tool: HarnessId; hash: string } }
@@ -31,7 +34,7 @@ export interface Waiting { kind: PageKind; key: string; name: string; latest?: {
  * a plugin's part), in the pages' order: skills, MCP servers, agents, each by name as its table lists it.
  */
 export function waitingForChoice(home: HomeView): Waiting[] {
-  return KINDS.flatMap(kind => {
+  return setupKinds(home).flatMap(kind => {
     const { facts, tools } = kindSource(home, kind);
     return facts.flatMap((fact): Waiting[] => {
       const rule = fact.takeInAnswers?.rule;
@@ -57,7 +60,10 @@ export const takenOutEarlier = (home: HomeView): number => KINDS.reduce((count, 
  * of copy.
  */
 export function whatYesDoes(home: HomeView) {
-  const takes = KINDS.flatMap(kind => { const { facts, tools } = kindSource(home, kind); return facts.filter(fact => fact.takeInAnswers && 'take' in fact.takeInAnswers.rule).map(fact => ({ kind, fact, tools })); });
+  const takes = setupKinds(home).flatMap(kind => {
+    const { facts, tools } = kindSource(home, kind);
+    return facts.filter(fact => fact.takeInAnswers && 'take' in fact.takeInAnswers.rule).map(fact => ({ fact, tools }));
+  });
   const gets = (fact: (typeof takes)[number]['fact'], tools: HarnessId[]) => tools.filter(tool => !fact.copies[tool] && !fact.cannot[tool] && !fact.anotherWay?.[tool]);
   const to = home.sync.managed.filter(tool => takes.some(({ fact, tools }) => gets(fact, tools).includes(tool)));
   return { takes: takes.length, to, choosing: waitingForChoice(home).length };

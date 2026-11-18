@@ -8,8 +8,12 @@
 //      This is the pass of the whole home, the one in which Synchronize everything takes found items in
 //      (librarypass.ts PassOptions background).
 // What such a pass tells the page is decided here too, for every kind alike (passTells): main.ts keeps it until the page reads.
+// Sync once reports just its own passes (syncOnceReport), with each kind's results still apart.
 // The other three one-time migrations run as each library is opened (skillstore.ts, serverstore.ts, agentstore.ts
 // openLibrary): only in memory for a reader such as the pages' views, and written by the first pass that may write.
+import { groupBy, noticeNames, plural, tookInCount } from './model.ts';
+import { rowNames, toolList, toolName } from './words.ts';
+import { libraryWords, sentences } from './libraryrow.ts';
 import { agentKind, applyAgents } from './agents.ts';
 import { migrateParts, type PluginNow } from './partsmigrate.ts';
 import { migrateProfiles } from './profilemigrate.ts';
@@ -71,4 +75,56 @@ export function passTells(synced: NonNullable<HomePass['synced']>): { copies: De
     copies: kinds.flatMap(([, done]) => (done?.results ?? []).filter(told)),
     stopped: [...synced.crashes, ...kinds.flatMap(([item, done]) => (done?.stopped ? [{ item, outcome: 'failed' as const, message: done.stopped }] : []))],
   };
+}
+
+/** The result of one explicit request. Keep each kind apart and name the tools from the writes themselves.
+ * For each tool its last result decides whether a refusal still stands. A deleted-by-hand notice says what turned Off
+ * when no copy result already describes the removal. Fold only completed items; keep every outstanding problem. */
+export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stopped?: string) {
+  const completed: { text: string; taken: boolean }[] = [], problems = new Set(passes.flatMap(pass => pass.crashes.map(crash => crash.message)));
+  if (stopped) problems.add(stopped);
+  const kinds = (['skills', 'mcp', 'agents'] as const).map(kind => {
+    const key = kind === 'mcp' ? 'servers' : kind;
+    const runs = passes.flatMap(pass => pass[key] ?? []);
+    for (const run of runs) if (run.stopped) problems.add(run.stopped);
+    const results = groupBy([...runs.flatMap(run => run.results), ...(passes.at(-1)?.[key]?.unread ?? [])], result => result.item);
+    const notices = runs.flatMap(run => run.notices ?? []);
+    return { kind, results, notices, names: new Set([...results.keys(), ...notices.flatMap(noticeNames)]) };
+  });
+  // An item's kind is named where an item of another kind in the result has its name, as a run's words do (words.ts rowNames).
+  const among = kinds.flatMap(({ kind, names }) => [...names].map(name => ({ kind, name })));
+  for (const { kind, results, notices, names } of kinds) {
+    const say = sentences(libraryWords[kind]);
+    for (const name of names) {
+      const label = rowNames([{ kind, name }], among)[0]!;
+      const copies = results.get(name) ?? [], parts: string[] = [];
+      let taken = false, refused = false;
+      for (const outcome of ['removed', 'written'] as const) {
+        const tools = [...new Set(copies.flatMap(copy => copy.harness && copy.outcome === outcome ? [copy.harness] : []))];
+        if (tools.length) parts.push(outcome === 'removed' ? `Removed ${label} from ${toolList(tools)}.` : `Copied ${label} to ${toolList(tools)}.`);
+      }
+      for (const copy of new Map(copies.map(copy => [copy.harness, copy])).values()) {
+        if (copy.outcome !== 'held' && copy.outcome !== 'failed') continue;
+        refused = true;
+        const action = copy.removal ? 'remove' : 'change', where = copy.removal ? 'from' : 'in';
+        parts.push(`Couldn’t ${action} ${label}${copy.harness ? ` ${where} ${toolName(copy.harness)}` : ''}. ${copy.message}`);
+      }
+      for (const notice of notices) {
+        if (notice.kind === 'taken-in' && notice.items.includes(name)) { taken = true; parts.push(`Took in ${label}.`); }
+        else if (notice.kind !== 'taken-in' && notice.item === name && (!parts.length || notice.kind !== 'deleted-by-hand')) {
+          parts.push(say.noticeWords({ ...notice, item: label }).text);
+        }
+      }
+      if (refused) problems.add(parts.join(' '));
+      else if (parts.length) completed.push({ text: parts.join(' '), taken });
+    }
+  }
+  const last = passes.at(-1);
+  if (last?.skills?.settling || last?.servers?.settling || last?.agents?.settling) problems.add('Some copies are still settling. Sync again after they finish saving.');
+  const folded = completed.length > 3 ? completed.splice(2) : [];
+  const taken = folded.filter(item => item.taken).length, changed = folded.length - taken;
+  const lines = completed.map(item => item.text);
+  if (taken) lines.push(`Sync once ${tookInCount(taken, true)}.`);
+  if (changed) lines.push(`Changed ${plural(changed, 'more item')}.`);
+  return { text: [...lines, ...problems].join('\n') || 'Nothing to do.', warn: problems.size > 0, history: folded.length > 0 };
 }
