@@ -1469,6 +1469,14 @@ async function practiceFlow() {
   await a.click(byId('pfile'));
   for (let tries = 0; tries < 40 && !(await fileShown())?.includes('The skill’s steps.'); tries++) await wait(100);
   check('a plugin’s skill named review shows its SKILL.md', (await fileShown())?.includes('The skill’s steps.'), await a.text('.details-plugin'));
+  // The plugin updated while the file is shown: Refresh shows the file as installed now.
+  writeClaudeInstall(practice, 'ck-outside', 'same-names', '0.2.0', {
+    'skills/review/SKILL.md': '---\nname: review\ndescription: The skill named review.\n---\n\nThe skill’s steps, version two.\n',
+    'agents/review.md': '---\nname: review\ndescription: The agent named review.\n---\n\nThe agent’s prompt.\n',
+  });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !(await fileShown())?.includes('version two'); tries++) await wait(100);
+  check('its plugin updated while the file is shown, Refresh shows the file as installed now', (await fileShown())?.includes('The skill’s steps, version two.'), await fileShown());
   await a.click('#nav-agents');
   for (let tries = 0; tries < 40 && !(await a.exists(byId('open'))); tries++) await wait(100);
   await a.click(byId('open'));
@@ -4520,6 +4528,11 @@ esac
   check('the result says what the switch did, with Undo', /issue-tracker: installed in Claude Code; its items put in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
   await pictures('plugin-switch-list');
+  // The first link to one of its items, before Skills was ever drawn, opens Skills with that row open.
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !(await a.exists('.plugin-items-list [data-key="skill:triage"] button')); tries++) await wait(100);
+  await a.click('.plugin-items-list [data-key="skill:triage"] button');
+  same('the first link to triage, before Skills was drawn, opens it with triage’s row open', await a.all('.ov-row.open', 'e.dataset.key'), ['triage']);
   // Its items are rows of the item pages, from the plugin: one row each, Claude Code's copy (the plugin's) folded in.
   await a.click('#nav-skills');
   check('triage is one row on Skills, “from the plugin issue-tracker”, and Claude Code has it with the plugin', /from the plugin issue-tracker/.test(await a.text('.ov-row[data-key="triage"]') ?? '')
@@ -4527,7 +4540,7 @@ esac
   await a.click('#nav-mcp');
   check('issues is one row on MCP servers, from the plugin too', /from the plugin issue-tracker/.test(await a.text('.ov-row[data-key="issues"]') ?? ''), await a.text('.page'));
   await a.click('#nav-plugins');
-  await a.click('#popen-0-issue-tracker');
+  if (!(await a.exists('.plugin-items-section'))) await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 50 && !/Its items/.test(await a.text('.plugin-page') ?? ''); tries++) await wait(100);
   check('its page lists its items for Pi', /Its items[\s\S]*skill triage[\s\S]*MCP server issues/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-page'));
   // Changed in Pi, triage is let go: the person's own from then on, said once on Skills; an update of the plugin's issues still follows.

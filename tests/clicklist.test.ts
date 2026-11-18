@@ -21,6 +21,7 @@ const main = {
 const api = {
   turnPlugin: (_source: string, plugin: string, what: PluginTurn) => { main.sent.push(`${plugin} ${what}`); return new Promise<PluginTurnResult>(done => main.answers.push(done)); },
   applySkills: (changes: Change[]) => { main.sent.push(changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}, seen ${change.seenOn ? 'on' : 'off'}`).join()); return new Promise<PassResult>(done => main.passes.push(done)); },
+  history: async () => ({ events: [], days: 30 }),
   applyAgents: (changes: Change[]) => { main.sent.push(`agent ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
   plugins: async () => { main.reads.plugins++; return view; },
   refresh: async () => { main.reads.home++; main.duringHomeRead?.(); return null; },
@@ -37,7 +38,7 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyClick, closeResult, drawPage, flashRequests, leaveResults, pinnedRows, queueClick, readAgain, showPage, state: app } = await import('../src/app.ts');
+const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, leaveResults, pinnedRows, queueClick, readAgain, showPage, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin } = await import('../src/itemrow.ts');
@@ -432,6 +433,42 @@ test('A skill and an agent both named review are clicked apart: the agent’s cl
   await settled();
   await main.pass(did('notes'));
   assert.deepEqual([app.outcome?.text, flashRequests.has('agents-notes'), flashRequests.has('skills-notes')], ['notes is off.', true, false]);
+});
+
+test('A click on Codex’s Agents tab that ends while Codex’s Skills tab is open is said in the status bar only: that header is the skills’', async () => {
+  onSkills();
+  app.home!.sync.managed = ['codex-cli'];
+  Object.assign(app, { page: 'harnesses', harness: 'codex-cli', harnessTab: 'agents' });
+  flip('release-notes', false, undefined, 'agents');
+  await settled();
+  // As harnesspage.ts goHarness does for another tab: the header emptied, the run ended.
+  app.harnessTab = 'skills';
+  leaveResults();
+  await main.pass(did('release-notes'));
+  assert.deepEqual([app.outcome, app.said.text, flashRequests.has('agents-release-notes')], [undefined, 'release-notes is off.', false]);
+});
+
+test('A plugin’s skill named like your own: its switch’s click, and its Undo, flash the plugin’s row, never your own', async () => {
+  onSkills();
+  const key = 'issue-tracker@team/release-notes', theirs = `skills-${key}`;
+  queueClick({ kind: 'skills', key, on: false }, 'release-notes', () => ({ kind: 'skills', items: ['release-notes'], keys: [key], changes: [{ key: 'release-notes', on: false, except: [] }], said: 'release-notes is off in Claude Code.' }), () => false);
+  await settled();
+  await main.pass({ ...did('release-notes'), made: ['event-1'] });
+  assert.deepEqual([flashRequests.has(theirs), flashRequests.has('skills-release-notes')], [true, false]);
+  flashRequests.clear();
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, flashRequests.has(theirs), flashRequests.has('skills-release-notes')], ['Undone: release-notes is as before.', true, false]);
+});
+
+test('A notice’s ask to flash a row lapses after its time, and a fresh ask then takes its place; Undo’s ask waits for the row', () => {
+  flashRequests.clear();
+  askFlash('skills-notes', Date.now() - 1);
+  askFlash('skills-notes', Date.now() + 3000);
+  assert.ok(flashRequests.get('skills-notes')! > Date.now());
+  flashRequests.set('skills-standup', Infinity);
+  askFlash('skills-standup', Date.now() + 3000);
+  assert.equal(flashRequests.get('skills-standup'), Infinity);
 });
 
 test('A click 8 seconds after the run’s last click ended starts a new run, though a result with a problem line still shows', async () => {
