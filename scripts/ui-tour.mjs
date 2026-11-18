@@ -9,7 +9,7 @@
 // plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
-// tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo,
+// tool's Manage switch, each state of the Harnesses list it changes, and the Library’s skills and Overview with tools left out), repo,
 // remove-build (one install at a time: the held screen while another build of Central Knot is on this Mac, as made-up
 // bundles), sources (a Git link read on a click, made-up repositories standing in for GitHub), source-agents (agents from a
 // link, beside a skill), source-servers (MCP servers from a link, reaching Claude Code as every tool), source-plugins
@@ -656,7 +656,7 @@ if (wanted('agents')) {
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
   for (const folder of Object.values(agentsFolder)) rmSync(join(practice, folder), { recursive: true, force: true });
   await openKind(a, 'agents'); await refresh();
-  await atEverySize('agents-none', 'A Practice copy whose tools have no agents: the Agents page says so and what to do');
+  await atEverySize('agents-none', 'A Practice copy whose tools have no agents: the Library’s agents says so and what to do');
 }
 
 // ---------- An agent in Pi, as a skill ----------
@@ -889,10 +889,10 @@ if (wanted('profiles')) {
   await a.run(`document.activeElement?.blur()`);
   await atEverySize('development-in-use', 'Chose "Development" in that menu: Development is in use; the column says what is on now');
   await openKind(a, 'skills'); await a.settle();
-  await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: each skill is On or Off in Central Knot, as Development has it; nothing marks a profile.');
+  await shot(a, 'skills-with-profile', 'The Library’s skills while Development is in use: each skill is On or Off in Central Knot, as Development has it; nothing marks a profile.');
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
   await a.click('#nav-profiles'); await openProfile('Development');
-  await atEverySize('after-hand-click', 'On the Skills page, turned standup off by hand, then came back: no profile is in use now (the status bar says No profile), and Development says what switching to it would turn back on', true);
+  await atEverySize('after-hand-click', 'On the Library’s skills, turned standup off by hand, then came back: no profile is in use now (the status bar says No profile), and Development says what switching to it would turn back on', true);
   await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
   await a.click('#profile-new'); await name('On call');
   await a.click('#profile-from-now');
@@ -2283,7 +2283,7 @@ if (wanted('manage')) {
   // While Codex is left out: its copy of notes is edited by hand, and standup is turned off in Central Knot.
   edit(join(practice, '.codex/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex while it was left out.\n'));
   await openKind(a, 'skills'); await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
-  await atEverySize('skills-one-left-out', 'Turned standup off on the Skills page with Codex left out: no Codex mark on any row; standup’s row and the band say no tool Central Knot manages has it');
+  await atEverySize('skills-one-left-out', 'Turned standup off on the Library’s skills with Codex left out: no Codex mark on any row; standup’s row and the band say no tool Central Knot manages has it');
   await a.click('#nav-overview');
   await atEverySize('overview-one-left-out', 'The Overview with Codex left out: Your tools has a row for Claude Code and Copilot CLI only, and the line under it says Codex is left out and that its switch is on Harnesses (under the fold at 860×560)');
   await a.click('#nav-harnesses'); await refresh();
