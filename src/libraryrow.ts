@@ -505,10 +505,10 @@ export function sentences(words: RowWords) {
    * (Off's): those with a copy of their own, which Off leaves alone (ownCopies).
    */
   const said = {
-    off(name: string, notIn: readonly string[], tools: readonly string[], leftOut: readonly string[] = [], own: readonly string[] = []): string {
+    off(name: string, notIn: readonly string[], tools: readonly string[], leftOut: readonly string[] = [], own: readonly string[] = [], ways: readonly string[] = []): string {
       const left = notIn.length ? `, but still in ${named(notIn, tools)}` : own.length ? `, but ${named(own, tools)} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there`
-        : leftOut.length ? ': no tool Central Knot manages has it' : ': no tool has it';
-      return `${name} is off${left}. Central Knot keeps it, and turning it on puts each ${copy} back as it was.`;
+        : ways.length ? '' : leftOut.length ? ': no tool Central Knot manages has it' : ': no tool has it';
+      return [`${name} is off${left}.`, ...ways, `Central Knot keeps it, and turning it on puts each ${copy} back as it was.`].join(' ');
     },
     /** A found item taken in; `use`: the harness whose copy was chosen where they differed. */
     takenIn(name: string, on: readonly string[], tools: readonly string[], use?: string, another: readonly string[] = []): string {
