@@ -1,5 +1,5 @@
-// The Skills, MCP servers and Agents pages around the tables matrix.ts draws (skillsPage, mcpPage, agentsPage), with their
-// empty states (kindEmpty); and what every page shares when it has nothing to show: a home not read (notRead), a home with no
+// The Library page around the table matrix.ts draws (libraryPage), with a skill's Files view and its empty states (libraryEmpty,
+// kindEmpty); and what every page shares when it has nothing to show: a home not read (notRead), a home with no
 // tool managed (noToolsLead, noToolsState), and preview only's reason inside a sentence (previewReason). Every other page has a
 // module of its own (overview.ts, harnesspage.ts, historypage.ts, profilespage.ts, sourcespage.ts, repopage.ts, pluginspage.ts,
 // instructionspage.ts, settingspage.ts); which page draws is renderer.ts renderPage, and the page's state and actions are app.ts's.
@@ -7,7 +7,8 @@ import { acting, announce, noToolManaged, noToolManagedSentence, homeToolNames, 
 import { button, emptyState, fileBlocks, h, icon, section } from './dom.ts';
 import { toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill } from './types.ts';
-import { brandMark, itemsTable, outcomeBand, resultInHeader, skillsBrowser, wrappingPath } from './matrix.ts';
+import { brandMark, kindGlyph, libraryTable, notAllRead, outcomeBand, resultInHeader, skillsBrowser, wrappingPath } from './matrix.ts';
+import { heldKinds } from './presence.ts';
 import { andList, kindNouns, noToolsSentence, orList } from './words.ts';
 import { rowCount } from './pluginrows.ts';
 import { partId, rowId } from './itemrow.ts';
@@ -42,33 +43,40 @@ export const noToolsLead = (page: string, more?: string) => {
 /** A page with nothing to show in a home with no tool managed: the same lead and action as the Overview's, in its place. */
 export const noToolsState = (page: string, more?: string) => h('div.scroll.overview-scroll.no-tools', { id: `${page}-no-tools-scroll` }, noToolsLead(page, more));
 
-/** An empty page: what is missing and the way forward. In a home with no tool managed, that is another home or Harnesses. */
-const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => {
-  if (noToolManaged()) return h('div.page', {}, emptyBands(), noToolsState(id));
-  return h('div.page', {}, emptyBands(), emptyState(glyph, title, body,
-    h('div.empty-actions', {},
-      button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('harnesses') }),
-      state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, disabled: acting(), onclick: () => void loadHome('fixture') }) : null)));
-};
+type Empty = { glyph: Parameters<typeof emptyState>[0]; title: string; body: string };
+/** What is missing and the way forward: which folders were read (Harnesses), and the practice copy. */
+const emptyWithActions = ({ glyph, title, body }: Empty, id: string) => emptyState(glyph, title, body,
+  h('div.empty-actions', {},
+    button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('harnesses') }),
+    state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, disabled: acting(), onclick: () => void loadHome('fixture') }) : null));
+/** An empty page. In a home with no tool managed, the way forward is another home or Harnesses. */
+const nothingHere = (empty: Empty, id: string) => h('div.page', {}, emptyBands(), noToolManaged() ? noToolsState(id) : emptyWithActions(empty, id));
 /**
  * An empty page's way forward. `holders` is this home's tools that can hold this kind of item (the kind's own view lists only
  * present tools), so the hint never names a tool that isn't here or couldn't take one; `noun` is the kind ("agents").
  */
 function addHint(holders: HarnessId[], noun: string) {
   if (holders.length) return `Add one in ${orList(holders.map(toolName))}, then Refresh.`;
-  // No tool here holds this kind: a Pi-only home whose Pi Agents tab's Open Agents leads to the Agents page.
+  // No tool here holds this kind: a Pi-only home whose Pi Agents tab's Open Agents leads to the Library.
   return `${andList(homeToolNames())} can’t hold ${noun}.`;
 }
-/** What each kind's page says when no tool in this home has one: also used on a harness's page for that kind. */
-export function kindEmpty(kind: PageKind): { glyph: Parameters<typeof emptyState>[0]; title: string; body: string } {
-  const holders = state.home?.[kind].tools ?? [];
-  // A tool left out may well have some: only the managed ones are said to have none.
-  const whose = homeTools().length < (state.home?.sync.present.length ?? 0) ? 'the tools Central Knot manages' : 'your tools';
-  return { glyph: ({ skills: 'wand-sparkles', mcp: 'plug', agents: 'bot' } as const)[kind], title: `No ${kindNouns[kind].many} here yet`, body: `None of ${whose} has ${kindNouns[kind].a} in this home. ${addHint(holders, kindNouns[kind].many)}` };
+/** A tool left out may well have some: only the managed ones are said to have none. */
+const whose = () => (homeTools().length < (state.home?.sync.present.length ?? 0) ? 'the tools Central Knot manages' : 'your tools');
+/** Where a kind's own record or a tool's file of it couldn't be read (the kind switch's "?": matrix.ts notAllRead), so "none" isn't known. */
+const unread = (kind: PageKind) => !!state.home && notAllRead(state.home, kind);
+/** What the Library says when no tool in this home has one of a kind: under its segment, and on a harness's tab for that kind. */
+export function kindEmpty(kind: PageKind): Empty {
+  const { many, a, title } = kindNouns[kind], hint = addHint(state.home?.[kind].tools ?? [], many);
+  const glyph = kindGlyph[kind];
+  return unread(kind) ? { glyph, title: `No ${many} read here`, body: `${title} couldn’t all be read here, so there may be some. ${hint}` }
+    : { glyph, title: `No ${many} here yet`, body: `None of ${whose()} has ${a} in this home. ${hint}` };
 }
-const emptyKindPage = (kind: PageKind, id: string) => { const empty = kindEmpty(kind); return nothingHere(empty.glyph, empty.title, empty.body, id); };
-const noSkills = (id: string) => emptyKindPage('skills', id);
-
+/** The Library with nothing of any kind: no tool managed, nothing read of any kind, or some of it couldn't be read. */
+function libraryEmpty(kinds: PageKind[]): Empty {
+  const hint = addHint([...new Set(kinds.flatMap(kind => state.home?.[kind].tools ?? []))], 'any of them');
+  return kinds.some(unread) ? { glyph: 'layers', title: 'Nothing read here', body: `Some of this home couldn’t be read, so there may be items. ${hint}` }
+    : { glyph: 'layers', title: 'Nothing in the Library yet', body: `None of ${whose()} has a skill, MCP server or agent in this home. ${hint}` };
+}
 /** Shown before any home has been read, or when reading failed. */
 export function notRead() {
   if (state.busy) return reading();
@@ -76,23 +84,7 @@ export function notRead() {
 }
 
 
-// ---------- MCP servers ----------
-
-export function mcpPage() {
-  if (!state.home) return notRead();
-  if (!rowCount(state.home, 'mcp')) return emptyKindPage('mcp', 'mcp-empty');
-  return itemsTable('mcp');
-}
-
-// ---------- Agents ----------
-
-export function agentsPage() {
-  if (!state.home) return notRead();
-  if (!rowCount(state.home, 'agents')) return emptyKindPage('agents', 'agents-empty');
-  return itemsTable('agents');
-}
-
-// ---------- Skills ----------
+// ---------- The Library ----------
 
 /** One term and value in a facts list (dl.facts). */
 export const fact = (term: string, value: Node | string) => [h('dt', {}, term), h('dd', {}, value)];
@@ -134,12 +126,16 @@ function copyEntry(key: string, { tool, skill }: Found, index: number) {
 const contents = (key: string, copies: Found[]) =>
   fileBlocks(partId('content', rowId('skills', key)), 'Skill contents', copies.map(copy => ({ ...copy, text: copy.skill.content })), holders => holders.map(({ tool, skill }) => `${toolName(tool)} (${skill.rootLabel})`).join(', '));
 
-export function skillsPage() {
+/**
+ * The Library: every skill, MCP server and agent this home's tools can hold, in one list under the kind switch (matrix.ts
+ * libraryTable, which says a segment's own kind has none: kindEmpty), or a skill's files and contents beside the list ("Files").
+ */
+export function libraryPage() {
   const home = state.home;
   if (!home) return notRead();
-  if (!rowCount(home, 'skills')) return noSkills('empty-read');
-  // The table is the Skills page; "Files" opens one skill's files and contents beside the list.
-  if (state.skillsView !== 'files') return itemsTable('skills');
+  const kinds = heldKinds(home);
+  if (noToolManaged() || !kinds.some(kind => rowCount(home, kind))) return nothingHere(libraryEmpty(kinds), 'library-empty');
+  if (state.skillsView !== 'files') return libraryTable(kind => emptyWithActions(kindEmpty(kind), `${kind}-empty`));
   return skillsBrowser(key => {
     if (!home) return { where: [], contents: [] };
     const copies = copiesOf(home, key);

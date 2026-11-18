@@ -386,6 +386,18 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .bar-icons .find { min-width: 88px; }
 .bar-wrap { flex-wrap: wrap; row-gap: 2px; }
 .bar-wrap .toolbar-end { border-left: 0; }
+/* The Library's kind switch (matrix.ts kindSwitch): first in the toolbar, one joined control whose words never fold; a wrapped
+   bar keeps it first, on the first line. */
+.kind-switch { display: inline-flex; flex: none; align-items: stretch; height: 28px; border: 1px solid var(--control-line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.kind-seg { display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; white-space: nowrap; border: 0; border-left: 1px solid var(--line); background: none; color: var(--ink-soft); font: inherit; font-size: 12.5px; cursor: pointer; }
+.kind-seg:first-child { border-left: 0; }
+.kind-seg:hover { background: var(--hover); color: var(--ink); }
+.kind-seg-on { background: var(--current); color: var(--ink); font-weight: 500; }
+.kind-seg-count { font-variant-numeric: tabular-nums; color: var(--ink-faint); font-size: 11.5px; }
+.bar-short .kind-seg { padding: 0 7px; }
+/* A Library row's mark of its kind, before its name; a tool's mark place left blank where that tool can't hold the row's kind. */
+.kind-mark { display: inline-grid; flex: none; place-items: center; }
+.tool-mark.mark-blank { visibility: hidden; }
 
 /* ---------- Bands and notices under the toolbar ---------- */
 .bands { display: flex; flex-direction: column; }

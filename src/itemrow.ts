@@ -134,14 +134,16 @@ export const timeIn = <Row extends Pick<ItemRow, 'key' | 'versions'>>(row: Row, 
 
 /**
  * The rows under one heading in the chosen order. Last updated or last used: newest first, an item with no time after every
- * one with a time; equal times, or none, go by name, so every look gives the same order. `itemOf`: a row's item as the library
+ * one with a time; equal times, or none, go by name, and one name by kind (skills, servers, agents: the Library's mixed list), so
+ * every look gives the same order. `itemOf`: a row's item as the library
  * holds it; `usedAt`: a row's last use (ms); `pins`: a row pinned on this list goes by the time it had when pinned (Pin). Each
  * row's time is kept by its row id, so a skill and an agent of one name keep their own.
  */
 export function inOrder<Row extends Pick<ItemRow, 'kind' | 'key' | 'versions'>>(rows: readonly Row[], order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined, usedAt: (row: Row) => number | undefined = () => undefined, pins?: Pinned<unknown>): Row[] {
   const id = (row: Row) => rowId(row.kind, row.key);
   const time = new Map(rows.map(row => { const pinned = pins?.rows.get(id(row)); return [id(row), (pinned ? pinned.time : timeIn(row, order, itemOf, usedAt)) ?? -Infinity]; }));
-  return [...rows].sort((first, second) => (time.get(id(second))! - time.get(id(first))!) || byName(first, second));
+  const kindRank = (row: Row) => ['skills', 'mcp', 'agents'].indexOf(row.kind);
+  return [...rows].sort((first, second) => (time.get(id(second))! - time.get(id(first))!) || byName(first, second) || kindRank(first) - kindRank(second));
 }
 
 // ---------- Rows pinned where they were ----------

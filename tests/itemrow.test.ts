@@ -1,5 +1,5 @@
-// The order of the rows under a heading on the Skills, MCP servers and Agents pages (src/itemrow.ts inOrder), as worked
-// examples: by name, or by last updated, newest first. An item's versions change only through library.ts's keepVersion and
+// The order of the rows under a heading on the Library and a tool's tabs (src/itemrow.ts inOrder), as worked examples: by
+// name, or by last updated, newest first; the Library's kinds mixed under one heading. An item's versions change only through library.ts's keepVersion and
 // setCurrent, so each example makes them that way. Then the rows a click pins where they were (Pinned), as the MCP servers
 // page draws them; and a skill and an agent of one name, two rows apart (rowId), on two lists and on one.
 import { test } from 'node:test';
@@ -145,4 +145,13 @@ test('On one list, a skill and an agent both named review keep their own times a
   pin(pins, rowId('skills', 'review'), 'on', Date.parse(daysAgo(9)));
   await edited(skills.review!, 0);
   assert.deepEqual(ids(inOrder([skill, notes, agent], 'updated', itemOf, undefined, pins)), ['agents-review', 'skills-notes', 'skills-review']);
+});
+
+test('On the Library, the kinds are mixed under one heading in the chosen Sort, and one name goes skill, server, agent', () => {
+  const rows = [row('review', {}, 'agents'), row('github', {}, 'mcp'), row('review', {}, 'mcp'), row('notes'), row('review')];
+  const ids = (list: ItemRow[]) => list.map(each => rowId(each.kind, each.key));
+  // By name: github, notes, then the three named review, the skill first, then the server, then the agent.
+  assert.deepEqual(ids(inOrder(rows, 'name', from({}))), ['mcp-github', 'skills-notes', 'skills-review', 'mcp-review', 'agents-review']);
+  // By last updated, none has a time: they go by name and kind the same way, whatever order they came in.
+  assert.deepEqual(ids(inOrder([...rows].reverse(), 'updated', from({}))), ['mcp-github', 'skills-notes', 'skills-review', 'mcp-review', 'agents-review']);
 });

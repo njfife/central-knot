@@ -20,7 +20,7 @@ import { asItIs } from './libraryrow.ts';
 import { dayAndTime, plural } from './model.ts';
 import { linkLabel } from './sourcelink.ts';
 import { andList, kindNouns, orList, pageNames, toolsPhrase, toPluginsLabel, turnIt } from './words.ts';
-import { outcomeBand } from './matrix.ts';
+import { openKind, outcomeBand } from './matrix.ts';
 import { pageOfPart } from './pluginstatus.ts';
 import { addMarketplace, market } from './pluginstate.ts';
 import type { ItemKind } from './library.ts';
@@ -73,7 +73,7 @@ async function settle(result: SourceResult, said: Said | undefined) {
   setHome(await api().refresh(), { reload: false });
   if (said && !result.stopped) {
     state.outcome = { page: 'sources', text: said.text, band: true, warn: said.warns, ...(said.note ? { note: said.note } : {}), ...(said.undo ? { undo: said.undo } : {}),
-      ...(said.open ? { next: { label: `Open ${kindNouns[said.open].title}`, id: `source-open-${said.open}`, run: () => showPage(said.open!) } } : {}) };
+      ...(said.open ? { next: { label: `Open ${kindNouns[said.open].title}`, id: `source-open-${said.open}`, run: () => openKind(said.open!) } } : {}) };
   }
   announce(result.stopped ?? said?.text ?? '', true);
 }
@@ -269,7 +269,7 @@ function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null
 function removedRow(fact: LibraryFacts, kind: ItemKind, locked: boolean) {
   const page = pageOfPart[kind];
   const turn = button({ variant: 'link', size: 'micro', label: turnIt(true), id: `source-turn-on-${kind}-${fact.key}`, disabled: locked,
-    attrs: { title: `Turn ${fact.name} on in every tool it isn’t kept out of, as its switch on ${kindNouns[page].title} does. Undo turns it off again.` }, onclick: () => void turnOn(fact, page) });
+    attrs: { title: `Turn ${fact.name} on in every tool it isn’t kept out of, as its switch in the Library does. Undo turns it off again.` }, onclick: () => void turnOn(fact, page) });
   return h('li.source-name', { 'data-key': fact.key, 'data-kind': kind, 'data-state': 'removed' },
     h('span.source-name-icon', {}, icon('triangle-alert', 14, 'tone-warning')),
     h('span.source-name-main', {},

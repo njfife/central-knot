@@ -108,10 +108,19 @@ export const kindNames = Object.fromEntries(Object.entries(kindNouns).map(([kind
 /** The nouns a result counts its rows with (a run's, Turn these off's): their kind's while they are of one kind, else "item". */
 export const rowNouns = (kinds: readonly HomeKind[]) => (new Set(kinds).size === 1 ? kindNouns[kinds[0]!] : { one: 'item', many: 'items' });
 /**
+ * Reasons, each said once; where they are said over several kinds (`several`), each led by the kinds it is about ("MCP
+ * servers: The MCP record is damaged. …"): a bulk Off's and its Undo's (app.ts), and the Library's bands (matrix.ts listNotices).
+ */
+export function saidByKind(pairs: readonly [HomeKind, string][], several: boolean): string[] {
+  const kindsOf = new Map<string, HomeKind[]>();
+  for (const [kind, reason] of pairs) kindsOf.set(reason, [...new Set([...(kindsOf.get(reason) ?? []), kind])]);
+  return [...kindsOf].map(([reason, kinds]) => (several ? `${sentence(andList(kinds.map(kind => kindNouns[kind].many)))}: ${reason}` : reason));
+}
+type Named = Pick<NamedRow, 'kind' | 'name'>;
+/**
  * A result's rows by name, a name with its kind after it where a row of another kind `among` the result's has that name too
  * ("review (skill)").
  */
-type Named = Pick<NamedRow, 'kind' | 'name'>;
 export const rowNames = (rows: readonly Named[], among: readonly Named[] = rows) =>
   rows.map(row => (among.some(other => other.kind !== row.kind && other.name === row.name) ? `${row.name} (${kindNouns[row.kind].one})` : row.name));
 

@@ -585,7 +585,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
  * finds the same failure again adds nothing; and each kind's notices, for its own page.
  */
 function keepPass({ told, skills, serversAndAgents }: BackgroundPass) {
-  const same = (one: DestinationResult, other: DestinationResult) => one.item === other.item && one.harness === other.harness && one.outcome === other.outcome && one.message === other.message;
+  const same = (one: DestinationResult, other: DestinationResult) => one.of === other.of && one.item === other.item && one.harness === other.harness && one.outcome === other.outcome && one.message === other.message;
   for (const result of [...(told?.stopped ?? []), ...(told?.copies ?? [])]) if (!pendingResults.some(known => same(known, result))) pendingResults.push(result);
   pendingNotices.push(...(skills?.notices ?? []));
   pendingServerNotices.push(...(serversAndAgents?.serverNotices ?? []));

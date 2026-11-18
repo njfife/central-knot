@@ -131,6 +131,18 @@ export const rowPart = (part, kind, key, ...within) => [...(part ? [part] : []),
 /** A selector for the element with this id, right for any id, a plugin row's key with "@", "/" and "." in it too: [id="…"]. */
 export const byId = id => `[id="${id}"]`;
 
+/**
+ * Opens a kind's list in the Library as a person does: the sidebar's Library, then that kind on its kind switch (src/matrix.ts
+ * kindSwitch; none where the home's tools hold one kind only). `kind` 'all' is the switch's All. The one way the end-to-end
+ * checks, the tour and the bundled check open a kind: a check that clicks the sidebar for it by hand finds no such row.
+ */
+export async function openKind(page, kind) {
+  await page.click('#nav-library');
+  if (await page.run(`!!document.getElementById('library-kind-${kind}')`)) await page.click(`#library-kind-${kind}`);
+}
+/** openKind's two clicks as one expression for page.run, made at once: for a check made while clicks run (a page's click waits for them). */
+export const openKindNow = kind => `(document.getElementById('nav-library').click(), document.getElementById('library-kind-${kind}')?.click(), true)`;
+
 /** Chooses `days` in Settings' Keep history for select, as picking it from the system's own menu (which can't be driven) would. */
 export async function keepFor(page, days) {
   await page.run(`(select => { select.value = '${days}'; select.dispatchEvent(new Event('change', { bubbles: true })); })(document.querySelector('#history-days'))`);

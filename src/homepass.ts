@@ -64,15 +64,16 @@ export async function homePass(context: ShareContext, managed: HarnessId[], writ
 
 /**
  * What the page is told of one pass of the whole home, every kind alike (main.ts keeps it for the next view: types.ts SyncView
- * caughtUp). `copies`: each copy the pass wrote or removed (the Harnesses page's Caught up band names those written:
- * model.ts caughtUpNames) and each that failed. `stopped`: each kind whose pass crashed or stopped part-way, and why
+ * caughtUp). `copies`: each copy the pass wrote or removed, with its kind (the Harnesses page's Caught up band names those
+ * written: model.ts caughtUpNames) and each that failed. `stopped`: each kind whose pass crashed or stopped part-way, and why
  * (with `copies`' failures, the problems band). An item left for a choice of copy is not told here: its row says it waits.
  */
 export function passTells(synced: NonNullable<HomePass['synced']>): { copies: DestinationResult[]; stopped: DestinationResult[] } {
-  const kinds = [[passNames.skills, synced.skills], [passNames.servers, synced.servers], [passNames.agents, synced.agents]] as const;
+  const kinds = [[passNames.skills, synced.skills, 'skills'], [passNames.servers, synced.servers, 'mcp'], [passNames.agents, synced.agents, 'agents']] as const;
   const told = (result: DestinationResult) => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed';
   return {
-    copies: kinds.flatMap(([, done]) => (done?.results ?? []).filter(told)),
+    // Each copy with its kind (DestinationResult of), so a skill and an agent of one name are told apart.
+    copies: kinds.flatMap(([, done, of]) => (done?.results ?? []).filter(told).map(result => ({ ...result, of }))),
     stopped: [...synced.crashes, ...kinds.flatMap(([item, done]) => (done?.stopped ? [{ item, outcome: 'failed' as const, message: done.stopped }] : []))],
   };
 }
