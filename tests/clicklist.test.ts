@@ -22,6 +22,7 @@ const main = {
   answer(result: PluginTurnResult = { done: [] }) { this.answers.shift()!(result); return settled(); },
 };
 const api = {
+  onNavigate(_callback: (command: string) => void) {},
   turnPlugin: (_source: string, plugin: string, what: PluginTurn) => { main.sent.push(`${plugin} ${what}`); return new Promise<PluginTurnResult>(done => main.answers.push(done)); },
   applySkills: (changes: Change[]) => { main.sent.push(changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}, seen ${change.seenOn ? 'on' : 'off'}`).join()); return new Promise<PassResult>(done => main.passes.push(done)); },
   history: async () => ({ events: [{ id: 'delete-bar', key: 'bar', kind: 'deleted' }], days: 30 }),
@@ -895,4 +896,69 @@ test('× on an item page’s result closes what its click could not do too', () 
   app.mcpResult = { results: [{ item: 'docs', harness: 'codex-cli', outcome: 'failed', message: 'Could not write.' }], writes: 0 } as unknown as typeof app.mcpResult;
   closeResult();
   assert.deepEqual([app.outcome, app.mcpResult], [undefined, undefined]);
+});
+
+test('a tool left out names the harness list even before the old selection clears', async () => {
+  start();
+  const { fullPlace } = await import('../src/places.ts');
+  Object.assign(app, { page: 'harnesses', harness: 'codex-cli', harnessTab: 'skills' });
+  assert.deepEqual(fullPlace(), { page: 'harnesses' });
+});
+
+/** Render just the history record and capture the window command listener on the stand-in page. */
+async function watchTravel(t: TestContext) {
+  const { listenForTravel, recordDraw } = await import('../src/places.ts');
+  let navigate!: (command: string) => void;
+  t.mock.method(window.centralKnot, 'onNavigate', (callback: typeof navigate) => { navigate = callback; });
+  t.mock.method(document, 'getElementById', (id: string) => id === 'announcement' ? announcement : { ...element(), scrollTo() {} });
+  listenForTravel();
+  setRenderer(recordDraw);
+  t.after(() => setRenderer(() => {}));
+  return { navigate, recordDraw };
+}
+
+test('Back returns to the MCP explanation tab of a tool absent from the MCP view', async t => {
+  start();
+  homeWith(t, []);
+  app.home!.mcp.tools = ['claude-cli'];
+  Object.assign(app, { page: 'harnesses', harness: undefined });
+  const { goHarness } = await import('../src/harnesspage.ts');
+  const { navigate, recordDraw } = await watchTravel(t);
+  recordDraw();
+  await settled();
+  goHarness('codex-cli', 'mcp');
+  await settled();
+  goHarness('codex-cli', 'about');
+  await settled();
+  navigate('browser-backward');
+  assert.equal(app.harnessTab, 'mcp');
+});
+
+for (const stale of [false, true]) test(`a plugin link left during a read returns by marketplace name (catalog ${stale ? 'stale' : 'unread'})`, async t => {
+  start();
+  homeWith(t, []);
+  app.home!.home = stale ? '/stale-catalog' : '/unread-catalog';
+  const { navigate } = await watchTravel(t);
+  const { fullPlace } = await import('../src/places.ts');
+  const beta = { ...entry, source: '/beta', name: 'Beta' };
+  const catalog = { ...view, marketplaces: [entry, beta] };
+  let finishRead!: (v: PluginsView) => void;
+  t.mock.method(api, 'plugins', () => new Promise<PluginsView>(resolve => { finishRead = resolve; }));
+  const { loadPlugins } = await import('../src/pluginstate.ts');
+  market.read.data = stale ? view : undefined; // The old catalog lists gamma only in the other marketplace.
+  market.nav = { source: '/alternate-spelling', marketName: 'Beta', plugin: 'gamma', tab: 'plugins', find: '' };
+  const first = loadPlugins();
+  await settled();
+  assert.equal(fullPlace().marketName, 'Beta');
+  showPage('history');
+  await settled();
+  const finishFirst = finishRead;
+  if (stale) navigate('browser-backward');
+  finishFirst(catalog);
+  await first;
+  if (!stale) navigate('browser-backward');
+  finishRead(catalog);
+  await settled();
+  const { source, plugin } = fullPlace();
+  assert.deepEqual([source, plugin], ['/beta', 'gamma']);
 });

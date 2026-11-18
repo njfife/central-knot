@@ -609,8 +609,7 @@ interface ItemTurn extends Turn { row: NonNullable<Turn['row']>; name: string; p
 const isItemTurn = (turn: Turn): turn is ItemTurn => 'isOn' in turn;
 /**
  * Where the page is now, as a run names its place: the page, and on Harnesses the tool whose page is open and the kind its tab
- * shows (each tab has a header of its own). A row's click is made on the table on screen, so its place is this when it is made;
- * a press is matched to the control a redraw put in its place only here (renderer.ts, dom.ts keepClicksAcrossRedraws).
+ * shows (each tab has a header of its own). A row's click is made on the table on screen, so its place is this when it is made.
  */
 export const placeNow = () => (state.page === 'harnesses' ? `harnesses ${state.harness ?? ''} ${harnessKindShown() ?? ''}` : state.page);
 const itemTurns = (run: Run) => clickList.turns.filter((turn): turn is ItemTurn => isItemTurn(turn) && turn.run === run);
@@ -875,7 +874,7 @@ function leaveAbsentPage() {
   if (!gone) return;
   // What the status bar said (a Refresh's summary, say) stays, with the reason the page moved.
   const said = state.said.text;
-  showPage('overview');
+  showPage('overview', { repair: true });
   announce(`${said ? `${said} ` : ''}No tool here holds ${kindNames[gone]} now.`);
 }
 
@@ -919,7 +918,13 @@ export function leaveResults(page = state.page) {
   tell(carried);
 }
 
-export function showPage(page: Page) {
+let moveRequested = false;
+// Functions that move the person mark a visit for the next draw. A read that changes the place leaves it a repair.
+export const noteMove = () => { moveRequested = true; };
+export const takeMove = () => { const moved = moveRequested; moveRequested = false; return moved; };
+
+export function showPage(page: Page, { repair = false } = {}) {
+  if (!repair) noteMove();
   // Plugins keep what they read while the person stays on them; every other page reads its data each time it opens.
   const stays = page === 'plugins' && state.page === 'plugins';
   // The sidebar's Harnesses opens the list of every harness, except while an action runs: its result belongs to the harness it
@@ -938,14 +943,18 @@ export function showPage(page: Page) {
   rerender();
 }
 
+export const filesSkillAvailable = (home: HomeView, key?: string) => home.skills.items.some(skill => key === undefined || skill.key === key);
+
 /** Leaves the Skills page's Files and contents view for the table (its Table button, or Escape). */
 export function showSkillsTable() {
+  noteMove();
   state.skillsView = 'table';
   state.item = undefined;
   rerender();
 }
 
 export function selectItem(key: string | undefined) {
+  noteMove();
   state.item = key;
   rerender();
   document.getElementById('detail-scroll')?.scrollTo(0, 0);

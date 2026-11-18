@@ -24,7 +24,7 @@ import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, sentence, 
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { acting, applyByKind, askFlash, closeResult, isKind, KINDS, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, askFlash, closeResult, isKind, KINDS, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -54,7 +54,7 @@ const names = toolNames as Record<Tool, string>;
 function openPlugin({ source, plugin, marketplace }: { source?: string; plugin: string; marketplace?: string }) {
   const lists = (entry: { plugins: { name: string }[] }) => entry.plugins.some(item => item.name === plugin);
   const listed = market.view?.marketplaces.find(entry => entry.source === source && lists(entry)) ?? market.view?.marketplaces.find(entry => !!marketplace && entry.name === marketplace && lists(entry));
-  market.nav = { source: listed?.source ?? source, plugin, tab: 'plugins', find: '', category: undefined };
+  market.nav = { source: listed?.source ?? source, marketName: listed ? undefined : marketplace, plugin, tab: 'plugins', find: '', category: undefined };
   showPage('plugins');
 }
 
@@ -1086,7 +1086,8 @@ const pluginChipShown = (t: Table) => pluginCount(t) > 0;
 const copiesDifferChipShown = (t: Table) => rowsOf(t.kind).some(skill => needsChoice(t, skill));
 
 /** A skill's files and contents: the Skills page's files view, from wherever its details were opened. */
-function openFiles(key: string) {
+export function openFiles(key: string) {
+  noteMove();
   if (state.page !== 'skills') showPage('skills');
   state.skillsView = 'files';
   state.item = key;
@@ -1941,8 +1942,6 @@ afterLayout(settleFilesColumns);
 export function skillsBrowser(more: (key: string) => { where: Node[]; contents: (Node | null | false)[] }, select: (key: string | undefined) => void) {
   const t = useTable('skills'), view = t.view;
   const all = rowsOf(t.kind);
-  // No skill at all (the last one just deleted): the table, which says so.
-  if (!all.length) return itemsTable('skills');
   const needle = view.listFind.trim().toLowerCase();
   const matches = all.filter(skill => !needle || skill.key.includes(needle) || (skill.name ?? '').toLowerCase().includes(needle) || skill.description.toLowerCase().includes(needle));
   // The table's headings, on, then found, then off (a row whose switch was clicked here under the one it was under), and its
@@ -1952,6 +1951,8 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   const chosen = all.find(skill => skill.key === state.item);
   // The detail always shows a skill: the chosen one, else the first listed. In narrow content it sits below the list.
   const shownDetail = chosen ?? shown[0] ?? all[0];
+  // Record the implicit first selection too, so fullPlace names the skill actually drawn.
+  state.item = shownDetail.key;
   const listRow = (skill: ItemRow) => h(`button.list-row${skill === shownDetail ? '.selected' : ''}`, {
     type: 'button', id: elId('list', skill), 'data-key': idOf(skill), 'aria-pressed': String(skill === shownDetail),
     'aria-label': `${skill.name ?? skill.key}, ${placeNames[standingOf(skill)].toLowerCase()}`,

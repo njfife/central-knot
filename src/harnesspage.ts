@@ -3,7 +3,7 @@
 // tool first, plus its instruction file and its plugins. A tool left out has its card and switch here, and no other page shows
 // it as a tool (History's entries, and the Overview's line under its tools table, still name it). Nothing here has its own
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
-import { KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
+import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
 import { installsIn, pluginsInstalled, type MarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
@@ -178,6 +178,7 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
  * `fromKeyboard`: going back to the list from the keyboard puts focus (and its ring) on the harness's card; a mouse return leaves it alone.
  */
 export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromKeyboard = true, showOnly }: { fromKeyboard?: boolean; showOnly?: PageKind } = {}) {
+  noteMove();
   const from = state.harness;
   if (tool !== from) resetTablesForHarness();
   state.harness = tool;

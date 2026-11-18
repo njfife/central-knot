@@ -7,7 +7,7 @@
 // own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, acting, drawPage, placeNow, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { afterLayout, button, fitBars, h, icon, keepClicksAcrossRedraws, keepSelection, runAfterLayout, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
@@ -29,6 +29,8 @@ import { anyOn } from './itemrow.ts';
 import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
 import { followPluginUpdates } from './pluginupdateview.ts';
 import { forgetHeldResult, heldBy, heldScreen } from './otherbuildview.ts';
+import { fullPlace, listenForTravel, recordDraw, restoring } from './places.ts';
+import { placeKey } from './visits.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** Each page's title, in the header and the sidebar: a kind's page by its kind's title (words.ts kindNouns). */
@@ -230,6 +232,7 @@ afterLayout(() => {
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
 
 function render() {
+  if (restoring) return;
   const focused = document.activeElement?.id;
   const scrolled = remembered();
   const selected = keepSelection();
@@ -237,6 +240,7 @@ function render() {
   renderSidebar();
   renderHeader(rail);
   drawPage(renderPage);
+  recordDraw();
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
   runAfterLayout();
   renderStatus();
@@ -251,9 +255,8 @@ function render() {
 }
 
 setRenderer(render);
-// A press is matched to the control now there only in the same place (the page's own, app.ts placeNow) in the same home, which a
-// page's place leaves out.
-keepClicksAcrossRedraws(() => `${placeNow()} ${state.home?.home ?? ''}`);
+listenForTravel();
+keepClicksAcrossRedraws(() => JSON.stringify([state.home?.home, placeKey(fullPlace())]));
 // The status bar's mark for a message too narrow to show (app.ts paintStatusMessage): drawn once.
 region('message-mark').replaceChildren(icon('info', 14));
 

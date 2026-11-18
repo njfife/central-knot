@@ -14,7 +14,7 @@
 //   which also says why), so a click on one lands on a disabled control and is dropped, never run twice. A switch is off under
 //   busy too.
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
-import { announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, state as app, tell } from './app.ts';
+import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, state as app, tell } from './app.ts';
 import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
@@ -89,12 +89,16 @@ export function resetMarket(): void {
   market.readmes.clear(); forgetDetails(); market.opened.clear(); market.nav = startNav();
 }
 
+/** The requested listing, including a tool's alternate spelling resolved by marketplace name. */
+export function listedMarket({ source, marketName }: Pick<typeof market.nav, 'source' | 'marketName'>) {
+  const list = market.view?.marketplaces;
+  return list?.find(entry => entry.source === source) ?? list?.find(entry => !!marketName && entry.name === marketName);
+}
+
 /** The marketplace on screen: the one chosen, or the first listed. The page and the reads both use this. */
 export function current(): { entry: MarketplaceView; index: number } | undefined {
-  const list = market.view?.marketplaces ?? [];
-  const bySource = list.findIndex(entry => entry.source === market.nav.source);
-  const index = Math.max(0, bySource >= 0 ? bySource : list.findIndex(entry => !!market.nav.marketName && entry.name === market.nav.marketName));
-  return list[index] ? { entry: list[index]!, index } : undefined;
+  const list = market.view?.marketplaces ?? [], entry = listedMarket(market.nav) ?? list[0];
+  return entry && { entry, index: list.indexOf(entry) };
 }
 
 /** The toolbar's notice ("… added", "… refreshed") has done its job once the person moves on. */
@@ -203,12 +207,14 @@ export function shownDetail(key: string): PluginDetail | null | undefined {
  * a find text once the list is short enough to have no find box (its filter would hide plugins with no way to clear it).
  */
 function settleNav(): void {
-  const entry = current()?.entry;
+  const selected = listedMarket(market.nav);
+  if ((market.nav.source || market.nav.marketName) && !selected) { market.nav = startNav(); return; }
+  const entry = selected ?? market.view?.marketplaces[0];
   if (!entry) return;
   const { plugin, category, find } = market.nav;
   const categories = categoriesOf(entry);
   market.nav = {
-    ...market.nav,
+    ...market.nav, source: entry.source, marketName: undefined,
     plugin: plugin && entry.plugins.some(candidate => candidate.name === plugin) ? plugin : undefined,
     category: category && categories.length > 1 && categories.includes(category) ? category : undefined,
     find: entry.plugins.length > FIND_FROM ? find : '',
@@ -217,7 +223,10 @@ function settleNav(): void {
 
 /** Moves within the page and reads what the new place shows. */
 export function browse(patch: Partial<typeof market.nav>): void {
-  market.nav = { ...market.nav, ...patch };
+  if ('source' in patch || 'tab' in patch || 'plugin' in patch) noteMove();
+  const base = 'source' in patch && patch.source !== current()?.entry.source ? startNav() : market.nav;
+  market.nav = { ...base, ...patch };
+  if (app.page !== 'plugins') { showPage('plugins'); return; }
   clearNotice();
   readShown();
   rerender();
@@ -266,6 +275,7 @@ export const addMarketplace = (source: string) => act('adding', async () => {
   const added = result.view?.marketplaces.find(entry => entry.source === result.source);
   market.draftSource = '';
   market.addOpen = false;
+  if (added && app.page === 'plugins') noteMove();
   market.nav = { ...startNav(), source: added?.source };
   showView(result.view);
   // The outcome first, the name last, so a narrow status bar that shortens the message cuts the name, not the news.
