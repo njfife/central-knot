@@ -274,8 +274,15 @@ async function mainHelpers(port) {
     /** Notes, for each sync:changed the page is sent, whether a `channel` request was under way (`told` reads it), until `restore` runs. */
     noteTells: channel => run(`(() => { const { ipcMain, BrowserWindow } = ${electron}; const contents = BrowserWindow.getAllWindows()[0].webContents, real = ipcMain._invokeHandlers.get(${JSON.stringify(channel)}); let open = 0; globalThis.ckAside = real; globalThis.ckTold = []; contents.send = function (name, ...rest) { if (name === 'sync:changed') globalThis.ckTold.push(open > 0); return Object.getPrototypeOf(contents).send.call(contents, name, ...rest); }; ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, async (...rest) => { open++; try { return await real(...rest); } finally { open--; } }); return true; })()`),
     told: () => run(`(() => { delete ${electron}.BrowserWindow.getAllWindows()[0].webContents.send; return globalThis.ckTold; })()`),
+    /** A later watcher or poll must not rescue a dropped notification in the two tests that deliver their own. */
+    manualSyncOnly: on => run(`(contents => {
+      if (!${on}) { delete contents.send; return; }
+      const send = contents.send.bind(contents);
+      contents.send = (channel, ...args) => { if (channel !== 'sync:changed') send(channel, ...args); };
+    })(${electron}.BrowserWindow.getAllWindows()[0].webContents)`),
     /** Sends the page a message, as the main process does after a background pass. */
-    tellPage: channel => run(`(() => { ${electron}.BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channel)}); return true; })()`),
+    tellPage: channel => run(`(contents => Object.getPrototypeOf(contents).send.call(contents, ${JSON.stringify(channel)}))(
+      ${electron}.BrowserWindow.getAllWindows()[0].webContents)`),
     /** Notes the arguments of each `channel` request (`calls` reads them), until `restore` runs. */
     noteCalls: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers, real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; globalThis.ckCalls = []; handlers.set(${JSON.stringify(channel)}, (event, ...args) => { globalThis.ckCalls.push(args); return real(event, ...args); }); return true; })()`),
     calls: () => run(`globalThis.ckCalls`),
@@ -1867,6 +1874,7 @@ async function practiceFlow() {
   // done, with no second Refresh.
   if (main) {
     const columns = async () => (await a.all('[data-plugin="document-tools"] .cell-button')).length;
+    await main.manualSyncOnly(true);
     check('the refresh reply is held while the page is busy', await main.holdRefresh('asked'));
     await a.run(`document.getElementById('header-refresh').click()`);
     await waitFor('the Refresh that still includes Codex', main.refreshHeld);
@@ -1901,6 +1909,7 @@ async function practiceFlow() {
     await waitFor('the two Skills draws', () => a.run(`window.ckMarkCounts.includes(${all - 1}) && window.ckMarkCounts.at(-1) === ${all}`));
     const counts = await a.run(`window.ckMarks.disconnect(); window.ckMarkCounts.slice(window.ckMarkCounts.indexOf(${all - 1}))`);
     same('two tool changes told back to back: the first read shows, then the second', counts, [all - 1, all]);
+    await main.manualSyncOnly(false);
     // Nothing is left owed: a later action's result stays. A found skill is visible evidence of a fresh
     // background view, with no sync notice of its own to replace the announcement.
     const quietRead = async key => {
