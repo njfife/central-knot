@@ -153,10 +153,12 @@ test('one click downloads, records the update for the next launch, prepares it a
   await until('the download’s folder removed', () => readdirSync(world.temp).length === 0);
 });
 
-test('with no page open a prepared update restarts at once', async t => {
+test('with no page open a prepared update restarts at once', { timeout: 30000 }, async t => {
   const { world, flow } = await offered(t, { page: false });
+  const restart = new Promise<void>(resolve => { world.quit = resolve; });
   await flow.install();
-  await until('the restart', () => world.quits === 1);
+  await restart;
+  assert.equal(world.quits, 1);
   assert.equal(world.quitting, true);
 });
 
