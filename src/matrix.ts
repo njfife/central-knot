@@ -272,7 +272,7 @@ const rowsIn = (t: Table) => t.kinds.flatMap(rowsOf);
  * Each kind a table lists, walked once, with what it brings beside its rows: its own record's stop (the home's is said once, by
  * listNotices), its problems beside that stop, its part of the usage reading (kindUsage) and the From plugins chip's count. The
  * bands (listNotices), the chips' counts and the No use seen band (usedColumn, unusedCount, unusedBand) go over the kinds here.
- * Not here: a kind's notices, kept as they are first shown (toldNotices), and the last results, the page's (listResult).
+ * Not here: a kind's notices, kept as they are first shown (toldNotices).
  */
 function kindParts(t: Table) {
   const home = state.home;
@@ -919,10 +919,9 @@ function listNotices(t: Table) {
  * do, then its reasons: app.ts Outcome), or else what a background pass could not do (any kind's), until a click or × ends them.
  */
 export function listResult(): HTMLElement[] {
-  // The last results of each kind's clicks (app.ts lastResult), the page's, not its segment's (kindParts): on the Library every
-  // kind's, whatever the segment (a run there is one, across kinds: app.ts placeNow); on a tool's tab its kind's.
-  const table = useTableShown(), kinds = state.page === 'library' ? KINDS : table?.kinds ?? [];
-  const kept = kinds.flatMap(kind => lastResult(kind) ?? []), result = kept[0], done = outcomeBand();
+  // The last results of the kinds the table lists (app.ts lastResult). The result itself, with its reasons, is the page's: on the
+  // Library one, whatever the segment (app.ts placeNow, outcomeShown).
+  const table = useTableShown(), kept = (table?.kinds ?? []).flatMap(kind => lastResult(kind) ?? []), result = kept[0], done = outcomeBand();
   const background = !table || result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed' && !state.dismissed.has(problemKey(entry)));
   const lines = [...background, ...kept.flatMap(each => each.results).filter(keptBack)].map(problem => `${problem.item}${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`)
     .concat(done ? state.outcome?.reasons ?? [] : []);
