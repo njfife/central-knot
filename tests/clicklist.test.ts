@@ -611,6 +611,17 @@ test('Turn these off where one skill’s Off is refused as stale: the result cou
   assert.deepEqual([main.restored, app.outcome?.text, flashRequests.has('skills-notes'), flashRequests.has('skills-spare')], [['off-skills-notes'], 'Undone: notes is as before.', true, false]);
 });
 
+test('Turn these off where every kind refuses: nothing is turned off, and the result says each kind by its name with its reason', async t => {
+  onSkills();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'mcp', key: 'github' }], { on: true });
+  turnTheseOff([itemRow('skills', 'notes'), itemRow('mcp', 'github')]);
+  await settled();
+  await main.pass({ stopped: 'The skills record is damaged.', results: [], writes: 0 });
+  await main.pass({ stopped: 'The MCP record is damaged.', results: [], writes: 0 });
+  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.act, flashRequests.size],
+    ['Skills: The skills record is damaged. MCP servers: The MCP record is damaged.', [], undefined, 0]);
+});
+
 test('An Undo one of whose History entries is gone says not all of it could be undone, and puts back the rest', async t => {
   onSkills();
   homeWith(t, [{ kind: 'skills', key: 'notes' }]);
