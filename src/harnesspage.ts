@@ -118,27 +118,26 @@ function instructionCount(tool: HarnessId): Count {
 }
 
 /**
- * How many plugins a tool has installed, the one count a tool's card here and the Overview's tools table say: the marketplace
- * read's installs there with the plugins the tool itself records (what its "from plugins" items come from), so one from a
- * marketplace the Plugins page doesn't list is no "none installed" beside its own skills; `unsure` when the read couldn't tell
- * for some. No count while the marketplaces are read (`reading`), after a read that failed, or where the tool takes none.
+ * How many plugins a tool has installed, the one count a tool's card and Plugins tab here and the Overview's tools table say: the
+ * plugins the tool itself records, read with the home from its files (HomeView pluginItems: no marketplace is read or fetched for
+ * it), with those the marketplace read finds installed once one is on hand. `unsure`: not all of it is known: the tool's record
+ * can't be read (HomeView pluginRecordsUnread), or the marketplace read couldn't tell for some. None where it takes no plugins.
  */
-export type PluginsInstalled = { state: 'reading' } | { state: 'failed' } | { state: 'unsupported' } | { state: 'read'; count: number; unsure: boolean };
+export type PluginsInstalled = { state: 'unsupported' } | { state: 'read'; count: number; unsure: boolean };
 export function pluginsInstalled(tool: HarnessId): PluginsInstalled {
-  const plugins = pluginsIn(tool);
-  if (plugins.state !== 'read') return plugins;
+  if (!takesPlugins(tool)) return { state: 'unsupported' };
+  const read = market.view ? installsIn(market.view, tool) : null;
   const recorded = (state.home?.pluginItems ?? []).filter(install => install.tool === tool).map(install => `${install.plugin}@${install.marketName}`);
-  const count = new Set([...plugins.installed.map(({ entry, plugin }) => `${plugin.name}@${entry.name}`), ...recorded]).size;
-  return { state: 'read', count, unsure: plugins.unknown.length + plugins.unreadable.length > 0 };
+  const count = new Set([...(read?.installed ?? []).map(({ entry, plugin }) => `${plugin.name}@${entry.name}`), ...recorded]).size;
+  const unsure = !!state.home?.pluginRecordsUnread?.includes(tool) || (!!read && read.unknown.length + read.unreadable.length > 0);
+  return { state: 'read', count, unsure };
 }
 
 function pluginCount(tool: HarnessId): Count {
   const plugins = pluginsInstalled(tool);
-  if (plugins.state === 'reading') return { value: '…', faint: true };
-  if (plugins.state === 'failed') return { value: '—', note: 'couldn’t be read', faint: true };
   if (plugins.state === 'unsupported') return { value: '—', note: pluginsNotHandled(tool), faint: true };
   const { count, unsure } = plugins;
-  return { value: count ? String(count) : '', note: [count ? 'installed' : 'none installed', unsure ? 'some not known' : ''].filter(Boolean).join(' · '), faint: !count };
+  return { value: count ? String(count) : '', note: [count ? 'installed' : unsure ? 'not known' : 'none installed', count && unsure ? 'some not known' : ''].filter(Boolean).join(' · '), faint: !count };
 }
 
 /** What needs a look on a card, each a link: differing copies (to that kind's tab, showing only those) and read problems (to About). */
@@ -248,7 +247,7 @@ function tabs(home: HomeView, tool: HarnessId) {
   // A count, a dash where the tool doesn't use that kind (as on its card), or nothing (Instructions, About, still reading).
   // Kinds count copies here and elsewhere directly: tabs redraw on every Find keystroke, so no differing-copies work here.
   const count = (tab: HarnessTab): { shown: number | '—'; elsewhere: number } | undefined => {
-    if (tab === 'plugins') { const plugins = pluginsIn(tool); return plugins.state === 'read' ? { shown: plugins.installed.length, elsewhere: 0 } : plugins.state === 'unsupported' ? { shown: '—', elsewhere: 0 } : undefined; }
+    if (tab === 'plugins') { const plugins = pluginsInstalled(tool); return { shown: plugins.state === 'read' ? plugins.count : '—', elsewhere: 0 }; }
     if (!isKind(tab)) return undefined;
     if (!supports(home, tab, tool)) return { shown: '—', elsewhere: 0 };
     const facts = kindSource(home, tab).facts;
@@ -325,10 +324,14 @@ function pluginsTab(tool: HarnessId) {
   const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${pluginTitle(plugin)}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];
   const unsureNote = unsure.length ? h('p.tools-note', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span', {}, `Not known for ${plural(unsure.length, 'plugin')}: ${unsure.join(' ')} `,
     button({ variant: 'link', size: 'micro', label: `Open ${pageNames.plugins}`, id: 'harness-plugins-unsure', onclick: () => showPage('plugins') }))) : null;
-  if (!plugins.installed.length) return page(unsureNote, emptyState('puzzle', `No plugins in ${names[tool]}`, `None of the plugins in your marketplaces is installed in ${names[tool]}.`,
+  // Counted too (pluginsInstalled), with no page on the Plugins page: those the tool records from a marketplace no tool lists.
+  const unlisted = (state.home?.pluginItems ?? []).filter(install => install.tool === tool && !install.listed);
+  const unlistedNote = unlisted.length ? h('p.tools-note', { id: 'harness-plugins-unlisted' }, icon('info', 14, 'tone-muted'),
+    `Installed from a marketplace not on ${pageNames.plugins}: ${andList(unlisted.map(install => `${install.plugin} (${install.marketName})`))}.`) : null;
+  if (!plugins.installed.length && !unlisted.length) return page(unsureNote, emptyState('puzzle', `No plugins in ${names[tool]}`, `None of the plugins in your marketplaces is installed in ${names[tool]}.`,
     button({ variant: 'outline', label: 'Browse plugins', id: 'harness-browse-plugins', onclick: () => showPage('plugins') })));
-  return page(h('p.tools-note', {}, icon('info', 14, 'tone-muted'), `Installed in ${names[tool]} from your marketplaces. Open one to uninstall it, or to install it in another tool.`),
-    unsureNote, h('div.harness-plugins', { role: 'list' }, plugins.installed.map(pluginRow)));
+  return page(plugins.installed.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), `Installed in ${names[tool]} from your marketplaces. Open one to uninstall it, or to install it in another tool.`) : null,
+    unsureNote, unlistedNote, plugins.installed.length ? h('div.harness-plugins', { role: 'list' }, plugins.installed.map(pluginRow)) : null);
 }
 
 /** Where the tool's files are, how it was found, and which other products read them. */

@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, asksWhichCopy, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, switchLabel, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, waitsForSync, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, switchLabel, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyOn, kindSource } from '../src/itemrow.ts';
@@ -310,4 +310,16 @@ test('The same sentences in another kind’s words name that kind and its copies
     'Put plan back in every tool, each page as it was',
   ]);
   assert.ok(said.every(line => !/\bagent|\bfile\b/.test(line ?? '')), 'no word of the agents’ own');
+});
+
+test('What waits for the next pass (waitsForSync: the Overview card’s changes waiting to sync): nothing where every copy is current, or where the one missing can’t be given; an edit to take in; a copy to write; a copy deleted by hand, the only one too, where nothing is left to remove', () => {
+  const all = { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }, onlyInCodex = item({ applied: { 'codex-cli': 'b' } }), notCodex = item({ applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
+  // `cannot`: a tool the plan would write to that can't take it (librarypass.ts copiesOf: an MCP transport it can't hold, say).
+  const waits = (hashes: LibraryRow['hashes'], agent = item(), edited: HarnessId[] = [], cannot: LibraryRow['cannot'] = {}) =>
+    waitsForSync({ on: agent.on, edited, cannot, plan: row(hashes, {}, agent).plan });
+  const cannotTake = { 'codex-cli': 'Codex can’t run a server over this transport.' };
+  assert.deepEqual([waits(all), waits({ 'claude-cli': 'b', 'copilot-cli': 'b' }, notCodex, [], cannotTake), waits({ ...all, 'codex-cli': 'c' }, item(), ['codex-cli']),
+    waits({ 'claude-cli': 'b', 'copilot-cli': 'b' }, notCodex), waits({ 'claude-cli': 'b', 'copilot-cli': 'b' }), waits({}, onlyInCodex)], [false, false, true, true, true, true]);
+  // The last waits as a hand deletion alone: it turns Off at the next pass, with no copy left to remove.
+  assert.deepEqual([row({}, {}, onlyInCodex).plan?.turnedOffBy, row({}, {}, onlyInCodex).plan?.remove], ['codex-cli', []]);
 });

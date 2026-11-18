@@ -2987,9 +2987,13 @@ if (wanted('overview')) {
   const top = () => a.run(`document.getElementById('overview-scroll')?.scrollTo(0, 0)`);
   /** Waits for a state the next pictures show; the run stops if it never comes, so no picture shows the wrong one. */
   const must = async (expression, ms, what) => { if (!(await waitFor(a, expression, ms))) throw new Error(`The Overview's tour waited in vain for ${what}; its usage line said: ${await a.run(`document.querySelector('#overview-usage')?.innerText`)}; the page: ${(await a.run(`document.querySelector('#overview-scroll')?.innerText ?? document.body.innerText`)).slice(0, 400)}`); };
+  // No tool, and a record that stops every write: why it can't be written is said too.
+  mkdirSync(join(HOME, '.central-knot'), { recursive: true });
+  writeFileSync(join(HOME, '.central-knot/sync.json'), '{ damaged');
   await a.click('#home-actual');
-  await must(`!!document.querySelector('#overview-choose-home')`, 15000, 'a home with no tool');
-  await atEverySize('no-tools', 'This computer’s home with no tool in it: one sentence and the way on; no cards, usage line or table', true);
+  await must(`!!document.querySelector('#overview-choose-home') && !!document.querySelector('#overview-stopped')`, 15000, 'a home with no tool and a damaged record');
+  await atEverySize('no-tools', 'This computer’s home with no tool in it, and its record damaged: one sentence and the way on, then why nothing can be written; no cards, usage strip or table', true);
+  rmSync(join(HOME, '.central-knot/sync.json'));
   const old = new Date(Date.now() - 40 * DAY), ago = days => new Date(Date.now() - days * DAY).toISOString();
   mkdirSync(join(HOME, '.local/bin'), { recursive: true });
   for (const [name, version] of [['claude', '2.1.322 (Claude Code)'], ['copilot', '1.0.4'], ['codex', 'codex-cli 0.142.3'], ['pi', '0.68.1'], ['opencode', '1.14.2']]) writeFileSync(join(HOME, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
@@ -3077,13 +3081,16 @@ if (wanted('overview')) {
   renameSync(join(HOME, '.pi/agent/sessions-away'), join(HOME, '.pi/agent/sessions'));
   await a.click('#overview-collect-usage');
   await must(`!/can’t say/.test(document.querySelector('#overview-mcp-usage')?.textContent ?? '') && /Usage collected/.test(document.querySelector('#overview-usage .overview-usage-text:not(.band-unshown)')?.textContent ?? '')`, 30000, 'the history back');
-  // A problem waiting: Copilot CLI's MCP file can't be read.
+  // A problem waiting: Copilot CLI's MCP file can't be read; and Claude Code's own record of its plugins can't either.
   writeFileSync(join(HOME, '.copilot/mcp-config.json'), '{ "mcpServers": { "github": ');
+  const installed = join(HOME, '.claude/plugins/installed_plugins.json'), installedText = readFileSync(installed, 'utf8');
+  writeFileSync(installed, '{');
   await refresh();
   await a.click('#nav-overview');
   await top();
-  await atEverySize('problem', 'A problem waiting: Copilot CLI’s MCP file couldn’t be read; it comes first, with the way to its page, and its MCP servers count 0 in the table', true);
+  await atEverySize('problem', 'A problem waiting: Copilot CLI’s MCP file couldn’t be read; it comes first, with the way to its page. In the table “?” for Copilot CLI’s MCP servers and for Claude Code’s plugins, whose record couldn’t be read, and the key says what “?” is; MCP servers says nothing of sync', true);
   rmSync(join(HOME, '.copilot/mcp-config.json'));
+  writeFileSync(installed, installedText);
   await refresh();
   // An update to install: found by Check for updates, then downloaded from the Overview's own button with a draft typed.
   releases.push({ tag: 'v0.7.1-alpha.1', zip, asset: 'Central-Knot-Alpha-0.7.1-mac-arm64.zip', bytesPerSecond: 400_000 });

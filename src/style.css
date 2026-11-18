@@ -848,6 +848,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .overview-lead { max-width: var(--measure); font-size: 14px; line-height: 1.5; color: var(--ink); }
 /* What needs you (overview.ts needsYou): a line each, close together. */
 .overview-needs { display: flex; flex-direction: column; gap: 8px; }
+/*
+ * The figures (what needs you, the cards, the usage strip, the tools) share one width, no more than 1100px, so their edges meet,
+ * a row's numbers stay near its name and the update's button near its words on a wide window.
+ */
+.overview-needs, .kind-cards, .overview-usage, .overview-tools { max-width: 1100px; }
 /* An update to install: the release and its notes, the Update button at the end. */
 .overview-update { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px;
   background: var(--surface); font-size: 13px; line-height: 1.5; color: var(--ink); }
@@ -878,35 +883,35 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .kind-card-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; padding: 2px 16px 0; font-size: 12.5px; line-height: 20px; color: var(--ink-soft); }
 .kind-card-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 /*
- * What the usage reading says of the kind: five lines, each one line high whatever it holds (empty, "…", a figure), so the
- * card is as high before a reading lands as after (overview.ts cardUsage). The three most used share columns: the label, the
- * name (shortened in the middle), the sessions.
+ * What the usage reading says of the kind (overview.ts cardUsage): room for five lines whatever it holds, so the card is as high
+ * before a reading lands as after. The three most used share columns: the label, the name (shortened in the middle), the
+ * sessions; a line across them (.kind-card-line) sizes none of them.
  */
-.kind-card-usage { display: flex; flex-direction: column; padding: 10px 16px 0; font-size: 12.5px; line-height: 20px; color: var(--ink-soft); }
-.kind-card-slot { height: 20px; margin: 0; white-space: nowrap; }
-.kind-card-top { display: grid; grid-template-columns: max-content minmax(0, max-content) max-content; column-gap: 8px; }
-.kind-card-top-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
+.kind-card-usage { display: grid; grid-template-columns: max-content minmax(0, max-content) 1fr; grid-template-rows: repeat(5, 20px); column-gap: 8px; align-content: start;
+  padding: 10px 16px 0; font-size: 12.5px; line-height: 20px; color: var(--ink-soft); }
+.kind-card-line { grid-column: 1 / -1; margin: 0; white-space: nowrap; }
+.kind-card-top-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; margin: 0; white-space: nowrap; }
 .kind-card-link { position: relative; z-index: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--accent-ink); font: inherit; cursor: pointer; text-align: left; }
 .kind-card-link:hover { text-decoration: underline; }
 .kind-card-top-name { display: flex; }
-/* The usage reading's line: its three sentences in one place (.band-stack), as high in each; boxed only when it failed. */
-/* Its words line up with the lines above; the box, when it shows, reaches into the page's left margin. */
-.overview-usage { margin-left: -12px; padding: 6px 11px; border: 1px solid transparent; border-radius: 10px; }
+/* The usage strip: its three sentences in one place (.band-stack), as high in each; boxed only when it failed, from the cards' left edge. */
+.overview-usage { padding: 6px 11px; border: 1px solid transparent; border-radius: 10px; }
 .overview-usage-failed { border-color: var(--line); background: var(--surface); }
 .overview-usage-text { display: block; max-width: var(--measure); padding-left: 22px; text-indent: -22px; font-size: 12.5px; line-height: 1.6; color: var(--ink-soft); }
 .overview-usage-text > svg.icon:first-child { display: inline-block; vertical-align: -2px; margin-right: 8px; }
 .overview-usage-text .btn { height: auto; padding: 0 2px; margin: 0 -2px; text-indent: 0; }
 /*
- * A row per managed tool, no wider than its figures need: the counts sit near the names on a wide window. The columns' widths
- * are fixed and the sessions cell keeps to one line, so no column or row moves when the sessions land; a tool's version goes
- * under its name where the column is narrow.
+ * A row per managed tool. The columns' widths are fixed and the sessions cell keeps to one line, so no column or row moves when
+ * the sessions land; the room left goes to the Tool column, where a tool's version goes under its name when it is narrow.
  */
-.overview-tools { display: flex; flex-direction: column; gap: 8px; max-width: 720px; }
+.overview-tools { display: flex; flex-direction: column; gap: 8px; }
 .tools-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
 .tools-table th, .tools-table td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; vertical-align: middle; }
 .tools-table tbody tr:last-child > * { border-bottom: 0; }
 .tools-table thead th { font-size: 11.5px; font-weight: 600; line-height: 1.3; color: var(--ink-soft); vertical-align: bottom; }
 .tools-table .num { width: 64px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* With room, each count's head ("MCP servers") on one line. */
+@container content (width >= 760px) { .tools-table .num { width: 100px; } }
 .tools-table thead th.num { white-space: normal; }
 .tools-table td.num { color: var(--ink); font-weight: 600; }
 .tools-table td.num.tone-faint { color: var(--ink-soft); font-weight: 400; }

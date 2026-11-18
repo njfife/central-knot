@@ -3370,7 +3370,7 @@ async function fewToolsFlow() {
     return;
   }
   same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
-  same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
+  same('its Overview says no tools were found, once, with another home to choose', [await a.text('.overview-lead'), await a.exists('#overview-choose-home')], ['No tools were found in this home.', true]);
   check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
   await fitsAtMinimum(a, 'a home with no tools');
@@ -4358,7 +4358,7 @@ async function syncEverythingFlow() {
   same('a notice no page has shown stays until shown: the sidebar names both passes’ notices for Skills', await unseenOnSkills(), '2 automatic changes: notes, fresh');
   await a.shot('everything-on');
   await a.click('#nav-overview');
-  check('Overview’s sync line says the rule in force', /edits spread between tools in seconds, and what turns up in a tool is taken in by Synchronize everything/.test(await a.text('.overview-more') ?? ''), await a.text('.overview-more'));
+  same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo.');
   await a.click('#nav-skills');
   same('on the Skills page notes and fresh are On and review stays found', await sectionsNow(a), [['on', ['fresh', 'notes']], ['found', ['review']]]);
   check('the Found heading says the rule in force: Synchronize everything leaves these, and how many wait for a choice', /Synchronize everything leaves these \(open a row to see why\)\. 1 waits for your choice of copy/.test(await foundNote() ?? ''), await foundNote());
@@ -5671,6 +5671,124 @@ esac
  * whose Undo puts every file back. A switch clicked while a reading is held (a named pipe among the session files) is carried out
  * before it lands, so no reading holds a click up: checked by order, not time, as a click and a reading slow each other on a busy machine.
  */
+/**
+ * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
+ * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
+ * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
+ * The lead never says nothing was found above a card that counts something, and why a home can't be written is said with no tool
+ * managed too. Made-up homes: Claude Code and Codex stand-ins, and a plugin from a marketplace no tool lists.
+ */
+async function overviewFlow() {
+  const home = join(scratch, 'overview-home'), data = join(scratch, 'overview-data'), real = join(scratch, 'overview-real');
+  const standIns = folder => { mkdirSync(join(folder, '.local/bin'), { recursive: true });
+    for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) writeFileSync(join(folder, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`, { mode: 0o755 }); };
+  standIns(home);
+  const [claude, codex] = [join(home, '.claude/skills'), join(home, '.codex/skills')];
+  for (const root of [claude, codex]) skill(root, 'notes');
+  skill(codex, 'review');
+  // kit, from a marketplace no tool lists, in Claude Code: checks only it brings, and review, which is Codex's own too.
+  writeClaudeInstall(home, 'orphan-market', 'kit', '1.0.0', { 'skills/checks/SKILL.md': text('checks'), 'skills/review/SKILL.md': text('review') });
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { docs: { command: 'docs' } } }));
+  writeFileSync(join(home, '.codex/config.toml'), '[mcp_servers.docs]\ncommand = "docs"\n');
+  for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  let a = await launch(data, [], real);
+  // Opening the Overview reads nothing beyond the home's view: no marketplace is read, so Central Knot's plugins record isn't started.
+  await wait(1500);
+  check('opening the Overview reads no marketplace: Central Knot’s plugins record isn’t started', !existsSync(join(home, '.central-knot/plugins.json')), existsSync(join(home, '.central-knot')) ? readdirSync(join(home, '.central-knot')) : []);
+  await a.click('#setup-no');
+  for (const [page, key] of [['skills', 'notes'], ['skills', 'review'], ['mcp', 'docs']]) { await a.click(`#nav-${page}`); await a.click(`#add-${key}`); }
+  await a.click('#nav-overview');
+  const cardSays = async kind => (await a.text(`.kind-card:has(#overview-${kind}) .kind-card-state`))?.trim() ?? null;
+  const claudeRow = () => a.all('.tools-table tr[data-tool="claude-cli"] td', 'e.textContent.trim()');
+  same('with every copy in step, each card says All in sync', [await cardSays('skills'), await cardSays('mcp')], ['All in sync', 'All in sync']);
+  // One count of plugins: kit is Claude Code's one plugin on the table and on its Plugins tab; the Skills card's "from plugins" is the chip's.
+  same('the table counts kit, Claude Code’s one plugin', (await claudeRow())[3], '1');
+  check('the Skills card counts from plugins what its page’s From plugins chip holds: checks, and review, which kit brings too', /· 2 from plugins/.test(await a.text('.kind-card:has(#overview-skills) .kind-card-summary') ?? ''), await a.text('.kind-card:has(#overview-skills) .kind-card-summary'));
+  await a.click('#overview-skills');
+  same('the Skills page’s From plugins chip holds 2', await a.run(`document.querySelector('.chip[data-tip="From plugins"] .chip-count')?.textContent`), '2');
+  await a.click('#nav-overview');
+  await a.click('#overview-tool-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && /Reading marketplaces/.test(await a.text('#harness-body') ?? ''); tries++) await wait(100);
+  const tab = await a.text('#harness-body') ?? '';
+  check('Claude Code’s Plugins tab counts kit too, from a marketplace no tool lists: never “No plugins”', (await a.text('#harness-tab-plugins'))?.includes('1') && !/No plugins in Claude Code/.test(tab) && /kit/.test(tab), [await a.text('#harness-tab-plugins'), tab]);
+  // A copy deleted by hand with Automatic sync off: the item turns off when sync runs, a change that waits.
+  await a.click('#nav-overview');
+  await a.click('#sync-switch');
+  rmSync(join(codex, 'notes'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  same('a copy deleted by hand, sync off: Skills waits for one change, not All in sync', await cardSays('skills'), '1 change waiting to sync');
+  skill(codex, 'notes');
+  await a.click('#header-refresh');
+  same('the copy back: All in sync again', await cardSays('skills'), 'All in sync');
+  await a.click('#sync-switch');
+  // Copies that differ: said once at the top, and the card says no "All in sync".
+  skill(claude, 'clash', text('clash', 'Claude Code’s way.'));
+  skill(codex, 'clash', text('clash', 'Codex’s way.'));
+  await a.click('#header-refresh');
+  same('a found skill whose copies differ: its line at the top, and the Skills card says nothing of sync', [await a.exists('#overview-skills-differ-line'), await cardSays('skills')], [true, null]);
+  rmSync(join(codex, 'clash'), { recursive: true, force: true });
+  // A tool's MCP file that can't be read: its problem at the top, "?" for its MCP servers, and no "All in sync" on MCP servers.
+  const claudeJson = readNow(join(home, '.claude.json'));
+  writeFileSync(join(home, '.claude.json'), '{ "mcpServers": ');
+  await a.click('#header-refresh');
+  const unreadMcp = [await a.exists('[id^="overview-mcp-problem-"]'), (await claudeRow())[1], await cardSays('mcp')];
+  writeFileSync(join(home, '.claude.json'), claudeJson);
+  // Claude Code's own record of its plugins can't be read: "?" for its plugins, and the key says what "?" is.
+  const installed = join(home, '.claude/plugins/installed_plugins.json'), installedText = readNow(installed);
+  writeFileSync(installed, '{');
+  await a.click('#header-refresh');
+  const unreadPlugins = [(await claudeRow())[3], ((await a.text('#overview-tools-key')) ?? '').split('?').length - 1];
+  writeFileSync(installed, installedText);
+  await a.click('#header-refresh');
+  same('Claude Code’s MCP file unread: its problem at the top, "?" for its MCP servers, and MCP servers says nothing of sync', unreadMcp, [true, '?', null]);
+  same('Claude Code’s plugin record unread: "?" for its plugins, and the key names "?" once', unreadPlugins, ['?', 1]);
+  same('no page errors, the Overview’s truths', a.pageErrors, []);
+  await a.quit();
+  // A most used name opens its row on the very first click, before its kind's page was ever drawn in this launch: an own skill, one
+  // whose copies differ (its question open), an own MCP server; then, in another home opened meanwhile, a plugin's skill.
+  skill(codex, 'clash', text('clash', 'Codex’s way.'));
+  const used = (folder, names) => { mkdirSync(join(folder, '.claude/projects/-work'), { recursive: true });
+    writeFileSync(join(folder, '.claude/projects/-work/used.jsonl'), JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(),
+      message: { content: names.map(name => (name.startsWith('mcp__') ? { type: 'tool_use', name, input: {} } : { type: 'tool_use', name: 'Skill', input: { skill: name } })) } }) + '\n'); };
+  used(home, ['notes', 'clash', 'mcp__docs__start']);
+  // This computer's home, opened second: its only item is a plugin's skill, used once.
+  standIns(real);
+  mkdirSync(join(real, '.claude/skills'), { recursive: true });
+  writeClaudeInstall(real, 'solo', 'kit', '1.0.0', { 'skills/one/SKILL.md': text('one') });
+  used(real, ['kit:one']);
+  a = await launch(data, [], real);
+  const openTop = async (kind, name) => {
+    const link = `#overview-${kind}-usage .middle[title=${JSON.stringify(name)}]`;
+    for (let tries = 0; tries < 100 && !(await a.exists(link)); tries++) await wait(100);
+    await a.click(`#${await a.run(`document.querySelector(${JSON.stringify(link)})?.closest('button')?.id`)}`);
+    const open = await a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key');
+    await a.click('#nav-overview');
+    return open;
+  };
+  same('launched, nothing visited: a most used own skill opens its row on the first click', await openTop('skills', 'notes'), ['notes']);
+  same('one whose copies differ opens too, with its copy question', await openTop('skills', 'clash'), ['clash']);
+  same('a most used MCP server, its page never drawn either, opens its row', await openTop('mcp', 'docs'), ['docs']);
+  await a.click('#home-actual');
+  for (let tries = 0; tries < 100 && !(await a.exists('#overview-skills-usage .middle[title="one"]')); tries++) await wait(100);
+  same('another home whose only item is a plugin’s skill: the card counts it, and the lead never says nothing was found',
+    [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /Nothing found/.test(await a.text('.overview-lead') ?? '')], ['1 skill · none synced · 1 from plugins', true, false]);
+  same('there, after Skills was drawn in the first home, a most used plugin’s skill opens its row on the first click', await openTop('skills', 'one'), ['kit@solo/one']);
+  same('no page errors, the most used links', a.pageErrors, []);
+  await a.quit();
+  // A home with no tool, whose record stops every write: why it can't be written is said with no tool managed too.
+  const stopped = join(scratch, 'overview-stopped'), stoppedData = join(scratch, 'overview-stopped-data');
+  mkdirSync(join(stopped, '.central-knot'), { recursive: true });
+  writeFileSync(join(stopped, '.central-knot/sync.json'), '{ damaged');
+  mkdirSync(stoppedData, { recursive: true });
+  writeFileSync(join(stoppedData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: stopped } }));
+  a = await launch(stoppedData, [], real);
+  same('no tool and a damaged record: the Overview says no tools were found, and why nothing can be written', [await a.exists('#overview-choose-home'), /damaged/.test(await a.text('#overview-stopped') ?? '')], [true, true]);
+  same('no page errors, the Overview with no tool', a.pageErrors, []);
+  await a.quit();
+}
+
 async function usageFlow() {
   const home = join(scratch, 'usage-home'), data = join(scratch, 'usage-data'), ago = days => new Date(Date.now() - days * 86_400_000);
   mkdirSync(join(home, '.local/bin'), { recursive: true });
@@ -5978,7 +6096,7 @@ async function usageFlow() {
   for (let tries = 0; tries < 200 && !reading(); tries++) await wait(25);
   const places = () => a.run(`[...document.querySelectorAll('.kind-card, .tools-table tr, .tools-table thead th, #overview-usage')].map(e => { const box = e.getBoundingClientRect(); return [box.left, box.top, box.width, box.height].map(Math.round).join(' '); })`);
   const usageSaid = async () => (await a.text('#overview-usage .overview-usage-text:not(.band-unshown)'))?.trim();
-  const cardLines = () => a.all('#overview-skills-usage .kind-card-slot', 'e.textContent');
+  const cardLines = () => a.all('#overview-skills-usage > p', 'e.textContent');
   const sessionsSaid = () => a.all('.tools-table td.tools-sessions', 'e.textContent');
   const placesWhile = {}, placesAfter = {};
   for (const [width, height] of [[1280, 800], [860, 600]]) { await sizeTo(a, width, height); placesWhile[width] = await places(); }
@@ -5987,8 +6105,8 @@ async function usageFlow() {
   for (let tries = 0; tries < 100 && !/^Usage collected/.test(await usageSaid() ?? ''); tries++) await wait(100);
   await a.settle();
   for (const [width, height] of [[860, 600], [1280, 800]]) { await sizeTo(a, width, height); placesAfter[width] = await places(); }
-  same('launched with nothing clicked, the Overview holds each figure’s room while the first reading runs: the line says it is collecting, the Skills card … where its count will be, every sessions cell …',
-    whileRunning, ['Collecting usage statistics: reading your tools’ session history on this computer. Nothing leaves it.', ['Used in the last 30 days: …', '', '', '', ''], ['…']]);
+  same('launched with nothing clicked, the Overview holds each figure’s room while the first reading runs: the line says it is collecting, the Skills card … where its count will be (its five lines’ room held by style.css), every sessions cell …',
+    whileRunning, ['Collecting usage statistics: reading your tools’ session history on this computer. Nothing leaves it.', ['Used in the last 30 days: …'], ['…']]);
   same('the figures land by themselves, and no card, table row, header cell or the usage line moved, at 1280 and at 860', [placesAfter[1280], placesAfter[860]], [placesWhile[1280], placesWhile[860]]);
   same('the Skills card says the reading as its page does: 3 used, the No use seen chip’s 1 (delta; bravo is Off) as a link, and the three most used by sessions, equal ones by name; the line, when',
     [await cardLines(), await a.text('#overview-skills-unused'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [['Used in the last 30 days: 3', 'No use seen in 30 days: 1', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], 'No use seen in 30 days: 1', true]);
@@ -6047,7 +6165,7 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group passes on its own.
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, overviewFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];

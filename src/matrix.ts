@@ -42,7 +42,7 @@ import { market } from './pluginstate.ts';
 import type { PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { pageOfPart, partOfPage, samePart } from './pluginstatus.ts';
-import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
+import { cellWords, fromAPlugin, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
 
 const names = toolNames as Record<Tool, string>;
@@ -65,7 +65,6 @@ const pluginTag = (plugin: string, title: string) => h('span.row-tag.row-part', 
 /** A table's plugin rows for the home on screen. */
 const plugged = (t: Table) => (!state.home ? { rows: [] as PluginRow[], unread: [] } : pageRows(state.home, t.kind));
 /** A row of a plugin's: an item some tool has through the plugin itself. */
-const fromAPlugin = (skill: ItemRow) => Object.keys(skill.plugin ?? {}).length > 0;
 
 /** The item a tool has through a plugin on a row of the person's own, with that plugin as the tool has it installed. */
 function itemThrough(skill: ItemRow, tool: Tool): PluginItemAt | undefined {
@@ -332,14 +331,17 @@ function startFresh(table: View, harness: Tool | undefined) {
 /**
  * The one way into a kind's own page from elsewhere (the Overview's cards and lines, a plugin's page): drawn afresh (startFresh),
  * narrowed by `filter` ("Copies differ", "No use seen in 30 days"), or with the row `key` open and scrolled into view (a plugin's
- * own row too: it shows under All). Its first draw there keeps both.
+ * own row too: it shows under All). The row is opened once the page is drawn, as its own click opens it (markOpen): so the first
+ * draw in another home, which drops that home's open row, can't drop it, and a row whose copies differ keeps its question.
  */
 export function openKind(which: PageKind, { filter, key }: { filter?: Filter; key?: string } = {}) {
   startFresh(views[which], undefined);
   if (filter) views[which].filter = filter;
-  views[which].comparing = key && rowId(which, key);
   showPage(which);
-  if (key) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
+  if (!key) return;
+  markOpen(views[which], rowId(which, key));
+  rerender();
+  requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
 }
 /** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name (a plugin's page names its parts so). */
 export function openItem(which: PageKind, name: string) {
@@ -634,11 +636,11 @@ function pluginDock(t: Table, row: PluginRow) {
 }
 
 /** Opening a row's details brings them into view, so a choice below the fold is not missed. */
+/** A row opened (or, `id` none, closed) on this visit: a copy question it asks stays until the page is left (itemsTable). */
+const markOpen = (view: View, id: string | undefined) => Object.assign(view, { comparing: id, openedOn: state.visit, openedAt: state.said.seq });
 function openRow(t: Table, row: ItemRow | PluginRow) {
   const id = idOf(row), key = row.key, view = t.view;
-  view.comparing = view.comparing === id ? undefined : id;
-  view.openedOn = state.visit;
-  view.openedAt = state.said.seq;
+  markOpen(view, view.comparing === id ? undefined : id);
   rerender();
   // Details that run past the table's bottom are brought into view with their row at its top, so the row's name and the
   // details' close button are in view too. Docked details sit beside the table and are always in view.
