@@ -146,6 +146,9 @@ test('Each hook event comes with the commands its hooks run, as written, in Clau
     await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'check-bash' }] }], Stop: [] } }));
     const only = componentsFrom(await pluginContents(root, {}, root));
     assert.deepEqual([only.hooks, only.sessionTextHooks, sessionText(only)], [true, false, [[], [], []]]);
+    // A plugin in Copilot CLI's form alone: its start-of-session hook can add text too.
+    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: './start.sh' }] } }));
+    assert.equal(componentsFrom(await pluginContents(root, {}, root)).sessionTextHooks, true);
   } finally { await cleanup(); }
 });
 
