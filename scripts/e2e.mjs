@@ -916,7 +916,7 @@ async function practiceFlow() {
   same('every skill is found: under Found, with Add where a switch would be, saying what a click does', [await sectionsNow(a, 'skills'), await a.all('.ov-row[data-key] .add-item', 'e.textContent'), await a.exists('.ov-row[data-key] .switch'), await a.run(`document.querySelector('#${rowPart('add', 'skills', 'notes')}').title`)],
     [[['found', ['notes', 'release-notes', 'review', 'standup']]], ['Add', 'Add', 'Add', 'Add'], false, 'Add notes to Central Knot and put it in every tool']);
   same('a found row’s name starts where an On row’s does: Add is as wide as the switch', await a.run(`document.querySelector('#${rowPart('add', 'skills', 'notes')}').getBoundingClientRect().width`), 32);
-  same('no column heads, and no filter chips while All would be alone with Copies differ', [await a.exists('.ov-head'), await a.all('.chip', 'e.dataset.tip')], [false, ['All', 'Copies differ']]);
+  same('no column heads, and the chips are toggles: Copies differ alone, no All chip', [await a.exists('.ov-head'), await a.all('.chip', 'e.dataset.tip')], [false, ['Copies differ']]);
   same('marks say what each tool has', [await cellState(a, 'skills', 'release-notes', 'claude-cli'), await cellState(a, 'skills', 'release-notes', 'copilot-cli'), await cellState(a, 'skills', 'review', 'copilot-cli')], ['own-copy', 'none', 'own-copy']);
   same('a found row’s only controls are its Add and its chevron: marks and Copies differ are only said', await a.all(`.ov-row[data-key="${rowPart('', 'skills', 'review')}"] button`, 'e.id'), [rowPart('add', 'skills', 'review'), rowPart('open', 'skills', 'review')]);
   check('copies differ is flagged', await a.exists(`#${rowPart('decide', 'skills', 'review')}`));
@@ -3717,7 +3717,7 @@ async function openCodeFlow() {
   await pictures(a, 'opencode-harnesses');
   check('OpenCode’s card names its CLI and its desktop app, each with its version, once', card.includes('Installed · 1.19.5; OpenCode desktop 2.2.5') && !card.includes('(OpenCode'), card);
   const pages = await a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
-  check('with OpenCode beside Claude Code, Agents and Plugins are pages', pages.includes('agents') && pages.includes('plugins'), pages);
+  check('with OpenCode beside Claude Code, the Library and Plugins are pages', pages.includes('library') && pages.includes('plugins'), pages);
   await openKind(a, 'skills');
   // OpenCode loads Claude Code's skills folder and the shared .agents folder as well as its own (measured on both of its lines).
   same('OpenCode has its own skill, Claude Code’s and the shared folder’s; Claude Code only its own',
@@ -4617,7 +4617,7 @@ async function syncEverythingFlow() {
   // The read after that pass reaches the page: the sidebar's dot names both skills' notices, neither shown yet.
   const unseenOnLibrary = () => a.run(`document.querySelector('#nav-library .nav-unseen')?.title ?? ''`);
   for (let tries = 0; tries < 40 && !/fresh/.test(await unseenOnLibrary()); tries++) await wait(100);
-  same('a notice no page has shown stays until shown: the sidebar names both passes’ notices for the Library', await unseenOnLibrary(), '2 automatic changes: notes, fresh');
+  same('a notice no page has shown stays until shown: the sidebar’s Library names both passes’ notices, of every kind', await unseenOnLibrary(), '3 automatic changes: notes, fresh, files');
   await a.shot('everything-on');
   await a.click('#nav-overview');
   same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo where it can be undone.');
@@ -4718,27 +4718,24 @@ async function firstSetupFlow() {
   await a.shot('setup-question');
   await a.click('#setup-yes');
   for (let tries = 0; tries < 40 && !(await a.exists('#walkthrough')); tries++) await wait(100);
-  same('Yes stores the rule on, takes in what it may (notes is in Codex now), and opens the walkthrough on Skills at 1 of 2, review, its latest copy (Codex’s) the main button',
+  same('Yes stores the rule on, takes in what it may (notes is in Codex now), and opens the walkthrough on the Library at 1 of 2, review, its latest copy (Codex’s) the main button',
     [record().syncEverything, readNow(join(codex, 'notes/SKILL.md')), await a.text('#walkthrough .walk-place'), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')} .version-cta-main`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')}`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')} .version-cta-main`)],
     [true, text('notes', 'Take notes.'), ' · 1 of 2', true, true, false]);
   check('the band after Yes says what it took in and what the one Undo covers', /^Synchronize everything is on: it took in 2 items, and 2 items with copies that differ wait for your choice\. One Undo in History takes back what it takes in; a copy you choose has its own Undo\./.test(await a.text('[data-outcome] .band-text') ?? ''), await a.text('[data-outcome] .band-text'));
   same('beside Skip, the walkthrough says it changes no copy', await a.text('#walk-note'), 'Skip changes no copy.');
   await fitsAtMinimum(a, 'the walkthrough at its first item');
   await a.shot('setup-walkthrough');
-  // The row the walkthrough is at, opened too: its copy question and the walkthrough's are drawn at once, their controls apart.
-  await a.click(`#${rowPart('open', 'skills', 'review')}`);
+  // The row the walkthrough is at, which it opens: its copy question and the walkthrough's are drawn at once, their controls apart.
   same('with the row the walkthrough is at opened, its question and the walkthrough’s share no id', [await a.exists(`.ov-row.open[data-key="${rowPart('', 'skills', 'review')}"]`), await sharedIds(a)], [true, []]);
-  await a.click(`#${rowPart('open', 'skills', 'review')}`);
   await a.click(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')}`);
-  same('a choice is the row’s own click: review is taken in with Codex’s copy, and the walkthrough says the next is on MCP servers',
-    [readNow(join(claude, 'review/SKILL.md')), await a.text('#walkthrough .band-text')], [text('review', 'Review hard.'), 'Next: docs, on MCP servers.']);
-  await a.click('#walk-go-on');
+  same('a choice is the row’s own click: review is taken in with Codex’s copy, and the walkthrough goes on to docs on the same page, its row the one open',
+    [readNow(join(claude, 'review/SKILL.md')), await a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key')], [text('review', 'Review hard.'), [rowPart('', 'mcp', 'docs')]]);
   same('at docs, 2 of 2: its entries have no dates to go by, nothing is preselected, and Use the latest for the rest can’t be used',
     [await a.text('#walkthrough .walk-place'), await a.text('#walk-note'), await a.exists('#walkthrough .version-cta-main'), await a.run(`document.querySelector('#walk-use-latest').disabled`)], [' · 2 of 2', 'No dates to go by: choose one, or skip it. Skip changes no copy.', false, true]);
   await fitsAtMinimum(a, 'the walkthrough at an item with no dates');
   await a.click('#walk-skip');
   same('skipped, the last: the band says what still waits and where, and docs stays found, its entries as they were',
-    [await a.text('#walkthrough .band-text'), (await sectionsNow(a, 'mcp')).find(([place]) => place === 'found')?.[1]], ['1 skipped item still waits for a choice, its copies as they are: docs on MCP servers. Each row still asks.', ['docs']]);
+    [await a.text('#walkthrough .band-text'), (await sectionsNow(a, 'mcp')).find(([place]) => place === 'found')?.[1]], ['1 skipped item still waits for a choice, its copies as they are: docs. Each row in the Library still asks.', ['docs']]);
   await a.click('#nav-overview');
   same('the Overview’s line counts what waits and starts choosing again, the last item having been skipped', [await a.text('#setup-choosing'), await a.exists('#setup-question')], ['1 found item has copies that differ and waits for your choice. Choose copies', false]);
   await a.click('#setup-choose');
@@ -5669,13 +5666,16 @@ fs.writeFileSync(record, JSON.stringify(now));
   /** While `hold` is there, Claude Code's stand-in waits before any plugin command: a plugin click stays running, however long. */
   const hold = () => writeFileSync(join(home, 'hold'), ''), letGo = () => rmSync(join(home, 'hold'), { force: true });
   /**
-   * Holds the page's run of clicks open, however far apart the clicks after it land: a click on plug-03's skill on Skills, whose
-   * command waits (hold), so each click made after it waits its turn behind it. Let go, it fails (the stand-in has no disable)
-   * and changes nothing. It ends on MCP servers, the list at its top.
+   * Holds the page's run of clicks open, however far apart the clicks after it land: a click on plug-03's skill on Claude Code's
+   * Skills tab (a place of its own, so not a click of the Library's run), whose command waits (hold), so each click made after it
+   * waits its turn behind it. Let go, it fails (the stand-in has no disable) and changes nothing. It ends on the Library's MCP
+   * servers, the list at its top.
    */
   const holdRun = async () => {
     hold();
-    await openKind(a, 'skills');
+    await a.click('#nav-harnesses');
+    await a.click('#harness-claude-cli');
+    await a.click('#harness-tab-skills');
     await a.run(`document.querySelector('.ov-row[data-key$="/plug-03-skill"] .switch').click()`);
     await a.run(openKindNow('mcp'));
     for (let tries = 0; tries < 50 && !(await a.exists(`#${rowPart('switch', 'mcp', 'srv-30')}`)); tries++) await wait(100);
@@ -6198,7 +6198,7 @@ async function overviewFlow() {
   await wait(1500);
   check('opening the Overview reads no marketplace: Central Knot’s plugins record isn’t started', !existsSync(join(home, '.central-knot/plugins.json')), existsSync(join(home, '.central-knot')) ? readdirSync(join(home, '.central-knot')) : []);
   await a.click('#setup-no');
-  for (const [page, key] of [['skills', 'notes'], ['skills', 'review'], ['mcp', 'docs']]) { await a.click(`#nav-${page}`); await a.click(`#${rowPart('add', page, key)}`); }
+  for (const [page, key] of [['skills', 'notes'], ['skills', 'review'], ['mcp', 'docs']]) { await openKind(a, page); await a.click(`#${rowPart('add', page, key)}`); }
   await a.click('#nav-overview');
   const cardSays = async kind => (await a.text(`.kind-card:has(#overview-${kind}) .kind-card-state`))?.trim() ?? null;
   const claudeRow = () => a.all('.tools-table tr[data-tool="claude-cli"] td', 'e.textContent.trim()');
@@ -6459,7 +6459,7 @@ async function usageFlow() {
   await fitsAtMinimum(a, 'Skills with usage collected and its figures');
   await a.shot('usage-read');
   // The chip: standup and spare, old enough with no use seen; fresh, 2 days old, left out and counted; idle, used in Copilot CLI, not in it.
-  same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['All', null], ['No use seen in 30 days', '2']]);
+  same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['No use seen in 30 days', '2']]);
   await a.click('.chip[data-tip="No use seen in 30 days"]');
   same('with the chip on, the table holds standup and spare', await sectionsNow(a, 'skills'), [['on', ['standup', 'spare']]]);
   same('its band leads with how many, what Turn these off does and the profile it ends; then, fainter, that a use elsewhere isn’t seen, how far back each tool’s history goes, what Codex doesn’t always record and the new one left out',
@@ -6493,14 +6493,14 @@ async function usageFlow() {
     [[[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [false, false]]);
   for (const key of ['standup', 'spare']) await a.clickInRun(`#${rowPart('switch', 'skills', key)}`);
   same('turned on again in the same run, each row is said as the run left it', await a.text('#header [data-outcome] .band-text'), '2 skills are on: standup and spare.');
-  // Turn these off, with standup already pinned on the chip's list: every row takes its own group, and the chip falls back to All.
+  // Turn these off, with standup already pinned on the chip's list: every row takes its own group, and the chip lets go.
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
   await a.click('#turn-unused-off');
-  // With nothing left for a chip to narrow, All is alone and no chip is drawn.
-  same('Turn these off lets the pinned rows go: every row under its own heading, and the page back on All', [await sectionsNow(a, 'skills'), (await chipOn()) ?? 'All'], [[['on', ['notes', 'idle', 'fresh']], ['off', ['standup', 'spare']]], 'All']);
+  // With nothing left for a chip to narrow, no chip is on or drawn.
+  same('Turn these off lets the pinned rows go: every row under its own heading, and no chip on', [await sectionsNow(a, 'skills'), (await chipOn()) ?? 'none'], [[['on', ['notes', 'idle', 'fresh']], ['off', ['standup', 'spare']]], 'none']);
   await a.click('#outcome-undo');
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
-  same('its Undo puts spare back; standup is turned on again by its switch', [await switchOn(a, 'skills', 'standup'), await switchOn(a, 'skills', 'spare'), await chipOn()], [true, true, 'All']);
+  same('its Undo puts spare back; standup is turned on again by its switch', [await switchOn(a, 'skills', 'standup'), await switchOn(a, 'skills', 'spare'), (await chipOn()) ?? 'none'], [true, true, 'none']);
   // A reading that fails shows nothing from the one before, and opens the band to say so (a dev run only: it reaches main to make the request fail).
   const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
   if (main) {
@@ -6610,7 +6610,7 @@ async function usageFlow() {
     await a.settle();
     same('Sort by name, the chip on: charlie, used just now, stays where it was when the reading lands, no row moves, the chip counts what Turn these off would turn off, and Put in order is offered',
       [(await sectionsNow(a, 'skills'))[0][1], await tops(), (await figures()).charlie, await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), await a.exists('#put-in-order')],
-      [['bravo', 'charlie', 'delta'], chipTops, 'used just now · 1 session', [['All', null], ['No use seen in 30 days', '2']], true]);
+      [['bravo', 'charlie', 'delta'], chipTops, 'used just now · 1 session', [['No use seen in 30 days', '2']], true]);
     await a.click('#put-in-order');
     same('Put in order lets the held rows go: charlie leaves the chip’s list, and the link goes', [(await sectionsNow(a, 'skills'))[0][1], await a.exists('#put-in-order')], [['bravo', 'delta'], false]);
     await a.click('#usage-line-close');
@@ -6726,8 +6726,244 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // (launch) and realHomeFlow's preview-only branch reads the History window practiceFlow set there. crashFlow comes last in its
 // group, as it deletes its copy's HOME. Inside a copy the flows run in this order on the HOME seeded for it (seedHome), so each
 // group passes on its own.
+/**
+ * The Library: one page lists every kind (STEP-LIB2.md, its "What must hold" and the worked examples of its settled point 9).
+ * One home with Claude Code and Copilot CLI: one row in the sidebar; Find across kinds and the kind switch's counts with Find
+ * and with a chip on; a skill and an agent both named review and a server switched in a row, the segment changed before they
+ * finish (9a); No use seen across kinds with a skill only Claude Code has, an agent a plugin also brings and a server whose
+ * record can't be read (9b); the Overview's card in. A second home: History's link in, and first setup's walkthrough with Find
+ * hiding its rows, a skill's Files and back (9c). The Practice copy: a plugin's page's link to its item.
+ */
+async function libraryFlow() {
+  const ago = days => new Date(Date.now() - days * 86_400_000);
+  const homeWith = name => {
+    const home = join(scratch, name), data = join(scratch, `${name}-data`), real = join(scratch, `${name}-real`);
+    mkdirSync(join(home, '.local/bin'), { recursive: true });
+    for (const [tool, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.']]) {
+      writeFileSync(join(home, '.local/bin', tool), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
+      chmodSync(join(home, '.local/bin', tool), 0o755);
+    }
+    for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
+    writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+    return { home, data, real, claude: join(home, '.claude/skills'), copilot: join(home, '.copilot/skills') };
+  };
+  const agentText = (name, body) => `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\n${body}\n`;
+  const agent = (home, tool, name, content) => {
+    const file = join(home, tool === 'claude-cli' ? `.claude/agents/${name}.md` : `.copilot/agents/${name}.agent.md`);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, content);
+    return file;
+  };
+  const row = (kind, key) => `.ov-row[data-key="${rowPart('', kind, key)}"]`;
+  const done = async a => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+  // The kind switch's counts, and the rows of each kind the list shows (a plugin's own rows too).
+  const counts = a => a.run(`Object.fromEntries([...document.querySelectorAll('.kind-seg')].map(seg => [seg.id.replace('library-kind-', ''), seg.querySelector('.kind-seg-count').textContent]))`);
+  const listed = async a => { const ids = await a.all('.ov-row[data-key]', 'e.dataset.key'); return Object.fromEntries(['skills', 'mcp', 'agents'].map(kind => [kind, ids.filter(id => id.startsWith(rowPart('', kind, ''))).length])); };
+  const find = (a, text) => a.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const pressed = a => a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id.replace('library-kind-', '') ?? null`);
+  const opened = a => a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key');
+  /** Pictures (with --shots) at 860×600 and 1280×800, then back to the full size. */
+  const pictures = async (a, name) => { if (!shots) return; for (const [width, height] of [[860, 600], [1280, 800]]) { await sizeTo(a, width, height); await a.shot(`library-${name}-${width}`); } await fullSize(a); };
+
+  // ---------- One home of every kind ----------
+  const A = homeWith('library-home'), market = join(scratch, 'market-library');
+  writeMarket(market, 'ck-test-market');
+  for (const name of ['review', 'notes', 'idle']) skill(A.claude, name);
+  skill(A.copilot, 'notes');
+  agent(A.home, 'claude-cli', 'review', agentText('review', 'You review code.'));
+  // release-reviewer: Copilot CLI's own agent, which Claude Code has through the plugin release-helper, the same file.
+  const reviewerText = readFileSync(join(market, 'plugins/release-helper/agents/release-reviewer.md'), 'utf8');
+  agent(A.home, 'copilot-cli', 'release-reviewer', reviewerText);
+  writeClaudeInstall(A.home, 'ck-test-market', 'release-helper', '0.4.1', { 'agents/release-reviewer.md': reviewerText });
+  writeFileSync(join(A.home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' }, github: { type: 'http', url: 'https://github.example.test/mcp' } } }, null, 2)}\n`);
+  // Claude Code keeps sessions, so it can tell: notes was used 2 days ago, nothing else.
+  mkdirSync(join(A.home, '.claude/projects/-work'), { recursive: true });
+  writeFileSync(join(A.home, '.claude/projects/-work/s1.jsonl'), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'notes' } }] }, timestamp: ago(2).toISOString() })}\n`);
+  const record = kind => join(A.home, `.central-knot/${kind}.json`);
+  let a = await launch(A.data, [], A.real);
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  check('Synchronize everything takes every kind in', await until(() => ['skills:idle', 'mcp:github', 'agents:release-reviewer'].every(entry => { const [kind, key] = entry.split(':'); return !!JSON.parse(readNow(record(kind)) || '{"items":{}}').items[key]; })));
+  await a.quit();
+  // idle, github and release-reviewer taken in 40 days ago, the rest today; idle kept out of Copilot CLI, which loses its copy.
+  for (const [kind, key] of [['skills', 'idle'], ['mcp', 'github'], ['agents', 'release-reviewer']]) {
+    const kept = JSON.parse(readFileSync(record(kind), 'utf8'));
+    kept.items[key].versions = kept.items[key].versions.map(version => ({ ...version, at: ago(40).toISOString() }));
+    if (key === 'idle') kept.items[key].except = ['copilot-cli'];
+    writeFileSync(record(kind), JSON.stringify(kept, null, 2));
+  }
+  rmSync(join(A.copilot, 'idle'), { recursive: true, force: true });
+  a = await launch(A.data, [], A.real);
+  same('one Library row in the sidebar, where the three kinds had theirs', await a.all('#nav .nav-row', 'e.id.replace("nav-", "")'), ['overview', 'harnesses', 'library', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
+  await openKind(a, 'all');
+  const total = (await counts(a)).all;
+  same('the sidebar’s total is the kind switch’s All, and each segment counts the rows of its kind listed',
+    [await a.text('#nav-library .nav-count'), await counts(a)], [total, Object.fromEntries([['all', total], ...Object.entries(await listed(a)).map(([kind, count]) => [kind, String(count)])])]);
+  // Find looks through every kind at once; a segment it leaves at 0 stays.
+  await find(a, 'review');
+  same('Find across kinds: each segment counts what it leaves, MCP servers at 0 still there', [await listed(a), await counts(a)], [{ skills: 1, mcp: 0, agents: 2 }, { all: '3', skills: '1', mcp: '0', agents: '2' }]);
+  await find(a, '');
+  check('usage is collected when the home opens, and the No use seen chip shows', await until(() => a.exists('#chip-unused')));
+  await a.click('#chip-unused');
+  same('with the chip on, each segment counts what it leaves: a skill, a server and an agent', [await listed(a), await counts(a)], [{ skills: 1, mcp: 1, agents: 1 }, { all: '3', skills: '1', mcp: '1', agents: '1' }]);
+  await a.click('#chip-unused');
+  // 9a: the skill review, the agent review and the server docs switched off in a row, and the segment changed to Skills before
+  // the clicks are done.
+  const ids = [rowPart('', 'skills', 'review'), rowPart('', 'agents', 'review'), rowPart('', 'mcp', 'docs')];
+  await a.run(`window.flashedRows = []; window.flashWatch = new MutationObserver(() => { for (const row of document.querySelectorAll('.ov-row.row-flash')) if (!flashedRows.includes(row.dataset.key)) flashedRows.push(row.dataset.key); }); flashWatch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })`);
+  const [was, now] = await a.run(`(() => {
+    const top = id => Math.round(document.querySelector('.ov-row[data-key="' + id + '"]').getBoundingClientRect().top), ids = ${JSON.stringify(ids)};
+    const was = ids.map(top);
+    for (const id of ids) document.getElementById('switch-' + id).click();
+    const now = ids.map(top);
+    document.getElementById('library-kind-skills').click();
+    return [was, now];
+  })()`);
+  await done(a);
+  same('three rows clicked in a row keep their places, and the segment changed mid-run makes no second run: one result, three counted, each review with its kind',
+    [now, await pressed(a), await a.text('#header [data-outcome] .band-text')], [was, 'skills', '3 items are off: review (skill), review (agent) and docs.']);
+  await a.click('#library-kind-all');
+  same('the right rows flash: the skill’s on Skills, then the agent’s and the server’s on All', (await a.run('window.flashedRows')).sort(), [...ids].sort());
+  await a.run('window.flashWatch.disconnect()');
+  await a.click('#outcome-undo');
+  await done(a);
+  same('one Undo puts all three back on', await a.all(ids.map(id => `#switch-${id}`).join(', '), 'e.getAttribute("aria-checked")'), ['true', 'true', 'true']);
+  // Two rows of one name are opened apart, one at a time.
+  await a.click(`#${rowPart('open', 'skills', 'review')}`);
+  await a.click(`#${rowPart('open', 'agents', 'review')}`);
+  same('the skill and the agent named review open apart, one row at a time', await opened(a), [rowPart('', 'agents', 'review')]);
+  // Another segment closes an opened row it doesn't list; back on All, the row stays closed.
+  await a.click('#library-kind-skills');
+  await a.click('#library-kind-all');
+  same('a segment that doesn’t list the opened row closes it', await opened(a), []);
+  await fitsAtMinimum(a, 'the Library on All');
+  // A click's problem lines are its run's: on the Library they stay whatever the segment. notes's Off can't remove Claude Code's copy.
+  chmodSync(A.claude, 0o555);
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+  await done(a);
+  await a.click('#library-kind-mcp');
+  check('a click’s problem line stays in the header with another segment chosen', /notes \(Claude Code\)/.test(await a.text('#header .header-result') ?? ''), await a.text('#header'));
+  chmodSync(A.claude, 0o755);
+  await a.click('#library-kind-all');
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+  await done(a);
+  // 9b: Turn these off across kinds, the MCP record damaged just before the click.
+  await a.click('#chip-unused');
+  check('its band counts the three in one noun', (await a.text('#unused-band .usage-lead') ?? '').startsWith('3 items with no use seen in the last 30 days.'), await a.text('#unused-band'));
+  await pictures(a, 'unused-across-kinds');
+  const mcpRecord = readFileSync(record('mcp'), 'utf8');
+  writeFileSync(record('mcp'), '{');
+  await a.run(`document.getElementById('turn-unused-off').click()`);
+  await done(a);
+  const said = await a.text('#header .header-result') ?? '';
+  same('Turn these off: idle is off in the tool it was in, release-reviewer is left to its row, and the server’s stop is named',
+    [existsSync(join(A.claude, 'idle')), existsSync(join(A.home, '.copilot/agents/release-reviewer.agent.md')), /idle/.test(said), /MCP servers: /.test(said)], [false, true, true, true]);
+  check('the MCP record’s stop is said once above the list, led by its kind', await until(async () => (await a.all('.band-danger .band-text', 'e.textContent')).some(line => line.startsWith('MCP servers: '))), await a.text('.bands'));
+  await pictures(a, 'turned-off-a-kind-stopped');
+  writeFileSync(record('mcp'), mcpRecord);
+  await a.click('#outcome-undo');
+  await done(a);
+  same('its Undo puts idle back in Claude Code only, where it was', [readNow(join(A.claude, 'idle/SKILL.md')), existsSync(join(A.copilot, 'idle'))], [text('idle'), false]);
+  // The Overview's MCP servers card opens the Library on MCP servers.
+  await a.click('#nav-overview');
+  await a.click('#overview-mcp');
+  same('the Overview’s MCP servers card opens the Library with MCP servers chosen', [await a.text('.page-title'), await pressed(a)], ['Library', 'mcp']);
+  await pictures(a, 'from-overview-card');
+  // A tool's page under Harnesses keeps a tab per kind, that tool first, with no kind switch.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  for (const tab of ['skills', 'agents']) {
+    await a.click(`#harness-tab-${tab}`);
+    same(`Claude Code’s ${tab} tab lists that kind only, with no kind switch`, [await a.exists('.kind-switch'), (await listed(a))[tab] > 0, Object.entries(await listed(a)).filter(([kind]) => kind !== tab).every(([, count]) => count === 0)], [false, true, true]);
+    await pictures(a, `harness-tab-${tab}`);
+  }
+  same('no page errors, one home of every kind', a.pageErrors, []);
+  await a.quit();
+
+  // ---------- 9c: first setup's walkthrough on the one page ----------
+  const B = homeWith('library-setup');
+  const saved = (path, hours) => utimesSync(path, ago(hours / 24), ago(hours / 24));
+  saved(join(skill(B.claude, 'review', text('review', 'Review gently.')), 'SKILL.md'), 48);
+  saved(join(skill(B.copilot, 'review', text('review', 'Review hard.')), 'SKILL.md'), 2);
+  saved(agent(B.home, 'claude-cli', 'review', agentText('review', 'You review code.')), 48);
+  saved(agent(B.home, 'copilot-cli', 'review', agentText('review', 'You review code, harder.')), 2);
+  const b = await launch(B.data, [], B.real);
+  await openKind(b, 'agents');
+  await find(b, 'zzz');
+  await b.click('#nav-history');
+  await b.click('#history-open-library');
+  same('History’s empty state opens the Library on All, Find let go', [await b.text('.page-title'), await pressed(b), await b.run(`document.querySelector('#find').value`)], ['Library', 'all', '']);
+  await pictures(b, 'from-history');
+  // Two empty states apart: none of a kind here, and nothing Find leaves.
+  await b.click('#library-kind-mcp');
+  same('a segment whose kind has none here says so, with its own hint', await b.text('.empty-title'), 'No MCP servers here yet');
+  await b.click('#library-kind-all');
+  await find(b, 'zzz');
+  same('Find leaving nothing says so', await b.text('.empty-title'), 'Nothing matches');
+  await b.click('#nav-overview');
+  await b.click('#setup-yes');
+  check('Yes opens the walkthrough', await until(() => b.exists('#walkthrough')));
+  same('the walkthrough opens the skill review’s row on the Library, Find let go since it hid the row',
+    [await b.text('.page-title'), await b.run(`document.querySelector('#find').value`), await b.text('#walkthrough .walk-place'), await opened(b)], ['Library', '', ' · 1 of 2', [rowPart('', 'skills', 'review')]]);
+  await pictures(b, 'walkthrough-1-of-2');
+  await b.click('#walk-skip');
+  same('Skip goes on to the agent of the same name: its row is the one open', [await b.text('#walkthrough .walk-place'), await opened(b)], [' · 2 of 2', [rowPart('', 'agents', 'review')]]);
+  await pictures(b, 'walkthrough-2-of-2');
+  // On a segment that doesn't list the item's kind, the band says what is next and leads to its row.
+  await b.click('#library-kind-skills');
+  same('on Skills, the band names the agent next, and Go on leads to its row on All', [await b.text('#walkthrough .band-text'), await b.exists('#walk-go-on')], ['Next: review (agent).', true]);
+  await b.click('#walk-go-on');
+  same('Go on: All, the agent’s row open', [await pressed(b), await opened(b)], ['all', [rowPart('', 'agents', 'review')]]);
+  await b.click(`#${rowPart('walk-use', 'agents', 'review', 'copilot-cli')}`);
+  await done(b);
+  same('the agent’s latest copy chosen: Claude Code has it, and the skipped skill still waits', [readNow(join(B.home, '.claude/agents/review.md')).includes('harder'), (await b.text('#walkthrough .band-text'))?.includes('1 skipped item still waits for a choice')], [true, true]);
+  await b.click('#walk-leave');
+  same('no page errors, first setup on the Library', b.pageErrors, []);
+  await b.quit();
+
+  // ---------- A plugin's page in, and that skill's Files: the Practice copy, with issue-tracker's skill triage an item in Pi ----------
+  const c = await launch(join(scratch, 'library-practice-data'), ['--practice-copy']);
+  const practice = await c.run(`document.querySelector('.status-home').title`);
+  same('the marketplace is added', await c.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  // Answered (No), the home has a sync record, which the move of a plugin's old parts waits for.
+  await c.click('#nav-overview');
+  await c.click('#setup-no');
+  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  await writeOldParts(practice, market, 'ck-test-market', 'issue-tracker', 'pi-cli', { skills: { triage: {} } });
+  await openKind(c, 'agents');
+  await c.click('#header-refresh');
+  check('one look moves the parts into the library', await until(() => !existsSync(join(practice, '.central-knot/plugin-parts.json'))));
+  await find(c, 'zzz');
+  await c.click('#nav-plugins');
+  if (await c.exists('#plugin-back')) await c.click('#plugin-back');
+  await c.click('[id^="popen-"][id$="-issue-tracker"]');
+  check('the plugin’s page lists its items', await until(() => c.exists('.plugin-part-link')), await c.text('.plugin-page'));
+  await c.click('.plugin-part-link');
+  same('a plugin’s item link opens the Library on its kind, Find let go, its row open', [await c.text('.page-title'), await pressed(c), await c.run(`document.querySelector('#find').value`), await opened(c)],
+    ['Library', 'skills', '', [rowPart('', 'skills', 'triage')]]);
+  await pictures(c, 'from-plugin-page');
+  // Its Files and back, from All (a list long enough to scroll): the Library as it was, its segment, Find, open row and scroll place.
+  await sizeTo(c, 860, 600);
+  await c.click('#library-kind-all');
+  await find(c, 'e');
+  const top = () => c.run(`Math.round(document.querySelector('#table-library-all').scrollTop)`);
+  await c.run(`document.querySelector('#table-library-all').scrollTop = 80`);
+  const before = await top();
+  await c.click(`#${rowPart('files', 'skills', 'triage')}`);
+  same('Files shows the skill beside the list of skills', [await c.exists('#skills-list'), await c.text('#skill-detail h2')], [true, 'triage']);
+  await c.shot('library-files-860');
+  await c.click('#skills-table');
+  same('Back from Files: the Library as it was, its segment, Find, open row and scroll place', [await pressed(c), await c.run(`document.querySelector('#find').value`), await opened(c), await top()], ['all', 'e', [rowPart('', 'skills', 'triage')], before]);
+  check('the list was scrolled', before > 0, before);
+  await c.shot('library-files-back-860');
+  await fullSize(c);
+  same('no page errors, a plugin’s page in', c.pageErrors, []);
+  await c.quit();
+}
+
 const groups = [
-  [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
+  [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow, libraryFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, overviewFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],

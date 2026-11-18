@@ -47,7 +47,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh'
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
 const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, whyKindReadOnly, whyReadOnly,
-  loadHome, queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
+  loadHome, problemKey, queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
@@ -676,7 +676,7 @@ test('An Undo one of whose History entries is gone says not all of it could be u
 test('A skill and an agent both named review, and a server, switched on one page: one run, three counted, each review with its kind, each row flashed, and one Undo puts back all three, newest first', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'review' }, { kind: 'agents', key: 'review' }, { kind: 'mcp', key: 'github' }]);
-  // Three kinds clicked where the page is one place (the Library will be): one run, whatever each row's kind.
+  // Three kinds clicked on the Library, one place whatever its segment: one run, whatever each row's kind.
   flip('review', false);
   flip('review', false, undefined, 'agents');
   flip('github', false, undefined, 'mcp');
@@ -688,6 +688,8 @@ test('A skill and an agent both named review, and a server, switched on one page
   await main.pass(offMade('mcp', 'github'));
   assert.deepEqual(main.sent, ['review off, seen on', 'agent review off', 'server github off']);
   assert.equal(app.outcome?.text, '3 items are off: review (skill), review (agent) and github.');
+  // The names it says, which a moved Undo says too (undoMoved), each review with its kind.
+  assert.deepEqual(app.outcome?.items, ['review (skill)', 'review (agent)', 'github']);
   assert.deepEqual(['skills-review', 'agents-review', 'mcp-github'].map(id => flashRequests.has(id)), [true, true, true]);
   // Each kind's last result, which its problem lines are read from, holds its own clicks' results alone.
   assert.deepEqual((['skills', 'agents', 'mcp'] as const).map(kind => lastResult(kind)?.results.map(entry => entry.item)), [['review'], ['review'], ['github']]);
@@ -890,7 +892,12 @@ test('× on the run’s result closes its problem lines too', async () => {
   assert.deepEqual([lastLines(), market.problem], [[], undefined]);
 });
 
-test('× on an item page’s result closes what its click could not do too', () => {
+test('A background problem closed with its × is remembered by its kind too: a skill’s and an agent’s of one name and reason are two', () => {
+  const failed = { item: 'review', harness: 'claude-cli', outcome: 'failed', message: 'Could not write.' } as const;
+  assert.notEqual(problemKey({ ...failed, of: 'skills' }), problemKey({ ...failed, of: 'agents' }));
+});
+
+test('× on an item list’s result closes what its click could not do too', () => {
   start();
   app.outcome = { page: 'library', text: 'docs is on in Claude Code.' } as typeof app.outcome;
   app.mcpResult = { results: [{ item: 'docs', harness: 'codex-cli', outcome: 'failed', message: 'Could not write.' }], writes: 0 } as unknown as typeof app.mcpResult;

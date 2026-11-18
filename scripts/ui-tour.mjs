@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, about 1,700 pictures over about forty minutes on the Mac. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), plugin-text (a plugin's instruction files and the hooks that can add text to sessions), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, library (the Library on All and each kind at five sizes), skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), plugin-text (a plugin's instruction files and the hooks that can add text to sessions), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
@@ -213,6 +213,34 @@ if (wanted('shell')) {
   await a.click('#home-actual'); if (await a.has('#nav-library')) await openKind(a, 'skills');
   await shot(a, 'this-macs-home', 'Clicked "This Mac\'s home" ("This computer\'s home" off macOS) at the bottom left. (In this tour the "real home" is an empty throwaway folder: only tools installed on this machine are found there.)');
   await a.click('#home-fixture'); await a.click('#nav-overview'); await shot(a, 'back-to-practice', 'Clicked "Practice copy" to go back, then "Overview".');
+}
+
+// ---------- The Library ----------
+// One page for every kind (STEP-LIB2.md): All and each kind at five sizes, dark and light; at 860×600 the toolbar with Find
+// filled, the sidebar a rail and open; a row opened and docked beside the list.
+if (wanted('library')) {
+  begin('library');
+  for (const kind of ['all', 'skills', 'mcp', 'agents']) {
+    await openKind(a, kind);
+    for (const [width, height] of [[860, 600], [1280, 800], [1316, 822], [1728, 1080], [2560, 1440]]) {
+      await a.size(width, height);
+      for (const theme of ['dark', 'light']) { await a.theme(theme); await shot(a, `${kind}-${width}-${theme}`, `The Library on ${kind === 'all' ? 'All' : kind}, ${width}×${height}, ${theme}.`); }
+    }
+  }
+  await a.theme('dark');
+  await openKind(a, 'all');
+  await a.size(860, 600);
+  await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'notes'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await shot(a, 'toolbar-860', 'Typed "notes" in Find on All at 860×600: the kind switch keeps its words and counts what Find leaves.');
+  await a.click('#sidebar-toggle');
+  await shot(a, 'toolbar-860-sidebar-switched', 'Clicked the sidebar toggle: the same toolbar with the sidebar the other way (a rail, or open).');
+  await a.click('#sidebar-toggle');
+  await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.size(1728, 1080);
+  await a.click(`#${rowPart('open', 'skills', 'notes')}`);
+  await shot(a, 'docked-1728', 'Opened notes on All at 1728×1080: its details docked beside the list, the list’s kind marks and tool columns beside it.');
+  await a.click(`#${rowPart('open', 'skills', 'notes')}`);
+  await a.size(1280, 800);
 }
 
 // ---------- Skills ----------
@@ -865,7 +893,7 @@ if (wanted('profiles')) {
   await a.click('#nav-profiles');
   await atEverySize('empty', 'Clicked "Profiles" in the sidebar before any profile exists', true);
   for (const [page, keys] of [['skills', ['notes', 'standup', 'release-notes']], ['mcp', ['docs', 'files']], ['agents', ['code-reviewer', 'release-notes']]]) {
-    await a.click(`#nav-${page}`); await a.settle();
+    await openKind(a, page); await a.settle();
     for (const key of keys) { await turnOnRow(page, key); await switchOn(page, key); }
   }
   await a.click('#nav-profiles');
