@@ -164,7 +164,7 @@
 // REMOVED AT ITS SOURCE (`removedBy`, the one place it is decided; worked out at each look, never stored): an item that is Off,
 // linked to no source, has a version from a recorded source's link since it last came in from a tool (fromLinkSinceTakeIn; one
 // deleted and written again by hand is not the source's), and that source's last read of its kind doesn't hold its name (a
-// skill of that name there is no agent). That source's row on Sources and the item's row on its kind's page say so
+// skill of that name there is no agent). That source's row on Sources and the item's row in the Library say so
 // (sources.ts sourceFacts, which the Sources page reads too). The drop let the link go, so turning it On (its switch,
 // History's Turn it on, a profile) is the revert: it is no longer Off, and nothing says it any more.
 // Nor once the item is deleted, the source removed, or a read holds the name again, readable or not: unchanged here since, the

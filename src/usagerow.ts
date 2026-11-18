@@ -1,10 +1,10 @@
-// What a usage reading (types.ts UsageReading, read in main by usage.ts) says of one row on the Skills, MCP servers and Agents
+// What a usage reading (types.ts UsageReading, read in main by usage.ts) says of one row in the Library
 // pages, and of a home in sum. Pure, for the page: which names in each tool's history are a row's item, by that tool's spelling
 // rules (`spelledIn`, a row per tool, as usage.ts readers has); what each tool's history says of it (`toolSays`); the row's one
 // figure, its last use and how many sessions used it (`rowFigure`, for an item on its page: `figureFor`); the "No use seen in
 // 30 days" chip's rule (`noUseSeen`), with the items its Turn these off leaves to their own row (`leftToItsRow`); each tool's
 // sessions in the 30 days and how far back its history goes (`toolHistories`); and a reading in sum, every kind's rows by what
-// it says of them, its most used, and each tool's history (`usageSummary`, which the item pages' chip and Used column and the
+// it says of them, its most used, and each tool's history (`usageSummary`, which the item lists' chip and Used column and the
 // Overview read). The 30 days (`USAGE_DAYS`) are here, read by usage.ts too. A use seen
 // always counts; only a tool whose records are sure for the kind (types.ts UsageTells) can say that none was seen. Not here:
 // reading the history (usage.ts), when it is read (app.ts collectUsage), and the words and drawing (matrix.ts).
@@ -125,7 +125,7 @@ export function rowFigure(says: readonly ToolSays[], on: readonly HarnessId[]): 
 /** Every tool's figure for one item, in each tool the reading read (a use in a tool not managed here counts too). */
 export const allSay = (reading: UsageReading, kind: ItemKind, facts: UsageFacts): ToolSays[] =>
   reading.tools.flatMap(each => toolSays(reading, kind, facts, each.tool) ?? []);
-/** An item's figure on its kind's page: over every tool's, with `tools` (the kind's managed tools) the ones whose "none seen" counts where they have it on. */
+/** An item's figure in the Library: over every tool's, with `tools` (the kind's managed tools) the ones whose "none seen" counts where they have it on. */
 export const figureFor = (reading: UsageReading, kind: ItemKind, facts: UsageFacts, tools: readonly HarnessId[]) => rowFigure(allSay(reading, kind, facts), onIn(facts, tools));
 
 /** An item's newest use in any tool (ms), for the "Last used" order; undefined: none seen. */
@@ -170,10 +170,10 @@ export function toolHistories(reading: UsageReading, home: Pick<HomeView, 'sync'
   });
 }
 
-/** One row of the most used: its key on its kind's page (a plugin's own row's too: pluginrows.ts PluginRow key), its name, and the sessions within USAGE_DAYS that used it. */
+/** One row of the most used: its key in the Library (a plugin's own row's too: pluginrows.ts PluginRow key), its name, and the sessions within USAGE_DAYS that used it. */
 export interface MostUsed { key: string; name: string; sessions: number }
 /**
- * What a reading says of one kind's page. Over every row the page lists (its items, found and Off ones too, and a plugin's own
+ * What a reading says of one kind's rows. Over every row the page lists (its items, found and Off ones too, and a plugin's own
  * rows): `figured`, how many have a figure in their Used cell (used, or no use seen where a tool that has it on can tell; none:
  * no tool here can tell for this kind, and the page draws no Used column); `used`, the keys of those whose Used cell says used
  * within USAGE_DAYS, and `mostUsed`, the three used in the most sessions (equal ones by name). Over its items that are On and not
@@ -182,9 +182,9 @@ export interface MostUsed { key: string; name: string; sessions: number }
  * seen, which the chip leaves out too.
  */
 export interface KindUsage { figured: number; used: string[]; mostUsed: MostUsed[]; noUseSeen: string[]; tooNew: string[]; cantSay: string[]; foundNoneSeen: string[] }
-/** A reading in sum: each kind's page (KindUsage) and each tool's history (toolHistories). */
+/** A reading in sum: each kind's rows (KindUsage) and each tool's history (toolHistories). */
 export interface UsageSummary { kinds: Record<'skills' | 'mcp' | 'agents', KindUsage>; tools: ToolHistory[] }
-/** What a reading says of a home in sum (UsageSummary): what the item pages' rows and chip say, counted, for any page to show. */
+/** What a reading says of a home in sum (UsageSummary): what the item lists' rows and chip say, counted, for any page to show. */
 export function usageSummary(reading: UsageReading, home: HomeView): UsageSummary {
   const kindUsage = (which: 'skills' | 'mcp' | 'agents'): KindUsage => {
     const { facts, library, tools } = kindSource(home, which), kind = partOfPage[which];

@@ -62,7 +62,7 @@ function question(home: HomeView) {
       button({ variant: 'outline', label: 'No, I’ll add items myself', id: 'setup-no', disabled: acting(), attrs: { title: no, 'aria-describedby': 'setup-no-says' }, onclick: () => void answer(false) })));
 }
 
-/** A home that waits for Resume: Resume comes first (any click resumes, as on the item pages), and the question after it. */
+/** A home that waits for Resume: Resume comes first (any click resumes, as on the item lists), and the question after it. */
 const resumeFirst = (reason: string) => h('p.overview-line', { id: 'setup-resume' }, icon('circle-alert', 14, 'tone-warning'), `${reason} `,
   button({ variant: 'link', size: 'micro', label: 'Resume', id: 'setup-resume-button', disabled: acting(), onclick: () => void applyClick({ kind: 'skills', changes: [], items: [], rows: [], said: 'Resumed: sync carries on from the record as it is.' }) }),
   ' Then Central Knot asks whether to synchronize everything.');

@@ -5,7 +5,7 @@
 // or Off), when it was last read, why it couldn't be read if so, Check now and Remove; an item there the library holds deleted
 // has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace and Keep mine; an item the
 // source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts fromSource) has a line
-// with Turn on, its switch on its kind's page. Every line and click carries its item's kind (types.ts SourceName `kind`; ids
+// with Turn on, its switch in the Library. Every line and click carries its item's kind (types.ts SourceName `kind`; ids
 // too: source-merge-<id>-skill-<key>), which pluginstatus.ts pageOfPart maps to its page, and whose words (words.ts kindNouns)
 // the line says; a sentence about every source names the kinds a source brings (SourcesView `kinds`). Every state a row says
 // is the engine's (types.ts SourceNameState, and that fromSource); this page only words it. The field takes any GitHub or
@@ -63,7 +63,7 @@ export async function loadSources(): Promise<void> {
 // ---------- The clicks ----------
 
 /**
- * After a click that may have changed the library: the home read again, so each kind's page and every count follow, then the
+ * After a click that may have changed the library: the home read again, so the Library and every count follow, then the
  * band (what the click did, from `said`, with its one action, and Open on the page of the kind where something changed).
  */
 async function settle(result: SourceResult, said: Said | undefined) {
@@ -116,7 +116,7 @@ const onLine = (source: SourceView, name: SourceName, click: SourceRowClick) => 
   await settle(result, whatItDid(result, linkLabel(source.link), click === 'replace' ? { kind: name.kind, name: name.name ?? name.key } : undefined));
 });
 
-/** Turn on, on the line of an item its source removed: the same click as its switch on its kind's page, On (the revert: library.ts REMOVED AT ITS SOURCE). */
+/** Turn on, on the line of an item its source removed: the same click as its switch in the Library, On (the revert: library.ts REMOVED AT ITS SOURCE). */
 const turnOn = (fact: LibraryFacts, page: PageKind) => {
   const homeTools = state.home?.sync.managed ?? [];
   return applyClick({ kind: page, items: [fact.name], rows: [{ kind: page, key: fact.key }], changes: [{ ...asItIs(fact.key, state.home?.[page].library[fact.key]), on: true, seenOn: false }],
@@ -263,7 +263,7 @@ function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null
 }
 
 /**
- * An item this source removed (types.ts LibraryFacts fromSource `removed`), from its kind's page: what it is now, and Turn on,
+ * An item this source removed (types.ts LibraryFacts fromSource `removed`), from the Library: what it is now, and Turn on,
  * its revert.
  */
 function removedRow(fact: LibraryFacts, kind: ItemKind, locked: boolean) {

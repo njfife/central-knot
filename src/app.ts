@@ -127,11 +127,11 @@ export const state = {
   said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void } },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
-  /** The result whose problem lines are shown whole (Show all: matrix.ts problemLines): an item page's outcome, kept result or first background problem; Plugins' run or problem. */
+  /** The result whose problem lines are shown whole (Show all: matrix.ts problemLines): an item list's outcome, kept result or first background problem; Plugins' run or problem. */
   shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | undefined,
   /** What the tools' session history shows was used (usage.ts), for this home: collected when it opens and on Update usage statistics (collectUsage). */
   usage: pageData<UsageReading>(),
-  /** Whether the usage band shows above an item page's list (matrix.ts usageBand): opened by Update usage statistics and by a reading that fails, closed by its close button and when a home opens. */
+  /** Whether the usage band shows above an item list's list (matrix.ts usageBand): opened by Update usage statistics and by a reading that fails, closed by its close button and when a home opens. */
   usageBand: false,
   /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
   instructions: pageData<InstructionFile[]>(),
@@ -306,7 +306,7 @@ export const focusWhenDone = (id: string) => { focusAfterBusy = id; };
  * toggle take the reason as `disabled`): Refresh, Automatic sync, Turn these off, Resume, an opened row's controls, History's
  * actions, Profiles, the sources page (words.ts pageNames), Instructions, the Git repo, a tool's Manage switch, first setup's
  * choices, Settings' Synchronize everything, the Plugins page's other actions and the other-build screen. A row's switch or Add
- * (the item pages and Plugins) joins the list instead; Settings' own switches, which write the app's settings, stay on.
+ * (the item lists and Plugins) joins the list instead; Settings' own switches, which write the app's settings, stay on.
  * showActing marks body[data-busy] for the end-to-end checks and says held news when acting ends, before the finished draw.
  */
 export const acting = (): string | undefined => state.busy || (clickList.running ? 'Waits until the switches clicked are done.' : undefined);
@@ -433,7 +433,7 @@ export const askFlash = (id: string, until: number) => { if (!((flashRequests.ge
 // ---------- One switch per item ----------
 
 /**
- * One click on an item page: the changes it makes, the item names it concerns, and what the result says it did. A click is one
+ * One click on an item list: the changes it makes, the item names it concerns, and what the result says it did. A click is one
  * kind's: `kind` is the engine its changes are sent to, and each of `rows` is of it, both made from the same row(s) where it
  * names any (Turn these off makes one click per kind: matrix.ts turnTheseOff); `items` names its `rows`, in their order.
  */
@@ -471,18 +471,18 @@ export interface Click {
   undone?: string;
 }
 
-/** Each item page's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
+/** Each kind's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
 const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, home: string) => Promise<PassResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
   skills: { send: (...args) => api().applySkills(...args), keep: (results, notices) => { state.skillsResult = { results, writes: 0, notices }; } },
   mcp: { send: (...args) => api().applyServers(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
   agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
 };
-/** Each item page's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, listNotices). */
+/** Each kind's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, listNotices). */
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
 
 /**
  * Whether a click in this home is a Resume: the page shows it waiting for one (share.ts libraryGate `resume`). Sent with the
- * clicks that resume such a home, as Resume itself does: an item page's clicks (first setup's walkthrough's too), a tool's
+ * clicks that resume such a home, as Resume itself does: an item list's clicks (first setup's walkthrough's too), a tool's
  * Manage switch, Take over and Clear the switch. History's actions, a profile switch and Synchronize
  * everything's switch send nothing, and are refused there until Resume.
  */
@@ -600,7 +600,7 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], notIn: 
 });
 
 /**
- * An item page's click in the page's list (clicklist.ts): its row's name, the page it was made on (its run's place says which
+ * An item list's click in the page's list (clicklist.ts): its row's name, the page it was made on (its run's place says which
  * table there: placeNow), whether its row is On now (`isOn`, read from the view), and once carried out, what it did.
  */
 interface ItemTurn extends Turn { row: NonNullable<Turn['row']>; name: string; page: Page; isOn: () => boolean | undefined; done?: Done }
@@ -615,7 +615,7 @@ export const placeNow = () => (state.page === 'harnesses' ? `harnesses ${state.h
 const itemTurns = (run: Run) => clickList.turns.filter((turn): turn is ItemTurn => isItemTurn(turn) && turn.run === run);
 
 /**
- * A row's switch or Add on an item page (matrix.ts flip, pluginRowSwitch): its click joins the page's list and is carried out in
+ * A row's switch or Add on an item list (matrix.ts flip, pluginRowSwitch): its click joins the page's list and is carried out in
  * its turn, worked out then from the view as it is (`make`; none when nothing is left to change), so the page stays live
  * meanwhile. Its row is drawn in the state it asks for at once (clicklist.ts wantedOn). It joins the run on its table's place, or
  * starts one (clicklist.ts runAt); the run's clicks are said as one result (sayRun).
@@ -903,7 +903,7 @@ export const homeToolNames = (): string[] => homeTools().map(toolName);
 /** The tools an action touched (ids), as a sentence names them in the open home: "all 3 tools" or their names. */
 export const touchedToolsPhrase = (touched: string[]): string => toolsPhrase(touched, homeTools());
 
-/** × on a result: it goes, and with it what its click could not do (the item pages' last click's problems). */
+/** × on a result: it goes, and with it what its click could not do (the item lists' last click's problems). */
 export function closeResult() { endRun(); state.outcome = undefined; state.skillsResult = state.mcpResult = state.agentsResult = undefined; rerender(); }
 
 /**
@@ -1560,7 +1560,7 @@ let refreshOwed = false;
 let setAside: HomeView | undefined;
 /** Whether the home waits to be read once the page's run of clicks is done: a background refresh asked for meanwhile, or a plugin's click (oweHomeRead). */
 export const homeReadOwed = () => refreshOwed;
-/** A plugin's click changed what the item pages show: the home is read once at the run's end (clicklist.ts), not after each click. */
+/** A plugin's click changed what the item lists show: the home is read once at the run's end (clicklist.ts), not after each click. */
 export const oweHomeRead = () => { refreshOwed = true; };
 /**
  * The home read again by a Plugins action before it ends (pluginstate.ts readAgain), or at a run of clicks' end (clicklist.ts):

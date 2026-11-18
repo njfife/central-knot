@@ -53,7 +53,7 @@ const hasIt = (hold: Hold) => Object.keys((hold.kind === 'skill' ? hold.row?.loa
 const heldEverywhere = (hold: Hold) => !!hold.row && !hold.row.unseen && !hold.row.switchProblem && hasIt(hold).length > 0
   && hasIt(hold).every(tool => hold.listed.includes(tool) && offIn(hold, tool));
 
-/** Format 1's holds, each with the row its kind's page reads now (skills by key, servers by their name's key). */
+/** Format 1's holds, each with the row the Library reads now (skills by key, servers by their name's key). */
 function holdsOf(offByProfile: unknown, skills: LibraryView, servers: LibraryView): Hold[] {
   return Object.entries(record(offByProfile) ?? {}).flatMap(([id, tools]): Hold[] => {
     const listed = (Array.isArray(tools) ? tools : []).filter((tool): tool is HarnessId => typeof tool === 'string');

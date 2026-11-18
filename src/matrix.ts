@@ -333,7 +333,7 @@ const newView = () => ({
   readingVersion: undefined as { id: string; index: number } | undefined,
   /** The harness whose page this view was last drawn on (undefined: the kind's own page). */
   shownFor: undefined as Tool | undefined,
-  /** What the Skills page list is narrowed to. */
+  /** What the Files view's list of skills is narrowed to (its own Find). */
   listFind: '',
   /** The row whose Delete from Central Knot is waiting for its confirming click. */
   confirmDelete: undefined as string | undefined,
@@ -479,7 +479,7 @@ export const problemsBand = (problems: DestinationResult[]) => h('div.band', { r
 /** Names shown as names, so a server called "files" does not read as a word in the sentence. */
 const nameList = (items: string[]) => items.flatMap((item, index) => [index ? (index === items.length - 1 ? ' and ' : ', ') : '', h('strong.item-name', {}, item)]).filter(part => part !== '');
 
-/** Where an item's details are drawn: under its row, docked beside the table, or in the Skills page's Files view. */
+/** Where an item's details are drawn: under its row, docked beside the table, or in the Library's Files view. */
 type Placement = 'row' | 'dock' | 'files';
 
 /** An item whose copies differ between tools, so the person chooses one (never one held as it is). */
@@ -1566,7 +1566,7 @@ function row(t: Table, skill: ItemRow) {
 
 // ---------- Usage, collected when a home opens and on Update (app.ts collectUsage; usagerow.ts says what it means for a row) ----------
 
-/** The usage reading on show: the last one collected for this home, kept while another runs; none after a reading that failed. The item pages and the Overview read it. */
+/** The usage reading on show: the last one collected for this home, kept while another runs; none after a reading that failed. The item lists and the Overview read it. */
 export const usageOnShow = () => (state.usage.state === 'failed' ? undefined : state.usage.data);
 /** A home's first reading runs (none on show yet): what a reading fills holds its room meanwhile, here and on the Overview. */
 export const firstReadingRuns = () => state.usage.state === 'reading' && !state.usage.data;
@@ -1753,7 +1753,7 @@ const usageElsewhere = (t: Table, skill: ItemRow) => usageOf(t, skill).filter(ea
 
 // ---------- The order of the rows under each heading ----------
 
-/** The flags (flags.ts) that put the rows of the Skills, MCP servers and Agents pages by last updated, or by last used: one choice for the three. */
+/** The flags (flags.ts) that put the Library's rows by last updated, or by last used: one choice, kept. */
 const BY_UPDATED = 'ck-items-by-last-updated', BY_USED = 'ck-items-by-last-used';
 /** The order of the rows under each heading (itemrow.ts inOrder): the one chosen, on a kind's own page (by Last used, a row with no use seen goes by name); by name on a harness's. */
 const chosenOrder = (t: Table): RowOrder => (t.tool ? 'name' : readFlag(BY_USED) ? 'used' : readFlag(BY_UPDATED) ? 'updated' : 'name');
@@ -1998,7 +1998,7 @@ function toolbarState(t: Table) {
   return null;
 }
 
-// ---------- Skills page ----------
+// ---------- The Library's Files view ----------
 
 /** The skill whose row was last scrolled into view, so the list moves only when the selection changes. */
 let revealed: string | undefined;

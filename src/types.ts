@@ -405,7 +405,7 @@ export interface Change {
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, and what is not as it asked. */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'>; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
- * What sync did on its own, told once on its kind's page: to one item (ItemNotice), the found items Synchronize everything
+ * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
  * took in, in one pass (TakenInNotice), or what a plugin did to one of its items (PluginItemNotice). Each is keyed by `history`.
  */
 export type SyncNotice = ItemNotice | TakenInNotice | PluginItemNotice;
@@ -844,7 +844,7 @@ export interface UsageReading { at: string; tools: ToolUsage[] }
 // ---------- A kind on Central Knot's library (library.ts): its page's view ----------
 
 /**
- * A library kind's page (agents.ts agentsView): every item in the library and every one found in a managed harness, read
+ * A library kind as the Library reads it (agents.ts agentsView): every item in the library and every one found in a managed harness, read
  * the way a pass reads them, so each mark says what the next pass will do. The page reads it through itemrow.ts kindSource.
  */
 export interface LibraryView {
@@ -864,7 +864,7 @@ export interface LibraryView {
   notices: SyncNotice[];
 }
 
-/** One row of a library kind's page: what each managed harness holds of the item and, for one in the library, what the next pass does. */
+/** One row of a library kind in the Library: what each managed harness holds of the item and, for one in the library, what the next pass does. */
 export interface LibraryFacts {
   key: string;
   name: string;

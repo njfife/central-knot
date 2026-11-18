@@ -622,8 +622,8 @@ function partsOffIn(tool: PluginTool, text: string, plugin: string, marketplace:
 }
 
 /**
- * Each plugin a tool has installed with what its copy holds, read once per pass or view (`context.reads`): the Skills,
- * MCP servers and Agents pages' "Through a plugin" boxes and their "From plugins" rows both ask.
+ * Each plugin a tool has installed with what its copy holds, read once per pass or view (`context.reads`): the
+ * Library's "Through a plugin" boxes and their "From plugins" rows both ask.
  */
 export const installedCopies = (context: PluginContext, tool: PluginTool): Promise<InstalledCopyOf[]> => once(context, `installed-copies:${tool}`, async () => {
   const switches = (await readOrNull(switchFileOf(context, tool))) ?? '';
@@ -678,8 +678,8 @@ export async function linkedToPlugin(home: string, items: Record<string, Pick<Li
  * What each of `tools` has through its installed plugins, of one kind: by tool, then by the item's key on its page
  * (share.ts itemKey of its name). A name alone doesn't make two items one: the caller counts an item as the plugin's when the
  * library's item is linked to that plugin (linkedToPlugin) or its content is the same (each kind's own test). A name two plugins
- * hold goes by the first listed. Read once where `home` carries `reads` (one pass or one view), since the Skills, MCP servers
- * and Agents pages all ask.
+ * hold goes by the first listed. Read once where `home` carries `reads` (one pass or one view), since every kind's
+ * rows in the Library ask.
  */
 export async function throughPlugins(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[], kind: PartKind): Promise<Map<HarnessId, Map<string, GivenByPlugin>>> {
   const context: PluginContext = { home: home.home, dataDir: '', binaries: {}, overrides: home.overrides, reads: home.reads ?? new Map() };

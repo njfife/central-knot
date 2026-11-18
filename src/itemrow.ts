@@ -1,4 +1,4 @@
-// An item (a skill, an MCP server or an agent) as the item pages draw it (ItemRow), with its kind, a row's identity on a page
+// An item (a skill, an MCP server or an agent) as the item lists draw it (ItemRow), with its kind, a row's identity on a page
 // (rowId), a row named by its kind and key as a click and its result name it (RowKey, NamedRow, sameRow) and the ids of its
 // elements (partId), each kind's items in a home as every page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
 // orderChoice; a row's last use, usagerow.ts lastUse), and the rows a click pins where they were, on every list that orders
@@ -79,8 +79,8 @@ export interface RowKey { kind: PageKind; key: string }
 export type NamedRow = RowKey & { name: string };
 export const sameRow = (first: RowKey, second: RowKey) => first.kind === second.kind && first.key === second.key;
 /**
- * The id of one of a row's elements on the item lists (the Skills, MCP servers and Agents pages, a tool's tabs of them under
- * Harnesses, and the Skills page's Files view): its part, the row's id (rowId, also the row's `data-key`), and what within the
+ * The id of one of a row's elements on the item lists (the Library, a tool's tabs of it under
+ * Harnesses, and the Library's Files view): its part, the row's id (rowId, also the row's `data-key`), and what within the
  * row it is of, a tool or a place: "switch-skills-review", "cell-skills-review-claude-cli". The one place these ids are made;
  * the scripts name them the same way (scripts/cdp.mjs rowPart). dom.ts fileBlocks extends an id made here with each block's
  * place ("-0"). Lists that are no rows of the item lists keep ids of their own: Profiles' ticks (by profileplan.ts itemId),
@@ -109,7 +109,7 @@ export const anyOn = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) =>
 
 // ---------- The order of the rows under a heading ----------
 
-/** The orders the item pages offer: by name (as always, and the default), by last updated, or by last used (usage collected: usagerow.ts lastUse), newest first. */
+/** The orders the item lists offer: by name (as always, and the default), by last updated, or by last used (usage collected: usagerow.ts lastUse), newest first. */
 export type RowOrder = 'name' | 'updated' | 'used';
 
 /** By name, a leading dot aside (".hidden" sorts with the h's). */

@@ -1,4 +1,4 @@
-// A click's result as an item page reads it (app.ts applyClick): which of a pass's results are the click's own, and what they
+// A click's result as an item list reads it (app.ts applyClick): which of a pass's results are the click's own, and what they
 // say. Pure: no page.
 import type { DestinationResult } from './types.ts';
 

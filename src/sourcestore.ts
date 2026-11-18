@@ -8,7 +8,7 @@
 //   sources/.stage-<uuid>/        a Check now's fetch, until its turn swaps it in
 //
 // The last read is a cache, not a record: what reads it are the source's row on the Sources page (what each skill there is to
-// the library, and why the read isn't whole), each linked item's row on Skills (whether a version waits there: sources.ts
+// the library, and why the read isn't whole), each linked item's row in the Library (whether a version waits there: sources.ts
 // sourceFacts, which also says each item a source removed: library.ts removedBy), and Add on a deleted name's row and Replace, Merge
 // and Keep mine on a waiting one's (each takes that name from it, with no fetch).
 // A missing copy means only "look again": the row reads it as nothing at the link's folder (atlink.ts unreadWhy), and the

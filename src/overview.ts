@@ -6,7 +6,7 @@
 // is kept. Nothing is stored, and opening it reads nothing more than the home's view. The figures come from that view, the usage
 // reading on show and its sum (matrix.ts usageOnShow, usageSums: usagerow.ts usageSummary), Harnesses' counts (harnesspage.ts
 // tally, pluginstatus.ts pluginsInstalled) and the update state (updateview.ts updateLine). While a home's first reading runs (matrix.ts
-// firstReadingRuns) every place a reading fills is drawn at its final size, so nothing moves when it lands. A kind's page opens
+// firstReadingRuns) every place a reading fills is drawn at its final size, so nothing moves when it lands. The Library opens
 // through matrix.ts openKind. Not here: the empty states every page shares (pages.ts noToolsLead, notRead, previewReason) and
 // first setup's question (firstsetup.ts setupLead).
 import { absentKinds, collectUsage, homeTools, loadHome, noToolManaged, practiceNoteOpen, realHomeName, rerender, setPracticeNote } from './app.ts';
@@ -183,7 +183,7 @@ function kindCard(kind: PageKind, home: HomeView) {
 /**
  * The usage reading's strip, as high in each state: its three sentences share one place, the others kept but not shown
  * (style.css .band-stack). Collecting (by itself when a home opens, or on Update); collected, when, with Update usage statistics;
- * or the history couldn't be read, with Try again, in a box. Both buttons collect without opening the item pages' band.
+ * or the history couldn't be read, with Try again, in a box. Both buttons collect without opening the item lists' band.
  */
 function usageStrip() {
   const read = usageOnShow(), now = state.usage.state === 'reading' ? 0 : state.usage.state === 'failed' || !read ? 2 : 1;

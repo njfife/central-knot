@@ -12,7 +12,7 @@
 //   is also the one that makes a copy outside Central Knot's its own); and the profiles migration releases one an earlier
 //   profile set, once (profilemigrate.ts).
 // Around the pass: applySkills and restoreSkill run it for skills (the page's clicks);
-// skillsView is the Skills page's reading (types.ts LibraryView); skillsForRepo is what the Git repo's Push sends. Elsewhere: the folders, skillfiles.ts; where things
+// skillsView is the Library's reading of skills (types.ts LibraryView); skillsForRepo is what the Git repo's Push sends. Elsewhere: the folders, skillfiles.ts; where things
 // are kept and the migration from the earlier record, skillstore.ts and skillmigrate.ts; the row and its words,
 // libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
 import { randomUUID } from 'node:crypto';
@@ -450,7 +450,7 @@ async function runTakeOver(context: ShareContext, item: LibraryItem, keep: Versi
 
 // ---------- For the callers around a pass ----------
 
-/** One version's folder, for the Skills page to show: its SKILL.md and the names of its other files; none when the store no longer has it. */
+/** One version's folder, for the Library to show: its SKILL.md and the names of its other files; none when the store no longer has it. */
 export async function skillVersion(context: ShareContext, key: string, hash: string): Promise<{ skill: string; files: string[] } | undefined> {
   const version = await readVersion(context, key, hash);
   if (!version) return undefined;
@@ -514,7 +514,7 @@ export function changedFiles(was: Tree, is: Tree): string[] {
 }
 
 /**
- * The Skills page's rows: every skill in the library (On, or Off: in Central Knot only) and every found one (in a managed
+ * The Library's skill rows: every skill in the library (On, or Off: in Central Knot only) and every found one (in a managed
  * tool, not in the library). `library` gives the page and History each item as the library holds it, deleted ones too.
  */
 export async function skillsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<LibraryView> {

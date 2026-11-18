@@ -5,7 +5,7 @@
 // runs the pass of the whole home (pass, through homepass.ts homePass), builds the view every page reads (syncThenView:
 // types.ts HomeView), and registers every IPC channel the page calls through preload.ts
 // (the Plugins page's are marketplaces.ts's, registered with this module's handle). Each handler hands its request to an engine;
-// a click on an item page goes through the `changes` sanitizer, which must copy each field of types.ts Change. Not here: what a
+// a click on an item list goes through the `changes` sanitizer, which must copy each field of types.ts Change. Not here: what a
 // change does (the engines: librarypass.ts and each kind, profiles.ts, sources.ts, gitrepo.ts, instructions.ts, plugins.ts) and
 // what a page shows (from renderer.ts).
 import { onlyAllowed, PRODUCT, record, strings } from './values.ts';
@@ -627,7 +627,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
     mcp: await serversView(shared, managed, pendingServerNotices.splice(0)),
     agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
   };
-  // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
+  // What plugins installed whole bring, read with the home so the Library shows it without Plugins.
   // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
   // Whose own record of its plugins can't be read, as the Plugins page finds it (marketplaces.ts look): what it has isn't known.

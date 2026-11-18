@@ -1,5 +1,5 @@
 // Harnesses: one place per tool. The list sums up what each one has, with its Manage switch (managecard.ts); a managed
-// harness's own page manages its items with the same tables and switches as the Skills, MCP servers and Agents pages, with that
+// harness's own page manages its items with the same tables and switches as the Library, with that
 // tool first, plus its instruction file and its plugins. A tool left out has its card and switch here, and no other page shows
 // it as a tool (History's entries, and the Overview's line under its tools table, still name it). Nothing here has its own
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.

@@ -21,7 +21,7 @@
 //   One write follows a pass: a Claude Code deny an earlier build's profiles migration kept is cleared once the server is wanted
 //   there (releaseKeptDenies).
 // Around the pass: applyServers and restoreServer run it (the page's clicks);
-// serversView is the MCP servers page's reading (types.ts LibraryView), with each row's source (sources.ts sourceFacts);
+// serversView is the Library's reading of MCP servers (types.ts LibraryView), with each row's source (sources.ts sourceFacts);
 // serversForRepo is what the Git repo's Push sends. Elsewhere: the formats, mcp.ts; where things are kept and
 // the migration from the earlier record, serverstore.ts and servermigrate.ts; the row and its words, libraryrow.ts with
 // librarypages.ts; History's sentences and actions, historyactions.ts.
@@ -222,7 +222,7 @@ export const restoreServer = async (context: ShareContext, tools: HarnessId[], e
 
 // ---------- For the callers around a pass ----------
 
-/** One version's content, for the MCP servers page to show: undefined when the store no longer has it. */
+/** One version's content, for the Library to show: undefined when the store no longer has it. */
 export const serverVersion = (context: ShareContext, key: string, hash: string) => readVersion(context, key, hash);
 
 /**
@@ -259,7 +259,7 @@ async function changesOf(context: ShareContext, item: LibraryItem): Promise<Vers
 }
 
 /**
- * The MCP servers page's rows: every server in the library (On, or Off: in Central Knot only), every one found in a managed
+ * The Library's MCP server rows: every server in the library (On, or Off: in Central Knot only), every one found in a managed
  * tool, and every one seen only in a form never taken in (it says why). `library` gives the page and History each item as the
  * library holds it, deleted ones too.
  */
