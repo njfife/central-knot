@@ -1541,6 +1541,40 @@ async function practiceFlow() {
   await fitsAtMinimum(a, 'Agents');
   await a.click('#nav-skills');
 
+  // A plugin that brings a skill and an agent both named review: two rows apart (itemrow.ts rowId). The skill's file shown on
+  // Skills is not the agent's: on Agents, the agent's row opens with its file unshown, and shows its own. Then the plugin goes.
+  const installedRecord = readNow(join(practice, '.claude/plugins/installed_plugins.json'));
+  writeClaudeInstall(practice, 'ck-outside', 'same-names', '0.1.0', {
+    'skills/review/SKILL.md': '---\nname: review\ndescription: The skill named review.\n---\n\nThe skill’s steps.\n',
+    'agents/review.md': '---\nname: review\ndescription: The agent named review.\n---\n\nThe agent’s prompt.\n',
+  });
+  await a.click('#header-refresh');
+  const sameName = 'same-names@ck-outside/review', byId = part => `[id="${part}-${sameName}"]`, fileShown = () => a.text('.plugin-file');
+  for (let tries = 0; tries < 40 && !(await a.exists(byId('open'))); tries++) await wait(100);
+  await a.click(byId('open'));
+  await a.click(byId('pfile'));
+  for (let tries = 0; tries < 40 && !(await fileShown())?.includes('The skill’s steps.'); tries++) await wait(100);
+  check('a plugin’s skill named review shows its SKILL.md', (await fileShown())?.includes('The skill’s steps.'), await a.text('.details-plugin'));
+  // The plugin updated while the file is shown: Refresh shows the file as installed now.
+  writeClaudeInstall(practice, 'ck-outside', 'same-names', '0.2.0', {
+    'skills/review/SKILL.md': '---\nname: review\ndescription: The skill named review.\n---\n\nThe skill’s steps, version two.\n',
+    'agents/review.md': '---\nname: review\ndescription: The agent named review.\n---\n\nThe agent’s prompt.\n',
+  });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !(await fileShown())?.includes('version two'); tries++) await wait(100);
+  check('its plugin updated while the file is shown, Refresh shows the file as installed now', (await fileShown())?.includes('The skill’s steps, version two.'), await fileShown());
+  await a.click('#nav-agents');
+  for (let tries = 0; tries < 40 && !(await a.exists(byId('open'))); tries++) await wait(100);
+  await a.click(byId('open'));
+  same('the agent of the same plugin named review opens with its own file unshown, not the skill’s', [await a.exists('.plugin-file'), await a.text(byId('pfile'))], [false, 'Show its agent file']);
+  await a.click(byId('pfile'));
+  for (let tries = 0; tries < 40 && !(await fileShown())?.includes('The agent’s prompt.'); tries++) await wait(100);
+  check('and shows its own when asked', (await fileShown())?.includes('The agent’s prompt.') && !(await fileShown())?.includes('The skill’s steps.'), await fileShown());
+  if (installedRecord) writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), installedRecord); else rmSync(join(practice, '.claude/plugins/installed_plugins.json'), { force: true });
+  rmSync(join(practice, '.claude/plugins/cache/ck-outside/same-names'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  await a.click('#nav-skills');
+
   // What a plugin installed whole brings shows on Skills and MCP servers with the plugin's mark, before Plugins was ever
   // opened, from a marketplace nothing here has added: Claude Code's own record and copy are enough.
   writeClaudeInstall(practice, 'ck-outside', 'outside-tools', '0.3.0', {
@@ -1567,8 +1601,12 @@ async function practiceFlow() {
     && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off in Claude Code, with its 1 other skill and 1 MCP server\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
   const other = 'outside-tools@ck-outside/outside-other';
   same('and the plugin’s other skill’s row says it is off in Claude Code too', [await cellState(a, other, 'claude-cli'), await switchOn(a, other)], ['plugin-off', false]);
+  // The rows drawn flashing from here on (their class, which a system's reduced motion doesn't take away as it does the animation).
+  await a.run(`window.flashedRows = []; window.flashWatch = new MutationObserver(() => { for (const row of document.querySelectorAll('.ov-row.row-flash')) if (!flashedRows.includes(row.dataset.key)) flashedRows.push(row.dataset.key); }); flashWatch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })`);
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 60 && (outsideOff() || !/Undone: outside-skill/.test(await a.text('#header') ?? '')); tries++) await wait(100);
+  check('its Undo flashes the plugin’s row on the page', (await a.run('window.flashedRows')).includes(outside), await a.run('window.flashedRows'));
+  await a.run('window.flashWatch.disconnect()');
   check('its one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside) && /Undone: outside-skill is back on in Claude Code\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
   // Two of its skills turned off 150 ms apart (clip 04), the second while the first still runs (Claude Code's stand-in takes a
   // second to disable it): the first takes the whole plugin off in Claude Code; the second, worked out in its turn, finds nothing
@@ -4988,6 +5026,11 @@ esac
   check('the result says what the switch did, with Undo', /issue-tracker: installed in Claude Code; its items put in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
   await pictures('plugin-switch-list');
+  // The first link to one of its items, before Skills was ever drawn, opens Skills with that row open.
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !(await a.exists('.plugin-items-list [data-key="skill:triage"] button')); tries++) await wait(100);
+  await a.click('.plugin-items-list [data-key="skill:triage"] button');
+  same('the first link to triage, before Skills was drawn, opens it with triage’s row open', await a.all('.ov-row.open', 'e.dataset.key'), ['triage']);
   // Its items are rows of the item pages, from the plugin: one row each, Claude Code's copy (the plugin's) folded in.
   await a.click('#nav-skills');
   check('triage is one row on Skills, “from the plugin issue-tracker”, and Claude Code has it with the plugin', /from the plugin issue-tracker/.test(await a.text('.ov-row[data-key="triage"]') ?? '')
@@ -4995,7 +5038,7 @@ esac
   await a.click('#nav-mcp');
   check('issues is one row on MCP servers, from the plugin too', /from the plugin issue-tracker/.test(await a.text('.ov-row[data-key="issues"]') ?? ''), await a.text('.page'));
   await a.click('#nav-plugins');
-  await a.click('#popen-0-issue-tracker');
+  if (!(await a.exists('.plugin-items-section'))) await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 50 && !/Its items/.test(await a.text('.plugin-page') ?? ''); tries++) await wait(100);
   check('its page lists its items for Pi', /Its items[\s\S]*skill triage[\s\S]*MCP server issues/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-page'));
   // Changed in Pi, triage is let go: the person's own from then on, said once on Skills; an update of the plugin's issues still follows.

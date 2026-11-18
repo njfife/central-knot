@@ -1,11 +1,12 @@
-// An item (a skill, an MCP server or an agent) as the item pages draw it (ItemRow), each kind's items in a home as every
-// page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
+// An item (a skill, an MCP server or an agent) as the item pages draw it (ItemRow), with its kind, and a row's identity on a
+// page (rowId), each kind's items in a home as every page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
 // orderChoice; a row's last use, usagerow.ts lastUse), and the rows a click pins where they were, on every list that orders
 // rows by their state, the Plugins list too (Pinned). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is libraryrow.ts's,
 // from the kind's view (types.ts LibraryView).
 import { currentIndex, type LibraryItem, type Plan, type VersionChange } from './library.ts';
 import { inLibrary } from './libraryrow.ts';
 import type { HarnessId, HomeView, LibraryFacts, ThroughPlugin } from './types.ts';
+import type { PageKind } from './app.ts';
 
 /** A tool, as a column. */
 export type Tool = string;
@@ -16,6 +17,8 @@ export type Tool = string;
  * lines the compare view quotes.
  */
 export interface ItemRow {
+  /** Its kind, set where the row is made (matrix.ts fromFacts): a skill and an agent may share a key. */
+  kind: PageKind;
   key: string;
   /** A library item from a source the home records: its link, and whether a version waits there, or the next one would, or the source removed it (types.ts LibraryFacts fromSource). */
   fromSource?: LibraryFacts['fromSource'];
@@ -60,6 +63,12 @@ export interface ItemRow {
   /** `pluginOn`: the tools with no copy of their own that have it on through an installed plugin (matrix.ts pluginOnIn; libraryrow.ts LibraryRow says it). */
   pluginOn?: Tool[];
 }
+
+/**
+ * A row's identity on a page, from its kind and key ("skills-review"): what the page keeps of one row goes by it (the opened row,
+ * the flash, the armed Delete, a plugin item's file shown), since a skill and an agent may share a key.
+ */
+export const rowId = (kind: PageKind, key: string) => `${kind}-${key}`;
 
 // ---------- Each kind in a home, as the pages read it ----------
 

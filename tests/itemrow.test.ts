@@ -1,10 +1,10 @@
 // The order of the rows under a heading on the Skills, MCP servers and Agents pages (src/itemrow.ts inOrder), as worked
 // examples: by name, or by last updated, newest first. An item's versions change only through library.ts's keepVersion and
 // setCurrent, so each example makes them that way. Then the rows a click pins where they were (Pinned), as the MCP servers
-// page draws them.
+// page draws them; and a skill and an agent of one name, two rows apart (rowId).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inOrder, noPins, pin, pinsOn, placeIn, type ItemRow, type Pinned } from '../src/itemrow.ts';
+import { inOrder, noPins, pin, pinsOn, placeIn, rowId, type ItemRow, type Pinned } from '../src/itemrow.ts';
 import { keepVersion, newItem, setCurrent, type LibraryItem, type Shelf } from '../src/library.ts';
 
 /** A shelf that keeps nothing: these examples read only the item's record. */
@@ -17,7 +17,7 @@ const takenIn = (key: string, days: number): LibraryItem =>
 /** An edit made in a tool `days` days ago, taken in as the current version. */
 const edited = (item: LibraryItem, days: number) => setCurrent(shelf, item, { hash: `${item.key}-edit-${days}`, at: daysAgo(days), from: { how: 'edited', harness: 'codex-cli' } }, null);
 /** A row as the page has it; `copyDays`: when each tool's copy was last changed, for a found item. */
-const row = (key: string, copyDays: Record<string, number> = {}): ItemRow => ({ key, description: '', copies: {}, on: true, except: [],
+const row = (key: string, copyDays: Record<string, number> = {}): ItemRow => ({ kind: 'skills', key, description: '', copies: {}, on: true, except: [],
   versions: Object.fromEntries(Object.entries(copyDays).map(([tool, days]) => [tool, { lines: '3 lines', changed: '', text: '', at: daysAgo(days) }])) });
 const keys = (rows: ItemRow[]) => rows.map(each => each.key);
 /** Each row's item, as the page finds it in the kind's library (matrix.ts itemOf). */
@@ -117,4 +117,16 @@ test('Sorted by last updated, a found item taken in by its Add keeps its place a
   assert.deepEqual(keys(inOrder(rows, 'updated', from(library), undefined, pins)), ['alpha', 'beta', 'gamma']);
   // Not pinned (the list drawn afresh), it goes first, by its time.
   assert.deepEqual(keys(inOrder(rows, 'updated', from(library))), ['beta', 'alpha', 'gamma']);
+});
+
+// ---------- A skill and an agent of one name ----------
+
+test('A skill and an agent both named review have two row ids, and a pin on the Skills list holds nothing on the Agents list', () => {
+  const skill: ItemRow = { ...row('review'), kind: 'skills' }, agent: ItemRow = { ...row('review'), kind: 'agents' };
+  // The opened row, the flash, the armed Delete and a plugin item's file shown go by the row's id.
+  assert.deepEqual([rowId(skill.kind, skill.key), rowId(agent.kind, agent.key)], ['skills-review', 'agents-review']);
+  // The skill's switch clicked on Skills pins it there; on Agents, whose list is another, the agent goes under its own heading.
+  const onSkills = pinsOn(noPins<string>(), 'Skills by name');
+  pin(onSkills, skill.key, 'on');
+  assert.deepEqual([placeIn(onSkills, skill.key, 'off'), placeIn(pinsOn(onSkills, 'Agents by name'), agent.key, 'off')], ['on', 'off']);
 });
