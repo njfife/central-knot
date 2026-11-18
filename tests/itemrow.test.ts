@@ -17,7 +17,7 @@ const takenIn = (key: string, days: number): LibraryItem =>
 /** An edit made in a tool `days` days ago, taken in as the current version. */
 const edited = (item: LibraryItem, days: number) => setCurrent(shelf, item, { hash: `${item.key}-edit-${days}`, at: daysAgo(days), from: { how: 'edited', harness: 'codex-cli' } }, null);
 /** A row as the page has it; `copyDays`: when each tool's copy was last changed, for a found item. */
-const row = (key: string, copyDays: Record<string, number> = {}): ItemRow => ({ key, description: '', copies: {}, on: true, except: [],
+const row = (key: string, copyDays: Record<string, number> = {}): ItemRow => ({ kind: 'skills', key, description: '', copies: {}, on: true, except: [],
   versions: Object.fromEntries(Object.entries(copyDays).map(([tool, days]) => [tool, { lines: '3 lines', changed: '', text: '', at: daysAgo(days) }])) });
 const keys = (rows: ItemRow[]) => rows.map(each => each.key);
 /** Each row's item, as the page finds it in the kind's library (matrix.ts itemOf). */
