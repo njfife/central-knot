@@ -11,7 +11,7 @@
 import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, setHome, showPage, state, syncNow, tell, whyReadOnly, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { rowClicks } from './libraryrow.ts';
-import { plural } from './model.ts';
+import { plural, tookInCount } from './model.ts';
 import { oneUndoCovers } from './historyactions.ts';
 import { asksNow, KINDS, setupKinds, latestDone, waitingForChoice, walkId, walkPlace, wayBackIn, whatYesDoes, type Waiting } from './setupcounts.ts';
 import type { Change, HomeView, PassResult } from './types.ts';
@@ -79,7 +79,7 @@ const answer = (on: boolean) => busy(on ? 'Turning on Synchronize everything…'
   }
   const taken = KINDS.flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' ? told.items : [])));
   const waiting = waitingForChoice(home).length;
-  tell({ page: 'overview', band: true, carry: true, history: true, text: `Synchronize everything is on: it took in ${plural(taken.length, 'item')}${waiting ? `, and ${plural(waiting, 'item')} with copies that differ ${waiting === 1 ? 'waits' : 'wait'} for your choice` : ''}. ${oneUndoCovers}` });
+  tell({ page: 'overview', band: true, carry: true, history: true, text: `Synchronize everything is on: it ${tookInCount(taken.length)}${waiting ? `, and ${plural(waiting, 'item')} with copies that differ ${waiting === 1 ? 'waits' : 'wait'} for your choice` : ''}. ${oneUndoCovers}` });
   walkIfWaiting();
 });
 const walkIfWaiting = () => { if (state.home && waitingForChoice(state.home).length) openWalkthrough(); };

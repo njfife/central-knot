@@ -93,6 +93,8 @@ export function clockTimesApart(isos: readonly string[], now = Date.now(), withD
   return times.map((time, index) => (withDay && days[index] !== today ? `${dayWords(isos[index])} at ${time}` : time));
 }
 export const plural = (count: number, word: string, many = `${word}s`) => `${count} ${count === 1 ? word : many}`;
+/** How first setup and Sync once count the items the standing rule took in. */
+export const tookInCount = (count: number, more = false) => `took in ${plural(count, more ? 'more item' : 'item')}`;
 
 /** Distinct skills: the same folder name in two of a tool's folders is one skill to that tool. */
 export const skillCount = (snapshot: Snapshot) => new Set(snapshot.skills.map(skill => skill.folder.normalize('NFC').toLowerCase())).size;

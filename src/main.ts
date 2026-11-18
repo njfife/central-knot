@@ -542,6 +542,7 @@ let lastStopped = '';
 interface ServersAndAgentsResult { serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean;
   /** The servers' and agents' found keys the pass left found (types.ts PassResult found), each with its kind's prefix. */ found: string[] }
 /**
+ * `synced`: the original results by kind for Sync once.
  * `told`: what the page is told of the pass, every kind alike (homepass.ts passTells); `done`: every result of the pass, all
  * three kinds, for a caller that says what it did (a tool's Manage switch).
  */

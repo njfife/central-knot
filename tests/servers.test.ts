@@ -18,7 +18,7 @@ import { libraryAction, librarySentence } from '../src/historyactions.ts';
 import { asItIs, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { discover } from '../src/discovery.ts';
-import { homePass, passTells } from '../src/homepass.ts';
+import { homePass, passTells, syncOnceReport } from '../src/homepass.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { applyServers, restoreServer, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
@@ -142,10 +142,28 @@ test('A tool installed later gets an On server from the pass of the whole home, 
  * Code's write or removal waited for its Write to Claude Code (it planned Claude Code as any tool and left that one step
  * undone, marking nothing): this build's first pass is what such a home meets.
  */
-async function claudeLeftOwed(box: Box, pass: () => Promise<unknown>) {
+async function claudeLeftOwed<T>(box: Box, pass: () => Promise<T>) {
   await fs.chmod(box.path('claude-cli'), 0o000);
-  try { await pass(); } finally { await fs.chmod(box.path('claude-cli'), 0o644); }
+  try { return await pass(); } finally { await fs.chmod(box.path('claude-cli'), 0o644); }
 }
+
+test('Sync once reports an unreadable owed removal and counts it as done only when the tool can be read again', async () => {
+  const box = await sandbox(), tools = settled.managed;
+  try {
+    await writeFile(box.path('claude-cli'), JSON.stringify({ mcpServers: { docs: { command: 'docs' } } }));
+    await box.send(on('docs'), tools);
+    await writeFile(box.path('copilot-cli'), '{"mcpServers":{}}');
+    const pass = async () => (await homePass(box.context, tools, true)).synced!;
+    const first = await claudeLeftOwed(box, pass);
+    const result = syncOnceReport([first]);
+    assert.equal(result.warn, true);
+    assert.match(result.text, /Removed docs from Codex\./);
+    assert.match(result.text, /Couldn’t remove docs from Claude Code\..*could not be read\./);
+    assert.deepEqual(syncOnceReport([first, await pass()]), {
+      text: 'Removed docs from Codex and Claude Code.', warn: false, history: false,
+    });
+  } finally { await box.cleanup(); }
+});
 
 test('A home alpha 2 left with Claude Code’s steps owed: the first pass takes a server turned Off out of Claude Code, and one deleted, by its tombstone', async () => {
   const box = await sandbox();

@@ -4735,11 +4735,12 @@ async function firstSetupFlow() {
   await sizeTo(d, 1280, 800);
   const inspector = d.inspect && await mainHelpers(d.inspect);
   if (inspector) await inspector.noteCalls('sync:now');
+  else console.log('No main-process inspector: skipping the Sync once request count and native menu checks.');
   const clickOnce = "document.querySelector('#overview-sync-now').click()";
   await d.run(`${clickOnce}; ${clickOnce}; true`);
-  for (let n = 0; n < 40 && !/sav|missing/i.test(await d.text('#announcement')); n++) await wait(50);
+  for (let n = 0; n < 40 && !/still saving its files/i.test(await d.text('#announcement')); n++) await wait(50);
   check('Sync once is disabled while it waits and the status bar explains the wait',
-    await d.run("document.querySelector('#overview-sync-now').disabled") && /sav|missing/i.test(await d.text('#announcement')));
+    await d.run("document.querySelector('#overview-sync-now').disabled") && /still saving its files/i.test(await d.text('#announcement')));
   await d.shot('sync-once-waiting');
   await d.run(clickOnce + '; true');
   await d.settle();
@@ -4796,22 +4797,44 @@ async function firstSetupFlow() {
     ['skill', 'agent', 'MCP server'].every(kind => names?.includes(`report (${kind}) from Claude Code and ${kind === 'MCP server' ? 'Codex' : 'Copilot CLI'}`)), names);
   if (d.inspect) {
     for (let n = 0; n < 50 && !await d.exists('#sync-switch[aria-checked="true"]'); n++) await wait(100);
-    check('turning on Automatic sync from the menu keeps the removal report true',
-      await d.exists('#sync-switch[aria-checked="true"]') && !/stays off/.test(await d.text('[data-outcome] .band-text')));
   }
   await d.shot('sync-once-same-names');
   if (d.inspect) await d.click('#sync-switch');
-  await d.click('#nav-overview');
+  await d.click('#nav-mcp');
   dropServer('locked');
+  for (let n = 1; n <= 8; n++) saved(skill(third.claude, 'guide-' + n), 5);
+  await d.click('#header-refresh');
+  await sizeTo(d, ...SMALLEST);
   mkdirSync(settings + '.lock');
   try {
-    await d.click('#overview-sync-now');
+    await d.click('#sync-now');
     const words = await d.text('[data-outcome] .band-text');
     check('a held removal names the surviving tool and its lock alongside the removal, with a warning',
-      /locked from Codex/.test(words) && /Claude Code.*lock/i.test(words) && await d.exists('[data-outcome] .tone-warning')
+      /locked from Codex/.test(words) && /remove locked from Claude Code.*lock/i.test(words) && await d.exists('[data-outcome] .tone-warning')
       && !!JSON.parse(readNow(settings)).mcpServers.locked, words);
-    await d.shot('sync-once-held');
+    check('a large Sync once shows two successful items, counts the rest and offers their History',
+      (words?.match(/Took in guide-/g) ?? []).length === 2 && /took in 6 more items/i.test(words)
+      && await d.exists('#outcome-history'), words);
+    same('the folded result fits the smallest window and covers no controls below the header', [
+      await d.run(CUT_OFF), await d.run("document.querySelector('.header-result').getBoundingClientRect().bottom <= document.querySelector('#page').getBoundingClientRect().top + 1"),
+    ], [[], true]);
+    await d.shot('sync-once-folded-minimum');
+    await d.click('#outcome-history');
+    const guides = (await d.all('.history-row[data-kind="on"] .history-what strong')).filter(name => name.startsWith('guide-'));
+    same('History lists all eight guides, including the six folded into the count', new Set(guides).size, 8);
   } finally { rmSync(settings + '.lock', { recursive: true }); }
+  if (d.inspect) {
+    await d.click('#nav-overview');
+    const menu = await mainHelpers(d.inspect);
+    try {
+      await menu.slowReply('discovery:refresh', 800);
+      await d.run("document.querySelector('#header-refresh').click(); true");
+      await menu.tellPage('sync:request');
+      await d.settle();
+      check('the menu’s Sync once during Refresh runs after it and reports the remaining removal',
+        /Removed locked from Claude Code/.test(await d.text('[data-outcome] .band-text')));
+    } finally { await menu.restore('discovery:refresh'); menu.close(); }
+  }
   same('no page errors, first setup with Automatic sync off', d.pageErrors, []);
   await d.quit();
 
