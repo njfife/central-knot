@@ -369,6 +369,8 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   // Names and descriptions only: the README is cached by what it is given, and whole files would make that key huge.
   const parts = detail ? [...detail.skills, ...detail.commands, ...detail.agents].map(({ name, description }) => ({ name, description })) : [];
   const descriptions = [plugin.description, ...parts.map(part => part.description)];
+  // "In each tool" only where some tool does something with some part: not for a plugin holding only an instruction file, say.
+  const inEachTool = components && nativeTools(view, entry, plugin.name).some(tool => outcomes(tool, components).length) ? components : undefined;
   return h('article.plugin-page', { 'aria-label': title },
     h('header.plugin-head', {},
       h('h2', {}, title, noLongerOffered(entry, plugin) ? h('span.plugin-chip.plugin-chip-gone', {}, 'No longer offered') : null),
@@ -381,6 +383,6 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
     h('div.plugin-columns', {},
       h('div.plugin-column', {},
         contentsBlock(view, entry, marketIndex, plugin, detail, reading, offered),
-        components && nativeTools(view, entry, plugin.name).length ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, entry, plugin, components)) : null),
+        inEachTool ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, entry, plugin, inEachTool)) : null),
       detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null));
 }

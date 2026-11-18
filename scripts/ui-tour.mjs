@@ -828,7 +828,7 @@ if (wanted('plugin-text')) {
   await a.click('#pfile-0-AGENTS-md'); await show('#pfile-0-AGENTS-md', 'start'); await shot(a, 'instruction-file-open', 'Clicked AGENTS.md: its text as written, the marketplace’s and Claude Code’s copy the same.');
   await a.click('#plugin-back');
   await a.click('#popen-0-house-notes'); await waitFor(a, `!!document.querySelector('#pfile-0-CLAUDE-md')`, 15000);
-  await atEverySize('only-claude-md', 'house-notes’ page: it holds only a CLAUDE.md, listed as an instruction file (no longer “Nothing Central Knot recognizes”); no In each tool, since no tool reads it', false, '.plugin-columns', 'start');
+  await atEverySize('only-claude-md', 'house-notes’ page: it holds only a CLAUDE.md, listed as an instruction file (no longer “Nothing Central Knot recognizes”); no In each tool, since no tool does anything with it', false, '.plugin-columns', 'start');
   await a.click('#plugin-back');
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`, 15000);
   await show('.plugin-columns', 'start'); await shot(a, 'nothing-of-the-kind', 'document-tools’ page, which holds no instruction file and no hook: What it holds is its two skills, as before.');

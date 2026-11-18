@@ -1218,6 +1218,8 @@ span.ins-confirm { margin-top: 0; }
 .plugin-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .plugin-parts li { display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 1fr); column-gap: 12px; font-size: 12.5px; }
 .plugin-part-body { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; max-width: var(--measure); }
+/* What a hook or server runs is no prose: it takes the row's width. */
+.plugin-part-body:has(> .plugin-part-what.mono) { max-width: none; }
 .plugin-part-what { margin: 0; font-size: 12.5px; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .plugin-part-what.expanded, .plugin-parts li.open .plugin-part-what { display: block; -webkit-line-clamp: unset; overflow: visible; }
 .plugin-part-what.mono { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
