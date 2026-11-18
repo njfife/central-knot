@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import * as engine from '../src/plugins.ts';
 import { WAITS_TO_MOVE } from '../src/pluginstatus.ts';
+import { componentsFrom, outcomes } from '../src/pluginoutcomes.ts';
 import { applySkills } from '../src/skills.ts';
 import type { ActionReport, DesktopApp, HarnessId } from '../src/types.ts';
 
@@ -280,11 +281,52 @@ test('A plugin the marketplace can’t give files for (an npm package) is read f
     await put(join(external, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ext', plugins: [{ name: 'tool', source: { source: 'npm', package: 'some-tool' } }] }));
     const npmCopy = join(box.home, '.claude/plugins/cache/ext/tool/1.0.0');
     await put(join(npmCopy, 'skills/s/SKILL.md'), '---\nname: s\ndescription: from npm\n---\n');
+    await put(join(npmCopy, 'AGENTS.md'), 'Notes for whoever works on the tool.\n');
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'tool@ext': [{ scope: 'user', installPath: npmCopy, version: '1.0.0' }] } }));
     await box.markets.add(external);
     const fromTool = await box.markets.detail(external, 'tool');
     assert.deepEqual([fromTool?.skills, fromTool?.installed?.['claude-cli']?.skills.map(skill => skill.description)], [[], ['from npm']]);
+    // Its instruction files too; its hooks can't be, as the marketplace's copy is what gives them.
+    assert.deepEqual(fromTool?.installed?.['claude-cli']?.instructions.map(file => [file.name, file.text]), [['AGENTS.md', 'Notes for whoever works on the tool.\n']]);
     assert.deepEqual([fromTool?.offered, fromTool?.problem], [false, undefined]);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin kept in another repository, not installed, shows its root CLAUDE.md once that repository is copied here', async () => {
+  // The page's own read of a plugin kept elsewhere: it copies the repository unless a copy is here already, as it is below.
+  const box = await setup({ engine: { readRemotePlugin: engine.readRemotePlugin } });
+  try {
+    const root = join(box.base, 'market');
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'official', plugins: [{ name: 'atlas', source: { source: 'github', repo: 'example/atlas', path: 'plugin' } }] }));
+    await box.markets.add(root);
+    const copy = engine.remoteCopyFolder({ home: box.home, dataDir: join(box.base, 'data', 'plugins'), binaries: {} }, { url: 'https://github.com/example/atlas.git' });
+    await put(join(copy, 'plugin/CLAUDE.md'), 'You have access to Atlas’s context layer through MCP tools.\n');
+    await put(join(copy, 'CLAUDE.md'), 'The repository’s own notes, outside the plugin’s folder.\n');
+    const detail = await box.markets.detail(root, 'atlas');
+    assert.deepEqual([detail?.offered, detail?.instructions.map(file => [file.path, file.text]), detail?.installed],
+      [true, [['CLAUDE.md', 'You have access to Atlas’s context layer through MCP tools.\n']], {}]);
+  } finally { await box.cleanup(); }
+});
+
+test('A start-of-session hook printing Claude Code’s JSON, installed in Claude Code and Copilot CLI: the page has its command and each copy’s AGENTS.md, and each tool’s line says what reaches its sessions', async () => {
+  const box = await setup();
+  try {
+    const root = join(box.base, 'market');
+    const start = 'echo \'{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Explain each choice."}}\'';
+    const plugin = { 'AGENTS.md': 'A plugin for explaining.\n', 'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: start }] }] } }), 'skills/explain/SKILL.md': '---\nname: explain\ndescription: Explains\n---\n' };
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'explainer', source: './plugins/explainer', version: '1.0.0' }] }));
+    for (const [path, text] of Object.entries(plugin)) await put(join(root, 'plugins/explainer', path), text);
+    await box.markets.add(root);
+    const claudeCopy = join(box.home, '.claude/plugins/cache/team/explainer/1.0.0'), copilotCopy = join(box.home, '.copilot/installed-plugins/team/explainer');
+    for (const copy of [claudeCopy, copilotCopy]) for (const [path, text] of Object.entries(plugin)) await put(join(copy, path), text);
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'explainer@team': [{ scope: 'user', installPath: claudeCopy, version: '1.0.0' }] } }));
+    await put(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'explainer', marketplace: 'team', version: '1.0.0', cache_path: copilotCopy, enabled: true }] }));
+    const detail = (await box.markets.detail(root, 'explainer'))!;
+    assert.deepEqual(detail.hooks, [{ event: 'SessionStart', runs: [start] }]);
+    assert.deepEqual(Object.entries(detail.installed ?? {}).map(([tool, copy]) => [tool, copy.instructions.map(file => file.name)]), [['claude-cli', ['AGENTS.md']], ['copilot-cli', ['AGENTS.md']]]);
+    // Claude Code adds what it prints; Copilot CLI reads only a bare additionalContext, which this hook doesn't print.
+    const line = (tool: HarnessId) => outcomes(tool, componentsFrom(detail)).find(outcome => outcome.component === 'Session text');
+    assert.deepEqual([line('claude-cli')?.result, line('copilot-cli')?.result, line('copilot-cli')?.text], ['works', 'limited', 'is limited: only a start-of-session hook printing JSON additionalContext adds it; prompt hooks’ output is dropped']);
   } finally { await box.cleanup(); }
 });
 

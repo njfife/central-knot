@@ -91,9 +91,9 @@ test('Update is offered only where a tool’s copy is older and can be changed h
 test('A copy at the marketplace’s version whose text differs is offered Update once its files are read; line endings and parts only one side has are no difference', () => {
   const part = (text: string, path = 'skills/one') => ({ name: 'one', description: '', text, path });
   const copies = { ...entry, states: { p: { 'claude-cli': { state: 'installed' as const, path: '/x', version: '1.2.0' }, 'copilot-cli': { state: 'installed' as const, path: '/y', version: '1.2.0' }, 'codex-cli': { state: 'installed' as const, path: '/z', version: '1.2.0', live: true } } } };
-  const detail = { skills: [part('---\nname: one\n---\nB\n')], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: true,
-    installed: { 'claude-cli': { skills: [part('---\nname: one\n---\nA\n')], commands: [], agents: [], version: '1.2.0' }, 'copilot-cli': { skills: [part('---\r\nname: one\r\n---\r\nB\r\n'), part('extra', 'skills/two')], commands: [], agents: [], version: '1.2.0' },
-      'codex-cli': { skills: [part('A')], commands: [], agents: [], version: '1.2.0' } } } as PluginDetail;
+  const detail = { skills: [part('---\nname: one\n---\nB\n')], commands: [], agents: [], instructions: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: true,
+    installed: { 'claude-cli': { skills: [part('---\nname: one\n---\nA\n')], commands: [], agents: [], instructions: [], version: '1.2.0' }, 'copilot-cli': { skills: [part('---\r\nname: one\r\n---\r\nB\r\n'), part('extra', 'skills/two')], commands: [], agents: [], instructions: [], version: '1.2.0' },
+      'codex-cli': { skills: [part('A')], commands: [], agents: [], instructions: [], version: '1.2.0' } } } as PluginDetail;
   // Claude Code's text differs; Copilot CLI's differs only in line endings and holds an extra part; Codex loads it live.
   assert.deepEqual(updateTools(view, copies, 'p', '1.2.0', detail), ['claude-cli']);
   assert.equal(copyStale(copies, 'p', 'claude-cli', '1.2.0', detail), true);

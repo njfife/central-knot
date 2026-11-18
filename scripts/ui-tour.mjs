@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), plugin-text (a plugin's instruction files and the hooks that can add text to sessions), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
@@ -800,6 +800,38 @@ if (wanted('plugin-boxes')) {
   await atEverySize('boxes', 'document-tools’ page with three working tools: Claude Code’s box ticked (installed there), Copilot CLI’s and Codex’s empty, each saying “Kept out: tick to put it back” (the first read kept it out of the tools that lacked it)', true, '.plugin-panel', 'start');
   await a.click('#pbox-0-document-tools-copilot-cli'); await waitFor(a, `document.body.dataset.busy !== 'true' && !document.querySelector('.plugin-click[data-click="waiting"], .plugin-click[data-click="running"]')`, 30000); await a.settle();
   await atEverySize('boxes-refused', 'Ticked Copilot CLI’s box: its own add refused the marketplace (“Invalid marketplace.json”), so its box is off and its line says “Copilot CLI refused this marketplace” (the tooltip has its words, and that it isn’t tried again until Refresh); Claude Code’s stays ticked, Codex’s says Kept out', true, '.plugin-panel', 'start');
+  await fresh();
+}
+
+// ---------- What a plugin carries as instructions, and what can add text to sessions ----------
+// The fixture's release-helper holds an AGENTS.md and a start-of-session hook beside a PreToolUse one, and is installed in Claude
+// Code; house-notes, added here, holds only a CLAUDE.md. Three working tools, so "In each tool" has a line for each.
+if (wanted('plugin-text')) {
+  await fresh();
+  begin('plugin-text');
+  const market = join(scratch, 'text-market');
+  writeMarket(market);
+  mkdirSync(join(market, 'plugins/house-notes'), { recursive: true });
+  writeFileSync(join(market, 'plugins/house-notes/CLAUDE.md'), '# House notes\n\nYou have access to the team’s house style through these notes. Prefer short sentences.\n');
+  edit(join(market, '.claude-plugin/marketplace.json'), text => { const catalog = JSON.parse(text); catalog.plugins.push({ name: 'house-notes', source: './plugins/house-notes', version: '0.1.0', category: 'productivity', description: 'The team’s house style, as a CLAUDE.md.' }); return JSON.stringify(catalog, null, 2); });
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  for (const [cli, version] of [['claude', '2.1.326 (Claude Code)'], ['codex', 'codex-cli 0.169.1'], ['copilot', 'GitHub Copilot CLI 1.0.113.']]) writeFileSync(join(HOME, '.local/bin', cli), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  const helper = path => readFileSync(join(market, 'plugins/release-helper', path), 'utf8');
+  writeClaudeInstall(practice, 'team-tools', 'release-helper', '0.4.1', Object.fromEntries(['AGENTS.md', 'hooks/hooks.json', 'commands/release-notes.md', 'agents/release-reviewer.md'].map(path => [path, helper(path)])));
+  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'team-tools': { source: { source: 'directory', path: market }, installLocation: market } }));
+  await refresh();
+  await a.click('#nav-plugins');
+  await addMarketplace(a, market);
+  await a.click('#popen-0-release-helper'); await waitFor(a, `!!document.querySelector('.plugin-outcome-list') && !!document.querySelector('#pfile-0-AGENTS-md')`, 15000);
+  await atEverySize('session-hook', 'release-helper’s page: under What it holds, Instruction files (1) lists AGENTS.md under the line that no tool reads it; Can add text to sessions (1) lists SessionStart with the command it runs, under the line that what it adds is known only when it runs; Hooks names PreToolUse', true, '.plugin-columns', 'start');
+  await show('.plugin-outcome-list'); await shot(a, 'session-hook-tools', 'The same page scrolled to In each tool: a Session text line per tool (Claude Code: comes from start-of-session and prompt hooks; Copilot CLI: limited to JSON additionalContext; Codex: waits for trust).');
+  await a.click('#pfile-0-AGENTS-md'); await show('#pfile-0-AGENTS-md', 'start'); await shot(a, 'instruction-file-open', 'Clicked AGENTS.md: its text as written, the marketplace’s and Claude Code’s copy the same.');
+  await a.click('#plugin-back');
+  await a.click('#popen-0-house-notes'); await waitFor(a, `!!document.querySelector('#pfile-0-CLAUDE-md')`, 15000);
+  await atEverySize('only-claude-md', 'house-notes’ page: it holds only a CLAUDE.md, listed as an instruction file (no longer “Nothing Central Knot recognizes”); no In each tool, since no tool reads it', false, '.plugin-columns', 'start');
+  await a.click('#plugin-back');
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`, 15000);
+  await show('.plugin-columns', 'start'); await shot(a, 'nothing-of-the-kind', 'document-tools’ page, which holds no instruction file and no hook: What it holds is its two skills, as before.');
   await fresh();
 }
 

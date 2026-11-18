@@ -4,7 +4,7 @@
 import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
-import type { HarnessId, NamedPart, PluginContents, PluginDetail } from './types.ts';
+import type { HarnessId, NamedPart, PluginContents, PluginDetail, PluginHook } from './types.ts';
 import { githubRepo, isFolder, isHttps, nameOfFile, record, strings, text } from './values.ts';
 
 const README_LIMIT = 60_000;
@@ -151,6 +151,36 @@ async function markdownIn(root: string, folder: string, paths: string[], unread?
   return found.sort((first, second) => first.name.localeCompare(second.name));
 }
 
+/**
+ * Where a plugin may keep an instruction file, from its own folder; a path ending in / is a folder whose .md files directly
+ * in it count (Copilot CLI's rules). No tool reads one into a session (docs/capability-data.md, section 6): the page lists
+ * them because the plugin carries them. No deeper search, and no manifest field.
+ */
+const INSTRUCTION_FILES = ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.claude/CLAUDE.md', '.github/copilot-instructions.md', 'com.github.copilot/rules/'];
+
+/** A plugin's instruction files (INSTRUCTION_FILES) in `folder`, each named by its path there, read as its skills' files are. */
+async function instructionsIn(root: string, folder: string): Promise<NamedPart[]> {
+  const inFolder = async (path: string) => (await listInside(root, join(folder, path))).filter(name => name.endsWith('.md')).sort().map(name => join(path, name));
+  const found: NamedPart[] = [];
+  for (const path of (await Promise.all(INSTRUCTION_FILES.map(path => (path.endsWith('/') ? inFolder(path) : [path])))).flat()) {
+    const body = await partFile(root, join(folder, path));
+    if (body !== undefined) found.push({ name: path, description: '', text: body, path });
+  }
+  return found;
+}
+
+/**
+ * Each event in a plugin's hooks section with the commands its hooks run then, as written: Claude Code's and Codex's form
+ * keeps them in an entry's `hooks[].command`, Copilot CLI's in an entry's `bash`, else its `powershell`.
+ */
+const hooksOf = (hooks: Record<string, unknown>): PluginHook[] =>
+  Object.keys(hooks).sort().map(event => ({ event, runs: (Array.isArray(hooks[event]) ? hooks[event] : []).flatMap(hookRuns) }));
+function hookRuns(value: unknown): string[] {
+  const entry = record(value);
+  if (Array.isArray(entry?.hooks)) return entry.hooks.map(hook => text(record(hook)?.command)).filter(Boolean);
+  return [text(entry?.bash) || text(entry?.powershell)].filter(Boolean);
+}
+
 /** What an MCP server runs: its command and arguments, or the URL it connects to. */
 function serverRuns(server: unknown): string {
   const entry = record(server);
@@ -242,7 +272,8 @@ export async function skillNamesIn(folder: string, entry: Record<string, unknown
  * Lists are paths, lists of paths, or (commands) a map of name to { source }: such a command is named by its file, not
  * its key, and an inline { content } one isn't listed. Agents folders are read too, though Claude Code takes only files.
  * An entry with "strict": false that also lists parts beside a plugin.json is one Claude Code refuses; it is read merged.
- * Hooks and servers are read from their default files plus whatever plugin.json or the entry names.
+ * Hooks and servers are read from their default files plus whatever plugin.json or the entry names. Instruction files are
+ * read at their fixed places (INSTRUCTION_FILES), in every copy alike.
  */
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs = {}): Promise<PluginContents> {
   const { own, added } = await manifestOf(folder, entry, root, readAs);
@@ -255,7 +286,8 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
     skills: await skillsOf(folder, entry, root, readAs),
     commands: await markdownIn(root, folder, listedOr('commands', join(folder, 'commands'))),
     agents: await markdownIn(root, folder, listedOr('agents', join(folder, 'agents'))),
-    hooks: Object.keys(hooks).sort(),
+    instructions: await instructionsIn(root, folder),
+    hooks: hooksOf(hooks),
     mcpServers: Object.entries(servers).map(([name, server]) => ({ name, runs: serverRuns(server), entry: JSON.stringify(server) })).sort((first, second) => first.name.localeCompare(second.name)),
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),
     lspServers: Object.keys(lsp).sort(),

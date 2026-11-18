@@ -111,7 +111,7 @@ const RETRY_MS = 60_000;
 /** Said of a plugin a tool still has that its marketplace's catalog dropped, beside its "No longer offered" mark. */
 export const NO_LONGER_OFFERED = 'Stays installed as it is until you uninstall it.';
 /** A plugin's contents with nothing in them, for a plugin whose files couldn't be read (its `problem` says why). */
-const empty: PluginDetail = { skills: [], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
+const empty: PluginDetail = { skills: [], commands: [], agents: [], instructions: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
 
 export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine = realEngine, offers: SuggestedMarketplace[] = suggestedMarketplaces) {
   const listPath = join(host.dataDir, 'marketplaces.json');
@@ -233,18 +233,18 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * Each tool's installed copy of one plugin, read from the folder that tool keeps it in, as that tool reads it (see
    * pluginContents): Claude Code and Copilot CLI by the copy's own plugin.json with the marketplace entry's part lists
    * added (paths a copy of another release doesn't have are simply not found; for Copilot CLI a listed skills folder
-   * replaces skills/); Codex by the one manifest it picks, its
-   * .codex-plugin one when the copy has it, without the entry. A copy's commands and agents are listed as it holds them;
-   * "In each tool" says what each tool does with them. The detail request names just a source and a plugin, so the tools
-   * and their install states are read here again.
+   * replaces skills/); Codex by the one manifest it picks, its .codex-plugin one when the copy has it, without the entry. A
+   * copy's commands, agents and instruction files are listed as it holds them; "In each tool" says what each tool does with
+   * its commands and agents (no tool reads its instruction files). The detail request names just a source and a plugin, so
+   * the tools and their install states are read here again.
    */
   async function installedCopies(ctx: engine.PluginContext, catalog: Catalog, source: string, item: CatalogPlugin, only?: PluginTool): Promise<Partial<Record<HarnessId, InstalledCopy>>> {
     const tools = only ? [only] : toolIds((await host.read()).tools);
     const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
-      const { skills, commands, agents } = await installedContents(tool as HarnessId, state.path, item.entry, !!item.isMarketplaceRoot);
-      return [tool, { skills, commands, agents, version: state.version }] as const;
+      const { skills, commands, agents, instructions } = await installedContents(tool as HarnessId, state.path, item.entry, !!item.isMarketplaceRoot);
+      return [tool, { skills, commands, agents, instructions, version: state.version }] as const;
     }));
     return Object.fromEntries(copies.filter(copy => !!copy));
   }
