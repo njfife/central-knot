@@ -848,7 +848,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* What needs you (overview.ts needsYou): a line each, close together. */
 .overview-needs { display: flex; flex-direction: column; gap: 8px; }
 /* An update to install: the release and its notes, the Update button at the end. */
-.overview-update { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; line-height: 1.5; color: var(--ink); }
+.overview-update { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); font-size: 13px; line-height: 1.5; color: var(--ink); }
 .overview-update-text { flex: 1 1 24em; max-width: var(--measure); }
 .overview-update-text > .btn { height: auto; padding: 0 2px; }
 .overview-update > .btn.primary { margin-left: auto; }
@@ -910,7 +911,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .tools-table td.num.tone-faint { color: var(--ink-soft); font-weight: 400; }
 .tools-table .tools-sessions { width: 190px; padding-left: 20px; white-space: nowrap; }
 .tools-count { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
-.tools-tool { display: inline-flex; align-items: center; gap: 8px; margin-right: 8px; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
+.tools-tool { display: inline-flex; align-items: center; gap: 8px; margin-right: 8px; padding: 0; border: 0; background: transparent; color: var(--ink);
+  font: inherit; cursor: pointer; text-align: left; }
 .tools-tool:hover > .tools-tool-name { text-decoration: underline; }
 .tools-version { display: inline-block; color: var(--ink-soft); white-space: nowrap; }
 .tools-table-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--ink-soft); }

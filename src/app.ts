@@ -738,8 +738,8 @@ export const whyReadOnly = (home: HomeView) => (!home.sync.access.allowed ? home
 
 /**
  * Reads what a page shows beyond the home itself: History, Settings, Instructions or the marketplaces (Plugins, Harnesses and
- * the Overview), into its slot (pagedata.ts), never as an action: the page says it is reading, and anything else can go on meanwhile. `fresh` reads
- * each marketplace anew.
+ * the Overview), into its slot (pagedata.ts), never as an action: the page says it is reading, and anything else can go on
+ * meanwhile. `fresh` reads each marketplace anew.
  */
 function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; readId?: number } = {}): Promise<void> {
   // The Overview's tools table counts each tool's plugins as Harnesses does (harnesspage.ts pluginsInstalled), from the same read.

@@ -180,7 +180,8 @@ export interface UsageSummary { kinds: Record<'skills' | 'mcp' | 'agents', KindU
 /** What a reading says of a home in sum (UsageSummary): what the item pages' rows and chip say, counted, for any page to show. */
 export function usageSummary(reading: UsageReading, home: HomeView): UsageSummary {
   const kindUsage = (which: 'skills' | 'mcp' | 'agents'): KindUsage => {
-    const { facts, library, tools } = kindSource(home, which), kind = partOfPage[which], sum: KindUsage = { figured: 0, used: [], mostUsed: [], noUseSeen: [], tooNew: [], cantSay: [], foundNoneSeen: [] };
+    const { facts, library, tools } = kindSource(home, which), kind = partOfPage[which];
+    const sum: KindUsage = { figured: 0, used: [], mostUsed: [], noUseSeen: [], tooNew: [], cantSay: [], foundNoneSeen: [] };
     const used: MostUsed[] = [];
     for (const each of facts) {
       const item = library[each.key], figure = figureFor(reading, kind, each, tools);

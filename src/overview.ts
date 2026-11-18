@@ -8,7 +8,8 @@
 // (updateview.ts updateLine). While a home's first reading runs (matrix.ts firstReadingRuns) every place a reading fills is
 // drawn at its final size, so nothing moves when it lands. A kind's page opens through matrix.ts openKind. Not here: the empty
 // states every page shares (pages.ts noToolsLead, notRead, previewReason) and first setup's question (firstsetup.ts setupLead).
-import { absentKinds, collectUsage, homeTools, loadHome, noToolManaged, practiceNoteOpen, realHomeName, rerender, setPracticeNote, showPage, state, syncNow, whyReadOnly, type PageKind } from './app.ts';
+import { absentKinds, collectUsage, homeTools, loadHome, noToolManaged, practiceNoteOpen, realHomeName, rerender, setPracticeNote } from './app.ts';
+import { showPage, state, syncNow, whyReadOnly, type PageKind } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, h, icon, middle } from './dom.ts';
 import { setupLead } from './firstsetup.ts';
@@ -41,7 +42,8 @@ function leadSentence(home: HomeView): string {
   const tools = homeTools(), named = andList(tools.map(tool => toolNames[tool]));
   const holdersOf = { skills: tools, mcp: home.mcp.tools, agents: home.agents.tools };
   const held = heldKinds(home).map(kind => [kindNouns[kind].many, holdersOf[kind]] as const);
-  if (tools.length === 1) return `Central Knot keeps the ${andList(held.map(([kind]) => kind))} you choose the same between your tools. ${home.sync.present.length > 1 ? `It manages only ${named} here` : `Only ${named} is in this home`}, so there is nothing to keep in step yet.`;
+  const only = home.sync.present.length > 1 ? `It manages only ${named} here` : `Only ${named} is in this home`;
+  if (tools.length === 1) return `Central Knot keeps the ${andList(held.map(([kind]) => kind))} you choose the same between your tools. ${only}, so there is nothing to keep in step yet.`;
   const everywhere = held.filter(([, holders]) => holders.length === tools.length).map(([kind]) => kind);
   const some = held.filter(([, holders]) => holders.length < tools.length).map(([kind, holders]) => {
     const without = tools.filter(tool => !holders.includes(tool));
@@ -57,7 +59,8 @@ function leadSentence(home: HomeView): string {
 function nextStep(home: HomeView, asking: boolean): string {
   if (!home.skills.items.length && !home.mcp.items.length && !home.agents.items.length) return ' Nothing found in this home yet.';
   // With a tool left out, the line under the tools table says where its switch is.
-  if (homeTools().length === 1) return home.sync.present.length > 1 ? '' : ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
+  if (homeTools().length === 1) return home.sync.present.length > 1 ? ''
+    : ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
   return home.sync.access.allowed && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
@@ -67,7 +70,8 @@ function practiceBanner() {
   const real = button({ variant: 'link', size: 'small', label: `or use ${realHomeName}`, id: 'intro-use-real', onclick: () => void loadHome('actual') });
   real.title = 'Only reads your tools; nothing is written there until you say so.';
   return h('div.intro', { role: 'note' },
-    h('div.intro-text', {}, h('strong', {}, 'This is a practice copy.'), h('span', {}, ' Sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools, so try anything.')),
+    h('div.intro-text', {}, h('strong', {}, 'This is a practice copy.'),
+      h('span', {}, ' Sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools, so try anything.')),
     // The first step stays inside the sandbox; the real home is the quieter second choice.
     button({ variant: 'primary', size: 'small', label: 'Try it: open Skills', id: 'intro-try', onclick: () => showPage('skills') }), real,
     button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Hide this note', id: 'intro-dismiss', onclick: () => { setPracticeNote(false); rerender(); } }));
@@ -92,18 +96,21 @@ const setupSpeaksOfCopies = (home: HomeView) => asksNow(home) === 'question' || 
 function needsYou(home: HomeView): HTMLElement | null {
   const empty = noToolManaged(), readOnly = whyReadOnly(home);
   const kinds = heldKinds(home), said = new Set<string>();
-  const problems = empty ? [] : kinds.flatMap(kind => problemsBesideStop(home[kind].problems, home.sync.gate).filter(problem => !said.has(problem) && said.add(problem)).map((problem, at) =>
-    line(`overview-${kind}-problem-${at}`, 'triangle-alert', 'tone-warning', `${problem} `, link(`Open ${kindNouns[kind].title}`, `overview-${kind}-problem-${at}-open`, () => openKind(kind)))));
+  const problems = empty ? [] : kinds.flatMap(kind => problemsBesideStop(home[kind].problems, home.sync.gate)
+    .filter(problem => !said.has(problem) && said.add(problem))
+    .map((problem, at) => line(`overview-${kind}-problem-${at}`, 'triangle-alert', 'tone-warning', `${problem} `,
+      link(`Open ${kindNouns[kind].title}`, `overview-${kind}-problem-${at}-open`, () => openKind(kind)))));
   const differ = empty || setupSpeaksOfCopies(home) ? [] : kinds.map(kind => {
     const count = kindSource(home, kind).facts.filter(asksWhichCopy).length, { one, many } = kindNouns[kind];
-    return !count ? null : line(`overview-${kind}-differ-line`, 'diff', 'tone-warning', `${plural(count, `found ${one}`, `found ${many}`)} ${count === 1 ? 'has' : 'have'} copies that differ. `,
-      link('Show them', `overview-${kind}-differ`, () => openKind(kind, { filter: 'attention' })));
+    const words = `${plural(count, `found ${one}`, `found ${many}`)} ${count === 1 ? 'has' : 'have'} copies that differ. `;
+    return !count ? null : line(`overview-${kind}-differ-line`, 'diff', 'tone-warning', words, link('Show them', `overview-${kind}-differ`, () => openKind(kind, { filter: 'attention' })));
   });
   const lines = [empty ? null : setupLead(home), updateLine(),
     empty || !readOnly ? null : home.sync.access.allowed ? line('overview-stopped', 'circle-alert', 'tone-danger', readOnly)
       : line('overview-preview', 'lock', 'tone-warning', `Automatic sync is paused. Preview only: ${previewReason(readOnly)}.`),
     ...problems, ...differ,
-    empty || readOnly || home.syncOn ? null : line('overview-sync-off', 'circle-minus', 'tone-warning', 'Automatic sync is off: edits wait until you turn it on or ', link('Sync once', 'overview-sync-now', () => void syncNow()), '.'),
+    empty || readOnly || home.syncOn ? null : line('overview-sync-off', 'circle-minus', 'tone-warning', 'Automatic sync is off: edits wait until you turn it on or ',
+      link('Sync once', 'overview-sync-now', () => void syncNow()), '.'),
   ].filter((each): each is HTMLElement => !!each);
   return lines.length ? h('div.overview-needs', { id: 'overview-needs' }, lines) : null;
 }
@@ -120,16 +127,19 @@ function needsYou(home: HomeView): HTMLElement | null {
 function cardUsage(kind: PageKind, total: number, sum: KindUsage | undefined) {
   const slot = (...content: (Node | string | null)[]) => h('p.kind-card-slot', {}, ...content);
   const tell = !!sum && !!total && !!sum.figured;
-  const used = !total ? '' : firstReadingRuns() ? `Used in the last ${USAGE_DAYS} days: …` : !sum ? '' : `Used in the last ${USAGE_DAYS} days: ${tell ? sum.used.length : 'can’t say'}`;
-  const second = !sum || !total ? null : !tell ? 'No tool that has them on can tell.'
-    : sum.noUseSeen.length ? h('button.kind-card-link', { type: 'button', id: `overview-${kind}-unused`, onclick: () => openKind(kind, { filter: 'unused' }) }, `No use seen in ${USAGE_DAYS} days: ${sum.noUseSeen.length}`) : null;
+  const used = !total ? '' : firstReadingRuns() ? `Used in the last ${USAGE_DAYS} days: …` : !sum ? ''
+    : `Used in the last ${USAGE_DAYS} days: ${tell ? sum.used.length : 'can’t say'}`;
+  const unused = sum?.noUseSeen.length ? h('button.kind-card-link', { type: 'button', id: `overview-${kind}-unused`, onclick: () => openKind(kind, { filter: 'unused' }) },
+    `No use seen in ${USAGE_DAYS} days: ${sum.noUseSeen.length}`) : null;
+  const second = !sum || !total ? null : !tell ? 'No tool that has them on can tell.' : unused;
   const top = tell ? sum!.mostUsed : [];
   return h('div.kind-card-usage', { id: `overview-${kind}-usage` },
     slot(used), second ? slot(second) : null,
     h('div.kind-card-top', {}, [0, 1, 2].map(at => {
       const each = top[at];
       return h('p.kind-card-slot.kind-card-top-row', {}, at === 0 && each ? h('span', {}, 'Most used') : h('span'),
-        each ? h('button.kind-card-link.kind-card-top-name', { type: 'button', id: `overview-${kind}-top-${at}`, onclick: () => openKind(kind, { key: each.key }) }, middle(each.name, 8)) : h('span'),
+        each ? h('button.kind-card-link.kind-card-top-name', { type: 'button', id: `overview-${kind}-top-${at}`, onclick: () => openKind(kind, { key: each.key }) },
+          middle(each.name, 8)) : h('span'),
         each ? h('span', {}, plural(each.sessions, 'session')) : h('span'));
     })),
     second ? null : slot());
@@ -144,13 +154,14 @@ function kindCard(kind: PageKind, home: HomeView) {
   const { title, short: noun } = kindNouns[kind], facts = kindSource(home, kind).facts;
   const fromPlugins = pluginItemCount(home, kind), total = facts.length + fromPlugins;
   const on = facts.filter(fact => fact.on).length, waiting = facts.filter(fact => fact.on && fact.edited?.length).length;
+  const counts = total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} synced` : 'none synced'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`;
   const status = waiting ? h('span.kind-card-state.tone-warning', {}, icon('clock', 13), `${plural(waiting, 'change')} waiting to sync`)
     : on ? h('span.kind-card-state.tone-success', {}, icon('check', 13), 'All in sync') : null;
   return h('div.kind-card', {},
     h('div.kind-card-about', {},
       h('button.kind-card-main', { type: 'button', id: `overview-${kind}`, onclick: () => openKind(kind) },
         h('span.kind-card-head', {}, icon(glyphs[kind], 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
-      h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} synced` : 'none synced'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`), status)),
+      h('div.kind-card-summary', {}, h('span', {}, counts), status)),
     cardUsage(kind, total, usageSums()?.kinds[kind]));
 }
 
@@ -166,7 +177,8 @@ function usageLine() {
   const again = (label: string, id: string, shown: boolean) => button({ variant: 'link', size: 'micro', label, id: shown ? id : undefined, onclick: () => void collectUsage() });
   const sentences = [
     [icon('refresh-cw', 14, 'spin tone-muted'), 'Collecting usage statistics: reading your tools’ session history on this computer. Nothing leaves it.'],
-    [icon('history', 14, 'tone-muted'), `Usage collected ${dayAndTime(read?.at ?? new Date().toISOString())}. `, again('Update usage statistics', 'overview-collect-usage', now === 1)],
+    [icon('history', 14, 'tone-muted'), `Usage collected ${dayAndTime(read?.at ?? new Date().toISOString())}. `,
+      again('Update usage statistics', 'overview-collect-usage', now === 1)],
     [icon('triangle-alert', 14, 'tone-warning'), 'Your tools’ session history couldn’t be read. ', again('Try again', 'overview-collect-again', now === 2)],
   ];
   return h(`div.overview-usage${now === 2 ? '.overview-usage-failed' : ''}`, { id: 'overview-usage', role: 'status' },
@@ -181,7 +193,8 @@ function sessionsCell(history: ToolHistory | undefined) {
   if (!history) return h('td.tools-sessions', {});
   if (history.goes === 'unread') return h('td.tools-sessions.tone-muted', {}, 'couldn’t be read');
   if (history.goes === 'none') return h('td.tools-sessions.tone-muted', {}, 'no sessions');
-  return h('td.tools-sessions', {}, h('strong.tools-count', {}, String(history.recent)), history.goes === 'from' ? h('span.tone-muted', {}, ` · history from ${dayWords(history.from)}`) : null);
+  const since = history.goes === 'from' ? h('span.tone-muted', {}, ` · history from ${dayWords(history.from)}`) : null;
+  return h('td.tools-sessions', {}, h('strong.tools-count', {}, String(history.recent)), since);
 }
 
 /** A tool's plugins as Harnesses counts them (harnesspage.ts pluginsInstalled): "—" where it takes none from a marketplace. */
@@ -201,10 +214,12 @@ function toolsTable(home: HomeView) {
   const tools = homeTools(), kinds = heldKinds(home), plugins = !absentKinds().includes('plugins'), histories = usageSums()?.tools ?? [];
   const version = (tool: HarnessId) => (home.mode === 'actual' ? home.snapshots.find(snapshot => snapshot.harness === tool)?.probe.version : undefined);
   const counts = tools.map(tool => kinds.map(kind => tally(home, kind, tool)));
-  const kindDash = counts.some(row => row.some(count => !count.supported)), pluginDash = plugins && tools.some(tool => !takesPlugins(tool) || pluginsInstalled(tool).state === 'unsupported');
+  const kindDash = counts.some(row => row.some(count => !count.supported));
+  const pluginDash = plugins && tools.some(tool => !takesPlugins(tool) || pluginsInstalled(tool).state === 'unsupported');
   const unread = plugins && tools.some(tool => takesPlugins(tool) && pluginsInstalled(tool).state === 'failed');
   const out = home.sync.present.filter(tool => !tools.includes(tool));
-  const key = [kindDash ? 'that tool can’t hold that kind' : '', pluginDash ? 'Central Knot doesn’t move that tool’s plugins' : ''].filter(Boolean);
+  const dashes = [kindDash ? 'that tool can’t hold that kind' : '', pluginDash ? 'Central Knot doesn’t move that tool’s plugins' : ''].filter(Boolean);
+  const key = [dashes.length ? `—: ${dashes.join(', or ')}.` : '', unread ? '?: the marketplaces couldn’t be read.' : ''].filter(Boolean).join(' ');
   return h('section.overview-tools', { 'aria-labelledby': 'overview-tools-title' },
     h('h2.eyebrow', { id: 'overview-tools-title' }, 'Your tools'),
     h('table.tools-table', {},
@@ -216,7 +231,7 @@ function toolsTable(home: HomeView) {
         ...counts[row].map(count => (count.supported ? h('td.num', {}, String(count.total)) : h('td.num.tone-faint', {}, '—'))),
         plugins ? pluginsCell(tool) : null,
         sessionsCell(histories.find(each => each.tool === tool)))))),
-    key.length || unread ? h('p.tools-table-note', { id: 'overview-tools-key' }, [key.length ? `—: ${key.join(', or ')}.` : '', unread ? '?: the marketplaces couldn’t be read.' : ''].filter(Boolean).join(' ')) : null,
+    key ? h('p.tools-table-note', { id: 'overview-tools-key' }, key) : null,
     out.length ? h('p.tools-table-note', { id: 'overview-left-out' }, `${toolList(out)} ${out.length === 1 ? 'is' : 'are'} installed and left out: `,
       link(out.length === 1 ? 'its switch is on Harnesses' : 'their switches are on Harnesses', 'overview-left-out-open', () => showPage('harnesses')), '.') : null);
 }
@@ -226,8 +241,11 @@ function toolsTable(home: HomeView) {
 /** Automatic sync's line, with History's: green once something syncs; before that, or where nothing can be written, History alone. */
 function syncLine(home: HomeView, nothingOn: boolean) {
   const history = link('History', 'overview-history', () => showPage('history'));
-  if (!home.syncOn || whyReadOnly(home) || nothingOn || noToolManaged()) return line('overview-sync', 'history', 'tone-muted', 'Every change Central Knot makes in your tools is kept in ', history, ', with Undo.');
-  return line('overview-sync', 'refresh-cw', 'tone-success', `Automatic sync is on: edits spread between tools in seconds${home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : ''}. Every change is kept in `, history, ', with Undo.');
+  if (!home.syncOn || whyReadOnly(home) || nothingOn || noToolManaged()) {
+    return line('overview-sync', 'history', 'tone-muted', 'Every change Central Knot makes in your tools is kept in ', history, ', with Undo.');
+  }
+  const takenIn = home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : '';
+  return line('overview-sync', 'refresh-cw', 'tone-success', `Automatic sync is on: edits spread between tools in seconds${takenIn}. Every change is kept in `, history, ', with Undo.');
 }
 
 export function overviewPage() {
