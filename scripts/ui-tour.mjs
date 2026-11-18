@@ -2959,18 +2959,20 @@ if (wanted('overview')) {
     requests.close();
     await a.click('#overview-collect-usage');
   }
-  writeFileSync(join(practice, '.copilot/mcp-config.json'), '{');
+  const config = join(practice, '.copilot/mcp-config.json'), before = readFileSync(config);
+  writeFileSync(config, '{');
   await refresh();
   await pictures('problem', 'A tool file cannot be read. The problem and its action appear above the figures.');
-  writeFileSync(join(practice, '.copilot/mcp-config.json'), '{}');
+  writeFileSync(config, before);
   await refresh();
   releases.push({ tag: 'v0.7.1-alpha.1', zip, asset: 'Central-Knot-Alpha-0.7.1-mac-arm64.zip', bytesPerSecond: 400000 });
   await a.click('#update-control');
   await waitFor(a, `!!document.querySelector('#overview-update')`, 20000);
   await pictures('update', 'An update is available, with release notes and the install action.');
   await a.click('#nav-instructions');
-  await a.click('[id^="ins-edit-"]');
-  await a.run(`(() => { const area = document.querySelector('textarea'); area.value += 'Unsaved'; area.dispatchEvent(new Event('input', {bubbles:true})); })()`);
+  await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`, 30000);
+  await a.click('#ins-edit-claude-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += 'Unsaved'; area.dispatchEvent(new Event('input', {bubbles:true})); })()`);
   await a.click('#nav-overview');
   await a.click('#overview-update');
   await waitFor(a, `/Downloading.*[1-9]/.test(document.querySelector('#overview-update')?.textContent)`);
@@ -2978,7 +2980,7 @@ if (wanted('overview')) {
   await waitFor(a, `document.querySelector('#update-control')?.dataset.look === 'held'`, 30000);
   await shot(a, 'held', 'The ready update waits for an unsaved draft.');
   await a.click('#overview-update');
-  if (!(await a.has('#setting-updates'))) throw new Error('A held restart should open Settings.');
+  if (!(await waitFor(a, `!!document.querySelector('#setting-updates')`))) throw new Error('A held restart should open Settings.');
   await fixture.close();
   await fresh({ CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
