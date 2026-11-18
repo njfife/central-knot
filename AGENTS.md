@@ -23,7 +23,7 @@ macOS is the released platform. Linux is being built, one step of the Linux plan
 Keep the loop short. These are the checks; nothing else is required.
 
 1. `npm test`: the type check and the unit tests, about 20 seconds.
-2. The Mac run, on your pushed branch: `gh workflow run mac.yml -R njfife/central-knot --ref <branch>`, then `gh run watch <id> -R njfife/central-knot`. It packages the app, runs the light tour and the end-to-end checks against the packaged app, and prints how long each part took. It also runs by itself on every push to `next`.
+2. The Mac run, on your pushed branch: `gh workflow run mac.yml -R njfife/central-knot --ref <branch>`, then `gh run watch <id> -R njfife/central-knot`. It runs `scripts/mac-run.mjs`: the unit tests, the packaging, the light tour, the bundled and alpha checks, then the end-to-end checks against the packaged app, and prints each part's result and how long it took. It also runs by itself on every push to `next`.
 3. If you changed what a page looks like, look at the pictures: `gh run download <id> -R njfife/central-knot -n light-tour` gives one picture of each page. For a state the light tour doesn't show, run only your own feature's section: `node scripts/ui-tour.mjs <outDir> --electron --only <section>`.
 
 - The full tour (`--full`, hundreds of pictures, about ten minutes) runs for a new release only. Do not run it, repair it or extend it for an ordinary change; a section outside your feature is not yours to fix.
