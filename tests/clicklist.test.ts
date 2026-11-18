@@ -448,7 +448,7 @@ test('A click on Codex’s Agents tab that ends while Codex’s Skills tab is op
   assert.deepEqual([app.outcome, app.said.text, flashRequests.has('agents-release-notes')], [undefined, 'release-notes is off.', false]);
 });
 
-test('A plugin’s skill named like your own: its switch’s click, and its Undo, flash the plugin’s row, never your own', async () => {
+test('A plugin’s skill named like your own: its switch’s click, and its Undo, ask for the plugin’s row’s flash, never your own’s', async () => {
   onSkills();
   const key = 'issue-tracker@team/release-notes', theirs = `skills-${key}`;
   queueClick({ kind: 'skills', key, on: false }, 'release-notes', () => ({ kind: 'skills', items: ['release-notes'], keys: [key], changes: [{ key: 'release-notes', on: false, except: [] }], said: 'release-notes is off in Claude Code.' }), () => false);

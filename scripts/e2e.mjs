@@ -1569,8 +1569,11 @@ async function practiceFlow() {
     && /outside-skill is off in Claude Code\. Its whole plugin outside-tools was turned off in Claude Code, with its 1 other skill and 1 MCP server\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
   const other = 'outside-tools@ck-outside/outside-other';
   same('and the plugin’s other skill’s row says it is off in Claude Code too', [await cellState(a, other, 'claude-cli'), await switchOn(a, other)], ['plugin-off', false]);
+  // The rows that flash on the page from here on, by the start of their highlight.
+  await a.run(`window.flashedRows = []; document.addEventListener('animationstart', event => { if (event.animationName === 'row-flash') window.flashedRows.push(event.target.dataset.key); })`);
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 60 && (outsideOff() || !/Undone: outside-skill/.test(await a.text('#header') ?? '')); tries++) await wait(100);
+  check('its Undo flashes the plugin’s row on the page', (await a.run('window.flashedRows')).includes(outside), await a.run('window.flashedRows'));
   check('its one Undo turns the plugin back on there', !outsideOff() && await switchOn(a, outside) && /Undone: outside-skill is back on in Claude Code\./.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(practice, '.claude/settings.json'))]);
   // Two of its skills turned off 150 ms apart (clip 04), the second while the first still runs (Claude Code's stand-in takes a
   // second to disable it): the first takes the whole plugin off in Claude Code; the second, worked out in its turn, finds nothing

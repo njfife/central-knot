@@ -11,8 +11,8 @@
 // chip with its band and one Turn these off (built from each row's own Off: rowClicks.off); what the reading says of a row, and
 // the chip's rule, are usagerow.ts's.
 // A table is told its kind and its tool by its caller (useTable gives a Table); its view is its kind's own, kept here (views), which
-// a kind's page shares with that kind's tabs under Harnesses. No kind, view or tool is this module's state between draws: the
-// header, a reading as it lands and Escape run useTable for the table on screen (useTableShown). A row carries its kind
+// a kind's page shares with that kind's tabs under Harnesses. This module keeps no current kind, view or tool: the header, a
+// reading as it lands and Escape run useTable for the table on screen (useTableShown). A row carries its kind
 // (itemrow.ts ItemRow kind; a plugin's row: kindOf). Until the Library page, every row on a table is of the table's kind; there a
 // table will list every kind, and only a row's own kind will say which it is.
 // A row's switch or Add joins the page's list of clicks (flip, pluginRowSwitch → app.ts queueClick) and is worked out in its turn,
@@ -143,7 +143,8 @@ function toggleFile(row: PluginRow) {
 /** A plugin item's details: what it is, where it comes from and is handled, each tool's copy, and its file as each tool's copy has it. */
 function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'row') {
   const [type, ...rest] = row.description.split(' · ');
-  // Shown, and its plugin updated since it was read: it is read again from the copies installed now.
+  // Shown, and its plugin's version changed in some tool since it was read (versionsOf): read again from the copies installed now.
+  // A plugin whose version doesn't change with its content (one with none, one Copilot CLI loads live) keeps the text read first.
   if (filesShown.has(idOf(row)) && filesShown.get(idOf(row))!.from !== versionsOf(row)) readFile(row);
   const shown = filesShown.has(idOf(row)), copies = filesShown.get(idOf(row))?.texts;
   const file = row.kind === 'skill' ? 'SKILL.md' : 'agent file';
@@ -187,7 +188,7 @@ function pluginRowEl(t: Table, row: PluginRow) {
     return drawn;
   };
   return [
-    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${open ? '.open' : ''}${t.used ? '.ov-usage' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(t, row) },
+    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${takeFlash(idOf(row)) ? '.row-flash' : ''}${open ? '.open' : ''}${t.used ? '.ov-usage' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(t, row) },
       h('div.ov-managed', { role: 'cell' }, pluginRowSwitch(t, row)),
       h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: row.description ? `${row.name}: ${row.description}` : row.name },
         h('span.ov-name-main', {}, h('span.ov-name-text', {}, row.name)),
@@ -1017,9 +1018,10 @@ function useTable(which: PageKind, harness?: Tool): Table {
 /**
  * The table on screen, worked out from the page (a kind's page, or a tool's tab of a kind under Harnesses): it runs useTable for
  * it, with useTable's resets (an armed Delete disarmed on another visit, a table started fresh for another page or home, a chip
- * with nothing left falling back to All). The header asks first (listResult, outcomeBand), so the resets come before anything
- * is drawn; the page then asks for the same table, and so do a reading as it lands (holdOrder) and Escape, and asked again
- * useTable changes nothing.
+ * with nothing left falling back to All). Where the header shows the result (listResult, outcomeBand), it asks first, so the
+ * resets come before anything is drawn; where it doesn't (a home another build holds: renderer.ts resultHere), a reading as it
+ * lands (holdOrder) can be the first to ask, and the resets come then rather than at the table's next draw. Asked again for the
+ * table already drawn, useTable changes nothing.
  */
 const useTableShown = (): Table | undefined => {
   const which = isKind(state.page) ? state.page : harnessKindShown();
