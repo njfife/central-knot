@@ -12,7 +12,8 @@ concurrency:
 jobs:
   mac:
     runs-on: [self-hosted, macOS, ARM64, ck-mac]
-    # A run took about 11 minutes on next b212759 (2026-11-17), about 6 of them the end-to-end checks; the limit leaves room for a slow one.
+    # A run of PR #152 took about 9 minutes (2026-11-17): about 3 for its first phase, 6 for the end-to-end checks (the end of
+    # scripts/mac-run.mjs's output gives each part's time). The limit leaves room for a slow one.
     timeout-minutes: 30
     steps:
       # An app left running by a cancelled or failed run would hold a debug port that this run could attach to.
@@ -23,10 +24,10 @@ jobs:
           node-version: '24'
           # No npm cache: this self-hosted runner keeps ~/.npm between runs, so restoring one only costs time.
       - run: npm ci
-      - run: npm test
-      - run: npm run package:mac
-      # The light tour: the packaged app opens and so does each page, one picture each (gh run download <run> -n light-tour).
-      - run: node scripts/ui-tour.mjs light-tour
+      # Every check, in two phases: scripts/mac-run.mjs says what runs beside what and why, and ends with each part's time. exec:
+      # the runner's stop (a newer push cancels this run) reaches the script itself, which sends it on to every part.
+      - run: exec node scripts/mac-run.mjs
+      # The light tour's pictures: gh run download <run> -n light-tour.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -34,9 +35,3 @@ jobs:
           path: light-tour
           if-no-files-found: ignore
           retention-days: 7
-      - run: npm run e2e
-        env: { CK_E2E_GROUPS_AT_ONCE: 4 }
-      # A bundled build: the documented build command on a fixture marketplace, then the packaged build opened with the source gone.
-      - run: node scripts/bundled-check.mjs
-      # The alpha: packaged from a test alpha tag beside the standard app, then both opened on one throwaway home.
-      - run: node scripts/alpha-check.mjs
