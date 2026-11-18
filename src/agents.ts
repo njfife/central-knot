@@ -24,7 +24,7 @@ import { libraryAction } from './historyactions.ts';
 import { itemKey, listed, noteAgainst, pendingEdits, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, lookFor, restore, runPass, takeInAnswers, unreadIn, unseenIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { mergeAgent } from './merge.ts';
 import { partsHolding, pluginHolds } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
@@ -274,7 +274,7 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
   for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key), fromSource.get(key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
   const problems = problem ? [problem, ...look.disk.problems] : look.disk.problems;
-  return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, notices };
+  return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, unread: unreadIn(look.disk, managed), notices };
 }
 
 /**

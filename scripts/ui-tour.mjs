@@ -16,7 +16,9 @@
 // (a link to a plugin's own folder, a marketplace or a plugin one lists, and Add to Plugin marketplaces), plugin-library
 // (a plugin's items in Pi as library items), parts-migration (a plugin's parts an earlier version put into Pi, moved to the
 // library at one look), sort (the item pages sorted by last updated) and usage (usage collected from made-up session history:
-// the button and its band, each row's figure, an opened row's line per tool, and the "No use seen in 30 days" chip with its band).
+// the button and its band, each row's figure, an opened row's line per tool, and the "No use seen in 30 days" chip with its band)
+// and overview (the Overview on a made-up home of ordinary size: no tool, first setup, collecting and collected, a problem, an
+// update to install, and at 1280×800 the states one line changes).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -2968,6 +2970,154 @@ if (wanted('usage')) {
     await requests.restore('usage:read');
     requests.close();
   }
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
+// ---------- The Overview, the page the app opens on (overview.ts) ----------
+// A made-up home of ordinary size in this run's own HOME (this computer's home, so each tool's version shows): five stand-in
+// tools, about 110 skills (10 from plugins), 12 MCP servers, 8 agents and session history in three tools. Each state at every
+// size and once in light; at 1280×800 also the states that are one line's change.
+if (wanted('overview')) {
+  const zip = join(scratch, 'update.zip');
+  writeFileSync(zip, Buffer.alloc(4_000_000, 7));
+  const releases = [];
+  const fixture = await serveReleases(releases);
+  await fresh({ CK_UPDATE_STUB: 'v0.7.0-alpha.1', CK_UPDATE_RELEASES: fixture.releasesUrl });
+  begin('overview');
+  const top = () => a.run(`document.getElementById('overview-scroll')?.scrollTo(0, 0)`);
+  /** Waits for a state the next pictures show; the run stops if it never comes, so no picture shows the wrong one. */
+  const must = async (expression, ms, what) => { if (!(await waitFor(a, expression, ms))) throw new Error(`The Overview's tour waited in vain for ${what}; its usage line said: ${await a.run(`document.querySelector('#overview-usage')?.innerText`)}; the page: ${(await a.run(`document.querySelector('#overview-scroll')?.innerText ?? document.body.innerText`)).slice(0, 400)}`); };
+  // No tool, and a record that stops every write: why it can't be written is said too.
+  mkdirSync(join(HOME, '.central-knot'), { recursive: true });
+  writeFileSync(join(HOME, '.central-knot/sync.json'), '{ damaged');
+  await a.click('#home-actual');
+  await must(`!!document.querySelector('#overview-choose-home') && !!document.querySelector('#overview-stopped')`, 15000, 'a home with no tool and a damaged record');
+  await atEverySize('no-tools', 'This computer’s home with no tool in it, and its record damaged: one sentence and the way on, then why nothing can be written; no cards, usage strip or table', true);
+  rmSync(join(HOME, '.central-knot/sync.json'));
+  const old = new Date(Date.now() - 40 * DAY), ago = days => new Date(Date.now() - days * DAY).toISOString();
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  for (const [name, version] of [['claude', '2.1.322 (Claude Code)'], ['copilot', '1.0.4'], ['codex', 'codex-cli 0.142.3'], ['pi', '0.68.1'], ['opencode', '1.14.2']]) writeFileSync(join(HOME, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  const words = ['api', 'audit', 'build', 'cache', 'changelog', 'ci', 'cloud', 'commit', 'config', 'cost', 'data', 'db', 'debug', 'deploy', 'design', 'docs', 'docker', 'edge', 'email', 'error', 'event', 'feature', 'flag', 'git', 'grafana', 'helm', 'incident', 'infra', 'jira', 'k8s', 'lint', 'log', 'merge', 'metric', 'migrate', 'monitor', 'note', 'oncall', 'perf', 'plan', 'pr', 'prompt', 'query', 'release', 'review', 'risk', 'schema', 'search', 'security', 'sql', 'test', 'ticket', 'trace', 'triage'];
+  const skillNames = ['check', 'draft', 'summary'].flatMap(verb => words.map(word => `${word}-${verb}`)).slice(0, 99);
+  // A long name, shortened in the middle where it is among the most used.
+  skillNames.push('kubernetes-deployment-rollout-health-check');
+  const roots = { claude: '.claude/skills', copilot: '.copilot/skills', codex: '.codex/skills', pi: '.pi/agent/skills', opencode: '.config/opencode/skills' };
+  const putSkill = (root, name, body = `Steps for ${name}.`) => {
+    const folder = join(HOME, root, name);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'SKILL.md'), `---\nname: ${name}\ndescription: Use when you need ${name.replace(/-/g, ' ')}.\n---\n\n${body}\n`);
+    for (const path of [join(folder, 'SKILL.md'), folder]) utimesSync(path, old, old);
+  };
+  skillNames.forEach((name, at) => { putSkill(roots.claude, name); if (at % 2) putSkill(roots.copilot, name); if (at % 5 === 0) putSkill(roots.codex, name); if (at % 3 === 0) putSkill(roots.pi, name); if (at % 7 === 0) putSkill(roots.opencode, name); });
+  // One found skill whose copies differ, in Claude Code and Copilot CLI.
+  putSkill(roots.claude, 'issue-triage', 'Label new issues by area and urgency.');
+  putSkill(roots.copilot, 'issue-triage', 'Label new issues by area.');
+  for (const root of Object.values(roots)) mkdirSync(join(HOME, root), { recursive: true });
+  const servers = ['github', 'linear', 'sentry', 'postgres', 'grafana', 'slack', 'notion', 'figma', 'datadog', 'kubernetes', 'stripe', 'browser'];
+  writeFileSync(join(HOME, '.claude.json'), JSON.stringify({ mcpServers: Object.fromEntries(servers.map(name => [name, { command: 'npx', args: ['-y', `@example/${name}-mcp`] }])) }, null, 2));
+  utimesSync(join(HOME, '.claude.json'), old, old);
+  mkdirSync(join(HOME, '.claude/agents'), { recursive: true });
+  for (const name of ['planner', 'debugger', 'test-writer', 'doc-writer', 'security-reviewer', 'migrator', 'reviewer', 'researcher']) { writeFileSync(join(HOME, '.claude/agents', `${name}.md`), `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nYou are the ${name}.\n`); utimesSync(join(HOME, '.claude/agents', `${name}.md`), old, old); }
+  const pluginSkills = { 'team-git': ['create-mr', 'rebase-help'], 'team-infra': ['helm-alert-audit', 'helm-alert-summary'], 'team-docs': ['publish-html'], 'team-observability': ['query-logs', 'query-traces'], 'team-risk': ['risk-handoff'], 'team-jira': ['jira-sprint', 'jira-search'] };
+  for (const [plugin, skills] of Object.entries(pluginSkills)) writeClaudeInstall(HOME, 'team-tools', plugin, '1.2.0', { '.claude-plugin/plugin.json': JSON.stringify({ name: plugin, version: '1.2.0' }), ...Object.fromEntries(skills.map(name => [`skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name} from ${plugin}.\n---\n\nSteps.\n`])) });
+  // Session history: Claude Code (40 sessions in 25 days, one 45 days ago), Copilot CLI (12 from 18 days ago), Pi (6 from 9 days ago).
+  const lines = (path, records) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n') + '\n'); };
+  const used = skillNames.filter((_, at) => at % 3 !== 2);
+  lines(join(HOME, '.claude/projects/-work/s-old.jsonl'), [{ type: 'user', message: { content: 'hello' }, timestamp: ago(45) }]);
+  for (let n = 0; n < 40; n++) {
+    const skills = [used[n % used.length], used[(n * 7) % 12], 'jira-check', ...(n % 3 ? [] : ['kubernetes-deployment-rollout-health-check'])], calls = servers.slice(0, 1 + (n % 3));
+    lines(join(HOME, `.claude/projects/-work/s${n}.jsonl`), [{ type: 'assistant', message: { content: [...skills.map(skill => ({ type: 'tool_use', name: 'Skill', input: { skill } })), ...calls.map(server => ({ type: 'tool_use', name: `mcp__${server}__call`, input: {} })),
+      ...(n % 4 ? [] : [{ type: 'tool_use', name: 'Agent', input: { subagent_type: 'planner' } }])] }, timestamp: ago((n * 25) / 40) }]);
+  }
+  for (let n = 0; n < 12; n++) lines(join(HOME, `.copilot/session-state/c${n}/events.jsonl`), [{ type: 'session.start', data: {}, timestamp: ago(18 - n) }, { type: 'skill.invoked', data: { name: used[(n * 5) % used.length] }, timestamp: ago(18 - n) }]);
+  for (let n = 0; n < 6; n++) lines(join(HOME, `.pi/agent/sessions/--w--/p${n}.jsonl`), [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: `<skill name="${used[n * 3]}">` }] }, timestamp: ago(9 - n) }]);
+  await a.click('#home-actual');
+  const opened = Date.now();
+  await must(`!!document.querySelector('#setup-question') && /Usage collected/.test(document.querySelector('#overview-usage .overview-usage-text:not(.band-unshown)')?.textContent ?? '')`, 180000, 'first setup’s question and a reading');
+  console.log(`(the made-up home's first reading landed ${Math.round((Date.now() - opened) / 1000)} s after it opened)`);
+  await top();
+  await atEverySize('first-setup', 'The same home with its tools in it, opened for the first time: first setup’s question first; the cards count what was found (nothing synced yet) and what the usage reading, collected by itself, says; a row per tool with its version', true);
+  await a.click('#setup-no');
+  await must(`!!document.querySelector('#overview-skills-differ')`, 30000, 'the line for copies that differ');
+  if (await a.has('#outcome-dismiss')) await a.click('#outcome-dismiss');
+  await top();
+  await shot(a, 'synchronize-everything-off-1280', 'Answered No: the found skill whose copies differ is said once, on a line of its own with Show them (Synchronize everything off) (1280×800)');
+  await a.click('#nav-settings');
+  await must(`!!document.querySelector('#sync-everything-on')`, 15000, 'Settings’ Synchronize everything');
+  await a.click('#sync-everything-on');
+  await waitFor(a, `!!document.querySelector('#walkthrough') || !document.querySelector('#sync-everything-on:not([aria-checked="true"])')`, 60000);
+  if (await a.has('#walk-leave')) await a.click('#walk-leave');
+  await a.click('#nav-overview');
+  if (await a.has('#outcome-dismiss')) await a.click('#outcome-dismiss');
+  // Opened again, its first reading held back: the cards' usage lines and the sessions column hold their room.
+  const requests = await requestHandles(a);
+  if (requests) {
+    await requests.slow('usage:read', 20000);
+    await a.click('#home-actual');
+    await must(`/Collecting usage/.test(document.querySelector('#overview-usage .overview-usage-text:not(.band-unshown)')?.textContent ?? '') && !!document.querySelector('.kind-card') && !document.querySelector('#walkthrough')`, 15000, 'the first reading held back');
+    await top();
+    await atEverySize('collecting', 'Synchronize everything on, the home opened again, its first reading running (held back here): every place a reading fills is drawn at its size, with … where a figure will be', true);
+    await requests.restore('usage:read');
+  }
+  await must(`/Usage collected/.test(document.querySelector('#overview-usage .overview-usage-text:not(.band-unshown)')?.textContent ?? '') && !!document.querySelector('#setup-choosing')`, 30000, 'the reading landed');
+  await top();
+  await atEverySize('collected', 'The reading landed with nothing moved: each card says how many were used in 30 days, how many the page’s No use seen chip holds (a link to it) and the three most used (links to their rows); each tool’s sessions in 30 days, and where its history starts later', true);
+  if (requests) {
+    await requests.fail('usage:read');
+    await a.click('#overview-collect-usage');
+    await must(`!!document.querySelector('.overview-usage-failed')`, 15000, 'a failed reading');
+    await top();
+    await shot(a, 'reading-failed-1280', 'Clicked Update usage statistics, and the reading failed: the line, boxed, says so with Try again; no figure from the reading before stays (1280×800)');
+    await requests.restore('usage:read');
+  }
+  // Claude Code's and Pi's history gone: Copilot CLI alone says which skills it ran, and no tool here can tell about MCP servers or agents.
+  renameSync(join(HOME, '.claude/projects'), join(HOME, '.claude/projects-away'));
+  renameSync(join(HOME, '.pi/agent/sessions'), join(HOME, '.pi/agent/sessions-away'));
+  await a.click(requests ? '#overview-collect-again' : '#overview-collect-usage');
+  await must(`/can’t say/.test(document.querySelector('#overview-mcp-usage')?.textContent ?? '')`, 30000, 'a kind no tool can tell about');
+  await top();
+  await shot(a, 'cant-say-1280', 'Only Copilot CLI’s history left: it tells which skills ran, so Skills has its figures; no tool here that has them on can tell about MCP servers or agents, so those cards say can’t say (1280×800)');
+  renameSync(join(HOME, '.claude/projects-away'), join(HOME, '.claude/projects'));
+  renameSync(join(HOME, '.pi/agent/sessions-away'), join(HOME, '.pi/agent/sessions'));
+  await a.click('#overview-collect-usage');
+  await must(`!/can’t say/.test(document.querySelector('#overview-mcp-usage')?.textContent ?? '') && /Usage collected/.test(document.querySelector('#overview-usage .overview-usage-text:not(.band-unshown)')?.textContent ?? '')`, 30000, 'the history back');
+  // A problem waiting: Copilot CLI's MCP file can't be read; and Claude Code's own record of its plugins can't either.
+  writeFileSync(join(HOME, '.copilot/mcp-config.json'), '{ "mcpServers": { "github": ');
+  const installed = join(HOME, '.claude/plugins/installed_plugins.json'), installedText = readFileSync(installed, 'utf8');
+  writeFileSync(installed, '{');
+  await refresh();
+  await a.click('#nav-overview');
+  await top();
+  await atEverySize('problem', 'A problem waiting: Copilot CLI’s MCP file couldn’t be read; it comes first, with the way to its page. In the table “?” for Copilot CLI’s MCP servers and for Claude Code’s plugins, whose record couldn’t be read, and the key says what “?” is; MCP servers says nothing of sync', true);
+  rmSync(join(HOME, '.copilot/mcp-config.json'));
+  writeFileSync(installed, installedText);
+  await refresh();
+  // An update to install: found by Check for updates, then downloaded from the Overview's own button with a draft typed.
+  releases.push({ tag: 'v0.7.1-alpha.1', zip, asset: 'Central-Knot-Alpha-0.7.1-mac-arm64.zip', bytesPerSecond: 400_000 });
+  await a.click('#nav-overview');
+  await a.click('#update-control');
+  await must(`!!document.querySelector('#overview-update')`, 20000, 'an update to install');
+  await top();
+  await atEverySize('update', 'A newer release found: its line comes first, with What’s new and Update; the sidebar’s control says it too', true);
+  await a.click('#nav-instructions');
+  await must(`!!document.querySelector('[id^="ins-edit-"]')`, 15000, 'an instruction file to edit');
+  const tool = await a.run(`document.querySelector('[id^="ins-edit-"]')?.id.slice('ins-edit-'.length) ?? ''`);
+  await a.click(`#ins-edit-${tool}`);
+  await a.run(`(() => { const area = document.querySelector('#ins-text-${tool}'); area.value += '\\n- Not saved yet.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await a.settle();
+  await a.click('#nav-overview');
+  await a.click('#overview-update');
+  await must(`/Downloading… [1-9]/.test(document.querySelector('#overview-update')?.textContent ?? '')`, 15000, 'the download under way');
+  await top();
+  await shot(a, 'downloading-1280', 'With an instructions draft typed and not saved, clicked Update on the Overview: its button says the download’s progress, as the sidebar’s ring does (1280×800)');
+  await must(`document.querySelector('#update-control')?.dataset.look === 'held' && !!document.querySelector('#overview-update')`, 40000, 'the held restart');
+  await top();
+  await shot(a, 'held-1280', 'Downloaded and prepared; the unsaved draft holds the restart: the Overview’s button, like the sidebar’s control, says Restart to update… and opens Settings, which says what would be lost (1280×800)');
+  await a.click('#overview-update');
+  await must(`!!document.querySelector('#setting-updates')`, 15000, 'Settings’ Updates row');
+  await shot(a, 'held-clicked-1280', 'Clicked Restart to update… on the Overview: Settings’ Updates row, which says what restarting would lose, beside its own Restart button (1280×800)');
+  if (requests) requests.close();
+  await fixture.close();
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
