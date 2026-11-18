@@ -6,6 +6,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, closeSync, constants as fsConstants, cpSync, existsSync, openSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -2456,20 +2457,28 @@ async function practiceFlow() {
   })()`), [0, 0, 16]);
   const appSettings = join(scratch, 'data/app-settings.json');
   // The app rewrites this file in place, so a read can land mid-write: read again until it parses.
-  const savedSettings = () => { for (let tries = 0; ; tries++) { try { return JSON.parse(readFileSync(appSettings, 'utf8')); } catch (error) { if (tries > 50) throw error; } } };
+  const savedSettings = async () => {
+    const deadline = performance.now() + 5000;
+    for (;;) {
+      const contents = await readFile(appSettings, 'utf8');
+      try { return JSON.parse(contents); }
+      catch (error) { if (!(error instanceof SyntaxError) || performance.now() >= deadline) throw error; }
+    }
+  };
   // Every writer saves through one chain: saves sent together land in order, the file stays whole, and other fields stay.
   // They bypass the page, so the open page (showing System) can only come to show Light by hearing that main saved it.
   await a.run(`Promise.all(['light', 'system', 'dark', 'system', 'light'].map(choice => window.centralKnot.setAppearance(choice)))`);
   let followed = false;
   for (let tries = 0; tries < 20 && !followed; tries++) { await wait(100); followed = await a.exists('#appearance-light[aria-checked="true"]'); }
-  check('settings saved at once keep the other settings, and the open page follows the last', followed && savedSettings().appearance === 'light' && savedSettings().home?.mode === 'fixture', savedSettings());
+  const afterSaves = await savedSettings();
+  check('settings saved at once keep the other settings, and the open page follows the last', followed && afterSaves.appearance === 'light' && afterSaves.home?.mode === 'fixture', afterSaves);
   chmodSync(appSettings, 0o444);
   await a.click('#appearance-dark');
   check('a save that fails says why in plain words in its row, and the saved choice stays', await dark() === false && await a.exists('#appearance-light[aria-checked="true"]')
     && await a.text('#setting-appearance .setting-failure') === 'Couldn’t save: Central Knot can’t write its settings file. Light is still in use. Check the file’s permissions, then try again.', await a.text('#setting-appearance'));
   chmodSync(appSettings, 0o644);
   await a.click('#appearance-system');
-  check('the next save clears the failure', !(await a.exists('.setting-failure')) && savedSettings().appearance === 'system');
+  check('the next save clears the failure', !(await a.exists('.setting-failure')) && (await savedSettings()).appearance === 'system');
   // The log: Show log shows its last 200 lines under its row, the page scrolled to the newest, with earlier lines back to its
   // start and Refresh log; Open log folder is a second button.
   const logFile = join(scratch, 'data/central-knot.log'), logAside = `${logFile}.aside`;
@@ -2565,11 +2574,11 @@ async function practiceFlow() {
     [await a.run(`document.querySelector('#history-days').value`), await agedShown(), agedOnFile()], ['30', ['aged-20', 'aged-5'], ['aged-60', 'aged-20', 'aged-5']]);
   await keepFor(a, 90);
   same('a longer window saves at once, with no question, and History shows what it now covers',
-    [savedSettings().historyDays, await a.exists('#history-shorten'), await agedShown()], [90, false, ['aged-60', 'aged-20', 'aged-5']]);
+    [(await savedSettings()).historyDays, await a.exists('#history-shorten'), await agedShown()], [90, false, ['aged-60', 'aged-20', 'aged-5']]);
   await keepFor(a, 7);
   const question = await a.text('#history-shorten-text') ?? '';
   same('a shorter window asks first, naming from when, and keeps the saved choice until confirmed (which its other button names)',
-    [/^History before .+ will be removed and can’t be restored\. Your other homes remove it too the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), savedSettings().historyDays],
+    [/^History before .+ will be removed and can’t be restored\. Your other homes remove it too the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), (await savedSettings()).historyDays],
     [true, 'Shorten to 7 days', 'Keep 90 days', '90', 90]);
   await a.shot('settings-history-confirm');
   await a.run(`document.querySelector('#history-days').focus()`);
@@ -2578,7 +2587,7 @@ async function practiceFlow() {
   const escaped = await a.exists('#history-shorten');
   await keepFor(a, 7);
   await a.click('#history-shorten-cancel');
-  same('Escape or Cancel closes the question and writes nothing', [escaped, await a.exists('#history-shorten'), savedSettings().historyDays, agedOnFile(), await a.run(`document.activeElement.id`)], [false, false, 90, ['aged-60', 'aged-20', 'aged-5'], 'history-days']);
+  same('Escape or Cancel closes the question and writes nothing', [escaped, await a.exists('#history-shorten'), (await savedSettings()).historyDays, agedOnFile(), await a.run(`document.activeElement.id`)], [false, false, 90, ['aged-60', 'aged-20', 'aged-5'], 'history-days']);
   // A window change waits its turn behind whatever main is doing (here a held queue standing in for a long sync pass). Meanwhile
   // the row says so and takes no other change, and other rows still work. Newer requests that arrive meanwhile win: the
   // confirmed shorter window they overtook neither saves nor removes anything, and main reports nothing pruned for it. History
@@ -2592,7 +2601,7 @@ async function practiceFlow() {
     await a.run(`void (window.ckNewest = window.centralKnot.setHistoryDays(30).then(saved => (window.ckNewestDone = true, saved)))`);
     await a.click('#appearance-light');
     const during = [await a.run(`document.querySelector('#history-days').disabled`), (await a.text('#setting-history-notice'))?.trim(), await a.exists('#history-shorten'),
-      await a.run(`window.ckNewestDone === true`), savedSettings().historyDays, await a.exists('#appearance-light[aria-checked="true"]')];
+      await a.run(`window.ckNewestDone === true`), (await savedSettings()).historyDays, await a.exists('#appearance-light[aria-checked="true"]')];
     // Not a.click: it waits for the page to be idle, and History's read waits behind the held queue.
     await a.run(`document.querySelector('#nav-history').click()`);
     await held.release();
@@ -2600,7 +2609,7 @@ async function practiceFlow() {
     await a.settle();
     const listedMeanwhile = await a.text('#history-scroll') ?? '';
     same('while main is busy the row says it is updating and takes no other change; the newest request wins, the overtaken shorter ones remove nothing, and History opened meanwhile agrees with the window that won',
-      [during, savedSettings().historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
+      [during, (await savedSettings()).historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
       [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 30 days. Change in Settings.']);
     await a.click('#nav-settings');
     same('the row then shows the window that won and takes changes again', [await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`)], ['30', false]);
@@ -2619,7 +2628,7 @@ async function practiceFlow() {
     await shortenMain.run(`(contents => { const send = contents.send; globalThis.ckUnmute = () => { contents.send = send; }; contents.send = (channel, ...rest) => channel === 'settings:changed' ? undefined : send.call(contents, channel, ...rest); })(electron.BrowserWindow.getAllWindows()[0].webContents)`);
     await shortenHeld.release();
   }
-  for (let tries = 0; tries < 30 && savedSettings().historyDays !== 7; tries++) await wait(100);
+  for (let tries = 0; tries < 30 && (await savedSettings()).historyDays !== 7; tries++) await wait(100);
   for (let tries = 0; tries < 30 && agedOnFile().length > 1; tries++) await wait(100);
   for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
   const removedNote = await a.text('#setting-history-message') ?? '';
@@ -2633,7 +2642,7 @@ async function practiceFlow() {
   const intro = await a.text('.history-intro');
   await a.click('#history-intro-settings');
   same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
-    [savedSettings().historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
+    [(await savedSettings()).historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
     [7, ['aged-5'], true, false, true, false, 'What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 7 days. Change in Settings.', true]);
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
   // in its hint's place: on a Mac, one outside the Applications folder; on Linux, any (signin.ts whyNoSignIn). Main refuses a
@@ -2643,7 +2652,7 @@ async function practiceFlow() {
   same('Start at sign-in that can’t be changed is off and disabled, says why, and main refuses a change', [
     await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
     await a.run(`document.getElementById(document.querySelector('#start-at-sign-in').getAttribute('aria-describedby'))?.textContent`),
-    refused.includes(signInReason), 'startAtSignIn' in savedSettings()], [['false', true], signInReason, true, false]);
+    refused.includes(signInReason), 'startAtSignIn' in (await savedSettings())], [['false', true], signInReason, true, false]);
   // The installed-app checks below stand in main's platform and login items, which only works where they are Linux's own: elsewhere a
   // stood-in packaged app could reach the real system's login items.
   if (a.main && process.platform === 'linux') {
@@ -2683,18 +2692,18 @@ async function practiceFlow() {
       [['true', null, null], ['false', null, null], unchanged, true, ['true', null, null], [[true, false, true], ['ms-settings:startupapps']]]);
     // As an installed app on Linux: coming back to the window reads it again.
     await main.run(`(ck.as('linux'), ck.asked = [])`);
-    const saved = savedSettings().startAtSignIn;
+    const saved = (await savedSettings()).startAtSignIn;
     await refocus(main);
     const reread = await until('Not available on Linux yet.', () => a.text('#setting-sign-in-hint'));
     const menuItem = await main.run(`(({ label, visible, enabled, checked }) => ({ label, visible, enabled, checked }))(ck.menus.at(-1).find(item => item.label?.startsWith('Start at sign-in')))`);
     // The first close explains where the app went; on Linux it offers no start at sign-in.
     await main.run(`electron.BrowserWindow.getAllWindows()[0].close()`);
-    for (let tries = 0; tries < 20 && !savedSettings().closeExplained; tries++) await wait(100);
+    for (let tries = 0; tries < 20 && !(await savedSettings()).closeExplained; tries++) await wait(100);
     const dialogs = await main.run(`ck.dialogs.map(options => 'checkboxLabel' in options)`);
     // The rest of the run has the real system back: platform, packaging, login items, menus, dialogs and links.
     await main.run(`(ck.restore(), electron.BrowserWindow.getAllWindows()[0].show())`);
     same('an installed app on Linux: the row (read again on focus), the menu (hidden) and the first-close dialog agree it isn’t available; no login-item call, nothing saved',
-      [reread, menuItem, dialogs, await main.run(`ck.asked`), savedSettings().startAtSignIn === saved],
+      [reread, menuItem, dialogs, await main.run(`ck.asked`), (await savedSettings()).startAtSignIn === saved],
       ['Not available on Linux yet.', { label: 'Start at sign-in (not on Linux yet)', visible: false, enabled: false, checked: false }, [false], [], true]);
     main.close();
   }
@@ -5479,18 +5488,32 @@ fs.writeFileSync(record, JSON.stringify(now));
   const atTop = ['srv-03', 'srv-04', 'srv-05', 'srv-06'], topPoints = [], topBefore = await placesNow(table, 'data-key'), topStates = await states('.ov-row[data-key]');
   for (const key of atTop) topPoints.push(await middleOf(`#${rowPart('switch', 'mcp', key)}`));
   const resultIn = () => a.run(`document.querySelector('#header [data-outcome]') ? 'header' : document.querySelector('[data-outcome]') ? 'elsewhere' : 'none'`), drawnAtOnce = [];
+  // Sample in the renderer, from the idle draw of the fourth click. Screenshots and CDP round trips can take
+  // part of the result's eight seconds before the driver even gets to its assertion.
+  const fourOff = '4 MCP servers are off: srv-03, srv-04, srv-05 and srv-06.';
+  await a.run(`(() => {
+    const result = () => document.querySelector('#header [data-outcome] .band-text')?.textContent;
+    const ended = new MutationObserver(() => {
+      if (document.body.dataset.busy === 'true' || result() !== ${JSON.stringify(fourOff)}) return;
+      ended.disconnect();
+      setTimeout(() => { window.ckResultAtSevenSeconds = result(); }, 7000);
+    });
+    ended.observe(document.body, { attributes: true, attributeFilter: ['data-busy'] });
+  })()`);
   for (const point of topPoints) { await clickAt(point); drawnAtOnce.push(await a.run(`document.activeElement?.getAttribute('aria-checked')`)); await wait(150); }
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
   await done();
   await a.shot('rows-mcp-top');
   const topAfter = await placesNow(table, 'data-key'), inClaude = () => Object.keys(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers ?? {});
   same('at the top of a long list, four rows clicked 150 ms apart are drawn Off at once and are the four that change, Off in every tool; no row moves, the scroll stays, and the header says the four once',
     [drawnAtOnce, changed(topStates, await states('.ov-row[data-key]')), atTop.filter(key => inClaude().includes(key)), ['srv-03', 'srv-08'].map(key => topAfter.at[rowPart('', 'mcp', key)]), topAfter.scroll, await resultIn(), await headerSays()],
-    [atTop.map(() => 'false'), atTop.map(key => rowPart('', 'mcp', key)), [], ['srv-03', 'srv-08'].map(key => topBefore.at[rowPart('', 'mcp', key)]), topBefore.scroll, 'header', '4 MCP servers are off: srv-03, srv-04, srv-05 and srv-06.']);
+    [atTop.map(() => 'false'), atTop.map(key => rowPart('', 'mcp', key)), [], ['srv-03', 'srv-08'].map(key => topBefore.at[rowPart('', 'mcp', key)]), topBefore.scroll, 'header', fourOff]);
   // A result with no problem goes by itself 8 seconds after the run's last click, and no row moves when it goes.
-  const goneAfter = Date.now();
-  for (let tries = 0; tries < 150 && await a.exists('#header .header-result'); tries++) await wait(100);
-  const whenGone = Date.now() - goneAfter, goneAt = await placesNow(table, 'data-key');
-  same('a result with no problem is gone after its 8 seconds, and every row is where it was, to the pixel', [whenGone > 7000 && whenGone < 14000, goneAt], [true, topAfter]);
+  const headerResult = '#header .header-result', deadline = performance.now() + 30000;
+  while (await a.exists(headerResult) && performance.now() < deadline) await wait(100);
+  same('the result is still in the header seven seconds after the last click ends', await a.run('window.ckResultAtSevenSeconds'), fourOff);
+  same('a result with no problem goes by itself, and every row is where it was, to the pixel',
+    [await a.exists(headerResult), await placesNow(table, 'data-key')], [false, topAfter]);
   await a.click('#nav-overview'); await a.click('#nav-mcp');
   // A switch in the middle of the list, the page's first click: its result comes in the header, and the list and its rows stay.
   await putAt(table, row('srv-20'), 300);
