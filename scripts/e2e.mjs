@@ -2451,15 +2451,7 @@ async function practiceFlow() {
       Math.round(document.querySelector('#setting-log-title').getBoundingClientRect().left - page.getBoundingClientRect().left)];
   })()`), [0, 0, 16]);
   const appSettings = join(scratch, 'data/app-settings.json');
-  // The app rewrites this file in place, so a read can land mid-write: read again until it parses.
-  const savedSettings = async () => {
-    const deadline = performance.now() + 5000;
-    for (;;) {
-      const contents = await readFile(appSettings, 'utf8');
-      try { return JSON.parse(contents); }
-      catch (error) { if (!(error instanceof SyntaxError) || performance.now() >= deadline) throw error; }
-    }
-  };
+  const savedSettings = async () => JSON.parse(await readFile(appSettings, 'utf8'));
   // Every writer saves through one chain: saves sent together land in order, the file stays whole, and other fields stay.
   // They bypass the page, so the open page (showing System) can only come to show Light by hearing that main saved it.
   await a.run(`Promise.all(['light', 'system', 'dark', 'system', 'light'].map(choice => window.centralKnot.setAppearance(choice)))`);
@@ -2467,6 +2459,26 @@ async function practiceFlow() {
   for (let tries = 0; tries < 20 && !followed; tries++) { await wait(100); followed = await a.exists('#appearance-light[aria-checked="true"]'); }
   const afterSaves = await savedSettings();
   check('settings saved at once keep the other settings, and the open page follows the last', followed && afterSaves.appearance === 'light' && afterSaves.home?.mode === 'fixture', afterSaves);
+  // Fail the final rename of this settings file after the temporary file was written, through the real appearance save.
+  if (a.main) {
+    const main = await a.main(), before = readFileSync(appSettings);
+    try {
+      const failure = await main.run(`(async () => {
+        const fs = process.mainModule.require('node:fs/promises'), rename = fs.rename;
+        fs.rename = async (from, to) => {
+          if (to === ${JSON.stringify(appSettings)}) throw new Error('settings rename failed');
+          return rename(from, to);
+        };
+        try {
+          return await electron.BrowserWindow.getAllWindows()[0].webContents.executeJavaScript(
+            "window.centralKnot.setAppearance('dark').then(() => '', error => error.message)");
+        } finally { fs.rename = rename; }
+      })()`);
+      same('a failed appearance rename keeps the settings bytes and removes its temporary file',
+        [failure.includes('settings rename failed'), readFileSync(appSettings).equals(before),
+          readdirSync(dirname(appSettings)).filter(name => name.startsWith('app-settings.json.'))], [true, true, []]);
+    } finally { main.close(); }
+  }
   chmodSync(appSettings, 0o444);
   await a.click('#appearance-dark');
   check('a save that fails says why in plain words in its row, and the saved choice stays', await dark() === false && await a.exists('#appearance-light[aria-checked="true"]')
@@ -6199,6 +6211,42 @@ async function overviewFlow() {
   same('launched, nothing visited: a most used own skill opens its row on the first click', await openTop('skills', 'notes'), ['notes']);
   same('one whose copies differ opens too, with its copy question', await openTop('skills', 'clash'), ['clash']);
   same('a most used MCP server, its page never drawn either, opens its row', await openTop('mcp', 'docs'), ['docs']);
+  const session = join(home, '.claude/projects/-work/used.jsonl');
+  const sessionsCell = '.tools-table tr[data-tool="claude-cli"] .tools-sessions';
+  const update = byId('overview-collect-usage');
+  const updateSessions = async () => {
+    await a.click(update);
+    for (let tries = 0; tries < 100 && !await a.exists(update); tries++) await wait(50);
+    return a.text(sessionsCell);
+  };
+  const readable = await a.text(sessionsCell);
+  check('Claude Code starts with one recent session', /^1(?:\s|$)/.test(readable), readable);
+  chmodSync(session, 0);
+  same('the only session unreadable: its count is unknown and the table explains why',
+    [await updateSessions(), (await a.text(byId('overview-tools-key')))?.includes('?: not known')], ['?', true]);
+  await a.click(byId('overview-skills'));
+  await a.click(byId(rowPart('open', 'skills', 'notes')));
+  const rowUsage = byId(rowPart('usage', 'skills', 'notes', 'claude-cli'));
+  check('the skill’s row says why Claude Code can’t tell', /can’t say: 1 session file couldn’t be read/i.test(await a.text(rowUsage)));
+  check('the toolbar makes no claim of no sessions', !(await a.text(byId('usage-when')))?.includes('no sessions'));
+  if (shots) {
+    await sizeTo(a, 1280, 800);
+    await a.run(`document.querySelector(${JSON.stringify(rowUsage)}).scrollIntoView({ block: 'center' })`);
+    await a.shot('skills-unread-session');
+  }
+  await a.click(byId('nav-overview'));
+  const second = join(dirname(session), 'second.jsonl');
+  writeFileSync(second, JSON.stringify({ type: 'user', timestamp: new Date().toISOString() }));
+  same('one session readable and another unreadable: the table marks the known count', await updateSessions(), '1 ?');
+  check('the key explains the number before the mark', (await a.text(byId('overview-tools-key')))?.includes('A number before the mark is what was counted, and there may be more.'));
+  if (shots) {
+    await a.run(`document.querySelector('.tools-table').scrollIntoView({ block: 'center' })`);
+    await a.shot('overview-unread-session');
+    await fullSize(a);
+  }
+  unlinkSync(second);
+  chmodSync(session, 0o600);
+  same('restoring access restores the complete sessions cell', await updateSessions(), readable);
   await a.click('#home-actual');
   for (let tries = 0; tries < 100 && !(await a.exists('#overview-skills-usage .middle[title="one"]')); tries++) await wait(100);
   same('another home whose only item is a plugin’s skill: the card counts it, and the lead never says nothing was found',
