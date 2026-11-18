@@ -256,11 +256,33 @@ async function mainHelpers(port) {
     slowRequest: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the busy test needs another way to slow a request.'); const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${Number(ms)})).then(() => real(...args))); return true; })()`),
     /** Makes one request's reply reach the page `ms` later (the work itself runs at once), until `restore` runs. */
     slowReply: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => Promise.resolve(real(...args)).then(value => new Promise(done => setTimeout(() => done(value), ${Number(ms)})))); return true; })()`),
+    /** Holds the first completed discovery reply matching the scenario, with its real view already read from disk. */
+    holdRefresh: (matches) => run(`(() => {
+      const handlers = ${electron}.ipcMain._invokeHandlers, real = handlers.get('discovery:refresh');
+      globalThis.ckRefreshHeld = false;
+      handlers.set('discovery:refresh', async (event, asked) => {
+        const view = await real(event, asked);
+        if (!(${matches})) return view;
+        handlers.set('discovery:refresh', real);
+        await new Promise(release => { globalThis.ckReleaseRefresh = release; globalThis.ckRefreshHeld = true; });
+        return view;
+      });
+      return true;
+    })()`),
+    refreshHeld: () => run('globalThis.ckRefreshHeld'),
+    releaseRefresh: () => run('globalThis.ckReleaseRefresh()'),
     /** Notes, for each sync:changed the page is sent, whether a `channel` request was under way (`told` reads it), until `restore` runs. */
     noteTells: channel => run(`(() => { const { ipcMain, BrowserWindow } = ${electron}; const contents = BrowserWindow.getAllWindows()[0].webContents, real = ipcMain._invokeHandlers.get(${JSON.stringify(channel)}); let open = 0; globalThis.ckAside = real; globalThis.ckTold = []; contents.send = function (name, ...rest) { if (name === 'sync:changed') globalThis.ckTold.push(open > 0); return Object.getPrototypeOf(contents).send.call(contents, name, ...rest); }; ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, async (...rest) => { open++; try { return await real(...rest); } finally { open--; } }); return true; })()`),
     told: () => run(`(() => { delete ${electron}.BrowserWindow.getAllWindows()[0].webContents.send; return globalThis.ckTold; })()`),
+    /** A later watcher or poll must not rescue a dropped notification in the two tests that deliver their own. */
+    manualSyncOnly: on => run(`(contents => {
+      if (!${on}) { delete contents.send; return; }
+      const send = contents.send.bind(contents);
+      contents.send = (channel, ...args) => { if (channel !== 'sync:changed') send(channel, ...args); };
+    })(${electron}.BrowserWindow.getAllWindows()[0].webContents)`),
     /** Sends the page a message, as the main process does after a background pass. */
-    tellPage: channel => run(`(() => { ${electron}.BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channel)}); return true; })()`),
+    tellPage: channel => run(`(contents => Object.getPrototypeOf(contents).send.call(contents, ${JSON.stringify(channel)}))(
+      ${electron}.BrowserWindow.getAllWindows()[0].webContents)`),
     /** Notes the arguments of each `channel` request (`calls` reads them), until `restore` runs. */
     noteCalls: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers, real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; globalThis.ckCalls = []; handlers.set(${JSON.stringify(channel)}, (event, ...args) => { globalThis.ckCalls.push(args); return real(event, ...args); }); return true; })()`),
     calls: () => run(`globalThis.ckCalls`),
@@ -1348,18 +1370,37 @@ async function practiceFlow() {
   const heard = async () => (await a.text('.sync-notices') ?? '').includes('standup was edited in Copilot CLI');
   for (let tries = 0; tries < 50 && !(await heard()); tries++) await wait(100);
   check('and the page hears about it without a click', await heard(), await a.text('.bands'));
-  // A background read whose reply arrives while an action runs is set aside, but the notice it carried still reaches the page. (A dev run only: it slows a reply in the main process.)
-  if (main) {
-    check('the refresh reply is slowed', await main.slowReply('discovery:refresh', 1500));
-    writeFileSync(standupPath('codex'), standupBefore.replace(/\n*$/, '\nEdited in Codex during an action.\n'));
+  // Only a missing event should use the deadline. Check each assertion once, after its prerequisite is observable.
+  const waitFor = async (what, observed) => {
+    const deadline = performance.now() + 60000;
+    while (!(await observed())) {
+      if (performance.now() >= deadline) throw new Error(`Never observed ${what}`);
+      await wait(50);
+    }
+  };
+  // Deliver the same notification as main and wait until the renderer has received it, even while a read is held.
+  if (main) await a.run(`window.ckSyncSignals = 0; centralKnot.onSyncChanged(() => { window.ckSyncSignals++; })`);
+  const tellOfChange = async () => {
+    const before = await a.run('window.ckSyncSignals');
     await main.tellPage('sync:changed');
-    await wait(300);
-    await a.run(`(document.querySelector('#header-refresh').click(), true)`);
-    await wait(3500);
-    await main.restore('discovery:refresh');
-    let keptNotice = false;
-    for (let tries = 0; tries < 40 && !keptNotice; tries++) { await wait(250); keptNotice = (await a.text('.sync-notices') ?? '').includes('standup was edited in Codex'); }
-    check('a notice from a background read set aside for an action is still shown', keptNotice, await a.text('.bands'));
+    await waitFor('sync:changed in the renderer', async () => await a.run('window.ckSyncSignals') > before);
+  };
+  // A background read whose reply arrives while an action runs is set aside, but the notice it carried still reaches the page.
+  if (main) {
+    check('the refresh reply is held', await main.holdRefresh("!asked && view?.skills.notices.some(n => n.item === 'standup' && n.winner === 'codex-cli')"));
+    writeFileSync(standupPath('codex'), standupBefore.replace(/\n*$/, '\nEdited in Codex during an action.\n'));
+    await tellOfChange();
+    await waitFor('the background reply carrying the Codex edit', main.refreshHeld);
+    const inspector = await a.main(), held = await holdQueue(inspector, a);
+    try {
+      await a.run(`document.getElementById('header-refresh').click()`);
+      await main.releaseRefresh();
+      // A round trip outside the held queue: the background reply reaches the renderer before the
+      // action is allowed to finish. Its notice must be there at the action's idle draw.
+      await a.run('centralKnot.getSettings().then(() => true)');
+    } finally { await held.release(); inspector.close(); }
+    const notice = await a.text('.sync-notices');
+    check('a notice from a background read set aside for an action is still shown', (notice ?? '').includes('standup was edited in Codex'), notice);
   }
   // A home switch that can't save its settings changes nothing: the page stays on this home, and this home (not the one asked
   // for) is still the one watched, so an edit on disk spreads within seconds, not at the next poll (20 s).
@@ -1378,25 +1419,34 @@ async function practiceFlow() {
   // problem stands alone in the header, and its × closes it.
   await a.click('#nav-overview'); await a.click('#nav-skills');
   const copilotLocked = [standupPath('copilot'), dirname(standupPath('copilot')), dirname(dirname(standupPath('copilot')))];
+  const standupSwitch = byId(rowPart('switch', 'skills', 'standup'));
+  const problemAfterPass = async key => {
+    await a.click(standupSwitch);
+    await a.click(byId('nav-overview'));
+    // A newly found skill makes the pass tell the page even when its only write failed. The count changes
+    // when Overview takes the new view; navigating back to Skills must then show that view's problem.
+    const count = async () => parseInt(await a.text(`.kind-card:has(${byId('overview-skills')}) .kind-card-summary`), 10);
+    const before = await count(), marker = skill(claudeSkills, key);
+    try {
+      await waitFor(`Overview to count ${key}`, async () => await count() === before + 1);
+      await a.click(byId('nav-skills'));
+    } finally { rmSync(marker, { recursive: true }); }
+  };
   for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o444 : 0o555);
-  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
-  await a.click('#nav-overview'); await wait(4000); await a.click('#nav-skills');
-  for (let tries = 0; tries < 40 && !/standup \(Copilot CLI\)/.test(await a.text('#header .header-result') ?? ''); tries++) await wait(250);
+  await problemAfterPass('first-pass');
   const backgroundSaid = await a.text('#header .header-result');
   await a.run(`document.querySelector('#header .band-dismiss')?.click()`); await a.settle();
   same('a background pass’s problem, alone in the header, is closed by its ×', [/standup \(Copilot CLI\)/.test(backgroundSaid ?? ''), await a.exists('#header .header-result')], [true, false]);
   await a.click('#header-refresh');
   same('reported again by the next read, it stays closed', await a.exists('#header .header-result'), false);
   for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o644 : 0o755);
-  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  await a.click(standupSwitch);
   // Cleared (standup On again, nothing left to remove), then the same failure later: it is said again.
   for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o444 : 0o555);
-  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
-  await a.click('#nav-overview'); await wait(4000); await a.click('#nav-skills');
-  for (let tries = 0; tries < 40 && !/standup \(Copilot CLI\)/.test(await a.text('#header .header-result') ?? ''); tries++) await wait(250);
+  await problemAfterPass('repeat-pass');
   same('the same failure, after it cleared, is said again', /standup \(Copilot CLI\)/.test(await a.text('#header .header-result') ?? ''), true);
   for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o644 : 0o755);
-  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  await a.click(standupSwitch);
   // Sync off: edits are noted, not spread; the page shows them pending; Sync once spreads them once.
   await a.click('#sync-switch');
   same('Sync turns off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
@@ -1946,14 +1996,15 @@ async function practiceFlow() {
   // done, with no second Refresh.
   if (main) {
     const columns = async () => (await a.all('[data-plugin="document-tools"] .cell-button')).length;
-    check('the refresh request is slowed', await main.slowRequest('discovery:refresh', 3000));
-    await a.run(`(document.querySelector('#header-refresh').click(), true)`);
-    await wait(1000);
+    await main.manualSyncOnly(true);
+    check('the refresh reply is held while the page is busy', await main.holdRefresh('asked'));
+    await a.run(`document.getElementById('header-refresh').click()`);
+    await waitFor('the Refresh that still includes Codex', main.refreshHeld);
     const busyThen = await a.run(`document.body.dataset.busy`);
     renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
-    await main.tellPage('sync:changed');
-    await main.restore('discovery:refresh');
-    for (let tries = 0; tries < 80 && (await columns()) !== 2; tries++) await wait(100);
+    await tellOfChange();
+    await main.releaseRefresh();
+    await waitFor('the Plugins read with Codex gone', async () => await columns() === 2);
     same('a tool change told while the page is busy is read once the work is done', [busyThen, await columns()], ['true', 2]);
     renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
     await a.click('#header-refresh');
@@ -1962,32 +2013,44 @@ async function practiceFlow() {
     // and the second change (Codex back) arrives while that read is still on its way. It is owed, and read as soon as the
     // first ends, so the page ends right.
     await a.click('#nav-skills');
-    const heads = () => a.run(`[...(document.querySelector('.ov-row[data-key] .tool-marks')?.children ?? [])].map(mark => mark.dataset.tool)`);
+    const marks = `[data-key="${rowPart('', 'skills', 'notes')}"] .tool-marks`;
+    const heads = () => a.all(`${marks} > [data-tool]`, 'e.dataset.tool');
     const all = (await heads()).length;
-    check('the refresh reply is slowed', await main.slowReply('discovery:refresh', 1500));
+    check('the first refresh reply is held', await main.holdRefresh("!asked && !view.sync.present.includes('codex-cli')"));
     renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
-    await main.tellPage('sync:changed');
-    await wait(300);
+    await tellOfChange();
+    await waitFor('the first reply with Codex gone', main.refreshHeld);
     renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
-    await main.tellPage('sync:changed');
-    await main.restore('discovery:refresh');
-    for (let tries = 0; tries < 80 && (await heads()).length !== all - 1; tries++) await wait(50);
-    const between = (await heads()).length;
-    for (let tries = 0; tries < 80 && (await heads()).length !== all; tries++) await wait(100);
-    same('two tool changes told back to back: the first read shows, then the second', [between, (await heads()).length], [all - 1, all]);
-    // Nothing is left owed: a later action's result stays, rather than being wiped by a read that ran late.
-    await wait(2500);
+    await tellOfChange();
+    // Both draws may land between driver reads. Record the marks where they change, in the renderer.
+    await a.run(`window.ckMarkCounts = []; window.ckMarks = new MutationObserver(() => {
+      const count = document.querySelector(${JSON.stringify(marks)})?.children.length;
+      if (window.ckMarkCounts.at(-1) !== count) window.ckMarkCounts.push(count);
+    }); window.ckMarks.observe(document.getElementById('page'), { childList: true });`);
+    await main.releaseRefresh();
+    await waitFor('the two Skills draws', () => a.run(`window.ckMarkCounts.includes(${all - 1}) && window.ckMarkCounts.at(-1) === ${all}`));
+    const counts = await a.run(`window.ckMarks.disconnect(); window.ckMarkCounts.slice(window.ckMarkCounts.indexOf(${all - 1}))`);
+    same('two tool changes told back to back: the first read shows, then the second', counts, [all - 1, all]);
+    await main.manualSyncOnly(false);
+    // Nothing is left owed: a later action's result stays. A found skill is visible evidence of a fresh
+    // background view, with no sync notice of its own to replace the announcement.
+    const quietRead = async key => {
+      const marker = skill(claudeSkills, key);
+      try {
+        await tellOfChange();
+        await waitFor(`Skills to show ${key}`, () => a.exists(byId(rowPart('add', 'skills', key))));
+      } finally { rmSync(marker, { recursive: true }); }
+    };
     await a.click('#header-refresh');
     const result = await a.text('#announcement');
-    await wait(2500);
+    await quietRead('after-refresh');
     same('and a later result stays said', [await a.text('#announcement'), (await heads()).length], [result, all]);
     check('that result says what was read', /^Read \d/.test(result ?? ''), result);
     // A sync:changed right after an action keeps that action's message: the read it starts brings no new notice.
     await a.click('#nav-skills');
-    await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+    await a.click(byId(rowPart('switch', 'skills', 'notes')));
     const switched = await a.run(`document.querySelector('#announcement').dataset.text`);
-    await main.tellPage('sync:changed');
-    await wait(1500);
+    await quietRead('after-switch');
     same('a sync:changed right after an action keeps its message', [await a.run(`document.querySelector('#announcement').dataset.text`), /^notes is off: no tool has it/.test(switched ?? '')], [switched, true]);
     await a.click('#outcome-undo');
     // A tool that appears is noticed by whichever read sees it first. Opening Plugins before the poll reads the home for
