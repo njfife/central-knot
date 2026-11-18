@@ -219,6 +219,15 @@ test('The switch says what a click does: off everywhere, or on everywhere; a fou
   assert.equal(placeTag(locked, item(), tools), undefined);
 });
 
+test('An Off agent on through its plugin in two tools names them in its page’s order: on Codex’s page, Codex first', () => {
+  // The row holds the tools in its kind's own order; each page says them with its own tool first (matrix.ts toolsFor).
+  const through = row({}, { pluginOn: ['claude-cli', 'codex-cli'] }), off = item({ on: false, applied: {} }), onCodexPage = ['codex-cli', 'claude-cli', 'copilot-cli'];
+  assert.deepEqual([placeTag(through, off, tools)?.text, placeTag(through, off, onCodexPage)?.text, statusLine(through, off, onCodexPage, false, [])],
+    ['on in Claude Code and Codex only, through its plugin', 'on in Codex and Claude Code only, through its plugin',
+      'Off · on in Codex and Claude Code only, through its plugin. Turn it on to put it in every tool.']);
+  assert.equal(placeTag(through, off, onCodexPage)?.title, 'Central Knot keeps this agent and its versions. Codex and Claude Code have it on through its plugin: its switch there, in the opened row, turns that off.');
+});
+
 test('The switch counts the tools an item is on in as its tag does: a tool that can’t take it is not one of them', () => {
   // triage, a skill of the plugin issue-tracker, which is kept out of every tool but OpenCode: the three tools that install
   // plugins can't be given it (the plugin isn't there), Pi keeps it out, and OpenCode has it.

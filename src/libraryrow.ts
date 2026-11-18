@@ -267,10 +267,12 @@ export function foldVersions(versions: readonly Version[], unfolded: boolean): {
  * is left out (`leftOut`: its Manage switch off; it keeps whatever it had), in no tool Central Knot manages.
  */
 function offWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[]) {
-  const own = ownCopies(row, item, tools);
-  return row.pluginOn?.length ? `on in ${andList(row.pluginOn.map(toolName))} only, through its plugin`
+  const own = ownCopies(row, item, tools), through = onThrough(row, tools);
+  return through.length ? `on in ${andList(through.map(toolName))} only, through its plugin`
     : own.length ? `in ${andList(['Central Knot', ...own.map(toolName)])}` : leftOut.length ? 'in no tool Central Knot manages' : 'in Central Knot only';
 }
+/** The tools that have an Off item on through its plugin (`pluginOn`), in the page's order of `tools` (its own tool first on a tool's page). */
+const onThrough = (row: LibraryRow, tools: readonly string[]) => tools.filter(tool => row.pluginOn?.includes(tool));
 /** The tools whose copy of an Off item the plan still removes (a removal held: Claude Code's lock, a file that couldn't be written). */
 const removalOwed = (row: LibraryRow, tools: readonly string[]) => (row.plan?.remove ?? []).filter(tool => tools.includes(tool));
 
@@ -463,8 +465,8 @@ export function sentences(words: RowWords) {
     const place = placeOf(item);
     const unseen = stillIn(row, item, [], tools);
     if (place === 'off' && unseen.length) return { text: `still in ${andList(unseen.map(toolName))}`, title: unseen.map(tool => row.unseen![tool]).join(' ') };
-    const own = ownCopies(row, item, tools);
-    const none = row.pluginOn?.length ? `${andList(row.pluginOn.map(toolName))} ${row.pluginOn.length === 1 ? 'has' : 'have'} it on through its plugin: its switch there, in the opened row, turns that off.`
+    const own = ownCopies(row, item, tools), through = onThrough(row, tools);
+    const none = through.length ? `${andList(through.map(toolName))} ${through.length === 1 ? 'has' : 'have'} it on through its plugin: its switch there, in the opened row, turns that off.`
       : own.length ? `${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there, left alone while the ${noun} is off.`
       : leftOut.length ? `No tool it manages has it until you turn it on; ${andList(leftOut.map(toolName))}, left out, ${leftOut.length === 1 ? 'keeps whatever it has' : 'keep whatever they have'}.`
       : 'No tool has it until you turn it on.';
