@@ -4,7 +4,7 @@
 // - With no switch it is the light tour (folder `light`): the app opens and each page is opened once, one picture each,
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
-// - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
+// - `--full` runs every feature section, about 1,700 pictures over about forty minutes on the Mac. For a new release only.
 // Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), plugin-text (a plugin's instruction files and the hooks that can add text to sessions), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
@@ -1029,7 +1029,7 @@ if (wanted('sync-everything')) {
   await waitFor(a, `document.querySelector('#sync-everything-on')?.getAttribute('aria-checked') === 'true'`, 15000);
   await atEverySize('settings-on', 'Clicked its switch: Synchronize everything is on; under the row, what the pass right after took in, a line per kind with History, and what still waits for a choice of copy', true, '#setting-sync-everything');
   await a.click('#nav-overview');
-  await atEverySize('overview-on', 'Opened Overview: the sync line says what turns up in a tool is taken in by Synchronize everything');
+  await atEverySize('overview-on', 'Opened Overview: its question is gone, now Synchronize everything is on; what still needs you is the one found item whose copies differ, with Choose copies, and the cards count what it took in');
   await a.click('#nav-skills');
   await atEverySize('skills-on', 'Opened Skills: one notice names the skills it took in and the tools it found them in; the Found heading says Synchronize everything leaves these, the opened row saying why, and counts what waits for a choice', true);
   await openRow('review');
@@ -1081,10 +1081,13 @@ if (wanted('plugin-skills')) {
   // Codex's switch is its config.toml, so its CLI is only asked its version (the switch is offered from a tested build).
   writeFileSync(join(HOME, '.local/bin/codex'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.167.0" && exit 0\nexit 9\n`, { mode: 0o755 });
   writeFileSync(join(HOME, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.108." && exit 0\nS="$HOME/.copilot/settings.json"\ncase "$1 $2" in\n  "skill disable") printf '{"extraKnownMarketplaces":${known},"disabledSkills":["%s"]}' "$3" > "$S" ;;\n  "skill enable") printf '${copilotSettings([])}' > "$S" ;;\n  *) exit 9 ;;\nesac\n`, { mode: 0o755 });
-  const at860 = async (name, caption) => {
+  // The switches' result goes by itself 8 s after the clicks, its Undo with it (app.ts FADE_MS), but stays while the pointer
+  // is on it. The pictures between the clicks and Undo take longer than that, so for each of them the pointer rests on its words.
+  const onResult = () => middleOf('#plugins-result .toolbar-result-text');
+  const at860 = async (name, caption, held = false) => {
     await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
     await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
-    await shot(a, name, caption);
+    await shot(a, name, caption, held ? await onResult() : undefined);
     await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
   };
   await a.click('#nav-plugins');
@@ -1097,17 +1100,17 @@ if (wanted('plugin-skills')) {
   const flip = async id => { await a.click(id); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle(); };
   await flip('#pskill-0-document-tools-pdf-reader-codex-cli');
   await flip('#pskill-0-document-tools-pdf-reader-copilot-cli');
-  await shot(a, 'skill-off', 'Clicked pdf-reader’s switch under Codex, then under Copilot CLI: each acted at once. Codex’s config.toml now names document-tools:pdf-reader with enabled = false, and Copilot CLI ran `copilot skill disable document-tools:pdf-reader`. The toolbar has the last click’s result, with its Undo.');
+  await shot(a, 'skill-off', 'Clicked pdf-reader’s switch under Codex, then under Copilot CLI: each acted at once. Codex’s config.toml now names document-tools:pdf-reader with enabled = false, and Copilot CLI ran `copilot skill disable document-tools:pdf-reader`. The header has the last click’s result, with its Undo; from here to Undo the pointer rests on the result, which keeps it.', await onResult());
   await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').focus({ focusVisible: true })`);
-  await shot(a, 'skill-focus', 'Moved keyboard focus to pdf-reader’s Codex switch (as Tab would): the focus ring.');
-  await a.theme('light'); await shot(a, 'skill-focus-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await shot(a, 'skill-focus', 'Moved keyboard focus to pdf-reader’s Codex switch (as Tab would): the focus ring.', await onResult());
+  await a.theme('light'); await shot(a, 'skill-focus-light', 'The same, in the light appearance.', await onResult()); await a.theme('dark');
   await a.run(`document.activeElement?.blur()`);
-  await at860('skill-off-860-skills', 'The same at 860×560, scrolled to the skills.');
-  await a.theme('light'); await shot(a, 'skill-off-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await at860('skill-off-860-skills', 'The same at 860×560, scrolled to the skills.', true);
+  await a.theme('light'); await shot(a, 'skill-off-light', 'The same, in the light appearance.', await onResult()); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
     await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false }); await a.settle();
-    await shot(a, `skill-off-${width}`, `The same page at ${width}×${height}.`);
-    await a.theme('light'); await shot(a, `skill-off-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
+    await shot(a, `skill-off-${width}`, `The same page at ${width}×${height}.`, await onResult());
+    await a.theme('light'); await shot(a, `skill-off-${width}-light`, `The same at ${width}×${height}, light.`, await onResult()); await a.theme('dark');
   }
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
   await flip('#plugins-undo');
@@ -1418,6 +1421,8 @@ async function instructionsAtSizes(tag, caption) {
   await shot(a, `${tag}-light`, `${caption} At 1280×800, light.`); await a.theme('dark');
 }
 if (wanted('instructions')) {
+  // Its own home, so a full tour draws what `--only instructions` draws: plugin-items, before it, leaves Pi in the home.
+  await fresh();
   begin('instructions');
   await a.click('#nav-instructions');
   await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`);
@@ -2252,11 +2257,11 @@ if (wanted('harnesses')) {
   await size(860, 560);
   const last = await a.run(`[...document.querySelectorAll('.ov-head .tool-head-button')].at(-1)?.id`);
   if (last) { await a.click(`#${last}`); await shot(a, 'last-menu-860', 'Clicked the right-most column header at 860×560: its menu stays inside the window.'); await a.click(`#${last}`); }
-  await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi doesn’t use agents.');
+  await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi holds none of them yet; the agents the other tools have are under “Not in Pi”, each with Add (in Pi an agent is a skill).');
   await a.click('#harness-tab-skills'); if (!(await a.has('.ov-row.open[data-key="release-notes"]'))) await a.click('#open-release-notes'); await shot(a, 'pi-details-860', 'Opened release-notes on Pi’s page at 860×560: each tool’s own switch in its details.');
   await size(1280, 800);
   // This computer's home (in the tour, an empty throwaway folder on Linux): detection, a Not found card, and its header.
-  await a.click('#home-actual'); await a.click('#nav-harnesses'); await shot(a, 'this-computer-list', 'Clicked "This computer’s home" at the bottom left, then Harnesses: each tool with how it was found; tools not found have a card that does not open.');
+  await a.click('#home-actual'); await a.click('#nav-harnesses'); await shot(a, 'this-computer-list', 'Clicked "This Mac’s home" ("This computer’s home" off macOS) at the bottom left, then Harnesses: each tool with how it was found; tools not found have a card that does not open.');
 }
 
 // ---------- A tool's Manage switch (Harnesses cards; toolchoice.ts) ----------
@@ -2277,7 +2282,7 @@ if (wanted('manage')) {
   await a.click('#nav-skills'); await a.click('#switch-standup'); await a.settle();
   await atEverySize('skills-one-left-out', 'Turned standup off on the Skills page with Codex left out: no Codex mark on any row; standup’s row and the band say no tool Central Knot manages has it');
   await a.click('#nav-overview');
-  await atEverySize('overview-one-left-out', 'The Overview with Codex left out: the lead names the managed tools and says where Codex’s switch is');
+  await atEverySize('overview-one-left-out', 'The Overview with Codex left out: Your tools has a row for Claude Code and Copilot CLI only, and the line under it says Codex is left out and that its switch is on Harnesses (under the fold at 860×560)');
   await a.click('#nav-harnesses'); await refresh();
   await atEverySize('codex-line-before-on', 'Edited Codex’s notes by hand, then Refresh on Harnesses: Codex’s line counts what turning it on will do there: Central Knot’s version written for one item, one copy that differs kept as a version first, one copy of an item that is off removed, and two found items', true, '#manage-codex-cli');
   await a.click('#manage-codex-cli');
@@ -2982,7 +2987,9 @@ if (wanted('overview')) {
   writeFileSync(zip, Buffer.alloc(4_000_000, 7));
   const releases = [];
   const fixture = await serveReleases(releases);
-  await fresh({ CK_UPDATE_STUB: 'v0.7.0-alpha.1', CK_UPDATE_RELEASES: fixture.releasesUrl });
+  // Tools are looked for only in this run's HOME, as e2e.mjs does: on a machine with real CLIs installed (a Mac with
+  // Homebrew's), "no tool in it" would otherwise find them.
+  await fresh({ CK_UPDATE_STUB: 'v0.7.0-alpha.1', CK_UPDATE_RELEASES: fixture.releasesUrl, CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
   begin('overview');
   const top = () => a.run(`document.getElementById('overview-scroll')?.scrollTo(0, 0)`);
   /** Waits for a state the next pictures show; the run stops if it never comes, so no picture shows the wrong one. */
