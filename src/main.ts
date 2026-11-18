@@ -1165,6 +1165,12 @@ function createWindow(show: boolean) {
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.on('app-command', (event, command) => {
+    if (command === 'browser-backward' || command === 'browser-forward') { event.preventDefault(); send('navigate', command); }
+  });
+  window.on('swipe', (_event, direction) => {
+    if (direction === 'left' || direction === 'right') send('navigate', direction === 'left' ? 'browser-backward' : 'browser-forward');
+  });
   window.webContents.on('will-navigate', event => event.preventDefault());
   log('window created');
   if (show) joinDock();

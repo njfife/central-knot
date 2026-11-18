@@ -35,7 +35,7 @@ const readProblems = (snapshot: Snapshot) => (snapshot.discovery === 'missing' ?
 /** The harnesses this home shows: this computer's home lists every tool, found or not; a folder only the ones it has. */
 const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode === 'actual' || home.sync.present.includes(snapshot.harness));
 
-const supports = (home: HomeView, kind: PageKind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
+export const supports = (home: HomeView, kind: PageKind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
 /** Said on the card, the tab's tooltip and the empty tab when a tool can't hold a kind. */
 const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${names[tool]} doesn’t use ${kindNouns[kind].many}`;
 

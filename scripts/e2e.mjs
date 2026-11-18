@@ -314,6 +314,115 @@ async function skillsOf(a, tool, pictureRow) {
   return { sections, counts: [card, tab, overview] };
 }
 
+/** The window's Back and Forward buttons return to the places actually drawn. */
+async function backFlow() {
+  const a = await launch(join(scratch, 'back-data'), ['--practice-copy']);
+  const thumb = async (button = 'back') => {
+    for (const [type, buttons] of [['mousePressed', button === 'back' ? 8 : 16], ['mouseReleased', 0]]) {
+      await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button, buttons, clickCount: 1 });
+    }
+  };
+  const page = () => a.run("document.querySelector('.nav-row[aria-current=page]')?.id");
+  await a.click('#nav-settings');
+  await a.run(`window.thumbEvents = []; for (const type of ['mouseup', 'auxclick']) {
+    window.addEventListener(type, e => window.thumbEvents.push([type, e.button, e.defaultPrevented]), { once: true });
+  }`);
+  await thumb();
+  same('mouse Back after a sidebar click returns to the previous page', await page(), 'nav-overview');
+  same('the page cancels the Back release and auxiliary click', await a.run('window.thumbEvents'), [['mouseup', 3, true], ['auxclick', 3, true]]);
+  const key = async forward => {
+    const mac = process.platform === 'darwin';
+    const key = mac ? (forward ? ']' : '[') : (forward ? 'ArrowRight' : 'ArrowLeft');
+    for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key, modifiers: mac ? 4 : 1 });
+  };
+  await thumb('forward');
+  same('mouse Forward reopens Settings', await page(), 'nav-settings');
+  await key(false);
+  same('the platform Back key returns to Overview', await page(), 'nav-overview');
+  await key(true);
+  same('the platform Forward key reopens Settings', await page(), 'nav-settings');
+  await thumb();
+  await a.click('#nav-history');
+  await thumb('forward');
+  same('a new visit after Back drops Forward', await page(), 'nav-history');
+
+  const practice = await a.run("document.querySelector('.status-home').title");
+  const market = join(scratch, 'back-market');
+  writeMarket(market, 'back-market');
+  const contents = readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8');
+  writeClaudeInstall(practice, 'back-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': contents });
+  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'back-market': { source: { source: 'directory', path: market }, installLocation: market } }));
+  await a.click('#header-refresh');
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  await a.click('#harness-plugin-back-market-issue-tracker');
+  await thumb();
+  check('one Back from the plugin returns to the tool’s Plugins tab', await a.exists('#harness-tab-plugins[aria-selected=true]'));
+  await thumb();
+  check('another Back returns to its Skills tab', await a.exists('#harness-tab-skills[aria-selected=true]'));
+  await thumb();
+  check('another Back returns to the harness list', await a.exists('button#harness-claude-cli'));
+  await a.click('#harness-codex-cli');
+  await a.click('#harness-tab-about');
+  await a.click('#harness-tab-skills');
+  await a.click('#nav-harnesses');
+  await a.click('#manage-codex-cli');
+  await thumb();
+  check('Back to a left-out tool lands on Harnesses', await a.exists('#harnesses-scroll'));
+  await thumb();
+  same('a second Back passes its vanished tabs and goes to the earlier page', await page(), 'nav-history');
+
+  await a.click('#nav-skills');
+  const skill = (part, key) => byId(rowPart(part, 'skills', key));
+  // Start Add on the same input turn as Back, so even a fast disk cannot finish before Back.
+  await a.run(`document.addEventListener('mouseup', () => {
+    document.querySelector(${JSON.stringify(skill('add', 'standup'))}).click();
+    window.backWhileActing = document.body.dataset.busy;
+  }, { capture: true, once: true })`);
+  await thumb();
+  await a.settle();
+  same('Back before Add ends leaves the write running and its result in the status bar',
+    [await a.run('window.backWhileActing'), await page(), /standup/i.test(await a.text('#announcement') ?? ''), existsSync(join(practice, '.copilot/skills/standup/SKILL.md'))],
+    ['true', 'nav-history', true, true]);
+  await thumb('forward');
+  check('Forward shows the skill On as Add left it', await switchOn(a, 'skills', 'standup'));
+  const pluginSkill = 'issue-tracker@back-market/triage';
+  await a.click(skill('open', pluginSkill));
+  await a.click(skill('open-whole', pluginSkill));
+  await a.click('#sidebar-toggle');
+  const exactPlugin = () => a.text('.crumb-here');
+  const name = await exactPlugin();
+  await thumb();
+  same('Back across a redraw returns directly to Skills with the linked row open',
+    [await page(), await a.exists(skill('open-whole', pluginSkill))], ['nav-skills', true]);
+  await thumb('forward');
+  check('Forward opens that same plugin', name && await exactPlugin() === name, name);
+  await thumb();
+  await a.click(skill('open', 'standup'));
+  await a.click(skill('files', 'standup'));
+  await a.click(skill('list', 'release-notes'));
+  await thumb();
+  check('Back in Files reselects the previous skill', await a.exists(skill('list', 'standup') + '[aria-pressed=true]'));
+  await thumb();
+  check('Back out of Files reaches the table', !(await a.exists('#skills-list')) && await page() === 'nav-skills');
+  await a.click('#nav-instructions');
+  await a.click('#ins-edit-claude-cli');
+  await a.run(`const editor = document.querySelector('#ins-text-claude-cli'); editor.focus();
+    editor.value += 'Back keeps this draft.'; editor.dispatchEvent(new Event('input', { bubbles: true }));`);
+  await key(false);
+  same('the shortcut leaves the focused editor in place', await page(), 'nav-instructions');
+  await thumb();
+  same('mouse Back leaves Instructions like the sidebar', await page(), 'nav-skills');
+  await thumb('forward');
+  check('Forward finds the typed draft intact', await a.run("document.querySelector('#ins-text-claude-cli')?.value.endsWith('Back keeps this draft.')"));
+  await a.click('#home-actual');
+  await thumb();
+  same('another accepted home starts with no previous place', await page(), 'nav-instructions');
+  same('no page errors during Back and Forward', a.pageErrors, []);
+  await a.quit();
+}
+
 /** Harnesses: one tool's page manages its items with the same engine as the Skills page. */
 async function harnessFlow() {
   // A packaged build starts on this computer's home: the switch puts it on the Practice copy, as a dev build starts.
@@ -6667,7 +6776,7 @@ const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, overviewFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
-  [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
+  [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
