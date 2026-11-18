@@ -118,6 +118,15 @@ test('a plugin’s skill the person also has (in Pi, shown there as through the 
   assert.deepEqual((['claude-cli', 'copilot-cli', 'pi-cli', 'codex-cli'] as const).map(tool => inTool(triage!, tool)), [true, true, true, false]);
 });
 
+test('a shared skill belongs to a tool that loads it now, even through a link, but not one that could read a future copy', () => {
+  const file = { folder: 'review', name: 'review', skillFile: '/home/example/.agents/skills/review/SKILL.md', switchedOff: false };
+  const review = fact('review', {}, {
+    loads: { 'claude-cli': file, 'codex-cli': file },
+    anotherWay: { 'opencode-cli': 'OpenCode gets it once it is on in Claude Code.' },
+  });
+  assert.deepEqual((['claude-cli', 'codex-cli', 'opencode-cli'] as const).map(tool => inTool(review, tool)), [true, true, false]);
+});
+
 test('a personal skill that only shares the name stays its own row beside the plugin’s', () => {
   const home = homeOf([fact('triage', { 'claude-cli': true })], [install('claude-cli')]);
   assert.deepEqual([pageRows(home, 'skills').rows.map(row => row.key), pluginItemCount(home, 'skills'), pluginItemCount(home, 'skills', 'claude-cli'), pluginItemCount(home, 'skills', 'pi-cli')], [['issue-tracker@m/triage'], 1, 1, 0]);

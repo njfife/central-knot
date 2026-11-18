@@ -112,6 +112,7 @@ function seedHome() {
   symlinkSync('SKILL.md', join(held, 'alias'));
   const shared = skill(AGENTS, 'linked');
   symlinkSync(shared, join(CLAUDE, 'linked'));
+  symlinkSync(join(AGENTS, 'missing'), join(CLAUDE, 'from-copilot'));
   toolClis(HOME);
   writeFileSync(join(HOME, '.claude/unrelated.json'), '{ "keep":   "these bytes" }\n');
   skill(CLAUDE, `very-long-${'n'.repeat(150)}`);
@@ -289,6 +290,28 @@ const sharedIds = a => a.run(`(() => { const ids = [...document.querySelectorAll
 /** Each section on an item page of `kind`, in order, with the keys of its rows. */
 const sectionsNow = async (a, kind) => (await a.run(`[...document.querySelectorAll('.ov-section[data-section]')].map(head => [head.dataset.section, [...head.parentElement.querySelectorAll('.ov-row[data-key]')].map(row => row.dataset.key)])`))
   .map(([section, ids]) => [section, keysOf(kind, ids)]);
+/** Read one tool's Skills counts on its card, tab and Overview row, and the sections on its tab. */
+async function skillsOf(a, tool, pictureRow) {
+  await a.click(await a.exists('#harness-back') ? '#harness-back' : '#nav-harnesses');
+  const card = await a.text(`#harness-${tool} .harness-count-value`); // Skills is the first kind.
+  await a.click(`#harness-${tool}`);
+  await a.click('#harness-tab-skills');
+  const tab = await a.text('#harness-tab-skills .harness-tab-count');
+  const sections = Object.fromEntries(await sectionsNow(a, 'skills'));
+  if (shots && pictureRow) {
+    await sizeTo(a, 1280, 800);
+    await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', pictureRow)}"]').scrollIntoView({block: 'nearest'})`);
+    await a.shot('claude-skills');
+  }
+  await a.click('#nav-overview');
+  const overview = await a.text(`.tools-table tr[data-tool="${tool}"] td`);
+  if (shots && pictureRow) {
+    await a.run("document.querySelector('.tools-table').scrollIntoView({block: 'end'})");
+    await a.shot('tools-overview');
+    await a.send('Emulation.clearDeviceMetricsOverride');
+  }
+  return { sections, counts: [card, tab, overview] };
+}
 
 /** Harnesses: one tool's page manages its items with the same engine as the Skills page. */
 async function harnessFlow() {
@@ -4217,6 +4240,11 @@ async function realHomeFlow() {
   await a.click('#harness-tab-about');
   const codexAbout = await a.text('#harness-body');
   check('Codex says where new copies go', codexAbout.includes('/.codex/skills'), codexAbout.slice(0, 600));
+  const { sections, counts } = await skillsOf(a, 'claude-cli', 'linked');
+  check('Claude Code’s broken link does not count as having the Copilot skill', sections.away?.includes('from-copilot'), sections);
+  same('Claude Code counts linked under Found on its Skills tab, its card and the Overview',
+    [sections.found?.includes('linked'), sections.away?.includes('linked') ?? false, counts],
+    [true, false, ['12', '12', '12']]);
   await a.click('#nav-skills');
   const rows = await rowKeys(a, 'skills');
   for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot', 'has-link']) check(`row for ${name}`, rows.includes(name), rows);
@@ -4259,6 +4287,14 @@ async function realHomeFlow() {
     await a.quit();
     return;
   }
+  unlinkSync(join(CLAUDE, 'from-copilot'));
+  await a.click('#header-refresh');
+  await a.click(byId(rowPart('add', 'skills', 'linked')));
+  await a.click('#nav-harnesses');
+  same('taking linked in leaves 12 skills on Claude Code’s card and none synced there',
+    [await a.text('#harness-claude-cli .harness-count-value'), await a.text('#harness-claude-cli .harness-count-note')], ['12', 'none synced']);
+  if (shots) { await sizeTo(a, 1280, 800); await a.shot('claude-card-linked-on'); await fullSize(a); }
+  await a.click('#nav-skills');
   const wrongHome = await a.run(`window.centralKnot.applySkills([{ key: 'rich', on: true, except: [] }], false, '/somewhere/else')`);
   check('an apply for another home is refused', wrongHome.writes === 0 && /not the one open/.test(wrongHome.stopped ?? ''), wrongHome);
   // Every skill turned on, one switch at a time, but private-one and those whose copies differ (each needs its own choice).
@@ -4329,6 +4365,7 @@ async function sharedCopiesFlow() {
   const name = 'opus-sol-loop', link = `../../.agents/skills/${name}`;
   const install = () => { skill(agents, name, text(name, 'From the installer.')); symlinkSync(link, join(copilot, name)); };
   install();
+  skill(agents, 'shared-only');
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
   const a = await launch(data);
@@ -4377,6 +4414,25 @@ async function sharedCopiesFlow() {
   await a.click('#header-refresh');
   same('came back: still on, Copilot CLI and Pi have it another way, the link and the shared copy as the installer left them', [await switchOn(a, 'skills', name), await cellState(a, 'skills', name, 'copilot-cli'), await cellState(a, 'skills', name, 'pi-cli'), onDisk()], [true, 'another-way', 'another-way', [`link:${link}`, true, false, true]]);
   await a.shot('shared-came-back');
+  // Off takes out Claude Code's copy alone: Copilot CLI and Pi still read the shared copy, and the result says so, as their lines do.
+  await a.click(`${row} .switch`);
+  for (let tries = 0; tries < 40 && !(await a.text('#header .band-text') ?? '').includes(`${name} is off`); tries++) await wait(100);
+  same('Off leaves the installer’s link and shared copy in place', onDisk(), [`link:${link}`, true, false, false]);
+  const reads = 'also reads a copy at …/.agents/skills, which is not Central Knot’s.';
+  check('turned off, the result names each tool that still reads it, and where, rather than that no tool has it',
+    (await a.text('#header') ?? '').includes(`${name} is off. Copilot CLI ${reads} Pi ${reads} Central Knot keeps it`), await a.text('#header'));
+  await a.click('#nav-harnesses');
+  await a.click('#harness-pi-cli');
+  await a.click('#harness-tab-skills');
+  await opened();
+  const elsewhere = `Pi ${reads} Copilot CLI ${reads}`;
+  check('the Off heading names the copies still read', (await headingSays(a, 'off')).includes(elsewhere), await headingSays(a, 'off'));
+  same('the Off row names the tools that still have it', await a.text(`${row} .row-tag`), 'in Central Knot, Pi and Copilot CLI');
+  check('the Off status says where the tools read it', (await a.text('.details-status') ?? '').includes(elsewhere), await a.text('.details-status'));
+  if (shots) { await sizeTo(a, 1280, 800); await a.shot('pi-skills-off'); await fullSize(a); }
+  await a.click('#nav-skills');
+  await a.click(`${row} .switch`);
+  for (let tries = 0; tries < 40 && !(await switchOn(a, 'skills', name)); tries++) await wait(100);
   // Delete from Central Knot removes only Central Knot's copy (Claude Code's); the link and the shared copy stay, and the
   // skill is found again.
   await opened();
@@ -4384,6 +4440,25 @@ async function sharedCopiesFlow() {
   await a.click(`#${rowPart('delete-confirm', 'skills', name)}`);
   same('Delete from Central Knot removes Claude Code’s copy and leaves the link and the shared copy', onDisk(), [`link:${link}`, true, false, false]);
   check('and the skill is found again, as the installer’s', (await rowKeys(a, 'skills')).includes(name) && !(await switchOn(a, 'skills', name)), await rowKeys(a, 'skills'));
+  // With all five tools present, each has both installer skills exactly when it reads the shared folder.
+  for (const dir of ['.codex/skills', '.config/opencode/skills']) mkdirSync(join(home, dir), { recursive: true });
+  await a.click('#header-refresh');
+  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']) {
+    const { sections, counts } = await skillsOf(a, tool);
+    const readsShared = tool !== 'claude-cli';
+    same(`${tool} counts shared-only exactly when it reads ~/.agents/skills`,
+      [sections.found?.includes('shared-only') ?? false, sections.away?.includes('shared-only') ?? false, counts],
+      [readsShared, !readsShared, readsShared ? ['2', '2', '2'] : ['', null, '0']]);
+  }
+  skill(claude, 'clash', text('clash', 'From Claude Code.'));
+  skill(pi, 'clash', text('clash', 'From Pi.'));
+  await a.click('#header-refresh');
+  await a.click('#nav-harnesses');
+  const differ = await a.text('#harness-opencode-cli-differ-skills');
+  await a.click('#harness-opencode-cli');
+  await a.click('#harness-tab-skills');
+  same('OpenCode reads Claude Code’s copy of clash, so its card and Copies differ chip both count it',
+    [parseInt(differ ?? '', 10), await a.text('.chip-warn .chip-count')], [1, '1']);
   same('no page errors, shared copies', a.pageErrors, []);
   await a.quit();
 }

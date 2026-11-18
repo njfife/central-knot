@@ -39,8 +39,9 @@ export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'item' | unde
   return off?.some(name => samePart({ kind: row.kind, name }, row)) ? 'item' : undefined;
 }
 
-/** Whether a tool has an item of the person's: a copy of its own there, or through a plugin installed there (its box says so). The tables and every count ask this. */
-export const inTool = (fact: Pick<LibraryFacts, 'copies' | 'plugin'>, tool: HarnessId) => fact.copies[tool] !== undefined || !!fact.plugin?.[tool];
+/** A tool has its own copies, items its plugins give it, and skill copies it reads through a link or another folder, even when its own switch has the copy off. */
+export const inTool = (fact: Pick<LibraryFacts, 'copies' | 'plugin' | 'loads'>, tool: HarnessId) =>
+  fact.copies[tool] !== undefined || !!fact.plugin?.[tool] || !!fact.loads?.[tool];
 
 /**
  * Whether a row of the person's own is this plugin's item already: some tool has that row's item through this plugin (its
