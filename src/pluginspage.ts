@@ -134,12 +134,8 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
 
 function findBox(entry: MarketplaceView) {
   return h('input.market-find', { id: 'plugin-find', type: 'search', placeholder: `Find in ${plural(entry.plugins.length, 'plugin')}`, 'aria-label': 'Find plugins', value: market.nav.find,
-    oninput: (event: Event) => {
-      browse({ find: (event.target as HTMLInputElement).value });
-      // The redraw makes a new box; the caret goes back to where the person was typing.
-      const box = document.getElementById('plugin-find') as HTMLInputElement | null;
-      box?.setSelectionRange(box.value.length, box.value.length);
-    } });
+    // The redraw makes a new box, which keeps the caret where he was typing (dom.ts keepSelection).
+    oninput: (event: Event) => browse({ find: (event.target as HTMLInputElement).value }) });
 }
 
 function categoryChips(entry: MarketplaceView, categories: string[]) {

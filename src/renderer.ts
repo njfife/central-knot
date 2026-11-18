@@ -2,12 +2,13 @@
 // draws (renderPage: while another build holds this one, the held screen of otherbuildview.ts instead of every page, with the
 // sidebar's update control kept), and drawing again on a change. On a list page the last result is in the header (resultHere),
 // whose room is always there, so a result never moves a row; one taller than the header lies over the toolbar as a panel
-// (style.css #header::after). The page's state and actions are app.ts's; each page is drawn by its own
-// module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
+// (style.css #header::after). A redraw keeps what is selected, the scroll places and the focus (render), and a press on a control
+// it replaces still counts (dom.ts keepClicksAcrossRedraws). The page's state and actions are app.ts's; each page is drawn by its
+// own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
-import { afterLayout, button, fitBars, h, icon, keepClicksAcrossRedraws, runAfterLayout, whyOff } from './dom.ts';
+import { absentKinds, acting, drawPage, placeNow, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { afterLayout, button, fitBars, h, icon, keepClicksAcrossRedraws, keepSelection, runAfterLayout, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
 import { kindNouns, pageNames } from './words.ts';
@@ -231,6 +232,7 @@ const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]
 function render() {
   const focused = document.activeElement?.id;
   const scrolled = remembered();
+  const selected = keepSelection();
   const { rail } = applyLayout();
   renderSidebar();
   renderHeader(rail);
@@ -239,6 +241,9 @@ function render() {
   runAfterLayout();
   renderStatus();
   fitBars();
+  // What was selected (a field's own scroll with it), then the scroll places and the focus, each where it was (dom.ts keepSelection
+  // neither focuses nor scrolls the page).
+  selected();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
   // Back on the control that had it, without scrolling to it: a redraw never pulls the page to a row scrolled away from.
   if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
@@ -246,7 +251,9 @@ function render() {
 }
 
 setRenderer(render);
-keepClicksAcrossRedraws();
+// A press is matched to the control now there only in the same place (the page's own, app.ts placeNow) in the same home, which a
+// page's place leaves out.
+keepClicksAcrossRedraws(() => `${placeNow()} ${state.home?.home ?? ''}`);
 // The status bar's mark for a message too narrow to show (app.ts paintStatusMessage): drawn once.
 region('message-mark').replaceChildren(icon('info', 14));
 

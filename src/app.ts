@@ -563,9 +563,10 @@ interface ItemTurn extends Turn { row: NonNullable<Turn['row']>; name: string; p
 const isItemTurn = (turn: Turn): turn is ItemTurn => 'isOn' in turn;
 /**
  * Where the page is now, as a run names its place: the page, and on Harnesses the tool whose page is open and the kind its tab
- * shows (each tab has a header of its own). A row's click is made on the table on screen, so its place is this when it is made.
+ * shows (each tab has a header of its own). A row's click is made on the table on screen, so its place is this when it is made;
+ * a press is matched to the control a redraw put in its place only here (renderer.ts, dom.ts keepClicksAcrossRedraws).
  */
-const placeNow = () => (state.page === 'harnesses' ? `harnesses ${state.harness ?? ''} ${harnessKindShown() ?? ''}` : state.page);
+export const placeNow = () => (state.page === 'harnesses' ? `harnesses ${state.harness ?? ''} ${harnessKindShown() ?? ''}` : state.page);
 const itemTurns = (run: Run) => clickList.turns.filter((turn): turn is ItemTurn => isItemTurn(turn) && turn.run === run);
 
 /**
