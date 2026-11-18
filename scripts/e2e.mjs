@@ -342,7 +342,7 @@ async function backFlow() {
   const onlySkill = skill(join(ownHome, '.claude/skills'), 'only-skill');
   const onlyCli = join(ownHome, '.local/bin/claude');
   cpSync(join(HOME, '.local/bin/claude'), onlyCli);
-  const a = await launch(join(scratch, 'back-data'), ['--practice-copy'], ownHome);
+  const a = await launch(join(scratch, 'back-data'), ['--practice-copy'], ownHome, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
   const thumb = async (button = 'back') => {
     for (const [type, buttons] of [['mousePressed', button === 'back' ? 8 : 16], ['mouseReleased', 0]]) {
       await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button, buttons, clickCount: 1 });
@@ -411,6 +411,8 @@ async function backFlow() {
   const skillPart = (part, key, ...within) => byId(rowPart(part, 'skills', key, ...within));
   await a.click(skillPart('open', 'pdf-reader'));
   await a.click(skillPart('enable', 'pdf-reader', 'claude-cli', 'page'));
+  // Navigation draws the page before its first catalog read has finished.
+  for (let tries = 0; tries < 100 && !(await a.exists('.market-item.selected')); tries++) await wait(100);
   same('the skill’s per-tool link resolves an alternate spelling on the first marketplace read', await exactPlugin(), ['back-market', 'document-tools']);
   await a.click(byId('nav-history'));
   await a.click(byId('nav-harnesses'));
