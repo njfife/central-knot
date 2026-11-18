@@ -2192,6 +2192,7 @@ async function practiceFlow() {
   // A tool's own instructions edited afterwards, opened by a click on their text: its base block, the base and the other files
   // stay as they are.
   const baseMd1 = readFileSync(join(practice, '.central-knot/instructions/base.md'), 'utf8');
+  await untilQuiet(a);
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', 'Prefer small commits');
   same('a click on a tool’s own text opens its editor, the caret where it landed', await caretAt(a), ['ins-text-claude-cli', baseClaude0.indexOf('Prefer small commits')]);
   check('with Review changes and Cancel in the card’s head', await a.exists('#ins-head-claude-cli #ins-review-claude-cli') && await a.exists('#ins-head-claude-cli #ins-cancel-claude-cli'), await a.text('#ins-head-claude-cli'));
@@ -4625,6 +4626,7 @@ async function draftFlow() {
   await a.click('#ins-save-codex-cli');
   same('and the save keeps every other line byte for byte, the new line taking the file’s own ending', readNow(agentsMd), crlf.replace('TARGET', 'NEW TARGET') + 'added line\r\n');
   // A click past a line's end lands at that line's end, not on the next line.
+  await untilQuiet(a);
   await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'line two');
   const pastEnd = await a.run(`(() => { const pre = document.querySelector('[aria-label="Codex instructions"] pre.ins-preview'), node = pre.firstChild, at = node.textContent.indexOf('line two');
     const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 8); const line = range.getBoundingClientRect();
