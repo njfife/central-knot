@@ -24,7 +24,7 @@ import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, sentence, 
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { acting, applyByKind, askFlash, closeResult, isKind, KINDS, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, askFlash, closeResult, isKind, KINDS, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -1087,6 +1087,7 @@ const copiesDifferChipShown = (t: Table) => rowsOf(t.kind).some(skill => needsCh
 
 /** A skill's files and contents: the Skills page's files view, from wherever its details were opened. */
 export function openFiles(key: string) {
+  noteMove();
   if (state.page !== 'skills') showPage('skills');
   state.skillsView = 'files';
   state.item = key;
@@ -1950,8 +1951,10 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   const pins = pinnedHere(t), place = new Map(all.map(skill => [idOf(skill), (['on', 'found', 'off'] as Role[]).indexOf(placeIn(pins, idOf(skill), sectionOf(t, skill)))]));
   const shown = inOrder(matches, chosenOrder(t), itemOf, usedAt(t), pins).sort((first, second) => place.get(idOf(first))! - place.get(idOf(second))!);
   const chosen = all.find(skill => skill.key === state.item);
+  if (state.item && !chosen) { state.skillsView = 'table'; state.item = undefined; return itemsTable('skills'); }
   // The detail always shows a skill: the chosen one, else the first listed. In narrow content it sits below the list.
   const shownDetail = chosen ?? shown[0] ?? all[0];
+  // Record the implicit first selection too, so fullPlace names the skill actually drawn.
   state.item = shownDetail.key;
   const listRow = (skill: ItemRow) => h(`button.list-row${skill === shownDetail ? '.selected' : ''}`, {
     type: 'button', id: elId('list', skill), 'data-key': idOf(skill), 'aria-pressed': String(skill === shownDetail),

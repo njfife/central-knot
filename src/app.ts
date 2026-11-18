@@ -874,7 +874,7 @@ function leaveAbsentPage() {
   if (!gone) return;
   // What the status bar said (a Refresh's summary, say) stays, with the reason the page moved.
   const said = state.said.text;
-  showPage('overview');
+  showPage('overview', { repair: true });
   announce(`${said ? `${said} ` : ''}No tool here holds ${kindNames[gone]} now.`);
 }
 
@@ -918,7 +918,13 @@ export function leaveResults(page = state.page) {
   tell(carried);
 }
 
-export function showPage(page: Page) {
+// The draw consumes this once for a whole click, including links that set more than one part of the place.
+let moveRequested = false;
+export const noteMove = () => { moveRequested = true; };
+export const takeMove = () => { const moved = moveRequested; moveRequested = false; return moved; };
+
+export function showPage(page: Page, { repair = false } = {}) {
+  if (!repair) noteMove();
   // Plugins keep what they read while the person stays on them; every other page reads its data each time it opens.
   const stays = page === 'plugins' && state.page === 'plugins';
   // The sidebar's Harnesses opens the list of every harness, except while an action runs: its result belongs to the harness it
@@ -939,12 +945,14 @@ export function showPage(page: Page) {
 
 /** Leaves the Skills page's Files and contents view for the table (its Table button, or Escape). */
 export function showSkillsTable() {
+  noteMove();
   state.skillsView = 'table';
   state.item = undefined;
   rerender();
 }
 
 export function selectItem(key: string | undefined) {
+  noteMove();
   state.item = key;
   rerender();
   document.getElementById('detail-scroll')?.scrollTo(0, 0);

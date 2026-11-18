@@ -363,6 +363,9 @@ async function backFlow() {
   same('the platform Back key returns to Overview', await page(), 'nav-overview');
   await key(true);
   same('the platform Forward key reopens Settings', await page(), 'nav-settings');
+  await a.run("const button = document.getElementById('sidebar-toggle'); button.focus(); button.addEventListener('keydown', e => e.preventDefault(), { once: true })");
+  await key(false);
+  same('Back leaves a shortcut already consumed by the focused control alone', await page(), 'nav-settings');
   if (a.main) {
     const main = await a.main();
     const emit = args => main.run(`electron.BrowserWindow.getAllWindows()[0].emit(${args})`);
@@ -379,6 +382,13 @@ async function backFlow() {
   await thumb('forward');
   same('a new visit after Back drops Forward', await page(), 'nav-history');
 
+  if (process.platform !== 'darwin') {
+    await a.click(byId('nav-settings'));
+    await a.run("document.getElementById('appearance-light').focus()");
+    await key(false);
+    same('an arrow used by Appearance stays on Settings', await page(), 'nav-settings');
+    await a.click(byId('nav-history'));
+  }
   const practice = await a.run("document.querySelector('.status-home').title");
   const market = join(scratch, 'back-market');
   writeMarket(market, 'back-market');
@@ -404,10 +414,18 @@ async function backFlow() {
   await a.click(byId('nav-harnesses'));
   await a.click(byId('manage-codex-cli'));
   await thumb();
-  check('Back to a left-out tool lands on Harnesses', await a.exists(byId('harnesses-scroll')));
+  same('one Back skips left-out tool entries that now show the current list', await page(), 'nav-history');
+  await a.click(byId('nav-harnesses'));
+  await a.click(byId('manage-codex-cli'));
+  await a.click(byId('harness-codex-cli'));
+  await a.click(byId('nav-settings'));
+  await a.click(byId('nav-harnesses'));
+  await a.click(byId('manage-codex-cli'));
   await thumb();
-  same('a second Back passes its vanished tabs and goes to the earlier page', await page(), 'nav-history');
-
+  same('Back reaches the page visited after the tool', await page(), 'nav-settings');
+  await thumb();
+  check('Back from Settings to the left-out tool lands on Harnesses', await a.exists(byId('harnesses-scroll')));
+  await a.click(byId('nav-history'));
   await a.click(byId('nav-skills'));
   const skill = (part, key) => byId(rowPart(part, 'skills', key));
   // Start Add on the same input turn as Back, so even a fast disk cannot finish before Back.
@@ -418,7 +436,7 @@ async function backFlow() {
   await thumb();
   await a.settle();
   same('Back before Add ends leaves the write running and its result in the status bar',
-    [await a.run('window.backWhileActing'), await page(), /standup/i.test(await a.text(byId('announcement')) ?? ''), existsSync(join(practice, '.copilot/skills/standup/SKILL.md'))],
+    [await a.run('window.backWhileActing'), await page(), /standup/i.test(await a.text(byId('announcement') + ':not(.visually-hidden)') ?? ''), existsSync(join(practice, '.copilot/skills/standup/SKILL.md'))],
     ['true', 'nav-history', true, true]);
   await thumb('forward');
   check('Forward shows the skill On as Add left it', await switchOn(a, 'skills', 'standup'));
@@ -426,13 +444,13 @@ async function backFlow() {
   await a.click(skill('open', pluginSkill));
   await a.click(skill('open-whole', pluginSkill));
   await a.click(byId('sidebar-toggle'));
-  const exactPlugin = () => a.text('.crumb-here');
-  const name = await exactPlugin();
+  const exactPlugin = () => Promise.all([a.text('.market-item.selected .market-item-name'), a.text('.crumb-here')]);
+  same('the row opens its listing', await exactPlugin(), ['back-market', 'issue-tracker']);
   await thumb();
   same('Back across a redraw returns directly to Skills with the linked row open',
     [await page(), await a.exists(skill('open-whole', pluginSkill))], ['nav-skills', true]);
   await thumb('forward');
-  check('Forward opens that same plugin', name && await exactPlugin() === name, name);
+  same('Forward opens the expected marketplace and plugin', await exactPlugin(), ['back-market', 'issue-tracker']);
   await thumb();
   await a.click(skill('open', 'standup'));
   await a.click(skill('files', 'standup'));
@@ -444,12 +462,36 @@ async function backFlow() {
   await thumb('forward');
   await thumb('forward');
   await a.click(byId('nav-settings'));
+  await thumb(); // Refresh while the selected skill is on screen.
   renameSync(join(practice, '.claude/skills/release-notes'), join(scratch, 'removed-release-notes'));
   await a.click(byId('header-refresh'));
-  await thumb();
   check('a skill that vanished leaves its table as the destination', await page() === 'nav-skills' && !(await a.exists(byId('skills-list'))));
   await thumb('forward');
   same('repairing the Files entry keeps Forward', await page(), 'nav-settings');
+  await a.click(byId('nav-skills'));
+  const small = join(scratch, 'small-market');
+  writeMarket(small, 'small-market');
+  // The larger marketplace has both a Find box and category chips; the small one has neither.
+  const largeListing = join(market, '.claude-plugin/marketplace.json');
+  const largeCatalog = JSON.parse(readFileSync(largeListing, 'utf8'));
+  const issue = largeCatalog.plugins.find(plugin => plugin.name === 'issue-tracker');
+  for (let i = 1; i <= 6; i++) largeCatalog.plugins.push({ ...issue, name: `issue-${i}` });
+  writeFileSync(largeListing, JSON.stringify(largeCatalog));
+  const listing = join(small, '.claude-plugin/marketplace.json');
+  const catalog = JSON.parse(readFileSync(listing, 'utf8'));
+  catalog.plugins = catalog.plugins.filter(plugin => plugin.name === 'document-tools');
+  writeFileSync(listing, JSON.stringify(catalog));
+  const knownFile = join(practice, '.claude/plugins/known_marketplaces.json');
+  const known = JSON.parse(readFileSync(knownFile, 'utf8'));
+  known['small-market'] = { source: { source: 'directory', path: small }, installLocation: small };
+  writeFileSync(knownFile, JSON.stringify(known));
+  await a.click(byId('nav-plugins'));
+  await a.click('.market-item[title^="small-market"]');
+  await a.click('.market-item[title^="back-market"]');
+  await a.run("const find = document.getElementById('plugin-find'); find.value = 'issue'; find.dispatchEvent(new Event('input', { bubbles: true }));");
+  await a.run("[...document.querySelectorAll('.market-chip')].find(e => e.textContent.startsWith('development')).click()");
+  await thumb();
+  same('Back clears the other marketplace’s Find and category', [await a.text('.market-item.selected .market-item-name'), await a.exists('[data-plugin="document-tools"]')], ['small-market', true]);
   await a.click(byId('nav-skills'));
   await a.click(byId('nav-instructions'));
   await a.click(byId('ins-edit-claude-cli'));

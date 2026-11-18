@@ -1165,6 +1165,7 @@ function createWindow(show: boolean) {
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // navigate carries a page name for the menu, or a browser command for this window’s Back/Forward list.
   window.on('app-command', (event, command) => {
     if (command === 'browser-backward' || command === 'browser-forward') { event.preventDefault(); send('navigate', command); }
   });
