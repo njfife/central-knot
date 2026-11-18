@@ -313,8 +313,12 @@ async function harnessFlow() {
   await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-skills');
   await a.click('#nav-overview');
+  // While first setup's question is asked it says the copies that differ itself; answered No, a line of their own says them.
+  check('while first setup’s question is asked, it alone says the copies that differ', !(await a.exists('#overview-skills-differ')) && /copies that differ/.test(await a.text('#setup-question') ?? ''), await a.text('#overview-needs'));
+  await a.click('#setup-no');
+  same('answered No, one line says the found skill whose copies differ, by the page’s count', await a.text('#overview-skills-differ-line'), '1 found skill has copies that differ. Show them');
   await a.click('#overview-skills-differ');
-  check('after a harness’s Skills tab, the Overview’s “different copies” link still opens Skills narrowed to them', (await a.text('.chip-on') ?? '').startsWith('Copies differ'), await a.text('.chips'));
+  check('after a harness’s Skills tab, the Overview’s Show them still opens Skills narrowed to them', (await a.text('.chip-on') ?? '').startsWith('Copies differ'), await a.text('.chips'));
   await a.click('#nav-harnesses');
   await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-instructions');
@@ -372,7 +376,8 @@ async function manageFlow() {
   await a.click('#nav-skills');
   check('the Skills page has no Codex mark', (await a.exists('.tool-mark')) && !(await a.exists('.tool-mark[data-tool="codex-cli"]')));
   await a.click('#nav-overview');
-  check('the Overview names the managed tools and says Codex is left out', (await a.text('.overview-lead') ?? '').includes('the same in Claude Code and Copilot CLI. Codex is left out (its switch is on Harnesses).'), await a.text('.overview-lead'));
+  same('the Overview’s tools table has a row per managed tool, and the line under it says Codex is left out', [await a.all('.tools-table tbody tr', 'e.dataset.tool'), await a.text('#overview-left-out')],
+    [['claude-cli', 'copilot-cli'], 'Codex is installed and left out: its switch is on Harnesses.']);
   same('Instructions and Plugins read no Codex', [
     await a.run(`window.centralKnot.instructions().then(files => files.map(file => file.tool))`),
     await a.run(`window.centralKnot.plugins(false).then(view => view?.tools ?? [])`)], [['claude-cli', 'copilot-cli'], ['claude-cli', 'copilot-cli']]);
@@ -1101,10 +1106,26 @@ async function practiceFlow() {
   const syncRecord = join(practice, '.central-knot/sync.json'), goodRecord = readFileSync(syncRecord, 'utf8');
   writeFileSync(syncRecord, '{ damaged');
   await a.click('#header-refresh');
-  same('a damaged record is said in the bands, and every switch is off', [/The sync record is damaged/.test(await a.text('.bands') ?? ''), await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`)], [true, true]);
+  const timesSaid = async selector => ((await a.text(selector)) ?? '').split('The sync record is damaged').length - 1;
+  same('a damaged record is said in the bands, once, and every switch is off', [await timesSaid('.bands'), await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`)], [1, true]);
+  await a.click('#nav-overview');
+  same('the Overview says it once too, first of what needs you, as the stop', [await timesSaid('#overview-needs'), await timesSaid('#overview-stopped')], [1, 1]);
+  await a.click('#nav-skills');
   writeFileSync(syncRecord, goodRecord);
   await a.click('#header-refresh');
   check('put back, the switches work again', !(await a.run(`document.querySelector('#switch-notes').disabled`)), await a.text('.bands'));
+  // A damaged skills record stops skills' writes alone, its reason both the stop and a problem: the Skills page says it once, as
+  // the stop; the Overview, whose stop line is the home's record's, once, as Skills' problem with the way there.
+  const skillsRecord = join(practice, '.central-knot/skills.json'), goodSkills = readFileSync(skillsRecord, 'utf8');
+  writeFileSync(skillsRecord, '{ damaged');
+  await a.click('#header-refresh');
+  const stopSays = await a.text('.band-danger .band-text') ?? '', saidIn = async selector => ((await a.text(selector)) ?? '').split(stopSays).length - 1;
+  same('a damaged skills record: the Skills page says why once, as the stop', [stopSays.length > 0, await saidIn('.bands')], [true, 1]);
+  await a.click('#nav-overview');
+  same('and the Overview once, as Skills’ problem, with the way to Skills', [await saidIn('#overview-needs'), await a.exists('#overview-stopped'), await a.exists('#overview-skills-problem-0-open')], [1, false, true]);
+  await a.click('#nav-skills');
+  writeFileSync(skillsRecord, goodSkills);
+  await a.click('#header-refresh');
   // The practice copy has no Pi folder, only a skill in the shared .agents folder that Pi (and others) read: that makes no
   // tool present, so Pi is no column, mark or control, and Tools shows no card for it.
   mkdirSync(join(practice, '.agents/skills/shared-only'), { recursive: true });
@@ -3130,6 +3151,9 @@ async function updateFlow() {
     same('it says so, and its name says which release', [offer.label, offer.name, offer.title], ['Update available', 'Update to 0.5.0 preview 5', '0.5.0 preview 5 is available. Click to download it and restart Central Knot. Your settings and data stay as they are.']);
     same('a screen reader is told of the new release', await a.text('#update-news'), 'Central Knot 0.5.0 preview 5 is available.');
     same('the status bar keeps the version', await a.text('#status-end'), 'Central Knot 0.5.0 preview 4');
+    // The Overview, where the app opens, says it too: one line, with What's new and a button in Settings' button's words.
+    same('the Overview’s line names the release, with What’s new and Update', [(await a.text('#overview-update-line .overview-update-text'))?.trim(), (await a.text('#overview-update'))?.trim()],
+      ['Central Knot 0.5.0 preview 5 is available. What’s new', 'Update to 0.5.0 preview 5']);
     await a.click('#nav-settings');
     const row = await a.text('#setting-updates') ?? '';
     check('Settings › Updates names the build and what is available', row.includes('This is Central Knot 0.5.0 preview 4.') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
@@ -3162,6 +3186,11 @@ async function updateFlow() {
     check('and the app is still running', a.child.exitCode === null);
     check('the status bar says what restarting loses, first', /^Restarting now loses your unsaved instructions draft\./.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
     check('so does the control, whose name says it too', /unsaved instructions draft\. Click to open Settings, where you can restart anyway\.$/.test((await control()).title) && /^Restart to update: Restarting now loses your unsaved instructions draft\. Opens Settings$/.test((await control()).name), await control());
+    // The Overview's button has the control's own click: held, it says so and opens Settings.
+    await a.click('#nav-overview');
+    same('on the Overview, its button says Restart to update… too', (await a.text('#overview-update'))?.trim(), 'Restart to update…');
+    await a.click('#overview-update');
+    check('and its click is the control’s: Settings opens, and the app keeps running', await a.run(`document.querySelector('#nav-settings').getAttribute('aria-current') === 'page'`) && a.child.exitCode === null);
     // A click on the held control never restarts: it opens Settings, which says what restarting loses beside its Restart button.
     await a.click('#update-control');
     check('the held control opens Settings’ Updates row, which says what would be lost, and the app keeps running', await a.run(`document.querySelector('#nav-settings').getAttribute('aria-current') === 'page'`) && /is ready\. Restarting now loses your unsaved instructions draft\./.test(await a.text('#setting-updates') ?? '') && a.child.exitCode === null, await a.text('#setting-updates'));
@@ -3341,7 +3370,7 @@ async function fewToolsFlow() {
     return;
   }
   same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
-  same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
+  same('its Overview says no tools were found, once, with another home to choose', [await a.text('.overview-lead'), await a.exists('#overview-choose-home')], ['No tools were found in this home.', true]);
   check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
   await fitsAtMinimum(a, 'a home with no tools');
@@ -4329,7 +4358,7 @@ async function syncEverythingFlow() {
   same('a notice no page has shown stays until shown: the sidebar names both passes’ notices for Skills', await unseenOnSkills(), '2 automatic changes: notes, fresh');
   await a.shot('everything-on');
   await a.click('#nav-overview');
-  check('Overview’s sync line says the rule in force', /edits spread between tools in seconds, and what turns up in a tool is taken in by Synchronize everything/.test(await a.text('.overview-more') ?? ''), await a.text('.overview-more'));
+  same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo where it can be undone.');
   await a.click('#nav-skills');
   same('on the Skills page notes and fresh are On and review stays found', await sectionsNow(a), [['on', ['fresh', 'notes']], ['found', ['review']]]);
   check('the Found heading says the rule in force: Synchronize everything leaves these, and how many wait for a choice', /Synchronize everything leaves these \(open a row to see why\)\. 1 waits for your choice of copy/.test(await foundNote() ?? ''), await foundNote());
@@ -5634,6 +5663,140 @@ esac
 }
 
 /**
+ * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
+ * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
+ * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
+ * The lead never says nothing was found above a card that counts something, and why a home can't be written is said with no tool
+ * managed too. Made-up homes: Claude Code and Codex stand-ins, and a plugin from a marketplace no tool lists.
+ */
+async function overviewFlow() {
+  const home = join(scratch, 'overview-home'), data = join(scratch, 'overview-data'), real = join(scratch, 'overview-real');
+  const standIns = folder => { mkdirSync(join(folder, '.local/bin'), { recursive: true });
+    for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) writeFileSync(join(folder, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`, { mode: 0o755 }); };
+  standIns(home);
+  const [claude, codex] = [join(home, '.claude/skills'), join(home, '.codex/skills')];
+  for (const root of [claude, codex]) skill(root, 'notes');
+  skill(codex, 'review');
+  // kit, from a marketplace no tool lists, in Claude Code: checks only it brings, and review, which is Codex's own too.
+  writeClaudeInstall(home, 'orphan-market', 'kit', '1.0.0', { 'skills/checks/SKILL.md': text('checks'), 'skills/review/SKILL.md': text('review') });
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { docs: { command: 'docs' } } }));
+  writeFileSync(join(home, '.codex/config.toml'), '[mcp_servers.docs]\ncommand = "docs"\n');
+  for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  let a = await launch(data, [], real);
+  // Opening the Overview reads nothing beyond the home's view: no marketplace is read, so Central Knot's plugins record isn't started.
+  await wait(1500);
+  check('opening the Overview reads no marketplace: Central Knot’s plugins record isn’t started', !existsSync(join(home, '.central-knot/plugins.json')), existsSync(join(home, '.central-knot')) ? readdirSync(join(home, '.central-knot')) : []);
+  await a.click('#setup-no');
+  for (const [page, key] of [['skills', 'notes'], ['skills', 'review'], ['mcp', 'docs']]) { await a.click(`#nav-${page}`); await a.click(`#add-${key}`); }
+  await a.click('#nav-overview');
+  const cardSays = async kind => (await a.text(`.kind-card:has(#overview-${kind}) .kind-card-state`))?.trim() ?? null;
+  const claudeRow = () => a.all('.tools-table tr[data-tool="claude-cli"] td', 'e.textContent.trim()');
+  same('with every copy in step, each card says All in sync', [await cardSays('skills'), await cardSays('mcp')], ['All in sync', 'All in sync']);
+  // One count of plugins: kit is Claude Code's one plugin on the table and on its Plugins tab; the Skills card's "from plugins" is the chip's.
+  same('the table counts kit, Claude Code’s one plugin', (await claudeRow())[3], '1');
+  check('the Skills card counts from plugins what its page’s From plugins chip holds: checks, and review, which kit brings too', /· 2 from plugins/.test(await a.text('.kind-card:has(#overview-skills) .kind-card-summary') ?? ''), await a.text('.kind-card:has(#overview-skills) .kind-card-summary'));
+  await a.click('#overview-skills');
+  same('the Skills page’s From plugins chip holds 2', await a.run(`document.querySelector('.chip[data-tip="From plugins"] .chip-count')?.textContent`), '2');
+  await a.click('#nav-overview');
+  await a.click('#overview-tool-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && /Reading marketplaces/.test(await a.text('#harness-body') ?? ''); tries++) await wait(100);
+  const tab = await a.text('#harness-body') ?? '';
+  check('Claude Code’s Plugins tab counts kit too, from a marketplace no tool lists: never “No plugins”', (await a.text('#harness-tab-plugins'))?.includes('1') && !/No plugins in Claude Code/.test(tab) && /kit/.test(tab), [await a.text('#harness-tab-plugins'), tab]);
+  // A copy deleted by hand with Automatic sync off: the item turns off when sync runs, a change that waits.
+  await a.click('#nav-overview');
+  await a.click('#sync-switch');
+  rmSync(join(codex, 'notes'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  same('a copy deleted by hand, sync off: Skills waits for one change, not All in sync', await cardSays('skills'), '1 change waiting to sync');
+  await a.click('#overview-skills');
+  same('the Skills page counts the same one change waiting, in its toolbar and in its band', [(await a.text('.apply-state.apply-waiting'))?.trim(), /1 change waiting/.test(await a.text('.band-sync-off') ?? '')], ['1 change waiting', true]);
+  await a.click('#nav-overview');
+  skill(codex, 'notes');
+  await a.click('#header-refresh');
+  same('the copy back: All in sync again', await cardSays('skills'), 'All in sync');
+  // One copy that can't be read: whether it is in step isn't known.
+  chmodSync(join(codex, 'notes/SKILL.md'), 0o000);
+  await a.click('#header-refresh');
+  const unreadCopy = await cardSays('skills');
+  chmodSync(join(codex, 'notes/SKILL.md'), 0o644);
+  await a.click('#header-refresh');
+  same('one copy that can’t be read: the Skills card says nothing of sync', unreadCopy, null);
+  await a.click('#sync-switch');
+  // Copies that differ: said once at the top, and the card says no "All in sync".
+  skill(claude, 'clash', text('clash', 'Claude Code’s way.'));
+  skill(codex, 'clash', text('clash', 'Codex’s way.'));
+  await a.click('#header-refresh');
+  same('a found skill whose copies differ: its line at the top, and the Skills card says nothing of sync', [await a.exists('#overview-skills-differ-line'), await cardSays('skills')], [true, null]);
+  rmSync(join(codex, 'clash'), { recursive: true, force: true });
+  // A tool's MCP file that can't be read: its problem at the top, "?" for its MCP servers, and no "All in sync" on MCP servers.
+  const claudeJson = readNow(join(home, '.claude.json'));
+  writeFileSync(join(home, '.claude.json'), '{ "mcpServers": ');
+  await a.click('#header-refresh');
+  const unreadMcp = [await a.exists('[id^="overview-mcp-problem-"]'), (await claudeRow())[1], await cardSays('mcp')];
+  writeFileSync(join(home, '.claude.json'), claudeJson);
+  // Claude Code's own record of its plugins can't be read: "?" for its plugins, and the key says what "?" is.
+  const installed = join(home, '.claude/plugins/installed_plugins.json'), installedText = readNow(installed);
+  writeFileSync(installed, '{');
+  await a.click('#header-refresh');
+  const unreadPlugins = [(await claudeRow())[3], ((await a.text('#overview-tools-key')) ?? '').split('?').length - 1];
+  await a.click('#overview-tool-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && /Reading marketplaces/.test(await a.text('#harness-body') ?? ''); tries++) await wait(100);
+  const tabUnread = [await a.text('#harness-tab-plugins'), await a.run(`document.querySelector('#harness-tab-plugins')?.title ?? ''`), await a.text('#harness-body')];
+  await a.click('#nav-overview');
+  writeFileSync(installed, installedText);
+  await a.click('#header-refresh');
+  same('Claude Code’s MCP file unread: its problem at the top, "?" for its MCP servers, and MCP servers says nothing of sync', unreadMcp, [true, '?', null]);
+  same('Claude Code’s plugin record unread: "?" for its plugins, and the key names "?" once', unreadPlugins, ['?', 1]);
+  check('and its Plugins tab says what it has isn’t known: no count, no nought in its tooltip, never “No plugins”', tabUnread[0]?.trim() === 'Plugins' && !/\b0\b/.test(tabUnread[1]) && /isn’t known/.test(tabUnread[2] ?? '') && !/No plugins/.test(tabUnread[2] ?? ''), tabUnread);
+  same('no page errors, the Overview’s truths', a.pageErrors, []);
+  await a.quit();
+  // A most used name opens its row on the very first click, before its kind's page was ever drawn in this launch: an own skill, one
+  // whose copies differ (its question open), an own MCP server; then, in another home opened meanwhile, a plugin's skill.
+  skill(codex, 'clash', text('clash', 'Codex’s way.'));
+  const used = (folder, names) => { mkdirSync(join(folder, '.claude/projects/-work'), { recursive: true });
+    writeFileSync(join(folder, '.claude/projects/-work/used.jsonl'), JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(),
+      message: { content: names.map(name => (name.startsWith('mcp__') ? { type: 'tool_use', name, input: {} } : { type: 'tool_use', name: 'Skill', input: { skill: name } })) } }) + '\n'); };
+  used(home, ['notes', 'clash', 'mcp__docs__start']);
+  // This computer's home, opened second: its only item is a plugin's skill, used once.
+  standIns(real);
+  mkdirSync(join(real, '.claude/skills'), { recursive: true });
+  writeClaudeInstall(real, 'solo', 'kit', '1.0.0', { 'skills/one/SKILL.md': text('one') });
+  used(real, ['kit:one']);
+  a = await launch(data, [], real);
+  const openTop = async (kind, name) => {
+    const link = `#overview-${kind}-usage .middle[title=${JSON.stringify(name)}]`;
+    for (let tries = 0; tries < 100 && !(await a.exists(link)); tries++) await wait(100);
+    await a.click(`#${await a.run(`document.querySelector(${JSON.stringify(link)})?.closest('button')?.id`)}`);
+    const open = await a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key');
+    await a.click('#nav-overview');
+    return open;
+  };
+  same('launched, nothing visited: a most used own skill opens its row on the first click', await openTop('skills', 'notes'), ['notes']);
+  same('one whose copies differ opens too, with its copy question', await openTop('skills', 'clash'), ['clash']);
+  same('a most used MCP server, its page never drawn either, opens its row', await openTop('mcp', 'docs'), ['docs']);
+  await a.click('#home-actual');
+  for (let tries = 0; tries < 100 && !(await a.exists('#overview-skills-usage .middle[title="one"]')); tries++) await wait(100);
+  same('another home whose only item is a plugin’s skill: the card counts it, and the lead never says nothing was found',
+    [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /Nothing found/.test(await a.text('.overview-lead') ?? '')], ['1 skill · none on · 1 from plugins', true, false]);
+  same('there, after Skills was drawn in the first home, a most used plugin’s skill opens its row on the first click', await openTop('skills', 'one'), ['kit@solo/one']);
+  same('no page errors, the most used links', a.pageErrors, []);
+  await a.quit();
+  // A home with no tool, whose record stops every write: why it can't be written is said with no tool managed too.
+  const stopped = join(scratch, 'overview-stopped'), stoppedData = join(scratch, 'overview-stopped-data');
+  mkdirSync(join(stopped, '.central-knot'), { recursive: true });
+  writeFileSync(join(stopped, '.central-knot/sync.json'), '{ damaged');
+  mkdirSync(stoppedData, { recursive: true });
+  writeFileSync(join(stoppedData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: stopped } }));
+  a = await launch(stoppedData, [], real);
+  same('no tool and a damaged record: the Overview says no tools were found, and why nothing can be written', [await a.exists('#overview-choose-home'), /damaged/.test(await a.text('#overview-stopped') ?? '')], [true, true]);
+  same('no page errors, the Overview with no tool', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
  * Usage (usage.ts, usagerow.ts, app.ts collectUsage) on a folder home whose tools have made-up session history: collected by
  * itself when the home opens, so each row says its figure without a click, an opened row each tool's, and Sort can put the rows
  * by last used. Update usage statistics collects again, with a band that says what collecting does and closes; a reading that
@@ -5940,6 +6103,40 @@ async function usageFlow() {
   }
   same('no page errors, usage after a relaunch', a.pageErrors, []);
   await a.quit();
+
+  // ---------- The Overview, the page a launch opens on: its figures land with no click, and nothing on it moves ----------
+  // Launched on this computer's home and nothing clicked: its first reading waits on the pipe. The cards, the tools table's rows
+  // and its header cells, and the usage line are measured at 1280 and 860 while it runs, then again once it has landed.
+  a = await launch(data, [], real);
+  for (let tries = 0; tries < 100 && !(await a.exists('.kind-card')); tries++) await wait(50);
+  for (let tries = 0; tries < 200 && !reading(); tries++) await wait(25);
+  const places = () => a.run(`[...document.querySelectorAll('.kind-card, .tools-table tr, .tools-table thead th, #overview-usage')].map(e => { const box = e.getBoundingClientRect(); return [box.left, box.top, box.width, box.height].map(Math.round).join(' '); })`);
+  const usageSaid = async () => (await a.text('#overview-usage .overview-usage-text:not(.band-unshown)'))?.trim();
+  const cardLines = () => a.all('#overview-skills-usage > p', 'e.textContent');
+  const sessionsSaid = () => a.all('.tools-table td.tools-sessions', 'e.textContent');
+  const placesWhile = {}, placesAfter = {};
+  for (const [width, height] of [[1280, 800], [860, 600]]) { await sizeTo(a, width, height); placesWhile[width] = await places(); }
+  const whileRunning = [await usageSaid(), await cardLines(), [...new Set(await sessionsSaid())]];
+  await letGo();
+  for (let tries = 0; tries < 100 && !/^Usage collected/.test(await usageSaid() ?? ''); tries++) await wait(100);
+  await a.settle();
+  for (const [width, height] of [[860, 600], [1280, 800]]) { await sizeTo(a, width, height); placesAfter[width] = await places(); }
+  same('launched with nothing clicked, the Overview holds each figure’s room while the first reading runs: the line says it is collecting, the Skills card … where its count will be (its five lines’ room held by style.css), every sessions cell …',
+    whileRunning, ['Collecting usage statistics: reading your tools’ session history on this computer. Nothing leaves it.', ['Used in the last 30 days: …'], ['…']]);
+  same('the figures land by themselves, and no card, table row, header cell or the usage line moved, at 1280 and at 860', [placesAfter[1280], placesAfter[860]], [placesWhile[1280], placesWhile[860]]);
+  same('the Skills card says the reading as its page does: 3 used, the No use seen chip’s 1 (delta; bravo is Off) as a link, and the three most used by sessions, equal ones by name; the line, when',
+    [await cardLines(), await a.text('#overview-skills-unused'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [['Used in the last 30 days: 3', 'No use seen in 30 days: 1', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], 'No use seen in 30 days: 1', true]);
+  check('every tool’s sessions cell has its figure, or why there is none', (await sessionsSaid()).every(said => said && said !== '…'), await sessionsSaid());
+  await a.click('#overview-skills-unused');
+  same('No use seen opens Skills on that chip, the rows the card counted', [await a.run(`document.querySelector('.chip-on')?.dataset.tip`), (await sectionsNow(a))[0]?.[1]], ['No use seen in 30 days', ['delta']]);
+  await a.click('#nav-overview');
+  await a.click('#overview-skills-top-1');
+  same('a most used name opens its row on Skills, under All', [await a.run(`document.querySelector('.chip-on')?.dataset.tip ?? 'All'`), await a.run(`document.querySelector('.ov-row[data-key="echo"]')?.getAttribute('aria-expanded')`)], ['All', 'true']);
+  await a.click('#nav-overview');
+  await fullSize(a);
+  await fitsAtMinimum(a, 'the Overview with usage collected');
+  same('no page errors, the Overview', a.pageErrors, []);
+  await a.quit();
   // Started at sign-in, with no window (--hidden): nothing is collected until the window first shows (a second launch shows it).
   a = await launch(data, ['--hidden'], real);
   await a.click('#nav-skills');
@@ -5984,7 +6181,7 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group passes on its own.
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, overviewFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];

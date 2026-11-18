@@ -24,8 +24,8 @@ import { everythingEntryAction, setSyncEverything } from './everything.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
-import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
-import { forgetRefusals, installedPlugins } from './plugins.ts';
+import { agentTools, mcpTools, noteTools, pluginTools, presentTools, takesPlugins } from './presence.ts';
+import { forgetRefusals, installedPlugins, recordReadable } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
@@ -608,6 +608,9 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: 
   // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
   // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
+  // Whose own record of its plugins can't be read, as the Plugins page finds it (marketplaces.ts look): what it has isn't known.
+  const records = pluginItemsContext(shared.overrides, shared.reads);
+  made.pluginRecordsUnread = (await Promise.all(managed.filter(takesPlugins).map(async tool => ((await recordReadable(records, tool)) ? [] : [tool])))).flat();
   // What the look above found, and where this copy runs from.
   const builds = buildsContext(), outside = builds && runsOutside(builds);
   if (builds && others !== 'unlooked') {

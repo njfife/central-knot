@@ -29,7 +29,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
 import { listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, unreadIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { mergeServer } from './merge.ts';
 import { cannotHold, editEntry, fromJson, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
@@ -271,7 +271,7 @@ export async function serversView(context: ShareContext, tools: HarnessId[], not
   for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key), fromSource.get(key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
   const problems = problem ? [problem, ...look.disk.problems] : look.disk.problems;
-  return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, notices };
+  return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, unread: unreadIn(look.disk, managed), notices };
 }
 
 /** One entry as the page shows it (types.ts ToolCopy): the copy question quotes its summary; `ownPart` names its own fields. */
