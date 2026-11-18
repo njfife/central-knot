@@ -385,10 +385,13 @@ function filterBar(t: Table) {
   return narrowing.length ? h('div.chips', { role: 'group', 'aria-label': 'Show' }, chip('all', 'All', 'list'), narrowing) : null;
 }
 
-/** Why the page's writes but a row's own switch or Add are off now, if they are: it acts (app.ts acting says why), or the home can't be written. */
+/**
+ * Why the page's writes but a row's own switch or Add are off now, if they are: it acts (app.ts acting says why), or the home
+ * can't be written; given a row's kind, or that kind's own record stops its writes (app.ts whyReadOnly).
+ */
 const writeOff = (kind?: PageKind): string | boolean => acting() ?? (!state.home || !!whyReadOnly(state.home, kind));
 const canWrite = (kind?: PageKind) => !writeOff(kind);
-/** A row's own switch or Add takes a click while a run of clicks goes on (app.ts queueClick): off only under other work or in a home that can't be written. */
+/** A row's own switch or Add takes a click while a run of clicks goes on (app.ts queueClick): off only under other work, or where the home or its kind can't be written. */
 const canQueue = (kind?: PageKind) => !!state.home && !whyReadOnly(state.home, kind) && !state.busy;
 
 /** What could not be done, item by item (the first four, then how many more), as a warning band. */
@@ -1950,7 +1953,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   const find = findInput({ id: 'skills-find', label: 'Find a skill', value: view.listFind, onInput: text => { view.listFind = text; rerender(); } });
   const list = shown.length
     ? h('div', { role: 'group', 'aria-label': 'Skills' }, shown.flatMap((skill, index) => [
-      index && place.get(shown[index - 1].key) === place.get(skill.key) ? null : h('div.list-group', {}, placeNames[place.get(skill.key)!]), listRow(skill)]))
+      index && place.get(idOf(shown[index - 1])) === place.get(idOf(skill)) ? null : h('div.list-group', {}, placeNames[place.get(idOf(skill))!]), listRow(skill)]))
     : emptyState('search-x', 'Nothing matches', `“${view.listFind}”`);
   const skill = shownDetail;
   if (skill.key !== revealed) { revealed = skill.key; requestAnimationFrame(revealSelected); }

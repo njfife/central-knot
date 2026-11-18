@@ -1349,10 +1349,10 @@ async function practiceFlow() {
 
   // Skills Files view: every skill in a list, and one skill's files and contents with the same switch and controls as the table.
   await a.click('#nav-skills');
-  const tableOrder = await rowKeys(a, 'skills');
+  const tableOrder = await rowKeys(a, 'skills'), tableHeadings = (await sectionsNow(a, 'skills')).filter(([, keys]) => keys.length).map(([section]) => section);
   await a.click(`#${rowPart('open', 'skills', 'standup')}`);
   await a.click(`#${rowPart('files', 'skills', 'standup')}`);
-  same('the Skills list has every skill, in the table’s order', keysOf('skills', await a.all('.list-row', 'e.dataset.key')), tableOrder);
+  same('the Skills list has every skill, in the table’s order, under the table’s headings', [keysOf('skills', await a.all('.list-row', 'e.dataset.key')), (await a.all('.list-group', 'e.textContent')).map(word => word.toLowerCase())], [tableOrder, tableHeadings]);
   await a.click(`#${rowPart('list', 'skills', 'standup')}`);
   check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details-paths')), await a.text('.pane-title'));
   check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
