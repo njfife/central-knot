@@ -2005,7 +2005,13 @@ async function practiceFlow() {
   check('the migrated plugin’s page lists Its items: pdf-reader his own, spreadsheet kept out of Pi', /skill pdf-reader\s*Not brought in: you have your own/.test(migrated) && /skill spreadsheet/.test(migrated), migrated);
   await fitsAtMinimum(a, 'a migrated plugin’s page, with Its items');
   await a.shot('practice-plugin-migrated');
+  // Pi joined just above: its folder goes once the pass bringing it up to date has ended, or that pass makes it again and the
+  // Plugins table below has a fourth tool's column.
+  await a.click('#nav-skills');
+  await piCaughtUp(a);
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-document-tools');
   await a.click('#plugin-back');
   // About has every fact about the marketplace, and Remove.
   await a.click('#market-tab-about');
@@ -4345,8 +4351,9 @@ async function firstSetupFlow() {
 
 /**
  * Force-kills the app part-way through real copies, then checks nothing half-written is visible to a tool. Each round takes in
- * what the kills before it left found: on the Mac runner all 40 have been on record by the last open in every grouped run, so
- * opening alone completes them; elsewhere a few may still be found then (33 of 40 once on picoder), each turned on by its Add.
+ * what the kills before it left found: on the Mac runner all 40 were on record by the last open in each grouped run of
+ * 2026-11-17, so opening alone completed them; elsewhere a few may still be found then (7 of 40 once on picoder, with 33 on
+ * record), each turned on by its Add.
  */
 async function crashFlow() {
   // Its checks are one or two per skill folder in place at each kill, so their count changes from run to run: said apart.
@@ -5588,9 +5595,9 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group passes on its own.
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, repoBaseFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
-  [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, usageFlow, firstSetupFlow, crashFlow],
+  [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
@@ -5603,17 +5610,20 @@ if (refused.length) { rmSync(scratch, { recursive: true, force: true }); throw n
 
 /**
  * What a copy's output and its end say: its passes (undefined without a total line), its FAIL lines, among them one more when
- * the copy died (it ended without its total line, or with an exit other than its total's, or by a signal), and the flows it
- * did not finish (one that began and stopped) and did not run. `number` names the copy for a death after all its flows.
+ * the copy died (it ended without its total line, or with an exit other than its total's, or by a signal) or its total counts
+ * more failures than its FAIL lines, and the flows it did not finish (one that began and stopped) and did not run. `number`
+ * names the copy where no one flow can be named.
  */
 function readCopy(names, number, output, code, signal) {
   const total = /^e2e: (\d+) passed, (\d+) failed/m.exec(output), ended = signal ? `ended by ${signal}` : `exit code ${code}`;
   const missed = names.filter(name => !new RegExp(`^${name}: \\d+s$`, 'm').test(output)), ran = names.filter(name => !missed.includes(name));
   const aborted = /^FAIL \[(\w+)\] aborted: /m.exec(output)?.[1];
+  const failLines = output.split('\n').filter(line => line.startsWith('FAIL ')).length;
   let death;
   if (!total && missed.length) death = `FAIL [${missed[0]}] its copy ended in this flow without a total line (${ended})`;
   else if (!total) death = `FAIL [group ${number}] its copy ended after its flows without a total line (${ended})`;
   else if (signal || code !== (Number(total[2]) ? 1 : 0)) death = `FAIL [${ran.at(-1) ?? names[0]}] its copy died after its total (${ended})`;
+  else if (Number(total[2]) > failLines) death = `FAIL [group ${number}] its total says ${total[2]} failed, and only ${failLines} of its lines say FAIL`;
   const unfinished = total ? missed.filter(name => name === aborted) : missed.slice(0, 1);
   const shown = death ? `${output.trimEnd()}\n${death}` : output.trimEnd();
   const fails = shown.split('\n').filter(line => line.startsWith('FAIL '));
@@ -5622,9 +5632,9 @@ function readCopy(names, number, output, code, signal) {
 
 /**
  * The run with no --flows: this script once per group with that group's --flows and the run's other options,
- * CK_E2E_GROUPS_AT_ONCE copies at a time (default 1). Each copy's
- * stdout and stderr, in the order they came, print as one block when it ends; then the run's total, the flows not finished and
- * not run, and every FAIL line again. The run's failures are its copies' FAIL lines, one more for each copy that died
+ * CK_E2E_GROUPS_AT_ONCE copies at a time (default 1). Each copy's stdout and stderr, in the order they came, print as one
+ * block when it ends; then the run's total, the flows not finished and not run, and every FAIL line again. The run's failures
+ * are its copies' FAIL lines, one more for each copy that died or whose total counts more failures than its FAIL lines
  * (readCopy); the passes of a copy without a total line are not known, and the total says so. A signal is passed on to every
  * copy, and each one's block printed as it ends. Returns the exit code.
  */
