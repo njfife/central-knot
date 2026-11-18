@@ -75,12 +75,12 @@ function itemThrough(skill: ItemRow, tool: Tool): PluginItemAt | undefined {
 
 
 /** Turns a plugin's item on or off in its tool at once, with its own switch or the whole plugin's (pluginswitch.ts). */
-function switchPluginItem(item: PluginItemAt, key: string) {
+function switchPluginItem(item: PluginItemAt, row: ItemRow | PluginRow) {
   const draft: PluginDraft = new Map();
   const on = !itemOn(item);
   clickPluginItem(draft, item);
   const ops = [...draft.values()];
-  void applyClick({ kind: pageOfPart[item.kind], items: [item.name], keys: [key], changes: [], said: itemSaid(item, on, ops), pluginsOnly: true, plugins: { ops }, undone: undoneWords(item.name, on, names[item.tool]) });
+  void applyClick({ kind: kindOf(row), items: [item.name], keys: [row.key], changes: [], said: itemSaid(item, on, ops), pluginsOnly: true, plugins: { ops }, undone: undoneWords(item.name, on, names[item.tool]) });
 }
 
 /** Why an item a tool has through a plugin can't be switched on this page now, if it can't: the switch itself (pluginswitch.cantSwitch), or a home that can't be written. */
@@ -89,16 +89,17 @@ const cantSwitchHere = (item: PluginItemAt) => cantSwitch(item) ?? (state.home ?
 /**
  * The item's switch in one tool, in an opened row, where a person's own item has its switch there: on or off, applied at once,
  * with the tool's own switch for one item or (where it has none) the whole plugin's, which its line says first. `page`: a link
- * to the plugin's page beside it, on a row that has no other.
+ * to the plugin's page beside it, on a row that has no other. `row`: the row it is drawn in, whose kind, key and ids it takes.
  */
-function pluginItemControls(item: PluginItemAt, key: string, id: string, page?: () => void) {
+function pluginItemControls(item: PluginItemAt, row: ItemRow | PluginRow, page?: () => void) {
+  const id = elId('enable', row, item.tool);
   const on = itemOn(item);
   const why = cantSwitchHere(item);
   const label = `${item.name} in ${names[item.tool]}: ${on ? 'on' : 'off'}. ${why ?? clickWords(item)}`;
   return h('span.details-tool-actions', {},
     h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, on ? 'On' : 'Off'),
-      toggle({ on, label, disabled: why ?? writeOff(), onchange: () => switchPluginItem(item, key), id })),
-    page ? smallAction('Plugin’s page', `${id}-page`, page, '.tool-link') : null);
+      toggle({ on, label, disabled: why ?? writeOff(), onchange: () => switchPluginItem(item, row), id })),
+    page ? smallAction('Plugin’s page', elId('enable', row, item.tool, 'page'), page, '.tool-link') : null);
 }
 
 /** Opens the plugin's page on Plugins, found by its marketplace's name where the source each tool recorded is spelled otherwise. */
@@ -165,7 +166,7 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
       return h('div.details-tool', {}, h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
         h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? cantSwitch(item) ?? switchWords(item) : ''].filter(Boolean).join(' ')),
-        item ? pluginItemControls(item, row.key, elId('enable', row, tool)) : null), usageLine(t, row, tool));
+        item ? pluginItemControls(item, row) : null), usageLine(t, row, tool));
     })),
     row.kind === 'mcp' ? null : h('div.details-file', {}, h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, elId('pfile', row), () => toggleFile(row))), fileShown));
 }
@@ -527,9 +528,10 @@ function copyQuote(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefi
  * The copy question, for an item whose copies differ: the question ("Which copy of <name> should every tool use?", or "both
  * tools") and its note, then one row per choice, each saying what it does, and doing it at once; the latest copy's is the main
  * one. Copies that are the same are one choice. Its layout at each width is style.css "The copy question"; its words' rules are
- * copywords.ts. `then`: run once a choice's click is done (first setup's walkthrough goes on).
+ * copywords.ts. `then`: run once a choice's click is done (first setup's walkthrough goes on). `prefix`: its controls' ids' own
+ * part, "walk-" in first setup's walkthrough, which draws the question while the row's own may be open (copyQuestion).
  */
-function compareChoices(t: Table, skill: ItemRow, inFiles = false, then?: () => void) {
+function compareChoices(t: Table, skill: ItemRow, inFiles = false, then?: () => void, prefix = '') {
   const versions = skill.versions ?? {}, tools = toolsFor(t, skill.kind), view = t.view;
   // The copies that count: each tool's own, but where a tool can't take the item (it keeps its own copy).
   const compared = tools.filter(tool => skill.copies[tool] !== undefined && !skill.cannot?.[tool]);
@@ -562,13 +564,13 @@ function compareChoices(t: Table, skill: ItemRow, inFiles = false, then?: () => 
     // A block counts only for a tool it syncs to that can load the skill.
     const block = skill.blocks?.[tool]?.find(entry => !skill.except.includes(entry.tool) && !skill.cannot?.[entry.tool]);
     // A copy that can't be chosen keeps its row: why, where its quote would be, and no Use this copy.
-    if (block) return h('button.version.version-blocked', { type: 'button', id: elId('use', skill, tool), disabled: true, title: block.reason },
+    if (block) return h('button.version.version-blocked', { type: 'button', id: elId(`${prefix}use`, skill, tool), disabled: true, title: block.reason },
       who, h('span.version-says', {}, h('span.version-effect.version-why', {}, icon('circle-alert', 12, 'tone-warning'), cantUse(block.reason))));
     const others = compared.filter(entry => !group.includes(entry));
     // A tool whose copy is one it has another way keeps it: Central Knot writes nothing there (library.ts, "held").
     const replaced = others.filter(entry => !skill.anotherWay?.[entry]), keeping = others.filter(entry => skill.anotherWay?.[entry]);
     const said = copyQuote(skill, tool, others);
-    return h('button.version', { type: 'button', id: elId('use', skill, tool), 'aria-label': `Use ${tools}’s copy`, disabled: !canWrite(), onclick: () => void applyClick(turnOn(t, skill, tool)).then(then) },
+    return h('button.version', { type: 'button', id: elId(`${prefix}use`, skill, tool), 'aria-label': `Use ${tools}’s copy`, disabled: !canWrite(), onclick: () => void applyClick(turnOn(t, skill, tool)).then(then) },
       who,
       h('span.version-says', {},
         said ? h('span.version-text', {}, ...said) : null,
@@ -578,10 +580,10 @@ function compareChoices(t: Table, skill: ItemRow, inFiles = false, then?: () => 
   // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already;
   // a kind with one, skills, opens it there). A kind with neither (MCP servers) quotes each whole in its row.
   const every = compared.length > 2 ? 'Read every copy' : 'Read both copies';
-  const read = inFiles ? null : lib.files ? smallAction(every, elId('diff', skill), () => openFiles(skill.key), '.compare-read')
-    : lib.words.body ? smallAction(view.reading === id ? 'Hide the copies' : every, elId('diff', skill), () => { view.reading = view.reading === id ? undefined : id; rerender(); }, '.compare-read') : null;
+  const read = inFiles ? null : lib.files ? smallAction(every, elId(`${prefix}diff`, skill), () => openFiles(skill.key), '.compare-read')
+    : lib.words.body ? smallAction(view.reading === id ? 'Hide the copies' : every, elId(`${prefix}diff`, skill), () => { view.reading = view.reading === id ? undefined : id; rerender(); }, '.compare-read') : null;
   const bodies = lib.words.body && view.reading === id
-    ? h('div.compare-copies', {}, fileBlocks(elId('body', skill), lib.words.body, compared.map(tool => ({ tool, text: versions[tool]?.body ?? '' })), holders => `${lib.words.body} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
+    ? h('div.compare-copies', {}, fileBlocks(elId(`${prefix}body`, skill), lib.words.body, compared.map(tool => ({ tool, text: versions[tool]?.body ?? '' })), holders => `${lib.words.body} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
     : null;
   return h('div.compare-block', {},
     h('p.compare-title', {}, icon('circle-question-mark', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
@@ -594,7 +596,7 @@ function compareChoices(t: Table, skill: ItemRow, inFiles = false, then?: () => 
 /** The copy question of the table's found item `key`, for first setup's walkthrough (firstsetup.ts): `then` runs once a choice's click is done. */
 export function copyQuestion(t: Table, key: string, then: () => void): HTMLElement | null {
   const skill = rowsOf(t.kind).find(row => row.key === key);
-  return skill && isDiffering(skill) ? compareChoices(t, skill, false, then) : null;
+  return skill && isDiffering(skill) ? compareChoices(t, skill, false, then, 'walk-') : null;
 }
 
 /** Whether an open row's details dock beside the table: the content is wide enough (renderer.ts sets state.wide). */
@@ -1250,7 +1252,7 @@ function flip(t: Table, skill: ItemRow, on: boolean) {
 
 /**
  * An item's one control: its switch while it is in Central Knot (librarySwitch), or Add while it is found (addButton). `prefix`
- * keeps a second one apart (the Files view's header): ids `<prefix>switch-<key>`, `<prefix>add-<key>`.
+ * keeps a second one apart (the Files view's header): ids `<prefix>switch-<row id>`, `<prefix>add-<row id>` (controlId).
  */
 function itemSwitch(t: Table, skill: ItemRow, prefix = '') {
   return drawnAsAdd(skill) ? addButton(t, skill, controlId(skill, prefix)) : librarySwitch(t, skill, controlId(skill, prefix));
@@ -1726,7 +1728,7 @@ function libraryVersions(t: Table, lib: LibraryPage, skill: ItemRow) {
     said: notIn => { const source = (version.from.how === 'made-current' && madeFrom(item, version)) || version;
       return lib.say.said.madeCurrent(name, source, versionClock(item, source), on(notIn), toolsFor(t, skill.kind)); } });
   const reading = at === undefined || !listed(item)[at] ? undefined : { index: at, text: textOf(listed(item)[at].hash), current: textOf(item.hash) };
-  return versionList({ item, row: id, canWrite: canWrite(), unfolded: view.versionsUnfolded === id, onUnfold: () => { view.versionsUnfolded = id; rerender(); },
+  return versionList({ item, rowId: id, canWrite: canWrite(), unfolded: view.versionsUnfolded === id, onUnfold: () => { view.versionsUnfolded = id; rerender(); },
     changes: skill.versionChanges, reading, now: Date.now(), onRead: read, onMakeCurrent: makeCurrent });
 }
 
@@ -1738,7 +1740,7 @@ function harnessControls(skill: ItemRow, tool: Tool) {
   const given = throughPluginHere(skill, tool);
   // Through a plugin: the item's switch in that tool (its own, or the whole plugin's), with the way to the plugin's page.
   const through = itemThrough(skill, tool);
-  if (through) return pluginItemControls(through, skill.key, elId('enable', skill, tool), () => openPlugin(given!));
+  if (through) return pluginItemControls(through, skill, () => openPlugin(given!));
   if (given) return h('span.details-tool-actions', {}, smallAction('Plugin’s page', elId('plugin', skill, tool), () => openPlugin(given)));
   return libraryHarnessSwitch(libraryPages[skill.kind], skill, tool);
 }

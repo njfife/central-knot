@@ -25,7 +25,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
-import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, rowPart, standIn } from './cdp.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, byId, rowPart, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { packagedApp } from './package-app.mjs';
 
@@ -173,14 +173,14 @@ const focusOn = selector => a.run(`document.querySelector('${selector}')?.focus(
 const refresh = async () => { await a.click('#header-refresh'); await a.settle(); };
 /** A row's details, opened or closed whichever way they are now. */
 const isOpen = (kind, key) => a.has(`.ov-row[data-key="${rowPart('', kind, key)}"][aria-expanded="true"]`);
-const openRow = async (kind, key) => { if (!(await isOpen(kind, key))) { await a.click(`#${rowPart('open', kind, key)}`); await a.settle(); } };
-const closeRow = async (kind, key) => { if (await isOpen(kind, key)) { await a.click(`#${rowPart('open', kind, key)}`); await a.settle(); } };
+const openRow = async (kind, key) => { if (!(await isOpen(kind, key))) { await a.click(byId(rowPart('open', kind, key))); await a.settle(); } };
+const closeRow = async (kind, key) => { if (await isOpen(kind, key)) { await a.click(byId(rowPart('open', kind, key))); await a.settle(); } };
 /** Waits until the row's switch is on. */
-const switchOn = (kind, key) => waitFor(a, `document.querySelector('#${rowPart('switch', kind, key)}')?.getAttribute('aria-checked') === 'true'`, 15000);
+const switchOn = (kind, key) => waitFor(a, `document.querySelector('${byId(rowPart('switch', kind, key))}')?.getAttribute('aria-checked') === 'true'`, 15000);
 /** Turns a row on: Add where it is found, its switch where it is off (in Central Knot only); nothing where it is on. */
 const turnOnRow = async (kind, key) => {
-  const [add, toggle] = [rowPart('add', kind, key), rowPart('switch', kind, key)];
-  if (await a.has(`#${add}, #${toggle}:not([aria-checked="true"])`)) await a.click(`#${add}, #${toggle}`);
+  const [add, toggle] = [byId(rowPart('add', kind, key)), byId(rowPart('switch', kind, key))];
+  if (await a.has(`${add}, ${toggle}:not([aria-checked="true"])`)) await a.click(`${add}, ${toggle}`);
 };
 
 // ---------- The light tour: the app opens, and so does each page ----------
@@ -979,10 +979,10 @@ if (wanted('first-setup')) {
   await a.click('#setup-yes');
   await waitFor(a, `!!document.querySelector('#walkthrough')`, 15000);
   await atEverySize('after-yes-walkthrough-first', 'Clicked Synchronize everything: the band says what it took in and what the one Undo covers; the walkthrough opened on Skills at its first item, 1 of 4, deploy, with its copy question as its row asks it, Codex’s copy (the latest) the main button, and beside Skip the line Skip changes no copy', true, '#walkthrough', 'start');
-  await a.size(860, 560); await show('#walkthrough', 'start'); await focusOn(`#${rowPart('use', 'skills', 'deploy', 'codex-cli')}`);
+  await a.size(860, 560); await show('#walkthrough', 'start'); await focusOn(`#${rowPart('walk-use', 'skills', 'deploy', 'codex-cli')}`);
   await shot(a, 'walkthrough-focus-860', 'Tabbed to Codex’s copy, the latest, at 860×560: the focus ring is on its Use this copy');
   await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
-  await a.click(`#${rowPart('use', 'skills', 'deploy', 'codex-cli')}`);
+  await a.click(`#${rowPart('walk-use', 'skills', 'deploy', 'codex-cli')}`);
   await atEverySize('walkthrough-second', 'Clicked Use this copy on Codex’s copy: the band says deploy is in Central Knot with Codex’s copy, with its own Undo; the walkthrough went on to 2 of 4, review, Copilot CLI’s copy the main button', false, '#walkthrough', 'start');
   await a.click('#walk-skip'); await a.click('#walk-skip');
   await shot(a, 'walkthrough-next-kind', 'Clicked Skip twice (review and triage): 4 of 4 is on MCP servers, so the band says so, with Go on');
@@ -1316,9 +1316,9 @@ if (wanted('plugin-items')) {
     await a.theme('light'); await shot(a, `skills-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
   }
   await size(1280, 800);
-  await a.click(`[id="${rowPart('open', 'skills', 'document-tools@team-tools/pdf-reader')}"]`);
+  await a.click(`${byId(rowPart('open', 'skills', 'document-tools@team-tools/pdf-reader'))}`);
   await shot(a, 'skill-open', 'Opened pdf-reader: it opens with where it is on (“On in Claude Code · off in Copilot CLI and Codex · from the plugin document-tools”), then where it is handled (a link to document-tools’ page; the switches below turn it on or off in each tool), and each tool’s line with its switch.');
-  await a.click(`[id="${rowPart('pfile', 'skills', 'document-tools@team-tools/pdf-reader')}"]`); await waitFor(a, `!!document.querySelector('.details-plugin .plugin-file')`, 15000);
+  await a.click(`${byId(rowPart('pfile', 'skills', 'document-tools@team-tools/pdf-reader'))}`); await waitFor(a, `!!document.querySelector('.details-plugin .plugin-file')`, 15000);
   await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”, under the tools’ lines: the file opens right under the link, in its own scrolling box no taller than 40% of the window, and each tool’s switch stays in view above it.');
   await a.theme('light'); await shot(a, 'skill-open-light', 'The same, light.'); await a.theme('dark');
   await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560: the tools’ lines and their switches, then its SKILL.md under the link.');
@@ -1326,17 +1326,17 @@ if (wanted('plugin-items')) {
   await size(1728, 1117); await shot(a, 'skill-open-1728', 'The open row at 1728×1117.'); await size(1280, 800);
   // The row's own switch turns it off in every tool that has it. Copilot CLI and Codex have it off already, and Claude Code has
   // no switch for one skill of a plugin, so there it turns the whole plugin off, as the switch's name and tooltip say first.
-  const pdfSwitch = `[id="${rowPart('switch', 'skills', 'document-tools@team-tools/pdf-reader')}"]`;
+  const pdfSwitch = `${byId(rowPart('switch', 'skills', 'document-tools@team-tools/pdf-reader'))}`;
   await shot(a, 'main-switch-before', `Before the row's switch is clicked (pdf-reader open, on in Claude Code only): its name and tooltip say “${await a.run(`document.querySelector('${pdfSwitch}').getAttribute('aria-label')`)}”`);
   await a.click(pdfSwitch); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
   await shot(a, 'main-switch-whole', 'Clicked pdf-reader’s own switch: the whole plugin document-tools is off in Claude Code, with Claude Code’s own command, and the band says pdf-reader is off there and names what went with it, with one Undo and no second button.');
   await size(860, 560); await shot(a, 'main-switch-whole-860', 'The same at 860×560.'); await size(1280, 800);
   await a.click('#outcome-undo-plugin'); await a.settle();
   await shot(a, 'main-switch-whole-undone', 'Clicked Undo: document-tools is on in Claude Code again.');
-  await a.click(`[id="${rowPart('open', 'skills', 'document-tools@team-tools/pdf-reader')}"]`);
+  await a.click(`${byId(rowPart('open', 'skills', 'document-tools@team-tools/pdf-reader'))}`);
   // spreadsheet is on in all three: its switch turns it off in Copilot CLI and Codex with their own switches and the whole
   // plugin in Claude Code, and its one Undo turns them all back on.
-  await a.click(`[id="${rowPart('switch', 'skills', 'document-tools@team-tools/spreadsheet')}"]`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+  await a.click(`${byId(rowPart('switch', 'skills', 'document-tools@team-tools/spreadsheet'))}`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
   await shot(a, 'main-switch-changed', 'Clicked spreadsheet’s own switch: off in Copilot CLI and Codex at once, each with its own switch, and in Claude Code, which has no switch for one skill of a plugin, with the whole plugin document-tools; the band names what went with it, with Undo.');
   await size(860, 560); await a.click('#sidebar-toggle');
   await shot(a, 'main-switch-changed-860-sidebar', 'The same at 860×560 with the sidebar open: the sentence keeps the width, Undo beside or under it.');
@@ -1355,7 +1355,7 @@ if (wanted('plugin-items')) {
       if (await a.has('#outcome-undo-plugin')) { await a.click('#outcome-undo-plugin'); await a.settle(); await shot(a, 'switch-undone', 'Clicked Undo: issue-tracker is off in Codex again, as it was; the confirmation fades by itself.'); }
     }
   }
-  await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="issue-tracker@"]')`);
+  await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="${rowPart('', 'mcp', 'issue-tracker@')}"]')`);
   await shot(a, 'mcp', 'MCP servers: issue-tracker’s issues server, installed in Codex with the plugin turned off.');
   await a.theme('light'); await shot(a, 'mcp-light', 'The same, light.'); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
@@ -1364,27 +1364,27 @@ if (wanted('plugin-items')) {
     await a.theme('light'); await shot(a, `mcp-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
   }
   await size(1280, 800);
-  if (await a.has(`[id="${rowPart('open', 'mcp', 'issue-tracker@team-tools/issues')}"]`)) { await a.click(`[id="${rowPart('open', 'mcp', 'issue-tracker@team-tools/issues')}"]`); await shot(a, 'mcp-open', 'Opened issues: its marketplace is added nowhere, so it says how Codex itself handles it; its switch is there all the same.'); }
+  if (await a.has(`${byId(rowPart('open', 'mcp', 'issue-tracker@team-tools/issues'))}`)) { await a.click(`${byId(rowPart('open', 'mcp', 'issue-tracker@team-tools/issues'))}`); await shot(a, 'mcp-open', 'Opened issues: its marketplace is added nowhere, so it says how Codex itself handles it; its switch is there all the same.'); }
   // One MCP server of a plugin has a switch of its own in every tool that takes plugins: its opened row's switch writes it at
   // once, and Undo takes it back.
-  if (await a.has(`[id="${rowPart('open', 'mcp', 'issue-tracker@team-tools/issues')}"]`)) {
-    if (!(await a.has(`[id="${rowPart('enable', 'mcp', 'issue-tracker@team-tools/issues', 'codex-cli')}"]`))) await a.click(`[id="${rowPart('open', 'mcp', 'issue-tracker@team-tools/issues')}"]`);
-    await a.click(`[id="${rowPart('enable', 'mcp', 'issue-tracker@team-tools/issues', 'codex-cli')}"]`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin, .bands .band')`, 15000);
+  if (await a.has(`${byId(rowPart('open', 'mcp', 'issue-tracker@team-tools/issues'))}`)) {
+    if (!(await a.has(`${byId(rowPart('enable', 'mcp', 'issue-tracker@team-tools/issues', 'codex-cli'))}`))) await a.click(`${byId(rowPart('open', 'mcp', 'issue-tracker@team-tools/issues'))}`);
+    await a.click(`${byId(rowPart('enable', 'mcp', 'issue-tracker@team-tools/issues', 'codex-cli'))}`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin, .bands .band')`, 15000);
     await shot(a, 'mcp-switch-applied', 'Clicked issues’ Codex switch in its opened row, where the whole plugin was off: it is on in Codex at once. The result leads with the server clicked (“issues is on in Codex. Its plugin issue-tracker was turned on there, with its skill triage left off.”), with Undo.');
     await size(1728, 1117); await shot(a, 'mcp-switch-applied-1728', 'The same at 1728×1117.'); await size(1280, 800);
     if (await a.has('#outcome-undo-plugin')) { await a.click('#outcome-undo-plugin'); await a.settle(); await shot(a, 'mcp-switch-undone', 'Clicked Undo: the plugin is off in Codex again, as it was.'); }
   }
   // The row's own switch does the same in every tool with a switch for one server: here, Codex.
-  if (await a.has(`[id="${rowPart('switch', 'mcp', 'issue-tracker@team-tools/issues')}"]`)) {
-    await a.click(`[id="${rowPart('switch', 'mcp', 'issue-tracker@team-tools/issues')}"]`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+  if (await a.has(`${byId(rowPart('switch', 'mcp', 'issue-tracker@team-tools/issues'))}`)) {
+    await a.click(`${byId(rowPart('switch', 'mcp', 'issue-tracker@team-tools/issues'))}`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
     await shot(a, 'mcp-main-switch', 'Clicked the issues row’s own switch: it is on in Codex, the one tool that has it, with its plugin turned on there for it alone; with Undo.');
     await a.click('#outcome-undo-plugin'); await a.settle();
   }
   await a.click('#nav-agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code, under “From plugins · installed with their plugin · switched here like any other”.');
-  if (await a.has(`[id="${rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer')}"]`)) {
-    await a.click(`[id="${rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer')}"]`);
+  if (await a.has(`${byId(rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer'))}`)) {
+    await a.click(`${byId(rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer'))}`);
     await shot(a, 'agent-open', 'Opened release-reviewer: it opens with where it is on (“On in Claude Code · from the plugin release-helper”), where it is handled, and Claude Code’s line with its switch for this one agent.');
-    await a.click(`[id="${rowPart('switch', 'agents', 'release-helper@team-tools/release-reviewer')}"]`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+    await a.click(`${byId(rowPart('switch', 'agents', 'release-helper@team-tools/release-reviewer'))}`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
     await shot(a, 'agent-main-switch', 'Clicked release-reviewer’s own switch: off in Claude Code at once, with Claude Code’s switch for one agent (the rest of release-helper stays on); the key says “Off there”; with Undo.');
     await a.click('#outcome-undo-plugin'); await a.settle();
     await shot(a, 'agent-main-switch-undone', 'Clicked Undo: release-reviewer is on in Claude Code again.');

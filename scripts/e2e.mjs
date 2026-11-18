@@ -12,7 +12,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { packagedApp } from './package-app.mjs';
-import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, rowPart, standIn } from './cdp.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, byId, rowPart, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
@@ -268,8 +268,14 @@ async function mainHelpers(port) {
 }
 
 // ---------- Flows ----------
-/** The keys of the rows of `kind` on the page, in order: each row's data-key is its row id (cdp.mjs rowPart), the kind's prefix taken off. */
-const keysOf = (kind, ids) => ids.filter(id => id.startsWith(rowPart('', kind, ''))).map(id => id.slice(rowPart('', kind, '').length));
+/**
+ * The keys of rows of `kind`, from their ids: each row's data-key is its row id (cdp.mjs rowPart), the kind's prefix taken off.
+ * A row of another kind is a slip in the check (it reads the wrong page), and says so.
+ */
+const keysOf = (kind, ids) => ids.map(id => {
+  if (!id.startsWith(rowPart('', kind, ''))) throw new Error(`${id} is no row of ${kind}`);
+  return id.slice(rowPart('', kind, '').length);
+});
 const rowKeys = async (a, kind) => keysOf(kind, await a.all('.ov-row[data-key]', 'e.dataset.key'));
 // A tool's mark on an item's row (a box on a page that still has one per tool): what that tool has.
 const cellState = (a, kind, key, tool) => a.run(`document.getElementById(${JSON.stringify(rowPart('cell', kind, key, tool))})?.dataset.state ?? null`);
@@ -278,6 +284,8 @@ const offMarks = (a, kind, key) => a.all(`.ov-row[data-key=${JSON.stringify(rowP
 const switchOn = (a, kind, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(rowPart('', kind, key))}] .switch')?.getAttribute('aria-checked') === 'true'`);
 /** A heading's words as shown: its name, its count and its note, but not a note's hidden room (matrix.ts section). */
 const headingSays = (a, role) => a.run(`[...(document.querySelector('.ov-section[data-section="${role}"] .ov-section-label')?.childNodes ?? [])].filter(node => !node.classList?.contains('ov-section-room')).map(node => node.textContent).join('')`);
+/** The ids two or more elements on the page share: none on a page drawn right, each row's element ids carrying its row id. */
+const sharedIds = a => a.run(`(() => { const ids = [...document.querySelectorAll('[id]')].map(each => each.id); return [...new Set(ids.filter((id, at) => ids.indexOf(id) !== at))]; })()`);
 /** Each section on an item page of `kind`, in order, with the keys of its rows. */
 const sectionsNow = async (a, kind) => (await a.run(`[...document.querySelectorAll('.ov-section[data-section]')].map(head => [head.dataset.section, [...head.parentElement.querySelectorAll('.ov-row[data-key]')].map(row => row.dataset.key)])`))
   .map(([section, ids]) => [section, keysOf(kind, ids)]);
@@ -1554,14 +1562,14 @@ async function practiceFlow() {
     'agents/review.md': '---\nname: review\ndescription: The agent named review.\n---\n\nThe agent’s prompt.\n',
   });
   await a.click('#header-refresh');
-  const sameName = 'same-names@ck-outside/review', byId = (part, kind) => `[id="${rowPart(part, kind, sameName)}"]`, fileShown = () => a.text('.plugin-file');
-  for (let tries = 0; tries < 40 && !(await a.exists(byId('open', 'skills'))); tries++) await wait(100);
+  const sameName = 'same-names@ck-outside/review', reviewEl = (part, kind) => byId(rowPart(part, kind, sameName)), fileShown = () => a.text('.plugin-file');
+  for (let tries = 0; tries < 40 && !(await a.exists(reviewEl('open', 'skills'))); tries++) await wait(100);
   const yours = rowPart('', 'skills', 'release-notes'), theirs = rowPart('', 'skills', 'same-names@ck-outside/release-notes');
   same('a plugin’s skill named like your own release-notes is a row of its own, and no two elements on the page share an id',
     [await a.exists(`.ov-row[data-key="${yours}"]`), await a.exists(`.ov-row[data-key="${theirs}"]`),
-      await a.run(`(() => { const ids = [...document.querySelectorAll('[id]')].map(each => each.id); return ids.filter((id, at) => ids.indexOf(id) !== at); })()`)], [true, true, []]);
-  await a.click(byId('open', 'skills'));
-  await a.click(byId('pfile', 'skills'));
+      await sharedIds(a)], [true, true, []]);
+  await a.click(reviewEl('open', 'skills'));
+  await a.click(reviewEl('pfile', 'skills'));
   for (let tries = 0; tries < 40 && !(await fileShown())?.includes('The skill’s steps.'); tries++) await wait(100);
   check('a plugin’s skill named review shows its SKILL.md', (await fileShown())?.includes('The skill’s steps.'), await a.text('.details-plugin'));
   // The plugin updated while the file is shown: Refresh shows the file as installed now.
@@ -1573,10 +1581,10 @@ async function practiceFlow() {
   for (let tries = 0; tries < 40 && !(await fileShown())?.includes('version two'); tries++) await wait(100);
   check('its plugin updated while the file is shown, Refresh shows the file as installed now', (await fileShown())?.includes('The skill’s steps, version two.'), await fileShown());
   await a.click('#nav-agents');
-  for (let tries = 0; tries < 40 && !(await a.exists(byId('open', 'agents'))); tries++) await wait(100);
-  await a.click(byId('open', 'agents'));
-  same('the agent of the same plugin named review opens with its own file unshown, not the skill’s', [await a.exists('.plugin-file'), await a.text(byId('pfile', 'agents'))], [false, 'Show its agent file']);
-  await a.click(byId('pfile', 'agents'));
+  for (let tries = 0; tries < 40 && !(await a.exists(reviewEl('open', 'agents'))); tries++) await wait(100);
+  await a.click(reviewEl('open', 'agents'));
+  same('the agent of the same plugin named review opens with its own file unshown, not the skill’s', [await a.exists('.plugin-file'), await a.text(reviewEl('pfile', 'agents'))], [false, 'Show its agent file']);
+  await a.click(reviewEl('pfile', 'agents'));
   for (let tries = 0; tries < 40 && !(await fileShown())?.includes('The agent’s prompt.'); tries++) await wait(100);
   check('and shows its own when asked', (await fileShown())?.includes('The agent’s prompt.') && !(await fileShown())?.includes('The skill’s steps.'), await fileShown());
   if (installedRecord) writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), installedRecord); else rmSync(join(practice, '.claude/plugins/installed_plugins.json'), { force: true });
@@ -1661,7 +1669,7 @@ async function practiceFlow() {
   await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
   writeFileSync(outsideStub, outsideStubBefore);
   if (outsideSettings) writeFileSync(join(practice, '.claude/settings.json'), outsideSettings); else rmSync(join(practice, '.claude/settings.json'), { force: true });
-  await a.click(`[id="${rowPart('open', 'skills', outside)}"]`);
+  await a.click(byId(rowPart('open', 'skills', outside)));
   check('its details open with where it is on and which plugin it is from, then where it is handled', /On in Claude Code · from the plugin outside-tools[\s\S]*marketplace “ck-outside”, which isn’t added in Central Knot/.test(await a.text('main') ?? ''), await a.text('main'));
   await a.click('#nav-mcp');
   same('its MCP server too, on the MCP servers page', await cellState(a, 'mcp', 'outside-tools@ck-outside/outside-server', 'claude-cli'), 'plugin');
@@ -4117,11 +4125,11 @@ async function realHomeFlow() {
   same('a skill with a link inside can’t be copied as it is: its mark says so, and its Add waits', [await cellState(a, 'skills', 'has-link', 'claude-cli'), await a.run(`document.querySelector('#${rowPart('add', 'skills', 'has-link')}')?.disabled`)], ['unseen', true]);
   await fitsAtMinimum(a, 'Skills in a real home');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 640, deviceScaleFactor: 1, mobile: false });
-  await a.click(`[id="${rowPart('open', 'skills', `very-long-${'n'.repeat(150)}`)}"]`);
+  await a.click(byId(rowPart('open', 'skills', `very-long-${'n'.repeat(150)}`)));
   const fits = await a.run(`({ page: document.documentElement.scrollWidth, window: innerWidth })`);
   check('a very long name stays on screen at 960', fits.page <= fits.window, fits);
   await a.send('Emulation.clearDeviceMetricsOverride');
-  await a.click(`[id="${rowPart('open', 'skills', `very-long-${'n'.repeat(150)}`)}"]`);
+  await a.click(byId(rowPart('open', 'skills', `very-long-${'n'.repeat(150)}`)));
   await a.shot('real-overview');
   if (!canWriteRealHome) {
     same('the switches and Add are off here', await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`), true);
@@ -4437,13 +4445,17 @@ async function firstSetupFlow() {
   await a.click('#setup-yes');
   for (let tries = 0; tries < 40 && !(await a.exists('#walkthrough')); tries++) await wait(100);
   same('Yes stores the rule on, takes in what it may (notes is in Codex now), and opens the walkthrough on Skills at 1 of 2, review, its latest copy (Codex’s) the main button',
-    [record().syncEverything, readNow(join(codex, 'notes/SKILL.md')), await a.text('#walkthrough .walk-place'), await a.exists(`#${rowPart('use', 'skills', 'review', 'codex-cli')} .version-cta-main`), await a.exists(`#${rowPart('use', 'skills', 'review', 'claude-cli')} .version-cta-main`)],
-    [true, text('notes', 'Take notes.'), ' · 1 of 2', true, false]);
+    [record().syncEverything, readNow(join(codex, 'notes/SKILL.md')), await a.text('#walkthrough .walk-place'), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')} .version-cta-main`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')}`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')} .version-cta-main`)],
+    [true, text('notes', 'Take notes.'), ' · 1 of 2', true, true, false]);
   check('the band after Yes says what it took in and what the one Undo covers', /^Synchronize everything is on: it took in 2 items, and 2 items with copies that differ wait for your choice\. One Undo in History takes back what it takes in; a copy you choose has its own Undo\./.test(await a.text('[data-outcome] .band-text') ?? ''), await a.text('[data-outcome] .band-text'));
   same('beside Skip, the walkthrough says it changes no copy', await a.text('#walk-note'), 'Skip changes no copy.');
   await fitsAtMinimum(a, 'the walkthrough at its first item');
   await a.shot('setup-walkthrough');
-  await a.click(`#${rowPart('use', 'skills', 'review', 'codex-cli')}`);
+  // The row the walkthrough is at, opened too: its copy question and the walkthrough's are drawn at once, their controls apart.
+  await a.click(`#${rowPart('open', 'skills', 'review')}`);
+  same('with the row the walkthrough is at opened, its question and the walkthrough’s share no id', [await a.exists(`.ov-row.open[data-key="${rowPart('', 'skills', 'review')}"]`), await sharedIds(a)], [true, []]);
+  await a.click(`#${rowPart('open', 'skills', 'review')}`);
+  await a.click(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')}`);
   same('a choice is the row’s own click: review is taken in with Codex’s copy, and the walkthrough says the next is on MCP servers',
     [readNow(join(claude, 'review/SKILL.md')), await a.text('#walkthrough .band-text')], [text('review', 'Review hard.'), 'Next: docs, on MCP servers.']);
   await a.click('#walk-go-on');
@@ -4456,7 +4468,7 @@ async function firstSetupFlow() {
   await a.click('#nav-overview');
   same('the Overview’s line counts what waits and starts choosing again, the last item having been skipped', [await a.text('#setup-choosing'), await a.exists('#setup-question')], ['1 found item has copies that differ and waits for your choice. Choose copies', false]);
   await a.click('#setup-choose');
-  same('which opens the walkthrough at docs again', [await a.text('#walkthrough .walk-place'), await a.exists(`#${rowPart('use', 'mcp', 'docs', 'codex-cli')}`)], [' · 1 of 1', true]);
+  same('which opens the walkthrough at docs again', [await a.text('#walkthrough .walk-place'), await a.exists(`#${rowPart('walk-use', 'mcp', 'docs', 'codex-cli')}`)], [' · 1 of 1', true]);
   await a.click('#walk-leave');
   await a.click('#nav-history');
   for (let tries = 0; tries < 30 && !(await a.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
@@ -5153,7 +5165,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   for (const plugin of installedFirst) await a.run(`window.centralKnot.turnPlugin(${JSON.stringify(market)}, ${JSON.stringify(plugin)}, 'on', undefined, ${JSON.stringify(home)}).then(() => true)`);
   await a.click('#header-refresh');
 
-  /** A list's scroll and its top on screen (a band above it moves it), and each row's place on screen (px from the window's top), by key. */
+  /** A list's scroll and its top on screen (a band above it moves it), and each row's place on screen (px from the window's top), by its `attr` (an item row's data-key, its row id; a plugin's data-plugin). */
   const placesNow = (list, attr) => a.run(`(() => { const list = document.getElementById(${JSON.stringify(list)}); return { scroll: Math.round(list.scrollTop), top: Math.round(list.getBoundingClientRect().top), at: Object.fromEntries([...list.querySelectorAll('[${attr}]')].map(row => [row.getAttribute('${attr}'), Math.round(row.getBoundingClientRect().top)])) }; })()`);
   const putAt = (list, selector, y) => a.run(`(() => { const list = document.getElementById(${JSON.stringify(list)}); list.scrollTop += document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().top - list.getBoundingClientRect().top - ${y}; return true; })()`);
   const middleOf = selector => a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)]; })()`);
@@ -5821,8 +5833,8 @@ async function usageFlow() {
   for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', kit)}"]`)); tries++) await wait(100);
   await a.click('#collect-usage');
   for (let tries = 0; tries < 50 && !(await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used')?.textContent`)); tries++) await wait(100);
-  await a.click(`[id="${rowPart('open', 'skills', kit)}"]`);
-  same('a From plugins row says its figure, and its opened row Claude Code’s, by the same match', [await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used')?.textContent`), (await a.text(`[id="${rowPart('usage', 'skills', kit, 'claude-cli')}"]`))?.trim()],
+  await a.click(byId(rowPart('open', 'skills', kit)));
+  same('a From plugins row says its figure, and its opened row Claude Code’s, by the same match', [await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used')?.textContent`), (await a.text(`${byId(rowPart('usage', 'skills', kit, 'claude-cli'))}`))?.trim()],
     ['used 4 days ago · 1 session', 'Used in 1 session in the last 30 days, last used 4 days ago.']);
   await a.shot('usage-plugin-row');
   // Sort by Last used, kept from this launch to the next: the reading that comes by itself as the home opens moves no row.

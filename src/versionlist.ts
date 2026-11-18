@@ -22,7 +22,7 @@ export type VersionText = VersionPart[] | 'reading' | null;
 export interface VersionListView {
   item: LibraryItem;
   /** Its row's id (itemrow.ts rowId), which its controls' ids carry (partId). */
-  row: string;
+  rowId: string;
   canWrite: boolean;
   /** Whether the whole list shows (else its newest few: libraryrow.ts foldVersions). */
   unfolded: boolean;
@@ -37,7 +37,7 @@ export interface VersionListView {
 }
 
 function versionRow(view: VersionListView, version: Version, index: number, when: string, backWhen: (back: Version) => string) {
-  const { item } = view, id = (part: string) => partId(part, view.row, index);
+  const { item } = view, id = (part: string) => partId(part, view.rowId, index);
   // The list starts with the current version (library.ts listed), and has each content once.
   const current = index === 0 && version.hash === item.hash;
   const read = view.reading?.index === index ? view.reading : undefined;
@@ -89,7 +89,7 @@ export function versionList(view: VersionListView): HTMLElement {
   const said = timesApart([...shown, ...backs].map(version => version.at), view.now, true, false);
   const times = said.slice(0, shown.length), backWhen = (back: Version) => said[shown.length + backs.indexOf(back)];
   const more = `Show ${rest} earlier ${rest === 1 ? 'version' : 'versions'}`;
-  const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: more, id: partId('versions-all', view.row), onclick: view.onUnfold }) : null;
+  const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: more, id: partId('versions-all', view.rowId), onclick: view.onUnfold }) : null;
   return h('div.versions', { role: 'group', 'aria-label': `Versions of ${item.name}` },
     h('p.versions-title', {}, h('strong', {}, 'Versions'), h('span.versions-count', {}, String(all.length)),
       h('span.versions-note', {}, 'Central Knot keeps every version.')),
