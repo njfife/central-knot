@@ -57,7 +57,7 @@ for (const race of ['changed before the move', 'saved before the link', 'no hard
   });
 }
 
-test('A settings write that fails after its first bytes keeps the old file and leaves no temporary file', async t => {
+test('A durable write that fails after its first bytes keeps the old file and leaves no temporary file', async t => {
   const folder = await mkdtemp(join(tmpdir(), 'ck-settings-'));
   t.after(() => rm(folder, { recursive: true, force: true }));
   const path = join(folder, 'app-settings.json'), original = '{ "appearance": "dark" }\n';
