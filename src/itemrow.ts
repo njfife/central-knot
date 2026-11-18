@@ -81,7 +81,7 @@ export const anyOn = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) =>
 
 // ---------- The order of the rows under a heading ----------
 
-/** The orders the item pages offer: by name (as always, and the default), by last updated, or by last used once usage is read, newest first. */
+/** The orders the item pages offer: by name (as always, and the default), by last updated, or by last used (usage collected: usagerow.ts lastUse), newest first. */
 export type RowOrder = 'name' | 'updated' | 'used';
 
 /** By name, a leading dot aside (".hidden" sorts with the h's). */
@@ -120,6 +120,7 @@ export function inOrder<Row extends Pick<ItemRow, 'key' | 'versions'>>(rows: rea
  * One row pinned on a list, whose own switch (or Add) was clicked there: the group it was drawn in before its first click
  * there, and its time in the list's order then (timeIn), so it keeps its place among its neighbours too (Add gives a found
  * item a time). A click never moves a row: it stays where it was, drawn in its new state, while the person works down the list.
+ * Nor does a usage reading that lands: on a list that goes by last used, every row is pinned where it is first (matrix.ts holdOrder).
  */
 export interface Pin<Group> { group: Group; time?: number }
 /**
