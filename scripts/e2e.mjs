@@ -476,6 +476,31 @@ const WORDS_CUT = `[...document.querySelectorAll('.plugin-click, .toolbar-result
   return own.width && (words.scrollWidth > words.clientWidth + 1 || own.right > box.right + 1) ? [node.textContent.slice(0, 60)] : [];
 })`;
 
+/**
+ * On Plugin marketplaces, each piece of a plugin's row that doesn't show whole: a piece of its open button (the title, the
+ * version, a chip) hidden, shortened or reaching past the button, a version or chip broken over two lines (only the title
+ * wraps), or the button reaching past its row's name cell; and each tool's heading wider than its column. Empty when every
+ * row's name, version and chips show whole (style.css "The plugin table"). CUT_OFF looks at the button and the heading's
+ * cell, not what is in them.
+ */
+const ROW_PIECES_CUT = `(() => {
+  const within = (inner, outer) => { const a = inner.getBoundingClientRect(), b = outer.getBoundingClientRect(); return a.left >= b.left - 1 && a.right <= b.right + 1; };
+  const lines = node => { const range = document.createRange(); range.selectNodeContents(node); return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size; };
+  const out = [...document.querySelectorAll('.plugin-table .ov-tool-head')].filter(head => head.scrollWidth > head.clientWidth + 1).map(head => head.textContent + '’s heading is wider than its column');
+  for (const row of document.querySelectorAll('.plugin-table .plugin-row')) {
+    const name = row.querySelector('.plugin-row-name'), open = name.querySelector('.plugin-row-open');
+    if (!within(open, name)) out.push(row.dataset.plugin + ': its open button reaches past its name cell');
+    for (const piece of open.children) {
+      const box = piece.getBoundingClientRect(), says = row.dataset.plugin + ': ' + piece.textContent;
+      if (box.width < 1 || box.height < 1) out.push(says + ' is hidden');
+      else if (!within(piece, open)) out.push(says + ' reaches past its open button');
+      else if (piece.scrollWidth > piece.clientWidth + 1) out.push(says + ' is shortened');
+      else if (!piece.matches('.plugin-row-title') && lines(piece) > 1) out.push(says + ' is broken over two lines');
+    }
+  }
+  return out;
+})()`;
+
 /** Sizes the page to width × height, and lets the app hear the resize. A real window that size leaves its page shorter (SMALLEST). */
 async function sizeTo(a, width, height) {
   await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -3415,6 +3440,57 @@ async function openCodeFlow() {
 }
 
 /**
+ * Plugin marketplaces with four tools, then five (Pi joins): every row's name, version and chips show whole, in the smallest
+ * window with the sidebar folded and open, and at 860×600, 1280×800, 1728×1117 and 2560×1440 with it open (style.css "The
+ * plugin table"). The marketplace is this flow's own, registered in Claude Code: a plugin whose name is 45 characters with a
+ * run of 25 letters, a long version and a category, and one that Claude Code still has and the marketplace no longer lists.
+ */
+async function pluginRowsFitFlow() {
+  const home = join(scratch, 'home-rows-fit'), market = join(scratch, 'market-rows-fit');
+  const long = 'observabilitydashboarding-for-on-call-support', gone = 'legacy-log-shipper';
+  const file = (root, path, body) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), body); };
+  const cli = (name, version) => { file(home, `.local/bin/${name}`, `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, '.local/bin', name), 0o755); };
+  toolClis(home);
+  cli('opencode', '1.19.5');
+  file(market, '.claude-plugin/marketplace.json', JSON.stringify({ name: 'rows-fit', owner: { name: 'Platform team' }, plugins: [
+    { name: long, source: `./plugins/${long}`, version: '12.10.0-beta.3', category: 'observability', description: 'Dashboards, alerts and traces for the services a team runs, in one place.' },
+  ] }));
+  file(market, `plugins/${long}/skills/dashboards/SKILL.md`, '---\nname: dashboards\ndescription: Builds a dashboard.\n---\n\nBuild it.\n');
+  file(home, '.claude/plugins/known_marketplaces.json', JSON.stringify({ 'rows-fit': { source: { source: 'directory', path: market }, installLocation: market } }));
+  writeClaudeInstall(home, 'rows-fit', gone, '1.0.0', { 'skills/ship/SKILL.md': '---\nname: ship\ndescription: Ships logs.\n---\n\nShip them.\n' });
+  const a = await launch(join(scratch, 'rows-fit-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const pieces = name => a.all(`.plugin-row[data-plugin="${name}"] .plugin-row-open > *`);
+  const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
+  const rowsWhole = async tools => {
+    for (let tries = 0; tries < 50 && await a.run(`document.querySelector('.plugin-table')?.dataset.tools`) !== String(tools); tries++) await wait(100);
+    same(`the table has ${tools} tool columns; each row has its name, version and chips: the one no longer offered says so`,
+      [await a.run(`document.querySelector('.plugin-table')?.dataset.tools`), await pieces(long), await pieces(gone)], [String(tools), [long, '12.10.0-beta.3', 'observability'], [gone, 'No longer offered']]);
+    for (const [width, height, open] of [[...SMALLEST, false], [...SMALLEST, true], [860, 600, true], [1280, 800, true], [1728, 1117, true], [2560, 1440, true]]) {
+      await sizeTo(a, width, height); await sidebarOpen(open);
+      same(`with ${tools} tools at ${width}×${height}, the sidebar ${open ? 'open' : 'folded'}, every plugin’s name, version and chips show whole, nothing cut off`, [...await a.run(ROW_PIECES_CUT), ...await a.run(CUT_OFF)], []);
+      if (open) await a.shot(`rows-fit-${tools}-tools-${width}x${height}`);
+    }
+    await sizeTo(a, ...SMALLEST); await sidebarOpen(true);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] }); await a.settle();
+    await a.shot(`rows-fit-${tools}-tools-${SMALLEST.join('x')}-dark`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await fullSize(a);
+  };
+  await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists(`.plugin-row[data-plugin="${gone}"]`)); tries++) await wait(100);
+  await rowsWhole(4);
+  // Pi joins at a read of the home, made where it is the one read (as openCodeFlow does: Plugins' own read would start a second).
+  cli('pi', '0.70.2');
+  await a.click('#nav-harnesses');
+  await a.click('#header-refresh');
+  await a.click('#nav-plugins');
+  await rowsWhole(5);
+  same('no page errors, the plugin rows', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
  * Marketplaces offered without being looked for: each plugin tool's own default, where that tool is here. Nothing is
  * fetched to offer one, so this flow never reaches the network (it never clicks Add).
  */
@@ -5511,7 +5587,7 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group, as it deletes its copy's HOME. Inside a copy the flows run in this order on the HOME seeded for it (seedHome), so each
 // group passes on its own.
 const groups = [
-  [practiceFlow, suggestedFlow, realHomeFlow],
+  [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, repoBaseFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, usageFlow, firstSetupFlow, crashFlow],
