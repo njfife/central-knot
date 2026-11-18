@@ -1,8 +1,8 @@
 // The page's one list of clicks (clicklist.ts), on the page's own code with a stand-in for main: each test clicks, then answers
 // main's calls one at a time and reads what the page holds in between. First the Plugins page's switch (pluginstate.ts
 // turnPlugin), then an item page's row switches (app.ts queueClick) and when their result goes by itself (app.ts FADE_MS); then,
-// on the same code, when the rows a click pins are let go (app.ts pinnedRows, drawPage).
-import { mock, test } from 'node:test';
+// on the same code, a background notice taken during a click or a home read, and when the rows a click pins are let go (app.ts pinnedRows, drawPage).
+import { mock, test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Change, HarnessId, HomeView, ItemNotice, PassResult, PluginTurn, PluginTurnResult, PluginsView } from '../src/types.ts';
 
@@ -23,6 +23,8 @@ const api = {
   applySkills: (changes: Change[]) => { main.sent.push(changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}, seen ${change.seenOn ? 'on' : 'off'}`).join()); return new Promise<PassResult>(done => main.passes.push(done)); },
   plugins: async () => { main.reads.plugins++; return view; },
   refresh: async (): Promise<HomeView | null> => { main.reads.home++; main.duringHomeRead?.(); return null; },
+  selectHome: async (): Promise<HomeView | null> => null,
+  history: async () => ({ events: [{ id: 'delete-bar', key: 'bar', kind: 'deleted' }] }),
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
   onSyncChanged: (listener: () => void) => { main.syncChanged = listener; },
 };
@@ -37,7 +39,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh'
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
 const { acting, applyClick, closeResult, drawPage, flashRequests, leaveResults, pinnedRows,
-  queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
+  loadHome, queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin } = await import('../src/itemrow.ts');
@@ -284,18 +286,23 @@ function onSkills() {
   Object.assign(app, { page: 'skills', harness: undefined });
 }
 
-test('Refresh draws the notice a background read brought while the page was busy', async t => {
+function deletionWhileReading(t: TestContext) {
   onSkills();
   const tools = ['copilot-cli'];
   const kind = { tools, items: [], notices: [] };
-  const home = { home: '/home', label: 'Practice', sync: { managed: tools, caughtUp: [] },
-    skills: kind, mcp: kind, agents: kind } as unknown as HomeView;
+  const home = { home: '/home', label: 'Practice', sync: { managed: tools, caughtUp: [], gate: { state: 'open' } },
+    skills: { ...kind, items: [{ key: 'notes' }], library: { bar: { key: 'bar', name: 'bar', deleted: true, except: [] } } }, mcp: kind, agents: kind } as unknown as HomeView;
   app.home = home;
   const notice: ItemNotice = { kind: 'deleted-by-hand', key: 'notes', item: 'notes', history: 'deletion',
     winner: 'copilot-cli', losers: [], orderProved: true };
   const reads = t.mock.method(api, 'refresh');
   reads.mock.mockImplementationOnce(async () => ({ ...home, skills: { ...home.skills, notices: [notice] } }));
   reads.mock.mockImplementationOnce(async () => home, 1);
+  return home;
+}
+
+test('Refresh draws the notice a background read brought while the page was busy', async t => {
+  deletionWhileReading(t);
   const draws: string[][] = [];
   setRenderer(() => { if (!acting()) draws.push(app.home!.skills.notices.map(n => n.history)); });
   try {
@@ -304,6 +311,32 @@ test('Refresh draws the notice a background read brought while the page was busy
     assert.deepEqual(draws[0], ['deletion']);
     assert.doesNotMatch(app.said.text, /Nothing changed/);
   } finally { setRenderer(() => {}); }
+});
+
+test('A deletion notice held during Delete takes the finished result’s place and points its Undo to History', async t => {
+  deletionWhileReading(t);
+  main.syncChanged();
+  const click = applyClick({ kind: 'skills', items: ['bar'], changes: [{ key: 'bar', on: true, except: [], deleted: true }], said: 'Deleted bar.' });
+  await main.pass({ ...did('bar'), made: ['delete-bar'] });
+  await click;
+  assert.equal(app.said.text, 'Sync changed notes.');
+  assert.equal(app.outcome, undefined);
+  assert.deepEqual(app.undoMoved, { page: 'skills', label: 'Undo', items: ['bar'], notices: ['deletion'] });
+});
+
+test('Opening the selected home describes the view that took the held deletion notice', async t => {
+  const home = deletionWhileReading(t);
+  t.mock.method(api, 'selectHome', async () => home);
+  const opened: string[] = [];
+  const elementById = document.getElementById;
+  t.mock.method(document, 'getElementById', (id: string) => {
+    if (id === 'announcement' && app.outcome?.text.startsWith('Opened')) opened.push(app.outcome.text);
+    return elementById(id);
+  });
+  main.syncChanged();
+  await loadHome('fixture');
+  assert.ok(opened.some(text => text.startsWith('Opened Practice. Read 1 skill')), opened.join(' / '));
+  assert.doesNotMatch(opened.join(' / '), /Nothing changed/);
 });
 
 test('Four switches clicked in a row: each row is drawn as clicked at once, main gets one at a time, and the header says the run once', async () => {
