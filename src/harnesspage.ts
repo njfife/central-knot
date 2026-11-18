@@ -1,8 +1,8 @@
 // Harnesses: one place per tool. The list sums up what each one has, with its Manage switch (managecard.ts); a managed
 // harness's own page manages its items with the same tables and switches as the Skills, MCP servers and Agents pages, with that
 // tool first, plus its instruction file and its plugins. A tool left out has its card and switch here, and no other page shows
-// it as a tool (History's entries and the Overview's first line still name it). Nothing here has its own engine: every change
-// goes through the pages it mirrors, or the switch's toolchoice.ts.
+// it as a tool (History's entries, and the Overview's line under its tools table, still name it). Nothing here has its own
+// engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
 import { KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
@@ -42,8 +42,9 @@ const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${names[tool]} doesn�
 /**
  * What one tool has of one kind: every item with a copy there, how many of those are On, and how many have copies that
  * differ and need a choice (the same count as that tool's "Copies differ" chip). `supported`: the tool can hold this kind.
+ * A tool's card here and the Overview's tools table count by it.
  */
-function tally(home: HomeView, kind: PageKind, tool: HarnessId) {
+export function tally(home: HomeView, kind: PageKind, tool: HarnessId) {
   const source = kindSource(home, kind);
   const here = source.facts.filter(item => inTool(item, tool));
   const plugins = pluginItemCount(home, kind, tool);
@@ -116,17 +117,28 @@ function instructionCount(tool: HarnessId): Count {
   return { value: '', note: file.text.trim() ? fileName(file.path) : `${fileName(file.path)} (empty)` };
 }
 
-function pluginCount(tool: HarnessId): Count {
+/**
+ * How many plugins a tool has installed, the one count a tool's card here and the Overview's tools table say: the marketplace
+ * read's installs there with the plugins the tool itself records (what its "from plugins" items come from), so one from a
+ * marketplace the Plugins page doesn't list is no "none installed" beside its own skills; `unsure` when the read couldn't tell
+ * for some. No count while the marketplaces are read (`reading`), after a read that failed, or where the tool takes none.
+ */
+export type PluginsInstalled = { state: 'reading' } | { state: 'failed' } | { state: 'unsupported' } | { state: 'read'; count: number; unsure: boolean };
+export function pluginsInstalled(tool: HarnessId): PluginsInstalled {
   const plugins = pluginsIn(tool);
+  if (plugins.state !== 'read') return plugins;
+  const recorded = (state.home?.pluginItems ?? []).filter(install => install.tool === tool).map(install => `${install.plugin}@${install.marketName}`);
+  const count = new Set([...plugins.installed.map(({ entry, plugin }) => `${plugin.name}@${entry.name}`), ...recorded]).size;
+  return { state: 'read', count, unsure: plugins.unknown.length + plugins.unreadable.length > 0 };
+}
+
+function pluginCount(tool: HarnessId): Count {
+  const plugins = pluginsInstalled(tool);
   if (plugins.state === 'reading') return { value: '…', faint: true };
   if (plugins.state === 'failed') return { value: '—', note: 'couldn’t be read', faint: true };
   if (plugins.state === 'unsupported') return { value: '—', note: pluginsNotHandled(tool), faint: true };
-  const unsure = plugins.unknown.length + plugins.unreadable.length > 0;
-  // Counted with the plugins the tool itself records (what its "from plugins" items come from), so one from a marketplace
-  // the Plugins page doesn't list is no "none installed" beside its own skills.
-  const recorded = (state.home?.pluginItems ?? []).filter(install => install.tool === tool).map(install => `${install.plugin}@${install.marketName}`);
-  const installed = new Set([...plugins.installed.map(({ entry, plugin }) => `${plugin.name}@${entry.name}`), ...recorded]).size;
-  return { value: installed ? String(installed) : '', note: [installed ? 'installed' : 'none installed', unsure ? 'some not known' : ''].filter(Boolean).join(' · '), faint: !installed };
+  const { count, unsure } = plugins;
+  return { value: count ? String(count) : '', note: [count ? 'installed' : 'none installed', unsure ? 'some not known' : ''].filter(Boolean).join(' · '), faint: !count };
 }
 
 /** What needs a look on a card, each a link: differing copies (to that kind's tab, showing only those) and read problems (to About). */
@@ -184,7 +196,7 @@ export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromK
   if (tool !== from) resetTablesForHarness();
   state.harness = tool;
   if (tab) state.harnessTab = tab;
-  if (showOnly) showFiltered(showOnly, 'attention', tool);
+  if (showOnly && tool) showFiltered(showOnly, 'attention', tool);
   // A home switch's result (and its Go back) survives one move, as it does across pages.
   leaveResults();
   rerender();

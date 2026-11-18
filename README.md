@@ -16,7 +16,7 @@ Real-home writes happen on macOS and Linux; on Windows a real home is preview on
 
 ### Overview
 
-One card each for skills, MCP servers and agents, with counts and anything that needs a choice. A card opens its page. While another build of Central Knot is on this Mac, the window shows one screen instead of the Overview and every other page (see Updates, One build on a Mac).
+The page the app opens on. First, what needs you, a line each with its way on: first setup's question, an update to install, why the home can't be written, what couldn't be read, found items whose copies differ, Automatic sync off; nothing when none applies. Then one card each for skills, MCP servers and agents: how many, how many synced and whether every copy is in sync, how many were used in the last 30 days, how many have no use seen (a link to that filter, where Turn these off is) and the three most used. Under them, when usage was collected, with **Update usage statistics**; then a row per managed tool: its version, its skills, MCP servers, agents and plugins, and its sessions in the last 30 days. While another build of Central Knot is on this Mac, the window shows one screen instead of the Overview and every other page (see Updates, One build on a Mac).
 
 ### Harnesses
 

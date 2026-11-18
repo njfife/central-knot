@@ -313,8 +313,12 @@ async function harnessFlow() {
   await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-skills');
   await a.click('#nav-overview');
+  // While first setup's question is asked it says the copies that differ itself; answered No, a line of their own says them.
+  check('while first setup’s question is asked, it alone says the copies that differ', !(await a.exists('#overview-skills-differ')) && /copies that differ/.test(await a.text('#setup-question') ?? ''), await a.text('#overview-needs'));
+  await a.click('#setup-no');
+  same('answered No, one line says the found skill whose copies differ, by the page’s count', await a.text('#overview-skills-differ-line'), '1 found skill has copies that differ. Show them');
   await a.click('#overview-skills-differ');
-  check('after a harness’s Skills tab, the Overview’s “different copies” link still opens Skills narrowed to them', (await a.text('.chip-on') ?? '').startsWith('Copies differ'), await a.text('.chips'));
+  check('after a harness’s Skills tab, the Overview’s Show them still opens Skills narrowed to them', (await a.text('.chip-on') ?? '').startsWith('Copies differ'), await a.text('.chips'));
   await a.click('#nav-harnesses');
   await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-instructions');
@@ -372,7 +376,8 @@ async function manageFlow() {
   await a.click('#nav-skills');
   check('the Skills page has no Codex mark', (await a.exists('.tool-mark')) && !(await a.exists('.tool-mark[data-tool="codex-cli"]')));
   await a.click('#nav-overview');
-  check('the Overview names the managed tools and says Codex is left out', (await a.text('.overview-lead') ?? '').includes('the same in Claude Code and Copilot CLI. Codex is left out (its switch is on Harnesses).'), await a.text('.overview-lead'));
+  same('the Overview’s tools table has a row per managed tool, and the line under it says Codex is left out', [await a.all('.tools-table tbody tr', 'e.dataset.tool'), await a.text('#overview-left-out')],
+    [['claude-cli', 'copilot-cli'], 'Codex is installed and left out: its switch is on Harnesses.']);
   same('Instructions and Plugins read no Codex', [
     await a.run(`window.centralKnot.instructions().then(files => files.map(file => file.tool))`),
     await a.run(`window.centralKnot.plugins(false).then(view => view?.tools ?? [])`)], [['claude-cli', 'copilot-cli'], ['claude-cli', 'copilot-cli']]);
@@ -1015,10 +1020,26 @@ async function practiceFlow() {
   const syncRecord = join(practice, '.central-knot/sync.json'), goodRecord = readFileSync(syncRecord, 'utf8');
   writeFileSync(syncRecord, '{ damaged');
   await a.click('#header-refresh');
-  same('a damaged record is said in the bands, and every switch is off', [/The sync record is damaged/.test(await a.text('.bands') ?? ''), await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`)], [true, true]);
+  const timesSaid = async selector => ((await a.text(selector)) ?? '').split('The sync record is damaged').length - 1;
+  same('a damaged record is said in the bands, once, and every switch is off', [await timesSaid('.bands'), await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`)], [1, true]);
+  await a.click('#nav-overview');
+  same('the Overview says it once too, first of what needs you, as the stop', [await timesSaid('#overview-needs'), await timesSaid('#overview-stopped')], [1, 1]);
+  await a.click('#nav-skills');
   writeFileSync(syncRecord, goodRecord);
   await a.click('#header-refresh');
   check('put back, the switches work again', !(await a.run(`document.querySelector('#switch-notes').disabled`)), await a.text('.bands'));
+  // A damaged skills record stops skills' writes alone, its reason both the stop and a problem: the Skills page says it once, as
+  // the stop; the Overview, whose stop line is the home's record's, once, as Skills' problem with the way there.
+  const skillsRecord = join(practice, '.central-knot/skills.json'), goodSkills = readFileSync(skillsRecord, 'utf8');
+  writeFileSync(skillsRecord, '{ damaged');
+  await a.click('#header-refresh');
+  const stopSays = await a.text('.band-danger .band-text') ?? '', saidIn = async selector => ((await a.text(selector)) ?? '').split(stopSays).length - 1;
+  same('a damaged skills record: the Skills page says why once, as the stop', [stopSays.length > 0, await saidIn('.bands')], [true, 1]);
+  await a.click('#nav-overview');
+  same('and the Overview once, as Skills’ problem, with the way to Skills', [await saidIn('#overview-needs'), await a.exists('#overview-stopped'), await a.exists('#overview-skills-problem-0-open')], [1, false, true]);
+  await a.click('#nav-skills');
+  writeFileSync(skillsRecord, goodSkills);
+  await a.click('#header-refresh');
   // The practice copy has no Pi folder, only a skill in the shared .agents folder that Pi (and others) read: that makes no
   // tool present, so Pi is no column, mark or control, and Tools shows no card for it.
   mkdirSync(join(practice, '.agents/skills/shared-only'), { recursive: true });
@@ -2936,6 +2957,9 @@ async function updateFlow() {
     same('it says so, and its name says which release', [offer.label, offer.name, offer.title], ['Update available', 'Update to 0.5.0 preview 5', '0.5.0 preview 5 is available. Click to download it and restart Central Knot. Your settings and data stay as they are.']);
     same('a screen reader is told of the new release', await a.text('#update-news'), 'Central Knot 0.5.0 preview 5 is available.');
     same('the status bar keeps the version', await a.text('#status-end'), 'Central Knot 0.5.0 preview 4');
+    // The Overview, where the app opens, says it too: one line, with What's new and a button in Settings' button's words.
+    same('the Overview’s line names the release, with What’s new and Update', [(await a.text('#overview-update-line .overview-update-text'))?.trim(), (await a.text('#overview-update'))?.trim()],
+      ['Central Knot 0.5.0 preview 5 is available. What’s new', 'Update to 0.5.0 preview 5']);
     await a.click('#nav-settings');
     const row = await a.text('#setting-updates') ?? '';
     check('Settings › Updates names the build and what is available', row.includes('This is Central Knot 0.5.0 preview 4.') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
@@ -2968,6 +2992,11 @@ async function updateFlow() {
     check('and the app is still running', a.child.exitCode === null);
     check('the status bar says what restarting loses, first', /^Restarting now loses your unsaved instructions draft\./.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
     check('so does the control, whose name says it too', /unsaved instructions draft\. Click to open Settings, where you can restart anyway\.$/.test((await control()).title) && /^Restart to update: Restarting now loses your unsaved instructions draft\. Opens Settings$/.test((await control()).name), await control());
+    // The Overview's button has the control's own click: held, it says so and opens Settings.
+    await a.click('#nav-overview');
+    same('on the Overview, its button says Restart to update… too', (await a.text('#overview-update'))?.trim(), 'Restart to update…');
+    await a.click('#overview-update');
+    check('and its click is the control’s: Settings opens, and the app keeps running', await a.run(`document.querySelector('#nav-settings').getAttribute('aria-current') === 'page'`) && a.child.exitCode === null);
     // A click on the held control never restarts: it opens Settings, which says what restarting loses beside its Restart button.
     await a.click('#update-control');
     check('the held control opens Settings’ Updates row, which says what would be lost, and the app keeps running', await a.run(`document.querySelector('#nav-settings').getAttribute('aria-current') === 'page'`) && /is ready\. Restarting now loses your unsaved instructions draft\./.test(await a.text('#setting-updates') ?? '') && a.child.exitCode === null, await a.text('#setting-updates'));
@@ -5467,6 +5496,40 @@ async function usageFlow() {
     await chipNamed('All'); await a.settle();
   }
   same('no page errors, usage after a relaunch', a.pageErrors, []);
+  await a.quit();
+
+  // ---------- The Overview, the page a launch opens on: its figures land with no click, and nothing on it moves ----------
+  // Launched on this computer's home and nothing clicked: its first reading waits on the pipe. The cards, the tools table's rows
+  // and its header cells, and the usage line are measured at 1280 and 860 while it runs, then again once it has landed.
+  a = await launch(data, [], real);
+  for (let tries = 0; tries < 100 && !(await a.exists('.kind-card')); tries++) await wait(50);
+  for (let tries = 0; tries < 200 && !reading(); tries++) await wait(25);
+  const places = () => a.run(`[...document.querySelectorAll('.kind-card, .tools-table tr, .tools-table thead th, #overview-usage')].map(e => { const box = e.getBoundingClientRect(); return [box.left, box.top, box.width, box.height].map(Math.round).join(' '); })`);
+  const usageSaid = async () => (await a.text('#overview-usage .overview-usage-text:not(.band-unshown)'))?.trim();
+  const cardLines = () => a.all('#overview-skills-usage .kind-card-slot', 'e.textContent');
+  const sessionsSaid = () => a.all('.tools-table td.tools-sessions', 'e.textContent');
+  const placesWhile = {}, placesAfter = {};
+  for (const [width, height] of [[1280, 800], [860, 600]]) { await sizeTo(a, width, height); placesWhile[width] = await places(); }
+  const whileRunning = [await usageSaid(), await cardLines(), [...new Set(await sessionsSaid())]];
+  await letGo();
+  for (let tries = 0; tries < 100 && !/^Usage collected/.test(await usageSaid() ?? ''); tries++) await wait(100);
+  await a.settle();
+  for (const [width, height] of [[860, 600], [1280, 800]]) { await sizeTo(a, width, height); placesAfter[width] = await places(); }
+  same('launched with nothing clicked, the Overview holds each figure’s room while the first reading runs: the line says it is collecting, the Skills card … where its count will be, every sessions cell …',
+    whileRunning, ['Collecting usage statistics: reading your tools’ session history on this computer. Nothing leaves it.', ['Used in the last 30 days: …', '', '', '', ''], ['…']]);
+  same('the figures land by themselves, and no card, table row, header cell or the usage line moved, at 1280 and at 860', [placesAfter[1280], placesAfter[860]], [placesWhile[1280], placesWhile[860]]);
+  same('the Skills card says the reading as its page does: 3 used, the No use seen chip’s 2 (bravo and delta) as a link, and the three most used by sessions, equal ones by name; the line, when',
+    [await cardLines(), await a.text('#overview-skills-unused'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [['Used in the last 30 days: 3', 'No use seen in 30 days: 2', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], 'No use seen in 30 days: 2', true]);
+  check('every tool’s sessions cell has its figure, or why there is none', (await sessionsSaid()).every(said => said && said !== '…'), await sessionsSaid());
+  await a.click('#overview-skills-unused');
+  same('No use seen opens Skills on that chip, the rows the card counted', [await a.run(`document.querySelector('.chip-on')?.dataset.tip`), (await sectionsNow(a))[0]?.[1]], ['No use seen in 30 days', ['bravo', 'delta']]);
+  await a.click('#nav-overview');
+  await a.click('#overview-skills-top-1');
+  same('a most used name opens its row on Skills, under All', [await a.run(`document.querySelector('.chip-on')?.dataset.tip ?? 'All'`), await a.run(`document.querySelector('.ov-row[data-key="echo"]')?.getAttribute('aria-expanded')`)], ['All', 'true']);
+  await a.click('#nav-overview');
+  await fullSize(a);
+  await fitsAtMinimum(a, 'the Overview with usage collected');
+  same('no page errors, the Overview', a.pageErrors, []);
   await a.quit();
   // Started at sign-in, with no window (--hidden): nothing is collected until the window first shows (a second launch shows it).
   a = await launch(data, ['--hidden'], real);

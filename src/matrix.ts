@@ -31,7 +31,7 @@ import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
 import { keptBack } from './clickplan.ts';
-import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, SyncNotice, HarnessId, TakenInNotice, ThroughPlugin, UsageReading } from './types.ts';
+import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, SyncGate, SyncNotice, HarnessId, TakenInNotice, ThroughPlugin, UsageReading } from './types.ts';
 import { pluginOf } from './sourcelink.ts';
 import { market } from './pluginstate.ts';
 import type { PluginDraft } from './pluginplan.ts';
@@ -296,24 +296,32 @@ const newView = () => ({
 });
 const views: Record<PageKind, ReturnType<typeof newView>> = { skills: newView(), mcp: newView(), agents: newView() };
 /**
- * Opens a page already narrowed, for links that point at a problem (the Overview's or a harness card's "different copies").
- * `harness`: the harness page it opens on (none: the kind's own page), so the first draw there keeps this filter.
+ * Opens a harness's page already narrowed, for a harness card's "different copies" link (harnesspage.ts goHarness): the first
+ * draw there keeps this filter. A kind's own page opens through openKind.
  */
-export const showFiltered = (which: PageKind, filter: Filter, harness?: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
+export const showFiltered = (which: PageKind, filter: Filter, harness: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
 /** A table drawn for another page (a harness's, or the kind's own) starts with no filter, Find text, open row or menu from the last one. */
 function startFresh(table: ReturnType<typeof newView>, harness: Tool | undefined) {
   Object.assign(table, { filter: 'all', find: '', comparing: undefined, confirmDelete: undefined, shownFor: harness });
 }
-/** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name, and scrolls it into view. */
+/**
+ * The one way into a kind's own page from elsewhere (the Overview's cards and lines, a plugin's page): drawn afresh (startFresh),
+ * narrowed by `filter` ("Copies differ", "No use seen in 30 days"), or with the row `key` open and scrolled into view (a plugin's
+ * own row too: it shows under All). Its first draw there keeps both.
+ */
+export function openKind(which: PageKind, { filter, key }: { filter?: Filter; key?: string } = {}) {
+  startFresh(views[which], undefined);
+  if (filter) views[which].filter = filter;
+  views[which].comparing = key;
+  showPage(which);
+  if (key) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
+}
+/** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name (a plugin's page names its parts so). */
 export function openItem(which: PageKind, name: string) {
   const facts = state.home && kindSource(state.home, which).facts;
   const partKind = partOfPage[which];
   const key = facts?.find(item => samePart({ kind: partKind, name: item.key }, { kind: partKind, name }) || samePart({ kind: partKind, name: item.name }, { kind: partKind, name }))?.key;
-  // Drawn for the kind's own page (startFresh), so its first draw there keeps this row open.
-  startFresh(views[which], undefined);
-  views[which].comparing = key;
-  showPage(which);
-  if (key) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
+  openKind(which, { key });
 }
 let view = views.skills;
 /** The page the tables were last drawn on. */
@@ -753,17 +761,23 @@ export function caughtUpBand(home: HomeView): HTMLElement | null {
     closeButton(() => { state.dismissed.add(key); rerender(); }, { id: 'caught-up-dismiss' }));
 }
 
+/**
+ * A kind's problems (what couldn't be read) but the reason of the stop a page says on its own line (`gate`), so it is said once:
+ * the bands above a table say the kind's own stop (a library file that can't be read is both), the Overview the home's.
+ */
+export const problemsBesideStop = (problems: string[], gate: SyncGate) => problems.filter(problem => gate.state !== 'stopped' || problem !== gate.reason);
+
 /** The bands above a table, from its kind's view (listView). */
 function listNotices() {
   const mcp = listView()!;
   const bands: HTMLElement[] = [];
   for (const band of [syncOffBand(), walkthroughBand(kind, copyQuestion)]) if (band) bands.push(band);
   if (!mcp.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, mcp.access.reason)));
-  // A record that stops every write (damaged, newer, another generation): said once, unless a problem below says it already.
-  if (mcp.gate.state === 'stopped' && !mcp.problems.includes(mcp.gate.reason)) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, mcp.gate.reason)));
+  // A record that stops every write (damaged, newer, another generation): said once, here, and not again among the problems.
+  if (mcp.gate.state === 'stopped') bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, mcp.gate.reason)));
   const resume = resumeBand();
   if (resume) bands.push(resume);
-  for (const problem of mcp.problems) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));
+  for (const problem of problemsBesideStop(mcp.problems, mcp.gate)) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));
   const unread = unreadBand();
   if (unread) bands.push(unread);
   const told = toldNotices();
@@ -1352,8 +1366,12 @@ function row(skill: ItemRow) {
 
 // ---------- Usage, collected when a home opens and on Update (app.ts collectUsage; usagerow.ts says what it means for a row) ----------
 
-/** The reading on show: on a kind's own page, once one is collected for this home; none after a reading that failed. */
-const reading = () => (focus || state.usage.state === 'failed' ? undefined : state.usage.data);
+/** The usage reading on show: the last one collected for this home, kept while another runs; none after a reading that failed. The item pages and the Overview read it. */
+export const usageOnShow = () => (state.usage.state === 'failed' ? undefined : state.usage.data);
+/** A home's first reading runs (none on show yet): what a reading fills holds its room meanwhile, here and on the Overview. */
+export const firstReadingRuns = () => state.usage.state === 'reading' && !state.usage.data;
+/** The reading on a kind's own page (never on a harness's). */
+const reading = () => (focus ? undefined : usageOnShow());
 /** A row's item as its kind's view has it (types.ts LibraryFacts), whose names in each tool usagerow.ts matches. */
 const factsOf = (skill: ItemRow) => (state.home ? kindSource(state.home, kind).facts.find(facts => facts.key === skill.key) : undefined);
 /** What each tool the reading read says of a row's item (usagerow.ts allSay): a use in a tool not managed here counts too. */
@@ -1362,8 +1380,8 @@ function usageOf(facts: UsageFacts | undefined): ToolSays[] {
   return read && facts ? allSay(read, partOfPage[kind], facts) : [];
 }
 
-/** While a home's first reading runs (none on show yet): its rows' cells and an opened row's lines hold their room, empty or saying so. */
-const firstReading = () => !focus && state.usage.state === 'reading' && !state.usage.data;
+/** While a home's first reading runs, on a kind's own page: its rows' cells and an opened row's lines hold their room, empty or saying so. */
+const firstReading = () => !focus && firstReadingRuns();
 
 /**
  * At the toolbar's end of a kind's own page: when usage was collected ("Collected 8:44 AM", "· no sessions yet" where no tool
@@ -1425,25 +1443,27 @@ function usedCell(facts: UsageFacts | undefined) {
 
 /**
  * Whether this page draws the Used column: while a home's first reading runs (its room held, the cells empty), and once a reading
- * is on show where some row here has a figure. A page where every row would say "can't say" (no tool that has its items on keeps
- * sessions here, say) shows none; each opened row still says why. Asked once per draw of the table (itemsTable: usedHere).
+ * is on show where some row here has a figure (usagerow.ts KindUsage figured). A page where every row would say "can't say" (no
+ * tool that has its items on keeps sessions here, say) shows none; each opened row still says why. Asked once per draw of the
+ * table (itemsTable: usedHere).
  */
 function usedColumn() {
   if (firstReading()) return true;
-  return !!reading() && [...committedList().map(factsOf), ...plugged().rows.map(pluginRowFacts)].some(facts => !!figureOf(facts));
+  return !!kindUsage()?.figured;
 }
 /** Whether the table being drawn has the Used column (usedColumn), set by itemsTable before its rows. */
 let usedHere = false;
 
-/** The reading in sum (usagerow.ts usageSummary), worked out again only when the reading or the home's view changes. */
+/** The reading on show in sum (usagerow.ts usageSummary), worked out again only when the reading or the home's view changes: the item pages and the Overview read this one. */
 let summed: { read: UsageReading; home: HomeView; sum: UsageSummary } | undefined;
-/** This kind's items in the reading's sum: the "No use seen in 30 days" chip's lists and what its band leaves out, by the summary's rule. */
-function kindUsage(): KindUsage | undefined {
-  const read = reading(), home = state.home;
+export function usageSums(): UsageSummary | undefined {
+  const read = usageOnShow(), home = state.home;
   if (!read || !home) return undefined;
   if (summed?.read !== read || summed.home !== home) summed = { read, home, sum: usageSummary(read, home) };
-  return summed.sum.kinds[kind];
+  return summed.sum;
 }
+/** This kind's items in the reading's sum, on its own page: whether it has a Used column, the "No use seen in 30 days" chip's lists and what its band leaves out. */
+const kindUsage = (): KindUsage | undefined => (reading() ? usageSums()?.kinds[kind] : undefined);
 /** Whether a row is in the "No use seen in 30 days" chip, and how many it holds (no chip at 0). */
 const inUnusedChip = (skill: ItemRow) => !!kindUsage()?.noUseSeen.includes(skill.key);
 const unusedCount = () => kindUsage()?.noUseSeen.length ?? 0;

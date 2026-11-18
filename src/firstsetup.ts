@@ -3,7 +3,7 @@
 // (everything.ts setSyncEverything; absent in the view until it is answered: types.ts SyncView syncEverything), and the
 // walkthrough's place lives in this window until it is left. Whether the question is asked, what Yes would do, and which items
 // wait for a choice are setupcounts.ts's, pure. The question, and the way back into the walkthrough, have one place: the top of
-// the Overview (setupLead, drawn by pages.ts overviewPage). The walkthrough is a band at the top of the item page of the item it
+// the Overview (setupLead, first of what needs you: overview.ts needsYou). The walkthrough is a band at the top of the item page of the item it
 // is at (walkthroughBand, drawn by matrix.ts listNotices), holding that item's copy question as its row shows it (matrix.ts
 // copyQuestion, which listNotices hands it, so this module needs nothing of matrix.ts), the latest copy preselected (library.ts latestCopy, in the take-in answer). Settings' Synchronize everything row
 // counts as the question does and leads in too (settingspage.ts). What Yes does in the engine, and its one Undo in History, are
