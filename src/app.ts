@@ -311,6 +311,7 @@ export const showActing = () => {
 };
 /** What follows any acting once it ends: a background refresh asked for meanwhile runs, the Git repo's count is read again (no fetch), and the result's time to go starts. */
 export function afterActing() {
+  if (!acting() && menuSyncHome) void syncNow(menuSyncHome);
   drainOwedRefresh();
   if (state.home) loadRepoSoon();
   fadeLater();
@@ -1019,8 +1020,8 @@ export interface Outcome {
   items?: string[];
   /** Said again on the next page opened (a home just opened). */
   carry?: boolean;
-  /** An instruction file saved (of `tool`): its card says so, with its Undo (instructionspage.ts). */
-  kind?: 'saved';
+  /** A saved instruction goes on its card (instructionspage.ts); a Sync once result makes room for its lines. */
+  kind?: 'saved' | 'sync-once';
   tool?: HarnessId;
   history?: boolean;
   /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be. */
@@ -1459,11 +1460,19 @@ export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synch
   announce(!on ? 'Synchronize everything is off: what turns up in a tool waits for Add.' : state.home?.syncOn ? 'Synchronize everything is on.' : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', true);
 });
 
-export const syncNow = () => busy('Syncing…', async () => {
-  const view = await api().syncNow(state.home!.home);
-  setHome(view);
-  announce('Synced once. Automatic sync stays off.', true);
-});
+let menuSyncHome: string | undefined;
+export async function syncNow(home = state.home?.home) {
+  if (acting() || !home) return;
+  menuSyncHome = undefined;
+  if (home !== state.home?.home) { announce('The open home changed before Sync once could run.'); return; }
+  await busy('Syncing…', async () => {
+    const result = await api().syncNow(home).finally(() => { menuSyncHome = undefined; });
+    if (!result) return;
+    setHome(result.view);
+    tell({ page: state.page, kind: 'sync-once', band: true, history: result.history, text: result.text, warn: result.warn });
+  });
+}
+api().onSyncRequest(() => { if (acting()) menuSyncHome = state.home?.home; else void syncNow(); });
 
 /** A background read is running, or one arrived while the page was acting and runs when it is done (afterActing). */
 let refreshing = false;

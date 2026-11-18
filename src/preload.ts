@@ -33,6 +33,7 @@ const api: DesktopApi = {
   startHome: () => ipcRenderer.invoke('discovery:start'),
   applyAgents: (changes, resume, home) => ipcRenderer.invoke('agents:apply', changes, resume, home),
   setSync: on => ipcRenderer.invoke('sync:set', on),
+  onSyncRequest: callback => { ipcRenderer.on('sync:request', () => callback()); },
   syncNow: home => ipcRenderer.invoke('sync:now', home),
   setSyncEverything: (on, home, answering) => ipcRenderer.invoke('sync:everything', on, home, answering),
   manageTool: (tool, on, resume, home) => ipcRenderer.invoke('tools:manage', tool, on, resume, home),

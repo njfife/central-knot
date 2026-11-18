@@ -400,6 +400,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .band .text-action.text-danger:hover { color: var(--danger); }
 .band-lines { display: flex; flex-direction: column; gap: 2px; }
 .band-danger { background: var(--danger-tint); color: var(--danger); }
+[data-outcome="sync-once"] .band-text { white-space: pre-line; overflow: auto; overflow-wrap: anywhere; max-height: 35vh; }
+#header:has([data-outcome="sync-once"]) { height: auto; min-height: 48px; padding-block: 6px; }
 .band-done, .band-done .band-text { color: var(--ink); }
 .band-actions { flex: none; display: inline-flex; align-items: center; gap: 6px; }
 .band-actions:empty { display: none; }

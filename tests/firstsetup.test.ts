@@ -101,6 +101,17 @@ test('A new home is asked: Yes switches the rule on with one History entry, and 
   } finally { await box.cleanup(); }
 });
 
+test('Yes counts only the kinds whose records let the pass run', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['codex-cli'], 'notes');
+    await putServers(box, 'claude-cli', { docs: { command: 'docs' } });
+    const view = await homeView(box);
+    view.skills.gate = { state: 'stopped', reason: 'The skills record is damaged.' };
+    assert.deepEqual(whatYesDoes(view), { takes: 1, to: tools.filter(tool => tool !== 'claude-cli'), choosing: 0 });
+  } finally { await box.cleanup(); }
+});
+
 test('No stores the rule off with no History entry and changes no file; the home is not asked again, and Settings can still switch it on', async () => {
   const box = await sandbox();
   try {
