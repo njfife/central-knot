@@ -1462,7 +1462,16 @@ export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synch
 export const syncNow = () => busy('Syncing…', async () => {
   const view = await api().syncNow(state.home!.home);
   setHome(view);
-  announce('Synced once. Automatic sync stays off.', true);
+  if (!view) return;
+  const copies = view.sync.caughtUp.flatMap(({ item, harness, outcome }) => {
+    if (!harness) return [];
+    if (outcome === 'removed') return [`Removed ${item} from ${toolName(harness)}.`];
+    return outcome === 'written' ? [`Copied ${item} to ${toolName(harness)}.`] : [];
+  });
+  const problems = view.sync.caughtUp.filter(result => result.outcome === 'failed').map(result => result.message);
+  const result = [...copies, ...problems, whyReadOnly(view)].filter(Boolean).join(' ') || 'Sync once finished.';
+  tell({ page: state.page, band: true, warn: problems.length > 0 || !!whyReadOnly(view),
+    text: view.syncOn ? result : `${result} Automatic sync stays off.` });
 });
 
 /** A background read is running, or one arrived while the page was acting and runs when it is done (afterActing). */

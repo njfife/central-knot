@@ -13,7 +13,7 @@ import { button, closeButton, h, icon } from './dom.ts';
 import { rowClicks } from './libraryrow.ts';
 import { plural } from './model.ts';
 import { oneUndoCovers } from './historyactions.ts';
-import { asksNow, KINDS, latestDone, waitingForChoice, walkId, walkPlace, wayBackIn, whatYesDoes, type Waiting } from './setupcounts.ts';
+import { asksNow, KINDS, setupKinds, latestDone, waitingForChoice, walkId, walkPlace, wayBackIn, whatYesDoes, type Waiting } from './setupcounts.ts';
 import type { Change, HomeView, PassResult } from './types.ts';
 import { andList, kindNouns, toolName } from './words.ts';
 
@@ -39,9 +39,12 @@ export function setupLead(home: HomeView): HTMLElement | null {
 }
 
 function question(home: HomeView) {
-  const yes = whatYesDoes(home);
+  const yes = whatYesDoes(home), ready = setupKinds(home);
+  const stopped = KINDS.filter(kind => !ready.includes(kind)).map(kind => kindNouns[kind].many);
+  const waits = stopped.length ? `Found ${andList(stopped)} wait until their record can be used.` : '';
   // What Yes adds at once, then what waits for a choice (nothing is chosen for anyone), then what Yes leaves to a later step.
   const now = yes.takes ? `Yes takes in now the ${plural(yes.takes, 'item')} found in your tools that Central Knot doesn’t keep yet, and puts each in the tools that lack it${yes.to.length ? ` (${andList(yes.to.map(toolName))})` : ''}; what turns up later is taken in too.`
+    : waits ? 'Yes takes in what turns up later.'
     : 'Nothing found in your tools now is new to Central Knot; Yes takes in what turns up later.';
   const choosing = yes.choosing ? ` ${plural(yes.choosing, 'more item')} ${yes.choosing === 1 ? 'has' : 'have'} copies that differ and ${yes.choosing === 1 ? 'waits' : 'wait'} for you: nothing is chosen for you. You’re asked about each, one at a time, with the latest copy marked where one can be told, or you skip it and its copies stay as they are.` : '';
   const later = home.syncOn ? '' : ' Automatic sync is off, so nothing is added until you click Sync once.';
@@ -49,7 +52,7 @@ function question(home: HomeView) {
   return h('section.setup-question', { id: 'setup-question', 'aria-labelledby': 'setup-question-title' },
     h('h2.setup-title', { id: 'setup-question-title' }, 'Synchronize everything?'),
     // One fact to a line, so the question reads at a glance: what Yes adds, what waits, the way back, Automatic sync.
-    h('div.setup-text', {}, ...[now, choosing, oneUndoCovers, later].map(line => line.trim()).filter(Boolean).map((line, at, lines) => h('p.setup-line', {}, at < lines.length - 1 ? `${line} ` : line))),
+    h('div.setup-text', {}, ...[now, waits, choosing, oneUndoCovers, later].map(line => line.trim()).filter(Boolean).map((line, at, lines) => h('p.setup-line', {}, at < lines.length - 1 ? `${line} ` : line))),
     h('p.setup-text', { id: 'setup-no-says' }, no),
     h('div.setup-actions', {},
       button({ variant: 'primary', label: 'Synchronize everything', id: 'setup-yes', disabled: acting(), onclick: () => void answer(true) }),

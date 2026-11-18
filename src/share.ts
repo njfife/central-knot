@@ -5,7 +5,7 @@
 // - two gates: writeAccess, whether this window may write this home at all (the real home only when chosen; nothing while this
 //   build is held by another: ShareContext held), and the gate for
 //   library writes (libraryGate), the one answer to "may this write of the library happen now", which asks writeAccess and
-//   syncGate (whether the record can be read, is the one this build remembers, or waits for Resume). A write of the library
+//   syncGate (whether the record can be read and saved, is the one this build remembers, or waits for Resume). A write of the library
 //   asks libraryGate, never the two apart; the views read them apart, to say why on the page;
 // - checked writes: a tool's file written or removed only while it holds what was read (writeFileChecked, removeFileChecked,
 //   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably);
@@ -457,6 +457,11 @@ export async function libraryGate(context: ShareContext, asked: Entering = {}): 
 export async function syncGate(context: ShareContext): Promise<SyncGate> {
   const { record, problem } = await readRecord(context.home);
   if (problem) return { state: 'stopped', reason: `${problem} ${NOTHING_CHANGED}` };
+  // Even a new home needs somewhere to save its first answer. A new store is created in the home.
+  const store = storeDirectory(context.home);
+  const folder = await exists(store) ? store : context.home;
+  try { await access(folder, constants.W_OK | constants.X_OK); }
+  catch (error) { return { state: 'stopped', reason: plainError(error) }; }
   const remembered = (await readSettings(context.settingsPath)).homes?.[context.home]?.generation;
   if (!record) return remembered ? { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` } : { state: 'first-setup' };
   if (!remembered) return { state: 'needs-resume', reason: 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.' };

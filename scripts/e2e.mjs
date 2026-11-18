@@ -4699,6 +4699,7 @@ async function firstSetupFlow() {
 
   // A third home, with Automatic sync off: Yes says nothing is added until Sync once, and offers it.
   const third = homeFor('home-setup-three');
+  mkdirSync(join(third.home, '.copilot/skills'), { recursive: true });
   saved(skill(third.claude, 'notes', text('notes', 'Take notes.')), 5);
   mkdirSync(third.codex, { recursive: true });
   const thirdData = join(scratch, 'setup-data-four');
@@ -4713,8 +4714,58 @@ async function firstSetupFlow() {
   await d.click('#setup-sync-once');
   for (let tries = 0; tries < 40 && !readNow(join(third.codex, 'notes/SKILL.md')); tries++) await wait(100);
   same('and its Sync once takes notes in', readNow(join(third.codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
+  const copies = [third.claude, third.codex, join(third.home, '.copilot/skills')].map(folder => join(folder, 'notes'));
+  const beforeDeletion = copies.map(folder => tree(folder));
+  rmSync(copies[1], { recursive: true });
+  await d.click('#header-refresh');
+  await sizeTo(d, 1280, 800);
+  await d.click('#overview-sync-now');
+  const removed = copies.every(folder => !existsSync(folder));
+  check('one Sync once removes both remaining copies and names notes in its result',
+    removed && /removed.*notes/i.test(await d.run("document.querySelector('#announcement').dataset.text")), copies.map(folder => existsSync(folder)));
+  await d.shot('sync-once-removed');
+  if (removed) {
+    await d.click('#overview-sync-now');
+    check('the next Sync once reports no further removal', !/Removed notes/.test(await d.text('[data-outcome] .band-text')));
+    await d.click('#nav-history');
+    await d.click('.history-row[data-kind="off"] .history-actions button');
+    same('Undo returns every notes folder byte for byte', copies.map(folder => existsSync(folder) && tree(folder)), beforeDeletion);
+    await d.click('#sync-switch');
+    rmSync(copies[1], { recursive: true });
+    for (let tries = 0; tries < 80 && existsSync(copies[0]); tries++) await wait(150);
+    check('Automatic sync finishes the same hand deletion by itself', copies.every(folder => !existsSync(folder)));
+  }
   same('no page errors, first setup with Automatic sync off', d.pageErrors, []);
   await d.quit();
+
+  for (const scenario of ['damaged', 'readonly']) {
+    const blocked = homeFor('setup-' + scenario), store = join(blocked.home, '.central-knot');
+    mkdirSync(blocked.claude, { recursive: true });
+    saved(skill(blocked.codex, 'plan'), 5);
+    mkdirSync(store);
+    if (scenario === 'damaged') writeFileSync(join(store, 'skills.json'), '{');
+    else { chmodSync(store, 0o555); chmodSync(blocked.home, 0o555); }
+    const data = join(scratch, 'data-' + scenario);
+    opened(blocked.home, data);
+    const page = await launch(data, [], real);
+    try {
+      await sizeTo(page, 1280, 800);
+      if (scenario === 'damaged') {
+        const words = await page.text('#setup-question');
+        check('setup says found skills wait for their problem and promises no copy from the damaged kind',
+          /skills.*wait|wait.*skills/i.test(words) && !/takes in now the 1 item/.test(words)
+          && /damaged[\s\S]*Synchronize everything\?/.test(await page.text('#overview-needs')), words);
+      } else {
+        check('a read-only store explains the stop before setup and offers no Yes',
+          !(await page.exists('#setup-yes')) && /read-only|Permission was denied/i.test(await page.text('#overview-stopped'))
+          && !/Open one below and turn on/.test(await page.text('.overview-lead')), await page.text('#overview-needs'));
+      }
+      await page.shot('setup-' + scenario);
+    } finally {
+      chmodSync(blocked.home, 0o755); chmodSync(store, 0o755);
+      await page.quit();
+    }
+  }
 }
 
 /**

@@ -468,8 +468,8 @@ function refreshTray() {
   const short = profile && profile.length > 20 ? `${profile.slice(0, 19)}…` : profile;
   if (process.platform === 'darwin') tray.setTitle(`${unseen || unseenPlugins ? '•' : ''}${short ? ` ${short}` : ''}`.trim());
 }
-/** Sync once, from either menu: one pass that writes, with Automatic sync left off. */
-const syncOnce = () => fromTray(async () => { keepPass(await pass(await read(), true)); });
+/** Sync once, from either menu: including the settling reread, with Automatic sync left off. */
+const syncOnce = () => fromTray(async () => { keepPass(await explicitPass(await read())); });
 /** Menu bar actions take their turn like the page's, then tell the page. */
 async function fromTray(work: () => Promise<void>) {
   await queued(work).catch(() => undefined);
@@ -575,14 +575,14 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   return (await syncAndView(explicit)).view;
 }
 
-/** The look for other builds, one pass, then the view built from the home as it left it; `passed`: what the pass did. */
+/** The look for other builds, sync, then the view built from the home as sync left it; `passed`: what the pass did. */
 async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: BackgroundPass }> {
   // First, so the held screen is shown before any pass could write: held, the pass below meets writeAccess's refusal. A record
   // taken over on the way is said with the view (a click on the held screen says it itself: carryOn).
   const tookOver = await lookForOthers();
   const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
-  const passed = await pass(before, explicit), { skills } = passed;
+  const passed = explicit ? await explicitPass(before) : await pass(before), { skills } = passed;
   keepPass(passed);
   lookAgainSoon(passed);
   foundGained(passed);
@@ -846,12 +846,24 @@ function foundGained({ skills, serversAndAgents }: BackgroundPass): boolean {
   lastFound = found;
   return gained;
 }
+const AFTER_SETTLE_MS = 2_500;
+const settling = ({ skills, serversAndAgents }: BackgroundPass) => skills?.settling || serversAndAgents?.settling;
+
+/** Sync once waits for a save in progress, then reads afresh once, even with background writes off. */
+async function explicitPass(snapshots: Snapshot[]): Promise<BackgroundPass> {
+  const first = await pass(snapshots, true);
+  if (!settling(first)) return first;
+  keepPass(first);
+  await new Promise(done => setTimeout(done, AFTER_SETTLE_MS));
+  return pass(await read(), true);
+}
+
 /**
  * Something a pass left inside its settle window (a copy missing just now, or a new one Synchronize everything waits to take
  * in while it is still being saved): look again just after it, so it finishes without a click. Otherwise an event or the poll.
  */
-function lookAgainSoon({ skills, serversAndAgents }: BackgroundPass) {
-  if (skills?.settling || serversAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
+function lookAgainSoon(passed: BackgroundPass) {
+  if (settling(passed)) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, AFTER_SETTLE_MS); }
 }
 
 /** The menus follow the open home's profiles and the library's items, which say which profile is in use. */

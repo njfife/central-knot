@@ -64,7 +64,7 @@ function nextStep(home: HomeView, asking: boolean): string {
   // A tool left out is named under the tools table, with where its switch is.
   if (homeTools().length === 1) return home.sync.present.length > 1 ? ''
     : ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
-  return home.sync.access.allowed && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
+  return !whyReadOnly(home) && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
 /** The practice copy explains itself the first times it opens: what it is, that it is safe, and how to move to the real thing. */
@@ -98,7 +98,7 @@ function readOnlyLine(home: HomeView): HTMLElement | null {
 }
 
 /**
- * What needs the person, before any figure, in this order: first setup (its question, Resume, or the way into choosing copies:
+ * What needs the person, before any figure, in this order: first setup (after the problems when a kind is stopped; its question, Resume, or the way into choosing copies:
  * firstsetup.ts setupLead); an update to install (updateview.ts updateLine); why the home can't be written (readOnlyLine); each
  * kind's problems, each said once (but the stop said above: matrix.ts problemsBesideStop); found items whose copies differ, a line
  * per kind with the page's "Copies differ" count, where first setup doesn't speak of them; Automatic sync off.
@@ -116,7 +116,9 @@ function needsYou(home: HomeView): HTMLElement | null {
   });
   const syncOff = empty || whyReadOnly(home) || home.syncOn ? null : line('overview-sync-off', 'circle-minus', 'tone-warning', 'Automatic sync is off: edits wait until you turn it on or ',
     link('Sync once', 'overview-sync-now', () => void syncNow()), '.');
-  const lines = [empty ? null : setupLead(home), updateLine(), readOnlyLine(home), ...problems, ...differ, syncOff].filter((each): each is HTMLElement => !!each);
+  const setup = empty ? null : setupLead(home);
+  const setupAfterStop = asksNow(home) === 'question' && kinds.some(kind => home[kind].gate.state === 'stopped');
+  const lines = [setupAfterStop ? null : setup, updateLine(), readOnlyLine(home), ...problems, setupAfterStop ? setup : null, ...differ, syncOff].filter((each): each is HTMLElement => !!each);
   return lines.length ? h('div.overview-needs', { id: 'overview-needs' }, lines) : null;
 }
 
