@@ -128,7 +128,8 @@ export function previewBlock(text: string, key: string, label: string, moreId: s
     else announce(edit.locked);
   };
   const editable = !!edit && !edit.locked;
-  return [h(`pre.ins-preview${editable ? '.ins-editable' : ''}`, { tabindex: '0', 'aria-label': label, 'aria-description': editable ? 'Click or press Enter to edit' : undefined,
+  // Its id lets a redraw keep a selection in it (dom.ts keepSelection).
+  return [h(`pre.ins-preview${editable ? '.ins-editable' : ''}`, { id: `shown-${key}`, tabindex: '0', 'aria-label': label, 'aria-description': editable ? 'Click or press Enter to edit' : undefined,
     onclick: edit ? (event: MouseEvent) => { const pre = event.currentTarget as HTMLElement; if (!selectedIn(pre)) begin(offsetAt(pre, event.clientX, event.clientY)); } : undefined,
     onkeydown: edit ? (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault(); begin(0); } } : undefined },
   (all ? lines : lines.slice(0, 14)).join('\n')),

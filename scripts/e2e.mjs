@@ -4489,6 +4489,31 @@ async function draftFlow() {
   await a.settle();
   same('a double-click on a word selects it, in the editor its first click opened', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionEnd)]; })()`), ['ins-text-codex-cli', 'last']);
   await a.press('Escape');
+  for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
+  // A pointer gesture is not redrawn under: a redraw asked for between a press and its release (here Refresh, as a background
+  // pass would) waits for the release. The text pressed is still there when the button comes up (marked before the press).
+  const marked = () => a.run(`document.querySelector('#shown-codex-cli').dataset.marked === 'yes'`);
+  const mark = () => a.run(`document.querySelector('#shown-codex-cli').dataset.marked = 'yes'`);
+  const mouse = (type, at, buttons, clickCount = 1) => a.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', buttons, clickCount });
+  const redrawNow = async () => { await a.run(`document.querySelector('#header-refresh').click()`); await a.settle(); };
+  await a.run(`document.querySelector('#ins-head-codex-cli').scrollIntoView({ block: 'start' })`);
+  const aim = await pointAt(a, codexText, 'line two');
+  await mark(); await mouse('mouseMoved', aim, 0); await mouse('mousePressed', aim, 1);
+  await redrawNow();
+  const keptUnderPress = await marked();
+  await mouse('mouseReleased', aim, 0); await a.settle();
+  same('a click on a card’s text with a redraw asked for between press and release: the text stays until the release, and the editor opens with the caret where it was aimed',
+    [keptUnderPress, ...await caretAt(a)], [true, 'ins-text-codex-cli', 'Run codex review before pushing.\nline one\n'.length]);
+  await a.press('Escape');
+  for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
+  const start = await pointAt(a, codexText, 'line one'), end = await pointAt(a, codexText, 'last line');
+  await mark(); await mouse('mouseMoved', start, 0); await mouse('mousePressed', start, 1); await mouse('mouseMoved', aim, 1);
+  await redrawNow();
+  await mouse('mouseMoved', end, 1); await mouse('mouseReleased', end, 0); await a.settle();
+  same('a drag across a card’s text with a redraw asked for in the middle keeps its selection and opens no editor, the redraw made after the release',
+    [await a.exists('#ins-text-codex-cli'), (await a.run(`String(getSelection())`)).includes('line two'), await marked()], [false, true, false]);
+  await a.run(`getSelection().removeAllRanges()`);
+
   writeFileSync(agentsMd, codex0);
   await a.click('#header-refresh'); await a.click('#nav-skills'); await a.click('#nav-instructions');
 
@@ -4723,6 +4748,14 @@ async function draftFlow() {
     await a.click('#base-draft-cancel');
   }
   await fullSize(a);
+  // A redraw keeps a selection in the log's lines, as it keeps the scroll place and the focus.
+  await a.click('#nav-settings');
+  await a.click('#show-log');
+  for (let tries = 0; tries < 50 && !(await a.exists('#log-text')); tries++) await wait(100);
+  const picked = await a.run(`(() => { const text = document.querySelector('#log-text'), node = text.firstChild, range = document.createRange(); text.dataset.marked = 'yes';
+    range.setStart(node, 0); range.setEnd(node, Math.min(40, node.length)); getSelection().removeAllRanges(); getSelection().addRange(range); return String(getSelection()); })()`);
+  await a.click('#sidebar-toggle'); await a.click('#sidebar-toggle');
+  same('a selection in the log’s lines is the same after a redraw drew them again', [await a.run(`document.querySelector('#log-text').dataset.marked === 'yes'`), await a.run(`String(getSelection())`)], [false, picked]);
   same('no page errors, draft', a.pageErrors, []);
   await a.quit();
 }
@@ -5148,7 +5181,8 @@ fs.writeFileSync(record, JSON.stringify(now));
   await letRunGo();
   same('a run left for Agents: its result is in the status bar, never in the Agents header', [await a.exists('#header [data-outcome]'), (await a.text('#announcement'))?.startsWith('srv-37 is off')], [false, true]);
   await a.click('#nav-mcp');
-  // A press on a switch whose release comes after a redraw replaced it (another switch clicked between) still counts.
+  // A press on a switch, another switch clicked before its release: the redraw that click asks for waits for the release, so the
+  // pressed switch is still there and its click counts (dom.ts paintWhenNoPress).
   await putAt(table, row('srv-38'), 200);
   const [x38, y38] = await middleOf('#switch-srv-38');
   await a.run(`document.getElementById('switch-srv-38').dataset.pressed = 'yes'`);
@@ -5157,7 +5191,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   const redrawn = await a.run(`document.getElementById('switch-srv-38').dataset.pressed !== 'yes'`);
   await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x38, y: y38, button: 'left', clickCount: 1 });
   await done();
-  same('a press released after a redraw replaced its switch still counts as its click', [redrawn, await switchOn(a, 'srv-38'), await switchOn(a, 'srv-32')], [true, false, false]);
+  same('a press on a switch is not redrawn under by another switch clicked before its release, and both clicks count', [redrawn, await switchOn(a, 'srv-38'), await switchOn(a, 'srv-32')], [false, false, false]);
 
   // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it. The
   // last result closed first, so the click below is a run of its own.
@@ -5232,8 +5266,8 @@ fs.writeFileSync(record, JSON.stringify(now));
   await sizeTo(a, 1728, 1117);
   const fiveWide = await fiveQuickly('plug-31');
   same('…and so in the wide table', ...fiveWide);
-  // A press on plug-24's switch, plug-30's switch clicked before the release (the list redrawn: plug-24's switch replaced), then the
-  // release: still plug-24's click (judges/ci1-builder-report.md, "For the LIST step"). Both are put back after.
+  // A press on plug-24's switch, plug-30's switch clicked before the release, then the release: the list is not redrawn under the
+  // press (dom.ts paintWhenNoPress), so plug-24's switch is still there and its click counts. Both are put back after.
   await putAt(list, '[data-plugin="plug-24"]', 200);
   const pressedBefore = await states('[data-plugin]'), [x24, y24] = await middleOf('#pswitch-0-plug-24');
   await a.run(`document.getElementById('pswitch-0-plug-24').dataset.pressed = 'yes'`);
@@ -5242,7 +5276,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   const replaced = await a.run(`document.getElementById('pswitch-0-plug-24').dataset.pressed !== 'yes'`);
   await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x24, y: y24, button: 'left', clickCount: 1 });
   await done();
-  same('a press on a plugin’s switch released after a redraw replaced it still counts: plug-24 and plug-30 both change', [replaced, changed(pressedBefore, await states('[data-plugin]'))], [true, ['plug-24', 'plug-30']]);
+  same('a press on a plugin’s switch is not redrawn under by another switch clicked before its release: plug-24 and plug-30 both change', [replaced, changed(pressedBefore, await states('[data-plugin]'))], [false, ['plug-24', 'plug-30']]);
   for (const name of ['plug-24', 'plug-30']) await a.run(`document.getElementById('pswitch-0-${name}').click()`);
   await done();
   // A list of four clicks, one failing (a plugin of its own at each size) and one on a plugin with no description (plug-08), at

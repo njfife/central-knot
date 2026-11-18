@@ -1,7 +1,7 @@
 // The page's element builder (h) and the small controls every page draws with: buttons, switches (toggle), checkboxes, icons,
-// empty states, section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout), and a
-// press released on a control a redraw replaced counting as its click (keepClicksAcrossRedraws). No words of the app's own: what
-// a control says is its caller's, and the styles are style.css's.
+// empty states, section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout), a paint
+// held while a pointer button is pressed (paintWhenNoPress), and a text selection kept across a redraw (keepSelection). No words
+// of the app's own: what a control says is its caller's, and the styles are style.css's.
 import { icons, type IconName } from './icons.ts';
 import { groupBy } from './model.ts';
 
@@ -91,25 +91,74 @@ export const pathText = (text: string, full = text): HTMLElement => {
 /** A disabled control's reason, as its tooltip and its accessible description. */
 export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
 
+/** Paints asked for while a pointer button is held, each once, run after its release. */
+const owed = new Set<() => void>();
+/** A main-button press is held; `released`: its release has come, and the click it fires is awaited. */
+let pressed = false, released = false;
+/** How long after a release with no click (a drag) the hold lasts at most. */
+const NO_CLICK_MS = 100;
+let noClick: ReturnType<typeof setTimeout> | undefined;
+
 /**
- * A press and its release on one control count as its click even when a redraw replaced the control between them (the lists
- * redraw as clicks run): the browser fires no click on it then, so the release clicks the control now there, found by its id,
- * only while it says what the pressed one said (its `aria-checked`) and the pressed one was not disabled, so a switch whose state
- * changed under the press is never flipped the other way.
+ * A pointer gesture is not redrawn under. A paint asked for while a pointer button is held on the page waits, and runs once
+ * after the release and the click it fires, so that click's handler runs on the element that was pressed, and a drag selects the
+ * text it started on. The same paint asked for several times meanwhile runs once. Every redraw goes through here (renderer.ts
+ * render), as does the update control's own paint (updateview.ts).
  */
-export function keepClicksAcrossRedraws(): void {
-  let pressed: { control: Element; checked: string | null; disabled: boolean } | undefined;
-  const control = (event: Event) => (event.target as Element | null)?.closest?.('button[id]') ?? null;
-  document.addEventListener('pointerdown', event => {
-    const at = control(event);
-    pressed = at ? { control: at, checked: at.getAttribute('aria-checked'), disabled: (at as HTMLButtonElement).disabled } : undefined;
+export function paintWhenNoPress(paint: () => void): void {
+  if (pressed) { owed.add(paint); return; }
+  owed.delete(paint);
+  paint();
+}
+/** The hold ends: paints asked for from now run at once (the click's own handler's too), and the owed ones after this event. */
+const endHold = () => {
+  if (!pressed) return;
+  pressed = released = false;
+  clearTimeout(noClick);
+  setTimeout(() => { const due = [...owed]; owed.clear(); for (const paint of due) paint(); });
+};
+/**
+ * Holds paints from a press of the main button on `page` (the one that clicks and selects) until the click its release fires
+ * (seen first, before the click's handlers), or a moment after a release that fires none (a drag), or a cancelled pointer. The
+ * click is waited for because a browser may dispatch it in a task of its own after the release's; a click before the release
+ * (a control clicked from code during the press) is not that click. Nothing else ends the hold:
+ * the window that was pressed keeps the mouse until the release, which comes back to it even when another window takes the focus
+ * or covers it. A press on a native list (`select`), whose popup takes the release, holds nothing. Installed once (renderer.ts).
+ */
+export function holdPaintsDuringPress(page: EventTarget): void {
+  page.addEventListener('pointerdown', event => {
+    if ((event as PointerEvent).button === 0 && !(event.target as Element | null)?.closest?.('select')) { pressed = true; released = false; }
   }, true);
-  document.addEventListener('pointerup', event => {
-    const now = control(event), was = pressed;
-    pressed = undefined;
-    if (!was || !now || was.control.isConnected || was.disabled || now.id !== was.control.id || now.getAttribute('aria-checked') !== was.checked) return;
-    (now as HTMLButtonElement).click();
-  }, true);
+  page.addEventListener('pointerup', () => { if (pressed) { released = true; clearTimeout(noClick); noClick = setTimeout(endHold, NO_CLICK_MS); } }, true);
+  page.addEventListener('click', () => { if (released) endHold(); }, true);
+  page.addEventListener('pointercancel', endHold, true);
+}
+
+/**
+ * A redraw keeps a text selection, as it keeps the scroll place and the focus. The selection is noted before the redraw if it
+ * is inside one element with an id (a card's shown text, the log's lines), and put back after it when that element is there again
+ * with the same text. Returns what puts it back; a selection in a text box, or with no id around it, is left to the redraw.
+ */
+export function keepSelection(): () => void {
+  const chosen = getSelection();
+  if (!chosen || chosen.isCollapsed || !chosen.rangeCount || chosen.anchorNode?.nodeType !== Node.TEXT_NODE || chosen.focusNode?.nodeType !== Node.TEXT_NODE) return () => {};
+  const common = chosen.getRangeAt(0).commonAncestorContainer;
+  const holder = (common instanceof Element ? common : common.parentElement)?.closest('[id]');
+  if (!holder) return () => {};
+  const [id, text] = [holder.id, holder.textContent];
+  const offset = (node: Node, at: number) => { const before = document.createRange(); before.selectNodeContents(holder); before.setEnd(node, at); return before.toString().length; };
+  const [anchor, focus] = [offset(chosen.anchorNode, chosen.anchorOffset), offset(chosen.focusNode, chosen.focusOffset)];
+  return () => {
+    const again = document.getElementById(id);
+    if (!again || again.textContent !== text) return;
+    // The text node and offset `at` characters into the element's text.
+    const place = (at: number): [Node, number] => {
+      const walk = document.createTreeWalker(again, NodeFilter.SHOW_TEXT);
+      for (let node = walk.nextNode(); node; node = walk.nextNode()) { const length = node.textContent?.length ?? 0; if (at <= length) return [node, at]; at -= length; }
+      return [again, again.childNodes.length];
+    };
+    getSelection()?.setBaseAndExtent(...place(anchor), ...place(focus));
+  };
 }
 
 /**

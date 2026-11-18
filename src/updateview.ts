@@ -7,7 +7,7 @@
 // Restarting is held while something typed isn't saved or a plugin run is under way: the control then opens Settings, whose
 // Updates row says what restarting would lose beside its own Restart button.
 import { announce, baseDraftTyped, rerender, showPage, state, toolDraftTyped } from './app.ts';
-import { h, icon } from './dom.ts';
+import { h, icon, paintWhenNoPress } from './dom.ts';
 import { market } from './pluginstate.ts';
 import { buildWords, restartWaits, tagWords, updateButton, updateIndicator, updateStatus } from './updates.ts';
 import type { UpdateView } from './types.ts';
@@ -165,10 +165,10 @@ export function sidebarEnd(): Node[] {
     glyph, h('span.nav-label', {}, shown.label))];
 }
 
-/** The sidebar's control drawn again on its own (renderer.ts draws it with the rest of the sidebar on a redraw). */
-function paintSidebarEnd() {
-  document.getElementById('sidebar-end')?.replaceChildren(...sidebarEnd());
-}
+/** The sidebar's control drawn again on its own (renderer.ts draws it with the rest of the sidebar on a redraw), once no pointer
+ *  button is held (dom.ts paintWhenNoPress). */
+function paintSidebarEnd() { paintWhenNoPress(repaintSidebarEnd); }
+function repaintSidebarEnd() { document.getElementById('sidebar-end')?.replaceChildren(...sidebarEnd()); }
 
 /** Download progress, painted in place so a redraw never interrupts typing elsewhere on the page. */
 function paintProgress() {
