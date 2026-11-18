@@ -75,9 +75,12 @@ export interface ToolSays {
   since?: string;
 }
 
+/** At least one session file, or the history as a whole, could not be read. */
+export const incompleteHistory = (history: ToolUsage) => !!(history.unread || history.skipped);
+
 /** Why a tool's history can't say an item of this kind wasn't used, if it can't: first that it couldn't all be read, then that it keeps no sessions, whatever it can tell of the kind. */
 export const cantSayFor = (history: ToolUsage, kind: ItemKind): CantSay | undefined =>
-  history.unread || history.skipped ? 'unread' : !history.sessions ? 'no-sessions' : !history.tells[kind] ? 'no-record' : history.tells[kind] === 'seen' ? 'not-sure' : undefined;
+  incompleteHistory(history) ? 'unread' : !history.sessions ? 'no-sessions' : !history.tells[kind] ? 'no-record' : history.tells[kind] === 'seen' ? 'not-sure' : undefined;
 
 /** Whether a tool's history starts later than USAGE_DAYS before the reading: it counts as far back as it goes. */
 export const startsLate = (reading: Pick<UsageReading, 'at'>, from: string | undefined) => !!from && Date.parse(from) > Date.parse(reading.at) - USAGE_DAYS * DAY_MS;
@@ -150,17 +153,21 @@ export const pluginRowFacts = (row: PluginRow): UsageFacts => ({ key: row.name, 
 /**
  * One tool's history in a reading: how many sessions it started within USAGE_DAYS (`recent`), and how far back it goes:
  * USAGE_DAYS or more (`whole`), from its first session when that is later (`from`), no session kept (`none`), or it couldn't be
- * read (`unread`).
+ * read (`unread`), or only some sessions could be read (`partial`).
  */
-export type ToolHistory = { tool: HarnessId; recent: number } & ({ goes: 'whole' | 'none' | 'unread' } | { goes: 'from'; from: string });
+export type ToolHistory = { tool: HarnessId; recent: number } & ({ goes: 'whole' | 'none' | 'unread' | 'partial' } | { goes: 'from'; from: string });
 /**
  * Each tool's history (ToolHistory), for the tools worth naming: every managed one, any other installed one with sessions, and
  * one not installed only with a use within USAGE_DAYS, a leftover folder being no tool.
  */
 export function toolHistories(reading: UsageReading, home: Pick<HomeView, 'sync'>): ToolHistory[] {
   const named = (each: ToolUsage) => home.sync.managed.includes(each.tool) || (each.sessions > 0 && (home.sync.present.includes(each.tool) || each.used.some(used => used.sessions.length)));
-  return reading.tools.filter(named).map(({ tool, recent, unread, sessions, from }): ToolHistory => (unread ? { tool, recent, goes: 'unread' } : !sessions ? { tool, recent, goes: 'none' }
-    : startsLate(reading, from) ? { tool, recent, goes: 'from', from: from! } : { tool, recent, goes: 'whole' }));
+  return reading.tools.filter(named).map((history): ToolHistory => {
+    const { tool, recent, sessions, from } = history;
+    if (incompleteHistory(history)) return { tool, recent, goes: sessions ? 'partial' : 'unread' };
+    if (sessions && startsLate(reading, from)) return { tool, recent, goes: 'from', from: from! };
+    return { tool, recent, goes: sessions ? 'whole' : 'none' };
+  });
 }
 
 /** One row of the most used: its key on its kind's page (a plugin's own row's too: pluginrows.ts PluginRow key), its name, and the sessions within USAGE_DAYS that used it. */

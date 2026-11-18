@@ -21,7 +21,7 @@ import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, fewNames, kindNouns, pageNames, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt } from './words.ts';
-import { allSay, figureFor, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
+import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
 import { acting, askFlash, closeResult, isKind, problemKey, leftOutTools, collectUsage, unpin, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
@@ -1451,7 +1451,7 @@ const firstReading = (t: Table) => !t.tool && firstReadingRuns();
 function usageControls(t: Table) {
   if (t.tool) return null;
   const collecting = state.usage.state === 'reading', read = reading(t), today = read && new Date(read.at).toDateString() === new Date().toDateString();
-  const when = collecting ? ['Collecting…'] : read ? [h('span.usage-words', {}, 'Collected '), today ? clockTime(read.at) : dayWords(read.at), read.tools.every(each => !each.sessions) ? ' · no sessions yet' : ''] : [];
+  const when = collecting ? ['Collecting…'] : read ? [h('span.usage-words', {}, 'Collected '), today ? clockTime(read.at) : dayWords(read.at), read.tools.every(each => !each.sessions && !incompleteHistory(each)) ? ' · no sessions yet' : ''] : [];
   const verb = read ? 'Update' : 'Collect';
   const go = button({ variant: 'outline', size: 'micro', label: `${verb} usage statistics`, id: 'collect-usage', disabled: collecting && 'Usage statistics are being collected.', onclick: () => void collectUsage({ asked: true }) });
   go.querySelector('.btn-label')!.replaceChildren(verb, h('span.usage-words', {}, ' usage statistics'));
@@ -1478,7 +1478,7 @@ function usageBand(t: Table) {
 
 /** How far back each tool's history goes (usagerow.ts toolHistories), as a sentence: "Each tool’s history: Claude Code, 30 days or more; Codex, from Nov 2." A tool's phrase never wraps inside. */
 function reachWords(read: UsageReading) {
-  const back = (each: ToolHistory) => (each.goes === 'unread' ? 'couldn’t be read' : each.goes === 'none' ? 'no sessions'
+  const back = (each: ToolHistory) => (each.goes === 'unread' ? 'couldn’t be read' : each.goes === 'partial' ? 'partly read' : each.goes === 'none' ? 'no sessions'
     : each.goes === 'from' ? `from ${dayWords(each.from)}` : `${USAGE_DAYS} days or more`);
   const tools = state.home ? toolHistories(read, state.home) : [];
   return tools.length ? `Each tool’s history: ${tools.map(each => `${names[each.tool]}, ${back(each)}`.replace(/ /g, '\u00a0')).join('; ')}.` : '';

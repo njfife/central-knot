@@ -2451,7 +2451,6 @@ async function practiceFlow() {
       Math.round(document.querySelector('#setting-log-title').getBoundingClientRect().left - page.getBoundingClientRect().left)];
   })()`), [0, 0, 16]);
   const appSettings = join(scratch, 'data/app-settings.json');
-  // The app rewrites this file in place, so a read can land mid-write: read again until it parses.
   const savedSettings = async () => {
     const deadline = performance.now() + 5000;
     for (;;) {
@@ -6199,6 +6198,41 @@ async function overviewFlow() {
   same('launched, nothing visited: a most used own skill opens its row on the first click', await openTop('skills', 'notes'), ['notes']);
   same('one whose copies differ opens too, with its copy question', await openTop('skills', 'clash'), ['clash']);
   same('a most used MCP server, its page never drawn either, opens its row', await openTop('mcp', 'docs'), ['docs']);
+  const session = join(home, '.claude/projects/-work/used.jsonl');
+  const sessionsCell = '.tools-table tr[data-tool="claude-cli"] .tools-sessions';
+  const update = byId('overview-collect-usage');
+  const updateSessions = async () => {
+    await a.click(update);
+    for (let tries = 0; tries < 100 && !await a.exists(update); tries++) await wait(50);
+    return a.text(sessionsCell);
+  };
+  const readable = await a.text(sessionsCell);
+  check('Claude Code starts with one recent session', /^1(?:\s|$)/.test(readable), readable);
+  chmodSync(session, 0);
+  same('the only session unreadable: its count is unknown and the table explains why',
+    [await updateSessions(), (await a.text(byId('overview-tools-key')))?.includes('?: not known')], ['?', true]);
+  await a.click(byId('overview-skills'));
+  await a.click(byId(rowPart('open', 'skills', 'notes')));
+  const rowUsage = byId(rowPart('usage', 'skills', 'notes', 'claude-cli'));
+  check('the skill’s row says why Claude Code can’t tell', /can’t say: 1 session file couldn’t be read/i.test(await a.text(rowUsage)));
+  check('the toolbar makes no claim of no sessions', !(await a.text(byId('usage-when')))?.includes('no sessions'));
+  if (shots) {
+    await sizeTo(a, 1280, 800);
+    await a.run(`document.querySelector(${JSON.stringify(rowUsage)}).scrollIntoView({ block: 'center' })`);
+    await a.shot('skills-unread-session');
+  }
+  await a.click(byId('nav-overview'));
+  const second = join(dirname(session), 'second.jsonl');
+  writeFileSync(second, JSON.stringify({ type: 'user', timestamp: new Date().toISOString() }));
+  same('one session readable and another unreadable: the table marks the known count', await updateSessions(), '1 ?');
+  if (shots) {
+    await a.run(`document.querySelector('.tools-table').scrollIntoView({ block: 'center' })`);
+    await a.shot('overview-unread-session');
+    await fullSize(a);
+  }
+  unlinkSync(second);
+  chmodSync(session, 0o600);
+  same('restoring access restores the complete sessions cell', await updateSessions(), readable);
   await a.click('#home-actual');
   for (let tries = 0; tries < 100 && !(await a.exists('#overview-skills-usage .middle[title="one"]')); tries++) await wait(100);
   same('another home whose only item is a plugin’s skill: the card counts it, and the lead never says nothing was found',

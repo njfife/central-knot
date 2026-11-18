@@ -204,7 +204,8 @@ function usageStrip() {
 function sessionsCell(history: ToolHistory | undefined) {
   if (firstReadingRuns()) return h('td.tools-sessions.tone-faint', {}, '…');
   if (!history) return h('td.tools-sessions', {});
-  if (history.goes === 'unread') return h('td.tools-sessions.tone-muted', {}, 'couldn’t be read');
+  if (history.goes === 'unread') return h('td.tools-sessions.tone-muted', {}, '?');
+  if (history.goes === 'partial') return h('td.tools-sessions', {}, `${history.recent} ?`);
   if (history.goes === 'none') return h('td.tools-sessions.tone-muted', {}, 'no sessions');
   const since = history.goes === 'from' ? h('span.tone-muted', {}, ` · history from ${dayWords(history.from)}`) : null;
   return h('td.tools-sessions', {}, h('strong.tools-count', {}, String(history.recent)), since);
@@ -227,7 +228,8 @@ function toolsTable(home: HomeView) {
   const rows = tools.map(tool => ({ tool, kinds: kinds.map(kind => kindShown(kind, tool)), plugins: plugins ? pluginsShown(pluginsInstalled(home, tool)) : undefined }));
   const shown = rows.flatMap(row => [...row.kinds, row.plugins]), kindDash = rows.some(row => row.kinds.includes('—'));
   const dashes = [kindDash ? 'that tool can’t hold that kind' : '', rows.some(row => row.plugins === '—') ? 'Central Knot doesn’t move that tool’s plugins' : ''].filter(Boolean);
-  const key = [dashes.length ? `—: ${dashes.join(', or ')}.` : '', shown.includes('?') ? '?: not known, as what that tool keeps there couldn’t all be read.' : ''].filter(Boolean).join(' ');
+  const unknown = shown.includes('?') || histories.some(each => tools.includes(each.tool) && (each.goes === 'unread' || each.goes === 'partial'));
+  const key = [dashes.length ? `—: ${dashes.join(', or ')}.` : '', unknown ? '?: not known, as what that tool keeps there couldn’t all be read.' : ''].filter(Boolean).join(' ');
   const out = home.sync.present.filter(tool => !tools.includes(tool));
   return h('section.overview-tools', { 'aria-labelledby': 'overview-tools-title' },
     h('h2.eyebrow', { id: 'overview-tools-title' }, 'Your tools'),

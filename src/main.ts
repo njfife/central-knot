@@ -14,12 +14,12 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, ne
 import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
-import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { access, constants, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps, forgetVersions } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
-import { forgetStale, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { errorCode, forgetStale, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
@@ -211,8 +211,10 @@ function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
   const write = settingsWrites.then(async () => {
     const next = { ...appSettings, ...change };
     if (!smoke) {
-      await mkdir(app.getPath('userData'), { recursive: true });
-      await writeFile(appSettingsPath(), `${JSON.stringify(next, null, 2)}\n`);
+      const path = appSettingsPath();
+      // Renaming needs only the folder's permission. Respect a read-only settings file too.
+      try { await access(path, constants.W_OK); } catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
+      await writeDurably(path, `${JSON.stringify(next, null, 2)}\n`);
     }
     appSettings = next;
     // The login item follows the saved choice before anyone hears of it, so what they read back is the system's answer to it.
