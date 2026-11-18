@@ -135,6 +135,12 @@ test('Whose an entry is: an agent’s and a server’s by their prefix (a server
   assert.deepEqual(libraryEntry(entry({ key: 'review:fix', kind: 'on' })), { kind: 'skills', key: 'review:fix' });
 });
 
+test('A skill whose folder is named agent:review, beside an agent review: its entry says it is a skill’s, and an entry from before entries said their kind is read by its key, as it always was', () => {
+  const skills = entry({ key: 'agent:review', of: 'skill', kind: 'off' }), agents = entry({ key: 'agent:review', of: 'agent', kind: 'off' });
+  assert.deepEqual([libraryEntry(skills), libraryEntry(agents)], [{ kind: 'skills', key: 'agent:review' }, { kind: 'agents', key: 'review' }]);
+  assert.deepEqual(libraryEntry(entry({ key: 'agent:review', kind: 'off' })), { kind: 'agents', key: 'review' });
+});
+
 test('A skill’s entries from before the library that no click can say again show as past: Remove, Disable, take-over, copies added', () => {
   const skill = { ...item(), key: 'notes', name: 'notes' };
   for (const kind of ['removed', 'switched', 'took-over', 'added'] as const) assert.equal(libraryAction(entry({ key: 'notes', kind, previous: 'a' }), skill, settled), undefined, kind);

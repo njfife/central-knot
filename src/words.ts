@@ -4,6 +4,7 @@
 // managed, through a plugin). A page's own words are its module's; a library row's are libraryrow.ts libraryWords, a History
 // entry's historyactions.ts and historypage.ts.
 import type { HomeKind } from './presence.ts';
+import type { NamedRow } from './itemrow.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
 
 export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi', 'opencode-cli': 'OpenCode' };
@@ -110,7 +111,7 @@ export const rowNouns = (kinds: readonly HomeKind[]) => (new Set(kinds).size ===
  * A result's rows by name, a name with its kind after it where a row of another kind `among` the result's has that name too
  * ("review (skill)").
  */
-type Named = { kind: HomeKind; name: string };
+type Named = Pick<NamedRow, 'kind' | 'name'>;
 export const rowNames = (rows: readonly Named[], among: readonly Named[] = rows) =>
   rows.map(row => (among.some(other => other.kind !== row.kind && other.name === row.name) ? `${row.name} (${kindNouns[row.kind].one})` : row.name));
 

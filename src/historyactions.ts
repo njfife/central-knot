@@ -69,7 +69,7 @@ import type { IconName } from './icons.ts';
 import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import { asItIs, noTimeTells, versionClock, type RowWords } from './libraryrow.ts';
-import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts } from './types.ts';
+import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts, PartKind } from './types.ts';
 import { andList, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
 
 /**
@@ -77,14 +77,19 @@ import { andList, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
  * No library item's: a profile's, a tool's Manage switch's and Synchronize everything's entries (by their kind), a Pull's
  * change to the base instructions (`base`) or to an agent's Claude Code settings alone (`settingsFile`), both gitrepo.ts's.
  * Of the rest, an agent's is keyed `agent:<key>`; an MCP server's `mcp:<key>` (before the library, `mcp:<name>` as written,
- * whose key is share.ts itemKey of it); and a skill's by its key alone, whatever characters its folder's name holds.
+ * whose key is share.ts itemKey of it); and a skill's by its key alone, whatever characters its folder's name holds. A skill's
+ * key is its folder's name, which may itself start `agent:` or `mcp:`, so the key alone can't say whose an entry is: an entry
+ * says its kind (`of`), and one from before that is read by its key's start, as it always was.
  */
 export function libraryEntry(event: HistoryEvent): { kind: 'agents' | 'skills' | 'mcp'; key: string } | undefined {
   if (!event.key || event.base || event.settingsFile || ['profile', 'managing', 'everything'].includes(event.kind)) return undefined;
-  if (event.key.startsWith('agent:')) return { kind: 'agents', key: event.key.slice('agent:'.length) };
-  if (event.key.startsWith('mcp:')) return { kind: 'mcp', key: itemKey(event.key.slice('mcp:'.length)) };
+  const of = entryKind(event);
+  if (of === 'agent') return { kind: 'agents', key: event.key.slice('agent:'.length) };
+  if (of === 'mcp') return { kind: 'mcp', key: itemKey(event.key.slice('mcp:'.length)) };
   return { kind: 'skills', key: event.key };
 }
+/** The kind an entry's item is of, as libraryEntry reads it (an agent's Claude Code settings change is keyed as the agent's). */
+export const entryKind = (event: HistoryEvent): PartKind => event.of ?? (event.key.startsWith('agent:') ? 'agent' : event.key.startsWith('mcp:') ? 'mcp' : 'skill');
 
 /** Restore over an agent of the same name made since: what becomes of it, for Restore's result and its tooltip. */
 export function keptOver(name: string, tools: readonly string[]): string {

@@ -9,7 +9,7 @@ import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changes, homeItems, NO_PROFILE, turnsWords, undoPlan } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
-import { doneWords, entriesNow, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
+import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -110,7 +110,7 @@ const everythingOffer = (event: HistoryEvent) => (state.home && state.history.da
 
 /** Skills, MCP servers, agents, profile switches, tools' Manage switches and Synchronize everything share History; each row says which it is. */
 const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.kind === 'managing' ? 'Tool' : event.kind === 'everything' ? 'Setting' : event.base ? 'Instructions'
-  : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
+  : ({ skill: 'Skill', mcp: 'MCP server', agent: 'Agent' } as const)[entryKind(event)]);
 /** Rows are grouped by day (day headings); each row shows its time, every row in one form (model.ts timesApart). */
 const day = (iso: string) => {
   const date = new Date(iso);

@@ -1028,7 +1028,14 @@ async function practiceFlow() {
   same('a switch set in Claude Code’s settings reaches the open page, and is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'skills', 'release-notes'), /switched off in Claude Code/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? ''), await switchOn(a, 'skills', 'release-notes')], [true, ['claude-cli'], true, true]);
   await opened('release-notes');
   check('its line in the opened row says the tool doesn’t load it', /Claude Code doesn’t load it, and Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
-  await a.click(`#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`);
+  // While the skills record is damaged, Let Claude Code load it is off as the row's other controls are, and nothing is written.
+  const clearSwitch = `#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`, skillsRecordHere = join(practice, '.central-knot/skills.json'), skillsRecordGood = readFileSync(skillsRecordHere, 'utf8');
+  writeFileSync(skillsRecordHere, '{ damaged');
+  await a.click('#header-refresh');
+  same('with the skills record damaged, Let Claude Code load it is there and off', await a.run(`document.querySelector(${JSON.stringify(clearSwitch)})?.disabled ?? 'not drawn'`), true);
+  writeFileSync(skillsRecordHere, skillsRecordGood);
+  await a.click('#header-refresh');
+  await a.click(clearSwitch);
   same('Clear the switch clears it in Claude Code’s settings, and the mark is on again', [JSON.parse(readSwitches()[0]).skillOverrides?.['release-notes'], await offMarks(a, 'skills', 'release-notes')], [undefined, []]);
   await opened('release-notes', false);
 

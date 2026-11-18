@@ -457,6 +457,8 @@ export interface HistoryEvent {
   at: string;
   key: string;
   item: string;
+  /** The library kind of the item it is about, recorded since entries say it (historyactions.ts libraryEntry reads an older one by its key). */
+  of?: PartKind;
   /** 'profile': a profile switch, or the profiles migration (key 'profiles:switch', item the profile's name: `profile`).
    * 'switched': a skill's tool switch cleared, or its Undo (`switched`).
    * 'took-over': a skill's copy outside Central Knot taken over (`losers`: that copy), which has no Undo.

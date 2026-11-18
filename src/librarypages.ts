@@ -5,7 +5,7 @@
 // for a kind (app.ts PageKind: 'agents'), not the library's (library.ts ItemKind: 'agent'). matrix.ts draws every row of a
 // kind here as a library row (librarySwitch, libraryMark, libraryVersions, libraryDelete, …). Every place a kind is wired in
 // is in librarypass.ts's recipe; this is one.
-import { acting, rerender, shownPath, skillAction, state, type PageKind } from './app.ts';
+import { acting, rerender, shownPath, skillAction, state, whyKindReadOnly, type PageKind } from './app.ts';
 import { h, icon } from './dom.ts';
 import { partId, rowId, type ItemRow } from './itemrow.ts';
 import type { NeutralServer } from './mcp.ts';
@@ -82,10 +82,12 @@ let armed: string | undefined;
  * a copy in ~/.agents/skills (two clicks for the shared copy, which other apps may read; it has no Undo, and says so).
  */
 function skillToolActions(row: ItemRow, tool: HarnessId): HTMLElement | null {
-  const item = state.home?.skills.library[row.key], name = row.name ?? row.key, where = toolName(tool);
-  if (!state.home) return null;
+  const home = state.home, item = home?.skills.library[row.key], name = row.name ?? row.key, where = toolName(tool);
+  if (!home) return null;
   const action = (label: string, id: string, title: string, run: () => void, danger = false) => {
-    const control = h(`button.text-action${danger ? '.text-danger' : ''}`, { type: 'button', id, title, disabled: !!acting(), onclick: (event: Event) => { event.stopPropagation(); run(); } }, label);
+    // A skill's write, as its row's other controls: off while the page acts or the skills' gate stops it (app.ts whyKindReadOnly).
+    const disabled = !!acting() || !!whyKindReadOnly(home, row.kind);
+    const control = h(`button.text-action${danger ? '.text-danger' : ''}`, { type: 'button', id, title, disabled, onclick: (event: Event) => { event.stopPropagation(); run(); } }, label);
     return control;
   };
   const clear = row.switchedOff?.includes(tool) ? action(`Let ${where} load it`, partId('clear-switch', rowId(row.kind, row.key), tool),

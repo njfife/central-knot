@@ -17,16 +17,16 @@ import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice, UsageReading } from './types.ts';
-import { anyOn, kindSource, noPins, pinsOn, rowId, sameRow, type Pinned, type RowKey } from './itemrow.ts';
+import { anyOn, kindSource, noPins, pinsOn, rowId, sameRow, type NamedRow, type Pinned, type RowKey } from './itemrow.ts';
 import { itemKey } from './library.ts';
-import { caughtUpNames, noticeNames, plural, withSetAside } from './model.ts';
+import { caughtUpNames, groupBy, noticeNames, plural, withSetAside } from './model.ts';
 import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
-import { clickResults, keptBack } from './clickplan.ts';
+import { clickResults, heldWhole, keptBack } from './clickplan.ts';
 import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
-import { andList, fewNames, fileName, kindNames, kindNouns, noToolsSentence, orList, rowNames, rowNouns, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
+import { andList, fewNames, fileName, kindNames, kindNouns, noToolsSentence, orList, rowNames, rowNouns, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { endListNews, fadeRun, loadPlugins, resetMarket } from './pluginstate.ts';
@@ -425,7 +425,11 @@ export const askFlash = (id: string, until: number) => { if (!((flashRequests.ge
 
 // ---------- One switch per item ----------
 
-/** One click on an item page: the changes it makes, the item names it concerns, and what the result says it did. */
+/**
+ * One click on an item page: the changes it makes, the item names it concerns, and what the result says it did. A click is one
+ * kind's: `kind` is the engine its changes are sent to, and each of `rows` is of it, both made from the same row(s) where it
+ * names any (Turn these off makes one click per kind: matrix.ts turnTheseOff); `items` names its `rows`, in their order.
+ */
 export interface Click {
   kind: PageKind;
   changes: Change[];
@@ -491,6 +495,8 @@ export interface Done {
   refused?: string;
   /** The tools its words never claim (carryOut): where its write failed or was held, or its plugins' switch didn't go through. */
   notIn?: HarnessId[];
+  /** The rows it changed (carryOut): all of its rows but one whose own change was refused whole (clickplan.ts heldWhole). */
+  changed?: NamedRow[];
   kept?: { kind: PageKind; results: DestinationResult[]; notices?: SyncNotice[] };
   focus?: string;
   regroups?: boolean;
@@ -514,7 +520,7 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const { ours, did, refusal, failed, differs, notIn } = clickResults(result.results, names);
   // A refusal is the click's result, or else one of its reasons: said once, not again among the failures.
   const kept = { kind: click.kind, results: ours.filter(entry => entry !== refusal), notices: result.notices };
-  if (result.stopped) return { kept, did: false, refused: result.stopped, outcome: { page, items: click.items, rows: click.rows, warn: true, band: true, text: result.stopped } };
+  if (result.stopped) return { kept, did: false, refused: result.stopped, changed: [], outcome: { page, items: click.items, rows: click.rows, warn: true, band: true, text: result.stopped } };
   const made = result.made ?? [];
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
@@ -522,7 +528,8 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const done = did || made.length > 0 || !!plugged?.done.some(entry => succeeded(entry.report));
   // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
-  const notClaimed = [...notIn, ...(plugged?.failedIn ?? [])];
+  const notClaimed = [...notIn, ...(plugged?.failedIn ?? [])], held = new Set(ours.filter(heldWhole).map(entry => entry.item.toLowerCase()));
+  const changed = click.rows.map((row, at) => ({ ...row, name: click.items[at] ?? row.key })).filter(row => !held.has(row.name.toLowerCase()));
   const said = typeof click.said === 'string' ? click.said : click.said(notClaimed, wrote);
   const choose = differs ? ' Its copies differ: choose which copy every tool uses.' : '';
   const along = plugged && !switchProblems(plugged) ? click.plugins?.said : undefined;
@@ -530,9 +537,9 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const back = plugged?.back ?? [];
   const undo = !click.undoing && done && ((made.length && await allUndoable(made)) || back.length) ? { kind: click.kind, made, back } : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
-  return { kept, did: done, refused: done || !refusal ? undefined : refusal.message, notIn: notClaimed, undo, along, focus: click.focus?.(), regroups: click.regroups,
+  return { kept, did: done, refused: done || !refusal ? undefined : refusal.message, notIn: notClaimed, changed, undo, along, focus: click.focus?.(), regroups: click.regroups,
     outcome: { page, items: click.items, rows: click.rows, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned,
-      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: !back.length, title: 'Put back everything this did', run: () => void undoClick(click, [undo]) } } };
+      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: !back.length, title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } } };
 }
 
 /**
@@ -552,7 +559,7 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
       act: undo && { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyClick(back) } } };
 }
 
-/** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Turn these off, Resume, a copy chosen. */
+/** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Resume, a copy chosen (Turn these off: applyByKind). */
 export const applyClick = (click: Click) => busy(click.undoing ? 'Undoing…' : 'Applying…', async () => sayDone(await carryOut(click, state.page), click));
 /** What a click applied at once did, said in the header (renderer.ts resultHere) or its band, its rows flashed, the focus on its control. */
 function sayDone(done: Done, click: Click) {
@@ -564,25 +571,33 @@ function sayDone(done: Done, click: Click) {
 }
 
 /**
+ * Why parts of one result were not done, each reason once; where the result spans several kinds, each led by the kinds it
+ * stopped ("MCP servers: The MCP record is damaged. …"), as a bulk Off's and its Undo's are said.
+ */
+const stopsSaid = (stops: [PageKind, string][], several: boolean) => [...groupBy(stops, ([, reason]) => reason)]
+  .map(([reason, of]) => (several ? `${sentence(andList(of.map(([kind]) => kindNouns[kind].many)))}: ${reason}` : reason));
+
+/**
  * One click over rows of several kinds (Turn these off: matrix.ts turnTheseOff): `clicks`, one per kind, carried out kind by
  * kind in turn under one busy, each through its kind's engine (carryOut). A kind's click refused whole (its own record stops its
- * writes, say) is skipped, and said as a problem line led by its kind; the others go on. `said`: what was done, given the clicks
- * that went and the tools each one's words can't claim; with none gone, the refusals are its words. One Undo, only when every
- * click that changed something has one (undoClick: every History entry they made, newest first).
+ * writes, say) is skipped, and said as a problem line (stopsSaid); the others go on. Its result belongs to the page it was clicked
+ * on, as applyClick's does. `said`: what was done, given the rows that changed (a row whose own change was refused, a stale one,
+ * is none: Done changed) and the tools their words can't claim; with none changed, the refusals are its words. Only the rows that
+ * changed flash, and one Undo, only when every click that changed something has one, puts them back (undoClick).
  */
-export const applyByKind = (clicks: Click[], said: (went: { click: Click; notIn: HarnessId[] }[]) => string) => busy('Applying…', async () => {
-  const parts: { click: Click; done: Done }[] = [];
-  for (const click of clicks) parts.push({ click, done: await carryOut(click, state.page) });
-  const went = parts.filter(part => !part.done.refused), refused = parts.filter(part => part.done.refused), changed = parts.filter(part => part.done.did);
-  const undos = changed.flatMap(part => (part.done.undo ? [part.done.undo] : [])), rows = parts.flatMap(part => part.click.rows), regroups = clicks.some(click => click.regroups);
-  const items = rowNames(changed.flatMap(part => part.click.items.map(name => ({ kind: part.click.kind, name }))));
-  const undo = changed.length && undos.length === changed.length ? () => void undoClick({ items, rows, regroups }, undos) : undefined;
+export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], notIn: HarnessId[]) => string) => busy('Applying…', async () => {
+  const page = state.page, several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
+  for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
+  const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
+  const stops = stopsSaid(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
+  const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])), regroups = clicks.some(click => click.regroups);
+  const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups }, undos) : undefined;
   for (const { done } of parts) if (done.kept) kindPages[done.kept.kind].keep(done.kept.results, done.kept.notices);
-  tell({ page: state.page, items: clicks.flatMap(click => click.items), rows, band: true, warn: parts.some(part => part.done.outcome.warn),
-    text: went.length ? said(went.map(part => ({ click: part.click, notIn: part.done.notIn ?? [] }))) : refused.map(part => part.done.refused).join(' '),
-    reasons: [...(went.length ? refused.map(part => `${kindNouns[part.click.kind].title}: ${part.done.refused}`) : []), ...went.flatMap(part => part.done.outcome.reasons ?? [])],
+  tell({ page, items: clicks.flatMap(click => click.items), rows: clicks.flatMap(click => click.rows), band: true, warn: parts.some(part => part.done.outcome.warn),
+    text: changed.length || !stops.length ? said(changed, went.flatMap(part => part.done.notIn ?? [])) : stops.join(' '),
+    reasons: [...(changed.length ? stops : []), ...went.flatMap(part => part.done.outcome.reasons ?? [])],
     act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything this did', run: undo } });
-  for (const row of rows) flashRow(row);
+  for (const row of changed) flashRow(row);
   if (regroups) unpin();
 });
 
@@ -647,12 +662,12 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   const asked = ended.filter(turn => turn.done!.did || !turn.done!.outcome.warn), nouns = rowNouns(turns.map(turn => turn.row.kind));
   const rows = asked.filter(turn => asked.findLast(other => sameRow(other.row, turn.row)) === turn);
   // A kind is named where a row of another kind in the run has the same name.
-  const named = (list: ItemTurn[]) => rowNames(list.map(turn => ({ kind: turn.row.kind, name: turn.name })), turns.map(turn => ({ kind: turn.row.kind, name: turn.name })));
-  const said = [false, true].map(on => named(rows.filter(turn => (turn.isOn() ?? turn.row.on) === on)))
+  const named = (turn: ItemTurn): NamedRow => ({ kind: turn.row.kind, key: turn.row.key, name: turn.name }), among = turns.map(named);
+  const said = [false, true].map(on => rowNames(rows.filter(turn => (turn.isOn() ?? turn.row.on) === on).map(named), among))
     .map((names, on) => (names.length ? `${plural(names.length, nouns.one, nouns.many)} ${names.length === 1 ? 'is' : 'are'} ${on ? 'on' : 'off'}: ${fewNames(names)}` : '')).filter(Boolean).join('; ');
-  const along = did.flatMap(turn => (turn.done!.along ? [`${turn.name}: ${turn.done!.along.replace(/^./, first => first.toLowerCase())}`] : []));
+  const along = did.flatMap(turn => (turn.done!.along ? [`${rowNames([named(turn)], among)[0]}: ${turn.done!.along.replace(/^./, first => first.toLowerCase())}`] : []));
   const undos = did.flatMap(turn => (turn.done!.undo ? [turn.done!.undo] : [])).reverse();
-  const undo = did.length && undos.length === did.length ? () => void undoClick({ items: [...new Set(named(did))], rows: did.map(turn => turn.row) }, undos) : undefined;
+  const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: did.map(named) }, undos) : undefined;
   return { page: turns[0]!.page, items: turns.map(turn => turn.name), rows: turns.map(turn => turn.row), band: true, warn: ended.some(turn => turn.done!.outcome.warn),
     reasons: ended.flatMap(turn => (asked.includes(turn) ? [] : [turn.done!.outcome.text]).concat(turn.done!.outcome.reasons ?? [])),
     text: [`${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along].join(' '), act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything these clicks did', run: undo } };
@@ -665,24 +680,26 @@ async function allUndoable(made: string[]) {
   return events.every(event => !libraryEntry(event) || !!libraryAction(event, about(event).item, about(event).now));
 }
 
-/** What an Undo puts back, as its result names it: its rows (flashed once it is done), where the focus goes, and whether every pinned row is let go. */
-type UndoOf = Pick<Click, 'items' | 'rows' | 'focus' | 'regroups'>;
+/** What an Undo puts back: the rows its clicks changed (named in its result and flashed once it is done), where the focus goes, and whether every pinned row is let go. */
+interface UndoOf { rows: NamedRow[]; focus?: () => string; regroups?: boolean }
 /** What one click can take back (Done undo): its kind, the History entries it made, and the plugin switches that turn its plugins' part back. */
 interface Undoable { kind: PageKind; made: string[]; back: PluginOp[] }
 
 /**
  * Undo of one click, or of several as one (a run, Turn these off): their plugin items' switches first, then every History entry
- * they made, newest first, each by its own action (historyactions.ts). An entry whose Undo is stopped (its kind's record, say) is
- * said once, as a problem line, and the later entries of its kind are left; the other kinds' still go back. Each kind's last
- * result becomes what its own entries' Undo did.
+ * they made, newest first, each by its own action (historyactions.ts). An entry History no longer holds, or one whose Undo is
+ * stopped (its kind's record, say), is said once as a problem line (stopsSaid: led by its kind where the Undo spans several), and
+ * the later entries of a stopped kind are left; the other kinds' still go back, and the result names them. Each kind's last result
+ * becomes what its own entries' Undo did.
  */
 const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async () => {
-  const home = state.home!;
+  const home = state.home!, several = new Set(parts.map(part => part.kind)).size > 1;
   // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do.
   const switchedBack = parts.flatMap(part => part.back);
   const unswitched = switchedBack.length ? await runSwitches(switchedBack, true) : undefined;
   const kindOfEntry = new Map(parts.flatMap(part => part.made.map(id => [id, part.kind] as const)));
   const events = (await api().history()).events.filter(event => kindOfEntry.has(event.id)).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
+  const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
   const results = new Map(parts.map(part => [part.kind, [] as DestinationResult[]])), stops = new Map<PageKind, string>();
   for (const event of events) {
     const kind = kindOfEntry.get(event.id)!;
@@ -694,10 +711,15 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   focusAfterBusy = about.focus?.();
   await putHistory();
   for (const [kind, kept] of results) kindPages[kind].keep(kept, []);
-  const stopped = [...new Set(stops.values())], reasons = [...stopped, ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
-  const what = about.items.length === 1 ? about.items[0] : fewNames(about.items);
-  tell({ page: state.page, items: about.items, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
-    text: undone ? `Undone: ${what} ${about.items.length === 1 ? 'is' : 'are'} as before.` : stopped.length ? 'Not all of it could be undone.' : `Not all of ${what} could be put back.` });
+  const missing = [...groupBy(gone, ([, kind]) => kind)].map(([kind, of]): [PageKind, string] =>
+    [kind, `${plural(of.length, 'History entry', 'History entries')} it was to put back ${of.length === 1 ? 'is' : 'are'} no longer in History.`]);
+  const reasons = [...stopsSaid([...stops, ...missing], several), ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
+  // What did go back, where some of it didn't: the rows of the kinds whose entries all went back as they were.
+  const short = new Set([...stops.keys(), ...gone.map(([, kind]) => kind)]), names = (rows: NamedRow[]) => [...new Set(rowNames(rows, about.rows))];
+  const all = names(about.rows), back = names(about.rows.filter(row => !short.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
+  const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
+  tell({ page: state.page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
+    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && back.length ? `; ${are(back)}` : ''}.` : `Not all of ${fewNames(all)} could be put back.` });
   for (const row of about.rows) flashRow(row);
   if (about.regroups) unpin();
 });
@@ -819,14 +841,13 @@ export async function readAgain() {
   if (read) await loadPageData(state.page, { fresh: true, readId: state.home?.readId });
 }
 
+/** Why the open home can't be written now, if so: preview only (or held by another build), or its record stops every write. */
+export const whyReadOnly = (home: HomeView) => (!home.sync.access.allowed ? home.sync.access.reason : home.sync.gate.state === 'stopped' ? home.sync.gate.reason : undefined);
 /**
- * Why the open home can't be written now, if so: preview only (or held by another build), or its record stops every write; for
- * one kind's writes (a row's controls), its view's gate, which is the home's or else its own record's stop (types.ts LibraryView).
+ * Why one kind's items can't be written now, if so, as every control of a row of that kind asks it: the home's reason, or that
+ * kind's own record stopping its writes alone (its view's gate is the home's, or its record's stop: types.ts LibraryView gate).
  */
-export function whyReadOnly(home: HomeView, kind?: PageKind) {
-  const gate = kind ? home[kind].gate : home.sync.gate;
-  return !home.sync.access.allowed ? home.sync.access.reason : gate.state === 'stopped' ? gate.reason : undefined;
-}
+export const whyKindReadOnly = (home: HomeView, kind: PageKind) => whyReadOnly(home) ?? (home[kind].gate.state === 'stopped' ? home[kind].gate.reason : undefined);
 
 /**
  * Reads what a page shows beyond the home itself: History, Settings, Instructions or Plugins, into its slot
@@ -1070,6 +1091,7 @@ export interface Outcome {
   /** Something was left undone: a warning icon, not a tick. */
   warn?: boolean;
   note?: string;
+  /** The names it says, for its words alone (bold in its band, and where its Undo moved to: undoMoved): `rows` is whose it is. */
   item?: string;
   items?: string[];
   /** The rows it is about: an open copy question of one of them, or the Files view of another skill, hides it (matrix.ts outcomeShown). */
@@ -1556,7 +1578,7 @@ api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); if (state.
 api().onSaid(text => announce(text));
 
 /** Each page's sync notices in a view: what changed on its own, with its History event. */
-const noticesByPage = (view: HomeView): [Page, SyncNotice[]][] => [['skills', view.skills.notices], ['mcp', view.mcp.notices], ['agents', view.agents.notices]];
+const noticesByPage = (view: HomeView): [PageKind, SyncNotice[]][] => [['skills', view.skills.notices], ['mcp', view.mcp.notices], ['agents', view.agents.notices]];
 
 /**
  * A sync notice its page hasn't shown yet (state.seenNotices) stays in the next read of the same home until it is shown or
@@ -1601,7 +1623,7 @@ async function backgroundRefresh() {
 }
 
 /** Fresh background notices already taken. An action finishes saying its own result before the status bar announces these. */
-const backgroundNews: { page: Page; notice: SyncNotice }[] = [];
+const backgroundNews: { page: PageKind; notice: SyncNotice }[] = [];
 function takeBackgroundNews(view: HomeView) {
   const known = new Set(state.home ? noticesByPage(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
   for (const [page, notices] of noticesByPage(view)) {
@@ -1622,7 +1644,8 @@ function sayBackgroundNews() {
       state.outcome = undefined;
     }
   }
-  const items = [...new Set(news.flatMap(({ notice }) => noticeNames(notice)))];
+  // Each item once, its kind named where another kind's news has its name (words.ts rowNames).
+  const items = [...new Set(rowNames(news.flatMap(({ page, notice }) => noticeNames(notice).map(name => ({ kind: page, name })))))];
   announce(`Sync changed ${andList(items)}.`, news.some(({ page }) => page === state.page));
 }
 

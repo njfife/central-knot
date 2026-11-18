@@ -1,5 +1,6 @@
 // An item (a skill, an MCP server or an agent) as the item pages draw it (ItemRow), with its kind, a row's identity on a page
-// (rowId) and the ids of its elements (partId), each kind's items in a home as every page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
+// (rowId), a row named by its kind and key as a click and its result name it (RowKey, NamedRow, sameRow) and the ids of its
+// elements (partId), each kind's items in a home as every page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
 // orderChoice; a row's last use, usagerow.ts lastUse), and the rows a click pins where they were, on every list that orders
 // rows by their state, the Plugins list too (Pinned). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is libraryrow.ts's,
 // from the kind's view (types.ts LibraryView).
@@ -74,6 +75,8 @@ export interface ItemRow {
 export const rowId = (kind: PageKind, key: string) => `${kind}-${key}`;
 /** A row named by its kind and key: what a click, a run, an Undo and a result say they are about (app.ts Click rows, Outcome rows). */
 export interface RowKey { kind: PageKind; key: string }
+/** A row by kind and key with the name its words give it: what a result says it changed, and its Undo puts back (app.ts Done changed). */
+export type NamedRow = RowKey & { name: string };
 export const sameRow = (first: RowKey, second: RowKey) => first.kind === second.kind && first.key === second.key;
 /**
  * The id of one of a row's elements on the item lists (the Skills, MCP servers and Agents pages, a tool's tabs of them under
