@@ -34,7 +34,7 @@ import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
-import { holdOrder, resultInHeader } from './matrix.ts';
+import { holdOrder, resultInHeader, noticeLinesOnPage } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -260,6 +260,7 @@ export function paintStatusMessage() {
 
 /**
  * Takes a new view, including the view set aside for this home. `say` gets the view as taken, before it replaces the one on screen.
+ * Fresh notices in a background view are “Sync changed” news. A held notice is said when the action ends.
  * When its tools changed (one appeared or went away), or there was no home before, the
  * page follows: a page whose kind is no longer here gives way to the Overview, saying why, and a page with its own data
  * reads it again (unless `reload` is false: the caller reads it itself).
@@ -276,6 +277,7 @@ export function setHome(view: HomeView | null | undefined, { reload = true, say,
   if (news) takeBackgroundNews(news);
   const before = state.home ? homeTools().join() : undefined;
   state.home = keepUnshown(state.home, view);
+  if (news && !acting()) sayBackgroundNews();
   // A closed background problem stays closed while reads report it, and is forgotten once one doesn't (matrix.ts listResult).
   for (const key of state.dismissed) if (key.startsWith('problem:') && !view.sync.caughtUp.some(entry => problemKey(entry) === key)) state.dismissed.delete(key);
   // A record taken over at this view's look (types.ts HomeView tookOver), after whatever the read itself said.
@@ -298,10 +300,10 @@ export const focusWhenDone = (id: string) => { focusAfterBusy = id; };
  * actions, Profiles, the sources page (words.ts pageNames), Instructions, the Git repo, a tool's Manage switch, first setup's
  * choices, Settings' Synchronize everything, the Plugins page's other actions and the other-build screen. A row's switch or Add
  * (the item pages and Plugins) joins the list instead; Settings' own switches, which write the app's settings, stay on.
- * body[data-busy] says it
- * (showActing), and the end-to-end checks wait on it.
+ * showActing marks body[data-busy] for the end-to-end checks and says held news when acting ends, before the finished draw.
  */
 export const acting = (): string | undefined => state.busy || (clickList.running ? 'Waits until the switches clicked are done.' : undefined);
+/** Marks whether the page is acting and, at its end, says any news held for this draw. */
 export const showActing = () => {
   document.body.dataset.busy = String(!!acting());
   if (!acting()) sayBackgroundNews();
@@ -510,7 +512,7 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const undo = !click.undoing && done && ((made.length && await allUndoable(made)) || back.length) ? { made, back } : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
   return { kept, did: done, undo, along, focus: click.focus?.(), regroups: click.regroups, outcome: { page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned,
-    text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick(click, made, back) } } };
+    text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: !back.length, title: 'Put back everything this did', run: () => void undoClick(click, made, back) } } };
 }
 
 /**
@@ -601,7 +603,7 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   const undo = undos.length && undos.every(Boolean) ? () => void undoClick({ kind: turns[0]!.row.kind, items, changes: [], said: '' }, undos.flatMap(each => each!.made), undos.flatMap(each => each!.back)) : undefined;
   return { page: turns[0]!.page, items: turns.map(turn => turn.name), band: true, warn: ended.some(turn => turn.done!.outcome.warn),
     reasons: ended.flatMap(turn => (asked.includes(turn) ? [] : [turn.done!.outcome.text]).concat(turn.done!.outcome.reasons ?? [])),
-    text: [`${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along].join(' '), act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything these clicks did', run: undo } };
+    text: [`${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along].join(' '), act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each?.back.length), title: 'Put back everything these clicks did', run: undo } };
 }
 
 /** Whether each History entry a click made still offers its own action, so the click's Undo can run them all. */
@@ -979,7 +981,7 @@ export const skillAction = (action: 'clear-switch' | 'take-over', key: string, t
     const said = `${name}: ${result.results[0]?.message ?? 'done.'}${action === 'take-over' ? ' This has no Undo.' : ''}`;
     const entry = action === 'clear-switch' ? result.made?.[0] : undefined;
     tell({ page: state.page, item: name, band: true, text: said,
-      act: entry ? { label: 'Undo', id: 'outcome-undo', title: `Turn ${name} off again in ${toolName(tool)}’s own settings`, run: () => void restoreEvent(entry) } : undefined });
+      act: entry ? { label: 'Undo', id: 'outcome-undo', inHistory: true, title: `Turn ${name} off again in ${toolName(tool)}’s own settings`, run: () => void restoreEvent(entry) } : undefined });
     flashRow(name);
   });
 
@@ -1008,7 +1010,13 @@ export interface Outcome {
   /** The band goes after a few seconds: an Undo's confirmation. */
   fade?: boolean;
   undo?: { id: string; label: string };
-  act?: { label: string; id: string; run: () => void; title?: string; /** Why it is off now, asked at each drawing (a home's Go back while the page acts). */ whyOff?: () => string | undefined };
+  act?: {
+    label: string; id: string; run: () => void; title?: string;
+    /** History offers this entire Undo, including every click in a run. */
+    inHistory?: boolean;
+    /** Why it is off now, asked at each drawing (a home's Go back while the page acts). */
+    whyOff?: () => string | undefined;
+  };
   /** A second button after `act`: the next step the result offers (the whole plugin's switch, "Turn its plugins off in Codex"). */
   next?: { label: string; id: string; run: () => void; title?: string };
   /** When it was said (state.said.seq): a result newer than a table's pending changes still shows there. */
@@ -1517,24 +1525,28 @@ async function backgroundRefresh() {
   }
 }
 
-/** Fresh background notices already taken. An action finishes saying its own result before these take its place. */
+/** Fresh background notices already taken. An action finishes saying its own result before the status bar announces these. */
 const backgroundNews: { page: Page; notice: SyncNotice }[] = [];
 function takeBackgroundNews(view: HomeView) {
   const known = new Set(state.home ? noticesByPage(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
   for (const [page, notices] of noticesByPage(view)) {
     for (const notice of notices) if (!known.has(notice.history)) backgroundNews.push({ page, notice });
   }
-  if (!acting()) sayBackgroundNews();
 }
 
+/** Says fresh background news. A result gives way only beside a notice that can point to its Undo in History. */
 function sayBackgroundNews() {
   const news = backgroundNews.splice(0).filter(({ notice }) => !state.dismissed.has(notice.history));
   if (!news.length) return;
-  // The action's result steps aside. Its Undo stays in History and the notice says where it went.
   const outcome = state.outcome;
-  if (outcome?.act) state.undoMoved = { page: outcome.page, label: outcome.act.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []),
-    notices: news.map(({ notice }) => notice.history) };
-  state.outcome = undefined;
+  const undo = outcome?.act?.inHistory ? outcome.act : outcome?.undo;
+  if (undo && outcome?.page === state.page) {
+    const notices = noticeLinesOnPage(news);
+    if (notices.length) {
+      state.undoMoved = { page: outcome.page, label: undo.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices };
+      state.outcome = undefined;
+    }
+  }
   const items = [...new Set(news.flatMap(({ notice }) => noticeNames(notice)))];
   announce(`Sync changed ${andList(items)}.`, news.some(({ page }) => page === state.page));
 }
@@ -1569,7 +1581,7 @@ function turnedOutcome(lead: string, turned: Pick<ProfileSwitchResult, 'on' | 'o
 
 /** What a switch did, with Undo switch (from the page or, next time the window shows, the menu bar). */
 const switchOutcome = (result: ProfileSwitchResult) => turnedOutcome(`Switched to ${result.name}`, result, result.results,
-  result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined);
+  result.event ? { label: 'Undo switch', id: 'outcome-undo', inHistory: true, title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined);
 
 /** Switches to a profile. The band says what changed, with Undo; the menu bar follows. */
 export const switchToProfile = (id: string) => busy('Switching profile…', async () => {

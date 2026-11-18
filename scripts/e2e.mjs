@@ -1074,6 +1074,7 @@ async function practiceFlow() {
         const limit = setTimeout(() => fail(new Error('The deletion did not trigger a completed Refresh.')), 30000);
         let clicked = false;
         centralKnot.onSyncChanged(() => {
+          // With the page paused, an earlier signal still finds a copy. Only the deletion pass removes the two that survived the hand deletion.
           if (clicked || copies().some(Boolean)) return;
           clicked = true;
           clearTimeout(limit);
