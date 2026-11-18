@@ -1,10 +1,10 @@
 // The order of the rows under a heading on the Skills, MCP servers and Agents pages (src/itemrow.ts inOrder), as worked
 // examples: by name, or by last updated, newest first. An item's versions change only through library.ts's keepVersion and
 // setCurrent, so each example makes them that way. Then the rows a click pins where they were (Pinned), as the MCP servers
-// page draws them.
+// page draws them; and a skill and an agent of one name, two rows apart (rowId).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inOrder, noPins, pin, pinsOn, placeIn, type ItemRow, type Pinned } from '../src/itemrow.ts';
+import { inOrder, noPins, pin, pinsOn, placeIn, rowId, type ItemRow, type Pinned } from '../src/itemrow.ts';
 import { keepVersion, newItem, setCurrent, type LibraryItem, type Shelf } from '../src/library.ts';
 
 /** A shelf that keeps nothing: these examples read only the item's record. */
@@ -117,4 +117,23 @@ test('Sorted by last updated, a found item taken in by its Add keeps its place a
   assert.deepEqual(keys(inOrder(rows, 'updated', from(library), undefined, pins)), ['alpha', 'beta', 'gamma']);
   // Not pinned (the list drawn afresh), it goes first, by its time.
   assert.deepEqual(keys(inOrder(rows, 'updated', from(library))), ['beta', 'alpha', 'gamma']);
+});
+
+// ---------- A skill and an agent of one name ----------
+
+test('A skill and an agent both named review are two rows: each has its own id, its own item’s time, and its own pin', async () => {
+  const skill: ItemRow = { ...row('review'), kind: 'skills' }, agent: ItemRow = { ...row('review'), kind: 'agents' };
+  // The opened row, the flash, the armed Delete and a plugin item's file shown go by the row's id.
+  assert.deepEqual([rowId(skill.kind, skill.key), rowId(agent.kind, agent.key)], ['skills-review', 'agents-review']);
+  // Each row's item is its kind's (matrix.ts itemOf): the skill edited yesterday comes before notes on Skills, the agent edited last week after it on Agents.
+  const libraries: Record<string, Record<string, LibraryItem>> = { skills: { review: takenIn('review', 30), notes: takenIn('notes', 3) }, agents: { review: takenIn('review', 30), notes: takenIn('notes', 3) } };
+  await edited(libraries.skills!.review!, 1);
+  await edited(libraries.agents!.review!, 7);
+  const itemOf = (each: ItemRow) => libraries[each.kind]![each.key];
+  assert.deepEqual([keys(inOrder([skill, { ...row('notes'), kind: 'skills' }], 'updated', itemOf)), keys(inOrder([agent, { ...row('notes'), kind: 'agents' }], 'updated', itemOf))],
+    [['review', 'notes'], ['notes', 'review']]);
+  // The skill's switch clicked on Skills pins it there; on Agents, whose list is another, the agent goes under its own heading.
+  const onSkills = pinsOn(noPins<string>(), 'Skills by name');
+  pin(onSkills, skill.key, 'on');
+  assert.deepEqual([placeIn(onSkills, skill.key, 'off'), placeIn(pinsOn(onSkills, 'Agents by name'), agent.key, 'off')], ['on', 'off']);
 });

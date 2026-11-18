@@ -21,6 +21,7 @@ const main = {
 const api = {
   turnPlugin: (_source: string, plugin: string, what: PluginTurn) => { main.sent.push(`${plugin} ${what}`); return new Promise<PluginTurnResult>(done => main.answers.push(done)); },
   applySkills: (changes: Change[]) => { main.sent.push(changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}, seen ${change.seenOn ? 'on' : 'off'}`).join()); return new Promise<PassResult>(done => main.passes.push(done)); },
+  applyAgents: (changes: Change[]) => { main.sent.push(`agent ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
   plugins: async () => { main.reads.plugins++; return view; },
   refresh: async () => { main.reads.home++; main.duringHomeRead?.(); return null; },
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
@@ -262,12 +263,12 @@ test('A new run on Plugins clears what an earlier action’s stop said, as befor
 
 /** Each skill On or Off as main last answered for it (On before): what a row's state is now, as the page would read it from its view. */
 const onNow = new Map<string, boolean>();
-/** A skill's switch clicked on the page open, as matrix.ts flip sends it: drawn as the row was (its latest unended click's state, else as it is now). */
-function flip(name: string, on: boolean, made = () => {}) {
-  const seen = wantedOn('skills', name) ?? onNow.get(name) ?? true;
-  queueClick({ kind: 'skills', key: name, on }, name, () => {
+/** A skill's switch (or `kind`'s) clicked on the page open, as matrix.ts flip sends it: drawn as the row was (its latest unended click's state, else as it is now). */
+function flip(name: string, on: boolean, made = () => {}, kind: 'skills' | 'agents' = 'skills') {
+  const seen = wantedOn(kind, name) ?? onNow.get(name) ?? true;
+  queueClick({ kind, key: name, on }, name, () => {
     made();
-    return { kind: 'skills', items: [name], changes: [{ key: name, on, except: [], seenOn: seen }], said: (notIn: HarnessId[]) => `${name} is ${on ? 'on' : 'off'}${notIn.length ? ', but still in Claude Code' : ''}.` };
+    return { kind, items: [name], changes: [{ key: name, on, except: [], seenOn: seen }], said: (notIn: HarnessId[]) => `${name} is ${on ? 'on' : 'off'}${notIn.length ? ', but still in Claude Code' : ''}.` };
   }, () => onNow.get(name) ?? true);
 }
 /** What main did of one click: the item written or removed in Claude Code, or the click refused as a whole, or a write that failed. */
@@ -399,12 +400,31 @@ test('A run made on one tool’s page is said there only: on another tool’s pa
   app.harness = 'codex-cli';
   leaveResults();
   await main.pass(did('a'));
-  assert.deepEqual([app.outcome, app.said.text, flashRequests.has('a')], [undefined, 'a is off.', false]);
+  assert.deepEqual([app.outcome, app.said.text, flashRequests.has('skills-a')], [undefined, 'a is off.', false]);
   // A click there is a run of its own, said in its own header.
   flip('b', false);
   await settled();
   await main.pass(did('b'));
   assert.equal(app.outcome?.text, 'b is off.');
+});
+
+test('A skill and an agent both named review are clicked apart: the agent’s click on Codex’s Agents tab waits; on Skills, review’s switch takes nothing back', async () => {
+  onSkills();
+  Object.assign(app, { page: 'harnesses', harness: 'codex-cli', harnessTab: 'agents' });
+  flip('a', false, undefined, 'agents');
+  flip('review', false, undefined, 'agents');
+  await settled();
+  // To Skills before the agent's click runs: the skill's switch is a click of its own, not a take-back of the agent's.
+  showPage('skills');
+  assert.equal(takeBack('skills', 'review'), false);
+  flip('review', false);
+  assert.deepEqual([wantedOn('agents', 'review'), wantedOn('skills', 'review')], [false, false]);
+  await main.pass(did('a'));
+  await main.pass(did('review'));
+  await main.pass(did('review'));
+  assert.deepEqual(main.sent, ['agent a off', 'agent review off', 'review off, seen on']);
+  // The skill's row flashes on Skills; the agent's click was made on another page, said in the status bar, and flashes no row.
+  assert.deepEqual([app.outcome?.text, flashRequests.has('skills-review'), flashRequests.has('agents-review')], ['review is off.', true, false]);
 });
 
 test('A click 8 seconds after the run’s last click ended starts a new run, though a result with a problem line still shows', async () => {

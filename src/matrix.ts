@@ -24,7 +24,7 @@ import { acting, closeResult, isKind, problemKey, leftOutTools, collectUsage, un
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { inOrder, kindSource, lastUpdated, noPins, pin, placeIn, timeIn, type ItemRow, type KindSource, type Pinned, type RowOrder, type Tool } from './itemrow.ts';
+import { inOrder, kindSource, lastUpdated, noPins, pin, placeIn, rowId, timeIn, type ItemRow, type KindSource, type Pinned, type RowOrder, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
@@ -36,7 +36,7 @@ import { pluginOf } from './sourcelink.ts';
 import { market } from './pluginstate.ts';
 import type { PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
-import { partOfPage, samePart } from './pluginstatus.ts';
+import { pageOfPart, partOfPage, samePart } from './pluginstatus.ts';
 import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
 
@@ -113,21 +113,24 @@ function handledNote(row: PluginRow, lead: string, id: string) {
 }
 
 
-/** Plugin items whose file is shown, by row key (a redraw keeps it open), with each tool's text once read. */
+/** A plugin's row's identity (itemrow.ts rowId), by the page its kind is listed on (pluginstatus.ts pageOfPart). */
+const pluginRowId = (row: PluginRow) => rowId(pageOfPart[row.kind], row.key);
+/** Plugin items whose file is shown, by row id (a redraw keeps it open), with each tool's text once read. */
 const filesShown = new Map<string, { tool: HarnessId; text: string }[] | undefined>();
 /** Shows or hides a plugin item's file; showing reads it from each tool's copy. */
 function toggleFile(row: PluginRow) {
-  if (filesShown.delete(row.key)) { rerender(); return; }
-  filesShown.set(row.key, undefined);
+  const id = pluginRowId(row);
+  if (filesShown.delete(id)) { rerender(); return; }
+  filesShown.set(id, undefined);
   rerender();
-  const read = (texts: { tool: HarnessId; text: string }[]) => { if (filesShown.has(row.key)) { filesShown.set(row.key, texts); rerender(); } };
+  const read = (texts: { tool: HarnessId; text: string }[]) => { if (filesShown.has(id)) { filesShown.set(id, texts); rerender(); } };
   void window.centralKnot.pluginItemTexts(row.plugin, row.marketName, row.kind, row.name).then(read, () => read([]));
 }
 
 /** A plugin item's details: what it is, where it comes from and is handled, each tool's copy, and its file as each tool's copy has it. */
 function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
   const [type, ...rest] = row.description.split(' · ');
-  const shown = filesShown.has(row.key), copies = filesShown.get(row.key);
+  const shown = filesShown.has(pluginRowId(row)), copies = filesShown.get(pluginRowId(row));
   const file = row.kind === 'skill' ? 'SKILL.md' : 'agent file';
   // The file shows right under the link that shows it, below the tools' lines, as in the Files view: the switches stay in view.
   const fileShown = !shown ? null : !copies?.length ? h('p.details-limits', {}, copies ? 'Its file couldn’t be read.' : 'Reading…')
@@ -159,7 +162,7 @@ function pluginStatus(row: PluginRow): string {
 
 /** A plugin item's row: its switch (each tool's switch for one item), its name with the plugin's mark, and a mark per tool. */
 function pluginRowEl(row: PluginRow) {
-  const open = view.comparing === row.key;
+  const open = view.comparing === pluginRowId(row);
   const mark = (tool: Tool) => {
     const look: MarkLook = !row.copies[tool as HarnessId] ? 'none' : offIn(row, tool as HarnessId) ? 'off' : 'on';
     const drawn = toolMark(look, tool);
@@ -169,7 +172,7 @@ function pluginRowEl(row: PluginRow) {
     return drawn;
   };
   return [
-    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${open ? '.open' : ''}${usedHere ? '.ov-usage' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(row.key) },
+    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${open ? '.open' : ''}${usedHere ? '.ov-usage' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(pageOfPart[row.kind], row.key) },
       h('div.ov-managed', { role: 'cell' }, pluginRowSwitch(row)),
       h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: row.description ? `${row.name}: ${row.description}` : row.name },
         h('span.ov-name-main', {}, h('span.ov-name-text', {}, row.name)),
@@ -177,7 +180,7 @@ function pluginRowEl(row: PluginRow) {
         row.description ? h('span.ov-name-about', { title: row.description }, row.description) : null),
       usedHere ? usedCell(pluginRowFacts(row)) : null,
       h('div.ov-marks', { role: 'cell' }, h('span.tool-marks', { role: 'img', 'aria-label': toolList().map(tool => cellWords(row, tool as HarnessId)).join('. ') }, toolList().map(mark))),
-      h('div.ov-open', { role: 'cell' }, openButton(row.key, row.name))),
+      h('div.ov-open', { role: 'cell' }, openButton(pageOfPart[row.kind], row.key, row.name))),
     open && !docked() ? pluginDetails(row) : null,
   ];
 }
@@ -271,19 +274,20 @@ type Filter = 'all' | 'attention' | 'plugins' | 'unused';
 const newView = () => ({
   filter: 'all' as Filter,
   find: '',
-  /** The skill whose details are open under its row. */
+  // A row's fields name it by its row id (itemrow.ts rowId).
+  /** The row whose details are open. */
   comparing: undefined as string | undefined,
-  /** A library kind: the item whose copy question shows every copy's body side by side (RowWords body). */
+  /** The row whose copy question shows every copy's body side by side (RowWords body). */
   reading: undefined as string | undefined,
-  /** A library kind: the item whose versions list shows every version, not only its newest few. */
+  /** The row whose versions list shows every version, not only its newest few. */
   versionsUnfolded: undefined as string | undefined,
-  /** A library kind: the version being read in an opened row (its item, and its place in the list). */
-  readingVersion: undefined as { key: string; index: number } | undefined,
+  /** The version being read in an opened row (its row, and its place in the list). */
+  readingVersion: undefined as { id: string; index: number } | undefined,
   /** The harness whose page this view was last drawn on (undefined: the kind's own page). */
   shownFor: undefined as Tool | undefined,
   /** What the Skills page list is narrowed to. */
   listFind: '',
-  /** The item whose Delete from Central Knot is waiting for its confirming click. */
+  /** The row whose Delete from Central Knot is waiting for its confirming click. */
   confirmDelete: undefined as string | undefined,
   /** The visit on which a row was last opened or closed (state.visit): a copy question doesn't outlive it. */
   openedOn: 0,
@@ -309,7 +313,7 @@ export function openItem(which: PageKind, name: string) {
   const key = facts?.find(item => samePart({ kind: partKind, name: item.key }, { kind: partKind, name }) || samePart({ kind: partKind, name: item.name }, { kind: partKind, name }))?.key;
   // Drawn for the kind's own page (startFresh), so its first draw there keeps this row open.
   startFresh(views[which], undefined);
-  views[which].comparing = key;
+  views[which].comparing = key && rowId(which, key);
   showPage(which);
   if (key) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
 }
@@ -519,7 +523,7 @@ function compareChoices(skill: ItemRow, inFiles = false, then?: () => void) {
   const factsOf = (tool: Tool, at: number) => [sizesDiffer ? versions[tool]!.lines : '', Number.isFinite(at) ? `edited ${sinceThen(at)}` : versions[tool]!.changed];
   const facts = groups.map(([tool], index) => (versions[tool] ? factsOf(tool, editedAt[index]).filter(Boolean).join(' · ') : ''));
   // The copies say when each was edited, and the latest one is marked.
-  const lib = libraryPages[skill.kind];
+  const lib = libraryPages[skill.kind], id = rowId(skill.kind, skill.key);
   const newest = groups.length > 2 ? 'Newest' : 'Newer';
   const about = (group: Tool[]) => {
     const said = facts[groups.indexOf(group)];
@@ -551,8 +555,8 @@ function compareChoices(skill: ItemRow, inFiles = false, then?: () => void) {
   // a kind with one, skills, opens it there). A kind with neither (MCP servers) quotes each whole in its row.
   const every = compared.length > 2 ? 'Read every copy' : 'Read both copies';
   const read = inFiles ? null : lib.files ? smallAction(every, `diff-${skill.key}`, () => openFiles(skill.key), '.compare-read')
-    : lib.words.body ? smallAction(view.reading === skill.key ? 'Hide the copies' : every, `diff-${skill.key}`, () => { view.reading = view.reading === skill.key ? undefined : skill.key; rerender(); }, '.compare-read') : null;
-  const bodies = lib.words.body && view.reading === skill.key
+    : lib.words.body ? smallAction(view.reading === id ? 'Hide the copies' : every, `diff-${skill.key}`, () => { view.reading = view.reading === id ? undefined : id; rerender(); }, '.compare-read') : null;
+  const bodies = lib.words.body && view.reading === id
     ? h('div.compare-copies', {}, fileBlocks(`body-${skill.key}`, lib.words.body, compared.map(tool => ({ tool, text: versions[tool]?.body ?? '' })), holders => `${lib.words.body} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
     : null;
   return h('div.compare-block', {},
@@ -575,7 +579,7 @@ const docked = () => state.wide;
  * Whether an open item's details sit under its row: always in a narrow window, and at every width for a copy question, so the
  * question opens where the switch was clicked.
  */
-const underRow = (key: string) => !docked() || rowsOf(kind).some(skill => skill.key === key && isDiffering(skill));
+const underRow = (id: string) => !docked() || rowsOf(kind).some(skill => rowId(skill.kind, skill.key) === id && isDiffering(skill));
 
 /**
  * The open row's details in a panel beside the table: its name and a close button, then everything the inline details
@@ -599,15 +603,16 @@ function pluginDock(row: PluginRow) {
     h('div.scroll.dock-scroll', { id: 'dock-scroll' }, pluginDetails(row, 'dock')));
 }
 
-/** Opening a row's details brings them into view, so a choice below the fold is not missed. */
-function openRow(key: string) {
-  view.comparing = view.comparing === key ? undefined : key;
+/** Opening a row's details (the row of `rowKind` keyed `key`) brings them into view, so a choice below the fold is not missed. */
+function openRow(rowKind: PageKind, key: string) {
+  const id = rowId(rowKind, key);
+  view.comparing = view.comparing === id ? undefined : id;
   view.openedOn = state.visit;
   view.openedAt = state.said.seq;
   rerender();
   // Details that run past the table's bottom are brought into view with their row at its top, so the row's name and the
   // details' close button are in view too. Docked details sit beside the table and are always in view.
-  if (view.comparing && underRow(key)) requestAnimationFrame(() => {
+  if (view.comparing && underRow(id)) requestAnimationFrame(() => {
     const rowEl = document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`);
     const details = rowEl?.nextElementSibling;
     const box = rowEl?.closest('.scroll')?.getBoundingClientRect();
@@ -650,10 +655,10 @@ function nameCell(skill: ItemRow, attention: boolean) {
     skill.description ? h('span.ov-name-about', { title: skill.description }, skill.description) : null);
 }
 
-/** The chevron that opens or closes a row's details, at the row's end. */
-function openButton(key: string, name: string) {
-  const open = view.comparing === key;
-  return h('button.row-open', { type: 'button', id: `open-${key}`, 'aria-label': `${open ? 'Hide' : 'Show'} details for ${name}`, 'aria-expanded': String(open), onclick: (event: Event) => { event.stopPropagation(); openRow(key); } },
+/** The chevron that opens or closes a row's details (the row of `rowKind` keyed `key`), at the row's end. */
+function openButton(rowKind: PageKind, key: string, name: string) {
+  const open = view.comparing === rowId(rowKind, key);
+  return h('button.row-open', { type: 'button', id: `open-${key}`, 'aria-label': `${open ? 'Hide' : 'Show'} details for ${name}`, 'aria-expanded': String(open), onclick: (event: Event) => { event.stopPropagation(); openRow(rowKind, key); } },
     icon(open ? 'chevron-down' : 'chevron-right', 14, 'tone-faint'));
 }
 
@@ -676,7 +681,7 @@ function outcomeShown(outcome: Outcome, matrixPage: boolean): boolean {
   if (outcome.page !== state.page) return false;
   const named = [outcome.item, ...(outcome.items ?? [])].filter((name): name is string => !!name);
   // A newer result (an Undo that brings the question back) is still said.
-  const choosing = matrixPage && view.comparing && (outcome.said ?? 0) <= view.openedAt && rowsOf(kind).some(skill => skill.key === view.comparing && differs(skill) && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
+  const choosing = matrixPage && view.comparing && (outcome.said ?? 0) <= view.openedAt && rowsOf(kind).some(skill => rowId(skill.kind, skill.key) === view.comparing && differs(skill) && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
   if (choosing) return false;
   return !(state.skillsView === 'files' && state.item && !named.some(name => name.toLowerCase() === state.item));
 }
@@ -901,12 +906,9 @@ const dismissNotices = (list: SyncNotice[]) => list.length < 3 ? null : smallAct
 
 /** When Central Knot first showed each notice, so a notice left up says how old it is. */
 const firstShown = new Map<string, number>();
-/** Rows a notice just told about, so they can show a brief highlight. */
-const flashed = new Map<string, number>();
-/** A row flashes on the first draw after its notice, once; later redraws leave it calm. */
-const takeFlash = (key: string) => {
-  if (flashRequests.delete(key)) return true;
-  const at = flashed.get(key); if (at === undefined) return false; flashed.delete(key); return Date.now() - at < 3000;
+/** A row flashes on its first draw after it was asked for (app.ts flashRequests), once, unless the ask lapsed; later redraws leave it calm. */
+const takeFlash = (id: string) => {
+  const until = flashRequests.get(id); if (until === undefined) return false; flashRequests.delete(id); return Date.now() < until;
 };
 const age = (key: string) => {
   if (!firstShown.has(key)) firstShown.set(key, Date.now());
@@ -937,10 +939,11 @@ function syncNotice(notice: Told) {
   const rowKey = rowsOf(kind).find(skill => skill.name === notice.item || skill.key === notice.item.toLowerCase())?.key;
   const noticeKey = notice.history;
   state.seenNotices.add(notice.history);
-  if (rowKey && !firstShown.has(noticeKey)) flashed.set(rowKey, Date.now());
+  // The rows a notice just told about show a brief highlight: on a draw in the next 3 s.
+  if (rowKey && !firstShown.has(noticeKey) && !flashRequests.has(rowId(kind, rowKey))) flashRequests.set(rowId(kind, rowKey), Date.now() + 3000);
   // The item's name opens its row: one click from "what changed" to the item, with no separate Details link.
-  const name = rowKey && view.comparing !== rowKey
-    ? h('button.item-name.notice-name', { type: 'button', id: `notice-open-${notice.history}`, title: `Show ${notice.item}’s details`, onclick: (event: Event) => { event.stopPropagation(); view.comparing = undefined; openRow(rowKey); } }, notice.item)
+  const name = rowKey && view.comparing !== rowId(kind, rowKey)
+    ? h('button.item-name.notice-name', { type: 'button', id: `notice-open-${notice.history}`, title: `Show ${notice.item}’s details`, onclick: (event: Event) => { event.stopPropagation(); view.comparing = undefined; openRow(kind, rowKey); } }, notice.item)
     : h('strong.item-name', {}, notice.item);
   const said = notice.item && text.startsWith(notice.item) ? [name, text.slice(notice.item.length)] : [text];
   // With sync off, a notice can only come from Sync now: say sync stays off, and offer to turn it on.
@@ -1029,9 +1032,10 @@ export function itemsTable(which: PageKind, harness?: Tool) {
     && (!needle || row.name.toLowerCase().includes(needle) || row.description.toLowerCase().includes(needle)));
   const find = findInput({ id: 'find', label: 'Find', value: view.find, onInput: text => { view.find = text; rerender(); } });
   // A copy question doesn't outlive the visit: back on the page, its row is closed.
-  if (view.comparing && view.openedOn !== state.visit && all.some(skill => skill.key === view.comparing && isDiffering(skill))) view.comparing = undefined;
-  const open = docked() && view.comparing && !underRow(view.comparing) ? all.find(skill => skill.key === view.comparing) : undefined;
-  const openRow = docked() && !open ? plugins.find(row => row.key === view.comparing) : undefined;
+  const opened = (skill: ItemRow) => rowId(skill.kind, skill.key) === view.comparing;
+  if (view.comparing && view.openedOn !== state.visit && all.some(skill => opened(skill) && isDiffering(skill))) view.comparing = undefined;
+  const open = docked() && view.comparing && !underRow(view.comparing) ? all.find(opened) : undefined;
+  const openRow = docked() && !open ? plugins.find(row => pluginRowId(row) === view.comparing) : undefined;
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
   // Found; the others, only other tools have. A row whose own switch was clicked here stays under the heading it was under.
   const under = (role: Role) => [shown.filter(skill => placeIn(pins, skill.key, sectionOf(skill)) === role), shown.filter(skill => sectionOf(skill) === role)] as const;
@@ -1198,9 +1202,9 @@ function flip(skill: ItemRow, on: boolean) {
   if (takeBack(kind, skill.key)) { rerender(); return; }
   if (on && isDiffering(skill)) {
     // The question opens under its row; a second click on the switch closes it.
-    if (view.comparing === skill.key) { view.comparing = undefined; rerender(); return; }
+    if (view.comparing === rowId(skill.kind, skill.key)) { view.comparing = undefined; rerender(); return; }
     view.comparing = undefined;
-    openRow(skill.key);
+    openRow(skill.kind, skill.key);
     announce(`${nameOf(skill)}’s copies differ. Choose which copy every tool uses.`, true);
     return;
   }
@@ -1239,7 +1243,7 @@ function librarySwitch(skill: ItemRow, id: string) {
  * starts where an On row's does. A found item none of whose copies can be read for sure has nothing to add: it waits.
  */
 function addButton(skill: ItemRow, id: string) {
-  const question = isDiffering(skill) ? (view.comparing === skill.key ? 'open' : 'closed') : undefined;
+  const question = isDiffering(skill) ? (view.comparing === rowId(skill.kind, skill.key) ? 'open' : 'closed') : undefined;
   const label = addLabel(skill, itemOf(skill), toolList(), question);
   return h('button.btn.outline.small.add-item', { type: 'button', id, title: label, 'aria-label': label, disabled: !canQueue() || !canAdd(skill),
     onclick: (event: Event) => { event.stopPropagation(); flip(skill, true); } }, 'Add');
@@ -1333,16 +1337,16 @@ function markLegend(list: ItemRow[], plugins: PluginRow[]) {
 
 /** One row: its switch, its name, a mark per tool, and the chevron that opens its details. */
 function row(skill: ItemRow) {
-  const open = view.comparing === skill.key, when = dated(), used = usedHere;
+  const id = rowId(skill.kind, skill.key), open = view.comparing === id, when = dated(), used = usedHere;
   return [
-    h(`div.ov-row.ov-switch-row${takeFlash(skill.key) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${when ? '.ov-dated' : ''}${used ? '.ov-usage' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(skill.key) },
+    h(`div.ov-row.ov-switch-row${takeFlash(id) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${when ? '.ov-dated' : ''}${used ? '.ov-usage' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(skill.kind, skill.key) },
       h('div.ov-managed', { role: 'cell' }, itemSwitch(skill)),
       nameCell(skill, differs(skill)),
       when ? whenCell(skill) : null,
       used ? usedCell(factsOf(skill)) : null,
       h('div.ov-marks', { role: 'cell' }, rowMarks(skill)),
-      h('div.ov-open', { role: 'cell' }, openButton(skill.key, nameOf(skill)))),
-    open && underRow(skill.key) ? details(skill) : null,
+      h('div.ov-open', { role: 'cell' }, openButton(skill.kind, skill.key, nameOf(skill)))),
+    open && underRow(id) ? details(skill) : null,
   ];
 }
 
@@ -1643,9 +1647,9 @@ function libraryHarnessSwitch(lib: LibraryPage, skill: ItemRow, tool: Tool) {
 function libraryDelete(lib: LibraryPage, skill: ItemRow) {
   const item = inLibrary(itemOf(skill));
   if (!item) return null;
-  const name = nameOf(skill), disarm = () => { view.confirmDelete = undefined; rerender(); };
-  if (view.confirmDelete !== skill.key) {
-    const arm = button({ variant: 'outline', size: 'micro', label: 'Delete from Central Knot…', id: `delete-${skill.key}`, disabled: writeOff(), onclick: () => { view.confirmDelete = skill.key; rerender(); } });
+  const name = nameOf(skill), id = rowId(skill.kind, skill.key), disarm = () => { view.confirmDelete = undefined; rerender(); };
+  if (view.confirmDelete !== id) {
+    const arm = button({ variant: 'outline', size: 'micro', label: 'Delete from Central Knot…', id: `delete-${skill.key}`, disabled: writeOff(), onclick: () => { view.confirmDelete = id; rerender(); } });
     arm.classList.add('delete-quiet');
     return h('span.delete-offer', {}, arm, h('span.delete-offer-note', {}, lib.say.said.deleteOffer));
   }
@@ -1666,8 +1670,8 @@ const versionTexts = new Map<string, VersionText>();
 function libraryVersions(lib: LibraryPage, skill: ItemRow) {
   const item = inLibrary(itemOf(skill));
   if (!item) return null;
-  const name = nameOf(skill), textKey = (hash: string) => `${state.home?.home}:${kind}:${item.key}:${hash}`;
-  const at = view.readingVersion?.key === item.key ? view.readingVersion.index : undefined;
+  const name = nameOf(skill), id = rowId(skill.kind, skill.key), textKey = (hash: string) => `${state.home?.home}:${skill.kind}:${item.key}:${hash}`;
+  const at = view.readingVersion?.id === id ? view.readingVersion.index : undefined;
   const fetch = (hash: string) => {
     if (versionTexts.has(textKey(hash))) return;
     versionTexts.set(textKey(hash), 'reading');
@@ -1675,7 +1679,7 @@ function libraryVersions(lib: LibraryPage, skill: ItemRow) {
   };
   // Reading a version reads the current one too, so what differs from it can be marked.
   const read = (index: number) => {
-    view.readingVersion = at === index ? undefined : { key: item.key, index };
+    view.readingVersion = at === index ? undefined : { id, index };
     if (view.readingVersion) { fetch(listed(item)[index].hash); fetch(item.hash); }
     rerender();
   };
@@ -1686,7 +1690,7 @@ function libraryVersions(lib: LibraryPage, skill: ItemRow) {
     said: notIn => { const source = (version.from.how === 'made-current' && madeFrom(item, version)) || version;
       return lib.say.said.madeCurrent(name, source, versionClock(item, source), on(notIn), toolList()); } });
   const reading = at === undefined || !listed(item)[at] ? undefined : { index: at, text: textOf(listed(item)[at].hash), current: textOf(item.hash) };
-  return versionList({ item, canWrite: canWrite(), unfolded: view.versionsUnfolded === item.key, onUnfold: () => { view.versionsUnfolded = item.key; rerender(); },
+  return versionList({ item, canWrite: canWrite(), unfolded: view.versionsUnfolded === id, onUnfold: () => { view.versionsUnfolded = id; rerender(); },
     changes: skill.versionChanges, reading, now: Date.now(), onRead: read, onMakeCurrent: makeCurrent });
 }
 

@@ -16,7 +16,7 @@ import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice, UsageReading } from './types.ts';
-import { anyOn, kindSource, noPins, pinsOn, type Pinned } from './itemrow.ts';
+import { anyOn, kindSource, noPins, pinsOn, rowId, type Pinned } from './itemrow.ts';
 import { caughtUpNames, noticeNames, plural, withSetAside } from './model.ts';
 import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -387,9 +387,14 @@ export async function collectUsage({ asked = false } = {}) {
   if (landed !== 'dropped') rerender();
 }
 
-/** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */
-export const flashRequests = new Set<string>();
-const flashRow = (item: string) => { if (item) flashRequests.add(item.toLowerCase()); };
+/**
+ * The rows to flash on their next draw, by row id (itemrow.ts rowId), each with the time its ask lapses: a click's, an Undo's or
+ * a Restore's waits for the row's next draw whenever it comes (flashRow); a notice's lapses after 3 s (matrix.ts syncNotice).
+ * matrix.ts takeFlash reads it.
+ */
+export const flashRequests = new Map<string, number>();
+/** The row of `kind` named `item` flashes on its next draw. */
+const flashRow = (kind: PageKind, item: string) => { if (item) flashRequests.set(rowId(kind, item.toLowerCase()), Infinity); };
 
 // ---------- One switch per item ----------
 
@@ -510,13 +515,13 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
 }
 
 /** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Turn these off, Resume, a copy chosen. */
-export const applyClick = (click: Click) => busy(click.undoing ? 'Undoing…' : 'Applying…', async () => sayDone(await carryOut(click, state.page)));
-/** What a click applied at once did, said in the header (renderer.ts resultHere) or its band, its row flashed, the focus on its control. */
-function sayDone(done: Done) {
+export const applyClick = (click: Click) => busy(click.undoing ? 'Undoing…' : 'Applying…', async () => sayDone(await carryOut(click, state.page), click.kind));
+/** What a click applied at once did, said in the header (renderer.ts resultHere) or its band, its rows (of `kind`) flashed, the focus on its control. */
+function sayDone(done: Done, kind: PageKind) {
   if (done.kept) kindPages[done.kept.kind].keep(done.kept.results, done.kept.notices);
   tell(done.outcome);
   focusAfterBusy = done.focus;
-  for (const item of done.outcome.items ?? []) flashRow(item);
+  for (const item of done.outcome.items ?? []) flashRow(kind, item);
   if (done.regroups) unpin();
 }
 
@@ -559,7 +564,7 @@ function sayRun(turn: ItemTurn) {
   if (placeOf(turn.row.kind) !== turn.run.place) { announce(spoken(outcome)); return; }
   if (done.kept) kindPages[done.kept.kind].keep(turns.flatMap(each => each.done?.kept?.results ?? []), done.kept.notices);
   tell(outcome);
-  flashRow(turn.name);
+  flashRow(turn.row.kind, turn.name);
   if (done.focus && document.activeElement === document.body) document.getElementById(done.focus)?.focus({ preventScroll: true });
 }
 
@@ -611,7 +616,7 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
   const what = click.items.length === 1 ? click.items[0] : fewNames(click.items);
   tell({ page: state.page, items: click.items, warn: !undone, band: true, fade: undone, reasons,
     text: undone ? `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.` : stopped ? 'Not all of it could be undone.' : `Not all of ${what} could be put back.` });
-  for (const item of click.items) flashRow(item);
+  for (const item of click.items) flashRow(click.kind, item);
   if (click.regroups) unpin();
 });
 
@@ -903,11 +908,12 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   }
   if (past && libraryEntry(past)) { sayLibraryAction(past, result); return; }
   if (past?.kind === 'everything') { sayEverything(past, result, switchesOn); return; }
-  // A Pull's change to an agent's Claude Code settings alone (gitrepo.ts undoSettingsChange): the one entry with an Undo of its own.
+  // A Pull's change to an agent's Claude Code settings alone (gitrepo.ts undoSettingsChange): the one entry with an Undo of its own,
+  // an agent's (its row flashes on Agents).
   const item = restored[0]?.item ?? past?.item ?? '';
   const done = !result.stopped && restored.length > 0;
   tell(done ? { page: state.page, item, history: true, text: `Undid the change to ${item}. The earlier version is back in ${everywhere}.` } : undefined, result.stopped ?? `Restored in ${plural(0, 'tool')}.`);
-  if (done) flashRow(item);
+  if (done) flashRow('agents', item);
 });
 
 /**
@@ -924,7 +930,7 @@ function sayLibraryAction(past: HistoryEvent, result: ApplyResult) {
   const notDone = result.results.filter(keptBack).map(entry => entry.message);
   const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].join(' ');
   tell({ page: state.page, item: past.item, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined });
-  flashRow(past.item);
+  flashRow(entry.kind, past.item);
 }
 
 /**
@@ -960,7 +966,7 @@ export const skillAction = (action: 'clear-switch' | 'take-over', key: string, t
     const entry = action === 'clear-switch' ? result.made?.[0] : undefined;
     tell({ page: state.page, item: name, band: true, text: said,
       act: entry ? { label: 'Undo', id: 'outcome-undo', title: `Turn ${name} off again in ${toolName(tool)}’s own settings`, run: () => void restoreEvent(entry) } : undefined });
-    flashRow(name);
+    flashRow('skills', name);
   });
 
 // ---------- Results ----------
