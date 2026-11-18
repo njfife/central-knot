@@ -47,6 +47,7 @@ const api: DesktopApi = {
   openSignInSettings: () => ipcRenderer.invoke('settings:open-sign-in'),
   setHistoryDays: days => ipcRenderer.invoke('settings:history-days', days),
   onSettingsChanged: callback => { ipcRenderer.on('settings:changed', () => callback()); },
+  onWindowShown: callback => { ipcRenderer.on('window:shown', () => callback()); },
   openLogFolder: () => ipcRenderer.invoke('settings:open-log-folder'),
   readLog: count => ipcRenderer.invoke('settings:read-log', count),
   setPluginUpdates: on => ipcRenderer.invoke('settings:plugin-updates', on),

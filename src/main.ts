@@ -183,7 +183,7 @@ async function pluginUpdatesSwitched(on: boolean) {
 }
 
 /** Sends the page a message, when there is a window to send it to. */
-function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'said', ...args: unknown[]) {
+function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'said' | 'window:shown', ...args: unknown[]) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
@@ -348,7 +348,13 @@ function showWindow() {
   window.show();
   window.focus();
   joinDock();
+  // Said here, not from the window's own show event, which macOS sends only once the window is seen on a screen; and said again
+  // each time the page loads (createWindow), so a page not yet listening when the window showed still hears it.
+  windowShown = true;
+  send('window:shown');
 }
+/** Whether the window has shown since it was made (a start at sign-in makes it hidden): the page is told at each show and each load. */
+let windowShown = false;
 /**
  * On a Mac, Central Knot is in the Dock (and the ⌘Tab list) only while it has a window: closed, it runs from its menu bar icon
  * alone. A minimised or hidden (⌘H) window still counts as one. Electron drops a request to leave made within a second of the
@@ -1156,11 +1162,13 @@ function createWindow(show: boolean) {
   });
   window.on('closed', () => { log('window closed'); leaveDock(); });
   window.webContents.on('render-process-gone', (_event, details) => log(`page process gone: ${details.reason}`));
-  window.webContents.on('did-finish-load', () => log('page loaded'));
+  windowShown = show;
+  window.webContents.on('did-finish-load', () => { log('page loaded'); if (windowShown) send('window:shown'); });
   // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
   // are rebuilt and the page re-reads, both from this one event. A release published meanwhile shows then too (updateflow.ts).
   window.on('focus', () => { unseen = false; unseenPlugins = undefined; refreshTray(); send('settings:changed'); void updater?.checkIfStale(); });
-  loading = window.loadFile(join(__dirname, 'index.html'));
+  // A start with no window tells the page so; it is told when the window shows (showWindow, and each load after): it collects usage then (app.ts collectUsage).
+  loading = window.loadFile(join(__dirname, 'index.html'), show ? {} : { query: { start: 'hidden' } });
 }
 
 // One Central Knot at a time: a second launch hands over to the first (which shows its window) and exits at once, before it opens
@@ -1362,7 +1370,7 @@ app.whenReady().then(async () => {
   // Reveal only: the file manager selects it; nothing is opened, run or written.
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? skillChange(context(), eventId) : undefined));
-  // The tools' session history, read on the page's click: outside the queue, since usage.ts changes nothing in the home. This
+  // The tools' session history, read when the page collects usage: outside the queue, since usage.ts changes nothing in the home. This
   // computer's home reads OpenCode's data where XDG_DATA_HOME moves it, as each tool's folder follows its own variable.
   handleNow('usage:read', async home => (current && home === current.home
     ? readUsage({ home: current.home, overrides: context().overrides, dataHome: current.mode === 'actual' ? process.env.XDG_DATA_HOME : undefined }) : null));

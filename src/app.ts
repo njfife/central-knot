@@ -3,12 +3,13 @@
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
 // item page sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick) or in its turn in the page's
 // list (queueClick), its result kept for the page (lastResult), a run's said once (sayRun); History's actions (restoreEvent); the reads of
-// the home (loadHome, readAgain, readHomeOnce), the usage reading on a click (readUsage), and the Sync switch, Sync once and
-// Synchronize everything's row; the rows a click pins where they were (pinnedRows, drawPage); and the Instructions, base
-// instructions and Profiles pages' actions.
+// the home (loadHome, readAgain, readHomeOnce), usage collected when a home opens and on Update (collectUsage), and the Sync
+// switch, Sync once and Synchronize everything's row; the rows a click pins where they were (pinnedRows, drawPage); and the
+// Instructions, base instructions and Profiles pages' actions.
 // A sync notice lives across reads here, until its page shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it. Not here: drawing (renderer.ts and each
 // page's module), the Plugins page's state (pluginstate.ts), the Sources and Git repo pages' (sourcespage.ts, repopage.ts), and
-// every rule a page shows (the engines' answers in the view: libraryrow.ts, historyactions.ts, profileplan.ts).
+// every rule a page shows (the engines' answers in the view: libraryrow.ts, historyactions.ts, profileplan.ts). Two calls go
+// into matrix.ts, which imports this module: resultInHeader, and holdOrder, which holds the list on screen as a reading lands.
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
@@ -33,7 +34,7 @@ import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
-import { resultInHeader } from './matrix.ts';
+import { holdOrder, resultInHeader } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -121,8 +122,10 @@ export const state = {
   outcome: undefined as Outcome | undefined,
   /** The result whose problem lines are shown whole (Show all: matrix.ts problemLines): an item page's outcome, kept result or first background problem; Plugins' run or problem. */
   shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | undefined,
-  /** What the tools' session history shows was used (usage.ts): read only on the item pages' Read usage click (readUsage), for this home. */
-  usage: pageData<UsageReading>('unasked'),
+  /** What the tools' session history shows was used (usage.ts), for this home: collected when it opens and on Update usage statistics (collectUsage). */
+  usage: pageData<UsageReading>(),
+  /** Whether the usage band shows above an item page's list (matrix.ts usageBand): opened by Update usage statistics and by a reading that fails, closed by its close button and when a home opens. */
+  usageBand: false,
   /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
   instructions: pageData<InstructionFile[]>(),
   /** The one instruction file being edited (InstructionDraft). */
@@ -153,11 +156,13 @@ export const state = {
 };
 
 /**
- * The rows pinned on the list on screen (itemrow.ts Pinned): the list asks for them each time it is drawn, by its own name, and a
- * click on a row's own switch pins that row (itemrow.ts pin). Only a draw lets them go: one that asks for another list or for
- * none (another page, tab, view or plugin's page, another Sort or chip: drawPage); and Refresh (readAgain). Find keeps them.
- * Asked for outside a draw (a click, a read in the background), they are only read: another list's name gets none. In memory
- * only. `Group`: what the list groups its rows by (matrix.ts its headings, pluginstate.ts a plugin's place).
+ * The rows pinned on the list on screen (itemrow.ts Pinned): the list asks for them each time it is drawn, by its own name; a
+ * click on a row's own switch pins that row (itemrow.ts pin), and a usage reading as it lands pins the rows it could move
+ * (matrix.ts holdOrder). Only a draw lets them go: one that asks for another list or for none (another page, tab, view or
+ * plugin's page, another Sort or chip: drawPage); and Refresh (readAgain) and Put in order (unpin, from matrix.ts rowsHeld).
+ * Find keeps them. Asked for outside a draw (a click, a reading landing), they are the ones kept when the name is the list on
+ * screen's, else a set kept nowhere, so a pin there is lost. In memory only. `Group`: what the list groups its rows by
+ * (matrix.ts its headings, pluginstate.ts a plugin's place).
  */
 let drawing = false, asked = false;
 export const pinnedRows = <Group extends string | number>(list: string): Pinned<Group> => {
@@ -350,7 +355,8 @@ function accept(view: HomeView) {
   state.draftPick = undefined;
   resetPageData(state.instructions);
   resetPageData(state.history);
-  resetPageData(state.usage, 'unasked');
+  resetPageData(state.usage);
+  state.usageBand = false;
   drop(turn => turn.state === 'waiting');
   endRun();
   resetMarket();
@@ -358,22 +364,35 @@ function accept(view: HomeView) {
   void loadPluginUpdates();
   setHome(view, { reload: false });
   void loadPageData(state.page, { readId: view.readId });
+  // Usage is collected for every home it opens, in the background (collectUsage).
+  void collectUsage();
   // The sidebar counts what waits each way for the repo, so it is read with the home (no fetch: that waits for the page).
   if (state.page !== 'repo') void loadRepo(false);
   // The sidebar counts the sources too (their last reads: no network).
   if (state.page !== 'sources') void loadSources();
 }
 
+/** Whether the window has shown: false only after a start at sign-in with no window (main.ts startedHidden, the page's `start`), until it first shows. */
+let windowShown = new URLSearchParams(globalThis.location?.search).get('start') !== 'hidden';
+api().onWindowShown(() => { if (windowShown) return; windowShown = true; void collectUsage(); });
+
 /**
- * Reads the open home's session history (main's usage:read), on Read usage. Not `busy`: it changes nothing, so the page stays
- * usable and its line says it is reading; an answer for a home switched meanwhile is dropped (accept resets the slot).
+ * Collects usage: main's usage:read reads the tools' own session history on this computer, and nothing leaves it. By itself
+ * when a home opens (accept; after a start with no window, once the window first shows), and on Update usage statistics
+ * (`asked`), whose click opens the band (state.usageBand), as a reading that fails does. Not `busy`: it changes nothing, so the
+ * page stays usable meanwhile. An answer for a home switched meanwhile is dropped (accept resets the slot). A reading that lands
+ * moves no row: once its answer is known to be kept, the list on screen is held where it is (matrix.ts holdOrder), then the slot takes it.
  */
-export async function readUsage() {
+export async function collectUsage({ asked = false } = {}) {
   const home = state.home?.home;
   if (!home) return;
-  const reading = readPageData(state.usage, () => api().readUsage(home));
+  if (!asked && !windowShown) return;
+  if (asked) state.usageBand = true;
+  const reading = readPageData(state.usage, () => api().readUsage(home), holdOrder);
   rerender();
-  if ((await reading) !== 'dropped') rerender();
+  const landed = await reading;
+  if (landed === 'failed') state.usageBand = true;
+  if (landed !== 'dropped') rerender();
 }
 
 /** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */
