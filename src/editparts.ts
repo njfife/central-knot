@@ -3,7 +3,7 @@
 // (fitEditors), earlier-version lists, the discard question, the keyboard hint, and the info box that holds what explains the page.
 import { announce, machine, rerender } from './app.ts';
 import { lineDiff, folded } from './diff.ts';
-import { afterLayout, button, h, icon } from './dom.ts';
+import { afterLayout, button, h, icon, offsetIn, pressWasDrag } from './dom.ts';
 import { plural } from './model.ts';
 import { linesOf } from './words.ts';
 import type { InstructionFile } from './types.ts';
@@ -95,8 +95,8 @@ const openInfo = new Set<string>();
 
 /**
  * How a shown text opens its editor: a plain click on it, with the caret where the click landed, or Enter while it has focus,
- * with the caret at the start. A click that ends with text selected in it (a drag, a double-click's word) leaves that selection
- * to be copied. `start` gets the caret's place as an offset into the text as its editor holds it (each line break one
+ * with the caret at the start. A press that moves off its character before the release is a drag (dom.ts pressWasDrag): it opens
+ * nothing and leaves what it selected to be copied. `start` gets the caret's place as an offset into the text as its editor holds it (each line break one
  * character, as a text box keeps them). `locked`: why the editor can't open now, the same reason its Edit button gives (the
  * card's own, or what the page is doing: app.ts acting), said in the status bar on a click.
  */
@@ -106,19 +106,14 @@ export interface EditOnClick { start: (caret: number) => void; locked?: string }
  *  that ends a line, before its \n or where the point stops between the two, isn't counted); its end when the point is past every
  *  character. */
 function offsetAt(pre: HTMLElement, x: number, y: number): number {
-  const at = document.caretRangeFromPoint(x, y);
-  const before = document.createRange();
-  before.selectNodeContents(pre);
-  if (at && pre.contains(at.startContainer)) before.setEnd(at.startContainer, at.startOffset);
-  return before.toString().replace(/\r(?=\n|$)/g, '').length;
+  const text = pre.textContent ?? '';
+  return text.slice(0, offsetIn(pre, x, y) ?? text.length).replace(/\r(?=\n|$)/g, '').length;
 }
-
-/** Text is selected inside `pre` (by a drag, or a double-click on a word). */
-const selectedIn = (pre: HTMLElement) => { const chosen = getSelection(); return !!chosen && !chosen.isCollapsed && pre.contains(chosen.anchorNode); };
 
 /**
  * A text shown 14 lines at a time, with "Show all N lines" / "Show less" (remembered by `key`). What is shown is the text's
- * start, so an offset into it is an offset into the text. With `edit`, the text opens its editor (EditOnClick).
+ * start, so an offset into it is an offset into the text. With `edit`, the text opens its editor (EditOnClick). Its id
+ * (`shown-<key>`) is what lets a click, a drag or a selection on it outlast a redraw (dom.ts keepClicksAcrossRedraws, keepSelection).
  */
 export function previewBlock(text: string, key: string, label: string, moreId: string, edit?: EditOnClick) {
   const lines = linesOf(text);
@@ -128,8 +123,8 @@ export function previewBlock(text: string, key: string, label: string, moreId: s
     else announce(edit.locked);
   };
   const editable = !!edit && !edit.locked;
-  return [h(`pre.ins-preview${editable ? '.ins-editable' : ''}`, { tabindex: '0', 'aria-label': label, 'aria-description': editable ? 'Click or press Enter to edit' : undefined,
-    onclick: edit ? (event: MouseEvent) => { const pre = event.currentTarget as HTMLElement; if (!selectedIn(pre)) begin(offsetAt(pre, event.clientX, event.clientY)); } : undefined,
+  return [h(`pre.ins-preview${editable ? '.ins-editable' : ''}`, { id: `shown-${key}`, tabindex: '0', 'aria-label': label, 'aria-description': editable ? 'Click or press Enter to edit' : undefined,
+    onclick: edit ? (event: MouseEvent) => { const pre = event.currentTarget as HTMLElement; if (!pressWasDrag(pre)) begin(offsetAt(pre, event.clientX, event.clientY)); } : undefined,
     onkeydown: edit ? (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault(); begin(0); } } : undefined },
   (all ? lines : lines.slice(0, 14)).join('\n')),
   lines.length > 14 ? button({ variant: 'link', size: 'micro', label: all ? 'Show less' : `Show all ${lines.length} lines`, id: moreId, onclick: () => { if (all) shownWhole.delete(key); else shownWhole.add(key); rerender(); } }) : null];

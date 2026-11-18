@@ -1,7 +1,8 @@
 // The page's element builder (h) and the small controls every page draws with: buttons, switches (toggle), checkboxes, icons,
-// empty states, section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout), and a
-// press released on a control a redraw replaced counting as its click (keepClicksAcrossRedraws). No words of the app's own: what
-// a control says is its caller's, and the styles are style.css's.
+// empty states, section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout), and what a
+// redraw keeps of a gesture in the middle of it: a press released on a control a redraw replaced counting as its click, a drag
+// across a text as its selection (keepClicksAcrossRedraws, pressWasDrag), and what is selected (keepSelection). No words of the
+// app's own: what a control says is its caller's, and the styles are style.css's.
 import { icons, type IconName } from './icons.ts';
 import { groupBy } from './model.ts';
 
@@ -91,25 +92,96 @@ export const pathText = (text: string, full = text): HTMLElement => {
 /** A disabled control's reason, as its tooltip and its accessible description. */
 export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
 
+/** The character offset in `text`'s whole text of the place (node, offset) inside it. */
+const offsetOf = (text: Element, node: Node, offset: number) => {
+  const before = document.createRange();
+  before.selectNodeContents(text); before.setEnd(node, offset);
+  return before.toString().length;
+};
+/** The character offset in `text`'s whole text of the point (x, y), as a caret would go there; undefined off the text. */
+export function offsetIn(text: Element, x: number, y: number): number | undefined {
+  const at = document.caretRangeFromPoint(x, y);
+  return at && text.contains(at.startContainer) ? offsetOf(text, at.startContainer, at.startOffset) : undefined;
+}
+/** Selects `text`'s characters from `anchor` to `focus` (a focus before the anchor selects backwards). */
+function selectIn(text: Element, anchor: number, focus: number) {
+  const place = (at: number): [Node, number] => {
+    const walk = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
+    for (let node = walk.nextNode(); node; node = walk.nextNode()) { const length = node.textContent!.length; if (at <= length) return [node, at]; at -= length; }
+    return [text, text.childNodes.length];
+  };
+  getSelection()?.setBaseAndExtent(...place(anchor), ...place(focus));
+}
+
+/** The last press of the main button on a control a redraw may replace (keepClicksAcrossRedraws). */
+interface Press { control: Element; id: string; says: string | null; where: string; disabled: boolean; at?: number; dragged: boolean }
+let pressed: Press | undefined;
+/** What a control says: a text (a `pre` with an id) its whole text, a button its `aria-checked`. */
+const says = (control: Element) => (control.matches('pre') ? control.textContent : control.getAttribute('aria-checked'));
+
 /**
- * A press and its release on one control count as its click even when a redraw replaced the control between them (the lists
- * redraw as clicks run): the browser fires no click on it then, so the release clicks the control now there, found by its id,
- * only while it says what the pressed one said (its `aria-checked`) and the pressed one was not disabled, so a switch whose state
- * changed under the press is never flipped the other way.
+ * A press and its release count as one click on the control now there even when a redraw replaced the pressed one between them
+ * (every redraw rebuilds the page): the browser then sends no click at all. The controls are a button with an id and a text (a
+ * `pre` with an id: a card's shown text, whose click opens its editor at the character clicked, the log's lines, a file's
+ * contents). The press notes the control's id, what it says (`says`), `where` (the page and the home) and on a text the character
+ * it landed on; the release then clicks, at its own point, the control with that id saying the same in the same place, not
+ * disabled, so a switch that changed under the press is never flipped the other way. A text's press is a click only while the
+ * held pointer stays on that character (the browser's own rule): once it moves off, it is a drag (pressWasDrag), which this release
+ * finishes by selecting from the press to the release in the text now there, or nothing when it ends off the text.
  */
-export function keepClicksAcrossRedraws(): void {
-  let pressed: { control: Element; checked: string | null; disabled: boolean } | undefined;
-  const control = (event: Event) => (event.target as Element | null)?.closest?.('button[id]') ?? null;
+export function keepClicksAcrossRedraws(where: () => string): void {
+  const textNow = (press: Press) => (press.control.isConnected ? press.control : document.getElementById(press.id));
   document.addEventListener('pointerdown', event => {
-    const at = control(event);
-    pressed = at ? { control: at, checked: at.getAttribute('aria-checked'), disabled: (at as HTMLButtonElement).disabled } : undefined;
+    const control = event.button === 0 ? (event.target as Element | null)?.closest?.('button[id], pre[id]') : null;
+    const at = control?.matches('pre') ? offsetIn(control, event.clientX, event.clientY) : undefined;
+    pressed = control ? { control, id: control.id, says: says(control), where: where(), disabled: control.matches(':disabled'), at, dragged: false } : undefined;
   }, true);
+  document.addEventListener('pointermove', event => {
+    const text = pressed?.at !== undefined && event.buttons & 1 ? textNow(pressed) : null;
+    if (pressed && text && offsetIn(text, event.clientX, event.clientY) !== pressed.at) pressed.dragged = true;
+  }, true);
+  document.addEventListener('pointercancel', () => { pressed = undefined; }, true);
   document.addEventListener('pointerup', event => {
-    const now = control(event), was = pressed;
+    const was = pressed, now = was && !was.control.isConnected ? document.getElementById(was.id) : null;
+    if (!was || !now || was.disabled || now.matches(':disabled') || says(now) !== was.says || where() !== was.where) return;
     pressed = undefined;
-    if (!was || !now || was.control.isConnected || was.disabled || now.id !== was.control.id || now.getAttribute('aria-checked') !== was.checked) return;
-    (now as HTMLButtonElement).click();
+    const at = was.at === undefined ? undefined : offsetIn(now, event.clientX, event.clientY);
+    const click = () => now.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY }));
+    if (was.at === undefined) { if (now.contains(event.target as Node)) click(); }
+    else if (!was.dragged && at === was.at) click();
+    else if (at === undefined) getSelection()?.removeAllRanges();
+    else selectIn(now, was.at, at);
   }, true);
+}
+/** Whether the press on `text` was a drag (keepClicksAcrossRedraws); asked by its click, which uses the press up. */
+export function pressWasDrag(text: Element): boolean {
+  const was = pressed;
+  if (was?.id !== text.id) return false;
+  pressed = undefined;
+  return was.dragged;
+}
+
+/**
+ * A redraw keeps what is selected, as it keeps the scroll places and the focus (renderer.ts render): the focused text field's
+ * caret, selection and scroll, when the field is drawn again holding the same value; else a selection inside one text (a `pre`
+ * with an id), its direction kept, when that text is drawn again the same. Returns what puts it back, which neither focuses nor
+ * scrolls the page.
+ */
+export function keepSelection(): () => void {
+  const field = document.activeElement;
+  if ((field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement) && field.id && typeof field.selectionStart === 'number') {
+    const { id, value, selectionStart, selectionEnd, selectionDirection, scrollTop } = field;
+    return () => {
+      const again = document.getElementById(id);
+      if (!(again instanceof HTMLTextAreaElement || again instanceof HTMLInputElement) || again.value !== value) return;
+      again.setSelectionRange(selectionStart, selectionEnd, selectionDirection ?? undefined); again.scrollTop = scrollTop;
+    };
+  }
+  const chosen = getSelection(), holder = (node: Node | null | undefined) => (node instanceof Element ? node : node?.parentElement)?.closest('pre[id]');
+  const text = holder(chosen?.anchorNode);
+  if (!chosen || chosen.isCollapsed || !text || holder(chosen.focusNode) !== text) return () => {};
+  const { id, textContent: words } = text, anchor = offsetOf(text, chosen.anchorNode!, chosen.anchorOffset), focus = offsetOf(text, chosen.focusNode!, chosen.focusOffset);
+  return () => { const again = document.getElementById(id); if (again?.matches('pre') && again.textContent === words) selectIn(again, anchor, focus); };
 }
 
 /**

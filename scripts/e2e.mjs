@@ -520,13 +520,19 @@ async function fullSize(a) {
   await a.settle();
 }
 
+/** One mouse event at the point `at`, as a real mouse sends it: `buttons` 1 while the left button is held, and no button named on a move without it. */
+const mouse = (a, type, at, buttons) => a.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: 1 });
 /**
  * A pointer click on the shown text `selector`, at the start of `words` in it, as a mouse makes it: with its point, which a
- * click on an instruction text uses to place the editor's caret. The line is scrolled into view first.
+ * click on an instruction text uses to place the editor's caret. The line is scrolled into view first. `whileHeld` runs between
+ * the press and the release (as redrawUnder).
  */
-async function clickText(a, selector, words) {
+async function clickText(a, selector, words, whileHeld) {
   const point = await pointAt(a, selector, words);
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  await mouse(a, 'mouseMoved', point, 0);
+  await mouse(a, 'mousePressed', point, 1);
+  await whileHeld?.();
+  await mouse(a, 'mouseReleased', point, 0);
   await a.settle();
 }
 /** Where the start of `words` is in the shown text `selector`, as a point in the window, its line scrolled into view first. */
@@ -541,20 +547,14 @@ function pointAt(a, selector, words) {
   })()`);
 }
 /**
- * Waits until the page is not about to redraw: the flow's own settle, then no redraw of the page for longer than a background
- * pass takes to follow a file the flow wrote (main.ts DEBOUNCE_MS, then the read it starts), at most 15 s. A redraw landing in
- * the middle of a pointer gesture is a known fault of the app with a step of its own (judges/gesture-spike-notes.md in the plan
- * folder); the checks that wait here are about what a click or a drag on a text does, not about that.
+ * A redraw of the whole page that changes nothing (the sidebar's toggle clicked twice), landing in the middle of a gesture as a
+ * background pass or a usage reading may. Returns [whether the text `selector` was replaced by it, whether the one now there
+ * opens its editor on a click].
  */
-async function untilQuiet(a, quietMs = 3000) {
-  await a.settle();
-  await a.run(`new Promise(done => {
-    let last = Date.now();
-    const watch = new MutationObserver(() => { last = Date.now(); });
-    watch.observe(document.getElementById('page'), { childList: true });
-    const end = Date.now() + 15000, look = () => { if (Date.now() - last >= ${quietMs} || Date.now() > end) { watch.disconnect(); done(true); } else setTimeout(look, 100); };
-    look();
-  })`);
+async function redrawUnder(a, selector) {
+  await a.run(`document.querySelector(${JSON.stringify(selector)}).dataset.before = 'the redraw'`);
+  await a.run(`(() => { for (let times = 0; times < 2; times++) document.querySelector('#sidebar-toggle').click(); })()`);
+  return a.run(`(() => { const now = document.querySelector(${JSON.stringify(selector)}); return [now.dataset.before !== 'the redraw', now.matches('.ins-editable')]; })()`);
 }
 /** The open editor's id and where its caret is, as [id, the caret's offset]. */
 const caretAt = a => a.run(`[document.activeElement?.id, document.activeElement?.selectionStart]`);
@@ -2163,11 +2163,34 @@ async function practiceFlow() {
   check('Save adds the base after each chosen tool’s own text, which is unchanged', baseClaude1.startsWith(baseClaude0) && baseClaude1.includes('- Shared by every tool.') && baseCodex1.startsWith(baseCodex0) && baseCodex1.includes('- Shared by every tool.'), baseClaude1);
   check('an unchosen tool is not written', !existsSync(join(practice, '.copilot/copilot-instructions.md')));
   // A click on the base's text opens its editor as Edit text or tools does, with the caret where the click landed.
-  await untilQuiet(a);
-  await clickText(a, '#base-card pre.ins-preview', 'every tool.');
+  const baseText = '#base-card pre.ins-preview';
+  await clickText(a, baseText, 'every tool.');
   same('a click on the base’s text opens its editor, the caret where it landed', await caretAt(a), ['base-text', '- Shared by '.length]);
   check('with its actions in the card’s head', await a.exists('#base-head #base-review') && await a.exists('#base-head #base-cancel'), await a.text('#base-head'));
   await a.press('Escape');
+  // A redraw landing between the press and the release (as a background pass or a usage reading may) replaces the text under the
+  // button, and the browser then sends no click: the release opens the editor of the text now there, the caret where it was aimed.
+  let underPress;
+  await clickText(a, baseText, 'every tool.', async () => { underPress = await redrawUnder(a, baseText); });
+  same('a click on the base’s text with a redraw between its press and its release: the text was replaced, and its editor opens with the caret where it was aimed',
+    [...underPress, ...await caretAt(a)], [true, true, 'base-text', '- Shared by '.length]);
+  await a.press('Escape');
+  // …on the same page in the same home only: a press on the base's text, then This Mac's home opened before the release, its base
+  // the same text (written so here), editable: the release opens nothing.
+  const otherBase = join(HOME, '.central-knot/instructions/base.md'), hadInstructions = existsSync(dirname(otherBase));
+  mkdirSync(dirname(otherBase), { recursive: true });
+  writeFileSync(otherBase, '- Shared by every tool.\n');
+  await clickText(a, baseText, 'every tool.', async () => {
+    await a.run(`document.querySelector('#home-actual').click()`);
+    for (let tries = 0; tries < 50 && (await a.text('#home-label')) === 'Practice copy'; tries++) await wait(100);
+    await a.settle();
+    underPress = await a.run(`(() => { const text = document.querySelector('${baseText}'); return [document.querySelector('#home-label').textContent !== 'Practice copy', text?.textContent, !!text?.matches('.ins-editable')]; })()`);
+  });
+  same('a press on the base’s text, then another home showing the same base text opened before the release: nothing opens there', [...underPress, await a.exists('#base-text')], [true, '- Shared by every tool.', true, false]);
+  await a.click('#home-fixture');
+  for (let tries = 0; tries < 50 && (await a.text('#home-label')) !== 'Practice copy'; tries++) await wait(100);
+  rmSync(hadInstructions ? otherBase : dirname(otherBase), { recursive: true, force: true });
+  await a.settle();
   // A tool's own instructions edited afterwards, opened by a click on their text: its base block, the base and the other files
   // stay as they are.
   const baseMd1 = readFileSync(join(practice, '.central-knot/instructions/base.md'), 'utf8');
@@ -2357,6 +2380,10 @@ async function practiceFlow() {
   }
   const selected = await a.run(`getSelection().toString()`);
   check('a drag over the log selects its text, to copy', selected.length > 10 && stackLine.includes(selected), selected);
+  // A redraw (Settings is redrawn whenever the window gains the focus) keeps that selection, and the focus and the scroll place.
+  const selectedNow = () => a.run(`[getSelection().toString(), document.activeElement?.id, document.querySelector('#settings-scroll').scrollTop]`);
+  const beforeRedraw = await selectedNow(), [logRedrawn] = await redrawUnder(a, '#log-text');
+  same('a redraw of Settings keeps the selection in the log’s lines, the focus and the scroll place', [logRedrawn, ...await selectedNow()], [true, ...beforeRedraw]);
   await a.run(`getSelection().removeAllRanges()`);
   await fullSize(a);
   await fitsAtMinimum(a, 'Settings with the whole log shown');
@@ -4582,13 +4609,17 @@ async function draftFlow() {
   const crlf = 'Run codex review before pushing.\r\nline one\r\nline two\r\nTARGET here\r\nlast line\r\n';
   writeFileSync(agentsMd, crlf);
   await a.click('#header-refresh');
-  await untilQuiet(a);
   const target = await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
   // What is under the click's point, said if the check fails.
   const under = await a.run(`(() => { const hit = document.elementFromPoint(${target.x}, ${target.y}), at = document.caretRangeFromPoint(${target.x}, ${target.y}); return { point: ${JSON.stringify(target)}, hit: hit && (hit.id || hit.className || hit.tagName), at: at && [at.startContainer.nodeName, at.startOffset], scroll: document.querySelector('#instructions-scroll').scrollTop }; })()`);
   await clickText(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
-  const landed = await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionStart + 6)]; })()`);
+  // The focused editor's id and the six characters at its caret.
+  const atCaret = () => a.run(`(() => { const area = document.activeElement; return [area.id, area.value?.slice(area.selectionStart, area.selectionStart + 6)]; })()`);
+  const landed = await atCaret();
   check('in a file with Windows line endings a click puts the caret where it landed', landed[0] === 'ins-text-codex-cli' && landed[1] === 'TARGET', { landed, under });
+  // A redraw just after the click (a background pass, the usage reading) draws the editor again: its caret stays where it was.
+  const [boxRedrawn] = await redrawUnder(a, '#ins-text-codex-cli');
+  same('a redraw just after the click keeps the editor’s caret where the click put it', [boxRedrawn, ...await atCaret()], [true, 'ins-text-codex-cli', 'TARGET']);
   await a.send('Input.insertText', { text: 'NEW ' });
   await a.run(`(() => { const area = document.querySelector('#ins-text-codex-cli'); area.value += 'added line\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#ins-review-codex-cli');
@@ -4600,23 +4631,64 @@ async function draftFlow() {
   const pastEnd = await a.run(`(() => { const pre = document.querySelector('[aria-label="Codex instructions"] pre.ins-preview'), node = pre.firstChild, at = node.textContent.indexOf('line two');
     const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 8); const line = range.getBoundingClientRect();
     return { x: Math.min(pre.getBoundingClientRect().right - 16, line.right + 200), y: line.top + line.height / 2 }; })()`);
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: pastEnd.x, y: pastEnd.y, button: 'left', clickCount: 1 });
+  await mouse(a, 'mouseMoved', pastEnd, 0); await mouse(a, 'mousePressed', pastEnd, 1); await mouse(a, 'mouseReleased', pastEnd, 0);
   await a.settle();
   same('in that file a click past a line’s end puts the caret at that line’s end', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart - 8, area.selectionStart), area.value[area.selectionStart]]; })()`), ['ins-text-codex-cli', 'line two', '\n']);
   await a.press('Escape');
   for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
+  // A redraw landing between the press and the release replaces the text under the button, and the browser then sends no click:
+  // the release opens the editor of the text now there, the caret where it was aimed, in that file too.
+  const codexText = '[aria-label="Codex instructions"] pre.ins-preview';
+  let underPress;
+  await clickText(a, codexText, 'TARGET', async () => { underPress = await redrawUnder(a, codexText); });
+  same('a click on a tool’s text with a redraw between its press and its release: the text was replaced, and its editor opens with the caret where it was aimed',
+    [...underPress, ...await atCaret()], [true, true, 'ins-text-codex-cli', 'TARGET']);
+  await a.press('Escape');
+  for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
+  // …only while the text now there is the same: a press on TARGET, the file changed and read again before the release (its last
+  // line only, so TARGET is where it was), then the release: nothing opens.
+  const savedText = readNow(agentsMd);
+  await clickText(a, codexText, 'TARGET', async () => {
+    writeFileSync(agentsMd, savedText.replace('last line', 'last line, changed'));
+    await a.run(`document.querySelector('#header-refresh').click()`);
+    await a.settle();
+    underPress = await a.run(`(() => { const text = document.querySelector('${codexText}'); return [text.textContent.includes('changed'), text.matches('.ins-editable')]; })()`);
+  });
+  same('a press on a tool’s text, its text changed before the release: nothing opens', [...underPress, await a.exists('#ins-text-codex-cli')], [true, true, false]);
+  writeFileSync(agentsMd, savedText);
+  await a.click('#header-refresh');
 
   // Selecting a card's text keeps the selection, to copy it: a drag opens no editor. A double-click's first click is a plain
   // click, which opens the editor, and its second selects the word there.
-  const codexText = '[aria-label="Codex instructions"] pre.ins-preview';
   await a.run(`document.querySelector('#ins-head-codex-cli').scrollIntoView({ block: 'start' })`);
-  await untilQuiet(a);
   const from = await pointAt(a, codexText, 'line one'), to = await pointAt(a, codexText, 'last line');
-  for (const [type, at, buttons] of [['mouseMoved', from, 0], ['mousePressed', from, 1], ['mouseMoved', to, 1], ['mouseReleased', to, 0]]) await a.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', buttons, clickCount: 1 });
+  await mouse(a, 'mouseMoved', from, 0); await mouse(a, 'mousePressed', from, 1); await mouse(a, 'mouseMoved', to, 1); await mouse(a, 'mouseReleased', to, 0);
   await a.settle();
   same('a drag across a card’s text selects it and opens no editor', [await a.exists('#ins-text-codex-cli'), (await a.run(`String(getSelection())`)).includes('line two')], [false, true]);
+  // A drag backwards from TARGET to line one, then the same drag with a redraw landing halfway (at line two) and carried on past
+  // where it was then: it selects what the drag with no redraw selects, backwards, and opens no editor. (Each starts with nothing
+  // selected: a press inside a selection drags the selected text instead.)
+  await a.run(`getSelection().removeAllRanges()`);
+  const fromTarget = await pointAt(a, codexText, 'TARGET'), halfway = await pointAt(a, codexText, 'line two');
+  const dragBack = async whileHeld => {
+    await mouse(a, 'mouseMoved', fromTarget, 0); await mouse(a, 'mousePressed', fromTarget, 1); await mouse(a, 'mouseMoved', halfway, 1);
+    const [replaced] = (await whileHeld?.()) ?? [false];
+    await mouse(a, 'mouseMoved', from, 1); await mouse(a, 'mouseReleased', from, 0);
+    await a.settle();
+    const chosen = await a.run(`(() => { const chosen = getSelection(); return [String(chosen), chosen.anchorOffset > chosen.focusOffset]; })()`);
+    await a.run(`getSelection().removeAllRanges()`);
+    return [replaced, await a.exists('#ins-text-codex-cli'), ...chosen];
+  };
+  const plainBack = await dragBack();
+  check('a drag backwards across a card’s text selects it backwards', plainBack[2].includes('line two') && plainBack[3], plainBack);
+  same('…and the same drag with a redraw halfway, carried on past where it was then: the text was replaced, the same selection, backwards, and no editor',
+    await dragBack(() => redrawUnder(a, codexText)), [true, false, plainBack[2], true]);
+  // A press that moves off its character and comes back before the release is a drag too (the browser's own rule): nothing opens.
+  await mouse(a, 'mouseMoved', fromTarget, 0); await mouse(a, 'mousePressed', fromTarget, 1); await mouse(a, 'mouseMoved', halfway, 1); await mouse(a, 'mouseMoved', fromTarget, 1); await mouse(a, 'mouseReleased', fromTarget, 0);
+  await a.settle();
+  same('a press that moves off its character and back before the release opens no editor', await a.exists('#ins-text-codex-cli'), false);
   const word = await pointAt(a, codexText, 'last line');
-  for (const clickCount of [1, 2]) for (const type of ['mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: word.x + 12, y: word.y, button: 'left', clickCount });
+  for (const clickCount of [1, 2]) for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: word.x + 12, y: word.y, button: 'left', buttons, clickCount });
   await a.settle();
   same('a double-click on a word selects it, in the editor its first click opened', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionEnd)]; })()`), ['ins-text-codex-cli', 'last']);
   await a.press('Escape');
@@ -4818,7 +4890,6 @@ async function draftFlow() {
   await a.run(`document.querySelector('#ins-head-claude-cli').scrollIntoView({ block: 'start' })`);
   same('at 860×600 a 200-line text’s Edit is in view at its card’s head', await inView(['ins-edit-claude-cli']), [true]);
   await a.click('#ins-more-claude-cli');
-  await untilQuiet(a);
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', '- Line 150 ');
   same('a click on line 150 opens the editor with the caret on it', await caretAt(a), ['ins-text-claude-cli', long.indexOf('- Line 150 ')]);
   same('with Review changes and Cancel in view, and line 150 too, without scrolling the page', [...await inView(['ins-review-claude-cli', 'ins-cancel-claude-cli']), await caretLineShows(a)], [true, true, true]);
