@@ -36,7 +36,7 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
     add(components.commands, 'Commands', 'limited', 'become skills');
     add(components.agents, 'Agents', 'works', 'get the plugin’s name in front, e.g.', 'agent');
     add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run; others may not');
-    add(components.sessionTextHooks, 'Session text', 'limited', 'is limited: only a start-of-session hook that prints `{"additionalContext": …}` at the top level adds it; Claude Code’s form and prompt hooks’ output are ignored');
+    add(components.sessionTextHooks, 'Session text', 'limited', 'is limited: only a start-of-session hook that prints `{"additionalContext": …}` at the top level adds it; Claude Code’s `hookSpecificOutput` form and prompt hooks’ output are ignored');
     add(components.mcp, 'MCP servers', 'works', 'run unchanged');
   } else if (tool === 'codex-cli') {
     add(components.skills, 'Skills', 'works', 'get the plugin’s name in front, e.g.', 'skill');

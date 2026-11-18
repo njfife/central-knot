@@ -288,6 +288,8 @@ test('A plugin the marketplace can’t give files for (an npm package) is read f
     assert.deepEqual([fromTool?.skills, fromTool?.installed?.['claude-cli']?.skills.map(skill => skill.description)], [[], ['from npm']]);
     // Its instruction files too; its hooks can't be, as the marketplace's copy is what gives them.
     assert.deepEqual(fromTool?.installed?.['claude-cli']?.instructions.map(file => [file.name, file.text]), [['AGENTS.md', 'Notes for whoever works on the tool.\n']]);
+    // Read only from a tool's copy, it never says it holds only instruction files: its hooks and servers aren't known.
+    assert.equal(fromTool?.onlyInstructions, false);
     assert.deepEqual([fromTool?.offered, fromTool?.problem], [false, undefined]);
   } finally { await box.cleanup(); }
 });
@@ -303,8 +305,8 @@ test('A plugin kept in another repository, not installed, shows its root CLAUDE.
     await put(join(copy, 'plugin/CLAUDE.md'), 'You have access to Atlas’s context layer through MCP tools.\n');
     await put(join(copy, 'CLAUDE.md'), 'The repository’s own notes, outside the plugin’s folder.\n');
     const detail = await box.markets.detail(root, 'atlas');
-    assert.deepEqual([detail?.offered, detail?.instructions.map(file => [file.path, file.text]), detail?.installed],
-      [true, [['CLAUDE.md', 'You have access to Atlas’s context layer through MCP tools.\n']], {}]);
+    assert.deepEqual([detail?.offered, detail?.instructions.map(file => [file.path, file.text]), detail?.installed, detail?.onlyInstructions],
+      [true, [['CLAUDE.md', 'You have access to Atlas’s context layer through MCP tools.\n']], {}, true]);
   } finally { await box.cleanup(); }
 });
 
@@ -327,7 +329,7 @@ test('A start-of-session hook printing Claude Code’s JSON, installed in Claude
     // Each tool's line is its fixed rule for start-of-session hooks (capability data, Appendix D), never a reading of what this
     // hook prints: Claude Code's works; Copilot CLI's says which form it takes and that Claude Code's is ignored.
     const line = (tool: HarnessId) => outcomes(tool, componentsFrom(detail)).find(outcome => outcome.component === 'Session text');
-    assert.deepEqual([line('claude-cli')?.result, line('copilot-cli')?.result, line('copilot-cli')?.text], ['works', 'limited', 'is limited: only a start-of-session hook that prints `{"additionalContext": …}` at the top level adds it; Claude Code’s form and prompt hooks’ output are ignored']);
+    assert.deepEqual([line('claude-cli')?.result, line('copilot-cli')?.result, line('copilot-cli')?.text], ['works', 'limited', 'is limited: only a start-of-session hook that prints `{"additionalContext": …}` at the top level adds it; Claude Code’s `hookSpecificOutput` form and prompt hooks’ output are ignored']);
   } finally { await box.cleanup(); }
 });
 

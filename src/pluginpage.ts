@@ -12,7 +12,7 @@ import { canAddText, outcomes } from './pluginoutcomes.ts';
 import { clickNote, componentsOf, dotted, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, onlyInstructions, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
+import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginHook, PluginItemLine, PluginView, PluginsView } from './types.ts';
@@ -91,8 +91,9 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     // A plugin a bundled build doesn't include says why here, on the page, once for every tool.
     notIncluded ? h('p.plugin-panel-hint', { id: 'plugin-not-included' }, notIncluded) : null,
     waiting.length ? h('p.plugin-panel-hint', { id: 'plugin-parts-waiting' }, waitingWords(view, entry, plugin.name, waiting)) : null,
-    // A plugin of instruction files alone: ticking a box would install text no tool reads.
-    onlyInstructions(shownDetail(pluginKey(entry.source, plugin.name))) ? h('p.plugin-panel-hint', { id: 'plugin-only-instructions' }, 'Installing it adds nothing your tools read; to use this text, put it in your own ',
+    // A plugin of instruction files alone, as read from the marketplace's copy (a detail with no such read says false): ticking a
+    // box would install files no tool reads.
+    shownDetail(pluginKey(entry.source, plugin.name))?.onlyInstructions ? h('p.plugin-panel-hint', { id: 'plugin-only-instructions' }, 'Installing it does not make your tools read these files; to use this text, put it in your own ',
       h('button.inline-link', { type: 'button', id: 'plugin-only-instructions-open', onclick: () => showPage('instructions') }, 'instructions'), '.') : null,
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo), box = boxOf(view, entry, plugin.name, tool, { mark, words });
@@ -142,8 +143,9 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
  * One group of named parts, each description held to two lines. Once laid out, a description that was cut gets a "Show
  * more" button (see markClamped); one that fits has none.
  */
-const partList = (owner: string, parts: { name: string; text: string; mono?: boolean }[]) => h('ul.plugin-parts', {}, parts.map(part => {
-  const key = `${owner}\u0000${part.name}`;
+const partList = (owner: string, parts: { name: string; text: string; mono?: boolean; key?: string }[]) => h('ul.plugin-parts', {}, parts.map(part => {
+  // What is opened is kept by the part's name, or by its `key` where rows share a name (two commands of one hook event).
+  const key = `${owner}\u0000${part.key ?? part.name}`;
   const open = market.opened.has(key);
   const more = h('button.part-more', { type: 'button', onclick: () => toggleOpened(key) }, open ? 'Show less' : 'Show more');
   return h(`li${open ? '.clamped' : ''}`, {},
@@ -220,17 +222,20 @@ type FileKind = 'skills' | 'commands' | 'agents' | 'instructions';
 /** Each kind of part with a file: its heading in "What it holds", what its file is called above its text, and a line under the heading. */
 const fileKinds: Record<FileKind, { title: string; file: string; about?: string }> = {
   skills: { title: 'Skills', file: 'SKILL.md' }, commands: { title: 'Commands', file: 'Command file' }, agents: { title: 'Agents', file: 'Agent file' },
-  instructions: { title: 'Instruction files', file: 'Instruction file', about: 'No tool reads a plugin’s own instruction file into a session. The model sees it only if one of the plugin’s skills tells it to read the file.' },
+  instructions: { title: 'Instruction files', file: 'Instruction file', about: 'No tool reads a plugin’s own instruction file into a session. The model sees it only when something tells it to read the file, such as one of the plugin’s skills.' },
 };
 /** Said under "Hooks that can add text to sessions": what is true of every such hook in every tool ("In each tool" has each tool's limits). */
-const SESSION_HOOKS_ABOUT = 'Your tool runs these when a session starts or you send a prompt; what they add is known only when they run.';
+const SESSION_HOOKS_ABOUT = 'These run when a session starts or you send a prompt (in Codex, once you trust them); what they add is known only when they run.';
 
 /**
- * One group of hooks: its heading with their count, an optional line under it, and a row per event with its commands as
- * written (one to a line). Both groups under What it holds are drawn by it.
+ * One group of hooks: its heading, an optional line under it, and a row per command (the event, then the command as written;
+ * an event whose hooks run none is a row of its own), so the count in the heading is the rows under it. Both groups under
+ * What it holds are drawn by it.
  */
-const hookGroup = (owner: string, title: string, hooks: PluginHook[], about?: string) => (hooks.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${hooks.length})`),
-  about ? h('p.plugin-group-note', {}, about) : null, partList(owner, hooks.map(hook => ({ name: hook.event, text: hook.runs.join('\n'), mono: true })))) : null);
+function hookGroup(owner: string, title: string, hooks: PluginHook[], about?: string) {
+  const rows = hooks.flatMap(hook => (hook.runs.length ? hook.runs : ['']).map((run, at) => ({ name: hook.event, text: run, mono: true, key: `${hook.event}\u0000${at}` })));
+  return rows.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${rows.length})`), about ? h('p.plugin-group-note', {}, about) : null, partList(owner, rows)) : null;
+}
 
 
 /**

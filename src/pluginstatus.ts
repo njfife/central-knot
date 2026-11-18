@@ -269,13 +269,6 @@ export function limitNote(limits: Outcome[]): string {
   return `${first.component} ${effect}${notWorking.length > 1 ? ` +${notWorking.length - 1}` : ''}`;
 }
 
-/**
- * Whether all the marketplace's copy of a plugin holds is instruction files, so installing it adds nothing a tool reads (its
- * page says so beside the tool boxes). Only a whole read of that copy can tell: a tool's copy gives no hooks or servers.
- */
-export const onlyInstructions = (detail: PluginDetail | null | undefined) => !!detail?.offered && !detail.problem && detail.instructions.length > 0
-  && !detail.skills.length && !detail.commands.length && !detail.agents.length && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
-
 /** "3 skills · 1 MCP server", from a plugin's counts. */
 export function summaryOf(parts: Components): string {
   return [parts.skills && plural(parts.skills, 'skill'), parts.commands && plural(parts.commands, 'command'), parts.agents && plural(parts.agents, 'agent'),

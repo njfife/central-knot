@@ -111,7 +111,7 @@ const RETRY_MS = 60_000;
 /** Said of a plugin a tool still has that its marketplace's catalog dropped, beside its "No longer offered" mark. */
 export const NO_LONGER_OFFERED = 'Stays installed as it is until you uninstall it.';
 /** A plugin's contents with nothing in them, for a plugin whose files couldn't be read (its `problem` says why). */
-const empty: PluginDetail = { skills: [], commands: [], agents: [], instructions: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
+const empty: PluginDetail = { skills: [], commands: [], agents: [], instructions: [], onlyInstructions: false, hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
 
 export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine = realEngine, offers: SuggestedMarketplace[] = suggestedMarketplaces) {
   const listPath = join(host.dataDir, 'marketplaces.json');

@@ -757,6 +757,8 @@ export interface PluginContents {
   agents: NamedPart[];
   /** Its instruction files (catalogdetail.ts INSTRUCTION_FILES), each named by its path in the plugin. No tool reads one. */
   instructions: NamedPart[];
+  /** It holds instruction files and nothing else that could be a part, so installing it makes no tool read anything of it (catalogdetail.ts holdsOnlyInstructions). */
+  onlyInstructions: boolean;
   /** The hook events it listens to, by name. */
   hooks: PluginHook[];
   /** Each MCP server with what it runs or connects to, and its entry as the plugin writes it, as JSON. */

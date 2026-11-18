@@ -66,7 +66,8 @@ export function writeMarket(root, name = 'team-tools', owner = 'Platform team') 
   file(root, 'plugins/release-helper/agents/release-reviewer.md', '---\nname: release-reviewer\ndescription: Reviews a release branch before it ships.\n---\n\nReview it.\n');
   file(root, 'plugins/release-helper/AGENTS.md', '# release-helper\n\nNotes for whoever works on this plugin: run the checks before each release.\n');
   file(root, 'plugins/release-helper/hooks/hooks.json', JSON.stringify({ hooks: {
-    SessionStart: [{ hooks: [{ type: 'command', command: `echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Releases go out on Tuesdays."}}'` }] }],
+    SessionStart: [{ hooks: [{ type: 'command', command: `echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Releases go out on Tuesdays."}}'` },
+      { type: 'command', command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/hooks/remind.mjs', '--days', '2'] }] }],
     PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }],
   } }));
   skill(root, 'plugins/issue-tracker/skills', 'triage', 'Sorts new issues by area and urgency.');

@@ -115,7 +115,39 @@ test('A plugin holding only a CLAUDE.md holds that file and nothing else, and no
   } finally { await cleanup(); }
 });
 
-test('Each hook event comes with the commands its hooks run, as written, in Claude Code’s form and Copilot CLI’s; start-of-session and prompt hooks are the ones that can add text, and each tool’s line says how', async () => {
+test('A plugin holds only instruction files when nothing else in it could be a part: a manifest that only describes it, a README and a licence don’t count; an output style, Copilot’s hooks, a manifest naming another kind of part or holding a server, or a skill do', async () => {
+  const { root, cleanup } = await box();
+  try {
+    const plugin = join(root, 'plugins/notes');
+    await put(join(plugin, 'CLAUDE.md'), 'House style.\n');
+    await put(join(plugin, 'com.github.copilot/rules/style.md'), 'House style.\n');
+    await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'notes', version: '1.0.0', description: 'House style.', author: { name: 'Docs' } }));
+    await put(join(plugin, 'README.md'), '# notes\n');
+    await put(join(plugin, 'LICENSE'), 'MIT\n');
+    const read = () => pluginContents(plugin, { name: 'notes', source: './plugins/notes', category: 'style' }, root);
+    assert.equal((await read()).onlyInstructions, true);
+    // A forced output style: Claude Code adds it to every session, though this reader names no such part.
+    await put(join(plugin, 'output-styles/house.md'), '---\nname: House\nforce-for-plugin: true\n---\nWrite short sentences.\n');
+    assert.equal((await read()).onlyInstructions, false, 'an output style');
+    await rm(join(plugin, 'output-styles'), { recursive: true });
+    // Copilot's own hooks folder, beside its rules: a part this reader doesn't read.
+    await put(join(plugin, 'com.github.copilot/hooks/hooks.json'), '{"version":1,"hooks":{}}');
+    assert.equal((await read()).onlyInstructions, false, 'Copilot’s hooks folder');
+    await rm(join(plugin, 'com.github.copilot/hooks'), { recursive: true });
+    // A manifest naming a kind of part this reader doesn't know, wherever its files are.
+    await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'notes', outputStyles: './CLAUDE.md' }));
+    assert.equal((await read()).onlyInstructions, false, 'a manifest naming output styles');
+    // An MCP server written in the manifest itself: no file of its own, yet a part.
+    await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'notes', mcpServers: { style: { command: 'style-mcp' } } }));
+    assert.equal((await read()).onlyInstructions, false, 'a server in the manifest');
+    // And a plugin with a skill holds more than instruction files.
+    await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'notes' }));
+    await put(join(plugin, 'skills/style/SKILL.md'), '---\nname: style\n---\n');
+    assert.equal((await read()).onlyInstructions, false, 'a skill');
+  } finally { await cleanup(); }
+});
+
+test('Each hook event comes with the commands its hooks run, as written, with their arguments, in Claude Code’s form and Copilot CLI’s; start-of-session and prompt hooks are the ones that can add text, and each tool’s line says how', async () => {
   const { root, cleanup } = await box();
   try {
     const claudeStart = 'echo \'{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Use the team style."}}\'';
@@ -123,6 +155,8 @@ test('Each hook event comes with the commands its hooks run, as written, in Clau
       SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: claudeStart }, { type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/hooks/fresh.sh' }] }],
       UserPromptSubmit: [{ hooks: [{ type: 'prompt', prompt: 'Is this safe?' }] }],
       PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'check-bash' }] }],
+      // A command with its arguments (stripe's and zyte's form): shown as the tool runs it, an argument with a space quoted.
+      Stop: [{ hooks: [{ type: 'command', command: 'uv', args: ['run', '--directory', '${CLAUDE_PLUGIN_ROOT}/hooks', 'end of turn.py'] }] }],
       // Copilot CLI's form: the command for each shell, bash first, then one for every shell.
       sessionStart: [{ type: 'command', bash: './start.sh', powershell: './start.ps1' }, { type: 'command', command: './any-shell.sh' }],
       userPromptSubmitted: [{ type: 'command', powershell: './prompt.ps1' }],
@@ -131,6 +165,7 @@ test('Each hook event comes with the commands its hooks run, as written, in Clau
     assert.deepEqual(contents.hooks, [
       { event: 'PreToolUse', runs: ['check-bash'] },
       { event: 'SessionStart', runs: [claudeStart, '${CLAUDE_PLUGIN_ROOT}/hooks/fresh.sh'] },
+      { event: 'Stop', runs: ['uv run --directory ${CLAUDE_PLUGIN_ROOT}/hooks "end of turn.py"'] },
       // A hook that runs no command (a prompt hook) is the event alone.
       { event: 'UserPromptSubmit', runs: [] },
       { event: 'sessionStart', runs: ['./start.sh', './any-shell.sh'] },
@@ -139,7 +174,7 @@ test('Each hook event comes with the commands its hooks run, as written, in Clau
     const sessionText = (components: ReturnType<typeof componentsFrom>) => (['claude-cli', 'copilot-cli', 'codex-cli'] as const).map(tool => outcomes(tool, components).filter(outcome => outcome.component === 'Session text').map(outcome => [outcome.result, outcome.text]));
     assert.deepEqual(sessionText(componentsFrom(contents)), [
       [['works', 'comes from start-of-session and prompt hooks']],
-      [['limited', 'is limited: only a start-of-session hook that prints `{"additionalContext": …}` at the top level adds it; Claude Code’s form and prompt hooks’ output are ignored']],
+      [['limited', 'is limited: only a start-of-session hook that prints `{"additionalContext": …}` at the top level adds it; Claude Code’s `hookSpecificOutput` form and prompt hooks’ output are ignored']],
       [['limited', 'waits for trust: these hooks can add it once you trust them in Codex (`/hooks`)']],
     ]);
     // A plugin whose hooks all listen elsewhere has hooks, and no Session text line.
