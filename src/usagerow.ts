@@ -6,7 +6,7 @@
 // sessions in the 30 days and how far back its history goes (`toolHistories`); and a reading in sum, every kind's rows by what
 // it says of them, its most used, and each tool's history (`usageSummary`, which the chip's count reads too). The 30 days (`USAGE_DAYS`) are here, read by usage.ts too. A use seen
 // always counts; only a tool whose records are sure for the kind (types.ts UsageTells) can say that none was seen. Not here:
-// reading the history (usage.ts), when it is read (app.ts collectUsage), and the words and drawing (matrix.ts).
+// reading the history (usage.ts), when it is read (app.ts collectUsage), and the words and drawing (matrix.ts and overview.ts).
 import { kindSource } from './itemrow.ts';
 import type { ItemKind, LibraryItem } from './library.ts';
 import { DAY_MS } from './model.ts';
@@ -166,27 +166,29 @@ export function toolHistories(reading: UsageReading, home: Pick<HomeView, 'sync'
 export interface MostUsed { key: string; name: string; sessions: number }
 /**
  * What a reading says of one kind's page. Over every row the page lists (its items, found and Off ones too, and a plugin's own
- * rows): `used`, the keys of those whose Used cell says used within USAGE_DAYS, and `mostUsed`, the three used in the most
+ * rows): `withFigure`, how many have a Used figure; `used`, the keys of those whose Used cell says used within USAGE_DAYS, and `mostUsed`, the three used in the most
  * sessions (equal ones by name). Over its items that are On and not used: `noUseSeen`, in the "No use seen in 30 days" chip
  * (noUseSeen `in`); `tooNew`, kept out of it by its age alone; `cantSay`, no tool that has it on can tell. And
  * `foundNoneSeen`: found items (in a tool, not in Central Knot) with no use seen, which the chip leaves out too.
  */
-export interface KindUsage { used: string[]; mostUsed: MostUsed[]; noUseSeen: string[]; tooNew: string[]; cantSay: string[]; foundNoneSeen: string[] }
+export interface KindUsage { withFigure: number; used: string[]; mostUsed: MostUsed[]; noUseSeen: string[]; tooNew: string[]; cantSay: string[]; foundNoneSeen: string[] }
 /** A reading in sum: each kind's page (KindUsage) and each tool's history (toolHistories). */
 export interface UsageSummary { kinds: Record<'skills' | 'mcp' | 'agents', KindUsage>; tools: ToolHistory[] }
 /** What a reading says of a home in sum (UsageSummary): what the item pages' rows and chip say, counted, for any page to show. */
 export function usageSummary(reading: UsageReading, home: HomeView): UsageSummary {
   const kindUsage = (which: 'skills' | 'mcp' | 'agents'): KindUsage => {
-    const { facts, library, tools } = kindSource(home, which), kind = partOfPage[which], sum: KindUsage = { used: [], mostUsed: [], noUseSeen: [], tooNew: [], cantSay: [], foundNoneSeen: [] };
+    const { facts, library, tools } = kindSource(home, which), kind = partOfPage[which], sum: KindUsage = { withFigure: 0, used: [], mostUsed: [], noUseSeen: [], tooNew: [], cantSay: [], foundNoneSeen: [] };
     const used: MostUsed[] = [];
     for (const each of facts) {
       const item = library[each.key], figure = figureFor(reading, kind, each, tools);
+      if (figure) sum.withFigure++;
       if (figure && 'used' in figure) used.push({ key: each.key, name: each.name, sessions: figure.sessions });
       else if (item?.on && !item.deleted) sum[!figure ? 'cantSay' : noUseSeen(item, figure, reading.at) === 'in' ? 'noUseSeen' : 'tooNew'].push(each.key);
       else if (figure && !inLibrary(item)) sum.foundNoneSeen.push(each.key);
     }
     for (const row of pageRows(home, which).rows) {
       const figure = figureFor(reading, kind, pluginRowFacts(row), tools);
+      if (figure) sum.withFigure++;
       if (figure && 'used' in figure) used.push({ key: row.key, name: row.name, sessions: figure.sessions });
     }
     sum.used = used.map(each => each.key);

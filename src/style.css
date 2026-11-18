@@ -863,20 +863,37 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .kind-card-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 /* The count, then what needs attention, on one line that wraps whole. */
 .kind-card-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 2px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
-.kind-card-dot { color: var(--ink-faint); }
-.kind-card-status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.kind-card-status.wrapped { flex-basis: 100%; }
-.kind-card-status.wrapped > .kind-card-dot { display: none; }
-/* Each tool that holds the kind, with its count: entries wrap whole. */
-.kind-card-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 10px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
-/* When they don't all fit on one line, every card's counts go on the same grid (pages.ts settleToolCounts). */
-.kind-card-tools[data-layout="columns"] { display: grid; grid-template-columns: repeat(2, max-content); column-gap: 28px; }
-.kind-card-tools[data-layout="stack"] { display: grid; grid-template-columns: max-content; }
-.kind-tool { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.kind-tool-count { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.kind-card-status { display: inline-flex; align-items: center; white-space: nowrap; }
+/* The first reading fills five lines under the counts, without moving the table. */
+.kind-card-usage { display: grid; grid-template-rows: repeat(5, 20px); padding: 8px 16px 0; font-size: 12.5px; line-height: 20px; color: var(--ink-soft); }
+.kind-card-usage > p { margin: 0; }
 .kind-card-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12.5px; }
 .kind-card-link { position: relative; z-index: 1; padding: 0; border: 0; background: transparent; font: inherit; cursor: pointer; text-align: left; }
 .kind-card-link:hover { text-decoration: underline; }
+/* An update to install, with its action at the right. */
+.overview-update { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; line-height: 1.5; color: var(--ink); }
+.overview-update > span { flex: 1 1 24em; max-width: var(--measure); }
+.overview-update > .btn { margin-left: auto; }
+/* A row per managed tool; the counts line up on the right. */
+.overview-tools { display: flex; flex-direction: column; gap: 8px; }
+.tools-table { width: 100%; max-width: 1100px; table-layout: fixed; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
+.tools-table th, .tools-table td { padding: 4px 10px; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; white-space: nowrap; }
+.tools-table tbody tr:last-child > * { border-bottom: 0; }
+.tools-table thead th { font-size: 11.5px; font-weight: 600; color: var(--ink-soft); }
+.tools-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.tools-table td.num { color: var(--ink); font-weight: 600; }
+.tools-table th:first-child { width: 29%; }
+.tools-table th:last-child { width: 23%; }
+.tools-table th { white-space: normal; }
+.tools-version { margin-left: 5px; overflow-wrap: anywhere; color: var(--ink-soft); }
+.tools-history small { display: block; min-height: 14px; line-height: 14px; color: var(--ink-soft); }
+#overview-usage { min-height: 40px; max-width: none; align-content: center; }
+#overview-usage.usage-failed { border: 1px solid var(--line); border-radius: 8px; text-indent: 0; padding: 4px 10px; }
+.card-most-used { display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.card-most-used button { display: inline-flex; min-width: 0; max-width: 100%; }
+.tools-table-name { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); }
+.tools-table-name:hover { text-decoration: underline; }
+.tools-table-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--ink-soft); }
 .overview-actions { display: flex; gap: 8px; }
 .overview-more { display: flex; flex-direction: column; gap: 8px; }
 /* An icon, then a sentence that wraps under itself rather than under the icon. */

@@ -2,12 +2,13 @@
 // - the sidebar's update control at the bottom left (sidebarEnd), always there: the quiet circular arrows (Check now), which
 //   become the Update button that stands out when a newer release is found, with the download, the held restart and the
 //   failures on it;
+// - the Overview’s installable update (overviewUpdate), with the sidebar’s click;
 // - the status bar's end (statusEnd): the build's name and version, nothing more;
 // - what Settings' Updates row needs: its Update button (settingUpdateButton) and Check now (checkNow).
 // Restarting is held while something typed isn't saved or a plugin run is under way: the control then opens Settings, whose
 // Updates row says what restarting would lose beside its own Restart button.
 import { announce, baseDraftTyped, rerender, showPage, state, toolDraftTyped } from './app.ts';
-import { h, icon } from './dom.ts';
+import { button, h, icon } from './dom.ts';
 import { market } from './pluginstate.ts';
 import { buildWords, restartWaits, tagWords, updateButton, updateIndicator, updateStatus } from './updates.ts';
 import type { UpdateView } from './types.ts';
@@ -17,12 +18,12 @@ export const updates = { view: undefined as UpdateView | undefined, checking: fa
 /** The update this launch came from has been said once in the status bar. */
 let saidUpdated = false;
 /**
- * The update control that had the focus when it was pressed (the sidebar's, or Settings' Update or Check now). It is disabled
+ * The update control that had the focus when it was pressed (on the sidebar, Overview or Settings). It is disabled
  * while it works, which drops the focus; it takes the focus back when it can be pressed again (a check ended, a held restart, a
  * failure), unless the person has moved on meanwhile.
  */
 let focusBack: string | undefined;
-const updateButtons = ['update-control', 'setting-update', 'check-updates'];
+const updateButtons = ['update-control', 'overview-update', 'setting-update', 'check-updates'];
 function keepFocus() {
   const id = document.activeElement?.id;
   focusBack = id && updateButtons.includes(id) ? id : undefined;
@@ -148,6 +149,23 @@ export function settingUpdateButton() {
     h('span.btn-label', {}, shown.label));
 }
 
+function clickFor(shown: NonNullable<ReturnType<typeof indicatorNow>>) {
+  // Typing doesn't redraw the page, so a draft typed since the control was drawn is looked for again at the click.
+  const restartUnlessHeld = () => (unsavedWork() ? openUpdatesRow() : restart());
+  return { check: () => void checkNow(), update: startUpdate, restart: restartUnlessHeld, settings: openUpdatesRow }[shown.does];
+}
+
+/** The installable update on the Overview. Its button follows the sidebar, including a restart held for unsaved work. */
+export function overviewUpdate() {
+  const next = updates.view?.available, words = buttonNow(), shown = indicatorNow();
+  if (!next || !words || !shown) return null;
+  return h('div.overview-update', { id: 'overview-update-line' }, icon('circle-arrow-down', 14),
+    h('span', {}, `Central Knot ${tagWords(next.tag)} is ${updates.view?.step === 'ready' ? 'ready' : 'available'}. `,
+      button({ variant: 'link', size: 'micro', label: 'What’s new', onclick: () => openPage(next.page) })),
+    button({ variant: 'primary', label: words.label, id: 'overview-update', disabled: shown.busy,
+      attrs: { title: shown.title, 'aria-busy': String(shown.busy) }, onclick: clickFor(shown) }));
+}
+
 /**
  * The sidebar's end: the update control, or nothing where there are no releases (only Macs have them). In the folded sidebar
  * (the rail) its label is hidden like every row's (style.css) and its name and tooltip say it whole.
@@ -155,13 +173,10 @@ export function settingUpdateButton() {
 export function sidebarEnd(): Node[] {
   const shown = indicatorNow();
   if (!shown) return [];
-  // Typing doesn't redraw the page, so a draft typed since the control was drawn is looked for again at the click.
-  const restartUnlessHeld = () => (unsavedWork() ? openUpdatesRow() : restart());
-  const click = { check: () => void checkNow(), update: startUpdate, restart: restartUnlessHeld, settings: openUpdatesRow }[shown.does];
   const glyph = h(`span.update-glyph${shown.progress !== undefined ? '.with-progress' : ''}`, {}, icon(shown.glyph, 16, shown.look === 'checking' ? 'spin' : shown.glyph === 'triangle-alert' ? 'tone-warning' : ''));
   // The download's progress rings the icon (style.css), set as a property: the page's CSP allows that where a style attribute isn't.
   if (shown.progress !== undefined) glyph.style.setProperty('--progress', String(shown.progress));
-  return [h('button.nav-row.update-control', { type: 'button', id: 'update-control', 'data-look': shown.look, 'aria-label': shown.name, title: shown.title, disabled: shown.busy, 'aria-busy': String(shown.busy), onclick: click },
+  return [h('button.nav-row.update-control', { type: 'button', id: 'update-control', 'data-look': shown.look, 'aria-label': shown.name, title: shown.title, disabled: shown.busy, 'aria-busy': String(shown.busy), onclick: clickFor(shown) },
     glyph, h('span.nav-label', {}, shown.label))];
 }
 
@@ -180,9 +195,11 @@ function paintProgress() {
     control.querySelector('.nav-label')!.textContent = shown.label;
     control.querySelector<HTMLElement>('.update-glyph')!.style.setProperty('--progress', String(shown.progress ?? 0));
   }
-  const button = document.getElementById('setting-update');
   const words = buttonNow();
-  if (button && words) { button.title = words.title; button.querySelector('.btn-label')!.textContent = words.label; }
+  for (const button of document.querySelectorAll<HTMLButtonElement>('#setting-update, #overview-update')) {
+    if (words) button.querySelector('.btn-label')!.textContent = words.label;
+    button.title = (button.id === 'overview-update' ? shown : words)?.title ?? '';
+  }
   const line = document.querySelector('#setting-updates-notice .setting-message-text');
   if (line && updates.view?.progress !== undefined) line.textContent = `Downloading ${tagWords(updates.view.available!.tag)}… ${Math.floor(updates.view.progress * 100)}%`;
 }

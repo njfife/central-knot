@@ -17,6 +17,7 @@
 // (a plugin's items in Pi as library items), parts-migration (a plugin's parts an earlier version put into Pi, moved to the
 // library at one look), sort (the item pages sorted by last updated) and usage (usage collected from made-up session history:
 // the button and its band, each row's figure, an opened row's line per tool, and the "No use seen in 30 days" chip with its band).
+// The overview section pictures the opening page before and after usage lands, including updates and problems.
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -2876,6 +2877,114 @@ if (wanted('usage')) {
     await requests.restore('usage:read');
     requests.close();
   }
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
+// ---------- The Overview on a made-up home ----------
+if (wanted('overview')) {
+  const releases = [];
+  const zip = join(scratch, 'update.zip');
+  writeFileSync(zip, Buffer.alloc(4_000_000, 7));
+  const fixture = await serveReleases(releases);
+  await fresh({ CK_UPDATE_STUB: 'v0.7.0-alpha.1', CK_UPDATE_RELEASES: fixture.releasesUrl });
+  begin('overview');
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  const OV_SIZES = [[860, 600], [1280, 800], [1728, 1080], [2560, 1440]];
+  const pictures = async (name, caption) => {
+    for (const [width, height] of OV_SIZES) { await a.size(width, height); await a.run(`document.getElementById('overview-scroll')?.scrollTo(0, 0)`); await shot(a, `${name}-${width}`, `${caption} (${width}×${height})`); }
+    await a.size(1280, 800); await a.theme('light'); await shot(a, `${name}-light`, `${caption} (1280×800, light)`); await a.theme('dark');
+  };
+  const old = new Date(Date.now() - 40 * DAY);
+  const words = ['api', 'audit', 'build', 'cache', 'changelog', 'ci', 'cli', 'cloud', 'commit', 'config', 'cost', 'data', 'db', 'debug', 'deploy', 'design', 'docs', 'docker', 'edge', 'email', 'error', 'event', 'feature', 'flag', 'git', 'grafana', 'helm', 'incident', 'infra', 'jira', 'k8s', 'lint', 'log', 'merge', 'metric', 'migrate', 'mobile', 'monitor', 'note', 'oncall', 'perf', 'plan', 'pr', 'prompt', 'query', 'release', 'review', 'risk', 'schema', 'search', 'security', 'sql', 'test', 'ticket', 'trace', 'triage'];
+  const verbs = ['check', 'draft', 'summary', 'fix'];
+  const skillNames = [];
+  for (const verb of verbs) for (const word of words) if (skillNames.length < 107) skillNames.push(`${word}-${verb}`);
+  const toolRoots = { claude: '.claude/skills', copilot: '.copilot/skills', codex: '.codex/skills', pi: '.pi/agent/skills', opencode: '.config/opencode/skills' };
+  const putSkill = (root, name) => {
+    const folder = join(practice, root, name);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'SKILL.md'), `---\nname: ${name}\ndescription: Use when you need ${name.replace('-', ' ')}.\n---\n\nSteps for ${name}.\n`);
+    for (const path of [join(folder, 'SKILL.md'), folder]) utimesSync(path, old, old);
+  };
+  // Every skill in Claude Code; most in Copilot CLI and Pi too, some in Codex and OpenCode: the take-in puts each everywhere.
+  skillNames.forEach((name, at) => { putSkill(toolRoots.claude, name); if (at % 2) putSkill(toolRoots.copilot, name); if (at % 5 === 0) putSkill(toolRoots.codex, name); if (at % 3 === 0) putSkill(toolRoots.pi, name); if (at % 7 === 0) putSkill(toolRoots.opencode, name); });
+  for (const [, root] of Object.entries(toolRoots)) mkdirSync(join(practice, root), { recursive: true });
+  for (const path of ['notes', 'review', 'release-notes', 'standup'].flatMap(key => Object.values(toolRoots).map(root => join(practice, root, key)))) if (existsSync(path)) for (const at of [join(path, 'SKILL.md'), path]) if (existsSync(at)) utimesSync(at, old, old);
+  // Twelve MCP servers in Claude Code's file, beside the practice copy's own.
+  edit(join(practice, '.claude.json'), text => { const json = JSON.parse(text); json.mcpServers = { ...(json.mcpServers ?? {}) };
+    for (const name of ['github', 'linear', 'sentry', 'postgres', 'grafana', 'slack', 'notion', 'figma', 'datadog', 'kubernetes', 'stripe', 'browser']) if (Object.keys(json.mcpServers).length < 12) json.mcpServers[name] = { command: 'npx', args: ['-y', `@example/${name}-mcp`] };
+    return JSON.stringify(json, null, 2); });
+  utimesSync(join(practice, '.claude.json'), old, old);
+  // Eight agents, with the practice copy's two.
+  for (const name of ['planner', 'debugger', 'test-writer', 'doc-writer', 'security-reviewer', 'migrator']) { writeFileSync(join(practice, '.claude/agents', `${name}.md`), `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nYou are the ${name}.\n`); utimesSync(join(practice, '.claude/agents', `${name}.md`), old, old); }
+  // Six plugins installed in Claude Code, ten skills among them.
+  const pluginSkills = { 'team-git': ['create-mr', 'rebase-help'], 'team-infra': ['helm-alert-audit', 'helm-alert-summary'], 'team-docs': ['publish-html'], 'team-observability': ['query-logs', 'query-traces'], 'team-risk': ['risk-handoff'], 'team-jira': ['jira-sprint', 'jira-search'] };
+  for (const [plugin, skills] of Object.entries(pluginSkills)) writeClaudeInstall(practice, 'team-tools', plugin, '1.2.0', { '.claude-plugin/plugin.json': JSON.stringify({ name: plugin, version: '1.2.0' }), ...Object.fromEntries(skills.map(name => [`skills/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${name} from ${plugin}.\n---\n\nSteps.\n`])) });
+  await wait(2500);
+  await refresh();
+  await a.click('#nav-overview');
+  await pictures('first-setup', 'First setup asks above the figures.');
+  await a.click('#setup-no');
+  if (await a.has('#outcome-dismiss')) await a.click('#outcome-dismiss');
+  await shot(a, 'copies-differ', 'With Synchronize everything off, Show them opens the matching Copies differ chip.');
+  await a.click('#nav-settings');
+  await a.click('#sync-everything-on');
+  await a.click('#nav-overview');
+  if (await a.has('#outcome-dismiss')) await a.click('#outcome-dismiss');
+  // Made-up session history: Claude Code (40 sessions over 25 days), Copilot CLI (12 over 18 days) and Pi (6 over 9 days).
+  const lines = (path, records) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n') + '\n'); };
+  const ago = days => new Date(Date.now() - days * DAY).toISOString();
+  const used = skillNames.filter((_, at) => at % 3 !== 2);
+  for (let n = 0; n < 40; n++) {
+    const day = (n * 25) / 40, skills = [used[n % used.length], used[(n * 7) % 12], 'jira-check'], servers = ['github', 'grafana', 'linear'].slice(0, 1 + (n % 3));
+    lines(join(practice, `.claude/projects/-work/s${n}.jsonl`), [
+      { type: 'assistant', message: { content: [...skills.map(skill => ({ type: 'tool_use', name: 'Skill', input: { skill } })), ...servers.map(server => ({ type: 'tool_use', name: `mcp__${server}__call`, input: {} })), ...(n % 4 ? [] : [{ type: 'tool_use', name: 'Agent', input: { subagent_type: 'planner' } }])] }, timestamp: ago(day) }]);
+  }
+  for (let n = 0; n < 12; n++) lines(join(practice, `.copilot/session-state/c${n}/events.jsonl`), [{ type: 'session.start', data: {}, timestamp: ago(18 - n) }, { type: 'skill.invoked', data: { name: used[(n * 5) % used.length] }, timestamp: ago(18 - n) }]);
+  for (let n = 0; n < 6; n++) lines(join(practice, `.pi/agent/sessions/p${n}.jsonl`), [{ type: 'message', message: { role: 'user', content: `<skill name="${used[n * 3]}">` }, timestamp: ago(9 - n) }]);
+  const requests = await requestHandles(a);
+  if (requests) await requests.slow('usage:read', 20000);
+  await a.click('#home-fixture');
+  if (requests) {
+    await pictures('collecting', 'The first reading is in progress. The cards and table reserve their room.');
+    await requests.restore('usage:read');
+  }
+  await waitFor(a, `!!document.querySelector('#overview-collect-usage')`, 30000);
+  await pictures('collected', 'The same home with 30-day figures and the three most used items of each kind.');
+  if (requests) {
+    await requests.fail('usage:read');
+    await a.click('#overview-collect-usage');
+    await shot(a, 'failed', 'An interrupted reading offers Try again.');
+    await requests.restore('usage:read');
+    requests.close();
+    await a.click('#overview-collect-usage');
+  }
+  writeFileSync(join(practice, '.copilot/mcp-config.json'), '{');
+  await refresh();
+  await pictures('problem', 'A tool file cannot be read. The problem and its action appear above the figures.');
+  writeFileSync(join(practice, '.copilot/mcp-config.json'), '{}');
+  await refresh();
+  releases.push({ tag: 'v0.7.1-alpha.1', zip, asset: 'Central-Knot-Alpha-0.7.1-mac-arm64.zip', bytesPerSecond: 400000 });
+  await a.click('#update-control');
+  await waitFor(a, `!!document.querySelector('#overview-update')`, 20000);
+  await pictures('update', 'An update is available, with release notes and the install action.');
+  await a.click('#nav-instructions');
+  await a.click('[id^="ins-edit-"]');
+  await a.run(`(() => { const area = document.querySelector('textarea'); area.value += 'Unsaved'; area.dispatchEvent(new Event('input', {bubbles:true})); })()`);
+  await a.click('#nav-overview');
+  await a.click('#overview-update');
+  await waitFor(a, `/Downloading.*[1-9]/.test(document.querySelector('#overview-update')?.textContent)`);
+  await shot(a, 'downloading', 'The download advances on both controls.');
+  await waitFor(a, `document.querySelector('#update-control')?.dataset.look === 'held'`, 30000);
+  await shot(a, 'held', 'The ready update waits for an unsaved draft.');
+  await a.click('#overview-update');
+  if (!(await a.has('#setting-updates'))) throw new Error('A held restart should open Settings.');
+  await fixture.close();
+  await fresh({ CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  await shot(a, 'cannot-tell', 'A home without session history has items whose use no tool can tell.');
+  await a.click('#home-actual');
+  await pictures('no-tools', 'No tool is managed in this home.');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 

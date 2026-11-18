@@ -313,6 +313,8 @@ async function harnessFlow() {
   await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-skills');
   await a.click('#nav-overview');
+  // The setup question owns its copies-differ sentence until answered.
+  if (await a.exists('#setup-no')) await a.click('#setup-no');
   await a.click('#overview-skills-differ');
   check('after a harness’s Skills tab, the Overview’s “different copies” link still opens Skills narrowed to them', (await a.text('.chip-on') ?? '').startsWith('Copies differ'), await a.text('.chips'));
   await a.click('#nav-harnesses');
@@ -372,7 +374,9 @@ async function manageFlow() {
   await a.click('#nav-skills');
   check('the Skills page has no Codex mark', (await a.exists('.tool-mark')) && !(await a.exists('.tool-mark[data-tool="codex-cli"]')));
   await a.click('#nav-overview');
-  check('the Overview names the managed tools and says Codex is left out', (await a.text('.overview-lead') ?? '').includes('the same in Claude Code and Copilot CLI. Codex is left out (its switch is on Harnesses).'), await a.text('.overview-lead'));
+  same('the Overview lists only the managed tools and names the one left out below', [
+    await a.all('.tools-table tbody tr', 'e.dataset.tool'), await a.text('#overview-left-out')],
+    [['claude-cli', 'copilot-cli'], 'Codex is left out. Open Harnesses']);
   same('Instructions and Plugins read no Codex', [
     await a.run(`window.centralKnot.instructions().then(files => files.map(file => file.tool))`),
     await a.run(`window.centralKnot.plugins(false).then(view => view?.tools ?? [])`)], [['claude-cli', 'copilot-cli'], ['claude-cli', 'copilot-cli']]);
@@ -5356,9 +5360,12 @@ async function usageFlow() {
   const kit = 'review-kit@ck-usage/checks';
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${kit}"]`)); tries++) await wait(100);
-  await a.click('#collect-usage');
-  for (let tries = 0; tries < 50 && !(await a.run(`document.querySelector('.ov-row[data-key="${kit}"] .ov-used')?.textContent`)); tries++) await wait(100);
-  await a.click(`[id="open-${kit}"]`);
+  await a.click('#nav-overview');
+  await a.click('#overview-collect-usage');
+  for (let tries = 0; tries < 50 && !(await a.exists('#overview-skills-usage .middle[title="checks"]')); tries++) await wait(100);
+  const top = await a.run(`document.querySelector('#overview-skills-usage .middle[title="checks"]')?.closest('button')?.id`);
+  await a.click(`#${top}`);
+  same('a most-used plugin skill opens its own row under All', await a.run(`document.querySelector('.ov-plugin-row.open')?.dataset.key`), kit);
   same('a From plugins row says its figure, and its opened row Claude Code’s, by the same match', [await a.run(`document.querySelector('.ov-row[data-key="${kit}"] .ov-used')?.textContent`), (await a.text(`[id="usage-${kit}-claude-cli"]`))?.trim()],
     ['used 4 days ago · 1 session', 'Used in 1 session in the last 30 days, last used 4 days ago.']);
   await a.shot('usage-plugin-row');
@@ -5468,6 +5475,25 @@ async function usageFlow() {
   }
   same('no page errors, usage after a relaunch', a.pageErrors, []);
   await a.quit();
+  // Actual launches on the made-up home, with their first reading held at the pipe. No click precedes either measurement.
+  for (const [width, height] of [[860, 600], [1280, 800]]) {
+    a = await launch(data, [], real);
+    await sizeTo(a, width, height);
+    for (let tries = 0; tries < 100 && !reading(); tries++) await wait(50);
+    const geometry = () => a.all('.kind-card, .tools-table tr, .tools-table thead th',
+      '(() => { const {x,y,width,height} = e.getBoundingClientRect(); return [x,y,width,height]; })()');
+    const before = await geometry();
+    same(`the opening Overview at ${width} holds room while collecting`, [
+      reading(), await a.text('#overview-skills-usage'), before.length > 3], [true, '…', true]);
+    await letGo();
+    for (let tries = 0; tries < 100 && !(await a.exists('#overview-collect-usage')); tries++) await wait(50);
+    await a.settle();
+    check(`the opening Overview at ${width} shows the collected figures without a click`,
+      (await a.text('#overview-skills-usage') ?? '').includes('used in the last 30 days') &&
+      (await a.text('.tools-table tr[data-tool="claude-cli"] .tools-history')) === '2', await a.text('#overview-scroll'));
+    same(`collecting at launch moves no card, row or column header at ${width}`, await geometry(), before);
+    await a.quit();
+  }
   // Started at sign-in, with no window (--hidden): nothing is collected until the window first shows (a second launch shows it).
   a = await launch(data, ['--hidden'], real);
   await a.click('#nav-skills');

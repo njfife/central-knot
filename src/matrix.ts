@@ -309,11 +309,17 @@ export function openItem(which: PageKind, name: string) {
   const facts = state.home && kindSource(state.home, which).facts;
   const partKind = partOfPage[which];
   const key = facts?.find(item => samePart({ kind: partKind, name: item.key }, { kind: partKind, name }) || samePart({ kind: partKind, name: item.name }, { kind: partKind, name }))?.key;
-  // Drawn for the kind's own page (startFresh), so its first draw there keeps this row open.
-  startFresh(views[which], undefined);
-  views[which].comparing = key;
+  openKind(which, { key });
+}
+
+/** Opens a kind's own table, optionally narrowed to a chip or with one row (including a plugin's) open. */
+export function openKind(which: PageKind, { filter = 'all', key }: { filter?: Filter; key?: string } = {}) {
+  showFiltered(which, filter);
   showPage(which);
-  if (key) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
+  // The first draw clears the previous home's row. Open the requested row on this visit.
+  if (!key) return;
+  openRow(key);
+  requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
 }
 let view = views.skills;
 /** The page the tables were last drawn on. */
@@ -753,17 +759,21 @@ export function caughtUpBand(home: HomeView): HTMLElement | null {
     closeButton(() => { state.dismissed.add(key); rerender(); }, { id: 'caught-up-dismiss' }));
 }
 
+/** Problems apart from the stopped record, whose own reason already has a line. */
+export const otherProblems = ({ problems, gate }: Pick<HomeView['skills'], 'problems' | 'gate'>) =>
+  problems.filter(problem => gate.state !== 'stopped' || problem !== gate.reason);
+
 /** The bands above a table, from its kind's view (listView). */
 function listNotices() {
   const mcp = listView()!;
   const bands: HTMLElement[] = [];
   for (const band of [syncOffBand(), walkthroughBand(kind, copyQuestion)]) if (band) bands.push(band);
   if (!mcp.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, mcp.access.reason)));
-  // A record that stops every write (damaged, newer, another generation): said once, unless a problem below says it already.
-  if (mcp.gate.state === 'stopped' && !mcp.problems.includes(mcp.gate.reason)) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, mcp.gate.reason)));
+  // A record that stops every write gets its own line.
+  if (mcp.gate.state === 'stopped') bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, mcp.gate.reason)));
   const resume = resumeBand();
   if (resume) bands.push(resume);
-  for (const problem of mcp.problems) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));
+  for (const problem of otherProblems(mcp)) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));
   const unread = unreadBand();
   if (unread) bands.push(unread);
   const told = toldNotices();
@@ -1352,8 +1362,9 @@ function row(skill: ItemRow) {
 
 // ---------- Usage, collected when a home opens and on Update (app.ts collectUsage; usagerow.ts says what it means for a row) ----------
 
-/** The reading on show: on a kind's own page, once one is collected for this home; none after a reading that failed. */
-const reading = () => (focus || state.usage.state === 'failed' ? undefined : state.usage.data);
+/** The reading on show for the home, kept during an update. Harness tables omit usage. */
+export const homeReading = () => state.usage.state === 'failed' ? undefined : state.usage.data;
+const reading = () => focus ? undefined : homeReading();
 /** A row's item as its kind's view has it (types.ts LibraryFacts), whose names in each tool usagerow.ts matches. */
 const factsOf = (skill: ItemRow) => (state.home ? kindSource(state.home, kind).facts.find(facts => facts.key === skill.key) : undefined);
 /** What each tool the reading read says of a row's item (usagerow.ts allSay): a use in a tool not managed here counts too. */
@@ -1363,7 +1374,7 @@ function usageOf(facts: UsageFacts | undefined): ToolSays[] {
 }
 
 /** While a home's first reading runs (none on show yet): its rows' cells and an opened row's lines hold their room, empty or saying so. */
-const firstReading = () => !focus && state.usage.state === 'reading' && !state.usage.data;
+export const firstReading = () => state.usage.state === 'reading' && !state.usage.data;
 
 /**
  * At the toolbar's end of a kind's own page: when usage was collected ("Collected 8:44 AM", "· no sessions yet" where no tool
@@ -1429,21 +1440,21 @@ function usedCell(facts: UsageFacts | undefined) {
  * sessions here, say) shows none; each opened row still says why. Asked once per draw of the table (itemsTable: usedHere).
  */
 function usedColumn() {
-  if (firstReading()) return true;
-  return !!reading() && [...committedList().map(factsOf), ...plugged().rows.map(pluginRowFacts)].some(facts => !!figureOf(facts));
+  return !focus && (firstReading() || !!kindUsage()?.withFigure);
 }
 /** Whether the table being drawn has the Used column (usedColumn), set by itemsTable before its rows. */
 let usedHere = false;
 
 /** The reading in sum (usagerow.ts usageSummary), worked out again only when the reading or the home's view changes. */
 let summed: { read: UsageReading; home: HomeView; sum: UsageSummary } | undefined;
-/** This kind's items in the reading's sum: the "No use seen in 30 days" chip's lists and what its band leaves out, by the summary's rule. */
-function kindUsage(): KindUsage | undefined {
-  const read = reading(), home = state.home;
+/** Share the same sum across the Overview, Used column and unused chip. */
+export function homeUsage(): UsageSummary | undefined {
+  const read = homeReading(), home = state.home;
   if (!read || !home) return undefined;
   if (summed?.read !== read || summed.home !== home) summed = { read, home, sum: usageSummary(read, home) };
-  return summed.sum.kinds[kind];
+  return summed.sum;
 }
+const kindUsage = (): KindUsage | undefined => focus ? undefined : homeUsage()?.kinds[kind];
 /** Whether a row is in the "No use seen in 30 days" chip, and how many it holds (no chip at 0). */
 const inUnusedChip = (skill: ItemRow) => !!kindUsage()?.noUseSeen.includes(skill.key);
 const unusedCount = () => kindUsage()?.noUseSeen.length ?? 0;
@@ -1499,7 +1510,7 @@ const cantSayWords: Record<CantSay, (nouns: { one: string }, says: ToolSays) => 
  * reading runs, the line holds its place, saying so, so the row is as high before the reading lands as after.
  */
 function usageLine(facts: UsageFacts | undefined, tool: Tool, key = facts?.key) {
-  if (firstReading()) return h('p.details-usage', { id: `usage-${key}-${tool}` }, icon('history', 12, 'tone-muted'), 'Collecting usage statistics…');
+  if (!focus && firstReading()) return h('p.details-usage', { id: `usage-${key}-${tool}` }, icon('history', 12, 'tone-muted'), 'Collecting usage statistics…');
   const says = usageOf(facts).find(each => each.tool === tool);
   if (!says) return null;
   const last = says.last ? `last used ${sinceThen(Date.parse(says.last))}` : '';
