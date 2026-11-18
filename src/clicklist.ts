@@ -11,8 +11,8 @@
 import { afterActing, FADE_MS, homeReadOwed, readHomeOnce, rerender, showActing, type PageKind } from './app.ts';
 
 /**
- * A run of clicks: its place (an item page's kind on one page, or one tool's page; or Plugins), and when its last click ended
- * (0 before one has). Its clicks are the turns that name it.
+ * A run of clicks: its place (an item page, or a tool's tab of one kind under Harnesses: app.ts placeNow; or Plugins), and
+ * when its last click ended (0 before one has). Its clicks are the turns that name it.
  */
 export interface Run { place: string; lastAt: number }
 

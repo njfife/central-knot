@@ -21,11 +21,12 @@ const main = {
 const api = {
   turnPlugin: (_source: string, plugin: string, what: PluginTurn) => { main.sent.push(`${plugin} ${what}`); return new Promise<PluginTurnResult>(done => main.answers.push(done)); },
   applySkills: (changes: Change[]) => { main.sent.push(changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}, seen ${change.seenOn ? 'on' : 'off'}`).join()); return new Promise<PassResult>(done => main.passes.push(done)); },
+  history: async () => ({ events: [{ id: 'delete-bar', key: 'bar', kind: 'deleted' }], days: 30 }),
+  applyAgents: (changes: Change[]) => { main.sent.push(`agent ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
   plugins: async () => { main.reads.plugins++; return view; },
   refresh: async (): Promise<HomeView | null> => { main.reads.home++; main.duringHomeRead?.(); return null; },
   setPluginSkill: async () => ({ reports: [report('skill-off', 'Turned off.')] }),
   selectHome: async (): Promise<HomeView | null> => null,
-  history: async () => ({ events: [{ id: 'delete-bar', key: 'bar', kind: 'deleted' }] }),
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
   onSyncChanged: (listener: () => void) => { main.syncChanged = listener; },
 };
@@ -40,7 +41,7 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyClick, closeResult, drawPage, flashRequests, leaveResults, pinnedRows,
+const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, leaveResults, pinnedRows,
   loadHome, queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
@@ -267,12 +268,12 @@ test('A new run on Plugins clears what an earlier action’s stop said, as befor
 
 /** Each skill On or Off as main last answered for it (On before): what a row's state is now, as the page would read it from its view. */
 const onNow = new Map<string, boolean>();
-/** A skill's switch clicked on the page open, as matrix.ts flip sends it: drawn as the row was (its latest unended click's state, else as it is now). */
-function flip(name: string, on: boolean, made = () => {}) {
-  const seen = wantedOn('skills', name) ?? onNow.get(name) ?? true;
-  queueClick({ kind: 'skills', key: name, on }, name, () => {
+/** A skill's switch (or `kind`'s) clicked on the page open, as matrix.ts flip sends it: drawn as the row was (its latest unended click's state, else as it is now). */
+function flip(name: string, on: boolean, made = () => {}, kind: 'skills' | 'agents' = 'skills') {
+  const seen = wantedOn(kind, name) ?? onNow.get(name) ?? true;
+  queueClick({ kind, key: name, on }, name, () => {
     made();
-    return { kind: 'skills', items: [name], changes: [{ key: name, on, except: [], seenOn: seen }], said: (notIn: HarnessId[]) => `${name} is ${on ? 'on' : 'off'}${notIn.length ? ', but still in Claude Code' : ''}.` };
+    return { kind, items: [name], changes: [{ key: name, on, except: [], seenOn: seen }], said: (notIn: HarnessId[]) => `${name} is ${on ? 'on' : 'off'}${notIn.length ? ', but still in Claude Code' : ''}.` };
   }, () => onNow.get(name) ?? true);
 }
 /** What main did of one click: the item written or removed in Claude Code, or the click refused as a whole, or a write that failed. */
@@ -490,12 +491,74 @@ test('A run made on one tool’s page is said there only: on another tool’s pa
   app.harness = 'codex-cli';
   leaveResults();
   await main.pass(did('a'));
-  assert.deepEqual([app.outcome, app.said.text, flashRequests.has('a')], [undefined, 'a is off.', false]);
+  assert.deepEqual([app.outcome, app.said.text, flashRequests.has('skills-a')], [undefined, 'a is off.', false]);
   // A click there is a run of its own, said in its own header.
   flip('b', false);
   await settled();
   await main.pass(did('b'));
   assert.equal(app.outcome?.text, 'b is off.');
+});
+
+test('A skill and an agent both named review are clicked apart: the agent’s click on Codex’s Agents tab waits; on Skills, review’s switch takes nothing back', async () => {
+  onSkills();
+  Object.assign(app, { page: 'harnesses', harness: 'codex-cli', harnessTab: 'agents' });
+  flip('a', false, undefined, 'agents');
+  flip('review', false, undefined, 'agents');
+  await settled();
+  // To Skills before the agent's click runs: the skill's switch is a click of its own, not a take-back of the agent's.
+  showPage('skills');
+  assert.equal(takeBack('skills', 'review'), false);
+  flip('review', false);
+  assert.deepEqual([wantedOn('agents', 'review'), wantedOn('skills', 'review')], [false, false]);
+  await main.pass(did('a'));
+  await main.pass(did('review'));
+  await main.pass(did('review'));
+  assert.deepEqual(main.sent, ['agent a off', 'agent review off', 'review off, seen on']);
+  // The skill's row flashes on Skills; the agent's click was made on another page, said in the status bar, and flashes no row.
+  assert.deepEqual([app.outcome?.text, flashRequests.has('skills-review'), flashRequests.has('agents-review')], ['review is off.', true, false]);
+  // Back on Codex's Agents tab, an agent's click said there flashes the agent's row, not a skill's of its name.
+  closeResult();
+  Object.assign(app, { page: 'harnesses', harness: 'codex-cli', harnessTab: 'agents' });
+  flip('notes', false, undefined, 'agents');
+  await settled();
+  await main.pass(did('notes'));
+  assert.deepEqual([app.outcome?.text, flashRequests.has('agents-notes'), flashRequests.has('skills-notes')], ['notes is off.', true, false]);
+});
+
+test('A click on Codex’s Agents tab that ends while Codex’s Skills tab is open is said in the status bar only: that header is the skills’', async () => {
+  onSkills();
+  app.home!.sync.managed = ['codex-cli'];
+  Object.assign(app, { page: 'harnesses', harness: 'codex-cli', harnessTab: 'agents' });
+  flip('release-notes', false, undefined, 'agents');
+  await settled();
+  // As harnesspage.ts goHarness does for another tab: the header emptied, the run ended.
+  app.harnessTab = 'skills';
+  leaveResults();
+  await main.pass(did('release-notes'));
+  assert.deepEqual([app.outcome, app.said.text, flashRequests.has('agents-release-notes')], [undefined, 'release-notes is off.', false]);
+});
+
+test('A plugin’s skill named like your own: its switch’s click, and its Undo, ask for the plugin’s row’s flash, never your own’s', async () => {
+  onSkills();
+  const key = 'issue-tracker@team/release-notes', theirs = `skills-${key}`;
+  queueClick({ kind: 'skills', key, on: false }, 'release-notes', () => ({ kind: 'skills', items: ['release-notes'], keys: [key], changes: [{ key: 'release-notes', on: false, except: [] }], said: 'release-notes is off in Claude Code.' }), () => false);
+  await settled();
+  await main.pass({ ...did('release-notes'), made: ['event-1'] });
+  assert.deepEqual([flashRequests.has(theirs), flashRequests.has('skills-release-notes')], [true, false]);
+  flashRequests.clear();
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, flashRequests.has(theirs), flashRequests.has('skills-release-notes')], ['Undone: release-notes is as before.', true, false]);
+});
+
+test('A notice’s ask to flash a row lapses after its time, and a fresh ask then takes its place; Undo’s ask waits for the row', () => {
+  flashRequests.clear();
+  askFlash('skills-notes', Date.now() - 1);
+  askFlash('skills-notes', Date.now() + 3000);
+  assert.ok(flashRequests.get('skills-notes')! > Date.now());
+  flashRequests.set('skills-standup', Infinity);
+  askFlash('skills-standup', Date.now() + 3000);
+  assert.equal(flashRequests.get('skills-standup'), Infinity);
 });
 
 test('A click 8 seconds after the run’s last click ended starts a new run, though a result with a problem line still shows', async () => {
