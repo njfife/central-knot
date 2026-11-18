@@ -1130,19 +1130,22 @@ span.ins-confirm { margin-top: 0; }
   .plugin-table > .plugin-row:nth-child(even of .plugin-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 /*
- * A row's name, version and chips are whole at any width and with any number of tools: nothing in them hides. When room is
- * short, in this order: the tool columns narrow, from 120px to 76px at the least, before the plugin's column goes under 360px
- * (a title of about 45 characters on one line); then the version and each chip move whole under what is before them; then
- * the title wraps, inside a word only when one word is wider than the column. A row is as tall as that makes it. The line
- * under the name is the one thing that shortens (.plugin-row-line, below): it stays one line, so a click never changes a
- * row's height.
+ * A row's name, version and chips show at any width and with any number of tools: nothing in them hides or is cut. When room
+ * is short, in this order: the tool columns narrow, from 120px to 76px at the least, before the plugin's column goes under
+ * 360px (a title of about 45 characters on one line); then the version and each chip move whole under what is before them;
+ * then the title wraps. A piece breaks inside a word only when that word alone is wider than the open button may be (the
+ * column; half of it in a wide table, below): a long title can be, and rarely a version or chip (a build identifier with no
+ * break in it). A row is as tall as that makes it. The line under the name is the one thing that shortens (.plugin-row-line,
+ * below): it stays one line, so a click never changes a row's height.
  */
 .plugin-table .ov-row {
-  --tool-width: clamp(76px, (100% - 48px - 360px - 28px) / var(--tool-count, 3), 120px);
-  grid-template-columns: 48px minmax(0, 1fr) repeat(var(--tool-count, 3), var(--tool-width)) 28px; height: auto; min-height: 40px;
+  --switch-width: 48px; --chevron-width: 28px;
+  /* The row, less the switch, the chevron and the plugin's 360px, shared by the tools. */
+  --tool-width: clamp(76px, (100% - var(--switch-width) - var(--chevron-width) - 360px) / var(--tool-count, 3), 120px);
+  grid-template-columns: var(--switch-width) minmax(0, 1fr) repeat(var(--tool-count, 3), var(--tool-width)) var(--chevron-width);
+  height: auto; min-height: 40px;
 }
-.plugin-table .plugin-row-open { flex-wrap: wrap; row-gap: 2px; }
-.plugin-table .plugin-row-title { overflow-wrap: anywhere; }
+.plugin-table .plugin-row-open { flex-wrap: wrap; row-gap: 2px; overflow-wrap: anywhere; }
 /* Room above the tool icons, so the pinned header doesn't touch the toolbar's rule */
 .plugin-table .ov-head { min-height: 48px; }
 .plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
