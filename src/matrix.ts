@@ -1942,7 +1942,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   const t = useTable('skills'), view = t.view;
   const all = rowsOf(t.kind);
   // No skill at all (the last one just deleted): the table, which says so.
-  if (!all.length) { state.skillsView = 'table'; state.item = undefined; return itemsTable('skills'); }
+  if (!all.length) return itemsTable('skills');
   const needle = view.listFind.trim().toLowerCase();
   const matches = all.filter(skill => !needle || skill.key.includes(needle) || (skill.name ?? '').toLowerCase().includes(needle) || skill.description.toLowerCase().includes(needle));
   // The table's headings, on, then found, then off (a row whose switch was clicked here under the one it was under), and its

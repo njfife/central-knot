@@ -17,7 +17,7 @@ export function fullPlace(): Place {
       return { page, source: entry?.source ?? market.nav.source, marketTab: plugin ? 'plugins' : market.nav.tab, plugin };
     }
   }
-  if (page === 'skills' && skillsView === 'files' && item) return { page, skill: item };
+  if (page === 'skills' && skillsView === 'files' && state.home?.skills.items.length && item) return { page, skill: item };
   return { page };
 }
 
@@ -76,6 +76,7 @@ function move(step: number) {
   if (state.busy && p.page === 'harnesses' && (state.harness !== p.tool || (p.tool && state.harnessTab !== p.tab))) return;
   visits = next;
   readingMarket = false;
+  if (placeKey(fullPlace()) === placeKey(p)) return;
   restoring = true;
   try { goToPlace(p); } finally { restoring = false; rerender(); }
 }
