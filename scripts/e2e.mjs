@@ -994,8 +994,25 @@ async function practiceFlow() {
   rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
   await a.click('#header-refresh');
   check('a fresh deletion waits for the settle window: nothing removed or put back yet', existsSync(join(practice, '.claude/skills/release-notes')) && !existsSync(join(practice, '.copilot/skills/release-notes')));
-  await wait(2200);
-  await a.click('#header-refresh');
+  // Click as the background read starts. Capture Refresh's finished draw before another read can change it.
+  const refreshNotice = await a.run(`new Promise((done, fail) => {
+    const limit = setTimeout(() => fail(new Error('The deletion did not trigger a completed Refresh.')), 30000);
+    let clicked = false;
+    centralKnot.onSyncChanged(() => {
+      if (clicked) return;
+      clicked = true;
+      document.querySelector('#header-refresh').click();
+      const draw = new MutationObserver(() => {
+        if (document.body.dataset.busy === 'true') return;
+        draw.disconnect();
+        clearTimeout(limit);
+        done(document.querySelector('.sync-notices')?.textContent ?? null);
+      });
+      draw.observe(document.body, { attributes: true, attributeFilter: ['data-busy'] });
+    });
+  })`);
+  await a.settle();
+  check('Refresh’s own draw offers to turn the deleted skill on', /release-notes was deleted[\s\S]*Turn it on/.test(refreshNotice), refreshNotice);
   same('then the skill turns off everywhere', releaseNotesIn(), [false, false, false]);
   check('with a notice that Central Knot keeps it, offering Turn it on', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && /Turn it on/.test(await a.text('.sync-notices') ?? ''), await a.text('.bands'));
   check('and the table keeps it under Off, in Central Knot only', ((await sectionsNow(a)).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && /in Central Knot only/.test(await a.text('.ov-row[data-key="release-notes"]') ?? '') && !(await switchOn(a, 'release-notes')), await sectionsNow(a));

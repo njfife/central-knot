@@ -4,7 +4,7 @@
 // on the same code, when the rows a click pins are let go (app.ts pinnedRows, drawPage).
 import { mock, test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Change, HarnessId, PassResult, PluginTurn, PluginTurnResult, PluginsView } from '../src/types.ts';
+import type { Change, HarnessId, HomeView, ItemNotice, PassResult, PluginTurn, PluginTurnResult, PluginsView } from '../src/types.ts';
 
 /** Main, as the page sees it: each switch click waits until the test answers it; every other call is counted. */
 const main = {
@@ -22,7 +22,7 @@ const api = {
   turnPlugin: (_source: string, plugin: string, what: PluginTurn) => { main.sent.push(`${plugin} ${what}`); return new Promise<PluginTurnResult>(done => main.answers.push(done)); },
   applySkills: (changes: Change[]) => { main.sent.push(changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}, seen ${change.seenOn ? 'on' : 'off'}`).join()); return new Promise<PassResult>(done => main.passes.push(done)); },
   plugins: async () => { main.reads.plugins++; return view; },
-  refresh: async () => { main.reads.home++; main.duringHomeRead?.(); return null; },
+  refresh: async (): Promise<HomeView | null> => { main.reads.home++; main.duringHomeRead?.(); return null; },
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
   onSyncChanged: (listener: () => void) => { main.syncChanged = listener; },
 };
@@ -36,7 +36,8 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyClick, closeResult, drawPage, flashRequests, leaveResults, pinnedRows, queueClick, readAgain, showPage, state: app } = await import('../src/app.ts');
+const { acting, applyClick, closeResult, drawPage, flashRequests, leaveResults, pinnedRows,
+  queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin } = await import('../src/itemrow.ts');
@@ -282,6 +283,28 @@ function onSkills() {
   flashRequests.clear();
   Object.assign(app, { page: 'skills', harness: undefined });
 }
+
+test('Refresh draws the notice a background read brought while the page was busy', async t => {
+  onSkills();
+  const tools = ['copilot-cli'];
+  const kind = { tools, items: [], notices: [] };
+  const home = { home: '/home', label: 'Practice', sync: { managed: tools, caughtUp: [] },
+    skills: kind, mcp: kind, agents: kind } as unknown as HomeView;
+  app.home = home;
+  const notice: ItemNotice = { kind: 'deleted-by-hand', key: 'notes', item: 'notes', history: 'deletion',
+    winner: 'copilot-cli', losers: [], orderProved: true };
+  const reads = t.mock.method(api, 'refresh');
+  reads.mock.mockImplementationOnce(async () => ({ ...home, skills: { ...home.skills, notices: [notice] } }));
+  reads.mock.mockImplementationOnce(async () => home, 1);
+  const draws: string[][] = [];
+  setRenderer(() => { if (!acting()) draws.push(app.home!.skills.notices.map(n => n.history)); });
+  try {
+    main.syncChanged();
+    await readAgain();
+    assert.deepEqual(draws[0], ['deletion']);
+    assert.doesNotMatch(app.said.text, /Nothing changed/);
+  } finally { setRenderer(() => {}); }
+});
 
 test('Four switches clicked in a row: each row is drawn as clicked at once, main gets one at a time, and the header says the run once', async () => {
   onSkills();

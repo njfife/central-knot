@@ -255,8 +255,12 @@ export function paintStatusMessage() {
  * page follows: a page whose kind is no longer here gives way to the Overview, saying why, and a page with its own data
  * reads it again (unless `reload` is false: the caller reads it itself).
  */
-export function setHome(view: HomeView | null | undefined, { reload = true } = {}): void {
+export function setHome(view: HomeView | null | undefined, { reload = true, say }: { reload?: boolean; say?: (view: HomeView) => void } = {}): void {
   if (!view) return;
+  // The next view taken of this home includes the notices and caught-up results a background read set aside.
+  view = withSetAside(setAside, view);
+  setAside = undefined;
+  say?.(view);
   const before = state.home ? homeTools().join() : undefined;
   state.home = keepUnshown(state.home, view);
   // A closed background problem stays closed while reads report it, and is forgotten once one doesn't (matrix.ts listResult).
@@ -725,8 +729,7 @@ export async function readAgain() {
     if (!view) return;
     state.skillsResult = undefined;
     // Said first, so a page that leaves (setHome) adds its reason after what was read.
-    announce(readSummary(view));
-    setHome(view, { reload: false });
+    setHome(view, { reload: false, say: taken => announce(readSummary(taken)) });
     read = true;
   });
   // Only a new read goes on to the page's own data: after a failure its message stays, and the page keeps what it showed.
@@ -1377,7 +1380,6 @@ export const syncNow = () => busy('Syncing…', async () => {
 /** A background read is running, or one arrived while the page was acting and runs when it is done (afterActing). */
 let refreshing = false;
 let refreshOwed = false;
-/** A background view that arrived while an action ran: its notices and caught-up results go into the next one (withSetAside). */
 let setAside: HomeView | undefined;
 /** Whether the home waits to be read once the page's run of clicks is done: a background refresh asked for meanwhile, or a plugin's click (oweHomeRead). */
 export const homeReadOwed = () => refreshOwed;
@@ -1385,13 +1387,11 @@ export const homeReadOwed = () => refreshOwed;
 export const oweHomeRead = () => { refreshOwed = true; };
 /**
  * The home read again by a Plugins action before it ends (pluginstate.ts readAgain), or at a run of clicks' end (clicklist.ts):
- * it stands for a background refresh owed meanwhile, so the home is read once, and takes in a view set aside, so no notice is lost.
+ * it stands for a background refresh owed meanwhile, so the home is read once.
  */
 export async function readHomeOnce(): Promise<void> {
   refreshOwed = false;
-  const read = await api().refresh().catch(() => null);
-  setHome(read && withSetAside(setAside, read));
-  setAside = undefined;
+  setHome(await api().refresh().catch(() => null));
 }
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const isPage = (page: string): page is Page => (pages as readonly string[]).includes(page);
@@ -1438,29 +1438,35 @@ async function backgroundRefresh() {
   if (acting() || refreshing) { refreshOwed = true; return; }
   refreshing = true;
   try {
-    const read = await api().refresh();
-    const view = read ? withSetAside(setAside, read) : undefined;
-    if (acting()) { refreshOwed = true; if (view) setAside = view; return; }
-    if (!view) return;
-    setAside = undefined;
-    const known = new Set(state.home ? noticesByPage(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
-    const fresh = noticesByPage(view).map(([page, notices]) => [page, notices.filter(notice => !known.has(notice.history))] as const).filter(([, notices]) => notices.length);
-    if (fresh.length) {
-      // A new sync notice is the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for
-      // different events, one above the other, is the one thing here that would mislead; the notice says where it went.
-      const outcome = state.outcome;
-      if (outcome?.act) state.undoMoved = { page: outcome.page, label: outcome.act.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices: noticesByPage(view).flatMap(([, notices]) => notices.map(notice => notice.history)) };
-      state.outcome = undefined;
-      const items = [...new Set(fresh.flatMap(([, notices]) => notices.flatMap(noticeNames)))];
-      // On the page whose notice says it, screen readers hear it; elsewhere the status bar says it, beside the sidebar's dot.
-      announce(`Sync changed ${andList(items)}.`, fresh.some(([page]) => page === state.page));
+    const view = await api().refresh();
+    if (acting()) {
+      refreshOwed = true;
+      if (view) setAside = withSetAside(setAside, view);
+      return;
     }
+    if (!view) return;
     // A tool appeared or went away: the page leaves a kind no longer here and reads its own data again (setHome).
-    setHome(view);
+    setHome(view, { say: sayBackgroundNews });
     rerender();
   } finally {
     refreshing = false;
     drainOwedRefresh();
+  }
+}
+
+/** Says what a background view brings, before it replaces the view on screen. */
+function sayBackgroundNews(view: HomeView) {
+  const known = new Set(state.home ? noticesByPage(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
+  const fresh = noticesByPage(view).map(([page, notices]) => [page, notices.filter(notice => !known.has(notice.history))] as const).filter(([, notices]) => notices.length);
+  if (fresh.length) {
+    // A new sync notice is the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for
+    // different events, one above the other, is the one thing here that would mislead; the notice says where it went.
+    const outcome = state.outcome;
+    if (outcome?.act) state.undoMoved = { page: outcome.page, label: outcome.act.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices: noticesByPage(view).flatMap(([, notices]) => notices.map(notice => notice.history)) };
+    state.outcome = undefined;
+    const items = [...new Set(fresh.flatMap(([, notices]) => notices.flatMap(noticeNames)))];
+    // On the page whose notice says it, screen readers hear it; elsewhere the status bar says it, beside the sidebar's dot.
+    announce(`Sync changed ${andList(items)}.`, fresh.some(([page]) => page === state.page));
   }
 }
 
