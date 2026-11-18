@@ -2176,17 +2176,21 @@ async function practiceFlow() {
     [...underPress, ...await caretAt(a)], [true, true, 'base-text', '- Shared by '.length]);
   await a.press('Escape');
   // …on the same page in the same home only: a press on the base's text, then This Mac's home opened before the release, its base
-  // the same text (written so here), editable: the release opens nothing.
+  // the same text (written so here), editable, and the pointer following that same character there: the release opens nothing.
   const otherBase = join(HOME, '.central-knot/instructions/base.md'), hadInstructions = existsSync(dirname(otherBase));
   mkdirSync(dirname(otherBase), { recursive: true });
   writeFileSync(otherBase, '- Shared by every tool.\n');
-  await clickText(a, baseText, 'every tool.', async () => {
-    await a.run(`document.querySelector('#home-actual').click()`);
-    for (let tries = 0; tries < 50 && (await a.text('#home-label')) === 'Practice copy'; tries++) await wait(100);
-    await a.settle();
-    underPress = await a.run(`(() => { const text = document.querySelector('${baseText}'); return [document.querySelector('#home-label').textContent !== 'Practice copy', text?.textContent, !!text?.matches('.ins-editable')]; })()`);
-  });
-  same('a press on the base’s text, then another home showing the same base text opened before the release: nothing opens there', [...underPress, await a.exists('#base-text')], [true, '- Shared by every tool.', true, false]);
+  const aimed = await pointAt(a, baseText, 'every tool.');
+  await mouse(a, 'mouseMoved', aimed, 0); await mouse(a, 'mousePressed', aimed, 1);
+  await a.run(`document.querySelector('#home-actual').click()`);
+  for (let tries = 0; tries < 50 && (await a.text('#home-label')) === 'Practice copy'; tries++) await wait(100);
+  await a.settle();
+  underPress = await a.run(`(() => { const text = document.querySelector('${baseText}'); return [document.querySelector('#home-label').textContent !== 'Practice copy', text?.textContent, !!text?.matches('.ins-editable')]; })()`);
+  const sameCharacter = await pointAt(a, baseText, 'every tool.');
+  await mouse(a, 'mouseMoved', sameCharacter, 1); await mouse(a, 'mouseReleased', sameCharacter, 0);
+  await a.settle();
+  same('a press on the base’s text, then another home showing the same base text opened before the release, released on that same character: nothing opens there',
+    [...underPress, await a.exists('#base-text')], [true, '- Shared by every tool.', true, false]);
   await a.click('#home-fixture');
   for (let tries = 0; tries < 50 && (await a.text('#home-label')) !== 'Practice copy'; tries++) await wait(100);
   rmSync(hadInstructions ? otherBase : dirname(otherBase), { recursive: true, force: true });
