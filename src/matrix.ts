@@ -10,9 +10,10 @@
 // an opened row, the Last used order (which a reading that lands never redraws: holdOrder), and the "No use seen in 30 days"
 // chip with its band and one Turn these off (built from each row's own Off: rowClicks.off); what the reading says of a row, and
 // the chip's rule, are usagerow.ts's.
+// No kind, view or tool is this module's state: each table is told its own by its caller (useTable gives a Table), each row
+// carries its kind (itemrow.ts ItemRow kind), and the header and Escape find the table on screen from the page (tableShown).
 // A row's switch or Add joins the page's list of clicks (flip, pluginRowSwitch → app.ts queueClick) and is worked out in its turn,
-// perhaps while another table is drawn: onTable then sets this module's table (its kind, view and tool) to the one the click was
-// made on, synchronously, and back.
+// perhaps while another table is drawn: its closures hold the row and the table it was clicked on, so it is worked out there.
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
@@ -76,7 +77,7 @@ function switchPluginItem(item: PluginItemAt) {
   const on = !itemOn(item);
   clickPluginItem(draft, item);
   const ops = [...draft.values()];
-  void applyClick({ kind, items: [item.name], changes: [], said: itemSaid(item, on, ops), pluginsOnly: true, plugins: { ops }, undone: undoneWords(item.name, on, names[item.tool]) });
+  void applyClick({ kind: pageOfPart[item.kind], items: [item.name], changes: [], said: itemSaid(item, on, ops), pluginsOnly: true, plugins: { ops }, undone: undoneWords(item.name, on, names[item.tool]) });
 }
 
 /** Why an item a tool has through a plugin can't be switched on this page now, if it can't: the switch itself (pluginswitch.cantSwitch), or a home that can't be written. */
@@ -172,7 +173,7 @@ function pluginRowEl(t: Table, row: PluginRow) {
     return drawn;
   };
   return [
-    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${open ? '.open' : ''}${usedHere ? '.ov-usage' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(pageOfPart[row.kind], row.key) },
+    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${open ? '.open' : ''}${usedHere ? '.ov-usage' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(t, pageOfPart[row.kind], row.key) },
       h('div.ov-managed', { role: 'cell' }, pluginRowSwitch(t, row)),
       h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: row.description ? `${row.name}: ${row.description}` : row.name },
         h('span.ov-name-main', {}, h('span.ov-name-text', {}, row.name)),
@@ -226,8 +227,6 @@ const fromFacts = (kind: PageKind, facts: LibraryFacts): ItemRow => ({
 const listView = (t: Table) => state.home?.[t.kind];
 /** The kind's column header ("Server") and its title ("MCP servers"), from words.ts kindNouns. */
 const nouns = Object.fromEntries((['skills', 'mcp', 'agents'] as const).map(each => [each, [kindNouns[each].short[0].replace(/^./, first => first.toUpperCase()), kindNouns[each].title]])) as Record<PageKind, [string, string]>;
-/** What this table shows: skills, MCP servers or agents. The same marks mean the same things on each. */
-let kind: PageKind = 'skills';
 const factsCache: Partial<Record<PageKind, { from: unknown; list: ItemRow[] }>> = {};
 
 /** A kind's rows in the home on screen, made once per read of its view. */
@@ -238,12 +237,10 @@ function rowsOf(kind: PageKind): ItemRow[] {
   if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fact => fromFacts(kind, fact)).map(row => ({ ...row, pluginOn: pluginOnIn(row) })) };
   return factsCache[kind]!.list;
 }
-/** The harness a Harnesses page shows: its column comes first, and the rows it has come before the others. */
-let focus: Tool | undefined;
-const toolList = (): Tool[] => toolsFor(tableNow(), kind);
 /**
- * A table, as its caller names it (itemsTable, emptyKind, skillsBrowser): the kind it lists, the harness whose page it is on
- * (`tool`; none on a kind's own page) and the view it keeps (views). A row's drawing reads the row and its table.
+ * A table, as its caller names it (itemsTable, emptyKind, skillsBrowser; the header: tableShown): the kind it lists, the harness
+ * whose page it is on (`tool`, none on a kind's own page: its column comes first, and the rows it has before the others) and
+ * the view it keeps (views). A row's drawing and its clicks read the row and its table.
  */
 interface Table { kind: PageKind; tool?: Tool; view: View }
 /** The tools `kind` can be in (itemrow.ts kindSource), the table's tool first: a row's marks and lines (its kind's), the table's columns (the table's). */
@@ -326,7 +323,6 @@ export function openItem(which: PageKind, name: string) {
   showPage(which);
   if (key) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
 }
-let view = views.skills;
 /** The page the tables were last drawn on. */
 let tablesVisit = -1;
 
@@ -613,15 +609,15 @@ function pluginDock(t: Table, row: PluginRow) {
 }
 
 /** Opening a row's details (the row of `rowKind` keyed `key`) brings them into view, so a choice below the fold is not missed. */
-function openRow(rowKind: PageKind, key: string) {
-  const id = rowId(rowKind, key);
+function openRow(t: Table, rowKind: PageKind, key: string) {
+  const id = rowId(rowKind, key), view = t.view;
   view.comparing = view.comparing === id ? undefined : id;
   view.openedOn = state.visit;
   view.openedAt = state.said.seq;
   rerender();
   // Details that run past the table's bottom are brought into view with their row at its top, so the row's name and the
   // details' close button are in view too. Docked details sit beside the table and are always in view.
-  if (view.comparing && underRow(tableNow(), id)) requestAnimationFrame(() => {
+  if (view.comparing && underRow(t, id)) requestAnimationFrame(() => {
     const rowEl = document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`);
     const details = rowEl?.nextElementSibling;
     const box = rowEl?.closest('.scroll')?.getBoundingClientRect();
@@ -667,7 +663,7 @@ function nameCell(t: Table, skill: ItemRow, attention: boolean) {
 /** The chevron that opens or closes a row's details (the row of `rowKind` keyed `key`), at the row's end. */
 function openButton(t: Table, rowKind: PageKind, key: string, name: string) {
   const open = t.view.comparing === rowId(rowKind, key);
-  return h('button.row-open', { type: 'button', id: `open-${key}`, 'aria-label': `${open ? 'Hide' : 'Show'} details for ${name}`, 'aria-expanded': String(open), onclick: (event: Event) => { event.stopPropagation(); openRow(rowKind, key); } },
+  return h('button.row-open', { type: 'button', id: `open-${key}`, 'aria-label': `${open ? 'Hide' : 'Show'} details for ${name}`, 'aria-expanded': String(open), onclick: (event: Event) => { event.stopPropagation(); openRow(t, rowKind, key); } },
     icon(open ? 'chevron-down' : 'chevron-right', 14, 'tone-faint'));
 }
 
@@ -686,11 +682,12 @@ export { brandMark };
  * Whether the open page still shows a result. It stands until the page changes, the next action, or it is dismissed; it
  * steps aside while a copy choice it names is open, and in the Files view for a skill it doesn't name.
  */
-function outcomeShown(outcome: Outcome, matrixPage: boolean): boolean {
+function outcomeShown(outcome: Outcome, t: Table | undefined): boolean {
   if (outcome.page !== state.page) return false;
   const named = [outcome.item, ...(outcome.items ?? [])].filter((name): name is string => !!name);
   // A newer result (an Undo that brings the question back) is still said.
-  const choosing = matrixPage && view.comparing && (outcome.said ?? 0) <= view.openedAt && rowsOf(kind).some(skill => rowId(skill.kind, skill.key) === view.comparing && differs(skill) && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
+  const opened = (skill: ItemRow) => rowId(skill.kind, skill.key) === t!.view.comparing;
+  const choosing = t?.view.comparing && (outcome.said ?? 0) <= t.view.openedAt && rowsOf(t.kind).some(skill => opened(skill) && differs(skill) && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
   if (choosing) return false;
   return !(state.skillsView === 'files' && state.item && !named.some(name => name.toLowerCase() === state.item));
 }
@@ -703,13 +700,13 @@ export const resultInHeader = () => state.page === 'skills' || state.page === 'm
   || (state.page === 'harnesses' && !(state.harness && state.harnessTab === 'instructions'));
 
 /**
- * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar.
- * `table`: a table is on screen, so its open copy choice hides an older result (guessed from the page). On a list page it is
- * drawn in the header only (listResult); the pages that draw it in a band are the others.
+ * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar. While a
+ * table is on screen (tableShown), its open copy choice hides an older result. On a list page it is drawn in the header only
+ * (listResult); the pages that draw it in a band are the others.
  */
-export function outcomeBand(table = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || !!harnessKindShown()): HTMLElement | null {
+export function outcomeBand(): HTMLElement | null {
   const outcome = state.outcome;
-  if (!outcome || !outcomeShown(outcome, table) || saidInStatusBar(outcome)) return null;
+  if (!outcome || !outcomeShown(outcome, tableShown()) || saidInStatusBar(outcome)) return null;
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
@@ -798,10 +795,8 @@ function listNotices(t: Table) {
  * do, then its reasons: app.ts Outcome), or else what a background pass could not do (any kind's), until a click or × ends them.
  */
 export function listResult(): HTMLElement[] {
-  // The table it is about is the page's (or the harness tab's), set here as the page will draw it: the header is drawn first.
-  const table = isKind(state.page) ? state.page : harnessKindShown();
-  if (table) useTable(table, state.page === 'harnesses' ? state.harness : undefined);
-  const result = table ? lastResult(table) : undefined, done = outcomeBand(!!table);
+  const table = tableShown()?.kind;
+  const result = table ? lastResult(table) : undefined, done = outcomeBand();
   const background = !table || result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed' && !state.dismissed.has(problemKey(entry)));
   const lines = [...background, ...(result?.results ?? []).filter(keptBack)].map(problem => `${problem.item}${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`)
     .concat(done ? state.outcome?.reasons ?? [] : []);
@@ -953,7 +948,7 @@ function syncNotice(t: Table, notice: Told) {
   if (rowKey && !firstShown.has(noticeKey) && !flashRequests.has(rowId(t.kind, rowKey))) flashRequests.set(rowId(t.kind, rowKey), Date.now() + 3000);
   // The item's name opens its row: one click from "what changed" to the item, with no separate Details link.
   const name = rowKey && t.view.comparing !== rowId(t.kind, rowKey)
-    ? h('button.item-name.notice-name', { type: 'button', id: `notice-open-${notice.history}`, title: `Show ${notice.item}’s details`, onclick: (event: Event) => { event.stopPropagation(); t.view.comparing = undefined; openRow(t.kind, rowKey); } }, notice.item)
+    ? h('button.item-name.notice-name', { type: 'button', id: `notice-open-${notice.history}`, title: `Show ${notice.item}’s details`, onclick: (event: Event) => { event.stopPropagation(); t.view.comparing = undefined; openRow(t, t.kind, rowKey); } }, notice.item)
     : h('strong.item-name', {}, notice.item);
   const said = notice.item && text.startsWith(notice.item) ? [name, text.slice(notice.item.length)] : [text];
   // With sync off, a notice can only come from Sync now: say sync stays off, and offer to turn it on.
@@ -982,15 +977,15 @@ function takenInNotice(t: Table, notice: TakenInNotice & { once?: boolean }) {
 }
 
 /**
- * Every way into a table starts here: which kind it shows, and the harness whose page it is on (none on the Skills, MCP
- * servers and Agents pages), then drops what belonged to another home. A Copies differ filter whose chip is not drawn
- * (this harness has nothing that differs) goes back to All, so the table is never empty with no chip pressed.
+ * Every way into a table starts here, and gives the table: which kind it shows, and the harness whose page it is on (none on the
+ * Skills, MCP servers and Agents pages), having dropped what belonged to another home. A Copies differ filter whose chip is not
+ * drawn (this harness has nothing that differs) goes back to All, so the table is never empty with no chip pressed. Asking again
+ * for the table on screen changes nothing.
  */
 function useTable(which: PageKind, harness?: Tool): Table {
   // An armed Delete belongs to the visit it was clicked on: another page disarms it.
   if (state.visit !== tablesVisit) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesVisit = state.visit; }
   const t: Table = { kind: which, tool: harness, view: views[which] };
-  [kind, focus, view] = [which, harness, t.view];
   forgetOtherHomes(t);
   if (t.view.shownFor !== harness) startFresh(t.view, harness);
   // Not while rows are pinned under it: they stay listed (itemsTable).
@@ -1000,6 +995,15 @@ function useTable(which: PageKind, harness?: Tool): Table {
   if (t.view.filter === 'unused' && !unusedCount(t) && !pinned) t.view.filter = 'all';
   return t;
 }
+
+/**
+ * The table on screen, worked out from the page (a kind's page, or a tool's tab of a kind under Harnesses) as the page draws it:
+ * the header asks first (listResult, outcomeBand), and a reading as it lands (holdOrder) and Escape in a find box ask too.
+ */
+const tableShown = (): Table | undefined => {
+  const which = isKind(state.page) ? state.page : harnessKindShown();
+  return which && useTable(which, state.page === 'harnesses' ? state.harness : undefined);
+};
 
 /** Whether a row is one the chip that is on shows (All shows every row). */
 const onChip = (t: Table, skill: ItemRow) => { const { filter } = t.view; return filter === 'all' || (filter === 'plugins' ? fromAPlugin(skill) : filter === 'unused' ? inUnusedChip(t, skill) : needsChoice(t, skill)); };
@@ -1079,9 +1083,9 @@ const nameOf = (skill: ItemRow) => skill.name ?? skill.key;
  */
 const click = (what: Click) => { void applyClick(what); };
 
-/** The list on screen, as the rows pinned on it are named (app.ts pinnedRows): the Skills Files view's list or this table, with its Sort and chip. */
+/** A table's list, as the rows pinned on it are named (app.ts pinnedRows): the Skills Files view's list or the table, with its Sort and chip. */
 const listNow = (t: Table) => [filesView(t) ? 'files' : 'table', t.kind, t.tool, chosenOrder(t), t.view.filter].join(' ');
-/** The rows pinned on the table's list, each with the heading it is pinned under. */
+/** The rows pinned on a table's list, each with the heading it is pinned under. */
 const pinnedHere = (t: Table) => pinnedRows<Role>(listNow(t));
 /** The table is the Skills page's, in its Files view: its list, and the chosen skill's switch in its pane (`detail-` ids). */
 const filesView = (t: Table) => t.kind === 'skills' && !t.tool && state.skillsView === 'files';
@@ -1149,26 +1153,14 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
  * through a plugin, one click with one Undo; or, with no copy to change, the plugins' part alone. `said`: what it did, given the
  * tools where it didn't, then what the plugins' part took with it (pluginswitch.ts alongWords: a whole plugin where a tool has
  * no switch for one item, named by the tool, as a run's result says it beside other clicks). `also`: what it left as it is,
- * said as a problem. Its words are worked out on this table (onTable), wherever the page is once it has run.
+ * said as a problem. Its words are worked out on the table it was clicked on (`t`), wherever the page is once it has run.
  */
 function mainClick(t: Table, kind: PageKind, name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string, focus?: () => string): Click {
   const along = plugins.turned.map(item => alongWords(item, plugins.ops)).filter(Boolean).join(' ') || undefined;
-  const table = tableNow(), here = (notIn: HarnessId[]) => onTable(table, () => said(notIn));
   const pluginsOnly = !changes.length, undone = pluginsOnly ? undoneWords(name, on, toolsPhrase(plugins.turned.map(item => item.tool), toolsFor(t, kind))) : undefined;
-  return { kind, items: [name], changes, said: here, also, focus: focus && (() => onTable(table, focus)), pluginsOnly, plugins: plugins.ops.length || pluginsOnly ? { ops: plugins.ops, said: along } : undefined, undone };
+  return { kind, items: [name], changes, said, also, focus, pluginsOnly, plugins: plugins.ops.length || pluginsOnly ? { ops: plugins.ops, said: along } : undefined, undone };
 }
 
-/** The table on screen, as a click made on it names it: its kind and the harness whose page it is on. */
-const tableNow = (): Table => ({ kind, tool: focus, view: views[kind] });
-/**
- * Works something out on the table a click was made on, then puts back the table on screen: a click is worked out in its turn
- * in the page's list (app.ts queueClick) and said after it has run, perhaps while another table is drawn.
- */
-function onTable<T>(table: Table, work: () => T): T {
-  const was = tableNow();
-  [kind, focus, view] = [table.kind, table.tool, table.view];
-  try { return work(); } finally { [kind, focus, view] = [was.kind, was.tool, was.view]; }
-}
 
 /** A plugin item's Undo, in one form on every page: what the click did, turned back ("Undone: triage is back on in Codex."). */
 const undoneWords = (name: string, on: boolean, where: string) => (on ? `Undone: ${name} is off in ${where} again.` : `Undone: ${name} is back on in ${where}.`);
@@ -1182,7 +1174,8 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
   const items = rowItems(row);
   const onTools = items.filter(itemOn).map(item => item.tool);
   const on = onTools.length > 0;
-  const label = [`${row.name}: ${on ? `on in ${toolsPhrase(onTools, toolsFor(t, pageOfPart[row.kind]))}` : 'off'}. Click to turn it ${on ? 'off' : 'on'} in every tool that can switch it.`, wholeWords(items, !on)].filter(Boolean).join(' ');
+  const kind = pageOfPart[row.kind], tools = () => toolsFor(t, kind);
+  const label = [`${row.name}: ${on ? `on in ${toolsPhrase(onTools, tools())}` : 'off'}. Click to turn it ${on ? 'off' : 'on'} in every tool that can switch it.`, wholeWords(items, !on)].filter(Boolean).join(' ');
   const wanted = wantedOn(kind, row.key);
   return toggle({ on: wanted ?? on, label: wanted === undefined ? label : turningLabel(row.name, wanted), disabled: !canQueue(), id: `switch-${row.key}`, onchange: next => {
     if (takeBack(kind, row.key)) { rerender(); return; }
@@ -1190,11 +1183,11 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
     const plugins = turnEvery(items, next);
     if (wanted === undefined && !plugins.ops.length) { tell({ page: state.page, item: row.name, warn: true, band: true, text: `${row.name}: nothing changed. ${plugins.left ?? `It is ${next ? 'on' : 'off'} already.`}` }); rerender(); return; }
     // Its part in each tool is worked out in its turn, from the plugins as the clicks before it left them.
-    const table = tableNow(), rowNow = () => plugged(table).rows.find(each => each.key === row.key);
-    queueClick({ kind, key: row.key, on: next }, row.name, () => onTable(table, () => {
+    const rowNow = () => plugged(t).rows.find(each => each.key === row.key);
+    queueClick({ kind, key: row.key, on: next }, row.name, () => {
       const now = rowNow(), turned = now && turnEvery(rowItems(now), next);
-      return turned?.ops.length ? mainClick(table, kind, row.name, next, [], turned, () => `${row.name} is ${next ? 'on' : 'off'} in ${toolsPhrase(turned.turned.map(item => item.tool), toolList())}.`, turned.left) : undefined;
-    }), () => onTable(table, () => { const now = rowNow(); return now && rowItems(now).some(itemOn); }));
+      return turned?.ops.length ? mainClick(t, kind, row.name, next, [], turned, () => `${row.name} is ${next ? 'on' : 'off'} in ${toolsPhrase(turned.turned.map(item => item.tool), tools())}.`, turned.left) : undefined;
+    }, () => { const now = rowNow(); return now && rowItems(now).some(itemOn); });
   } });
 }
 
@@ -1207,23 +1200,23 @@ const turningLabel = (name: string, on: boolean) => `${name}: being turned ${on 
  * the clicks before it left it; a second click while it waits takes it back (clicklist.ts takeBack). Its row is pinned where it is
  * (itemrow.ts Pinned) until another list or none is drawn, or Refresh (app.ts pinnedRows).
  */
-function flip(skill: ItemRow, on: boolean) {
-  const table = tableNow();
-  pin(pinnedHere(table), skill.key, sectionOf(table, skill), timeIn(skill, chosenOrder(table), itemOf, usedAt(table)));
-  if (takeBack(kind, skill.key)) { rerender(); return; }
+function flip(t: Table, skill: ItemRow, on: boolean) {
+  const { kind, key } = skill;
+  pin(pinnedHere(t), key, sectionOf(t, skill), timeIn(skill, chosenOrder(t), itemOf, usedAt(t)));
+  if (takeBack(kind, key)) { rerender(); return; }
   if (on && isDiffering(skill)) {
     // The question opens under its row; a second click on the switch closes it.
-    if (view.comparing === rowId(skill.kind, skill.key)) { view.comparing = undefined; rerender(); return; }
-    view.comparing = undefined;
-    openRow(skill.kind, skill.key);
+    if (t.view.comparing === rowId(kind, key)) { t.view.comparing = undefined; rerender(); return; }
+    t.view.comparing = undefined;
+    openRow(t, kind, key);
     announce(`${nameOf(skill)}’s copies differ. Choose which copy every tool uses.`, true);
     return;
   }
   // Refused in its turn if its row is no longer as it was drawn when clicked.
-  const key = skill.key, seen = wantedOn(kind, key) ?? libraryPlace(itemOf(skill)) === 'on', refocus = focusOn(table, skill);
+  const seen = wantedOn(kind, key) ?? libraryPlace(itemOf(skill)) === 'on', refocus = focusOn(t, skill);
   const rowNow = () => rowsOf(kind).find(row => row.key === key);
-  queueClick({ kind, key, on }, nameOf(skill), () => onTable(table, () => { const now = rowNow(); return now && (on ? turnOn(table, now, undefined, seen) : turnOff(table, now, seen)); }),
-    () => onTable(table, () => { const now = rowNow(); return now && libraryPlace(itemOf(now)) === 'on'; }));
+  queueClick({ kind, key, on }, nameOf(skill), () => { const now = rowNow(); return now && (on ? turnOn(t, now, undefined, seen) : turnOff(t, now, seen)); },
+    () => { const now = rowNow(); return now && libraryPlace(itemOf(now)) === 'on'; });
   // Add gives way to the switch: the focus goes with it.
   if (document.activeElement === document.body) document.getElementById(refocus())?.focus({ preventScroll: true });
 }
@@ -1245,7 +1238,7 @@ function librarySwitch(t: Table, skill: ItemRow, id: string) {
   const item = itemOf(skill), wanted = wantedOn(skill.kind, skill.key), on = wanted ?? libraryPlace(item) === 'on', tools = toolsFor(t, skill.kind);
   // Where a tool has it through a plugin with no switch for one item there, the click turns the whole plugin: said first.
   const label = wanted !== undefined ? turningLabel(nameOf(skill), wanted) : [switchLabel(skill, item, tools), wholeWords(throughItems(t, skill), !on)].filter(Boolean).join(' ');
-  return toggle({ on, partial: wanted === undefined && isPartial(item, tools, skill), label, onchange: next => flip(skill, next), disabled: !canQueue(), id });
+  return toggle({ on, partial: wanted === undefined && isPartial(item, tools, skill), label, onchange: next => flip(t, skill, next), disabled: !canQueue(), id });
 }
 
 /**
@@ -1257,7 +1250,7 @@ function addButton(t: Table, skill: ItemRow, id: string) {
   const question = isDiffering(skill) ? (t.view.comparing === rowId(skill.kind, skill.key) ? 'open' : 'closed') : undefined;
   const label = addLabel(skill, itemOf(skill), toolsFor(t, skill.kind), question);
   return h('button.btn.outline.small.add-item', { type: 'button', id, title: label, 'aria-label': label, disabled: !canQueue() || !canAdd(skill),
-    onclick: (event: Event) => { event.stopPropagation(); flip(skill, true); } }, 'Add');
+    onclick: (event: Event) => { event.stopPropagation(); flip(t, skill, true); } }, 'Add');
 }
 
 /**
@@ -1350,7 +1343,7 @@ function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
 function row(t: Table, skill: ItemRow) {
   const id = rowId(skill.kind, skill.key), open = t.view.comparing === id, when = dated(t), used = usedHere;
   return [
-    h(`div.ov-row.ov-switch-row${takeFlash(id) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${when ? '.ov-dated' : ''}${used ? '.ov-usage' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(skill.kind, skill.key) },
+    h(`div.ov-row.ov-switch-row${takeFlash(id) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${when ? '.ov-dated' : ''}${used ? '.ov-usage' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(t, skill.kind, skill.key) },
       h('div.ov-managed', { role: 'cell' }, itemSwitch(t, skill)),
       nameCell(t, skill, differs(skill)),
       when ? whenCell(skill) : null,
@@ -1540,8 +1533,8 @@ const usedAt = (t: Table) => (skill: ItemRow) => lastUse(usageOf(t, skill.kind, 
  * drawn, Refresh, or Put in order: rowsHeld).
  */
 export function holdOrder() {
-  const t = tableNow();
-  if (chosenOrder(t) !== 'used' && t.view.filter !== 'unused') return;
+  const t = tableShown();
+  if (!t || (chosenOrder(t) !== 'used' && t.view.filter !== 'unused')) return;
   const pins = pinnedHere(t);
   for (const skill of filesView(t) ? rowsOf(t.kind) : rowsOf(t.kind).filter(each => onChip(t, each))) pin(pins, skill.key, sectionOf(t, skill), timeIn(skill, chosenOrder(t), itemOf, usedAt(t)));
 }
@@ -1558,7 +1551,7 @@ function orderChoice(t: Table) {
     rowsHeld(t) ? smallAction('Put in order', 'put-in-order', () => { unpin(); rerender(); }, '.order-tidy') : null];
 }
 /**
- * The keys of this table's rows as drawn, heading by heading, given the rows pinned on it (none: each row under its own heading,
+ * The keys of a table's rows as drawn, heading by heading, given the rows pinned on it (none: each row under its own heading,
  * in the order Sort names), as itemsTable draws them; Find, which moves no row, aside.
  */
 const listedKeys = (t: Table, pins: Pinned<Role>) => (['on', 'found', 'away', 'off'] as Role[]).flatMap(role =>
@@ -1838,7 +1831,7 @@ function settleFilesColumns(): void {
   const wide = pane.clientWidth >= DETAIL_COLUMNS_FROM;
   pane.dataset.columns = wide ? '2' : '1';
   const where = pane.querySelector<HTMLDetailsElement>('.files-tail > details.details-paths');
-  if (where && view.whereOpen === undefined) where.open = wide;
+  if (where && views.skills.whereOpen === undefined) where.open = wide;
 }
 afterLayout(settleFilesColumns);
 
@@ -1902,8 +1895,9 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
 
 // Escape in a find box clears it.
 document.addEventListener('keydown', event => {
-  if (event.key !== 'Escape') return;
   const id = (event.target as HTMLElement | null)?.id;
-  if (id === 'skills-find' && view.listFind) { view.listFind = ''; rerender(); }
-  if (id === 'find' && view.find) { view.find = ''; rerender(); }
+  if (event.key !== 'Escape' || (id !== 'find' && id !== 'skills-find')) return;
+  const view = tableShown()?.view;
+  if (id === 'skills-find' && view?.listFind) { view.listFind = ''; rerender(); }
+  if (id === 'find' && view?.find) { view.find = ''; rerender(); }
 });
