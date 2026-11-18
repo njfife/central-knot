@@ -125,6 +125,29 @@ test('OpenCode, closed: its database, read where it is: a skill part, a task par
   assert.deepEqual(await readdir(folder), before, 'nothing is left beside OpenCode\'s database');
 });
 
+test('OpenCode, closed, writes while it is read in place: the change is noticed, and it is read again from a copy', async () => {
+  const home = await newHome(), folder = join(home, '.local/share/opencode'), file = join(folder, 'opencode.db');
+  await mkdir(folder, { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec('CREATE TABLE session (id text PRIMARY KEY, agent text, time_created integer NOT NULL); CREATE TABLE part (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, data text NOT NULL)');
+  db.prepare('INSERT INTO session VALUES (?, ?, ?)').run('s1', null, NOW - DAY);
+  const skillPart = (name: string) => JSON.stringify({ type: 'tool', tool: 'skill', state: { input: { name } } });
+  db.prepare('INSERT INTO part VALUES (?, ?, ?, ?)').run('p1', 's1', NOW - DAY, skillPart('notes'));
+  db.close();
+  // OpenCode writes a use of standup as the in-place read takes its first slice.
+  const statements = (await import('node:sqlite')).StatementSync.prototype as unknown as { all: (...args: unknown[]) => unknown };
+  const all = statements.all;
+  let wrote = false;
+  statements.all = function (this: unknown, ...args: unknown[]) {
+    if (args.length === 2 && !wrote) { wrote = true; const writer = new DatabaseSync(file); writer.prepare('INSERT INTO part VALUES (?, ?, ?, ?)').run('p2', 's1', NOW - DAY, skillPart('standup')); writer.close(); }
+    return all.apply(this, args);
+  };
+  try {
+    assert.deepEqual(usedIn(await readUsage({ home }, NOW), 'opencode-cli'), { 'skill:notes': [1, daysAgo(1)], 'skill:standup': [1, daysAgo(1)] });
+  } finally { statements.all = all; }
+  assert.deepEqual(await readdir(folder), ['opencode.db'], 'nothing is left beside OpenCode\'s database');
+});
+
 test('OpenCode, running: its last writes are only in its write-ahead log, so its database and log are read from a copy, and nothing is left beside them', async () => {
   const home = await newHome(), folder = join(home, '.local/share/opencode');
   await mkdir(folder, { recursive: true });

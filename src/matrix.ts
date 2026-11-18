@@ -1531,7 +1531,7 @@ const usedAt = (skill: ItemRow) => lastUse(usageOf(factsOf(skill)));
 export function holdOrder() {
   if (chosenOrder() !== 'used' && view.filter !== 'unused') return;
   const pins = pinnedHere();
-  for (const skill of filesView() ? committedList() : committedList().filter(onChip)) pin(pins, skill.key, sectionOf(skill), timeIn(skill, 'used', itemOf, usedAt));
+  for (const skill of filesView() ? committedList() : committedList().filter(onChip)) pin(pins, skill.key, sectionOf(skill), timeIn(skill, chosenOrder(), itemOf, usedAt));
 }
 /** Whether each row says when it was last updated: while the rows go by it. */
 const dated = () => chosenOrder() === 'updated';

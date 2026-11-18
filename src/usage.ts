@@ -12,7 +12,7 @@
 //
 // Not here: which item a name is, by each tool's spelling rules (usagerow.ts, the page's, with the 30 days: USAGE_DAYS),
 // and what the page shows (matrix.ts). Another tool is another row of `readers`, and of usagerow.ts spelledIn.
-import { createReadStream, existsSync } from 'node:fs';
+import { constants as fsConstants, createReadStream, existsSync } from 'node:fs';
 import { copyFile, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
@@ -161,21 +161,31 @@ const PART_SLICE = 2_000;
 /**
  * OpenCode keeps its sessions in SQLite: a session's own agent (its `agent` column), and its skill and task calls. With no
  * write-ahead log beside it (OpenCode not running), the database is read where it is, as a file that won't change (SQLite's
- * `immutable`), which leaves nothing beside it; with one, the last writes are only in the log, and SQLite opening a database in
- * WAL mode, even read only, would leave files of its own beside OpenCode's, so both are read from a copy in a temporary
- * folder. Its parts can be hundreds of thousands, and node:sqlite reads synchronously, so they are read a slice of rows at a
- * time (PART_SLICE, by rowid), giving way between slices.
+ * `immutable`), which leaves nothing beside it; if the file changed meanwhile (OpenCode started and wrote), that reading is
+ * dropped and it is read again from a copy. With a log, the last writes are only in it, and SQLite opening a database in WAL
+ * mode, even read only, would leave files of its own beside OpenCode's, so both are read from a copy in a temporary folder (a
+ * clone where the file system makes one). Its parts can be hundreds of thousands, and node:sqlite reads synchronously, so
+ * they are read a slice of rows at a time (PART_SLICE, by rowid), giving way between slices.
  */
 async function openCodeSessions(at: UsageWhere, now: number): Promise<Read | undefined> {
   const file = join(at.dataHome ?? join(at.home, '.local/share'), 'opencode', 'opencode.db');
   if (!existsSync(file)) return undefined;
+  if (!existsSync(`${file}-wal`)) {
+    const before = await stat(file), read = await openCodeRead(file, now, false).catch(() => undefined), after = await stat(file);
+    if (read && before.size === after.size && before.mtimeMs === after.mtimeMs) return read;
+  }
+  return openCodeRead(file, now, true);
+}
+
+/** OpenCode's sessions from its database, read where it is (`copied` false) or from a copy of it and its log. */
+async function openCodeRead(file: string, now: number, copied: boolean): Promise<Read> {
   const { DatabaseSync } = await import('node:sqlite');
-  const copy = existsSync(`${file}-wal`) ? await mkdtemp(join(tmpdir(), 'ck-opencode-copy-')) : undefined;
+  const copy = copied ? await mkdtemp(join(tmpdir(), 'ck-opencode-copy-')) : undefined;
   let db: InstanceType<typeof DatabaseSync> | undefined;
   try {
     if (copy) {
-      await copyFile(file, join(copy, 'opencode.db'));
-      await copyFile(`${file}-wal`, join(copy, 'opencode.db-wal')).catch(() => undefined);
+      await copyFile(file, join(copy, 'opencode.db'), fsConstants.COPYFILE_FICLONE);
+      await copyFile(`${file}-wal`, join(copy, 'opencode.db-wal'), fsConstants.COPYFILE_FICLONE).catch(() => undefined);
     }
     db = copy ? new DatabaseSync(join(copy, 'opencode.db')) : new DatabaseSync(new URL(`${pathToFileURL(file).href}?immutable=1`), { readOnly: true });
     const fileTime = (await stat(file)).mtimeMs, when = (time: number) => (time > now ? fileTime : time);

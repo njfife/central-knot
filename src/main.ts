@@ -348,9 +348,13 @@ function showWindow() {
   window.show();
   window.focus();
   joinDock();
-  // Said here, not from the window's own show event, which macOS sends only once the window is seen on a screen.
+  // Said here, not from the window's own show event, which macOS sends only once the window is seen on a screen; and said again
+  // each time the page loads (createWindow), so a page not yet listening when the window showed still hears it.
+  windowShown = true;
   send('window:shown');
 }
+/** Whether the window has shown since it was made (a start at sign-in makes it hidden): the page is told at each show and each load. */
+let windowShown = false;
 /**
  * On a Mac, Central Knot is in the Dock (and the ⌘Tab list) only while it has a window: closed, it runs from its menu bar icon
  * alone. A minimised or hidden (⌘H) window still counts as one. Electron drops a request to leave made within a second of the
@@ -1158,11 +1162,12 @@ function createWindow(show: boolean) {
   });
   window.on('closed', () => { log('window closed'); leaveDock(); });
   window.webContents.on('render-process-gone', (_event, details) => log(`page process gone: ${details.reason}`));
-  window.webContents.on('did-finish-load', () => log('page loaded'));
+  windowShown = show;
+  window.webContents.on('did-finish-load', () => { log('page loaded'); if (windowShown) send('window:shown'); });
   // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
   // are rebuilt and the page re-reads, both from this one event. A release published meanwhile shows then too (updateflow.ts).
   window.on('focus', () => { unseen = false; unseenPlugins = undefined; refreshTray(); send('settings:changed'); void updater?.checkIfStale(); });
-  // A start with no window tells the page so; showWindow tells it when the window shows: it collects usage then (app.ts collectUsage).
+  // A start with no window tells the page so; it is told when the window shows (showWindow, and each load after): it collects usage then (app.ts collectUsage).
   loading = window.loadFile(join(__dirname, 'index.html'), show ? {} : { query: { start: 'hidden' } });
 }
 

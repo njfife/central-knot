@@ -5379,7 +5379,8 @@ async function usageFlow() {
   const realSkills = join(real, '.claude/skills');
   mkdirSync(join(real, '.local/bin'), { recursive: true });
   for (const name of ['claude', 'codex']) cpSync(join(home, '.local/bin', name), join(real, '.local/bin', name));
-  for (const name of ['alpha', 'bravo', 'charlie', 'delta', 'echo']) { const folder = skill(realSkills, name); for (const path of [folder, join(folder, 'SKILL.md')]) utimesSync(path, ago(40), ago(40)); }
+  // Each saved 40 days ago or more, so old enough for the chip; delta's copy saved after bravo's, so Last updated puts it first.
+  for (const [name, days] of [['alpha', 40], ['bravo', 44], ['charlie', 42], ['delta', 41], ['echo', 40]]) { const folder = skill(realSkills, name); for (const path of [folder, join(folder, 'SKILL.md')]) utimesSync(path, ago(days), ago(days)); }
   lines(join(real, '.claude/projects/-work/r0.jsonl'), [{ type: 'user', message: { content: 'hello' }, timestamp: ago(45).toISOString() }]);
   lines(join(real, '.claude/projects/-work/r1.jsonl'), [skillCall('alpha', 2)]);
   lines(join(real, '.codex/sessions/2026/11/12/rollout-r.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(5).toISOString() },
@@ -5450,6 +5451,19 @@ async function usageFlow() {
     await a.click('#put-in-order');
     same('Put in order lets the held rows go: charlie leaves the chip’s list, and the link goes', [(await sectionsNow(a))[0][1], await a.exists('#put-in-order')], [['bravo', 'delta'], false]);
     await a.click('#usage-line-close');
+    // Sort by Last updated, the chip on: an Update lands, and no row moves, with nothing to put in order.
+    await chooseOrder('updated');
+    const updatedOrder = (await sectionsNow(a))[0][1];
+    await a.click('#collect-usage');
+    for (let tries = 0; tries < 100 && !reading(); tries++) await wait(25);
+    const updatedTops = await tops();
+    await letGo();
+    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await a.settle();
+    same('Sort by Last updated, the chip on: an Update lands and no row moves, with nothing to put in order', [updatedOrder, (await sectionsNow(a))[0][1], await tops(), await a.exists('#put-in-order')],
+      [['delta', 'bravo'], ['delta', 'bravo'], updatedTops, false]);
+    await a.click('#usage-line-close');
+    await chooseOrder('name');
     await chipNamed('All'); await a.settle();
   }
   same('no page errors, usage after a relaunch', a.pageErrors, []);
@@ -5466,6 +5480,21 @@ async function usageFlow() {
   await letGo();
   for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
   same('once the window shows, usage is collected', await collected(), true);
+  // The window shown while its page isn't listening (a development run only: main's debugger reloads the page and shows the
+  // window at once, so the message that it showed reaches no page): told again once the page has loaded, it still collects.
+  if (a.inspect) {
+    await a.quit();
+    a = await launch(data, ['--hidden'], real);
+    const main = await mainProcess(a.inspect);
+    await main.run(`(electron.BrowserWindow.getAllWindows()[0].webContents.reload(), electron.app.emit('second-instance'), true)`);
+    main.close();
+    for (let tries = 0; tries < 100 && !(await a.exists('#nav-skills')); tries++) await wait(50);
+    await a.click('#nav-skills');
+    for (let tries = 0; tries < 100 && !reading(); tries++) await wait(50);
+    await letGo();
+    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    same('started with no window, then shown while its page wasn’t listening: it still collects', await collected(), true);
+  }
   same('no page errors, usage started at sign-in', a.pageErrors, []);
   await a.quit();
   rmSync(pipe);
