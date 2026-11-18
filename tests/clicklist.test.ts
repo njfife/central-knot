@@ -425,6 +425,13 @@ test('A skill and an agent both named review are clicked apart: the agent’s cl
   assert.deepEqual(main.sent, ['agent a off', 'agent review off', 'review off, seen on']);
   // The skill's row flashes on Skills; the agent's click was made on another page, said in the status bar, and flashes no row.
   assert.deepEqual([app.outcome?.text, flashRequests.has('skills-review'), flashRequests.has('agents-review')], ['review is off.', true, false]);
+  // Back on Codex's Agents tab, an agent's click said there flashes the agent's row, not a skill's of its name.
+  closeResult();
+  Object.assign(app, { page: 'harnesses', harness: 'codex-cli', harnessTab: 'agents' });
+  flip('notes', false, undefined, 'agents');
+  await settled();
+  await main.pass(did('notes'));
+  assert.deepEqual([app.outcome?.text, flashRequests.has('agents-notes'), flashRequests.has('skills-notes')], ['notes is off.', true, false]);
 });
 
 test('A click 8 seconds after the run’s last click ended starts a new run, though a result with a problem line still shows', async () => {

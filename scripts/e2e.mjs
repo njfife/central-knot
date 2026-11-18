@@ -1455,6 +1455,32 @@ async function practiceFlow() {
   await fitsAtMinimum(a, 'Agents');
   await a.click('#nav-skills');
 
+  // A plugin that brings a skill and an agent both named review: two rows apart (itemrow.ts rowId). The skill's file shown on
+  // Skills is not the agent's: on Agents, the agent's row opens with its file unshown, and shows its own. Then the plugin goes.
+  const installedRecord = readNow(join(practice, '.claude/plugins/installed_plugins.json'));
+  writeClaudeInstall(practice, 'ck-outside', 'same-names', '0.1.0', {
+    'skills/review/SKILL.md': '---\nname: review\ndescription: The skill named review.\n---\n\nThe skill’s steps.\n',
+    'agents/review.md': '---\nname: review\ndescription: The agent named review.\n---\n\nThe agent’s prompt.\n',
+  });
+  await a.click('#header-refresh');
+  const sameName = 'same-names@ck-outside/review', byId = part => `[id="${part}-${sameName}"]`, fileShown = () => a.text('.plugin-file');
+  for (let tries = 0; tries < 40 && !(await a.exists(byId('open'))); tries++) await wait(100);
+  await a.click(byId('open'));
+  await a.click(byId('pfile'));
+  for (let tries = 0; tries < 40 && !(await fileShown())?.includes('The skill’s steps.'); tries++) await wait(100);
+  check('a plugin’s skill named review shows its SKILL.md', (await fileShown())?.includes('The skill’s steps.'), await a.text('.details-plugin'));
+  await a.click('#nav-agents');
+  for (let tries = 0; tries < 40 && !(await a.exists(byId('open'))); tries++) await wait(100);
+  await a.click(byId('open'));
+  same('the agent of the same plugin named review opens with its own file unshown, not the skill’s', [await a.exists('.plugin-file'), await a.text(byId('pfile'))], [false, 'Show its agent file']);
+  await a.click(byId('pfile'));
+  for (let tries = 0; tries < 40 && !(await fileShown())?.includes('The agent’s prompt.'); tries++) await wait(100);
+  check('and shows its own when asked', (await fileShown())?.includes('The agent’s prompt.') && !(await fileShown())?.includes('The skill’s steps.'), await fileShown());
+  if (installedRecord) writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), installedRecord); else rmSync(join(practice, '.claude/plugins/installed_plugins.json'), { force: true });
+  rmSync(join(practice, '.claude/plugins/cache/ck-outside/same-names'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  await a.click('#nav-skills');
+
   // What a plugin installed whole brings shows on Skills and MCP servers with the plugin's mark, before Plugins was ever
   // opened, from a marketplace nothing here has added: Claude Code's own record and copy are enough.
   writeClaudeInstall(practice, 'ck-outside', 'outside-tools', '0.3.0', {
