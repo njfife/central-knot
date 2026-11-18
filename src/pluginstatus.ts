@@ -1,11 +1,24 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
-// it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
+// it, whether it is installed there, how many plugins a tool has installed (pluginsInstalled), and a short summary of what it holds.
+import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, toolNames as names } from './words.ts';
 import { takesPlugins } from './presence.ts';
 import type { Owed, PluginSwitch, ToolNow } from './pluginrecord.ts';
+
+/**
+ * How many plugins a tool has installed, the one count the Overview's tools table and a tool's card and Plugins tab on Harnesses
+ * say: the plugins the tool's own record lists, read with the home (HomeView pluginItems), each once, whatever names a catalog
+ * gives it; no marketplace is read for it, so the number is the same wherever the person has been. `unknown` where that record
+ * can't be read (HomeView pluginRecordsUnread); none where the tool takes no plugins from a marketplace.
+ */
+export type PluginsInstalled = { state: 'unsupported' } | { state: 'unknown' } | { state: 'read'; count: number };
+export function pluginsInstalled(home: Pick<HomeView, 'pluginItems' | 'pluginRecordsUnread'> | undefined, tool: HarnessId): PluginsInstalled {
+  if (!takesPlugins(tool)) return { state: 'unsupported' };
+  if (home?.pluginRecordsUnread?.includes(tool)) return { state: 'unknown' };
+  return { state: 'read', count: new Set((home?.pluginItems ?? []).filter(install => install.tool === tool).map(install => `${install.plugin}@${install.marketName}`)).size };
+}
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;

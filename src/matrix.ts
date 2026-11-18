@@ -30,7 +30,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { inOrder, kindSource, lastUpdated, noPins, pin, placeIn, rowId, timeIn, type ItemRow, type KindSource, type Pinned, type RowOrder, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, waitsForSync, fromSourceWords, harnessIs, inLibrary, madeFrom, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -42,7 +42,7 @@ import { market } from './pluginstate.ts';
 import type { PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { pageOfPart, partOfPage, samePart } from './pluginstatus.ts';
-import { cellWords, fromAPlugin, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
+import { cellWords, fromAPlugin, fromPluginsCount, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
 
 const names = toolNames as Record<Tool, string>;
@@ -64,7 +64,6 @@ const pluginTag = (plugin: string, title: string) => h('span.row-tag.row-part', 
 // ---------- What a plugin installed whole brings (pluginrows.ts) ----------
 /** A table's plugin rows for the home on screen. */
 const plugged = (t: Table) => (!state.home ? { rows: [] as PluginRow[], unread: [] } : pageRows(state.home, t.kind));
-/** A row of a plugin's: an item some tool has through the plugin itself. */
 
 /** The item a tool has through a plugin on a row of the person's own, with that plugin as the tool has it installed. */
 function itemThrough(skill: ItemRow, tool: Tool): PluginItemAt | undefined {
@@ -635,9 +634,9 @@ function pluginDock(t: Table, row: PluginRow) {
     h('div.scroll.dock-scroll', { id: 'dock-scroll' }, pluginDetails(t, row, 'dock')));
 }
 
-/** Opening a row's details brings them into view, so a choice below the fold is not missed. */
 /** A row opened (or, `id` none, closed) on this visit: a copy question it asks stays until the page is left (itemsTable). */
 const markOpen = (view: View, id: string | undefined) => Object.assign(view, { comparing: id, openedOn: state.visit, openedAt: state.said.seq });
+/** Opening a row's details brings them into view, so a choice below the fold is not missed. */
 function openRow(t: Table, row: ItemRow | PluginRow) {
   const id = idOf(row), key = row.key, view = t.view;
   markOpen(view, view.comparing === id ? undefined : id);
@@ -763,8 +762,9 @@ export function outcomeBand(): HTMLElement | null {
 /** Sync off: what waits, and the two ways on. Shown on every managed page, since the switch covers all of them. */
 function syncOffBand(t: Table): HTMLElement | null {
   if (!state.home || state.home.syncOn) return null;
-  const waiting = rowsOf(t.kind).filter(skill => skill.on && skill.edited?.length);
-  const what = waiting.slice(0, 3).flatMap((skill, index) => [index ? ', ' : '', h('strong.item-name', {}, skill.name ?? skill.key), `, edited in ${andList((skill.edited ?? []).map(tool => names[tool]))}`]).concat(waiting.length > 3 ? [` and ${waiting.length - 3} more`] : []);
+  const waiting = rowsOf(t.kind).filter(waitsForSync);
+  const editedIn = (skill: ItemRow) => (skill.edited?.length ? `, edited in ${andList(skill.edited.map(tool => names[tool]))}` : '');
+  const what = waiting.slice(0, 3).flatMap((skill, index) => [index ? ', ' : '', h('strong.item-name', {}, skill.name ?? skill.key), editedIn(skill)]).concat(waiting.length > 3 ? [` and ${waiting.length - 3} more`] : []);
   // Right after a sync, its notice says what spread; the idle banner comes back once that is dismissed.
   if (!waiting.length && visibleNotices(t).length) return null;
   return h('div.band.band-sync-off', { role: 'status' }, icon('circle-minus', 14, waiting.length ? 'tone-warning' : 'tone-muted'),
@@ -869,7 +869,7 @@ function forgetOtherHomes(t: Table) {
   const was = tableHomes[t.kind];
   if (state.home?.home === was) return;
   tableHomes[t.kind] = state.home?.home;
-  // A kind's first table has no other home's to forget: a row a link opened before it was drawn (openItem) stays open.
+  // A kind's first table has no other home's to forget.
   if (was === undefined) return;
   t.view.comparing = undefined;
   keptNotices.delete(t.kind);
@@ -1049,10 +1049,10 @@ const useTableShown = (): Table | undefined => {
 
 /** Whether a row is one the chip that is on shows (All shows every row). */
 const onChip = (t: Table, skill: ItemRow) => { const { filter } = t.view; return filter === 'all' || (filter === 'plugins' ? fromAPlugin(skill) : filter === 'unused' ? inUnusedChip(t, skill) : needsChoice(t, skill)); };
-/** How many rows here are a plugin's (its own rows, and the person's own items that are a plugin's part or come through one): the From plugins chip's count. */
-const pluginCount = (t: Table) => plugged(t).rows.filter(row => !t.tool || row.copies[t.tool as HarnessId]).length + rowsOf(t.kind).filter(skill => inTableTool(t, skill) && fromAPlugin(skill)).length;
+/** The From plugins chip's count (pluginrows.ts fromPluginsCount: a plugin's own rows, and the person's own a plugin also brings), here. */
+const pluginCount = (t: Table) => (state.home ? fromPluginsCount(state.home, t.kind, t.tool as HarnessId | undefined) : 0);
 /** Whether the From plugins chip is drawn: some row here is a plugin's. */
-const pluginChipShown = (t: Table) => plugged(t).rows.some(row => !t.tool || row.copies[t.tool as HarnessId]) || rowsOf(t.kind).some(skill => inTableTool(t, skill) && fromAPlugin(skill));
+const pluginChipShown = (t: Table) => pluginCount(t) > 0;
 
 /** Whether the Copies differ chip is drawn: something here differs. A Copies differ filter whose chip is gone falls back to All. */
 const copiesDifferChipShown = (t: Table) => rowsOf(t.kind).some(skill => needsChoice(t, skill));
@@ -1807,10 +1807,10 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
     remove ? h('div.details-actions.details-danger', {}, remove) : null);
 }
 
-/** What waits, in the toolbar: edits waiting for sync, or that sync is off. */
+/** What waits, in the toolbar: the changes waiting for sync (libraryrow.ts waitsForSync, as the Overview's card counts them), or that sync is off. */
 function toolbarState(t: Table) {
-  const edits = rowsOf(t.kind).filter(skill => skill.on && skill.edited?.length).length;
-  if (edits) return h('span.apply-state.apply-waiting', {}, icon('clock', 14, 'tone-warning'), `${edits} ${edits === 1 ? 'change' : 'changes'} waiting`);
+  const waiting = rowsOf(t.kind).filter(waitsForSync).length;
+  if (waiting) return h('span.apply-state.apply-waiting', {}, icon('clock', 14, 'tone-warning'), `${waiting} ${waiting === 1 ? 'change' : 'changes'} waiting`);
   if (state.home && !state.home.syncOn) return h('span.apply-state.apply-quiet', {}, icon('circle-minus', 14, 'tone-muted'), 'Nothing waiting · sync off');
   return null;
 }

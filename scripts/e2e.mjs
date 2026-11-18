@@ -4358,7 +4358,7 @@ async function syncEverythingFlow() {
   same('a notice no page has shown stays until shown: the sidebar names both passes’ notices for Skills', await unseenOnSkills(), '2 automatic changes: notes, fresh');
   await a.shot('everything-on');
   await a.click('#nav-overview');
-  same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo.');
+  same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo where it can be undone.');
   await a.click('#nav-skills');
   same('on the Skills page notes and fresh are On and review stays found', await sectionsNow(a), [['on', ['fresh', 'notes']], ['found', ['review']]]);
   check('the Found heading says the rule in force: Synchronize everything leaves these, and how many wait for a choice', /Synchronize everything leaves these \(open a row to see why\)\. 1 waits for your choice of copy/.test(await foundNote() ?? ''), await foundNote());
@@ -5663,15 +5663,6 @@ esac
 }
 
 /**
- * Usage (usage.ts, usagerow.ts, app.ts collectUsage) on a folder home whose tools have made-up session history: collected by
- * itself when the home opens, so each row says its figure without a click, an opened row each tool's, and Sort can put the rows
- * by last used. Update usage statistics collects again, with a band that says what collecting does and closes; a reading that
- * lands moves no row. Three skills were taken in from copies saved 40 days ago, old enough for "No use seen in 30 days"; fresh,
- * saved 2 days ago, is left out as new. The chip lists the two with no use seen, and Turn these off turns them off in one click
- * whose Undo puts every file back. A switch clicked while a reading is held (a named pipe among the session files) is carried out
- * before it lands, so no reading holds a click up: checked by order, not time, as a click and a reading slow each other on a busy machine.
- */
-/**
  * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
  * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
  * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
@@ -5719,9 +5710,19 @@ async function overviewFlow() {
   rmSync(join(codex, 'notes'), { recursive: true, force: true });
   await a.click('#header-refresh');
   same('a copy deleted by hand, sync off: Skills waits for one change, not All in sync', await cardSays('skills'), '1 change waiting to sync');
+  await a.click('#overview-skills');
+  same('the Skills page counts the same one change waiting, in its toolbar and in its band', [(await a.text('.apply-state.apply-waiting'))?.trim(), /1 change waiting/.test(await a.text('.band-sync-off') ?? '')], ['1 change waiting', true]);
+  await a.click('#nav-overview');
   skill(codex, 'notes');
   await a.click('#header-refresh');
   same('the copy back: All in sync again', await cardSays('skills'), 'All in sync');
+  // One copy that can't be read: whether it is in step isn't known.
+  chmodSync(join(codex, 'notes/SKILL.md'), 0o000);
+  await a.click('#header-refresh');
+  const unreadCopy = await cardSays('skills');
+  chmodSync(join(codex, 'notes/SKILL.md'), 0o644);
+  await a.click('#header-refresh');
+  same('one copy that can’t be read: the Skills card says nothing of sync', unreadCopy, null);
   await a.click('#sync-switch');
   // Copies that differ: said once at the top, and the card says no "All in sync".
   skill(claude, 'clash', text('clash', 'Claude Code’s way.'));
@@ -5740,10 +5741,16 @@ async function overviewFlow() {
   writeFileSync(installed, '{');
   await a.click('#header-refresh');
   const unreadPlugins = [(await claudeRow())[3], ((await a.text('#overview-tools-key')) ?? '').split('?').length - 1];
+  await a.click('#overview-tool-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && /Reading marketplaces/.test(await a.text('#harness-body') ?? ''); tries++) await wait(100);
+  const tabUnread = [await a.text('#harness-tab-plugins'), await a.run(`document.querySelector('#harness-tab-plugins')?.title ?? ''`), await a.text('#harness-body')];
+  await a.click('#nav-overview');
   writeFileSync(installed, installedText);
   await a.click('#header-refresh');
   same('Claude Code’s MCP file unread: its problem at the top, "?" for its MCP servers, and MCP servers says nothing of sync', unreadMcp, [true, '?', null]);
   same('Claude Code’s plugin record unread: "?" for its plugins, and the key names "?" once', unreadPlugins, ['?', 1]);
+  check('and its Plugins tab says what it has isn’t known: no count, no nought in its tooltip, never “No plugins”', tabUnread[0]?.trim() === 'Plugins' && !/\b0\b/.test(tabUnread[1]) && /isn’t known/.test(tabUnread[2] ?? '') && !/No plugins/.test(tabUnread[2] ?? ''), tabUnread);
   same('no page errors, the Overview’s truths', a.pageErrors, []);
   await a.quit();
   // A most used name opens its row on the very first click, before its kind's page was ever drawn in this launch: an own skill, one
@@ -5773,7 +5780,7 @@ async function overviewFlow() {
   await a.click('#home-actual');
   for (let tries = 0; tries < 100 && !(await a.exists('#overview-skills-usage .middle[title="one"]')); tries++) await wait(100);
   same('another home whose only item is a plugin’s skill: the card counts it, and the lead never says nothing was found',
-    [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /Nothing found/.test(await a.text('.overview-lead') ?? '')], ['1 skill · none synced · 1 from plugins', true, false]);
+    [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /Nothing found/.test(await a.text('.overview-lead') ?? '')], ['1 skill · none on · 1 from plugins', true, false]);
   same('there, after Skills was drawn in the first home, a most used plugin’s skill opens its row on the first click', await openTop('skills', 'one'), ['kit@solo/one']);
   same('no page errors, the most used links', a.pageErrors, []);
   await a.quit();
@@ -5789,6 +5796,15 @@ async function overviewFlow() {
   await a.quit();
 }
 
+/**
+ * Usage (usage.ts, usagerow.ts, app.ts collectUsage) on a folder home whose tools have made-up session history: collected by
+ * itself when the home opens, so each row says its figure without a click, an opened row each tool's, and Sort can put the rows
+ * by last used. Update usage statistics collects again, with a band that says what collecting does and closes; a reading that
+ * lands moves no row. Three skills were taken in from copies saved 40 days ago, old enough for "No use seen in 30 days"; fresh,
+ * saved 2 days ago, is left out as new. The chip lists the two with no use seen, and Turn these off turns them off in one click
+ * whose Undo puts every file back. A switch clicked while a reading is held (a named pipe among the session files) is carried out
+ * before it lands, so no reading holds a click up: checked by order, not time, as a click and a reading slow each other on a busy machine.
+ */
 async function usageFlow() {
   const home = join(scratch, 'usage-home'), data = join(scratch, 'usage-data'), ago = days => new Date(Date.now() - days * 86_400_000);
   mkdirSync(join(home, '.local/bin'), { recursive: true });

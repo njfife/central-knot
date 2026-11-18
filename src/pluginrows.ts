@@ -83,11 +83,15 @@ export function pageRows(home: HomeView, page: Page): PageRows {
 /** How many plugin rows the page lists; in `tool`, those it has there. */
 export const pluginItemCount = (home: HomeView, page: Page, tool?: HarnessId): number => pageRows(home, page).rows.filter(row => !tool || row.copies[tool]).length;
 
-/** The rows a page has: its own items and a plugin's. None: the page shows its empty state instead. */
 /** Whether a row of the person's own is also brought by a plugin installed in a tool: the "From plugins" chip holds it too. */
 export const fromAPlugin = (row: { plugin?: object }) => Object.keys(row.plugin ?? {}).length > 0;
-/** What a kind's page's "From plugins" chip holds: a plugin's own rows, and the person's own a plugin also brings (the Overview's card says it). */
-export const fromPluginsCount = (home: HomeView, page: Page): number => pluginItemCount(home, page) + kindSource(home, page).facts.filter(fromAPlugin).length;
+/**
+ * What a kind's page's "From plugins" chip holds (matrix.ts pluginCount; the Overview's card says it too): a plugin's own rows, and
+ * the person's own a plugin also brings; on a tool's page (`tool`), those that tool has.
+ */
+export const fromPluginsCount = (home: HomeView, page: Page, tool?: HarnessId): number =>
+  pluginItemCount(home, page, tool) + kindSource(home, page).facts.filter(fact => fromAPlugin(fact) && (!tool || inTool(fact, tool))).length;
+/** The rows a page has: its own items and a plugin's. None: the page shows its empty state instead. */
 export const rowCount = (home: HomeView, page: Page): number => kindSource(home, page).facts.length + pluginItemCount(home, page);
 
 /** The tools that have this item through the plugin, in column order. */

@@ -273,14 +273,15 @@ function offWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonl
 }
 /** The tools that have an Off item on through its plugin (`pluginOn`), in the page's order of `tools` (its own tool first on a tool's page). */
 const onThrough = (row: LibraryRow, tools: readonly string[]) => tools.filter(tool => row.pluginOn?.includes(tool));
-/** The tools whose copy of an Off item the plan still removes (a removal held: Claude Code's lock, a file that couldn't be written). */
 /**
  * Whether an item in Central Knot has a change that waits for the next pass, as its status line says it ("when sync runs"): an On
  * item's edit to take in, a copy deleted by hand that turns it off, a copy to write in a tool that can take it, or copies still to
- * be removed. With Automatic sync on a pass follows in seconds; off, they wait for Sync once. The Overview's card counts them.
+ * be removed. With Automatic sync on a pass follows in seconds; off, they wait for Sync once. The one count of what waits: the
+ * Overview's card, and a kind's toolbar and its band with Automatic sync off (matrix.ts toolbarState, syncOffBand).
  */
-export const waitsForSync = (row: Pick<LibraryFacts, 'on' | 'edited' | 'plan' | 'cannot'>) => (row.on && !!row.edited?.length) || !!row.plan?.turnedOffBy
-  || !!row.plan?.write.some(tool => !row.cannot?.[tool]) || !!row.plan?.remove.length;
+export const waitsForSync = (row: { on: boolean; edited?: readonly string[]; plan?: Plan; cannot?: Partial<Record<string, string>> }) => (row.on && !!row.edited?.length)
+  || !!row.plan?.turnedOffBy || !!row.plan?.write.some(tool => !row.cannot?.[tool]) || !!row.plan?.remove.length;
+/** The tools whose copy of an Off item the plan still removes (a removal held: Claude Code's lock, a file that couldn't be written). */
 const removalOwed = (row: LibraryRow, tools: readonly string[]) => (row.plan?.remove ?? []).filter(tool => tools.includes(tool));
 
 /** The home's harnesses by name, as a sentence lists them ("all 3 tools", or their names). */

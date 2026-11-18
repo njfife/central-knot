@@ -5,7 +5,7 @@
 // (toolsTable: its version, what it has of each kind and of plugins, its sessions in the last 30 days); and where every change
 // is kept. Nothing is stored, and opening it reads nothing more than the home's view. The figures come from that view, the usage
 // reading on show and its sum (matrix.ts usageOnShow, usageSums: usagerow.ts usageSummary), Harnesses' counts (harnesspage.ts
-// tally, pluginsInstalled) and the update state (updateview.ts updateLine). While a home's first reading runs (matrix.ts
+// tally, pluginstatus.ts pluginsInstalled) and the update state (updateview.ts updateLine). While a home's first reading runs (matrix.ts
 // firstReadingRuns) every place a reading fills is drawn at its final size, so nothing moves when it lands. A kind's page opens
 // through matrix.ts openKind. Not here: the empty states every page shares (pages.ts noToolsLead, notRead, previewReason) and
 // first setup's question (firstsetup.ts setupLead).
@@ -14,13 +14,14 @@ import { showPage, state, syncNow, whyReadOnly, type PageKind } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, h, icon, middle } from './dom.ts';
 import { setupLead } from './firstsetup.ts';
-import { goHarness, pluginsInstalled, tally, type PluginsInstalled } from './harnesspage.ts';
+import { goHarness, tally } from './harnesspage.ts';
 import { anyOn, kindSource } from './itemrow.ts';
 import { asksWhichCopy, waitsForSync } from './libraryrow.ts';
 import { firstReadingRuns, openKind, outcomeBand, problemsBesideStop, usageOnShow, usageSums } from './matrix.ts';
 import { dayAndTime, dayWords, plural } from './model.ts';
 import { noToolsLead, notRead, previewReason } from './pages.ts';
 import { fromPluginsCount, pluginItemCount, rowCount } from './pluginrows.ts';
+import { pluginsInstalled, type PluginsInstalled } from './pluginstatus.ts';
 import { heldKinds } from './presence.ts';
 import type { HarnessId, HomeView } from './types.ts';
 import { updateLine } from './updateview.ts';
@@ -145,25 +146,28 @@ function cardUsage(kind: PageKind, total: number, sum: KindUsage | undefined) {
 }
 
 /**
- * Whether a kind is in step, by what its page shows: nothing where something of it differs, can't be read or can't be written (what
- * needs you says it at the top); else its changes waiting to sync (libraryrow.ts waitsForSync), or "All in sync" once something is on.
+ * Whether a kind is in step, by what its page shows: nothing where something of it differs, can't be read (a tool's whole file, or
+ * one copy: LibraryFacts unseen) or can't be written (what needs you says it at the top); else its changes waiting to sync
+ * (libraryrow.ts waitsForSync), or "All in sync" once something is on.
  */
 function syncState(kind: PageKind, home: HomeView): HTMLElement | null {
   const view = home[kind], facts = kindSource(home, kind).facts;
-  if (facts.some(asksWhichCopy) || view.problems.length || view.unread.length || !view.access.allowed || view.gate.state === 'stopped' || view.gate.state === 'needs-resume') return null;
+  const unsure = facts.some(fact => asksWhichCopy(fact) || Object.keys(fact.unseen ?? {}).length > 0) || view.problems.length || view.unread.length;
+  if (unsure || !view.access.allowed || view.gate.state === 'stopped' || view.gate.state === 'needs-resume') return null;
   const waiting = facts.filter(waitsForSync).length;
   if (waiting) return h('span.kind-card-state.tone-warning', {}, icon('clock', 13), `${plural(waiting, 'change')} waiting to sync`);
   return facts.some(fact => fact.on) ? h('span.kind-card-state.tone-success', {}, icon('check', 13), 'All in sync') : null;
 }
 
 /**
- * One kind: its page (the card's one button, over the whole card); how many there are, how many are synced, and how many its page's
- * "From plugins" chip holds (pluginrows.ts fromPluginsCount); whether it is in step (syncState); its usage (cardUsage).
+ * One kind: its page (the card's one button, over the whole card); how many there are, how many are On (the page's word: some may
+ * still wait to sync), and how many its page's "From plugins" chip holds (pluginrows.ts fromPluginsCount); whether it is in step
+ * (syncState); its usage (cardUsage).
  */
 function kindCard(kind: PageKind, home: HomeView) {
   const { title, short: noun } = kindNouns[kind], facts = kindSource(home, kind).facts;
   const total = facts.length + pluginItemCount(home, kind), on = facts.filter(fact => fact.on).length, fromPlugins = fromPluginsCount(home, kind);
-  const counts = total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} synced` : 'none synced'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`;
+  const counts = total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} on` : 'none on'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`;
   return h('div.kind-card', {},
     h('div.kind-card-about', {},
       h('button.kind-card-main', { type: 'button', id: `overview-${kind}`, onclick: () => openKind(kind) },
@@ -206,7 +210,7 @@ function sessionsCell(history: ToolHistory | undefined) {
 
 /** A count cell: the figure, "—" where the tool can't hold it, "?" where what it holds isn't all known. */
 const countCell = (shown: string) => h(`td.num${shown === '—' ? '.tone-faint' : ''}`, {}, shown);
-const pluginsShown = (plugins: PluginsInstalled) => (plugins.state === 'unsupported' ? '—' : plugins.unsure ? '?' : String(plugins.count));
+const pluginsShown = (plugins: PluginsInstalled) => (plugins.state === 'unsupported' ? '—' : plugins.state === 'unknown' ? '?' : String(plugins.count));
 
 /**
  * Each managed tool: its name (to its page on Harnesses) with its version on this computer; how many of each kind it has as
@@ -218,7 +222,7 @@ function toolsTable(home: HomeView) {
   const tools = homeTools(), kinds = heldKinds(home), plugins = !absentKinds().includes('plugins'), histories = usageSums()?.tools ?? [];
   const version = (tool: HarnessId) => (home.mode === 'actual' ? home.snapshots.find(snapshot => snapshot.harness === tool)?.probe.version : undefined);
   const kindShown = (kind: PageKind, tool: HarnessId) => { const count = tally(home, kind, tool); return !count.supported ? '—' : home[kind].unread.includes(tool) ? '?' : String(count.total); };
-  const rows = tools.map(tool => ({ tool, kinds: kinds.map(kind => kindShown(kind, tool)), plugins: plugins ? pluginsShown(pluginsInstalled(tool)) : undefined }));
+  const rows = tools.map(tool => ({ tool, kinds: kinds.map(kind => kindShown(kind, tool)), plugins: plugins ? pluginsShown(pluginsInstalled(home, tool)) : undefined }));
   const shown = rows.flatMap(row => [...row.kinds, row.plugins]), kindDash = rows.some(row => row.kinds.includes('—'));
   const dashes = [kindDash ? 'that tool can’t hold that kind' : '', rows.some(row => row.plugins === '—') ? 'Central Knot doesn’t move that tool’s plugins' : ''].filter(Boolean);
   const key = [dashes.length ? `—: ${dashes.join(', or ')}.` : '', shown.includes('?') ? '?: not known, as what that tool keeps there couldn’t all be read.' : ''].filter(Boolean).join(' ');
@@ -257,5 +261,6 @@ export function overviewPage() {
       h('div.overview-more', {},
         absent.length && !empty ? line('overview-absent', 'info', 'tone-muted', `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         // Automatic sync's state is the status bar's; what it did is History's.
-        line('overview-kept', 'history', 'tone-muted', 'Every change Central Knot makes in your tools is kept in ', link('History', 'overview-history', () => showPage('history')), ', with Undo.'))));
+        line('overview-kept', 'history', 'tone-muted', 'Every change Central Knot makes in your tools is kept in ', link('History', 'overview-history', () => showPage('history')),
+          ', with Undo where it can be undone.'))));
 }
