@@ -1212,18 +1212,11 @@ async function practiceFlow() {
   same('and every skill’s switch is off, on a list that has some', await controlsOff().then(off => off.length > 0 && off.every(Boolean)), true);
   await a.click('#nav-agents');
   same('while the agents’ switches work', (await controlsOff()).some(off => !off), true);
-  // History's actions on skills' entries ask the skills' gate too: off while the record is damaged.
-  await a.click('#nav-history');
-  const skillActionsOff = () => a.run(`[...document.querySelectorAll('.history-row')].filter(row => row.querySelector('.history-kind')?.textContent === 'Skill').flatMap(row => [...row.querySelectorAll('.history-actions button')]).map(button => button.disabled)`);
-  same('and History’s actions on skills’ entries are there and off', await skillActionsOff().then(off => off.length > 0 && off.every(Boolean)), true);
   await a.click('#nav-overview');
   same('and the Overview once, as Skills’ problem, with the way to Skills', [await saidIn('#overview-needs'), await a.exists('#overview-stopped'), await a.exists('#overview-skills-problem-0-open')], [1, false, true]);
   await a.click('#nav-skills');
   writeFileSync(skillsRecord, goodSkills);
   await a.click('#header-refresh');
-  await a.click('#nav-history');
-  same('put back, History’s actions on skills’ entries are on again', await skillActionsOff().then(off => off.length > 0 && !off.some(Boolean)), true);
-  await a.click('#nav-skills');
   // The practice copy has no Pi folder, only a skill in the shared .agents folder that Pi (and others) read: that makes no
   // tool present, so Pi is no column, mark or control, and Tools shows no card for it.
   mkdirSync(join(practice, '.agents/skills/shared-only'), { recursive: true });

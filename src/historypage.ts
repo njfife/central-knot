@@ -4,7 +4,7 @@
 // instructions' and tools' Manage switches' entries, and the sentences of entries from before an item was on the library (which
 // offer only what historyactions.ts finds left to do).
 import { DAY_MS, plural, timesApart } from './model.ts';
-import { acting, noToolManaged, restoreEvent, showPage, shownPath, state, touchedToolsPhrase, whyKindReadOnly } from './app.ts';
+import { acting, noToolManaged, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changes, homeItems, NO_PROFILE, turnsWords, undoPlan } from './profileplan.ts';
@@ -133,8 +133,7 @@ function libraryButtons(event: HistoryEvent) {
   const loads = entry.kind === 'skills' ? state.home?.skills.items.find(row => row.key === entry.key)?.loads : undefined;
   const own = libraryAction(event, item, entriesNow(state.home!)(event).now, undefined, loads);
   const link = (label: string, help: string, id: string, version?: string) => {
-    // A write to the entry's kind: off while the page acts or that kind's gate stops it, as its row's controls are (app.ts whyKindReadOnly).
-    const control = button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: acting() ?? whyKindReadOnly(state.home!, entry.kind), onclick: () => void restoreEvent(event.id, version) });
+    const control = button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: acting(), onclick: () => void restoreEvent(event.id, version) });
     control.title = help;
     return control;
   };
