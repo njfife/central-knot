@@ -1393,22 +1393,45 @@ if (wanted('plugin-items')) {
 }
 
 // ---------- Instructions ----------
+/** A pointer click on the shown text `selector` at the start of `words` (with its point, which places the editor's caret). */
+async function clickText(a, selector, words) {
+  const point = await a.run(`(() => {
+    const pre = document.querySelector(${JSON.stringify(selector)}), node = pre.firstChild, at = node.textContent.indexOf(${JSON.stringify(words)});
+    const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 1);
+    const page = pre.closest('.scroll'), view = page.getBoundingClientRect(), line = range.getBoundingClientRect();
+    if (line.top < view.top || line.bottom > view.bottom) page.scrollTop += line.top - view.top - view.height / 2;
+    const box = range.getBoundingClientRect();
+    return { x: box.left + 1, y: box.top + box.height / 2 };
+  })()`);
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 });
+  await a.settle();
+}
+/** The Instructions page at the four sizes (dark, and light at 1280×800), from its top. */
+async function instructionsAtSizes(tag, caption) {
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await a.size(width, height); await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+    await shot(a, `${tag}-${width}`, `${caption} At ${width}×${height}.`);
+  }
+  await a.size(1280, 800); await a.theme('light'); await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await shot(a, `${tag}-light`, `${caption} At 1280×800, light.`); await a.theme('dark');
+}
 if (wanted('instructions')) {
   begin('instructions');
   await a.click('#nav-instructions');
   await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`);
-  await shot(a, 'instructions-start', 'Clicked "Instructions" in the sidebar. The practice copy has CLAUDE.md and AGENTS.md; Copilot CLI has no file yet.');
-  await a.click('#ins-edit-claude-cli'); await shot(a, 'instructions-editing', 'Clicked Edit on Claude Code\'s file.');
+  await shot(a, 'instructions-start', 'Clicked "Instructions" in the sidebar: "How these files are read" at the top, the Base instructions card, then "Each tool’s own instructions". The practice copy has CLAUDE.md and AGENTS.md; Copilot CLI has no file yet.');
+  await a.click('#ins-about summary'); await shot(a, 'instructions-about', 'Clicked "How these files are read": how the files are read and saved, the base, and who reads each file with its tool’s own notes.');
+  await a.click('#ins-about summary');
+  await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', 'Prefer small'); await shot(a, 'instructions-editing', 'Clicked "Prefer small commits" in Claude Code\'s text: its editor opens with the caret there, Review changes and Cancel in the card\'s head.');
   await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value = area.value.replace('Prefer small commits', 'Prefer small, focused commits') + '- Never push without asking.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
+  await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes: Save is in the card\'s head.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
-  await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
-  // Near the cards' column breakpoint (each about 320px), a card's review and discard confirmation wrap within it.
+  await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Add instructions for Copilot CLI", which has no file yet.');
   await a.size(1240, 800);
   await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await shot(a, 'instructions-1240-saved-unsaved', 'At 1240×800: Claude Code\'s card says Saved with Undo save, Copilot CLI\'s says Unsaved changes, and Codex\'s card is plain; the headers line up.');
-  await a.click('#ins-review-copilot-cli'); await shot(a, 'instructions-review-1240', 'At 1240×800, three cards across: wrote a first draft for Copilot CLI and clicked Review new file.');
-  await a.click('#ins-review-discard-copilot-cli'); await shot(a, 'instructions-discard-confirm-1240', 'Clicked Discard changes: the confirmation wraps within the card.');
+  await shot(a, 'instructions-1240-saved-unsaved', 'At 1240×800: Claude Code\'s card says Saved with Undo save, Copilot CLI\'s says Unsaved changes, and Codex\'s card is plain.');
+  await a.click('#ins-review-copilot-cli'); await shot(a, 'instructions-review-1240', 'At 1240×800: wrote a first draft for Copilot CLI and clicked Review new file.');
+  await a.click('#ins-review-discard-copilot-cli'); await shot(a, 'instructions-discard-confirm-1240', 'Clicked Discard changes: the question takes the place of the card\'s actions, in its head.');
   await a.click('#ins-review-discard-yes-copilot-cli');
   await a.size(1280, 800);
   await a.click('#ins-edit-copilot-cli');
@@ -1418,8 +1441,31 @@ if (wanted('instructions')) {
   await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#ins-orphan')`);
   await shot(a, 'instructions-orphan-draft', 'Typed a draft for Copilot CLI, then moved Copilot CLI\'s folder away outside the app and clicked Refresh: the card is gone, and the draft is offered to copy or discard.');
   await a.click('#ins-orphan-discard');
+  await instructionsAtSizes('two-tools', 'Two tools (Claude Code and Codex): one card a row, two a row once the cards area is 1936 px wide (2560).');
+  // Five tools, Pi's file long: one card a row at every size, each text at a reading measure.
   renameSync(join(practice, '.copilot-away'), join(practice, '.copilot'));
-  await a.click('#header-refresh');
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  mkdirSync(join(practice, '.config/opencode'), { recursive: true });
+  writeFileSync(join(practice, '.pi/agent/AGENTS.md'), `## Driving GUI apps\n\n${Array.from({ length: 95 }, (_, line) => `- Step ${line + 1}: use the narrowest tool that reaches the outcome, and say which one was used and why it was the narrowest.`).join('\n')}\n`);
+  writeFileSync(join(practice, '.config/opencode/AGENTS.md'), '# OpenCode\n- Keep sessions short.\n');
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#ins-edit-pi-cli')`, 15000);
+  await instructionsAtSizes('five-tools', 'Five tools, Pi\'s file 97 lines long: one card a row, two a row once the cards area is 1936 px wide (2560).');
+  // A click deep in a long text at the smallest window: the caret's line is under the card's head, with its actions.
+  await a.size(860, 600);
+  await a.click('#ins-more-pi-cli');
+  await clickText(a, '[aria-label="Pi instructions"] pre.ins-preview', '- Step 80:');
+  await shot(a, 'instructions-860-long-click', 'At 860×600: clicked "Show all 97 lines" on Pi\'s card, scrolled down and clicked "- Step 80": the editor opens with the caret on that line, under the card\'s head with Review changes and Cancel.');
+  await a.click('#ins-cancel-pi-cli');
+  await a.size(1280, 800);
+  // The same card on a tool's Instructions tab under Harnesses.
+  await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-instructions');
+  await waitFor(a, `!!document.querySelector('#ins-edit-pi-cli')`);
+  await a.click('#ins-about summary');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await shot(a, `harness-tab-${width}`, `Pi's Instructions tab under Harnesses, "How these files are read" opened, at ${width}×${height}.`); }
+  await a.click('#ins-about summary');
+  await a.size(1280, 800);
+  for (const folder of ['.pi', '.config/opencode']) rmSync(join(practice, folder), { recursive: true, force: true });
+  await a.click('#nav-instructions'); await a.click('#header-refresh');
 }
 
 // ---------- Window sizes: every page from the window's minimum to a large display, full screen ----------
@@ -1702,7 +1748,7 @@ if (wanted('missing')) {
   await a.click('#nav-overview'); await shot(a, 'after-overview', 'The same folder\'s Overview: its first sentence names only the two tools.');
   await a.size(2560, 1440);
   await a.click('#nav-harnesses'); await shot(a, 'after-2560-harnesses', 'The same folder\'s Harnesses at 2560×1440: two cards, two columns.');
-  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: two cards, two columns, one height.');
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: the two tools\' cards side by side.');
   await a.size(1280, 800);
   await a.size(860, 560);
   await a.click('#nav-skills'); await shot(a, 'after-860-skills', 'The same folder\'s Skills at 860×560.');

@@ -884,19 +884,17 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .overview-line > svg.icon:first-child, .tools-note > svg.icon:first-child { display: inline-block; vertical-align: -2px; margin-right: 8px; }
 .overview-line .btn, .tools-note .btn { height: auto; padding: 0 2px; margin: 0 -2px; text-indent: 0; }
 
-/* ---------- Tools and Instructions: one card per tool, side by side once there is room for two ---------- */
+/* ---------- Instructions: the base's card across the page, then the tools' cards ---------- */
 .cards-scroll { container: cards / inline-size; display: flex; flex-direction: column; gap: 16px; padding: 12px var(--pad-end) 16px 16px; }
 .cards-scroll > * { flex: none; }
-/*
- * Cards in equal columns, each row's cards matching its height. The columns come from the width and the count (dom.ts
- * cardGrid): two (or four, 2×2) from 960px; three go from one column to three across at 992px, once each can be about
- * 320px wide; four across from 2000px. No grid cell is left empty.
- */
-.card-grid { --cols: 1; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 16px; }
-/* :where keeps this rule's weight at .card-grid's, so the later rules for three and four cards win as they apply. */
-@container cards (width >= 960px) { .card-grid:not(:where([data-count="1"], [data-count="3"])) { --cols: 2; } }
-@container cards (width >= 992px) { .card-grid[data-count="3"] { --cols: 3; } }
-@container cards (width >= 2000px) { .card-grid[data-count="4"] { --cols: 4; } }
+/* The tools' cards: one a row, and two a row from the width where each of two still holds a line of about 120 characters
+   (120 × 7.5 px of the 12.5 px mono text, its box's 26 px, the card's 34 px, and the 16 px gap: 2 × 960 + 16). */
+.ins-tool-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@container cards (width >= 1936px) { .ins-tool-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* The heading over the tools' own cards, with what sets them apart from the base above. */
+.ins-section-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 8px; }
+.ins-section-title { font-size: 15px; line-height: 22px; font-weight: 600; }
+.ins-section-note { font-size: 12.5px; color: var(--ink-soft); }
 .tool-head { display: flex; align-items: center; gap: 8px; min-height: 53px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 /* A narrow card leaves its header's folder out rather than cut it to a stub; "Config folder" below says it whole. */
 @container (width < 440px) { .tool-head > .path-text { display: none; } }
@@ -906,20 +904,26 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .tool-title { flex: none; font-size: 14px; line-height: 20px; font-weight: 600; }
 .plain-list { display: flex; flex-direction: column; gap: 4px; }
 
-.ins-card { container: ins-card / inline-size; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
+.ins-card { container: ins-card / inline-size; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px;
+  /* A file's text keeps to 160 characters a line (7.5 px each in the 12.5 px mono text, plus its box's 26 px). */
+  --ins-measure: 1226px; }
+/* On a tool's card everything ends where its text does: the head's pills, the base strip, the editor. */
+.ins-card:not(.base-card) > * { max-width: var(--ins-measure); }
 /*
- * Cards in a row share one height, as the tool cards do, so a short card leaves no hole. The header's first row is one
- * fixed height with its contents centred, so a pill (No file yet, Saved with Undo save, Unsaved changes) never moves the
- * title or the path, and titles line up across the row; a narrow card's path takes a line of its own, the same height.
+ * A card's head: its title line, then its one actions row (Edit; Review changes and Cancel; Save), so a long text never
+ * hides them. The title line is one fixed height with its contents centred, so a pill (No file yet, Saved with Undo save,
+ * Unsaved changes) never moves the title or the path; a narrow card's path takes a line of its own, the same height.
  */
-.ins-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
-.ins-head > :not(svg, [hidden], .ins-missing) { flex-shrink: 0; height: 24px; display: inline-flex; align-items: center; }
-.ins-head > .path-text { flex-shrink: 1; }
-.ins-head .btn, .ins-head .ins-missing { height: 22px; }
+.ins-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ins-head > .ins-actions { margin-top: 0; }
+.ins-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.ins-title > :not(svg, [hidden], .ins-missing) { flex-shrink: 0; height: 24px; display: inline-flex; align-items: center; }
+.ins-title > .path-text { flex-shrink: 1; }
+.ins-title .btn, .ins-title .ins-missing { height: 22px; }
 /* A card's status pill never wraps; with no room beside the name it moves under it. */
 .ins-missing { margin-left: auto; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; line-height: 18px; color: var(--ink-soft); white-space: nowrap; }
 /* A narrow card gives its file's path a line of its own under the name, rather than cutting it to a stub. */
-@container ins-card (width < 420px) { .ins-head > .path-text { order: 1; flex-basis: 100%; } }
+@container ins-card (width < 420px) { .ins-title > .path-text { order: 1; flex-basis: 100%; } }
 .ins-saved-group { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
 .ins-saved-group > .ins-missing { margin-left: 0; }
 .ins-saved { color: var(--success); border-color: color-mix(in oklab, var(--success) 45%, transparent); }
@@ -930,7 +934,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ins-note > svg { flex: none; margin-top: 2px; }
 .ins-warn { color: var(--ink); }
 .ins-preview, .ins-diff { margin: 0; padding: 10px 12px; max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--chrome); font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.ins-preview { max-height: none; font-size: 12.5px; }
+.ins-preview { max-height: none; font-size: 12.5px; user-select: text; }
+/* A text a click opens for editing (editparts.ts previewBlock): it looks like the editor it opens. */
+.ins-editable { cursor: text; }
+.ins-editable:hover { border-color: var(--control-line); }
+/* A file's text, its editor and its changes use the card's width up to the measure, which only a wide card passes. */
+.ins-card .ins-preview, .ins-card .ins-text, .ins-card .ins-diff { max-width: var(--ins-measure); }
 .ins-empty { font-size: 12.5px; color: var(--ink-soft); }
 /* A card's actions, and a discard confirmation, wrap by the card's width rather than spill out of it. */
 .ins-actions, .ins-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 4px; min-width: 0; }
@@ -958,6 +967,17 @@ span.ins-confirm { margin-top: 0; }
 .ins-versions summary::-webkit-details-marker { display: none; }
 .ins-versions[open] summary svg { transform: rotate(90deg); }
 .ins-version { display: flex; align-items: center; gap: 10px; padding: 2px 0 2px 16px; }
+/* The info box (editparts.ts infoBox): one quiet line that opens, on a click or Enter, to what explains the page. */
+.info-box { font-size: 12.5px; color: var(--ink-soft); }
+.info-box summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px; margin-left: -6px; border-radius: 6px; font-size: 13px; color: var(--ink); cursor: pointer; }
+.info-box summary::-webkit-details-marker { display: none; }
+.info-box summary:hover { color: var(--ink); background: var(--hover); }
+.info-box[open] .info-box-chevron { transform: rotate(90deg); }
+.info-box-body { display: flex; flex-direction: column; gap: 6px; max-width: var(--measure); padding: 2px 0 4px 20px; line-height: 1.55; }
+.info-box-files { gap: 6px; }
+.info-box-files > li { display: flex; align-items: flex-start; gap: 8px; }
+.info-box-files > li > svg { flex: none; margin-top: 3px; }
+.info-box-files strong { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink); }
 
 /* ---------- History ---------- */
 .history-intro { margin: 12px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
@@ -1460,6 +1480,20 @@ span.ins-confirm { margin-top: 0; }
 .base-not-carried { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; max-width: none; }
 .base-not-carried > span { flex: 1 1 260px; min-width: 0; }
 #base-draft-problem:focus { outline: none; }
+/* The panel that sets up a draft, under the base's text; its prompt can be read and selected, and scrolls past a screenful. */
+.draft-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.draft-tools { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.draft-tools legend { padding: 0; margin-bottom: 4px; font-size: 12.5px; color: var(--ink-soft); }
+.draft-tool { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; }
+.draft-tool input { margin: 0; accent-color: var(--accent); }
+.draft-model { font-size: 12.5px; color: var(--ink-soft); }
+.draft-model-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.draft-model-input { width: min(100%, 280px); height: 28px; padding: 0 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); color: var(--ink); font: 400 12.5px/20px var(--mono); user-select: text; cursor: text; }
+.draft-model-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.draft-prompt { max-height: clamp(120px, 100vh - 520px, 360px); overflow: auto; user-select: text; cursor: text; }
+/* (The 520 px is the window's header and status bar, the panel's other rows and a few lines of the base's text above the panel:
+   on a short window the prompt gives way, so Start, the panel's title and the end of that text show together; the prompt's end
+   is reached by scrolling within it.) */
 .base-writing { display: flex; align-items: center; gap: 8px; }
 /* A wide base card puts the tools beside the text. */
 @container ins-card (width >= 1100px) { .base-columns { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
@@ -1682,11 +1716,9 @@ button.harness-card-main:disabled { cursor: default; }
 /* Narrow: the switcher keeps only the marks (names stay in their tooltips). */
 @media (max-width: 1180px) { .harness-switch-item:not(.selected) .harness-switch-name { display: none; } }
 /* The harness's own column header: a quiet fill across the whole column's width. */
-/* Its instruction card: sized to its file at a reading measure, never wider than the pane; with notes or earlier versions
-   beside it (wide windows), it spans the pane (the file box's 100% then resolves against the pane).
-   It is no size container here: containment would size it as if empty, leaving it at its minimum on any window. */
-.harness-page .ins-card { container-type: normal; max-width: 100%; width: fit-content; min-width: min(100%, 520px); box-sizing: border-box; }
-.harness-page .ins-card:has(> .ins-versions, > .ins-note) { width: auto; }
+/* Its Instructions tab: the info box with "Every tool's file" beside its line, then the same card as on Instructions. */
+.ins-about-line { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 16px; }
+.ins-about-line > .btn { height: 26px; margin-left: auto; }
 /* The whole card shows hover and focus, not just its upper part. */
 .harness-card:has(> .harness-card-main:hover) { background: var(--hover); }
 .harness-card:has(> .harness-card-main:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
@@ -1705,16 +1737,6 @@ button.harness-card-main:focus-visible { outline: 0; }
 @container (max-width: 600px) { .harness-cards[data-count="4"] { grid-template-columns: minmax(0, 1fr); } }
 /* "Not in <harness>" and Off: quieter headings than On and Not synced. */
 .ov-section-away .ov-section-label > strong { font-weight: 500; color: var(--ink-soft); }
-/* Wide: the file sits at a reading measure on the left, with who reads it, notes and earlier versions beside it. */
-@container (min-width: 1300px) {
-  .harness-page .ins-card { display: grid; grid-template-columns: minmax(0, max-content) minmax(260px, 1fr); grid-auto-flow: row dense; column-gap: 32px; row-gap: 0; align-content: start; }
-  .harness-page .ins-card > * { grid-column: 2; margin-bottom: 8px; }
-  .harness-page .ins-card > .ins-head { grid-column: 1 / -1; }
-  .harness-page .ins-card > .ins-body, .harness-page .ins-card > .ins-editor { grid-column: 1; grid-row: 2 / span 6; }
-  /* With nothing but the reader line beside it, the card keeps its stacked layout rather than strand one sentence. */
-  .harness-page .ins-card:not(:has(> .ins-versions, > .ins-note)) { display: flex; }
-  .harness-page .ins-card:has(> .ins-versions, > .ins-note) > .ins-readers::before { content: 'Read by'; display: block; margin-bottom: 4px; font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
-}
 /* About: every fact row is as tall as one with a copy button, so the two groups' rows line up. */
 .harness-about .facts > dt, .harness-about .facts > dd { min-height: 24px; display: flex; align-items: center; }
 .harness-tab-none:not(.selected) { color: var(--ink-faint); }
@@ -1726,9 +1748,6 @@ button.harness-card-main:focus-visible { outline: 0; }
 .ov-section-after { gap: 0; }
 .ov-section-label > .ov-section-after { margin-left: 0; }
 .ov-section-dot { margin: 0 8px 0 0; color: var(--ink-faint); }
-/* In view and while editing, the file sits at one reading measure, so the card is the same width either way and Edit swaps in place. */
-.harness-page .ins-card .ins-text, .harness-page .ins-card .ins-preview { width: calc(110ch + 26px); max-width: 100%; box-sizing: border-box; }
-.harness-page .ins-card .ins-diff { max-width: 110ch; }
 /* One or two harnesses don't stretch across a wide window: each card is at most about 560px wide. */
 .harness-cards[data-count="1"], .harness-cards[data-count="2"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 560px)); }
 .ov-section-after > .text-action { padding-left: 0; margin-left: 0; }

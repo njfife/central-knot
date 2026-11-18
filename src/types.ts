@@ -211,8 +211,11 @@ export interface DesktopApi {
   /** The base instructions and the tools that get them (INS-03). */
   instructionBase(): Promise<BaseView | null>;
   applyBase(request: BaseApply, home: string): Promise<BaseResult>;
-  /** Has `tool` write a draft of the base from every tool's own instructions. Nothing is saved: the draft is reviewed first. */
-  draftBase(tool: HarnessId, home: string): Promise<BaseDraft>;
+  /** The prompt a draft of the base would send now, shown before anything runs; or why there is nothing to draft from. */
+  draftPrompt(home: string): Promise<{ prompt: string } | { stopped: string }>;
+  /** Has `tool` write a draft of the base from every tool's own instructions, on `model` ('' for the tool's own default), sent
+   *  `shown`, the prompt the person saw (draftbase.ts writeDraft). Nothing is saved: the draft is reviewed first. */
+  draftBase(tool: HarnessId, home: string, model: string, shown: string): Promise<BaseDraft>;
   /** Stops the draft being written, if one is. */
   cancelDraft(): Promise<void>;
   undoBase(undo: BaseUndo, home: string): Promise<BaseResult>;
@@ -992,6 +995,8 @@ export interface BaseApply { text: string; expected: string; tools: HarnessId[];
  * listed), and the hash of each file and of the base it was written from, so a review can tell what changed since.
  */
 export interface BaseDraft { stopped?: string; cancelled?: true;
+  /** Nothing ran: the files changed after the prompt was shown, and this is the prompt as it would be sent now. */
+  promptNow?: string;
   draft?: { by: HarnessId; base: string; own: Partial<Record<HarnessId, string>>; read: Partial<Record<HarnessId, string>>; baseHash: string } }
 /** What an apply or undo did per tool. */
 export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean;

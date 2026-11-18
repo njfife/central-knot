@@ -1,15 +1,20 @@
-// Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
-// (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled or emptied by Central Knot (the one
-// deletion is an Undo of a base save removing a file that save created, while unchanged).
+// Instructions: each tool's own instruction file, a plain editor (opened by a click on the text or by Edit), a diff before
+// saving and earlier versions (INS-01, INS-02); the page puts the Base instructions card (basecard.ts) first, then the tools'
+// cards under a heading (one a row, two on a wide page: style.css .ins-tool-cards), and keeps what explains the files (who reads
+// each, the tools' own notes) in one info box at the top. A tool's card has its actions in its head at every stage, so a long
+// text never hides them (the base card's, too, except while its Draft panel is open: basecard.ts). There is no turn-off switch:
+// instruction files are edited, never disabled or emptied by Central Knot (the one deletion is an Undo of a base save removing a
+// file that save created, while unchanged).
 import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
-import { changeCounts, diffView, discardConfirm, escapeTo, keepCaret, keys, legend, previewBlock, versionsList } from './editparts.ts';
+import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keepCaret, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { fileName, lineCount, toolNames } from './words.ts';
-import { button, cardGrid, h, icon, lockAttrs, pathText, rereadBand } from './dom.ts';
+import { button, h, icon, lockAttrs, pathText, rereadBand } from './dom.ts';
 import { noToolsState } from './pages.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import type { HarnessId, InstructionFile } from './types.ts';
 import { lineDiff } from './diff.ts';
+import { keepLineBreaks } from './drafts.ts';
 export { lineDiff } from './diff.ts';
 
 
@@ -32,7 +37,8 @@ document.addEventListener('keydown', event => {
   leaveReview(edit.tool);
 });
 
-function editor(file: InstructionFile) {
+/** The open file's editor, or its review before saving. */
+function editor(file: InstructionFile): Stage {
   const edit = state.instructionEdit!;
   const name = fileName(file.path);
   // With the base, the editor holds this tool's own text; the base block stays as it is. Restoring compares whole files.
@@ -50,29 +56,32 @@ function editor(file: InstructionFile) {
       : edit.restoring ? `Going back to an earlier version of ${name}: ${counts}.`
       : `Review before saving ${name}: ${counts}.`;
     const empties = changed && original.trim() && !edit.text.trim() && !file.base?.copy?.trim();
-    return h('div.ins-editor', {},
-      h('p.ins-review-title', {}, title),
-      edit.takeOut ? h('p.base-explain', {}, `${toolNames[file.tool]}’s own instructions stay; the earlier text is kept under Earlier versions.`)
-        : edit.restoring && file.base ? h('p.base-explain', {}, `This restores the whole file, including its base instructions as they were then. The base itself and the other tools’ files stay as they are.`) : null,
-      empties ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `This leaves ${name} empty. ${toolNames[file.tool]} will start sessions with no instructions from it.`)) : null,
-      edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${name} changed outside Central Knot. Your draft is kept; this review now compares it with the file as it is now.`)) : null,
-      legend(`${name} now`, edit.restoring && !edit.takeOut ? 'the earlier version' : 'after saving'),
-      diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }),
+    return {
       // While the discard question is open it is the only decision on screen.
-      edit.confirmDiscard
-        ? h('div.ins-actions', { id: `ins-actions-${file.tool}` }, discardConfirm(name, { discard: `ins-review-discard-yes-${file.tool}`, keep: `ins-review-keep-${file.tool}` }, 'Keep reviewing',
+      actions: edit.confirmDiscard
+        ? h('div.ins-actions', {}, discardConfirm(name, { discard: `ins-review-discard-yes-${file.tool}`, keep: `ins-review-keep-${file.tool}` }, 'Keep reviewing',
           { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-save-${file.tool}` }))
-        : h('div.ins-actions', { id: `ins-actions-${file.tool}` },
+        : h('div.ins-actions', {},
           button({ variant: 'primary', size: 'small', label: edit.takeOut ? 'Take the block out' : edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: acting() || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
           button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => leaveReview(file.tool) }),
-          edit.restoring ? null : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-keep-${file.tool}`)?.focus(); } })));
+          edit.restoring ? null : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-keep-${file.tool}`)?.focus(); } })),
+      body: [h('div.ins-editor', {},
+        h('p.ins-review-title', {}, title),
+        edit.takeOut ? h('p.base-explain', {}, `${toolNames[file.tool]}’s own instructions stay; the earlier text is kept under Earlier versions.`)
+          : edit.restoring && file.base ? h('p.base-explain', {}, `This restores the whole file, including its base instructions as they were then. The base itself and the other tools’ files stay as they are.`) : null,
+        empties ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `This leaves ${name} empty. ${toolNames[file.tool]} will start sessions with no instructions from it.`)) : null,
+        edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${name} changed outside Central Knot. Your draft is kept; this review now compares it with the file as it is now.`)) : null,
+        legend(`${name} now`, edit.restoring && !edit.takeOut ? 'the earlier version' : 'after saving'),
+        diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); })),
+      baseStrip(file, 'Finish or cancel this edit first.')],
+    };
   }
   const area = h('textarea.ins-text', { id: `ins-text-${file.tool}`, spellcheck: 'false', 'aria-label': `Edit ${name}`,
     placeholder: file.base ? `Write what only ${toolNames[file.tool]} should know (the base instructions stay after it). For example:\n# Only for ${toolNames[file.tool]}\n- …`
       : `Write what ${toolNames[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
     oninput: (event: Event) => {
       const target = event.target as HTMLTextAreaElement;
-      edit.text = target.value;
+      edit.text = keepLineBreaks(edit.from.text, target.value);
       if (edit.confirmDiscard) { edit.confirmDiscard = false; keepCaret(`ins-text-${file.tool}`, target.selectionStart, rerender); return; }
       // Said as you type, without redrawing the editor: the pill and Review follow whether the text differs.
       const changed = draftUnsaved();
@@ -89,20 +98,44 @@ function editor(file: InstructionFile) {
   area.rows = edit.text ? Math.min(30, Math.max(8, lineCount(edit.text) + 3)) : 6;
   if (!original) area.classList.add('ins-text-new');
   const actions = edit.confirmDiscard
-    ? h('div.ins-actions', { id: `ins-actions-${file.tool}` }, discardConfirm(name, { discard: `ins-discard-${file.tool}`, keep: `ins-keep-${file.tool}` }, 'Keep editing',
+    ? h('div.ins-actions', {}, discardConfirm(name, { discard: `ins-discard-${file.tool}`, keep: `ins-keep-${file.tool}` }, 'Keep editing',
       { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-text-${file.tool}` }))
-    : h('div.ins-actions', { id: `ins-actions-${file.tool}` },
+    : h('div.ins-actions', {},
       button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, disabled: !draftUnsaved(), onclick: () => { edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); } }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { const ask = draftUnsaved(); if (ask) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); document.getElementById(ask ? `ins-keep-${file.tool}` : `ins-edit-${file.tool}`)?.focus(); } }),
       h('span.ins-locked', { id: `ins-hint-${file.tool}` }, draftUnsaved() ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.'));
-  return h('div.ins-editor', { onkeydown: escapeTo(`ins-cancel-${file.tool}`, `ins-keep-${file.tool}`) },
+  return { actions, body: [h('div.ins-editor', {},
     file.exists ? null : h('p.ins-empty', {}, `New file: saving creates ${name} here.`),
     file.base ? h('p.base-explain', {}, `${toolNames[file.tool]}’s own instructions. The base instructions stay after them, as they are.`) : null,
-    area, actions);
+    area), baseStrip(file, 'Finish or cancel this edit first.')] };
 }
 
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
 const savedHere = (file: InstructionFile) => draftFile() !== file && state.outcome?.page === state.page && state.outcome.tool === file.tool && state.outcome.kind === 'saved';
+
+/** The file holds a copy of the base, so its tool reads base instructions whatever its own text says. */
+const holdsBase = (file: InstructionFile) => file.base?.copy !== undefined;
+
+/**
+ * A card at rest: its own text, which a click or Enter opens in the editor as Edit does, under the same lock (`lockedWhy`, or else
+ * whatever the page is doing: app.ts acting), then the base block it holds; and its one action, with the card's own reason and
+ * `goTo` beside it. With no text of its own, the action says whose instructions it adds, and whether they come on top of the base.
+ */
+function resting(file: InstructionFile, lockedWhy: string | undefined, goTo: Node | null): Stage {
+  const own = ownText(file);
+  const name = toolNames[file.tool];
+  const label = own.trim() ? 'Edit' : holdsBase(file) ? `Add additional instructions for ${name}` : `Add instructions for ${name}`;
+  const held = lockedWhy ?? acting();
+  return {
+    actions: h('div.ins-actions', {},
+      button({ variant: 'outline', size: 'small', label, id: `ins-edit-${file.tool}`, disabled: held ?? false, attrs: lockAttrs(held), onclick: () => startInstructionEdit(file) }),
+      lockedWhy ? h('span.ins-locked', {}, lockedWhy, goTo ? [' ', goTo] : null) : null),
+    body: [h('div.ins-body', {},
+      file.exists && own.trim() ? previewBlock(own, file.tool, `${fileName(file.path)} contents`, `ins-more-${file.tool}`, { start: caret => startInstructionEdit(file, caret), locked: held })
+        : file.exists && !holdsBase(file) ? h('p.ins-empty', {}, 'The file is empty.') : null,
+      baseStrip(file, lockedWhy))],
+  };
+}
 
 /**
  * One tool's file: shown on Instructions for every tool, and on that tool's Harnesses page. `titled`: false on a harness's
@@ -117,27 +150,37 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
   const readOnly = savingOff();
   const lockedWhy = readOnly ? 'Saving is off in this home.' : baseDraftTyped() ? 'Finish or cancel the base instructions edit first.'
     : !toolDirty ? undefined : draftFile() ? `Finish or cancel the ${fileName(state.instructionEdit!.from.path)} edit first.` : 'Copy or discard the unsaved draft above first.';
-  const own = ownText(file);
-  return h('article.card.ins-card', { 'aria-label': `${toolNames[file.tool]} instructions` },
-    h('header.ins-head', {}, titled ? [brandMark(file.tool, 18), h('h2.tool-title', {}, toolNames[file.tool])] : null, pathText(shownPath(file.path), file.path),
-      file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
-      savedHere(file) ? h('span.ins-saved-group', { 'data-outcome': '' }, h('span.ins-missing.ins-saved', {}, 'Saved'),
-        state.outcome!.act ? button({ variant: 'link', size: 'micro', label: 'Undo save', id: state.outcome!.act.id, attrs: { title: 'Put back the text this save replaced' }, onclick: () => state.outcome!.act!.run() }) : null) : null,
-      editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: !draftUnsaved() }, 'Unsaved changes') : null),
-    h('p.ins-readers', {}, file.readers),
-    file.notes.map(note => h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, note))),
-    editing ? [editor(file), baseStrip(file, 'Finish or cancel this edit first.')]
-      : h('div.ins-body', {},
-        file.exists && own.trim() ? previewBlock(own, file.tool, `${fileName(file.path)} contents`, `ins-more-${file.tool}`)
-          : file.base?.copy !== undefined ? h('p.base-explain', {}, `No instructions of its own: ${toolNames[file.tool]} reads only the base instructions below.`)
-          : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
-        baseStrip(file, lockedWhy),
-        h('div.ins-actions', {},
-          button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: acting() || readOnly || otherDirty || editing, attrs: lockAttrs(lockedWhy), onclick: () => startInstructionEdit(file) }),
-          lockedWhy ? h('span.ins-locked', {}, lockedWhy,
-            otherDirty && goToOther && draftFile() ? [' ', button({ variant: 'link', size: 'micro', label: `Go to ${toolNames[draftFile()!.tool]}’s file`, id: `ins-go-${draftFile()!.tool}`, disabled: !!state.busy, onclick: () => goToOther(draftFile()!.tool) })] : null) : null)),
+  // Where the edit that locks this card is open on another page (another harness's), a link goes there.
+  const open = otherDirty && goToOther ? draftFile() : undefined;
+  const goTo = open ? button({ variant: 'link', size: 'micro', label: `Go to ${toolNames[open.tool]}’s file`, id: `ins-go-${open.tool}`, disabled: !!state.busy, onclick: () => goToOther!(open.tool) }) : null;
+  const stage = editing ? editor(file) : resting(file, lockedWhy, goTo);
+  // Esc anywhere in the card while its editor is open (the text, a button in its head) is Cancel.
+  const escape = editing && state.instructionEdit!.stage === 'edit' ? escapeTo(`ins-cancel-${file.tool}`, `ins-keep-${file.tool}`) : undefined;
+  return h('article.card.ins-card', { 'aria-label': `${toolNames[file.tool]} instructions`, onkeydown: escape },
+    h('header.ins-head', { id: `ins-head-${file.tool}` },
+      h('div.ins-title', {}, titled ? [brandMark(file.tool, 18), h('h3.tool-title', {}, toolNames[file.tool])] : null, pathText(shownPath(file.path), file.path),
+        file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
+        savedHere(file) ? h('span.ins-saved-group', { 'data-outcome': '' }, h('span.ins-missing.ins-saved', {}, 'Saved'),
+          state.outcome!.act ? button({ variant: 'link', size: 'micro', label: 'Undo save', id: state.outcome!.act.id, attrs: { title: 'Put back the text this save replaced' }, onclick: () => state.outcome!.act!.run() }) : null) : null,
+        editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: !draftUnsaved() }, 'Unsaved changes') : null),
+      stage.actions),
+    stage.body,
     versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!acting() || readOnly || otherDirty || (editing && draftUnsaved()),
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));
+}
+
+/**
+ * What explains the files, behind one info box at the top of the page (and of a harness's Instructions tab, for its one file):
+ * how they are read and saved, what the base does (with `base`), and who reads each file, with its tool's own notes.
+ */
+export function aboutInstructions(files: InstructionFile[], base: boolean): HTMLElement {
+  return infoBox('about-instructions', 'ins-about', 'How these files are read',
+    h('p', {}, 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone; base instructions change them only when you save.'),
+    base ? h('p', {}, 'Base instructions are kept after each chosen tool’s own instructions, in its file. Saving them updates every chosen file; a copy edited outside Central Knot stays as it is until you choose. Each tool’s own text stays as it is.') : null,
+    h('ul.plain-list.info-box-files', {}, files.map(file => h('li', {}, brandMark(file.tool, 14),
+      h('div', {}, h('p', {}, h('strong', {}, fileName(file.path)), ` · ${file.readers}`),
+        file.notes.map(note => h('p', {}, note)),
+        holdsBase(file) && !ownText(file).trim() ? h('p', {}, `No instructions of its own: ${toolNames[file.tool]} reads only the base instructions.`) : null)))));
 }
 
 /**
@@ -163,9 +206,10 @@ export function instructionsPage() {
   if (!files.length) return h('div.page', {}, noToolsState('instructions'));
   return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
-      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone; base instructions change them only when you save.'),
+      aboutInstructions(files, !!state.base),
       baseCard(files),
-      cardGrid(files.map(file => instructionCard(file)))));
+      h('div.ins-section-head', {}, h('h2.ins-section-title', {}, 'Each tool’s own instructions'), h('p.ins-section-note', {}, 'Only that tool reads these.')),
+      h('div.ins-tool-cards', {}, files.map(file => instructionCard(file)))));
 }
 
 /** Shown while the files are not here yet: their read is under way, or it failed (Refresh reads again). */

@@ -80,6 +80,14 @@ export interface BaseEdit {
   ticksBeforeStop?: HarnessId[];
 }
 
+/**
+ * The panel that sets up a draft of the base, while it is open under the base's text (basecard.ts draftPanel): the tool that
+ * will write it, the model typed for that tool ('' for its own default; choosing another tool clears it), the prompt it will be
+ * sent as main last read it (when the panel opened, or when a Start or a dropped draft found the files changed), and why the
+ * last try gave no draft. Nothing of it is stored.
+ */
+export interface DraftPick { tool: HarnessId; model: string; prompt: string; problem?: string }
+
 /** The text a tool's editor works on: its own instructions, without the base block when it gets the base. */
 export const ownText = (file: InstructionFile) => (file.base ? file.base.own : file.text);
 
@@ -126,8 +134,8 @@ export const state = {
   base: undefined as BaseView | undefined,
   /** The base being edited: its text and tools so far, the hash it was opened at, and where the draft came from. */
   baseEdit: undefined as BaseEdit | undefined,
-  /** The question of which tool writes a draft of the base is open on its card; `problem`: why the last try gave no draft. */
-  draftPick: undefined as { problem?: string } | undefined,
+  /** The panel that sets up a draft of the base, while it is open (DraftPick). */
+  draftPick: undefined as DraftPick | undefined,
   /** The tool writing a draft of the base right now. */
   drafting: undefined as HarnessId | undefined,
   /** Sync notices the person has dismissed, by History event or item, and a background pass's problems (matrix.ts listResult). */
@@ -1110,17 +1118,42 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
   tell(result.stopped ? undefined : { page, item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` }, result.stopped);
 });
 
-/** Opens one file in the editor; any earlier result band belongs to the last task, not this one. */
-export function startInstructionEdit(file: InstructionFile) {
+/**
+ * Focus in an editor once it is drawn (`id`: its text box, or a review's Save), with its card's head (`headId`, where its
+ * actions are) and the box in view: when either is out of sight, the page scrolls the head to its top, and the box, sized to the
+ * room under the head (editparts.ts), shows whole. With `caret` (where a click on the text landed) the caret goes there, and
+ * the box scrolls within itself to show that line.
+ */
+function focusEditor(id: string, headId: string, caret?: number) {
+  const target = document.getElementById(id), head = document.getElementById(headId), page = target?.closest('.scroll')?.getBoundingClientRect();
+  if (!target || !head || !page) return;
+  target.focus({ preventScroll: true });
+  const box = target instanceof HTMLTextAreaElement && caret !== undefined ? target : undefined;
+  // How far down the caret's line ends: the height of the text up to it in a one-row box, wrapped lines counted. Measured
+  // before the page scrolls, since the box is briefly one row tall.
+  let lineEnd = 0;
+  if (box) {
+    const [text, rows] = [box.value, box.rows];
+    Object.assign(box, { value: text.slice(0, caret), rows: 1 });
+    lineEnd = box.scrollHeight;
+    Object.assign(box, { value: text, rows });
+    box.setSelectionRange(caret!, caret!);
+  }
+  const shows = (element: Element) => { const edges = element.getBoundingClientRect(); return edges.top >= page.top - 1 && edges.bottom <= page.bottom + 1; };
+  if (!shows(head) || !shows(target)) head.scrollIntoView({ block: 'start' });
+  if (box) box.scrollTop = lineEnd > box.clientHeight ? lineEnd - box.clientHeight / 2 : 0;
+}
+
+/** Opens one file in the editor, the caret at `caret` when a click on its text opened it; any earlier result band belongs to
+ *  the last task, not this one. */
+export function startInstructionEdit(file: InstructionFile, caret?: number) {
   if (askAboutOpenDraft()) return;
   // A save on another card keeps its Undo there; any other result belongs to the last task.
   if (!(state.outcome?.kind === 'saved' && state.outcome.tool !== file.tool)) state.outcome = undefined;
   if (!openDraft(file, ownText(file), 'edit')) { rerender(); return; }
   state.baseEdit = undefined;
   rerender();
-  const area = document.getElementById(`ins-text-${file.tool}`) as HTMLTextAreaElement | null;
-  area?.focus();
-  document.getElementById(`ins-actions-${file.tool}`)?.scrollIntoView({ block: 'nearest' });
+  focusEditor(`ins-text-${file.tool}`, `ins-head-${file.tool}`, caret);
 }
 
 /** Loads an earlier version into the editor; putting it back is an ordinary save, with its diff first. */
@@ -1205,16 +1238,16 @@ function leftText(result: BaseResult, undoing = false) {
     result.problem ? ` ${result.problem}` : ''].join('');
 }
 
-/** Opens the base in its editor; a clean tool editor closes, since only one thing is edited at a time. */
-export function startBaseEdit(draft: Omit<BaseEdit, 'hash' | 'stage'> & { stage?: BaseEdit['stage'] }) {
+/** Opens the base in its editor (the caret at `caret` when a click on its text opened it); a clean tool editor closes, since
+ *  only one thing is edited at a time. */
+export function startBaseEdit(draft: Omit<BaseEdit, 'hash' | 'stage'> & { stage?: BaseEdit['stage'] }, caret?: number) {
   if (askAboutOpenDraft()) return;
   if (state.outcome?.kind !== 'saved') state.outcome = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
   state.draftPick = undefined;
   state.baseEdit = { stage: 'edit', ...draft, hash: state.base?.hash ?? '' };
   rerender();
-  document.getElementById(state.baseEdit.stage === 'edit' ? 'base-text' : 'base-save')?.focus();
-  document.getElementById('base-card')?.scrollIntoView({ block: 'nearest' });
+  focusEditor(state.baseEdit.stage === 'edit' ? 'base-text' : 'base-save', 'base-head', caret);
 }
 
 /**
@@ -1303,16 +1336,22 @@ export const draftStale = (edit: BaseEdit) => ({
   base: edit.readBase !== undefined && edit.readBase !== (state.base?.hash ?? ''),
 });
 
-/** Opens the question of which tool writes the draft; an editor holding typed work is asked about first. */
+/** Opens the panel that sets up a draft, with the prompt main would send now; nothing runs yet. An editor holding typed work is
+ *  asked about first. */
 export function openDraftPick() {
   if (askAboutOpenDraft()) return;
-  if (state.outcome?.kind !== 'saved') state.outcome = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
   state.baseEdit = undefined;
-  state.draftPick = {};
-  rerender();
-  document.getElementById(`base-draft-by-${state.base?.drafters[0]}`)?.focus();
-  document.getElementById('base-card')?.scrollIntoView({ block: 'nearest' });
+  void busy('Reading the instruction files…', async () => {
+    const now = await api().draftPrompt(state.home!.home);
+    if ('stopped' in now) { announce(now.stopped); return; }
+    state.draftPick = { tool: state.base!.drafters[0], model: '', prompt: now.prompt };
+  }).then(() => {
+    // Focus on Start, placed at the window's foot every time: above it the panel, and over the panel the base's text, still there.
+    const start = document.getElementById('base-draft-start');
+    start?.focus({ preventScroll: true });
+    start?.scrollIntoView({ block: 'end' });
+  });
 }
 export function closeDraftPick() {
   state.draftPick = undefined;
@@ -1321,19 +1360,30 @@ export function closeDraftPick() {
 }
 
 /**
- * Has `tool` write a draft of the base from every tool's instructions, then opens it as a review: saving it there sets the
- * base and updates each file in one step. Nothing is written before that. A failure is said where the tools are chosen, in
- * the tool's own words, so another tool can be tried.
+ * Has the panel's tool write a draft of the base from every tool's instructions, on the model typed, sent the prompt the panel
+ * shows; then opens the draft as a review: saving it there sets the base and updates each file in one step. Nothing is written
+ * before that. Anything short of a draft leaves the panel as it was, saying why: a failure in the tool's own words, so another
+ * tool or model can be tried, or (the files changed since the prompt was shown) the prompt as it would be sent now.
  */
-export const draftBaseWith = (tool: HarnessId) => {
+export const startDraft = () => {
+  // One thing is edited at a time: typed work in a tool's editor is asked about first, and a clean one closes.
+  if (askAboutOpenDraft()) return;
+  if (!draftUnsaved()) state.instructionEdit = undefined;
+  const pick = state.draftPick!;
+  const tool = pick.tool;
   state.drafting = tool;
-  state.draftPick = {};
+  pick.problem = undefined;
   return busy(`${namedTools[tool]} is writing a draft of the base instructions…`, async () => {
     try {
-      const result = await api().draftBase(tool, state.home!.home);
+      const result = await api().draftBase(tool, state.home!.home, pick.model, pick.prompt);
       await rereadInstructions();
-      // A failure is read where it is said, so no tool's button looks chosen; after Stop, focus is back on the tool that was stopped.
-      const none = (why: string, problem = true) => { if (problem) state.draftPick = { problem: why }; focusAfterBusy = problem ? 'base-draft-problem' : `base-draft-by-${tool}`; announce(why); };
+      // A failure is read where it is said; after Stop, focus is back on Start.
+      const none = (why: string, problem = true) => { if (problem) pick.problem = why; focusAfterBusy = problem ? 'base-draft-problem' : 'base-draft-start'; announce(why); };
+      if (result.promptNow !== undefined) {
+        pick.prompt = result.promptNow;
+        none('The instruction files changed after this prompt was shown, so nothing was sent. The prompt below is as it would be sent now: Start sends it.');
+        return;
+      }
       const draft = result.draft;
       if (!draft) { none(result.cancelled ? 'Stopped. No draft was written, and nothing was changed.' : result.stopped ?? 'No draft was written.', !result.cancelled); return; }
       // Written from the files as they were when it started: saving it over one that changed since would lose what is new there.
@@ -1341,7 +1391,10 @@ export const draftBaseWith = (tool: HarnessId) => {
       const changed = files.filter(file => draft.read[file.tool] !== undefined && draft.read[file.tool] !== file.hash).map(file => file.tool);
       const base = state.base;
       if (changed.length || draft.baseHash !== (base?.hash ?? '')) {
-        none(`${changed.length ? `${fileNames(changed)} changed` : 'The base instructions changed'} while the draft was being written, so the draft was dropped. Nothing was changed. Have it written again.`);
+        // The prompt below is read again, so the next Start sends the files as they are now.
+        const now = await api().draftPrompt(state.home!.home);
+        if ('prompt' in now) pick.prompt = now.prompt;
+        none(`${changed.length ? `${fileNames(changed)} changed` : 'The base instructions changed'} while the draft was being written, so the draft was dropped. Nothing was changed. ${'prompt' in now ? 'The prompt below is as it would be sent now: Start sends it.' : now.stopped}`);
         return;
       }
       // Every tool gets a first base, as when one is written by hand; a later draft keeps the list and adds the tools it sorted.

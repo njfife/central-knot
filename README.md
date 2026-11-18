@@ -68,11 +68,11 @@ Skills: each tool's own skills folder. OpenCode 1.x leaves out a skill with no `
 
 ### Instructions
 
-Opens each tool's own instruction file to read and edit in place, with **Undo save**. OpenCode's card says when OpenCode 1.x is reading Claude Code's `CLAUDE.md` because it has no `AGENTS.md` yet.
+Opens each tool's own instruction file to read and edit in place, one card a row (two on a wide window): a click on the text (or **Edit**) opens it with the caret there, a drag across it selects it to copy, and a card's buttons stay in its head while you edit, with **Undo save** after. **How these files are read**, at the top, says who reads each file and each tool's own notes, such as OpenCode 1.x reading Claude Code's `CLAUDE.md` while it has no `AGENTS.md`.
 
 **Base instructions**: you write a base once and choose which tools get it. It is added after each tool's own instructions as one marked block; the tool's own text is never rewritten. Every write is reviewed first (**Review changes**), a copy edited outside the app is found, and each save can be undone. A typed draft is not lost when you switch homes: the app asks first.
 
-**Draft with a tool**: instead of writing the base yourself, have one of your tools write a first draft from the instruction files you already have. Choose the tool (any with a CLI on this computer, except OpenCode); it runs once and sorts your files into a base for every tool and what stays only in each tool's file. You see the draft, including any line it did not carry over as written, and can change it; one **Save** then sets the base and updates every file, with **Undo**. Nothing is saved before that.
+**Draft with a tool**: instead of writing the base yourself, have one of your tools write a first draft from the instruction files you already have. The button opens a panel under the base's text and runs nothing yet: it says which tool's command line will run, takes the tool (any with a CLI on this computer, except OpenCode) and, if you want one, a model (passed as `--model`; empty is the tool's own default), and shows the whole prompt the tool will be sent. **Start** runs it once, sending exactly that prompt (if a file changed since it was shown, nothing is sent and the new prompt is shown instead); it sorts your files into a base for every tool and what stays only in each tool's file. You see the draft, including any line it did not carry over as written, and can change it; one **Save** then sets the base and updates every file, with **Undo**. Nothing is saved before that.
 
 ### Plugin marketplaces
 
