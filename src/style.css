@@ -1862,13 +1862,27 @@ button.harness-card-main:focus-visible { outline: 0; }
 /* While the rows go by last updated, each says when (matrix.ts whenCell) in a column of its own before the marks, at least 6.5em wide. */
 .ov-row.ov-switch-row.ov-dated { grid-template-columns: auto minmax(0, 1fr) minmax(6.5em, auto) auto auto; }
 .ov-when { font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; }
-/* Once usage is read (matrix.ts usedCell), each row says its figure in a column of its own before the marks, one width on
-   every row so the marks stay in line; an opened row says each tool's (matrix.ts usageLine). */
+/* Usage (matrix.ts usedCell): each row says its figure in a column of its own before the marks, one width on every row so the
+   marks stay in line, wide enough for the longest ("used 13 days ago · 999 sessions"), the count fainter; an opened row says
+   each tool's (matrix.ts usageLine). */
 .ov-row.ov-switch-row.ov-usage { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
 .ov-row.ov-switch-row.ov-dated.ov-usage { grid-template-columns: auto minmax(0, 1fr) minmax(6.5em, auto) auto auto auto; }
-.ov-used { width: 12em; font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-used { width: 16em; font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-used-faint { color: var(--ink-faint); }
-.usage-turn-note { color: var(--ink-soft); }
+.ov-used-count { color: var(--ink-faint); }
+/* The chip's band (matrix.ts unusedBand): its lead, then a fainter line; Turn these off at the band's end at every width. */
+.usage-band > .band-text { flex: 1 1 auto; display: flex; flex-direction: column; }
+.usage-more { color: var(--ink-faint); }
+/* The usage band (matrix.ts usageBand): its three sentences in one place, the one on show over the others, so it never changes height. */
+.band-stack { display: grid; }
+.band-stack > * { grid-area: 1 / 1; }
+.band-unshown { visibility: hidden; }
+/* The usage controls at a toolbar's end (matrix.ts usageControls): short of room, "Collected" and "usage statistics" go first,
+   then the time; the button keeps its verb. */
+.bar-short .usage-words { display: none; }
+.bar-icons #usage-when { display: none; }
+/* Put in order, beside Sort (matrix.ts rowsHeld). */
+.order-tidy { flex: none; white-space: nowrap; }
 .details-usage { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; color: var(--ink-soft); }
 .details-usage > svg { flex: none; align-self: center; }
 .ov-switch-row > .ov-managed { justify-content: flex-start; }
