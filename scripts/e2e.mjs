@@ -3252,6 +3252,39 @@ async function fewToolsFlow() {
   await p.quit();
 }
 
+/** Check the words themselves: the open button can fit while its text spills past it or a chip is hidden. */
+async function pluginRowsFit(a, tools, title) {
+  same('tool columns in the plugin list', await a.run(`document.querySelector('.plugin-table')?.dataset.tools`), String(tools));
+  same('the long plugin has its whole title, version and category', await a.all(`[data-plugin="${title}"] .plugin-row-open > *`),
+    [title, '12.10.0-beta.3', 'development']);
+  same('the installed plugin the marketplace dropped has its chip', await a.text('.plugin-chip-gone'), 'No longer offered');
+  const clipped = `[...document.querySelectorAll('.plugin-row-open > *')].filter(part => {
+    const button = part.parentElement, cell = button.parentElement;
+    const range = document.createRange();
+    range.selectNodeContents(part);
+    const inside = (rect, box) => rect.width > 0 && rect.height > 0 && rect.left >= box.left - 1 && rect.right <= box.right + 1
+      && rect.top >= box.top - 1 && rect.bottom <= box.bottom + 1;
+    const boxes = [part, button, cell].map(node => node.getBoundingClientRect());
+    return !part.checkVisibility({ visibilityProperty: true, opacityProperty: true }) || !inside(boxes[0], boxes[1]) || !inside(boxes[0], boxes[2])
+      || [...range.getClientRects()].some(line => boxes.some(box => !inside(line, box)));
+  }).map(part => part.textContent)`;
+  for (const [width, height, rail] of [[...SMALLEST, true], SMALLEST, [860, 600], [1280, 800], [1728, 1080], [1728, 1117], [2560, 1440]]) {
+    await sizeTo(a, width, height);
+    if (await a.run("document.body.classList.contains('rail')") !== Boolean(rail)) await a.click('#sidebar-toggle');
+    await a.run(`document.querySelector('[data-plugin="${title}"]')?.scrollIntoView({ block: 'nearest' })`);
+    same(`plugin row text and controls fit at ${width}×${height}, ${rail ? 'rail' : 'sidebar open'}, ${tools} tools`,
+      [...await a.run(clipped), ...await a.run(CUT_OFF)], []);
+    if (shots && !rail && height !== 1117) {
+      for (const theme of height === 528 ? ['dark', 'light'] : ['light']) {
+        await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+        await a.shot(`plugin-rows-${tools}-${width}x${height}-${theme}`);
+      }
+    }
+  }
+  await a.click('#sidebar-toggle');
+  await fullSize(a);
+}
+
 /**
  * OpenCode as a tool, beside Claude Code, in a home of its own: its CLI and its desktop app stand in there (the CLI answers
  * nothing but its version), and its skills, MCP servers, agents and instruction file are read from its own folder.
@@ -3359,12 +3392,20 @@ async function openCodeFlow() {
   // OpenCode takes no plugin whole: a plugin's skills, MCP servers and agents go in as library items linked to it, in OpenCode's forms.
   const market = join(scratch, 'opencode-market');
   writeMarket(market);
+  const title = 'catalog-configurationverification-diagnostics';
+  const manifest = join(market, '.claude-plugin/marketplace.json');
+  const catalog = JSON.parse(readNow(manifest));
+  catalog.plugins.unshift({ name: title, version: '12.10.0-beta.3', source: './plugins/release-helper', category: 'development' });
+  writeFileSync(manifest, JSON.stringify(catalog));
+  writeClaudeInstall(practice, catalog.name, 'archived-helper', '1.0.0', { 'README.md': 'Archived helper' });
+  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ [catalog.name]: { source: { source: 'directory', path: market } } }));
   await p.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)})`);
   await p.click('#nav-plugins');
   await p.click('#header-refresh');
   const box = plugin => `[id^="pcell-"][id$="-${plugin}-opencode-cli"]`;
   for (let tries = 0; tries < 50 && !(await p.exists(box('issue-tracker'))); tries++) await wait(100);
   same('OpenCode is a column; the plugins, off, are in none of the tools', [await p.run(`document.querySelector('${box('issue-tracker')}')?.dataset.state`), await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)], ['absent', 'absent']);
+  await pluginRowsFit(p, 4, title);
   // Three switches On, in one list: the plugins' items go into OpenCode (Claude Code's installer, a stand-in, refuses, and says so).
   await p.run(`['document-tools', 'issue-tracker', 'release-helper'].forEach(name => document.querySelector('.plugin-row[data-plugin="' + name + '"] .plugin-row-switch .switch').click())`);
   const listRuns = () => p.run(`document.body.dataset.busy === 'true' || [...document.querySelectorAll('.plugin-click')].some(note => note.dataset.click !== 'ended')`);
@@ -3406,6 +3447,7 @@ async function openCodeFlow() {
     if (['mcp', 'plugins', 'profiles', 'harnesses', 'overview'].includes(page)) await pictures(p, `opencode-five-${page}`);
   }
   await p.click('#nav-plugins');
+  await pluginRowsFit(p, 5, title);
   await p.click('[id^="popen-"][id$="-issue-tracker"]');
   for (let tries = 0; tries < 40 && !/Its items/.test(await p.text('.plugin-page') ?? ''); tries++) await wait(100);
   await fitsAtMinimum(p, 'a plugin’s page with five tools');
