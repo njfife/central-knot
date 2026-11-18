@@ -934,10 +934,10 @@ test('Back returns to the MCP explanation tab of a tool absent from the MCP view
   assert.equal(app.harnessTab, 'mcp');
 });
 
-test('a plugin link left during its first read returns by its marketplace name', async t => {
+for (const stale of [false, true]) test(`a plugin link left during a read returns by marketplace name (catalog ${stale ? 'stale' : 'unread'})`, async t => {
   start();
   homeWith(t, []);
-  app.home!.home = '/aliased';
+  app.home!.home = stale ? '/stale-catalog' : '/unread-catalog';
   const { navigate } = await watchTravel(t);
   const { fullPlace } = await import('../src/places.ts');
   const beta = { ...entry, source: '/beta', name: 'Beta' };
@@ -945,15 +945,18 @@ test('a plugin link left during its first read returns by its marketplace name',
   let finishRead!: (v: PluginsView) => void;
   t.mock.method(api, 'plugins', () => new Promise<PluginsView>(resolve => { finishRead = resolve; }));
   const { loadPlugins } = await import('../src/pluginstate.ts');
-  market.read.data = undefined;
+  market.read.data = stale ? view : undefined; // The old catalog lists gamma only in the other marketplace.
   market.nav = { source: '/alternate-spelling', marketName: 'Beta', plugin: 'gamma', tab: 'plugins', find: '' };
   const first = loadPlugins();
   await settled();
+  assert.equal(fullPlace().marketName, 'Beta');
   showPage('history');
   await settled();
-  finishRead(catalog);
+  const finishFirst = finishRead;
+  if (stale) navigate('browser-backward');
+  finishFirst(catalog);
   await first;
-  navigate('browser-backward');
+  if (!stale) navigate('browser-backward');
   finishRead(catalog);
   await settled();
   const { source, plugin } = fullPlace();

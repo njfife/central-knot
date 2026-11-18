@@ -338,7 +338,11 @@ async function skillsOf(a, tool, pictureRow) {
 
 /** The window's Back and Forward buttons return to the places actually drawn. */
 async function backFlow() {
-  const a = await launch(join(scratch, 'back-data'), ['--practice-copy']);
+  const ownHome = join(scratch, 'back-home');
+  const onlySkill = skill(join(ownHome, '.claude/skills'), 'only-skill');
+  const onlyCli = join(ownHome, '.local/bin/claude');
+  cpSync(join(HOME, '.local/bin/claude'), onlyCli);
+  const a = await launch(join(scratch, 'back-data'), ['--practice-copy'], ownHome);
   const thumb = async (button = 'back') => {
     for (const [type, buttons] of [['mousePressed', button === 'back' ? 8 : 16], ['mouseReleased', 0]]) {
       await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button, buttons, clickCount: 1 });
@@ -394,10 +398,21 @@ async function backFlow() {
   writeMarket(market, 'back-market');
   const contents = readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8');
   writeClaudeInstall(practice, 'back-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': contents });
-  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'back-market': { source: { source: 'directory', path: market }, installLocation: market } }));
+  const pdf = join(market, 'plugins/document-tools/skills/pdf-reader');
+  cpSync(pdf, join(practice, '.copilot/skills/pdf-reader'), { recursive: true });
+  writeClaudeInstall(practice, 'back-market', 'document-tools', '1.2.0', { 'skills/pdf-reader/SKILL.md': readFileSync(join(pdf, 'SKILL.md'), 'utf8') });
+  writeFileSync(join(scratch, 'back-data/marketplaces.json'), JSON.stringify([market]));
+  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'back-market': { source: { source: 'directory', path: market + '/.' }, installLocation: market } }));
   await a.click(byId('header-refresh'));
   const auxCanceled = await a.run("!document.dispatchEvent(new MouseEvent('auxclick', { button: 3, cancelable: true, bubbles: true }))");
   same('an auxiliary click is canceled without another move', [auxCanceled, await page()], [true, 'nav-history']);
+  const exactPlugin = () => Promise.all([a.text('.market-item.selected .market-item-name'), a.text('.crumb-here')]);
+  await a.click(byId('nav-skills'));
+  const skillPart = (part, key, ...within) => byId(rowPart(part, 'skills', key, ...within));
+  await a.click(skillPart('open', 'pdf-reader'));
+  await a.click(skillPart('enable', 'pdf-reader', 'claude-cli', 'page'));
+  same('the skill’s per-tool link resolves an alternate spelling on the first marketplace read', await exactPlugin(), ['back-market', 'document-tools']);
+  await a.click(byId('nav-history'));
   await a.click(byId('nav-harnesses'));
   await a.click(byId('harness-claude-cli'));
   await a.click(byId('harness-tab-plugins'));
@@ -427,10 +442,9 @@ async function backFlow() {
   check('Back from Settings to the left-out tool lands on Harnesses', await a.exists(byId('harnesses-scroll')));
   await a.click(byId('nav-history'));
   await a.click(byId('nav-skills'));
-  const skill = (part, key) => byId(rowPart(part, 'skills', key));
   // Start Add on the same input turn as Back, so even a fast disk cannot finish before Back.
   await a.run(`document.addEventListener('mouseup', () => {
-    document.querySelector(${JSON.stringify(skill('add', 'standup'))}).click();
+    document.querySelector(${JSON.stringify(skillPart('add', 'standup'))}).click();
     window.backWhileActing = document.body.dataset.busy;
   }, { capture: true, once: true })`);
   await thumb();
@@ -441,22 +455,21 @@ async function backFlow() {
   await thumb('forward');
   check('Forward shows the skill On as Add left it', await switchOn(a, 'skills', 'standup'));
   const pluginSkill = 'issue-tracker@back-market/triage';
-  await a.click(skill('open', pluginSkill));
-  await a.click(skill('open-whole', pluginSkill));
+  await a.click(skillPart('open', pluginSkill));
+  await a.click(skillPart('open-whole', pluginSkill));
   await a.click(byId('sidebar-toggle'));
-  const exactPlugin = () => Promise.all([a.text('.market-item.selected .market-item-name'), a.text('.crumb-here')]);
   same('the row opens its listing', await exactPlugin(), ['back-market', 'issue-tracker']);
   await thumb();
   same('Back across a redraw returns directly to Skills with the linked row open',
-    [await page(), await a.exists(skill('open-whole', pluginSkill))], ['nav-skills', true]);
+    [await page(), await a.exists(skillPart('open-whole', pluginSkill))], ['nav-skills', true]);
   await thumb('forward');
   same('Forward opens the expected marketplace and plugin', await exactPlugin(), ['back-market', 'issue-tracker']);
   await thumb();
-  await a.click(skill('open', 'standup'));
-  await a.click(skill('files', 'standup'));
-  await a.click(skill('list', 'release-notes'));
+  await a.click(skillPart('open', 'standup'));
+  await a.click(skillPart('files', 'standup'));
+  await a.click(skillPart('list', 'release-notes'));
   await thumb();
-  check('Back in Files reselects the previous skill', await a.exists(skill('list', 'standup') + '[aria-pressed=true]'));
+  check('Back in Files reselects the previous skill', await a.exists(skillPart('list', 'standup') + '[aria-pressed=true]'));
   await thumb();
   check('Back out of Files reaches the table', !(await a.exists(byId('skills-list'))) && await page() === 'nav-skills');
   await thumb('forward');
@@ -481,17 +494,27 @@ async function backFlow() {
   const catalog = JSON.parse(readFileSync(listing, 'utf8'));
   catalog.plugins = catalog.plugins.filter(plugin => plugin.name === 'document-tools');
   writeFileSync(listing, JSON.stringify(catalog));
-  const knownFile = join(practice, '.claude/plugins/known_marketplaces.json');
-  const known = JSON.parse(readFileSync(knownFile, 'utf8'));
-  known['small-market'] = { source: { source: 'directory', path: small }, installLocation: small };
-  writeFileSync(knownFile, JSON.stringify(known));
   await a.click(byId('nav-plugins'));
-  await a.click('.market-item[title^="small-market"]');
+  await a.click('.market-item[title^="back-market"]');
+  await a.click(byId('open-add-marketplace'));
+  await a.run(`const input = document.getElementById('marketplace-source'); input.value = ${JSON.stringify(small)}; input.dispatchEvent(new Event('input'))`);
+  await a.click(byId('add-marketplace'));
+  await thumb();
+  same('Back from Add returns to the previously selected marketplace', await exactPlugin(), ['back-market', null]);
+  await thumb('forward');
   await a.click('.market-item[title^="back-market"]');
   await a.run("const find = document.getElementById('plugin-find'); find.value = 'issue'; find.dispatchEvent(new Event('input', { bubbles: true }));");
   await a.run("[...document.querySelectorAll('.market-chip')].find(e => e.textContent.startsWith('development')).click()");
   await thumb();
   same('Back clears the other marketplace’s Find and category', [await a.text('.market-item.selected .market-item-name'), await a.exists('[data-plugin="document-tools"]')], ['small-market', true]);
+  await a.click('[data-plugin="document-tools"] .plugin-row-open');
+  await a.click(byId('nav-settings'));
+  writeFileSync(join(scratch, 'back-data/marketplaces.json'), JSON.stringify([market]));
+  await thumb();
+  for (let tries = 0; tries < 50 && await a.exists('.market-item[title^="small-market"]'); tries++) await wait(100);
+  same('a removed marketplace falls back to the surviving list even when both list document-tools', await exactPlugin(), ['back-market', null]);
+  await thumb('forward');
+  same('the marketplace repair keeps Forward', await page(), 'nav-settings');
   await a.click(byId('nav-skills'));
   await a.click(byId('nav-instructions'));
   await a.click(byId('ins-edit-claude-cli'));
@@ -506,6 +529,23 @@ async function backFlow() {
   await a.click(byId('home-actual'));
   await thumb();
   same('another accepted home starts with no previous place', await page(), 'nav-instructions');
+  await a.click(byId('nav-skills'));
+  await a.click(skillPart('open', 'only-skill'));
+  await a.click(skillPart('files', 'only-skill'));
+  const removedSkill = join(scratch, 'removed-only-skill');
+  renameSync(onlySkill, removedSkill);
+  await a.click(byId('header-refresh'));
+  renameSync(removedSkill, onlySkill);
+  await a.click(byId('header-refresh'));
+  check('restoring the last skill leaves its table open', await a.exists(skillPart('open', 'only-skill')) && !(await a.exists(byId('skills-list'))));
+  await a.click(byId('nav-settings'));
+  await thumb();
+  renameSync(onlyCli, join(scratch, 'removed-claude-cli'));
+  renameSync(join(ownHome, '.claude'), join(scratch, 'removed-only-tool'));
+  await a.click(byId('header-refresh'));
+  same('losing the last managed tool takes Skills to Overview', await page(), 'nav-overview');
+  await thumb('forward');
+  same('the last-tool repair keeps Forward', await page(), 'nav-settings');
   same('no page errors during Back and Forward', a.pageErrors, []);
   await a.quit();
 }

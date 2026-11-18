@@ -8,6 +8,7 @@ export interface Visits { entries: Place[]; cursor: number }
 export const emptyVisits = (): Visits => ({ entries: [], cursor: -1 });
 // The press matcher compares the same fields as history, regardless of property order.
 export const placeKey = (p: Place) => JSON.stringify([p.page, p.tool, p.tab, p.source, p.marketName, p.marketTab, p.plugin, p.skill]);
+// moved means a function moved the person. Otherwise a changed place repairs the current entry and keeps Forward.
 export function recordPlace(list: Visits, place: Place, moved: boolean): Visits {
   const here = list.entries[list.cursor];
   if (here && placeKey(here) === placeKey(place)) return list;

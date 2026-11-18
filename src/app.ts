@@ -918,8 +918,8 @@ export function leaveResults(page = state.page) {
   tell(carried);
 }
 
-// The draw consumes this once for a whole click, including links that set more than one part of the place.
 let moveRequested = false;
+// Functions that move the person mark a visit for the next draw. A read that changes the place leaves it a repair.
 export const noteMove = () => { moveRequested = true; };
 export const takeMove = () => { const moved = moveRequested; moveRequested = false; return moved; };
 
@@ -942,6 +942,8 @@ export function showPage(page: Page, { repair = false } = {}) {
   state.item = undefined;
   rerender();
 }
+
+export const filesSkillAvailable = (home: HomeView, key?: string) => home.skills.items.some(skill => key === undefined || skill.key === key);
 
 /** Leaves the Skills page's Files and contents view for the table (its Table button, or Escape). */
 export function showSkillsTable() {

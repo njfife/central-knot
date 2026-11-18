@@ -275,6 +275,7 @@ export const addMarketplace = (source: string) => act('adding', async () => {
   const added = result.view?.marketplaces.find(entry => entry.source === result.source);
   market.draftSource = '';
   market.addOpen = false;
+  if (added && app.page === 'plugins') noteMove();
   market.nav = { ...startNav(), source: added?.source };
   showView(result.view);
   // The outcome first, the name last, so a narrow status bar that shortens the message cuts the name, not the news.

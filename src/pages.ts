@@ -3,7 +3,7 @@
 // tool managed (noToolsLead, noToolsState), and preview only's reason inside a sentence (previewReason). Every other page has a
 // module of its own (overview.ts, harnesspage.ts, historypage.ts, profilespage.ts, sourcespage.ts, repopage.ts, pluginspage.ts,
 // instructionspage.ts, settingspage.ts); which page draws is renderer.ts renderPage, and the page's state and actions are app.ts's.
-import { acting, announce, noToolManaged, noToolManagedSentence, homeToolNames, homeTools, loadHome, type PageKind, selectItem, shownPath, showFile, showPage, startHome, state } from './app.ts';
+import { acting, announce, filesSkillAvailable, noToolManaged, noToolManagedSentence, homeToolNames, homeTools, loadHome, type PageKind, selectItem, shownPath, showFile, showPage, startHome, state } from './app.ts';
 import { button, emptyState, fileBlocks, h, icon, section } from './dom.ts';
 import { toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill } from './types.ts';
@@ -137,6 +137,9 @@ const contents = (key: string, copies: Found[]) =>
 export function skillsPage() {
   const home = state.home;
   if (!home) return notRead();
+  if (state.skillsView === 'files' && !filesSkillAvailable(home, state.item)) {
+    state.skillsView = 'table'; state.item = undefined;
+  }
   if (!rowCount(home, 'skills')) return noSkills('empty-read');
   // The table is the Skills page; "Files" opens one skill's files and contents beside the list.
   if (state.skillsView !== 'files') return itemsTable('skills');

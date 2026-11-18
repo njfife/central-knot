@@ -54,7 +54,7 @@ const names = toolNames as Record<Tool, string>;
 function openPlugin({ source, plugin, marketplace }: { source?: string; plugin: string; marketplace?: string }) {
   const lists = (entry: { plugins: { name: string }[] }) => entry.plugins.some(item => item.name === plugin);
   const listed = market.view?.marketplaces.find(entry => entry.source === source && lists(entry)) ?? market.view?.marketplaces.find(entry => !!marketplace && entry.name === marketplace && lists(entry));
-  market.nav = { source: listed?.source ?? source, plugin, tab: 'plugins', find: '', category: undefined };
+  market.nav = { source: listed?.source ?? source, marketName: listed ? undefined : marketplace, plugin, tab: 'plugins', find: '', category: undefined };
   showPage('plugins');
 }
 
@@ -1942,8 +1942,6 @@ afterLayout(settleFilesColumns);
 export function skillsBrowser(more: (key: string) => { where: Node[]; contents: (Node | null | false)[] }, select: (key: string | undefined) => void) {
   const t = useTable('skills'), view = t.view;
   const all = rowsOf(t.kind);
-  // No skill at all (the last one just deleted): the table, which says so.
-  if (!all.length) return itemsTable('skills');
   const needle = view.listFind.trim().toLowerCase();
   const matches = all.filter(skill => !needle || skill.key.includes(needle) || (skill.name ?? '').toLowerCase().includes(needle) || skill.description.toLowerCase().includes(needle));
   // The table's headings, on, then found, then off (a row whose switch was clicked here under the one it was under), and its
@@ -1951,7 +1949,6 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   const pins = pinnedHere(t), place = new Map(all.map(skill => [idOf(skill), (['on', 'found', 'off'] as Role[]).indexOf(placeIn(pins, idOf(skill), sectionOf(t, skill)))]));
   const shown = inOrder(matches, chosenOrder(t), itemOf, usedAt(t), pins).sort((first, second) => place.get(idOf(first))! - place.get(idOf(second))!);
   const chosen = all.find(skill => skill.key === state.item);
-  if (state.item && !chosen) { state.skillsView = 'table'; state.item = undefined; return itemsTable('skills'); }
   // The detail always shows a skill: the chosen one, else the first listed. In narrow content it sits below the list.
   const shownDetail = chosen ?? shown[0] ?? all[0];
   // Record the implicit first selection too, so fullPlace names the skill actually drawn.
