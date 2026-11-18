@@ -34,7 +34,7 @@ import { agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts
 import { agentsFolder } from './agentfiles.ts';
 import { libraryEntry } from './historyactions.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
-import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
+import { clearDraftFolders, draftSources, draftTools, promptNow, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { addSource, checkDue, checkSource, previewSource, removeSource, rowClick, sourcesView } from './sources.ts';
@@ -1388,15 +1388,17 @@ app.whenReady().then(async () => {
     drafters = await draftTools(homedir(), await searchPath());
     return baseView(context(), harnessIds.filter(tool => drafters[tool]));
   });
+  handle('instructions:draft-prompt', async home => (home === current?.home ? promptNow(await draftSources(context(), await read())) : { stopped: notOpenHome }));
   // The files are read in turn with everything else; the tool then writes its draft outside the queue (it can take minutes,
   // and writes nothing), so sync never waits behind it.
-  handleNow('instructions:draft-base', async (tool, home): Promise<BaseDraft> => {
-    if (home !== current?.home || !isTool(tool)) return { stopped: notOpenHome };
+  handleNow('instructions:draft-base', async (tool, home, model, shown): Promise<BaseDraft> => {
+    if (home !== current?.home || !isTool(tool) || typeof shown !== 'string') return { stopped: notOpenHome };
     const binary = drafters[tool];
     if (!binary) return { stopped: 'That tool was not found on this computer, so it can’t write a draft.' };
     if (drafting) return { stopped: 'A draft is already being written.' };
     const mine = drafting = new AbortController();
-    try { return await writeDraft(await queued(async () => draftSources(context(), await read())), tool, binary, { signal: mine.signal }); }
+    const named = typeof model === 'string' && model.trim() ? model.trim() : undefined;
+    try { return await writeDraft(await queued(async () => draftSources(context(), await read())), tool, binary, { shown, model: named, signal: mine.signal }); }
     finally { if (drafting === mine) drafting = undefined; }
   });
   handleNow('instructions:cancel-draft', async () => { drafting?.abort(); });

@@ -1,7 +1,9 @@
 // A draft of the base instructions, written by one of the person's own tools (INS-06). The tool's CLI runs once, with a prompt
-// that holds every tool's own instructions, in an empty folder, with none of its tools on and no session kept. Its answer sorts
-// those instructions into what every tool should get (the base) and what stays only in each tool's file. Nothing is written
-// here: the answer is a draft, which the Instructions page reviews and saves like any other base change.
+// that holds every tool's own instructions, in an empty folder, with none of its tools on and no session kept, on the model the
+// person typed or on its own default. The prompt is shown before anything runs (promptNow), and what runs is sent exactly that
+// prompt (writeDraft refuses when the files changed since). Its answer sorts those instructions into what every tool should get
+// (the base) and what stays only in each tool's file. Nothing is written here: the answer is a draft, which the Instructions page
+// reviews and saves like any other base change.
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,14 +24,17 @@ const MOST_OUTPUT = 4 * 1024 * 1024;
 /**
  * How each tool is run for one answer and no more: the prompt arrives on standard input, the tool's own tools are off where it
  * has a switch for that (Copilot CLI has none, and without approval it runs none that change anything), and no session is kept
- * where it can be told so. Codex prints its progress, so its answer is read from the file it is told to write.
+ * where it can be told so. Codex prints its progress, so its answer is read from the file it is told to write. With `model`,
+ * the tool is asked for it by name as `--model`, which each of these CLIs takes (Codex's inside `exec`, before the `-` that
+ * reads the prompt); without, it uses its own default.
  */
-export function draftCommand(tool: HarnessId, answerFile: string): { args: string[]; answer: 'output' | 'file' } | undefined {
+export function draftCommand(tool: HarnessId, answerFile: string, model?: string): { args: string[]; answer: 'output' | 'file' } | undefined {
+  const on = model ? ['--model', model] : [];
   switch (tool) {
-    case 'claude-cli': return { args: ['-p', '--tools', '', '--strict-mcp-config', '--no-session-persistence'], answer: 'output' };
-    case 'codex-cli': return { args: ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '--color', 'never', '-o', answerFile, '-'], answer: 'file' };
-    case 'copilot-cli': return { args: ['-s', '--no-color', '--no-ask-user'], answer: 'output' };
-    case 'pi-cli': return { args: ['-p', '--no-tools', '--no-session'], answer: 'output' };
+    case 'claude-cli': return { args: ['-p', '--tools', '', '--strict-mcp-config', '--no-session-persistence', ...on], answer: 'output' };
+    case 'codex-cli': return { args: ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '--color', 'never', '-o', answerFile, ...on, '-'], answer: 'file' };
+    case 'copilot-cli': return { args: ['-s', '--no-color', '--no-ask-user', ...on], answer: 'output' };
+    case 'pi-cli': return { args: ['-p', '--no-tools', '--no-session', ...on], answer: 'output' };
     // OpenCode writes no draft: its newer line answers through a background service that stays running, which Central Knot never starts.
     case 'opencode-cli': return undefined;
   }
@@ -60,6 +65,12 @@ export async function draftSources(context: ShareContext, snapshots: Snapshot[])
 
 const mark = (name: string) => `<<<CENTRAL KNOT: ${name}>>>`;
 const MARK = /^\s*<<<\s*CENTRAL KNOT:\s*([\w-]+)\s*>>>\s*$/i;
+
+const NOTHING_TO_SORT = 'No tool’s file has instructions of its own, so there is nothing to draft from.';
+
+/** What a draft would send now, shown before anything runs: the prompt, or why there is nothing to draft from. */
+export const promptNow = (sources: DraftSources): { prompt: string } | { stopped: string } =>
+  (sources.files.length ? { prompt: draftPrompt(sources) } : { stopped: NOTHING_TO_SORT });
 
 /** What the tool is asked: how to sort, the texts, and the form of the answer. */
 export function draftPrompt(sources: DraftSources): string {
@@ -195,19 +206,23 @@ function lastWords(text: string) {
 }
 
 /**
- * Has `by` write a draft from `sources`. The answer comes back sorted, with the hash of everything it was written from, so a
- * review can tell when a file changed since. A failure says what the tool said; every failure leaves everything as it was.
+ * Has `by` write a draft from `sources`, on `model` when one is given. It is sent `shown`, the prompt the person saw: when the
+ * files changed since, so that the prompt now differs, nothing runs and the prompt as it is now comes back to be shown instead.
+ * The answer comes back sorted, with the hash of everything it was written from, so a review can tell when a file changed
+ * since. A failure says what the tool said; every failure leaves everything as it was.
  */
-export async function writeDraft(sources: DraftSources, by: HarnessId, binary: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<BaseDraft> {
+export async function writeDraft(sources: DraftSources, by: HarnessId, binary: string, options: { shown: string; model?: string; signal?: AbortSignal; timeoutMs?: number }): Promise<BaseDraft> {
   const name = toolNames[by];
-  if (!sources.files.length) return { stopped: 'No tool’s file has instructions of its own, so there is nothing to draft from.' };
+  if (!sources.files.length) return { stopped: NOTHING_TO_SORT };
+  const prompt = draftPrompt(sources);
+  if (prompt !== options.shown) return { promptNow: prompt };
   // An empty folder of its own: no project there for the tool to read, and nothing of the person's to change.
   const folder = await mkdtemp(join(tmpdir(), 'central-knot-draft-'));
   try {
     const answerFile = join(folder, 'answer.md');
-    const command = draftCommand(by, answerFile);
+    const command = draftCommand(by, answerFile, options.model);
     if (!command) return { stopped: `${name} can’t write a draft here. Nothing was changed.` };
-    const ran = await run(binary, command.args, draftPrompt(sources), { cwd: folder, signal: options.signal, timeoutMs: options.timeoutMs ?? DRAFT_TIMEOUT_MS });
+    const ran = await run(binary, command.args, prompt, { cwd: folder, signal: options.signal, timeoutMs: options.timeoutMs ?? DRAFT_TIMEOUT_MS });
     if (ran.code === 'cancelled') return { cancelled: true };
     if (ran.code === 'missing') return { stopped: `${name} could not be started, so there is no draft. Nothing was changed.` };
     if (ran.code === 'timeout') return { stopped: `${name} did not finish a draft in time, so it was stopped. Nothing was changed.` };

@@ -211,8 +211,11 @@ export interface DesktopApi {
   /** The base instructions and the tools that get them (INS-03). */
   instructionBase(): Promise<BaseView | null>;
   applyBase(request: BaseApply, home: string): Promise<BaseResult>;
-  /** Has `tool` write a draft of the base from every tool's own instructions. Nothing is saved: the draft is reviewed first. */
-  draftBase(tool: HarnessId, home: string): Promise<BaseDraft>;
+  /** The prompt a draft of the base would send now, shown before anything runs; or why there is nothing to draft from. */
+  draftPrompt(home: string): Promise<{ prompt: string } | { stopped: string }>;
+  /** Has `tool` write a draft of the base from every tool's own instructions, on `model` ('' for the tool's own default), sent
+   *  `shown`, the prompt the person saw (draftbase.ts writeDraft). Nothing is saved: the draft is reviewed first. */
+  draftBase(tool: HarnessId, home: string, model: string, shown: string): Promise<BaseDraft>;
   /** Stops the draft being written, if one is. */
   cancelDraft(): Promise<void>;
   undoBase(undo: BaseUndo, home: string): Promise<BaseResult>;
@@ -566,7 +569,13 @@ export interface HistoryEvent {
 }
 
 // ---------- Marketplaces and plugins ----------
-export interface Components { skills: number; commands: number; agents: number; hooks: boolean; mcp: number; mcpRootVariable: boolean; bin: boolean; /** The skills' folder names, to show how a tool will name them. */ skillNames?: string[] }
+export interface Components {
+  skills: number; commands: number; agents: number; hooks: boolean; mcp: number; mcpRootVariable: boolean; bin: boolean;
+  /** Some hook listens to an event whose hooks can add text to sessions (pluginoutcomes.ts canAddText). */
+  sessionTextHooks: boolean;
+  /** The skills' folder names, to show how a tool will name them. */
+  skillNames?: string[];
+}
 
 export interface CatalogPlugin {
   name: string;
@@ -738,17 +747,23 @@ export interface PluginItemLine { kind: ItemKind; key: string; name: string; sta
 export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; of: number; ready?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean }>> }
 
 /**
- * One named part of a plugin (a skill, command or agent): what it says it does, its whole file (SKILL.md or NAME.md) as
- * written, and where it sits in the plugin (`path`, the same in every copy of the plugin).
+ * One named part of a plugin (a skill, command, agent or instruction file): what it says it does, its whole file (SKILL.md,
+ * NAME.md, CLAUDE.md…) as written, and where it sits in the plugin (`path`, the same in every copy of the plugin).
  */
 export interface NamedPart { name: string; description: string; text: string; path: string }
+/** One hook event a plugin listens to, such as PreToolUse, with each command its hooks run then, as written (never run here). */
+export interface PluginHook { event: string; runs: string[] }
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
 export interface PluginContents {
   skills: NamedPart[];
   commands: NamedPart[];
   agents: NamedPart[];
-  /** Hook events it listens to, such as PreToolUse. */
-  hooks: string[];
+  /** Its instruction files (catalogdetail.ts INSTRUCTION_FILES), each named by its path in the plugin. No tool reads one. */
+  instructions: NamedPart[];
+  /** It holds instruction files and nothing else that could be a part, so installing it makes no tool read anything of it (catalogdetail.ts holdsOnlyInstructions). */
+  onlyInstructions: boolean;
+  /** The hook events it listens to, by name. */
+  hooks: PluginHook[];
   /** Each MCP server with what it runs or connects to, and its entry as the plugin writes it, as JSON. */
   mcpServers: { name: string; runs: string; entry: string }[];
   /** Some server refers to ${CLAUDE_PLUGIN_ROOT}, which only Claude Code fills in. */
@@ -770,7 +785,7 @@ export interface PluginDetail extends PluginContents {
   installed?: Partial<Record<HarnessId, InstalledCopy>>;
 }
 /** What one tool has installed of a plugin, read from that tool's own copy. */
-export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents' | 'version'>;
+export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents' | 'instructions' | 'version'>;
 
 export interface PluginsView {
   home: string;
@@ -980,6 +995,8 @@ export interface BaseApply { text: string; expected: string; tools: HarnessId[];
  * listed), and the hash of each file and of the base it was written from, so a review can tell what changed since.
  */
 export interface BaseDraft { stopped?: string; cancelled?: true;
+  /** Nothing ran: the files changed after the prompt was shown, and this is the prompt as it would be sent now. */
+  promptNow?: string;
   draft?: { by: HarnessId; base: string; own: Partial<Record<HarnessId, string>>; read: Partial<Record<HarnessId, string>>; baseHash: string } }
 /** What an apply or undo did per tool. */
 export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean;

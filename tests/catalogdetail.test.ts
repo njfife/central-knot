@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { inside, marketplacePage, pluginContents, pluginFiles, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
+import { componentsFrom, outcomes } from '../src/pluginoutcomes.ts';
 
 const noLinks = process.platform === 'win32';
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -33,7 +34,7 @@ test('Parts are found as Claude Code and Codex find them: what plugin.json and t
     assert.deepEqual(contents.commands.map(command => command.name), ['notes', 'status']);
     // plugin.json's version wins over the entry's.
     assert.equal(contents.version, '0.9.0');
-    assert.deepEqual(contents.hooks, ['PreToolUse', 'SessionStart']);
+    assert.deepEqual(contents.hooks.map(hook => hook.event), ['PreToolUse', 'SessionStart']);
     assert.deepEqual(contents.mcpServers, [{ name: 'files', runs: 'npx -y files-mcp', entry: '{"command":"npx","args":["-y","files-mcp"]}' }]);
     // A marketplace's root plugin whose entry lists skills loads only those.
     assert.deepEqual((await pluginContents(root, { skills: ['./skills/hello'] }, root, { atMarketplaceRoot: true })).skills.map(skill => skill.name), ['hello']);
@@ -78,9 +79,111 @@ test('Server and hook files are read in every shape plugins use: flat or wrapped
     assert.deepEqual(contents.mcpServers.map(server => server.name), ['github', 'one', 'two']);
     assert.equal(contents.mcpUsesPluginRoot, true);
     assert.deepEqual(contents.lspServers, ['gopls', 'rust']);
-    assert.deepEqual(contents.hooks, ['PreToolUse']);
+    assert.deepEqual(contents.hooks.map(hook => hook.event), ['PreToolUse']);
     // Two commands may share a name in different folders; their places in the plugin tell them apart.
     assert.deepEqual(contents.commands.map(command => [command.name, command.path]), [['commit', join('commands', 'docs', 'commit.md')], ['commit', join('commands', 'git', 'commit.md')]]);
+  } finally { await cleanup(); }
+});
+
+test('A plugin’s instruction files are listed by their path in it, from the fixed places only, in the plugin’s own repository too', async () => {
+  const { root, cleanup } = await box();
+  try {
+    const plugin = join(root, 'plugins/notes');
+    for (const path of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.claude/CLAUDE.md', '.github/copilot-instructions.md', 'com.github.copilot/rules/plain.md', 'com.github.copilot/rules/scoped.instructions.md']) await put(join(plugin, path), `Read me: ${path}\n`);
+    // Not instruction files here: a rules/ or instructions/ folder at the root (plugins keep other things there), a file
+    // deeper in Copilot's rules folder, one that isn't Markdown, one inside a skill, and a manifest field naming one.
+    for (const path of ['rules/style.md', 'instructions/style.instructions.md', 'com.github.copilot/rules/deeper/more.md', 'com.github.copilot/rules/notes.txt', 'skills/s/AGENTS.md']) await put(join(plugin, path), 'Not listed.\n');
+    await put(join(plugin, 'skills/s/SKILL.md'), '---\nname: s\n---\n');
+    await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'notes', instructions: './rules/style.md' }));
+    const contents = await pluginContents(plugin, {}, root);
+    assert.deepEqual(contents.instructions.map(file => file.path), ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', join('.claude', 'CLAUDE.md'), join('.github', 'copilot-instructions.md'), join('com.github.copilot', 'rules', 'plain.md'), join('com.github.copilot', 'rules', 'scoped.instructions.md')]);
+    // Each is named by its path and holds its whole text, as a skill's file does.
+    assert.deepEqual(contents.instructions[3], { name: join('.claude', 'CLAUDE.md'), description: '', text: 'Read me: .claude/CLAUDE.md\n', path: join('.claude', 'CLAUDE.md') });
+  } finally { await cleanup(); }
+});
+
+test('A plugin holding only a CLAUDE.md holds that file and nothing else, and no tool has a line for it', async () => {
+  const { root, cleanup } = await box();
+  try {
+    await put(join(root, 'plugins/atlas/CLAUDE.md'), 'You have access to Atlas through MCP tools.\n');
+    const contents = await pluginContents(join(root, 'plugins/atlas'), {}, root);
+    assert.deepEqual([contents.instructions.map(file => [file.name, file.text]), contents.skills, contents.commands, contents.agents, contents.hooks, contents.mcpServers],
+      [[['CLAUDE.md', 'You have access to Atlas through MCP tools.\n']], [], [], [], [], []]);
+    // No tool reads it, so "In each tool" has nothing to say of it (and so nothing to show as a limit on a tool's line).
+    const components = componentsFrom(contents);
+    assert.deepEqual((['claude-cli', 'copilot-cli', 'codex-cli'] as const).map(tool => outcomes(tool, components)), [[], [], []]);
+  } finally { await cleanup(); }
+});
+
+test('A plugin holds only instruction files when nothing else in it could be a part: a manifest that only describes it, a README and a licence don’t count; an output style, Copilot’s hooks, a manifest naming another kind of part or holding a server, or a skill do', async () => {
+  const { root, cleanup } = await box();
+  try {
+    const plugin = join(root, 'plugins/notes');
+    await put(join(plugin, 'CLAUDE.md'), 'House style.\n');
+    await put(join(plugin, 'com.github.copilot/rules/style.md'), 'House style.\n');
+    await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'notes', version: '1.0.0', description: 'House style.', author: { name: 'Docs' } }));
+    await put(join(plugin, 'README.md'), '# notes\n');
+    await put(join(plugin, 'LICENSE'), 'MIT\n');
+    const read = () => pluginContents(plugin, { name: 'notes', source: './plugins/notes', category: 'style' }, root);
+    assert.equal((await read()).onlyInstructions, true);
+    // A forced output style: Claude Code adds it to every session, though this reader names no such part.
+    await put(join(plugin, 'output-styles/house.md'), '---\nname: House\nforce-for-plugin: true\n---\nWrite short sentences.\n');
+    assert.equal((await read()).onlyInstructions, false, 'an output style');
+    await rm(join(plugin, 'output-styles'), { recursive: true });
+    // Copilot's own hooks folder, beside its rules: a part this reader doesn't read.
+    await put(join(plugin, 'com.github.copilot/hooks/hooks.json'), '{"version":1,"hooks":{}}');
+    assert.equal((await read()).onlyInstructions, false, 'Copilot’s hooks folder');
+    await rm(join(plugin, 'com.github.copilot/hooks'), { recursive: true });
+    // A manifest naming a kind of part this reader doesn't know, wherever its files are.
+    await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'notes', outputStyles: './CLAUDE.md' }));
+    assert.equal((await read()).onlyInstructions, false, 'a manifest naming output styles');
+    // An MCP server written in the manifest itself: no file of its own, yet a part.
+    await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'notes', mcpServers: { style: { command: 'style-mcp' } } }));
+    assert.equal((await read()).onlyInstructions, false, 'a server in the manifest');
+    // And a plugin with a skill holds more than instruction files.
+    await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'notes' }));
+    await put(join(plugin, 'skills/style/SKILL.md'), '---\nname: style\n---\n');
+    assert.equal((await read()).onlyInstructions, false, 'a skill');
+  } finally { await cleanup(); }
+});
+
+test('Each hook event comes with the commands its hooks run, as written, with their arguments, in Claude Code’s form and Copilot CLI’s; start-of-session and prompt hooks are the ones that can add text, and each tool’s line says how', async () => {
+  const { root, cleanup } = await box();
+  try {
+    const claudeStart = 'echo \'{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Use the team style."}}\'';
+    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: {
+      SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: claudeStart }, { type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/hooks/fresh.sh' }] }],
+      UserPromptSubmit: [{ hooks: [{ type: 'prompt', prompt: 'Is this safe?' }] }],
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'check-bash' }] }],
+      // A command with its arguments (stripe's and zyte's form): shown as the tool runs it, an argument with a space quoted.
+      Stop: [{ hooks: [{ type: 'command', command: 'uv', args: ['run', '--directory', '${CLAUDE_PLUGIN_ROOT}/hooks', 'end of turn.py'] }] }],
+      // Copilot CLI's form: the command for each shell, bash first, then one for every shell.
+      sessionStart: [{ type: 'command', bash: './start.sh', powershell: './start.ps1' }, { type: 'command', command: './any-shell.sh' }],
+      userPromptSubmitted: [{ type: 'command', powershell: './prompt.ps1' }],
+    } }));
+    const contents = await pluginContents(root, {}, root);
+    assert.deepEqual(contents.hooks, [
+      { event: 'PreToolUse', runs: ['check-bash'] },
+      { event: 'SessionStart', runs: [claudeStart, '${CLAUDE_PLUGIN_ROOT}/hooks/fresh.sh'] },
+      { event: 'Stop', runs: ['uv run --directory ${CLAUDE_PLUGIN_ROOT}/hooks "end of turn.py"'] },
+      // A hook that runs no command (a prompt hook) is the event alone.
+      { event: 'UserPromptSubmit', runs: [] },
+      { event: 'sessionStart', runs: ['./start.sh', './any-shell.sh'] },
+      { event: 'userPromptSubmitted', runs: ['./prompt.ps1'] },
+    ]);
+    const sessionText = (components: ReturnType<typeof componentsFrom>) => (['claude-cli', 'copilot-cli', 'codex-cli'] as const).map(tool => outcomes(tool, components).filter(outcome => outcome.component === 'Session text').map(outcome => [outcome.result, outcome.text]));
+    assert.deepEqual(sessionText(componentsFrom(contents)), [
+      [['works', 'comes from start-of-session and prompt hooks']],
+      [['limited', 'is limited: only a start-of-session hook that prints `{"additionalContext": …}` at the top level adds it; Claude Code’s `hookSpecificOutput` form and prompt hooks’ output are ignored']],
+      [['limited', 'waits for trust: these hooks can add it once you trust them in Codex (`/hooks`)']],
+    ]);
+    // A plugin whose hooks all listen elsewhere has hooks, and no Session text line.
+    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'check-bash' }] }], Stop: [] } }));
+    const only = componentsFrom(await pluginContents(root, {}, root));
+    assert.deepEqual([only.hooks, only.sessionTextHooks, sessionText(only)], [true, false, [[], [], []]]);
+    // A plugin in Copilot CLI's form alone: its start-of-session hook can add text too.
+    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: './start.sh' }] } }));
+    assert.equal(componentsFrom(await pluginContents(root, {}, root)).sessionTextHooks, true);
   } finally { await cleanup(); }
 });
 
@@ -92,7 +195,9 @@ test('Nothing outside the marketplace is read, through a listed path or a link',
     await mkdir(join(root, 'plugins/p/skills'), { recursive: true });
     await symlink(join(base, 'private/notes.txt'), join(root, 'plugins/p/README.md'));
     await symlink(join(base, 'private'), join(root, 'plugins/p/skills/linked'));
+    await symlink(join(base, 'private/notes.txt'), join(root, 'plugins/p/CLAUDE.md'));
     assert.equal(await readmeIn(join(root, 'plugins/p'), root), undefined);
+    assert.deepEqual((await pluginContents(join(root, 'plugins/p'), {}, root)).instructions, [], 'an instruction file linked to one outside is not read');
     const contents = await pluginContents(join(root, 'plugins/p'), { skills: ['../../../private'] }, root);
     assert.deepEqual(contents.skills, []);
     assert.deepEqual((await pluginContents(join(root, 'plugins/p'), {}, root)).skills, []);
