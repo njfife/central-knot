@@ -4493,6 +4493,79 @@ async function draftFlow() {
   writeFileSync(agentsMd, crlf);
   await a.click('#header-refresh');
   await untilQuiet(a);
+  // ---- PROBE (scratch branch probe/gesture-events only, never merged): what a real-shaped press on a shown text meets here.
+  // Each case prints one line `PROBE <case> {json}`: the events in order with their times (ms from the press's start), the
+  // marks after pointerup (a microtask, a timeout(0), a frame), focus and visibility events, the click's target and whether it
+  // is still in the page, the selection, activeElement, and the editor's caret just after the gesture and after one more redraw.
+  {
+    const pre = '[aria-label="Codex instructions"] pre.ins-preview';
+    await a.run(`(() => {
+      if (window.__probe) return;
+      const P = window.__probe = { log: [], on: false, t0: 0, upHook: null };
+      const name = node => !node ? null : node === window ? 'window' : node === document ? 'document' : node.nodeType === 3 ? '#text' + (node.isConnected ? '' : '(gone)')
+        : (node.id ? '#' + node.id : node.nodeName.toLowerCase() + (typeof node.className === 'string' && node.className ? '.' + node.className.split(' ')[0] : '')) + (node.dataset?.probe ? '[' + node.dataset.probe + ']' : '') + (node.isConnected ? '' : '(gone)');
+      const sel = () => { const s = getSelection(); return s && !s.isCollapsed ? JSON.stringify(String(s).slice(0, 24)) + ' in ' + name(s.anchorNode?.parentElement) : 'none'; };
+      P.put = (what, extra) => { if (P.on) P.log.push([Math.round(performance.now() - P.t0), what, extra ?? '']); };
+      for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'click', 'focusin', 'focusout']) window.addEventListener(type, event => {
+        P.put(type, name(event.target) + (event.buttons !== undefined ? ' b' + event.buttons : '') + (type === 'click' ? ' sel=' + sel() + ' active=' + name(document.activeElement) : ''));
+        if (type === 'pointerup' && P.on) {
+          queueMicrotask(() => P.put('microtask after pointerup'));
+          setTimeout(() => P.put('timeout0 after pointerup', 'sel=' + sel()));
+          requestAnimationFrame(() => P.put('frame after pointerup', 'sel=' + sel()));
+          const hook = P.upHook; P.upHook = null; hook?.();
+        }
+        if (type === 'mouseup' && P.on) { const hook = P.mouseupHook; P.mouseupHook = null; hook?.(); }
+      }, true);
+      window.addEventListener('focus', event => { if (event.target === window) P.put('window focus'); }, true);
+      window.addEventListener('blur', event => { if (event.target === window) P.put('window blur'); }, true);
+      document.addEventListener('visibilitychange', () => P.put('visibility', document.visibilityState));
+      // A redraw that changes no state: the sidebar's toggle clicked twice.
+      P.redraw = why => { P.put('redraw ' + why); for (let i = 0; i < 2; i++) document.getElementById('sidebar-toggle').click(); P.put('redrawn'); };
+      P.selectNow = (from, to) => { const node = document.querySelector(${JSON.stringify(pre)}).firstChild; getSelection().setBaseAndExtent(node, node.data.indexOf(from), node, node.data.indexOf(to)); P.put('selection set', sel()); };
+      P.sel = sel; P.name = name;
+    })()`);
+    const mouse = (type, at, buttons) => a.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', buttons, clickCount: 1 });
+    const rest = async () => {
+      if (await a.exists('#ins-text-codex-cli')) await a.press('Escape');
+      for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
+      await a.run(`getSelection().removeAllRanges()`);
+      await a.settle();
+    };
+    const probeCase = async (label, { redraw, drag = false, select = false }) => {
+      await rest();
+      await a.run(`document.querySelector('#ins-head-codex-cli').scrollIntoView({ block: 'start' })`);
+      const from = await pointAt(a, pre, drag ? 'line one' : 'TARGET'), mid = await pointAt(a, pre, 'line two'), to = await pointAt(a, pre, 'last line');
+      const hook = [redraw === 'release' ? `P.redraw('at pointerup');` : redraw === 'task' ? `setTimeout(() => P.redraw('in a task after pointerup'));` : '', select ? `P.selectNow(${JSON.stringify(drag ? 'line one' : 'TARGET')}, ${JSON.stringify(drag ? 'last line' : ' here')});` : ''].join(' ');
+      await a.run(`(() => { const P = window.__probe; P.log = []; P.t0 = performance.now(); P.on = true; document.querySelector(${JSON.stringify(pre)}).dataset.probe = 'old';
+        P.upHook = () => { ${hook} }; P.mouseupHook = ${redraw === 'mouseup' ? `() => P.redraw('at mouseup')` : 'null'}; })()`);
+      await mouse('mouseMoved', from, 0); await mouse('mousePressed', from, 1);
+      if (drag) await mouse('mouseMoved', mid, 1);
+      if (redraw === 'press') await a.run(`window.__probe.redraw('between press and release')`);
+      if (drag) await mouse('mouseMoved', to, 1);
+      await mouse('mouseReleased', drag ? to : from, 0);
+      await a.settle();
+      const look = `(() => { const P = window.__probe, area = document.querySelector('#ins-text-codex-cli'); return { editor: area ? area.value.slice(area.selectionStart, area.selectionStart + 6) + '@' + area.selectionStart : 'none', active: P.name(document.activeElement), selection: P.sel() }; })()`;
+      const after = await a.run(look);
+      if (await a.exists('#ins-text-codex-cli')) { await a.run(`window.__probe.redraw('after the gesture')`); await a.settle(); after.afterOneMoreRedraw = await a.run(look); }
+      after.log = await a.run(`(() => { const P = window.__probe; P.on = false; return P.log; })()`);
+      console.log(`PROBE ${label} ${JSON.stringify(after)}`);
+    };
+    for (let run = 1; run <= 3; run++) await probeCase(`click-plain#${run}`, {});
+    for (let run = 1; run <= 3; run++) await probeCase(`click-redraw-between-press-and-release#${run}`, { redraw: 'press' });
+    for (let run = 1; run <= 3; run++) await probeCase(`click-redraw-between-release-and-click#${run}`, { redraw: 'release' });
+    for (let run = 1; run <= 3; run++) await probeCase(`click-redraw-at-mouseup#${run}`, { redraw: 'mouseup' });
+    for (let run = 1; run <= 3; run++) await probeCase(`click-redraw-in-a-task-after-pointerup#${run}`, { redraw: 'task' });
+    for (let run = 1; run <= 2; run++) await probeCase(`drag-redraw-in-the-middle#${run}`, { redraw: 'press', drag: true });
+    await probeCase('drag-plain', { drag: true });
+    await probeCase('click-plain+selection-set-at-pointerup', { select: true });
+    await probeCase('click-redraw-between-press-and-release+selection-set-at-pointerup', { redraw: 'press', select: true });
+    await probeCase('click-redraw-between-release-and-click+selection-set-at-pointerup', { redraw: 'release', select: true });
+    await probeCase('click-redraw-at-mouseup+selection-set-at-pointerup', { redraw: 'mouseup', select: true });
+    await probeCase('drag-redraw-in-the-middle+selection-set-at-pointerup', { redraw: 'press', drag: true, select: true });
+    await rest();
+  }
+  // ---- end of PROBE
+  await untilQuiet(a);
   const target = await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
   // What is under the click's point, said if the check fails.
   const under = await a.run(`(() => { const hit = document.elementFromPoint(${target.x}, ${target.y}), at = document.caretRangeFromPoint(${target.x}, ${target.y}); return { point: ${JSON.stringify(target)}, hit: hit && (hit.id || hit.className || hit.tagName), at: at && [at.startContainer.nodeName, at.startOffset], scroll: document.querySelector('#instructions-scroll').scrollTop }; })()`);
