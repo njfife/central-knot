@@ -508,6 +508,22 @@ function pointAt(a, selector, words) {
     return { x: box.left + 1, y: box.top + box.height / 2 };
   })()`);
 }
+/**
+ * Waits until the page is not about to redraw: the flow's own settle, then no redraw of the page for longer than a background
+ * pass takes to follow a file the flow wrote (main.ts DEBOUNCE_MS, then the read it starts), at most 15 s. A redraw landing in
+ * the middle of a pointer gesture is a known fault of the app with a step of its own (judges/gesture-spike-notes.md in the plan
+ * folder); the checks that wait here are about what a click or a drag on a text does, not about that.
+ */
+async function untilQuiet(a, quietMs = 3000) {
+  await a.settle();
+  await a.run(`new Promise(done => {
+    let last = Date.now();
+    const watch = new MutationObserver(() => { last = Date.now(); });
+    watch.observe(document.getElementById('page'), { childList: true });
+    const end = Date.now() + 15000, look = () => { if (Date.now() - last >= ${quietMs} || Date.now() > end) { watch.disconnect(); done(true); } else setTimeout(look, 100); };
+    look();
+  })`);
+}
 /** The open editor's id and where its caret is, as [id, the caret's offset]. */
 const caretAt = a => a.run(`[document.activeElement?.id, document.activeElement?.selectionStart]`);
 /**
@@ -2103,6 +2119,7 @@ async function practiceFlow() {
   check('Save adds the base after each chosen tool’s own text, which is unchanged', baseClaude1.startsWith(baseClaude0) && baseClaude1.includes('- Shared by every tool.') && baseCodex1.startsWith(baseCodex0) && baseCodex1.includes('- Shared by every tool.'), baseClaude1);
   check('an unchosen tool is not written', !existsSync(join(practice, '.copilot/copilot-instructions.md')));
   // A click on the base's text opens its editor as Edit text or tools does, with the caret where the click landed.
+  await untilQuiet(a);
   await clickText(a, '#base-card pre.ins-preview', 'every tool.');
   same('a click on the base’s text opens its editor, the caret where it landed', await caretAt(a), ['base-text', '- Shared by '.length]);
   check('with its actions in the card’s head', await a.exists('#base-head #base-review') && await a.exists('#base-head #base-cancel'), await a.text('#base-head'));
@@ -4463,6 +4480,7 @@ async function draftFlow() {
   const crlf = 'Run codex review before pushing.\r\nline one\r\nline two\r\nTARGET here\r\nlast line\r\n';
   writeFileSync(agentsMd, crlf);
   await a.click('#header-refresh');
+  await untilQuiet(a);
   const target = await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
   // What is under the click's point, said if the check fails.
   const under = await a.run(`(() => { const hit = document.elementFromPoint(${target.x}, ${target.y}), at = document.caretRangeFromPoint(${target.x}, ${target.y}); return { point: ${JSON.stringify(target)}, hit: hit && (hit.id || hit.className || hit.tagName), at: at && [at.startContainer.nodeName, at.startOffset], scroll: document.querySelector('#instructions-scroll').scrollTop }; })()`);
@@ -4490,6 +4508,7 @@ async function draftFlow() {
   // click, which opens the editor, and its second selects the word there.
   const codexText = '[aria-label="Codex instructions"] pre.ins-preview';
   await a.run(`document.querySelector('#ins-head-codex-cli').scrollIntoView({ block: 'start' })`);
+  await untilQuiet(a);
   const from = await pointAt(a, codexText, 'line one'), to = await pointAt(a, codexText, 'last line');
   for (const [type, at, buttons] of [['mouseMoved', from, 0], ['mousePressed', from, 1], ['mouseMoved', to, 1], ['mouseReleased', to, 0]]) await a.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', buttons, clickCount: 1 });
   await a.settle();
@@ -4697,6 +4716,7 @@ async function draftFlow() {
   await a.run(`document.querySelector('#ins-head-claude-cli').scrollIntoView({ block: 'start' })`);
   same('at 860×600 a 200-line text’s Edit is in view at its card’s head', await inView(['ins-edit-claude-cli']), [true]);
   await a.click('#ins-more-claude-cli');
+  await untilQuiet(a);
   await clickText(a, '[aria-label="Claude Code instructions"] pre.ins-preview', '- Line 150 ');
   same('a click on line 150 opens the editor with the caret on it', await caretAt(a), ['ins-text-claude-cli', long.indexOf('- Line 150 ')]);
   same('with Review changes and Cancel in view, and line 150 too, without scrolling the page', [...await inView(['ins-review-claude-cli', 'ins-cancel-claude-cli']), await caretLineShows(a)], [true, true, true]);
