@@ -178,7 +178,7 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   };
   const settle = async () => { await wait(120); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s.')) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
-    child, run, send, settle, pageErrors,
+    child, run, send, settle, pageErrors, debugUrl: targets[0].webSocketDebuggerUrl,
     inspect, main: inspect && (() => mainProcess(inspect)),
     // A row's own switch or Add clicked here is a run of its own: the header's result is closed first, which ends the run on screen
     // (clicklist.ts runAt), so each step reads its own click's result. clickInRun leaves it open, so a click soon after the last
@@ -1082,11 +1082,51 @@ async function practiceFlow() {
     [byUpdated[0], [...byUpdated].sort(), standupWhen, onAgents, await onRows(), await a.exists('.ov-when')], ['standup', [...byName].sort(), 'just now', 'updated', byName, false]);
   const releaseNotesIn = () => ['claude', 'copilot', 'codex'].map(tool => existsSync(join(practice, `.${tool}/skills/release-notes/SKILL.md`)));
   const releaseNotesOn = folders('release-notes');
-  rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
-  await a.click('#header-refresh');
-  check('a fresh deletion waits for the settle window: nothing removed or put back yet', existsSync(join(practice, '.claude/skills/release-notes')) && !existsSync(join(practice, '.copilot/skills/release-notes')));
-  await wait(2200);
-  await a.click('#header-refresh');
+  // Read the real folders at the instant the page asks: pausing its listener keeps the background reply from landing
+  // between that check and the click. The same probe reads the files at the first Refresh's draw, before its settle.
+  const probe = await connect(a.debugUrl, async event => {
+    if (event.method !== 'Debugger.paused') return;
+    await probe.send('Debugger.evaluateOnCallFrame', { callFrameId: event.params.callFrames[0].callFrameId,
+      expression: `window.releaseNotesCopies = ${JSON.stringify(releaseNotesIn())}` });
+    await probe.send('Debugger.resume');
+  });
+  let refreshNotice;
+  try {
+    await probe.send('Debugger.enable');
+    await a.run(`{
+      const copies = () => { debugger; return window.releaseNotesCopies; };
+      const clickAndRead = read => new Promise((done, fail) => {
+        const draw = new MutationObserver(() => {
+          if (document.body.dataset.busy === 'true') return;
+          draw.disconnect();
+          clearTimeout(limit);
+          done(read());
+        });
+        const limit = setTimeout(() => { draw.disconnect(); fail(new Error('Refresh did not finish.')); }, 30000);
+        draw.observe(document.body, { attributes: true, attributeFilter: ['data-busy'] });
+        document.querySelector('#header-refresh').click();
+      });
+      window.firstRefreshCopies = () => clickAndRead(copies);
+      window.deletionRefresh = new Promise((done, fail) => {
+        const limit = setTimeout(() => fail(new Error('The deletion did not trigger a completed Refresh.')), 30000);
+        let clicked = false;
+        centralKnot.onSyncChanged(() => {
+          // With the page paused, an earlier signal still finds a copy. Only the deletion pass removes the two that survived the hand deletion.
+          if (clicked || copies().some(Boolean)) return;
+          clicked = true;
+          clearTimeout(limit);
+          done(clickAndRead(() => document.querySelector('.sync-notices')?.textContent ?? null));
+        });
+      });
+      true;
+    }`);
+    rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
+    same('a fresh deletion waits for the settle window: nothing removed or put back yet', await a.run('window.firstRefreshCopies()'), [true, false, true]);
+    await a.settle();
+    refreshNotice = await a.run('window.deletionRefresh');
+  } finally { probe.close(); }
+  await a.settle();
+  check('Refresh’s own draw offers to turn the deleted skill on', /release-notes was deleted[\s\S]*Turn it on/.test(refreshNotice), refreshNotice);
   same('then the skill turns off everywhere', releaseNotesIn(), [false, false, false]);
   check('with a notice that Central Knot keeps it, offering Turn it on', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && /Turn it on/.test(await a.text('.sync-notices') ?? ''), await a.text('.bands'));
   check('and the table keeps it under Off, in Central Knot only', ((await sectionsNow(a)).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && /in Central Knot only/.test(await a.text('.ov-row[data-key="release-notes"]') ?? '') && !(await switchOn(a, 'release-notes')), await sectionsNow(a));

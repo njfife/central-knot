@@ -14,7 +14,7 @@
 // handOff), the look's one action is the hand-off button (words.ts toPluginsLabel), the Plugins page's own add (pluginstate.ts
 // addMarketplace), run on that page, which tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way
 // and in Central Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
-import { acting, announce, applyClick, busy, rerender, showPage, state, type PageKind } from './app.ts';
+import { acting, announce, applyClick, busy, rerender, setHome, showPage, state, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { asItIs } from './libraryrow.ts';
 import { dayAndTime, plural } from './model.ts';
@@ -70,8 +70,7 @@ async function settle(result: SourceResult, said: Said | undefined) {
   if (result.view) sources.view = result.view;
   sources.problem = result.stopped;
   sources.confirmRemove = undefined;
-  const home = await api().refresh();
-  if (home) state.home = home;
+  setHome(await api().refresh(), { reload: false });
   if (said && !result.stopped) {
     state.outcome = { page: 'sources', text: said.text, band: true, warn: said.warns, ...(said.note ? { note: said.note } : {}), ...(said.undo ? { undo: said.undo } : {}),
       ...(said.open ? { next: { label: `Open ${kindNouns[said.open].title}`, id: `source-open-${said.open}`, run: () => showPage(said.open!) } } : {}) };

@@ -18,13 +18,13 @@
 // A row's switch or Add joins the page's list of clicks (flip, pluginRowSwitch → app.ts queueClick) and is worked out in its turn,
 // perhaps while another table is drawn: its closures hold the row and the table it was clicked on, so it is worked out there.
 import { brandMark } from './brand.ts';
-import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, plural } from './model.ts';
+import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, fewNames, kindNouns, pageNames, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt } from './words.ts';
 import { allSay, figureFor, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkthroughBand } from './firstsetup.ts';
-import { acting, askFlash, closeResult, isKind, problemKey, leftOutTools, collectUsage, unpin, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { acting, askFlash, closeResult, isKind, problemKey, leftOutTools, collectUsage, unpin, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, showSkillsTable, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -42,7 +42,7 @@ import { market } from './pluginstate.ts';
 import type { PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { pageOfPart, partOfPage, samePart } from './pluginstatus.ts';
-import { cellWords, fromAPlugin, fromPluginsCount, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
+import { cellWords, fromAPlugin, fromPluginsCount, handledWhere, inTool, insideTitle, offIn, pageRows, rowCount, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
 
 const names = toolNames as Record<Tool, string>;
@@ -808,13 +808,13 @@ function listNotices(t: Table) {
   }
   const unread = unreadBand(t);
   if (unread) bands.push(unread);
-  const told = toldNotices(t);
-  const shownNotices = told.filter(notice => !state.dismissed.has(notice.history));
+  const shownNotices = visibleNotices(t);
+  const onScreen = shownNotices.slice(0, noticeLineLimit);
   // An earlier result's Undo that stepped aside for this notice: one faint closing line inside the notice, not a band of its own.
-  const moved = state.undoMoved?.page === state.page && !state.outcome && shownNotices.some(notice => state.undoMoved!.notices.includes(notice.history))
+  const moved = state.undoMoved?.page === state.page && !state.outcome && onScreen.some(notice => state.undoMoved!.notices.includes(notice.history))
     ? h('span.notice-tail.tone-faint', { id: 'undo-moved' }, ...movedUndoText(state.undoMoved!.label, state.undoMoved!.items), h('button.inline-link', { type: 'button', id: 'notice-undo-moved', onclick: () => showPage('history') }, 'History'), '.') : null;
   if (shownNotices.length) {
-    const lines = shownNotices.slice(0, 6).map(notice => syncNotice(t, notice));
+    const lines = onScreen.map(notice => syncNotice(t, notice));
     if (moved) {
       const link = lines.at(-1)!.querySelector<HTMLElement>('[id^="notice-history-"]');
       if (link) link.title = `${moved.textContent?.replace(/^Earlier: the undo/, 'The earlier undo').replace(/ is in History\.$/, ' is here too')}.`;
@@ -941,6 +941,20 @@ function visibleNotices(t: Table) {
   if (!state.home) return [];
   const told = toldNotices(t);
   return told.filter(notice => !state.dismissed.has(notice.history));
+}
+
+const noticeLineLimit = 6;
+
+/** Which of this news the open table will draw, where it can tell the person where their Undo went. */
+export function noticeLinesOnPage(news: { page: Page; notice: SyncNotice }[], outcome: Outcome): string[] {
+  const home = state.home;
+  if (!home || holdingBuild(home.otherBuilds)) return [];
+  const t = useTableShown();
+  if (!t || !outcomeShown(outcome, t)) return [];
+  const fresh = new Set(news.filter(each => each.page === t.kind).map(each => each.notice.history));
+  if (!fresh.size) return [];
+  if (t.tool ? !home[t.kind].tools.some(tool => tool === t.tool) : !rowCount(home, t.kind)) return [];
+  return visibleNotices(t).slice(0, noticeLineLimit).map(notice => notice.history).filter(id => fresh.has(id));
 }
 
 /** Notices stay until read; a quiet × clears them. */
