@@ -7,7 +7,7 @@
 // is in librarypass.ts's recipe; this is one.
 import { acting, rerender, shownPath, skillAction, state, type PageKind } from './app.ts';
 import { h, icon } from './dom.ts';
-import type { ItemRow } from './itemrow.ts';
+import { partId, rowId, type ItemRow } from './itemrow.ts';
 import type { NeutralServer } from './mcp.ts';
 import { agentsKeptIn } from './presence.ts';
 import type { HarnessId } from './types.ts';
@@ -71,7 +71,7 @@ function asSkillNote(agent: ItemRow) {
   const lacks = `${there} holds no agents of its own, so there an agent is a skill, a file in its skills folder: it has no `
     + `${andList(['isolated context of its own', 'tool restrictions', 'model selection'])}, and it is invoked as a skill rather than picked as an agent.`;
   const deleting = takes ? ` Deleting that file in ${takes} turns the agent off in every tool; to keep it out of ${takes} only, use ${takes}’s switch above.` : '';
-  return h('p.details-limits.details-note', { id: `as-skill-${agent.key}` }, icon('info', 12, 'tone-muted'), lacks + deleting);
+  return h('p.details-limits.details-note', { id: partId('as-skill', rowId(agent.kind, agent.key)) }, icon('info', 12, 'tone-muted'), lacks + deleting);
 }
 
 /** A take-over that asks to be confirmed (it removes a copy other apps may read): its skill and tool, until another click. */
@@ -88,18 +88,18 @@ function skillToolActions(row: ItemRow, tool: HarnessId): HTMLElement | null {
     const control = h(`button.text-action${danger ? '.text-danger' : ''}`, { type: 'button', id, title, disabled: !!acting(), onclick: (event: Event) => { event.stopPropagation(); run(); } }, label);
     return control;
   };
-  const clear = row.switchedOff?.includes(tool) ? action(`Let ${where} load it`, `clear-switch-${row.key}-${tool}`,
+  const clear = row.switchedOff?.includes(tool) ? action(`Let ${where} load it`, partId('clear-switch', rowId(row.kind, row.key), tool),
     `Clear ${where}’s own switch for ${name}, so ${where} loads it again from its next session. History can undo it.`,
     () => void skillAction('clear-switch', row.key, tool, name)) : null;
   // Only a skill in Central Knot takes a copy over: a found one is taken in first, by its switch.
   const outside = item && !item.deleted ? row.takeOver?.[tool] : undefined, key = `${row.key}:${tool}`;
   const take = !outside ? null : outside.kind === 'link'
-    ? action('Take over', `take-over-${row.key}-${tool}`, `Replace the link in ${where}’s skills folder with Central Knot’s copy of ${name}. What the link led to is left as it is; if Central Knot doesn’t have that content yet, it is kept as a version first.`,
+    ? action('Take over', partId('take-over', rowId(row.kind, row.key), tool), `Replace the link in ${where}’s skills folder with Central Knot’s copy of ${name}. What the link led to is left as it is; if Central Knot doesn’t have that content yet, it is kept as a version first.`,
       () => void skillAction('take-over', row.key, tool, name))
-    : armed !== key ? action('Take over…', `take-over-${row.key}-${tool}`, `Remove the copy at ${shownPath(outside.path)} and give each tool that read it Central Knot’s copy. Other apps that read that folder won’t find it there.`,
+    : armed !== key ? action('Take over…', partId('take-over', rowId(row.kind, row.key), tool), `Remove the copy at ${shownPath(outside.path)} and give each tool that read it Central Knot’s copy. Other apps that read that folder won’t find it there.`,
       () => { armed = key; rerender(); })
-      : h('span.delete-armed', {}, action('Cancel', `take-over-cancel-${row.key}-${tool}`, 'Leave the copy where it is', () => { armed = undefined; rerender(); }),
-        action('Take over now', `take-over-confirm-${row.key}-${tool}`, `Remove the copy at ${shownPath(outside.path)}; it is kept as a version first if Central Knot doesn’t have that content. This has no Undo.`,
+      : h('span.delete-armed', {}, action('Cancel', partId('take-over-cancel', rowId(row.kind, row.key), tool), 'Leave the copy where it is', () => { armed = undefined; rerender(); }),
+        action('Take over now', partId('take-over-confirm', rowId(row.kind, row.key), tool), `Remove the copy at ${shownPath(outside.path)}; it is kept as a version first if Central Knot doesn’t have that content. This has no Undo.`,
           () => { armed = undefined; void skillAction('take-over', row.key, tool, name); }, true));
   return clear || take ? h('span.details-tool-extra', {}, clear, take) : null;
 }
@@ -112,7 +112,7 @@ function takeOverNote(row: ItemRow, tool: HarnessId): HTMLElement | null {
   const outside = row.takeOver?.[tool];
   if (!outside || armed !== `${row.key}:${tool}`) return null;
   const readers = (Object.keys(row.takeOver ?? {}) as HarnessId[]).filter(each => row.takeOver?.[each]?.path === outside.path).map(toolName);
-  return h('p.delete-armed-note.details-tool-note', { id: `take-over-note-${row.key}-${tool}` },
+  return h('p.delete-armed-note.details-tool-note', { id: partId('take-over-note', rowId(row.kind, row.key), tool) },
     `Take over now removes the copy at ${shownPath(outside.path)}, keeping what it holds as a version; ${andList(readers)} ${readers.length === 1 ? 'gets' : 'get'} Central Knot’s copy instead. `
     + 'Other apps that read that folder won’t find it there. This has no Undo.');
 }

@@ -27,7 +27,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
-import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, standIn } from './cdp.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, byId, rowPart, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { packagedApp } from './package-app.mjs';
 
@@ -174,13 +174,16 @@ const middleOf = selector => a.run(`(() => { const box = document.querySelector(
 const focusOn = selector => a.run(`document.querySelector('${selector}')?.focus({ focusVisible: true })`);
 const refresh = async () => { await a.click('#header-refresh'); await a.settle(); };
 /** A row's details, opened or closed whichever way they are now. */
-const isOpen = key => a.has(`.ov-row[data-key="${key}"][aria-expanded="true"]`);
-const openRow = async key => { if (!(await isOpen(key))) { await a.click(`#open-${key}`); await a.settle(); } };
-const closeRow = async key => { if (await isOpen(key)) { await a.click(`#open-${key}`); await a.settle(); } };
+const isOpen = (kind, key) => a.has(`.ov-row[data-key="${rowPart('', kind, key)}"][aria-expanded="true"]`);
+const openRow = async (kind, key) => { if (!(await isOpen(kind, key))) { await a.click(byId(rowPart('open', kind, key))); await a.settle(); } };
+const closeRow = async (kind, key) => { if (await isOpen(kind, key)) { await a.click(byId(rowPart('open', kind, key))); await a.settle(); } };
 /** Waits until the row's switch is on. */
-const switchOn = key => waitFor(a, `document.querySelector('#switch-${key}')?.getAttribute('aria-checked') === 'true'`, 15000);
+const switchOn = (kind, key) => waitFor(a, `document.querySelector('${byId(rowPart('switch', kind, key))}')?.getAttribute('aria-checked') === 'true'`, 15000);
 /** Turns a row on: Add where it is found, its switch where it is off (in Central Knot only); nothing where it is on. */
-const turnOnRow = async key => { if (await a.has(`#add-${key}, #switch-${key}:not([aria-checked="true"])`)) await a.click(`#add-${key}, #switch-${key}`); };
+const turnOnRow = async (kind, key) => {
+  const [add, toggle] = [byId(rowPart('add', kind, key)), byId(rowPart('switch', kind, key))];
+  if (await a.has(`${add}, ${toggle}:not([aria-checked="true"])`)) await a.click(`${add}, ${toggle}`);
+};
 
 // ---------- The light tour: the app opens, and so does each page ----------
 if (only ? only.includes('light') : !full) {
@@ -220,51 +223,51 @@ if (wanted('skills')) {
   const putSkill = (tool, key, body) => { mkdirSync(folderIn(tool, key), { recursive: true }); writeFileSync(join(folderIn(tool, key), 'SKILL.md'), `---\nname: ${key}\ndescription: ${body}\n---\n\n${body}\n`); };
   await a.click('#nav-skills');
   await atEverySize('found', 'Clicked "Skills". Every skill is found: a tool has it and Central Knot doesn’t yet, so each row has Add where an On row has its switch; review’s copies differ', true);
-  await shot(a, 'found-hover', 'The pointer on notes’s Add: its tooltip says a click adds it to Central Knot and puts it in every tool.', await middleOf('#add-notes'));
-  await openRow('notes');
+  await shot(a, 'found-hover', 'The pointer on notes’s Add: its tooltip says a click adds it to Central Knot and puts it in every tool.', await middleOf(`#${rowPart('add', 'skills', 'notes')}`));
+  await openRow('skills', 'notes');
   await atEverySize('found-open', 'Opened notes while it is found: its status, what every tool it is on in gets of a skill (its whole folder), each tool’s line, and Files and contents', true, '.details');
-  await closeRow('notes');
+  await closeRow('skills', 'notes');
   // Taken in: written to every tool, its whole folder. Its Undo takes it out again: found once more, the tools it was found in keeping theirs.
-  await a.click('#add-notes'); await switchOn('notes');
+  await a.click(`#${rowPart('add', 'skills', 'notes')}`); await switchOn('skills', 'notes');
   await atEverySize('taken-in', 'Clicked notes’s Add: it is in Central Knot now, and on in all 3 tools; the header says so, with Undo', false, '#header');
   await a.click('#outcome-undo'); await a.settle();
   await atEverySize('taken-in-undone', 'Clicked Undo in that strip: the copy Codex got is gone, Claude Code and Copilot CLI keep theirs, and notes is found again', false, '.bands');
-  await a.click('#add-notes'); await switchOn('notes');
+  await a.click(`#${rowPart('add', 'skills', 'notes')}`); await switchOn('skills', 'notes');
   // Off: out of every tool, kept in Central Knot.
-  await a.click('#switch-notes'); await a.settle();
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`); await a.settle();
   await atEverySize('off', 'Turned notes off: its folder left every tool; its row stays where it was, under Found, drawn Off, "in Central Knot only", until he leaves the list or clicks Refresh; the result offers Undo', true);
-  await openRow('notes');
+  await openRow('skills', 'notes');
   await atEverySize('off-open', 'Opened the Off row: its status, each tool with no copy while it is off, its versions, and Delete from Central Knot with how it differs from Off', true, '.details');
-  await a.click('#switch-notes'); await switchOn('notes');
-  await closeRow('notes');
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`); await switchOn('skills', 'notes');
+  await closeRow('skills', 'notes');
   // The copy question: review's copies differ.
-  await a.click('#add-review'); await a.settle();
+  await a.click(`#${rowPart('add', 'skills', 'review')}`); await a.settle();
   await atEverySize('copy-question', 'Clicked review’s Add: its copies differ, so the row asks which copy every tool uses, quoting each copy’s first line and saying what choosing it does. Nothing is written yet', true, '.details-differs');
-  await a.click('#use-review-copilot-cli'); await switchOn('review');
-  await openRow('review');
+  await a.click(`#${rowPart('use', 'skills', 'review', 'copilot-cli')}`); await switchOn('skills', 'review');
+  await openRow('skills', 'review');
   await atEverySize('chosen-versions', 'Clicked "Use this copy" on Copilot CLI’s: review is in Central Knot, on in all 3 tools; opened, its versions list Copilot CLI’s copy (current) and Claude Code’s, kept as a version', true, '.version-row');
-  await a.click('#version-read-review-1');
+  await a.click(`#${rowPart('version-read', 'skills', 'review', '1')}`);
   await waitFor(a, `!!document.querySelector('.version-read')`);
   await atEverySize('version-read', 'Clicked Read on Claude Code’s version: its SKILL.md, what differs from the current version marked', false, '.version-read');
-  await a.click('#version-read-review-1');
-  await closeRow('review');
+  await a.click(`#${rowPart('version-read', 'skills', 'review', '1')}`);
+  await closeRow('skills', 'review');
   // Partial: kept out of one tool by its switch in the opened row.
-  for (const key of ['release-notes', 'standup']) { await a.click(`#add-${key}`); await switchOn(key); }
-  await openRow('standup');
-  await a.click('#enable-standup-codex-cli'); await a.settle();
-  await atEverySize('partial', 'Turned release-notes and standup on, then opened standup and turned it off in Codex alone: its folder left Codex; the row says "in 2 of 3 tools · kept out of Codex" and its switch is drawn partial', true, '.ov-row[data-key="standup"]');
-  await a.click('#enable-standup-codex-cli'); await a.settle();
-  await closeRow('standup');
+  for (const key of ['release-notes', 'standup']) { await a.click(`#${rowPart('add', 'skills', key)}`); await switchOn('skills', key); }
+  await openRow('skills', 'standup');
+  await a.click(`#${rowPart('enable', 'skills', 'standup', 'codex-cli')}`); await a.settle();
+  await atEverySize('partial', 'Turned release-notes and standup on, then opened standup and turned it off in Codex alone: its folder left Codex; the row says "in 2 of 3 tools · kept out of Codex" and its switch is drawn partial', true, `.ov-row[data-key="${rowPart('', 'skills', 'standup')}"]`);
+  await a.click(`#${rowPart('enable', 'skills', 'standup', 'codex-cli')}`); await a.settle();
+  await closeRow('skills', 'standup');
   // A tool's own switch, set in its settings: read, never undone; the opened row can clear it.
   const claudeSettings = join(practice, '.claude/settings.json');
   const settingsBefore = existsSync(claudeSettings) ? readFileSync(claudeSettings, 'utf8') : '{}';
   writeFileSync(claudeSettings, JSON.stringify({ ...JSON.parse(settingsBefore), skillOverrides: { 'release-notes': 'off' } }, null, 2));
   await refresh();
-  await openRow('release-notes');
+  await openRow('skills', 'release-notes');
   await atEverySize('switched-off', 'Outside the app, Claude Code’s settings turned release-notes off, then Refresh: its folder stays; Claude Code is not counted as on (status line, a partial switch, its own mark); its line says "Switched off" and offers Let Claude Code load it', true, '.details');
-  await a.click('#clear-switch-release-notes-claude-cli'); await a.settle();
+  await a.click(`#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`); await a.settle();
   await atEverySize('switch-cleared', 'Clicked "Let Claude Code load it": Claude Code loads it again; the strip says so, with Undo (which sets that switch again)', false, '.bands');
-  await closeRow('release-notes');
+  await closeRow('skills', 'release-notes');
   // An edit made in a tool becomes the current version and reaches the others; its notice offers Undo.
   writeFileSync(join(folderIn('codex', 'standup'), 'SKILL.md'), `${readFileSync(join(folderIn('codex', 'standup'), 'SKILL.md'), 'utf8')}\nEdited in Codex.\n`);
   await refresh();
@@ -273,48 +276,48 @@ if (wanted('skills')) {
   rmSync(folderIn('copilot', 'release-notes'), { recursive: true, force: true });
   await refresh(); await wait(2300); await refresh();
   await atEverySize('deleted-by-hand', 'Outside the app, release-notes’s folder was deleted in Copilot CLI, then Refresh (twice, past the settle window): it is off everywhere, kept in Central Knot; the notice offers Turn it on', true, '.sync-notices');
-  await a.click('#switch-release-notes'); await switchOn('release-notes');
+  await a.click(`#${rowPart('switch', 'skills', 'release-notes')}`); await switchOn('skills', 'release-notes');
   // Found skills that can't go everywhere: a folder that can't be copied as it is, and a name Copilot CLI won't load.
   putSkill('claude', 'has-link', 'A skill with a link inside.');
   symlinkSync('SKILL.md', join(folderIn('claude', 'has-link'), 'alias'));
   mkdirSync(folderIn('claude', 'plain-notes'), { recursive: true }); writeFileSync(join(folderIn('claude', 'plain-notes'), 'SKILL.md'), 'Notes with no frontmatter, which Copilot CLI and Codex won’t load.\n');
   await refresh();
-  await openRow('has-link');
+  await openRow('skills', 'has-link');
   await atEverySize('cannot-copy', 'A skill in Claude Code with a link inside its folder: its row says it can’t be taken in, its Add looks unavailable, and Claude Code’s line says why and what to do (replace the link with the file, then Refresh)', true, '.details');
-  await closeRow('has-link');
-  await openRow('plain-notes');
+  await closeRow('skills', 'has-link');
+  await openRow('skills', 'plain-notes');
   await atEverySize('cannot-take', 'A skill with no frontmatter in Claude Code, found: the status says it goes nowhere else, Copilot CLI and Codex can’t take it; their marks (their own) and lines say why, in the same words', false, '.details');
-  await closeRow('plain-notes');
+  await closeRow('skills', 'plain-notes');
   rmSync(folderIn('claude', 'has-link'), { recursive: true, force: true }); rmSync(folderIn('claude', 'plain-notes'), { recursive: true, force: true });
   await refresh();
   // Another way: a copy in ~/.agents/skills, which Copilot CLI and Codex read; Claude Code gets Central Knot's copy.
   mkdirSync(join(practice, '.agents/skills/shared-notes'), { recursive: true });
   writeFileSync(join(practice, '.agents/skills/shared-notes/SKILL.md'), '---\nname: shared-notes\ndescription: Kept in the shared folder.\n---\n\nKept in the shared folder.\n');
   await refresh();
-  await a.click('#add-shared-notes'); await switchOn('shared-notes');
-  await openRow('shared-notes');
+  await a.click(`#${rowPart('add', 'skills', 'shared-notes')}`); await switchOn('skills', 'shared-notes');
+  await openRow('skills', 'shared-notes');
   await atEverySize('another-way', 'A skill in ~/.agents/skills, taken in: the strip says it is on in Claude Code and that Copilot CLI and Codex have it another way; their lines say "Another way" (no switch: nothing of Central Knot’s goes there) and offer Take over…', true, '.details');
-  await a.click('#take-over-shared-notes-copilot-cli');
+  await a.click(`#${rowPart('take-over', 'skills', 'shared-notes', 'copilot-cli')}`);
   await atEverySize('take-over-armed', 'Clicked "Take over…" on Copilot CLI’s line: its armed line says which folder goes, which tools get Central Knot’s copy instead, that other apps won’t find it there, and that it has no Undo', false, '.details');
-  await a.click('#take-over-confirm-shared-notes-copilot-cli'); await a.settle();
+  await a.click(`#${rowPart('take-over-confirm', 'skills', 'shared-notes', 'copilot-cli')}`); await a.settle();
   await atEverySize('taken-over', 'Clicked "Take over now": the shared copy is gone, Copilot CLI and Codex have Central Knot’s copy; the strip says so and that it has no Undo', false, '.bands');
-  await closeRow('shared-notes');
+  await closeRow('skills', 'shared-notes');
   // Delete from Central Knot, armed, then done.
-  await openRow('shared-notes');
-  await a.click('#delete-shared-notes');
-  await atEverySize('delete-armed', 'Clicked "Delete from Central Knot…": it says what happens, and for how long History can restore it', false, '#delete-note-shared-notes');
-  await a.click('#delete-confirm-shared-notes'); await a.settle();
+  await openRow('skills', 'shared-notes');
+  await a.click(`#${rowPart('delete', 'skills', 'shared-notes')}`);
+  await atEverySize('delete-armed', 'Clicked "Delete from Central Knot…": it says what happens, and for how long History can restore it', false, `#${rowPart('delete-note', 'skills', 'shared-notes')}`);
+  await a.click(`#${rowPart('delete-confirm', 'skills', 'shared-notes')}`); await a.settle();
   await shot(a, 'deleted', 'Clicked "Delete it now": shared-notes is out of every tool and off the page; History can restore it.');
   // The Files view.
-  await openRow('standup');
-  await a.click('#files-standup'); await a.settle();
+  await openRow('skills', 'standup');
+  await a.click(`#${rowPart('files', 'skills', 'standup')}`); await a.settle();
   await atEverySize('files-view', 'Clicked "Files and contents" in standup’s details: the list of skills beside standup’s switch; stacked, its SKILL.md comes first, then each tool’s line and where each copy is ("← Skills" goes back)', true);
   await a.click('#skills-table');
   // For History's switch actions (the owner asked what its "Turn on" means): the first skill that is on is kept out of Codex in
   // its opened row, and the second turned off, so History offers "Turn it on in Codex" and "Turn it on".
-  const [outOfCodex, turnedOff] = await a.run(`[...document.querySelectorAll('[id^="switch-"][aria-checked="true"]')].map(each => each.id.slice('switch-'.length))`);
-  await openRow(outOfCodex); await a.click(`#enable-${outOfCodex}-codex-cli`); await a.settle(); await closeRow(outOfCodex);
-  await a.click(`#switch-${turnedOff}`); await a.settle();
+  const [outOfCodex, turnedOff] = await a.run(`[...document.querySelectorAll('[id^="${rowPart('switch', 'skills', '')}"][aria-checked="true"]')].map(each => each.id.slice(${rowPart('switch', 'skills', '').length}))`);
+  await openRow('skills', outOfCodex); await a.click(`#${rowPart('enable', 'skills', outOfCodex, 'codex-cli')}`); await a.settle(); await closeRow('skills', outOfCodex);
+  await a.click(`#${rowPart('switch', 'skills', turnedOff)}`); await a.settle();
   // History.
   await a.click('#nav-history'); await a.settle();
   await atEverySize('history', 'Clicked "History": each skill’s entries in words, each with its own Undo, Turn it on, Turn it on in Codex, Restore or Use … copy where one can still be done, all in the actions column', true);
@@ -326,7 +329,7 @@ if (wanted('skills')) {
 if (wanted('sync')) {
   begin('sync');
   await a.click('#nav-skills');
-  await turnOnRow('standup');
+  await turnOnRow('skills', 'standup');
   edit(join(practice, '.codex/skills/standup/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex.\n'));
   await waitFor(a, `document.body.innerText.includes('Codex')&&!!document.querySelector('.sync-notice')`);
   await shot(a, 'edit-spread-notice', 'Outside the app, a line was added to standup\'s SKILL.md in Codex. A few seconds later, without clicking anything: the notice.');
@@ -356,51 +359,51 @@ if (wanted('mcp')) {
   edit(settings.codex, text => `${text}\n[mcp_servers.node_repl]\ncommand = "/Applications/ChatGPT.app/Contents/Resources/node"\nargs = ["repl"]\n`);
   await a.click('#nav-mcp'); await refresh();
   await atEverySize('found', 'Clicked "MCP servers". Every server is found: docs in Claude Code, files in Copilot CLI and Codex, each with Add; node_repl belongs to ChatGPT desktop, so its Add is unavailable and its tag says it can’t be taken in', true);
-  await openRow('node_repl');
+  await openRow('mcp', 'node_repl');
   await atEverySize('cannot-take-in', 'Opened node_repl: "Not in Central Knot · it can’t be taken in now (see below)", and Codex’s line says why: ChatGPT desktop keeps this server for itself', false, '.details');
-  await closeRow('node_repl');
-  await openRow('files');
+  await closeRow('mcp', 'node_repl');
+  await openRow('mcp', 'files');
   await atEverySize('found-open', 'Opened files while found: what every tool shares of a server and what stays each tool’s own, each tool’s line with its settings file, and Add', true, '.details');
-  await closeRow('files');
+  await closeRow('mcp', 'files');
   // Taken in: every tool gets it at once, Claude Code too.
-  await a.click('#add-docs'); await switchOn('docs');
-  await a.click('#add-files'); await switchOn('files');
+  await a.click(`#${rowPart('add', 'mcp', 'docs')}`); await switchOn('mcp', 'docs');
+  await a.click(`#${rowPart('add', 'mcp', 'files')}`); await switchOn('mcp', 'files');
   await atEverySize('taken-in', 'Clicked Add on docs, then on files: files is in Central Knot, on in all 3 tools, Claude Code too; the result says so, and no band asks for a later step', true);
-  await shot(a, 'claude-hover', 'The pointer on files’s Claude Code mark: its tooltip says Claude Code has the current version.', await middleOf('#cell-files-claude-cli'));
-  await openRow('files');
+  await shot(a, 'claude-hover', 'The pointer on files’s Claude Code mark: its tooltip says Claude Code has the current version.', await middleOf(`#${rowPart('cell', 'mcp', 'files', 'claude-cli')}`));
+  await openRow('mcp', 'files');
   await atEverySize('taken-in-open', 'Opened files: every tool’s line, Claude Code’s too, has the current version and its switch says On; Codex’s own setting named after its line', false, '.details');
-  await closeRow('files');
+  await closeRow('mcp', 'files');
   // Off: out of every tool at once, Claude Code too. Then Delete from Central Knot.
-  await a.click('#switch-files'); await a.settle();
+  await a.click(`#${rowPart('switch', 'mcp', 'files')}`); await a.settle();
   await atEverySize('off', 'Turned files off: it left every tool at once, Claude Code too; its row stays where it was, drawn Off, until he leaves the list or clicks Refresh', true);
-  await openRow('files');
+  await openRow('mcp', 'files');
   await atEverySize('off-open', 'Opened the Off row: "Off · in Central Knot only."; each tool’s line says it has no copy while it is off', false, '.details');
-  await a.click('#delete-files'); await a.click('#delete-confirm-files'); await a.settle();
+  await a.click(`#${rowPart('delete', 'mcp', 'files')}`); await a.click(`#${rowPart('delete-confirm', 'mcp', 'files')}`); await a.settle();
   await atEverySize('deleted', 'Then Delete from Central Knot: files leaves the page; History can restore it', true);
   // A tool's own switch, set in its settings: read, never written; its line says Central Knot leaves it as it is.
   const switchesBefore = existsSync(settings.copilotSwitches) ? readFileSync(settings.copilotSwitches, 'utf8') : '{}';
   writeFileSync(settings.copilotSwitches, JSON.stringify({ ...JSON.parse(switchesBefore), disabledMcpServers: ['docs'] }, null, 2));
   await refresh();
-  await openRow('docs');
+  await openRow('mcp', 'docs');
   await atEverySize('switched-off', 'Outside the app, Copilot CLI’s settings turned docs off, then Refresh: its own mark, a partial switch, "switched off in Copilot CLI"; its line says Central Knot leaves that switch as it is, so it stays off after Off and On; "Switched off" in place of its switch', true, '.details');
   writeFileSync(settings.copilotSwitches, switchesBefore); await refresh();
   // Kept out of one tool by its switch in the opened row.
-  await openRow('docs');
-  await a.click('#enable-docs-codex-cli'); await a.settle();
-  await atEverySize('kept-out', 'Turned docs off in Codex alone, in its opened row: its entry left Codex; the row says "in 2 of 3 tools · kept out of Codex" and its switch is drawn partial', true, '.ov-row[data-key="docs"]');
-  await a.click('#enable-docs-codex-cli'); await a.settle();
-  await closeRow('docs');
+  await openRow('mcp', 'docs');
+  await a.click(`#${rowPart('enable', 'mcp', 'docs', 'codex-cli')}`); await a.settle();
+  await atEverySize('kept-out', 'Turned docs off in Codex alone, in its opened row: its entry left Codex; the row says "in 2 of 3 tools · kept out of Codex" and its switch is drawn partial', true, `.ov-row[data-key="${rowPart('', 'mcp', 'docs')}"]`);
+  await a.click(`#${rowPart('enable', 'mcp', 'docs', 'codex-cli')}`); await a.settle();
+  await closeRow('mcp', 'docs');
   // An edit made in a tool becomes the current version; its versions list says where each came from, and Read shows one.
   edit(settings.codex, text => text.replace('url = "https://docs.example.test/mcp"', 'url = "https://docs.example.test/mcp/v2"'));
   await refresh();
   await atEverySize('edit-notice', 'Outside the app, docs’s URL was edited in Codex, then Refresh: the edit is the current version, in Copilot CLI and Claude Code too; the notice offers Undo', false, '.sync-notices');
-  await openRow('docs');
+  await openRow('mcp', 'docs');
   await atEverySize('versions', 'Opened docs: its versions, edited in Codex (current) and found in Claude Code, each with what changed ("URL changed")', true, '.version-row');
-  await a.click('#version-read-docs-1');
+  await a.click(`#${rowPart('version-read', 'mcp', 'docs', '1')}`);
   await waitFor(a, `!!document.querySelector('.version-read')`);
   await atEverySize('version-read', 'Clicked Read on the version found in Claude Code: what it runs, part by part, what differs from the current version marked', false, '.version-read');
-  await a.click('#version-read-docs-1');
-  await closeRow('docs');
+  await a.click(`#${rowPart('version-read', 'mcp', 'docs', '1')}`);
+  await closeRow('mcp', 'docs');
   // What `codex mcp remove docs` leaves: docs turns off, its entry leaving every tool; Central Knot keeps it, and the notice offers Turn it on.
   edit(settings.codex, text => text.replace(/\n?\[mcp_servers\.docs\][^[]*/, '\n'));
   await refresh(); await wait(2300); await refresh();
@@ -412,13 +415,13 @@ if (wanted('mcp')) {
   edit(settings.copilot, text => { const config = JSON.parse(text); config.mcpServers.search = { type: 'local', command: 'search-mcp', args: ['--index', 'copilot'], tools: ['*'] }; return JSON.stringify(config, null, 2); });
   edit(settings.codex, text => `${text}\n[mcp_servers.search]\ncommand = "search-mcp"\nargs = ["--index", "codex", "--fast"]\n`);
   await refresh();
-  await a.click('#add-live'); await switchOn('live');
-  await openRow('live');
+  await a.click(`#${rowPart('add', 'mcp', 'live')}`); await switchOn('mcp', 'live');
+  await openRow('mcp', 'live');
   await atEverySize('cannot-hold', 'Added live, an SSE server from Claude Code: Copilot CLI has it now; Codex can’t take it (its own mark, "Codex has no SSE transport."), and the status says so', false, '.details');
-  await closeRow('live');
-  await a.click('#add-search'); await a.settle();
+  await closeRow('mcp', 'live');
+  await a.click(`#${rowPart('add', 'mcp', 'search')}`); await a.settle();
   await atEverySize('copy-question', 'Clicked search’s Add: Copilot CLI’s and Codex’s entries differ, so the row asks which one every tool uses, each row quoting its own command with the words only it has marked, and what choosing does in each tool', true, '.details-differs');
-  await a.click('#use-search-copilot-cli'); await switchOn('search');
+  await a.click(`#${rowPart('use', 'mcp', 'search', 'copilot-cli')}`); await switchOn('mcp', 'search');
   await atEverySize('chosen', 'Clicked "Use this copy" on Copilot CLI’s: search is in Central Knot, on in all 3 tools; Codex’s entry is kept as a version', false, '.bands');
   await a.click('#nav-history');
   await atEverySize('history', 'History: each server’s entries in the library’s words, with what each still offers (Turn it on, Restore, Undo, Use Codex’s copy)', true);
@@ -436,26 +439,26 @@ if (wanted('agents')) {
 
   await a.click('#nav-agents');
   await atEverySize('agents-found', 'Clicked "Agents". Both agents are found: a tool has them and Central Knot doesn’t yet, so each row has Add where an On row has its switch; the section line says what Add does');
-  await shot(a, 'agents-found-hover', 'The pointer on code-reviewer’s Add: the row lights up; Add’s tooltip says a click adds it to Central Knot and puts it in every tool.', await middleOf('#add-code-reviewer'));
-  await focusOn('#add-code-reviewer');
+  await shot(a, 'agents-found-hover', 'The pointer on code-reviewer’s Add: the row lights up; Add’s tooltip says a click adds it to Central Knot and puts it in every tool.', await middleOf(`#${rowPart('add', 'agents', 'code-reviewer')}`));
+  await focusOn(`#${rowPart('add', 'agents', 'code-reviewer')}`);
   await shot(a, 'agents-found-focus', 'Keyboard focus on code-reviewer’s Add: its focus ring.');
   await a.run('document.activeElement?.blur()');
-  await openRow('code-reviewer');
+  await openRow('agents', 'code-reviewer');
   await atEverySize('agents-found-open', 'Opened code-reviewer while it is found: its status says where it is and what Add does; its whole description shows; each tool says what it has', true);
-  await closeRow('code-reviewer');
-  for (const key of ['code-reviewer', 'release-notes']) { await a.click(`#add-${key}`); await switchOn(key); }
+  await closeRow('agents', 'code-reviewer');
+  for (const key of ['code-reviewer', 'release-notes']) { await a.click(`#${rowPart('add', 'agents', key)}`); await switchOn('agents', key); }
   await shot(a, 'agents-on', 'Clicked both Adds: each agent is taken into Central Knot and on in all 3 tools. The result says so.');
 
   // Off: out of every harness, kept in Central Knot. On puts each file back.
-  await a.click('#switch-code-reviewer'); await a.settle();
+  await a.click(`#${rowPart('switch', 'agents', 'code-reviewer')}`); await a.settle();
   await atEverySize('agents-off', 'Turned code-reviewer off: it left every tool; its row stays where it was, drawn Off, "in Central Knot only", with its description, until he leaves the list or clicks Refresh; the result offers Undo', true);
-  await openRow('code-reviewer');
+  await openRow('agents', 'code-reviewer');
   await atEverySize('agents-off-open', 'Opened the Off row: its status, its whole description, each tool with no copy while it is off, its versions, and Delete from Central Knot as a quiet button with how it differs from Off', true);
-  await a.click('#switch-code-reviewer'); await switchOn('code-reviewer');
+  await a.click(`#${rowPart('switch', 'agents', 'code-reviewer')}`); await switchOn('agents', 'code-reviewer');
   await shot(a, 'agents-on-again', 'Clicked its switch again: on in all 3 tools, each file as it was.');
 
   // The opened row of an agent that is On: each harness's line and switch, what stays its own, and one version.
-  await openRow('code-reviewer');
+  await openRow('agents', 'code-reviewer');
   await atEverySize('agents-open', 'Opened code-reviewer, on: its whole description at the top; each tool has the current version and its own switch; Claude Code’s line names the settings that stay in its file; one version, its first');
 
   // Edits made in a harness: each becomes the current version. Several make the versions list long enough to fold.
@@ -467,70 +470,70 @@ if (wanted('agents')) {
     edit(reviewer(tool), change);
     await refresh(); await wait(1100);
   }
-  await openRow('code-reviewer');
+  await openRow('agents', 'code-reviewer');
   await atEverySize('agents-versions-folded', 'Four more edits, in Claude Code, Copilot CLI and Codex: the versions list shows its newest four, the current one first, each with its time (every row in one form), where it was edited and what changed, and one line for the earlier ones');
-  await a.click('#versions-all-code-reviewer'); await a.settle();
+  await a.click(`#${rowPart('versions-all', 'agents', 'code-reviewer')}`); await a.settle();
   await atEverySize('agents-versions-all', 'Clicked "Show 2 earlier versions": every version, the current one first, then in the order Central Knot took them', true);
-  await shot(a, 'agents-version-hover', 'The pointer on the second version’s Make current: a quiet outlined button, apart from Read.', await middleOf('#version-current-code-reviewer-1'));
-  await focusOn('#version-current-code-reviewer-1');
+  await shot(a, 'agents-version-hover', 'The pointer on the second version’s Make current: a quiet outlined button, apart from Read.', await middleOf(`#${rowPart('version-current', 'agents', 'code-reviewer', '1')}`));
+  await focusOn(`#${rowPart('version-current', 'agents', 'code-reviewer', '1')}`);
   await shot(a, 'agents-version-focus', 'Keyboard focus on that Make current: its focus ring.');
   await a.run('document.activeElement?.blur()');
-  await a.click('#version-read-code-reviewer-2'); await waitFor(a, `/careful code reviewer/.test(document.querySelector('.version-read')?.textContent ?? '')`, 15000);
+  await a.click(`#${rowPart('version-read', 'agents', 'code-reviewer', '2')}`); await waitFor(a, `/careful code reviewer/.test(document.querySelector('.version-read')?.textContent ?? '')`, 15000);
   await atEverySize('agents-version-read', 'Clicked Read on an earlier version: its description and prompt open under its line, upright, headed by what differs from the current version ("Differs from current in: …"), each difference marked', false, '.version-read');
-  await a.click('#version-read-code-reviewer-2'); await a.settle();
-  await a.click('#version-current-code-reviewer-5'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click(`#${rowPart('version-read', 'agents', 'code-reviewer', '2')}`); await a.settle();
+  await a.click(`#${rowPart('version-current', 'agents', 'code-reviewer', '5')}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await atEverySize('agents-made-current', 'Clicked Make current on the first version: it is the new current version, first, "back to:" the version it went back to (folded into its row), written to all 3 tools; the result names it and offers Undo');
 
   // One harness kept out: the closed row says so too.
-  await a.click('#enable-code-reviewer-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click(`#${rowPart('enable', 'agents', 'code-reviewer', 'codex-cli')}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await atEverySize('agents-kept-out', 'Turned Codex’s own switch off: code-reviewer is kept out of Codex (its copy there is gone, its mark struck through, "not in Codex" beside its name) and stays on in the others', true);
-  await a.click('#version-current-code-reviewer-1'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click(`#${rowPart('version-current', 'agents', 'code-reviewer', '1')}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await shot(a, 'agents-made-current-kept-out', 'With Codex kept out, clicked Make current on an earlier version: written to Claude Code and Copilot CLI; Codex stays out, and the result names only those two.');
   // Off while kept out of one tool, then On: Codex stays out.
-  await a.click('#switch-code-reviewer'); await a.settle();
-  await openRow('code-reviewer');
+  await a.click(`#${rowPart('switch', 'agents', 'code-reviewer')}`); await a.settle();
+  await openRow('agents', 'code-reviewer');
   await shot(a, 'agents-off-kept-out', 'Turned code-reviewer off while it is kept out of Codex: it is in Central Knot only, its versions still offered.');
-  await a.click('#version-current-code-reviewer-1'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click(`#${rowPart('version-current', 'agents', 'code-reviewer', '1')}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await shot(a, 'agents-made-current-off', 'While it is off, clicked Make current: the version is current in Central Knot, and no tool is written; the result says so.');
-  await a.click('#switch-code-reviewer'); await switchOn('code-reviewer');
-  await openRow('code-reviewer');
+  await a.click(`#${rowPart('switch', 'agents', 'code-reviewer')}`); await switchOn('agents', 'code-reviewer');
+  await openRow('agents', 'code-reviewer');
   await shot(a, 'agents-on-kept-out', 'Turned it on again: on in Claude Code and Copilot CLI, still kept out of Codex.');
-  await a.click('#enable-code-reviewer-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click(`#${rowPart('enable', 'agents', 'code-reviewer', 'codex-cli')}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
 
   // A harness whose edit waits: with Automatic sync off, an edit shows as becoming the current version at the next sync.
   await a.click('#sync-switch'); await a.settle();
   edit(reviewer('copilot'), text => text.replace('description: ', 'description: Edited while sync is off. '));
   await refresh();
-  await openRow('code-reviewer');
+  await openRow('agents', 'code-reviewer');
   await atEverySize('agents-edit-waits', 'Turned Automatic sync off, edited code-reviewer in Copilot CLI, clicked Refresh: Copilot CLI’s mark and line say its edit becomes the current version when sync runs; the toolbar counts it');
   await a.click('#sync-switch'); await a.settle(); await refresh();
 
   // Many versions, unfolded.
   for (let count = 1; count <= 7; count++) { edit(reviewer(['claude', 'copilot', 'codex'][count % 3]), text => text.replace('Keep it short.', `Keep it short (${count}).`).replace(/Keep it short \(\d+\)\./, `Keep it short (${count}).`)); await refresh(); await wait(1100); }
-  await openRow('code-reviewer');
-  if (await a.has('#versions-all-code-reviewer')) { await a.click('#versions-all-code-reviewer'); await a.settle(); }
+  await openRow('agents', 'code-reviewer');
+  if (await a.has(`#${rowPart('versions-all', 'agents', 'code-reviewer')}`)) { await a.click(`#${rowPart('versions-all', 'agents', 'code-reviewer')}`); await a.settle(); }
   await atEverySize('agents-versions-many', 'Seven more edits: every version unfolded, each on one line where there is room, the times reading apart', false, '.versions');
-  await closeRow('code-reviewer');
+  await closeRow('agents', 'code-reviewer');
 
   // A harness that can't hold it: a name it can't store.
   writeFileSync(join(practice, '.claude/agents/réviseur.md'), '---\nname: réviseur\ndescription: Relit un changement avant sa fusion.\n---\n\nRelis le changement.\n');
   await refresh();
-  await a.click('#add-réviseur'); await a.settle();
-  await openRow('réviseur');
+  await a.click(`#${rowPart('add', 'agents', 'réviseur')}`); await a.settle();
+  await openRow('agents', 'réviseur');
   await atEverySize('agents-cannot', 'An agent in Claude Code whose name Copilot CLI and Codex can’t store, turned on: its status says "On in Claude Code only", and each other tool’s line names the character and what to do');
-  await closeRow('réviseur');
+  await closeRow('agents', 'réviseur');
 
   // A long name and a long prompt.
   const long = 'reviews-database-migrations-before-they-reach-production-and-checks-rollbacks';
   claudeFile(long, 'Reads every migration in a change, checks that each one can be rolled back, that it locks no large table for long, and that the code shipped with it works before and after it runs.',
     Array.from({ length: 40 }, (_, line) => `${line + 1}. Check the migration’s step ${line + 1}: what it changes, what it locks, how long it runs on the largest table, and how it is rolled back.`).join('\n') + '\n');
   await refresh();
-  await a.click(`#add-${long}`); await switchOn(long);
-  await atEverySize('agents-long-name', 'An agent with a long name and description, on: the row shortens the description first, and the name at a word', false, `.ov-row[data-key="${long}"]`);
-  await openRow(long);
-  await a.click(`#version-read-${long}-0`); await waitFor(a, `!!document.querySelector('.version-read pre')`, 15000);
+  await a.click(`#${rowPart('add', 'agents', long)}`); await switchOn('agents', long);
+  await atEverySize('agents-long-name', 'An agent with a long name and description, on: the row shortens the description first, and the name at a word', false, `.ov-row[data-key="${rowPart('', 'agents', long)}"]`);
+  await openRow('agents', long);
+  await a.click(`#${rowPart('version-read', 'agents', long, '0')}`); await waitFor(a, `!!document.querySelector('.version-read pre')`, 15000);
   await atEverySize('agents-long-read', 'Opened it and clicked "Read current": a 40-line prompt reads in its box, which scrolls, upright', false, '.version-read');
-  await closeRow(long);
+  await closeRow('agents', long);
 
   // Found copies that differ, in three tools: the copy question, each copy's edit time, the newest marked; the others become versions.
   writeFileSync(join(practice, '.claude/agents/changelog.md'), '---\nname: changelog\ndescription: Keeps the changelog.\n---\n\nKeep the changelog short.\nOne line each.\n');
@@ -538,16 +541,16 @@ if (wanted('agents')) {
   writeFileSync(join(practice, '.codex/agents/changelog.toml'), 'name = "changelog"\ndescription = "Keeps the changelog."\ndeveloper_instructions = """\nKeep the changelog short.\nOne line each. Link the pull request.\n"""\n');
   savedIn(join(practice, '.claude/agents/changelog.md'), -600); savedIn(join(practice, '.copilot/agents/changelog.agent.md'), -120);
   await refresh();
-  await a.click('#add-changelog'); await a.settle();
+  await a.click(`#${rowPart('add', 'agents', 'changelog')}`); await a.settle();
   await atEverySize('agents-choice', 'A found agent whose copies differ in all three tools, its Add clicked: it asks which copy every tool uses; each copy says when it was edited, the newest is marked and its button is the main one', true);
-  await a.click('#use-changelog-codex-cli'); await switchOn('changelog');
-  await openRow('changelog');
+  await a.click(`#${rowPart('use', 'agents', 'changelog', 'codex-cli')}`); await switchOn('agents', 'changelog');
+  await openRow('agents', 'changelog');
   await atEverySize('agents-choice-made', 'Chose Codex’s copy: changelog is in Central Knot with it, on in all 3 tools; the current version is listed first, the other copies after it, each with Make current');
 
   // Delete from Central Knot, and History's Restore.
-  await a.click('#delete-changelog'); await a.settle();
-  await atEverySize('agents-delete-armed', 'Clicked "Delete from Central Knot…": it asks once more, with Cancel beside it, and says History keeps it, with its versions, for 30 days', true, '#delete-note-changelog');
-  await a.click('#delete-confirm-changelog'); await a.settle();
+  await a.click(`#${rowPart('delete', 'agents', 'changelog')}`); await a.settle();
+  await atEverySize('agents-delete-armed', 'Clicked "Delete from Central Knot…": it asks once more, with Cancel beside it, and says History keeps it, with its versions, for 30 days', true, `#${rowPart('delete-note', 'agents', 'changelog')}`);
+  await a.click(`#${rowPart('delete-confirm', 'agents', 'changelog')}`); await a.settle();
   await shot(a, 'agents-deleted', 'Clicked "Delete it now": changelog left every tool and this page; the result offers Undo.');
   await a.click('#nav-history'); await a.settle();
   await atEverySize('agents-history', 'History: each click and each edit taken in, in the library’s words, with its action: Restore on the deletion, Undo on the latest change, "Go back before this" on older ones (the full sentence its tooltip), Turn it off or Turn it on on a switch', true);
@@ -558,60 +561,60 @@ if (wanted('agents')) {
   // Many agents: On, Off and Found together.
   for (let count = 1; count <= 14; count++) claudeFile(`helper-${String(count).padStart(2, '0')}`, `Helps with task ${count}. Reads the request, plans it, and reports what changed.`, `Do task ${count} carefully.\n`);
   await a.click('#nav-agents'); await refresh();
-  await waitFor(a, `!!document.querySelector('#add-helper-14')`, 20000);
-  for (let count = 1; count <= 8; count++) { await a.click(`#add-helper-${String(count).padStart(2, '0')}`); await switchOn(`helper-${String(count).padStart(2, '0')}`); }
-  for (const count of [2, 5, 7]) { await a.click(`#switch-helper-0${count}`); await a.settle(); }
+  await waitFor(a, `!!document.querySelector('#${rowPart('add', 'agents', 'helper-14')}')`, 20000);
+  for (let count = 1; count <= 8; count++) { const helper = `helper-${String(count).padStart(2, '0')}`; await a.click(`#${rowPart('add', 'agents', helper)}`); await switchOn('agents', helper); }
+  for (const count of [2, 5, 7]) { await a.click(`#${rowPart('switch', 'agents', `helper-0${count}`)}`); await a.settle(); }
   await atEverySize('agents-many', 'Fourteen more agents: some on, three off, six found; the three sections, each with its count and line');
   await a.run(`document.querySelector('.legend')?.scrollIntoView({ block: 'end' })`);
   await shot(a, 'agents-legend', 'The key at the end of the list: "Kept out", "Off: Central Knot keeps it", "Can’t take it" among the marks this page uses.');
 
   // States added in round 3, after the earlier pictures so their numbers stay. The long name heads its opened panel.
-  await openRow(long);
-  if (await a.has('.version-read')) { await a.click(`#version-read-${long}-0`); await a.settle(); }
+  await openRow('agents', long);
+  if (await a.has('.version-read')) { await a.click(`#${rowPart('version-read', 'agents', long, '0')}`); await a.settle(); }
   await atEverySize('agents-long-name-open', 'Opened the agent with the long name: the panel’s header holds it, and the list beside it cuts it before any description goes', false, '.details');
-  await closeRow(long);
+  await closeRow('agents', long);
 
   // Two copies that differ: the copy question marks the newer one "Newer".
   writeFileSync(join(practice, '.claude/agents/triage.md'), '---\nname: triage\ndescription: Sorts new issues.\n---\n\nLabel each issue.\n');
   writeFileSync(join(practice, '.copilot/agents/triage.agent.md'), '---\nname: triage\ndescription: Sorts new issues.\n---\n\nLabel each issue. Close duplicates.\n');
   savedIn(join(practice, '.claude/agents/triage.md'), -300);
   await refresh();
-  await a.click('#add-triage'); await a.settle(); await show('#use-triage-claude-cli');
+  await a.click(`#${rowPart('add', 'agents', 'triage')}`); await a.settle(); await show(`#${rowPart('use', 'agents', 'triage', 'claude-cli')}`);
   await shot(a, 'agents-choice-two', 'A found agent whose copies differ in two tools, its Add clicked: the newer copy is marked "Newer" and its button is the main one.');
-  await a.click('#use-triage-copilot-cli'); await switchOn('triage');
+  await a.click(`#${rowPart('use', 'agents', 'triage', 'copilot-cli')}`); await switchOn('agents', 'triage');
 
   // Thirty versions: each edit adds a line.
   const steps = count => Array.from({ length: count }, (_, step) => `Step ${step + 1}: say what changed since yesterday.`).join('\n') + '\n';
   claudeFile('standup', 'Writes the daily standup.', steps(1));
   await refresh();
-  await a.click('#add-standup'); await switchOn('standup');
+  await a.click(`#${rowPart('add', 'agents', 'standup')}`); await switchOn('agents', 'standup');
   // A second apart, as a person's edits are, so no two read the same time.
   for (let count = 2; count <= 30; count++) { claudeFile('standup', 'Writes the daily standup.', steps(count)); await refresh(); await wait(1000); }
-  await openRow('standup');
+  await openRow('agents', 'standup');
   await shot(a, 'agents-versions-thirty-folded', 'Twenty-nine edits in Claude Code, each adding a line: thirty versions, the newest four shown and one line for the other twenty-six.');
-  await a.click('#versions-all-standup'); await a.settle();
+  await a.click(`#${rowPart('versions-all', 'agents', 'standup')}`); await a.settle();
   await atEverySize('agents-versions-thirty', 'Clicked "Show 26 earlier versions": all thirty, one line each, every time in one form', false, '.versions');
   // Read on a version that has words the current one lacks: they are tinted.
-  await a.click('#version-current-standup-25'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  await a.click('#version-read-standup-1'); await waitFor(a, `!!document.querySelector('.version-read .change-added')`, 15000);
+  await a.click(`#${rowPart('version-current', 'agents', 'standup', '25')}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click(`#${rowPart('version-read', 'agents', 'standup', '1')}`); await waitFor(a, `!!document.querySelector('.version-read .change-added')`, 15000);
   await atEverySize('agents-version-read-adds', 'Made the fifth version current, then clicked Read on the one that was current before: the lines it has and the current one lacks are tinted; the header says what differs', false, '.version-read');
-  await a.click('#version-read-standup-1'); await a.settle();
+  await a.click(`#${rowPart('version-read', 'agents', 'standup', '1')}`); await a.settle();
 
   // Undo of a Make current while the agent is kept out of a tool: that tool stays out.
-  await a.click('#enable-standup-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  await a.click('#version-current-standup-2'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click(`#${rowPart('enable', 'agents', 'standup', 'codex-cli')}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click(`#${rowPart('version-current', 'agents', 'standup', '2')}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await a.click('#outcome-undo'); await a.settle(); await show('.details-tool-line');
   await shot(a, 'agents-made-current-kept-out-undone', 'Kept standup out of Codex, clicked Make current on an earlier version, then Undo: the version before is current again in Claude Code and Copilot CLI; Codex stays out.');
-  await a.click('#enable-standup-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click(`#${rowPart('enable', 'agents', 'standup', 'codex-cli')}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
 
   // A tool whose agents folder can't be written: its line says so, and the next pass writes it once it can.
   chmodSync(join(practice, agentsFolder.codex), 0o555);
   claudeFile('standup', 'Writes the daily standup.', steps(31));
-  await refresh(); await openRow('standup');
+  await refresh(); await openRow('agents', 'standup');
   await atEverySize('agents-folder-locked', 'Codex’s agents folder made read-only, then standup edited in Claude Code: Copilot CLI gets the edit; Codex’s line says Central Knot can’t write in its agents folder', false, '.details-tool-line');
   chmodSync(join(practice, agentsFolder.codex), 0o755);
   await refresh();
-  await closeRow('standup');
+  await closeRow('agents', 'standup');
 
   // A version pulled from the Git repo, over a copy found here that differs.
   const remote = join(scratch, 'agents-remote.git'), author = join(scratch, 'agents-author');
@@ -630,14 +633,14 @@ if (wanted('agents')) {
   await a.click('#repo-pull');
   await waitFor(a, `document.body.dataset.busy !== 'true' && !/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`, 30000); await a.settle();
   await a.click('#nav-agents'); await a.settle();
-  await openRow('retro');
+  await openRow('agents', 'retro');
   await atEverySize('agents-pulled', 'Connected a Git repo with a retro agent, while Claude Code had a different retro of its own, and clicked Pull: retro is on, pulled from the Git repo; Claude Code’s copy is kept as a version, noted against the pulled one', false, '.versions');
-  await closeRow('retro');
+  await closeRow('agents', 'retro');
 
   // Restore when an agent of that name exists again.
-  await openRow('triage');
-  await a.click('#delete-triage'); await a.settle();
-  await a.click('#delete-confirm-triage'); await a.settle();
+  await openRow('agents', 'triage');
+  await a.click(`#${rowPart('delete', 'agents', 'triage')}`); await a.settle();
+  await a.click(`#${rowPart('delete-confirm', 'agents', 'triage')}`); await a.settle();
   writeFileSync(join(practice, '.claude/agents/triage.md'), '---\nname: triage\ndescription: Sorts new issues by hand.\n---\n\nA new triage, made after the old one was deleted.\n');
   await refresh();
   await a.click('#nav-history'); await a.settle();
@@ -645,7 +648,7 @@ if (wanted('agents')) {
   await a.run(`[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('triage'))?.querySelector('.history-actions button')?.click()`);
   await a.settle();
   await shot(a, 'agents-restore-name-taken', 'Clicked Restore: the old triage is back in Central Knot and every tool; the new copy found in Claude Code is kept as a version first.');
-  await a.click('#nav-agents'); await a.settle(); await openRow('triage'); await show('.versions');
+  await a.click('#nav-agents'); await a.settle(); await openRow('agents', 'triage'); await show('.versions');
   await shot(a, 'agents-restore-name-taken-open', 'Opened triage after Restore: its versions, the new copy from Claude Code among them, each with Make current.');
 
   // No agents at all: a fresh Practice copy with its agents' files removed.
@@ -667,13 +670,13 @@ if (wanted('agents-pi')) {
   mkdirSync(join(practice, '.pi/agent/skills/release-notes'), { recursive: true });
   writeFileSync(join(practice, '.pi/agent/skills/release-notes/SKILL.md'), '---\nname: release-notes\ndescription: Pi’s own skill for release notes.\n---\n\nWrite the release notes.\n');
   await a.click('#nav-agents'); await refresh();
-  for (const key of ['code-reviewer', 'release-notes']) { await turnOnRow(key); await switchOn(key); }
-  await openRow('code-reviewer');
-  await atEverySize('agents-pi-open', 'Pi in the home, code-reviewer added: Pi has the current version (a skill, code-reviewer.md in its skills folder) with its own switch, and a note under the tools says once what Pi gets: no isolated context, tool restrictions or model selection, invoked as a skill; deleting the file in Pi turns the agent off everywhere', true, '#as-skill-code-reviewer');
-  await closeRow('code-reviewer');
-  await openRow('release-notes');
+  for (const key of ['code-reviewer', 'release-notes']) { await turnOnRow('agents', key); await switchOn('agents', key); }
+  await openRow('agents', 'code-reviewer');
+  await atEverySize('agents-pi-open', 'Pi in the home, code-reviewer added: Pi has the current version (a skill, code-reviewer.md in its skills folder) with its own switch, and a note under the tools says once what Pi gets: no isolated context, tool restrictions or model selection, invoked as a skill; deleting the file in Pi turns the agent off everywhere', true, `#${rowPart('as-skill', 'agents', 'code-reviewer')}`);
+  await closeRow('agents', 'code-reviewer');
+  await openRow('agents', 'release-notes');
   await atEverySize('agents-pi-held', 'release-notes added while Pi has a skill of its own named release-notes: nothing is written in Pi, and Pi’s line says why and how to use the agent there (delete or rename that skill)', true, '.details');
-  await closeRow('release-notes');
+  await closeRow('agents', 'release-notes');
   await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-agents'); await a.settle();
   await atEverySize('agents-pi-harness', 'Harnesses › Pi › Agents: the same rows with Pi first, code-reviewer current there and release-notes held', true);
   await a.click('#harness-tab-about'); await a.settle();
@@ -863,7 +866,7 @@ if (wanted('profiles')) {
   await atEverySize('empty', 'Clicked "Profiles" in the sidebar before any profile exists', true);
   for (const [page, keys] of [['skills', ['notes', 'standup', 'release-notes']], ['mcp', ['docs', 'files']], ['agents', ['code-reviewer', 'release-notes']]]) {
     await a.click(`#nav-${page}`); await a.settle();
-    for (const key of keys) { await turnOnRow(key); await switchOn(key); }
+    for (const key of keys) { await turnOnRow(page, key); await switchOn(page, key); }
   }
   await a.click('#nav-profiles');
   await a.click('#profile-new');
@@ -887,7 +890,7 @@ if (wanted('profiles')) {
   await atEverySize('development-in-use', 'Chose "Development" in that menu: Development is in use; the column says what is on now');
   await a.click('#nav-skills'); await a.settle();
   await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: each skill is On or Off in Central Knot, as Development has it; nothing marks a profile.');
-  await a.click('#switch-standup'); await a.settle();
+  await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
   await a.click('#nav-profiles'); await openProfile('Development');
   await atEverySize('after-hand-click', 'On the Skills page, turned standup off by hand, then came back: no profile is in use now (the status bar says No profile), and Development says what switching to it would turn back on', true);
   await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
@@ -970,7 +973,7 @@ if (wanted('first-setup')) {
   await atEverySize('after-no', 'Clicked No, I’ll add items myself: the band says nothing changed, what is on stays on and keeps syncing, found items wait on their page for Add, and Settings can switch it on later; the question is gone, and the lead says to open a card and turn on what you want', true);
   // A home from before this step, with an item already On, whose rule was never answered: the record without its answer.
   await a.click('#nav-skills');
-  await turnOnRow('notes'); await switchOn('notes');
+  await turnOnRow('skills', 'notes'); await switchOn('skills', 'notes');
   edit(join(practice, '.central-knot/sync.json'), text => { const record = JSON.parse(text); delete record.syncEverything; return JSON.stringify(record, null, 2); });
   await refresh();
   await a.click('#nav-overview');
@@ -978,10 +981,10 @@ if (wanted('first-setup')) {
   await a.click('#setup-yes');
   await waitFor(a, `!!document.querySelector('#walkthrough')`, 15000);
   await atEverySize('after-yes-walkthrough-first', 'Clicked Synchronize everything: the band says what it took in and what the one Undo covers; the walkthrough opened on Skills at its first item, 1 of 4, deploy, with its copy question as its row asks it, Codex’s copy (the latest) the main button, and beside Skip the line Skip changes no copy', true, '#walkthrough', 'start');
-  await a.size(860, 560); await show('#walkthrough', 'start'); await focusOn('#use-deploy-codex-cli');
+  await a.size(860, 560); await show('#walkthrough', 'start'); await focusOn(`#${rowPart('walk-use', 'skills', 'deploy', 'codex-cli')}`);
   await shot(a, 'walkthrough-focus-860', 'Tabbed to Codex’s copy, the latest, at 860×560: the focus ring is on its Use this copy');
   await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
-  await a.click('#use-deploy-codex-cli');
+  await a.click(`#${rowPart('walk-use', 'skills', 'deploy', 'codex-cli')}`);
   await atEverySize('walkthrough-second', 'Clicked Use this copy on Codex’s copy: the band says deploy is in Central Knot with Codex’s copy, with its own Undo; the walkthrough went on to 2 of 4, review, Copilot CLI’s copy the main button', false, '#walkthrough', 'start');
   await a.click('#walk-skip'); await a.click('#walk-skip');
   await shot(a, 'walkthrough-next-kind', 'Clicked Skip twice (review and triage): 4 of 4 is on MCP servers, so the band says so, with Go on');
@@ -1032,9 +1035,9 @@ if (wanted('sync-everything')) {
   await atEverySize('overview-on', 'Opened Overview: its question is gone, now Synchronize everything is on; what still needs you is the one found item whose copies differ, with Choose copies, and the cards count what it took in');
   await a.click('#nav-skills');
   await atEverySize('skills-on', 'Opened Skills: one notice names the skills it took in and the tools it found them in; the Found heading says Synchronize everything leaves these, the opened row saying why, and counts what waits for a choice', true);
-  await openRow('review');
+  await openRow('skills', 'review');
   await atEverySize('skills-on-review', 'Opened review, left found: its copies differ, so it asks which copy every tool uses, as Add would; the row and its question are one block, its bar the warning colour', false, '.ov-row.open', 'start');
-  await closeRow('review');
+  await closeRow('skills', 'review');
   await a.click('#nav-mcp');
   await atEverySize('mcp-on', 'Opened MCP servers: its notice names the servers it took in and where, and that History can undo each; Claude Code has them too', true);
   await a.click('#nav-agents');
@@ -1047,9 +1050,9 @@ if (wanted('sync-everything')) {
   await a.run(`${notesRow}.querySelector('.history-actions button').click()`); await a.settle();
   await atEverySize('history-undone', 'Clicked Undo on notes’s entry: the status bar says it is out of Central Knot again, each tool it was found in keeping its own copy', true);
   await a.click('#nav-skills'); await refresh();
-  await openRow('notes');
+  await openRow('skills', 'notes');
   await atEverySize('skills-undone-found', 'Opened Skills after a pass: notes is found again and stays so; its line says it was deleted from Central Knot, so it will not be added by itself again, and that Add, or Restore in History, brings it back; the Found heading grows with its note', true, '.details');
-  await closeRow('notes');
+  await closeRow('skills', 'notes');
   await a.click('#nav-settings');
   await a.click('#sync-everything-on');
   await waitFor(a, `document.querySelector('#sync-everything-on')?.getAttribute('aria-checked') === 'false'`, 15000);
@@ -1318,9 +1321,9 @@ if (wanted('plugin-items')) {
     await a.theme('light'); await shot(a, `skills-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
   }
   await size(1280, 800);
-  await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
+  await a.click(`${byId(rowPart('open', 'skills', 'document-tools@team-tools/pdf-reader'))}`);
   await shot(a, 'skill-open', 'Opened pdf-reader: it opens with where it is on (“On in Claude Code · off in Copilot CLI and Codex · from the plugin document-tools”), then where it is handled (a link to document-tools’ page; the switches below turn it on or off in each tool), and each tool’s line with its switch.');
-  await a.click('[id="pfile-document-tools@team-tools/pdf-reader"]'); await waitFor(a, `!!document.querySelector('.details-plugin .plugin-file')`, 15000);
+  await a.click(`${byId(rowPart('pfile', 'skills', 'document-tools@team-tools/pdf-reader'))}`); await waitFor(a, `!!document.querySelector('.details-plugin .plugin-file')`, 15000);
   await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”, under the tools’ lines: the file opens right under the link, in its own scrolling box no taller than 40% of the window, and each tool’s switch stays in view above it.');
   await a.theme('light'); await shot(a, 'skill-open-light', 'The same, light.'); await a.theme('dark');
   await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560: the tools’ lines and their switches, then its SKILL.md under the link.');
@@ -1328,36 +1331,36 @@ if (wanted('plugin-items')) {
   await size(1728, 1117); await shot(a, 'skill-open-1728', 'The open row at 1728×1117.'); await size(1280, 800);
   // The row's own switch turns it off in every tool that has it. Copilot CLI and Codex have it off already, and Claude Code has
   // no switch for one skill of a plugin, so there it turns the whole plugin off, as the switch's name and tooltip say first.
-  const pdfSwitch = '[id="switch-document-tools@team-tools/pdf-reader"]';
+  const pdfSwitch = `${byId(rowPart('switch', 'skills', 'document-tools@team-tools/pdf-reader'))}`;
   await shot(a, 'main-switch-before', `Before the row's switch is clicked (pdf-reader open, on in Claude Code only): its name and tooltip say “${await a.run(`document.querySelector('${pdfSwitch}').getAttribute('aria-label')`)}”`);
   await a.click(pdfSwitch); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
   await shot(a, 'main-switch-whole', 'Clicked pdf-reader’s own switch: the whole plugin document-tools is off in Claude Code, with Claude Code’s own command, and the band says pdf-reader is off there and names what went with it, with one Undo and no second button.');
   await size(860, 560); await shot(a, 'main-switch-whole-860', 'The same at 860×560.'); await size(1280, 800);
   await a.click('#outcome-undo-plugin'); await a.settle();
   await shot(a, 'main-switch-whole-undone', 'Clicked Undo: document-tools is on in Claude Code again.');
-  await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
+  await a.click(`${byId(rowPart('open', 'skills', 'document-tools@team-tools/pdf-reader'))}`);
   // spreadsheet is on in all three: its switch turns it off in Copilot CLI and Codex with their own switches and the whole
   // plugin in Claude Code, and its one Undo turns them all back on.
-  await a.click('[id="switch-document-tools@team-tools/spreadsheet"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+  await a.click(`${byId(rowPart('switch', 'skills', 'document-tools@team-tools/spreadsheet'))}`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
   await shot(a, 'main-switch-changed', 'Clicked spreadsheet’s own switch: off in Copilot CLI and Codex at once, each with its own switch, and in Claude Code, which has no switch for one skill of a plugin, with the whole plugin document-tools; the band names what went with it, with Undo.');
   await size(860, 560); await a.click('#sidebar-toggle');
   await shot(a, 'main-switch-changed-860-sidebar', 'The same at 860×560 with the sidebar open: the sentence keeps the width, Undo beside or under it.');
   await a.click('#sidebar-toggle'); await size(1280, 800);
   await a.click('#outcome-undo-plugin'); await a.settle();
   await shot(a, 'main-switch-changed-undone', 'Clicked Undo: “Undone: spreadsheet is back on in Claude Code, Copilot CLI and Codex.”');
-  if (await a.has('#open-triage')) {
-    await a.click('#open-triage'); await shot(a, 'copy-and-plugin', 'Opened triage: the copy in Pi and the plugin installed in Codex share the row, its SKILL.md being the same; Codex’s line has its switch.');
+  if (await a.has(`#${rowPart('open', 'skills', 'triage')}`)) {
+    await a.click(`#${rowPart('open', 'skills', 'triage')}`); await shot(a, 'copy-and-plugin', 'Opened triage: the copy in Pi and the plugin installed in Codex share the row, its SKILL.md being the same; Codex’s line has its switch.');
     // Each tool's switch for the item is in its opened row, and applies at once. issue-tracker is off in Codex: its switch
     // turns the plugin on there for triage alone.
-    if (await a.has('#enable-triage-codex-cli')) {
-      await a.click('#enable-triage-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin, .bands .band')`, 15000);
+    if (await a.has(`#${rowPart('enable', 'skills', 'triage', 'codex-cli')}`)) {
+      await a.click(`#${rowPart('enable', 'skills', 'triage', 'codex-cli')}`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin, .bands .band')`, 15000);
       await shot(a, 'switch-applied', 'Clicked triage’s Codex switch in its opened row (the whole plugin issue-tracker was off there): it is on in Codex at once. The band leads with the skill clicked (“triage is on in Codex. Its plugin issue-tracker was turned on there, with its MCP server issues left off.”), with Undo.');
       await a.theme('light'); await shot(a, 'switch-applied-light', 'The same, light.'); await a.theme('dark');
       await size(860, 560); await shot(a, 'switch-applied-860', 'The same at 860×560.'); await size(1280, 800);
       if (await a.has('#outcome-undo-plugin')) { await a.click('#outcome-undo-plugin'); await a.settle(); await shot(a, 'switch-undone', 'Clicked Undo: issue-tracker is off in Codex again, as it was; the confirmation fades by itself.'); }
     }
   }
-  await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="issue-tracker@"]')`);
+  await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="${rowPart('', 'mcp', 'issue-tracker@')}"]')`);
   await shot(a, 'mcp', 'MCP servers: issue-tracker’s issues server, installed in Codex with the plugin turned off.');
   await a.theme('light'); await shot(a, 'mcp-light', 'The same, light.'); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
@@ -1366,27 +1369,27 @@ if (wanted('plugin-items')) {
     await a.theme('light'); await shot(a, `mcp-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
   }
   await size(1280, 800);
-  if (await a.has('[id="open-issue-tracker@team-tools/issues"]')) { await a.click('[id="open-issue-tracker@team-tools/issues"]'); await shot(a, 'mcp-open', 'Opened issues: its marketplace is added nowhere, so it says how Codex itself handles it; its switch is there all the same.'); }
+  if (await a.has(`${byId(rowPart('open', 'mcp', 'issue-tracker@team-tools/issues'))}`)) { await a.click(`${byId(rowPart('open', 'mcp', 'issue-tracker@team-tools/issues'))}`); await shot(a, 'mcp-open', 'Opened issues: its marketplace is added nowhere, so it says how Codex itself handles it; its switch is there all the same.'); }
   // One MCP server of a plugin has a switch of its own in every tool that takes plugins: its opened row's switch writes it at
   // once, and Undo takes it back.
-  if (await a.has('[id="open-issue-tracker@team-tools/issues"]')) {
-    if (!(await a.has('[id="enable-issue-tracker@team-tools/issues-codex-cli"]'))) await a.click('[id="open-issue-tracker@team-tools/issues"]');
-    await a.click('[id="enable-issue-tracker@team-tools/issues-codex-cli"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin, .bands .band')`, 15000);
+  if (await a.has(`${byId(rowPart('open', 'mcp', 'issue-tracker@team-tools/issues'))}`)) {
+    if (!(await a.has(`${byId(rowPart('enable', 'mcp', 'issue-tracker@team-tools/issues', 'codex-cli'))}`))) await a.click(`${byId(rowPart('open', 'mcp', 'issue-tracker@team-tools/issues'))}`);
+    await a.click(`${byId(rowPart('enable', 'mcp', 'issue-tracker@team-tools/issues', 'codex-cli'))}`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin, .bands .band')`, 15000);
     await shot(a, 'mcp-switch-applied', 'Clicked issues’ Codex switch in its opened row, where the whole plugin was off: it is on in Codex at once. The result leads with the server clicked (“issues is on in Codex. Its plugin issue-tracker was turned on there, with its skill triage left off.”), with Undo.');
     await size(1728, 1117); await shot(a, 'mcp-switch-applied-1728', 'The same at 1728×1117.'); await size(1280, 800);
     if (await a.has('#outcome-undo-plugin')) { await a.click('#outcome-undo-plugin'); await a.settle(); await shot(a, 'mcp-switch-undone', 'Clicked Undo: the plugin is off in Codex again, as it was.'); }
   }
   // The row's own switch does the same in every tool with a switch for one server: here, Codex.
-  if (await a.has('[id="switch-issue-tracker@team-tools/issues"]')) {
-    await a.click('[id="switch-issue-tracker@team-tools/issues"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+  if (await a.has(`${byId(rowPart('switch', 'mcp', 'issue-tracker@team-tools/issues'))}`)) {
+    await a.click(`${byId(rowPart('switch', 'mcp', 'issue-tracker@team-tools/issues'))}`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
     await shot(a, 'mcp-main-switch', 'Clicked the issues row’s own switch: it is on in Codex, the one tool that has it, with its plugin turned on there for it alone; with Undo.');
     await a.click('#outcome-undo-plugin'); await a.settle();
   }
   await a.click('#nav-agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code, under “From plugins · installed with their plugin · switched here like any other”.');
-  if (await a.has('[id="open-release-helper@team-tools/release-reviewer"]')) {
-    await a.click('[id="open-release-helper@team-tools/release-reviewer"]');
+  if (await a.has(`${byId(rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer'))}`)) {
+    await a.click(`${byId(rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer'))}`);
     await shot(a, 'agent-open', 'Opened release-reviewer: it opens with where it is on (“On in Claude Code · from the plugin release-helper”), where it is handled, and Claude Code’s line with its switch for this one agent.');
-    await a.click('[id="switch-release-helper@team-tools/release-reviewer"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+    await a.click(`${byId(rowPart('switch', 'agents', 'release-helper@team-tools/release-reviewer'))}`); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
     await shot(a, 'agent-main-switch', 'Clicked release-reviewer’s own switch: off in Claude Code at once, with Claude Code’s switch for one agent (the rest of release-helper stays on); the key says “Off there”; with Undo.');
     await a.click('#outcome-undo-plugin'); await a.settle();
     await shot(a, 'agent-main-switch-undone', 'Clicked Undo: release-reviewer is on in Claude Code again.');
@@ -1495,7 +1498,7 @@ async function everyPage(tag) {
   await a.click('#nav-overview'); await shot(a, `${tag}-overview`, `The Overview ${at}.`);
   await a.click('#nav-skills'); await shot(a, `${tag}-skills`, `Skills ${at}.`);
   // notes, when there: a skill whose copies agree, so its details offer Files and contents.
-  const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
+  const first = await a.run(`(document.querySelector('#${rowPart('open', 'skills', 'notes')}') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
   if (first) {
     if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${first}`);
     if (!(await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`))) throw new Error(`The skill's details did not open ${at}.`);
@@ -1513,9 +1516,9 @@ async function everyPage(tag) {
     if (await a.has('.ov-row.open')) await a.click(`#${first}`);
   }
   // draft's copies differ: its switch opens the copy question under its row, and a second click closes it.
-  if (await a.has('#add-draft')) {
-    await a.click('#add-draft'); await shot(a, `${tag}-skills-choice`, `Clicked draft's Add: its copies differ, so the copy question opens under its row ${at}.`);
-    if (await a.has('#use-draft-copilot-cli')) await a.click('#add-draft');
+  if (await a.has(`#${rowPart('add', 'skills', 'draft')}`)) {
+    await a.click(`#${rowPart('add', 'skills', 'draft')}`); await shot(a, `${tag}-skills-choice`, `Clicked draft's Add: its copies differ, so the copy question opens under its row ${at}.`);
+    if (await a.has(`#${rowPart('use', 'skills', 'draft', 'copilot-cli')}`)) await a.click(`#${rowPart('add', 'skills', 'draft')}`);
   }
   const on = await a.run(`document.querySelector('.ov-row[data-key] .switch[aria-checked="true"]:not([disabled])')?.id ?? ''`);
   if (on) { await a.click(`#${on}`); await shot(a, `${tag}-skills-switched-off`, `Turned one skill off: its result and Undo ${at}.`); if (await a.has('#outcome-undo')) await a.click('#outcome-undo'); }
@@ -1556,7 +1559,7 @@ async function everyPage(tag) {
 /** An edit to Copilot CLI's MCP settings made outside the app, files being in Central Knot, so the MCP page shows its notice and actions. */
 async function editMcpOutside() {
   await a.click('#nav-mcp');
-  if (await a.has('#add-files')) { await a.click('#add-files'); await a.settle(); }
+  if (await a.has(`#${rowPart('add', 'mcp', 'files')}`)) { await a.click(`#${rowPart('add', 'mcp', 'files')}`); await a.settle(); }
   edit(join(practice, '.copilot/mcp-config.json'), text => (text.includes('"npx-edited"') ? text.replace('"npx-edited"', '"npx"') : text.replace('"command": "npx"', '"command": "npx-edited"')));
   await waitFor(a, `!!document.querySelector('.sync-notice')`, 10000);
 }
@@ -1692,30 +1695,30 @@ if (wanted('shared-copies')) {
       await a.theme(theme);
       for (const [width, height] of sizes) {
         await a.size(width, height);
-        if (into) await a.run(`(() => { document.querySelector(${JSON.stringify(`.ov-row[data-key="${key}"]`)})?.scrollIntoView({ block: 'start' }); document.querySelector(${JSON.stringify(into)})?.scrollIntoView({ block: 'nearest' }); })()`);
+        if (into) await a.run(`(() => { document.querySelector(${JSON.stringify(`.ov-row[data-key="${rowPart('', 'skills', key)}"]`)})?.scrollIntoView({ block: 'start' }); document.querySelector(${JSON.stringify(into)})?.scrollIntoView({ block: 'nearest' }); })()`);
         await shot(a, `${tag}-${theme}-${width}`, `${caption} (${theme}, ${width}×${height})`);
       }
     }
     await a.theme('dark'); await a.size(1280, 800);
   };
-  const open = () => openRow(name);
+  const open = () => openRow('skills', name);
   await open();
   await everySize('unmanaged', `Opened ${name}, found: the real folder is in ~/.agents/skills, Copilot CLI's skills folder has a link to it, Pi reads the shared folder. Its status says Copilot CLI and Pi have it another way and that Add puts it in Claude Code; each tool's line says how it gets it; no Delete, as it isn't in Central Knot.`, '.details', true);
-  const turnOn = async () => { await turnOnRow(name); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); };
+  const turnOn = async () => { await turnOnRow('skills', name); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); };
   await turnOn();
   await everySize('turned-on', 'Clicked its Add: it is in Central Knot and on in Claude Code; Copilot CLI and Pi keep the shared copy, their lines saying “Another way” with Take over…; the band says so, with Undo.', '.bands', true);
   await a.click('#outcome-undo'); await a.settle();
   await everySize('undone', 'Clicked Undo in that band: it says opus-sol-loop is as before: found again, the link and the shared copy untouched.', '.bands');
   // Taken in again; Take over… on a line removes the shared copy and gives each tool that read it Central Knot's copy.
   await turnOn(); await open();
-  await a.click(`#take-over-${name}-copilot-cli`);
-  await everySize('take-over-armed', 'Clicked “Take over…” on Copilot CLI’s line: the armed line says which copy goes, which tools get Central Knot’s copy instead, that other apps won’t find it there, and that it has no Undo.', `#take-over-note-${name}-copilot-cli`, true);
-  await a.click(`#take-over-confirm-${name}-copilot-cli`); await a.settle();
+  await a.click(`#${rowPart('take-over', 'skills', name, 'copilot-cli')}`);
+  await everySize('take-over-armed', 'Clicked “Take over…” on Copilot CLI’s line: the armed line says which copy goes, which tools get Central Knot’s copy instead, that other apps won’t find it there, and that it has no Undo.', `#${rowPart('take-over-note', 'skills', name, 'copilot-cli')}`, true);
+  await a.click(`#${rowPart('take-over-confirm', 'skills', name, 'copilot-cli')}`); await a.settle();
   await open();
   await everySize('taken-over', 'Clicked “Take over now”: the shared copy is gone and Copilot CLI and Pi have Central Knot’s copy; the band says so, and that it has no Undo.', '.bands', true);
-  await a.click(`#delete-${name}`);
-  await everySize('delete-armed', 'Clicked “Delete from Central Knot…”: it says what happens, and for how long History can restore it.', `#delete-note-${name}`);
-  await a.click(`#delete-confirm-${name}`); await a.settle();
+  await a.click(`#${rowPart('delete', 'skills', name)}`);
+  await everySize('delete-armed', 'Clicked “Delete from Central Knot…”: it says what happens, and for how long History can restore it.', `#${rowPart('delete-note', 'skills', name)}`);
+  await a.click(`#${rowPart('delete-confirm', 'skills', name)}`); await a.settle();
   await everySize('deleted', 'Clicked “Delete it now”: opus-sol-loop is out of every tool and off the page; the band says so.', '.bands');
   // Layout 4: Copilot CLI's whole skills folder is a link to the shared folder, so the copy there is the only one it can have.
   const linked = join(scratch, 'shared-root');
@@ -1724,13 +1727,13 @@ if (wanted('shared-copies')) {
   skillAt(join(linked, '.agents/skills'), 'gamma', 'A skill the installer keeps in the shared folder.');
   symlinkSync('../.agents/skills', join(linked, '.copilot/skills'));
   await openFolder(linked);
-  await openRow('gamma');
+  await openRow('skills', 'gamma');
   await everySize('linked-skills-folder', 'A folder whose Copilot CLI skills folder is itself a link to ~/.agents/skills: opened gamma, found. Its status and each tool’s line say how each tool gets it; no action is offered that could not work.', '.details', true, 'gamma');
-  await turnOnRow('gamma'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  await openRow('gamma');
+  await turnOnRow('skills', 'gamma'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await openRow('skills', 'gamma');
   await everySize('linked-skills-folder-managed', 'Added gamma there: Claude Code has Central Knot’s copy, Copilot CLI and Pi keep the shared copy, their lines saying “Another way”.', '.details', true, 'gamma');
-  await a.click('#delete-gamma');
-  await a.click('#delete-confirm-gamma'); await a.settle();
+  await a.click(`#${rowPart('delete', 'skills', 'gamma')}`);
+  await a.click(`#${rowPart('delete-confirm', 'skills', 'gamma')}`); await a.settle();
   await everySize('linked-skills-folder-deleted', 'Clicked “Delete from Central Knot…”, then “Delete it now” there: gamma is out of Central Knot; the band says so.', '.bands', false, 'gamma');
   if (await a.has('#outcome-undo')) { await a.click('#outcome-undo'); await a.settle(); await everySize('linked-skills-folder-restored', 'Clicked Undo in that band: gamma is back in Central Knot, on in Claude Code, Copilot CLI and Pi keeping the shared copy.', '.bands', false, 'gamma'); }
 }
@@ -1955,7 +1958,7 @@ if (wanted('settings')) {
   await keepFor(a, 30);
   // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
   await a.click('#nav-skills');
-  await turnOnRow('standup');
+  await turnOnRow('skills', 'standup');
   await a.click('#nav-settings');
   mkdirSync(join(practice, '.central-knot'), { recursive: true });
   writeFileSync(join(practice, '.central-knot/history.json'), JSON.stringify({ events: [
@@ -2214,8 +2217,8 @@ if (wanted('harnesses')) {
   if (await a.has('[id^="harness-claude-cli-differ-"]')) { await a.click('[id^="harness-claude-cli-differ-"]'); await shot(a, 'claude-differ-link', 'Clicked "1 skill with different copies" on the Claude Code card: its page, showing only those.'); await a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.textContent.trim() === 'All')?.click()`); await a.settle(); await a.click('#harness-back'); }
   await a.click('#harness-claude-cli'); await shot(a, 'claude-skills', 'Clicked the Claude Code card: its page, on the Skills tab. Its column comes first; skills only other tools have are under "Not in Claude Code".');
   await sizes('claude-skills', 'Claude Code’s Skills tab.');
-  if (await a.has('#add-standup, #switch-standup:not([aria-checked="true"])')) { await turnOnRow('standup'); await shot(a, 'claude-switched', 'Turned standup on from Claude Code’s page: it is copied to every tool at once.'); }
-  await a.click('#open-release-notes'); await shot(a, 'claude-details', 'Opened release-notes’ details from its row.');
+  if (await a.has(`#${rowPart('add', 'skills', 'standup')}, #${rowPart('switch', 'skills', 'standup')}:not([aria-checked="true"])`)) { await turnOnRow('skills', 'standup'); await shot(a, 'claude-switched', 'Turned standup on from Claude Code’s page: it is copied to every tool at once.'); }
+  await a.click(`#${rowPart('open', 'skills', 'release-notes')}`); await shot(a, 'claude-details', 'Opened release-notes’ details from its row.');
   await a.click('#harness-tab-mcp'); await shot(a, 'claude-mcp', 'Clicked the "MCP servers" tab.');
   await a.click('#harness-tab-agents'); await shot(a, 'claude-agents', 'Clicked the "Agents" tab.');
   await a.click('#harness-tab-instructions'); await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`); await shot(a, 'claude-instructions', 'Clicked the "Instructions" tab: Claude Code’s own file, editable here.');
@@ -2258,7 +2261,7 @@ if (wanted('harnesses')) {
   const last = await a.run(`[...document.querySelectorAll('.ov-head .tool-head-button')].at(-1)?.id`);
   if (last) { await a.click(`#${last}`); await shot(a, 'last-menu-860', 'Clicked the right-most column header at 860×560: its menu stays inside the window.'); await a.click(`#${last}`); }
   await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi holds none of them yet; the agents the other tools have are under “Not in Pi”, each with Add (in Pi an agent is a skill).');
-  await a.click('#harness-tab-skills'); if (!(await a.has('.ov-row.open[data-key="release-notes"]'))) await a.click('#open-release-notes'); await shot(a, 'pi-details-860', 'Opened release-notes on Pi’s page at 860×560: each tool’s own switch in its details.');
+  await a.click('#harness-tab-skills'); if (!(await a.has(`.ov-row.open[data-key="${rowPart('', 'skills', 'release-notes')}"]`))) await a.click(`#${rowPart('open', 'skills', 'release-notes')}`); await shot(a, 'pi-details-860', 'Opened release-notes on Pi’s page at 860×560: each tool’s own switch in its details.');
   await size(1280, 800);
   // This computer's home (in the tour, an empty throwaway folder on Linux): detection, a Not found card, and its header.
   await a.click('#home-actual'); await a.click('#nav-harnesses'); await shot(a, 'this-computer-list', 'Clicked "This Mac’s home" ("This computer’s home" off macOS) at the bottom left, then Harnesses: each tool with how it was found; tools not found have a card that does not open.');
@@ -2271,7 +2274,7 @@ if (wanted('manage')) {
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
   // notes and standup On in every tool first, so Codex has copies of Central Knot's to keep, or lose, while it is left out.
   await a.click('#nav-skills');
-  for (const key of ['notes', 'standup']) { await turnOnRow(key); await switchOn(key); }
+  for (const key of ['notes', 'standup']) { await turnOnRow('skills', key); await switchOn('skills', key); }
   await a.click('#nav-harnesses'); await waitFor(a, `!/…/.test(document.querySelector('.harness-cards')?.textContent ?? '…')`);
   await atEverySize('all-managed', 'Harnesses with every tool managed: each card has its Manage switch on, and the line under it says what turning it off leaves as it is', true);
   await focusOn('#manage-codex-cli'); await shot(a, 'switch-focus', 'Keyboard focus on Codex’s Manage switch, with its ring.');
@@ -2279,7 +2282,7 @@ if (wanted('manage')) {
   await atEverySize('codex-left-out', 'Clicked Codex’s switch: the band says Codex is left out and its copies stay; its card has no counts, and its line says no item in Codex would change on turning it on, and two found items would show under Found', true);
   // While Codex is left out: its copy of notes is edited by hand, and standup is turned off in Central Knot.
   edit(join(practice, '.codex/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex while it was left out.\n'));
-  await a.click('#nav-skills'); await a.click('#switch-standup'); await a.settle();
+  await a.click('#nav-skills'); await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
   await atEverySize('skills-one-left-out', 'Turned standup off on the Skills page with Codex left out: no Codex mark on any row; standup’s row and the band say no tool Central Knot manages has it');
   await a.click('#nav-overview');
   await atEverySize('overview-one-left-out', 'The Overview with Codex left out: Your tools has a row for Claude Code and Copilot CLI only, and the line under it says Codex is left out and that its switch is on Harnesses (under the fold at 860×560)');
@@ -2324,7 +2327,7 @@ if (wanted('repo')) {
   run(author, 'add', '-A'); run(author, 'commit', '--quiet', '-m', 'Incident kit'); run(author, 'push', '--quiet', 'origin', 'HEAD:main');
 
   await a.click('#nav-skills');
-  for (const key of await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].filter(row => row.querySelector(':is(.add-item, .switch:not([aria-checked="true"])):not([disabled])') && !row.querySelector('[id^="decide-"]')).map(row => row.dataset.key)`)) await turnOnRow(key);
+  for (const key of await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].filter(row => row.querySelector(':is(.add-item, .switch:not([aria-checked="true"])):not([disabled])') && !row.querySelector('[id^="decide-"]')).map(row => row.dataset.key.slice(${rowPart('', 'skills', '').length}))`)) await turnOnRow('skills', key);
   await a.click('#nav-repo');
   await shot(a, 'repo-start-dark', 'Clicked "Git repo" in the sidebar: nothing connected yet. The page says what goes where and that nothing changes until Pull or Push.');
   await a.theme('light'); await shot(a, 'repo-start-light', 'The same, light.'); await a.theme('dark');
@@ -2543,16 +2546,16 @@ if (wanted('sources')) {
   await a.size(860, 560); await focusOn('#source-add'); await shot(a, 'look-focus-860', 'Tabbed to Add 1 skill at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
   await a.click('#source-add'); await busyDone(); await a.settle();
   await atEverySize('source-row', 'Clicked Add 1 skill: the band says deslop is in Central Knot, Off, with Open Skills; the source’s row: its link, branch, folder, commit and when it was read, the line saying what Check now can do in your tools, Check now and Remove…, and deslop, at the root of skill-deslop, In Central Knot, Off', true, '.source-row');
-  await a.click('#nav-skills'); await openRow('deslop');
-  await atEverySize('skill-off', 'On Skills, deslop’s row is Off, in no tool, as any Off item reads; opened, it says it is from github.com/stephenturner/skill-deslop (main), a source, with a link to Sources, and its one version says the same', true, '.ov-row[data-key="deslop"]', 'start');
-  await turnOnRow('deslop'); await switchOn('deslop');
-  await atEverySize('skill-on', 'Clicked its switch: deslop is On, and each tool’s line says it has the current version; the opened row still says where it is from', false, '.ov-row[data-key="deslop"]', 'start');
+  await a.click('#nav-skills'); await openRow('skills', 'deslop');
+  await atEverySize('skill-off', 'On Skills, deslop’s row is Off, in no tool, as any Off item reads; opened, it says it is from github.com/stephenturner/skill-deslop (main), a source, with a link to Sources, and its one version says the same', true, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
+  await turnOnRow('skills', 'deslop'); await switchOn('skills', 'deslop');
+  await atEverySize('skill-on', 'Clicked its switch: deslop is On, and each tool’s line says it has the current version; the opened row still says where it is from', false, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Keep the voice');
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await atEverySize('updated', 'Changed deslop at the source and clicked Check now: the band says deslop was updated from its source, now in all 3 tools, with Undo the update, Open Skills, and that each change can be seen or undone in History', true, '.source-row');
-  await a.click('#nav-skills'); await openRow('deslop');
-  await atEverySize('updated-skill', 'On Skills, deslop’s opened row: two versions, the current one from the source, the earlier one too, each saying where it came from', false, '.ov-row[data-key="deslop"]', 'start');
+  await a.click('#nav-skills'); await openRow('skills', 'deslop');
+  await atEverySize('updated-skill', 'On Skills, deslop’s opened row: two versions, the current one from the source, the earlier one too, each saying where it came from', false, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   await a.click('#nav-history');
   await shot(a, 'updated-history', 'History: Updated from github.com/stephenturner/skill-deslop (main); that became the current version, in all 3 tools, with Undo (1280×800)');
   // Edited in Claude Code (Automatic sync takes it in), then changed at the source: the source's version waits.
@@ -2565,8 +2568,8 @@ if (wanted('sources')) {
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await atEverySize('waiting', 'deslop was edited in Claude Code, then changed at the source; clicked Check now: the band says deslop changed at the source and yours stays current, since it was changed here or a tool’s copy can’t be read just now, and that on its row Merge puts the source’s changes into yours if they don’t clash, Replace takes the source’s, and Keep mine keeps yours; deslop’s line on the source’s row, under a warning mark, says yours stays current until you merge, replace or keep it, for the same reasons, what Merge, Replace and Keep mine do, and ends with Merge, Replace and Keep mine', true, '.source-row');
   await a.size(860, 560); await show('.source-row'); await focusOn('.source-row button[id^="source-merge-"]'); await shot(a, 'waiting-merge-focus-860', 'Tabbed to Merge on deslop’s line at 860×560: its focus ring, with Replace beside it'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
-  await a.click('#nav-skills'); await openRow('deslop');
-  await atEverySize('waiting-skill', 'On Skills, deslop’s row says “update at its source” after its name, under a warning mark; opened, each tool has the current version (the edit made in Claude Code), and the line at the end says the source has a newer version, yours stays current since it was changed here or a tool’s copy of it can’t be read just now, and on Sources Merge puts its changes into yours if they don’t clash, and Replace takes it as it is, either keeping yours as a version, and Keep mine keeps yours current and the source’s as a version, so it no longer waits', true, '.ov-row[data-key="deslop"]', 'start');
+  await a.click('#nav-skills'); await openRow('skills', 'deslop');
+  await atEverySize('waiting-skill', 'On Skills, deslop’s row says “update at its source” after its name, under a warning mark; opened, each tool has the current version (the edit made in Claude Code), and the line at the end says the source has a newer version, yours stays current since it was changed here or a tool’s copy of it can’t be read just now, and on Sources Merge puts its changes into yours if they don’t clash, and Replace takes it as it is, either keeping yours as a version, and Keep mine keeps yours current and the source’s as a version, so it no longer waits', true, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   await a.click('#nav-sources');
   // Both changed the same line of SKILL.md: Merge names it and changes nothing.
   await a.click('.source-row button[id^="source-merge-"]'); await busyDone(); await a.settle();
@@ -2586,8 +2589,8 @@ if (wanted('sources')) {
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await a.click('.source-row button[id^="source-merge-"]'); await busyDone(); await a.settle();
   await atEverySize('merged', 'A line was added to deslop in Claude Code, and the source reworded its description; clicked Check now, then Merge on deslop’s line: the band says deslop now has your changes and the source’s, merged, in all 3 tools, and the version it had is kept, with Undo the merge, Open Skills, and that each change can be seen or undone in History; deslop’s line says In Central Knot, On, with no Merge or Replace', true, '.source-row');
-  await a.click('#nav-skills'); await openRow('deslop');
-  await atEverySize('merged-skill', 'On Skills, deslop’s opened row: each tool has the merged version; its newest versions say merged with the source’s version, and from the source; the line at the end says you changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on Sources; no tag after its name, since nothing waits', false, '.ov-row[data-key="deslop"]', 'start');
+  await a.click('#nav-skills'); await openRow('skills', 'deslop');
+  await atEverySize('merged-skill', 'On Skills, deslop’s opened row: each tool has the merged version; its newest versions say merged with the source’s version, and from the source; the line at the end says you changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on Sources; no tag after its name, since nothing waits', false, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   await a.click('#nav-history');
   await shot(a, 'merged-history', 'History: Merged github.com/stephenturner/skill-deslop (main)’s version into yours; that became the current version, in all 3 tools; the version it had and the source’s are kept, with Undo (1280×800)');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Rename to unslop');
@@ -2599,8 +2602,8 @@ if (wanted('sources')) {
   await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so the source turned no skill, agent or MCP server off (nothing there can be read), and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can this source turns no skill off; deslop’s line, no longer at this source, with Turn it on, stays as it was', false, '.source-row');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Mend the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await a.click('#nav-skills'); await openRow('deslop');
-  await atEverySize('dropped-skill', 'On Skills, deslop is Off, out of every tool, kept in Central Knot with its versions, and “removed at its source” after its name, under a warning mark; its opened row’s line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and that should the source have it again, it follows the source if unchanged here and stays as you have it if you changed it; its versions still say where each came from', false, '.ov-row[data-key="deslop"]', 'start');
+  await a.click('#nav-skills'); await openRow('skills', 'deslop');
+  await atEverySize('dropped-skill', 'On Skills, deslop is Off, out of every tool, kept in Central Knot with its versions, and “removed at its source” after its name, under a warning mark; its opened row’s line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and that should the source have it again, it follows the source if unchanged here and stays as you have it if you changed it; its versions still say where each came from', false, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   await a.click('#nav-history');
   await shot(a, 'dropped-history', 'History: github.com/stephenturner/skill-deslop (main) no longer has it, so it is off and removed from all 3 tools, and no longer from that source, with Turn it on; and unslop brought in, Off, with Turn it on (1280×800)');
   await a.click('#nav-sources');
@@ -2610,7 +2613,7 @@ if (wanted('sources')) {
   await lookAt('https://github.com/nobody/missing');
   await atEverySize('cannot-read', 'Looked at a link with no repository there (or none this computer can read): why, in plain words, and Cancel', false, '#source-preview');
   await a.click('#source-cancel');
-  await a.click('#nav-skills'); await turnOnRow('notes'); await switchOn('notes');
+  await a.click('#nav-skills'); await turnOnRow('skills', 'notes'); await switchOn('skills', 'notes');
   await a.click('#nav-sources');
   await lookAt('team/kit');
   await atEverySize('already-has', 'notes is On in Central Knot (the Practice copy’s own), and looked at team/kit: release comes in, Off; notes is not brought in, since Central Knot already has a different notes, and the line says how to take this one instead (deleting yours also takes it out of every tool it is on in); each skill sits in the folder of its name; the agent writer, in the folder agents, comes in Off', true, '#source-preview');
@@ -2653,9 +2656,9 @@ if (wanted('source-agents')) {
   await atEverySize('look', 'Looked at team/review-kit: one skill, notes, in the folder notes, and two agents, reviewer in the folder agents and release-notes-writer-for-the-whole-team in .claude/agents, each line saying its kind, where it sits and its file; each comes in Off; Add 1 skill and 2 agents', true, '#source-preview');
   await a.click('#source-add'); await busyDone(); await a.settle();
   await atEverySize('source-row', 'Clicked Add 1 skill and 2 agents: the band says notes, reviewer and release-notes-writer-for-the-whole-team are in Central Knot, Off, to turn on in Skills and Agents, with Open Skills; the source’s row lists the skill and both agents, In Central Knot, Off', true, '.source-row');
-  await a.click('#nav-agents'); await openRow('reviewer');
-  await atEverySize('agent-row-source', 'On Agents, reviewer is Off, in Central Knot only; opened, its version says it came from github.com/team/review-kit, and the line at the end says it is from that source, and that what changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here', true, '.ov-row[data-key="reviewer"]', 'start');
-  await turnOnRow('reviewer'); await switchOn('reviewer');
+  await a.click('#nav-agents'); await openRow('agents', 'reviewer');
+  await atEverySize('agent-row-source', 'On Agents, reviewer is Off, in Central Knot only; opened, its version says it came from github.com/team/review-kit, and the line at the end says it is from that source, and that what changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here', true, `.ov-row[data-key="${rowPart('', 'agents', 'reviewer')}"]`, 'start');
+  await turnOnRow('agents', 'reviewer'); await switchOn('agents', 'reviewer');
   const inClaude = join(practice, '.claude/agents/reviewer.md');
   writeFileSync(inClaude, readFileSync(inClaude, 'utf8').replace('Say where you were lost.', 'Say where you were lost, and why.'));
   await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
@@ -2667,8 +2670,8 @@ if (wanted('source-agents')) {
   commit({ 'agents/reviewer.md': null }, 'Drop reviewer');
   await checkNow();
   await atEverySize('agent-removed', 'reviewer was taken out of the source; clicked Check now: the band leads, under a warning mark, with reviewer no longer at the source, turned off and taken out of the tools, Central Knot keeping it, with Turn reviewer on; the source’s row has reviewer’s line, an agent not in its last read: no longer at this source, Off, and no longer from it, with Turn it on', true, '.source-row');
-  await a.click('#nav-agents'); await openRow('reviewer');
-  await atEverySize('agent-removed-agents', 'On Agents, reviewer is Off, out of every tool, with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and what happens should the source have it again', true, '.ov-row[data-key="reviewer"]', 'start');
+  await a.click('#nav-agents'); await openRow('agents', 'reviewer');
+  await atEverySize('agent-removed-agents', 'On Agents, reviewer is Off, out of every tool, with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and what happens should the source have it again', true, `.ov-row[data-key="${rowPart('', 'agents', 'reviewer')}"]`, 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
@@ -2698,14 +2701,14 @@ if (wanted('source-servers')) {
   await a.click('#source-look'); await busyDone(); await a.settle();
   await atEverySize('look', 'Looked at team/service-kit: one agent, reviewer, in the folder agents, and four MCP servers from its .mcp.json at the root: relay and search-index come in Off; team-plugin-helper is not brought in, since it names a plugin’s own folder or settings, which only Claude Code fills in, for a plugin; half-written can’t be read, since it has no command to run; Add 1 agent and 2 MCP servers', true, '#source-preview');
   await a.click('#source-add'); await busyDone(); await a.settle();
-  await a.click('#nav-mcp'); await openRow('relay');
-  await atEverySize('server-row-source', 'On MCP servers, relay is Off, in Central Knot only; opened, its version says it came from github.com/team/service-kit, and the line at the end says it is from that source, and that what changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here', true, '.ov-row[data-key="relay"]', 'start');
-  await turnOnRow('relay'); await switchOn('relay');
+  await a.click('#nav-mcp'); await openRow('mcp', 'relay');
+  await atEverySize('server-row-source', 'On MCP servers, relay is Off, in Central Knot only; opened, its version says it came from github.com/team/service-kit, and the line at the end says it is from that source, and that what changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here', true, `.ov-row[data-key="${rowPart('', 'mcp', 'relay')}"]`, 'start');
+  await turnOnRow('mcp', 'relay'); await switchOn('mcp', 'relay');
   commit({ '.mcp.json': servers({ relay: relay('debug'), 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Log more');
   await checkNow();
   await atEverySize('server-updated', 'relay was turned On, in Claude Code too, then its RELAY_LOG changed at the source (and half-written was taken out there); clicked Check now: the band says relay was updated from its source, now in all 3 tools, with Open MCP servers and Undo the update', true, '.source-row');
-  await a.click('#nav-mcp'); await openRow('relay');
-  await atEverySize('server-updated-row', 'On MCP servers, relay’s row: on in every tool, Claude Code’s with the update too', false, '.ov-row[data-key="relay"]', 'start');
+  await a.click('#nav-mcp'); await openRow('mcp', 'relay');
+  await atEverySize('server-updated-row', 'On MCP servers, relay’s row: on in every tool, Claude Code’s with the update too', false, `.ov-row[data-key="${rowPart('', 'mcp', 'relay')}"]`, 'start');
   const inCopilot = join(practice, '.copilot/mcp-config.json');
   edit(inCopilot, text => { const parsed = JSON.parse(text); parsed.mcpServers.relay.env.RELAY_REGION = 'east'; return JSON.stringify(parsed, null, 2); });
   await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
@@ -2716,8 +2719,8 @@ if (wanted('source-servers')) {
   commit({ '.mcp.json': servers({ 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Drop relay');
   await checkNow();
   await atEverySize('server-removed', 'relay was taken out of the source; clicked Check now: the band leads, under a warning mark, with relay no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn relay on; the source’s row has relay’s line: no longer at this source, Off, no longer from it, with Turn it on', true, '.source-row');
-  await a.click('#nav-mcp'); await openRow('relay');
-  await atEverySize('server-removed-mcp', 'On MCP servers, relay is Off with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, and what happens should the source have it again', true, '.ov-row[data-key="relay"]', 'start');
+  await a.click('#nav-mcp'); await openRow('mcp', 'relay');
+  await atEverySize('server-removed-mcp', 'On MCP servers, relay is Off with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, and what happens should the source have it again', true, `.ov-row[data-key="${rowPart('', 'mcp', 'relay')}"]`, 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
@@ -2808,7 +2811,7 @@ if (wanted('plugin-library')) {
   writeFileSync(join(market, 'plugins/issue-tracker/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp', '--v2'] } } }));
   await refresh(); await waitFor(a, `/An update is ready/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
   await atEverySize('items-page', 'issue-tracker turned on in a home with Pi and no tool’s command-line tool: Your tools has Pi’s line, “1 of its 1 items is on” (triage, dropped, is no longer the plugin’s), and Claude Code’s, Copilot CLI’s and Codex’s boxes off, each line saying “No … command-line tool here”; the plugin then dropped triage (Update turned it off) and changed issues: Its items lists MCP server issues, “An update is ready: Update brings it in”, and skill triage, “Removed by the plugin’s update, so it is off. Turning it on keeps it as yours”, with Update at the top', true, '.plugin-items-section');
-  await a.click('#nav-mcp'); await openRow('issues');
+  await a.click('#nav-mcp'); await openRow('mcp', 'issues');
   // document-tools on too, with a third skill, charts; pdf-reader then edited in Pi (let go as his own) and spreadsheet deleted from Central Knot.
   mkdirSync(join(market, 'plugins/document-tools/skills/charts'), { recursive: true });
   writeFileSync(join(market, 'plugins/document-tools/skills/charts/SKILL.md'), '---\nname: charts\ndescription: Draws a chart from a table.\n---\nDraw it.\n');
@@ -2817,19 +2820,19 @@ if (wanted('plugin-library')) {
   await a.click('#pswitch-page-0-document-tools'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   edit(join(practice, '.pi/agent/skills/pdf-reader/SKILL.md'), text => `${text}\nMy own way of reading PDFs.\n`);
   await refresh(); await a.click('#nav-skills'); await waitFor(a, `!!document.querySelector('.sync-notice[data-kind="let-go"]')`, 15000);
-  await openRow('pdf-reader');
-  await atEverySize('let-go-row', 'pdf-reader was edited in Pi: on Skills the notice says it is your own now, no longer following the plugin document-tools, that it stays in the tools that have it and its row lets it into the others; its row says Pi only, with no “from the plugin”, and its versions keep the plugin’s', true, '.ov-row[data-key="pdf-reader"]', 'start');
-  await openRow('spreadsheet'); await a.click('#delete-spreadsheet'); await a.click('#delete-confirm-spreadsheet'); await a.settle();
+  await openRow('skills', 'pdf-reader');
+  await atEverySize('let-go-row', 'pdf-reader was edited in Pi: on Skills the notice says it is your own now, no longer following the plugin document-tools, that it stays in the tools that have it and its row lets it into the others; its row says Pi only, with no “from the plugin”, and its versions keep the plugin’s', true, `.ov-row[data-key="${rowPart('', 'skills', 'pdf-reader')}"]`, 'start');
+  await openRow('skills', 'spreadsheet'); await a.click(`#${rowPart('delete', 'skills', 'spreadsheet')}`); await a.click(`#${rowPart('delete-confirm', 'skills', 'spreadsheet')}`); await a.settle();
   await a.click('#nav-plugins'); await refresh(); await waitFor(a, `/you deleted it/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
   await atEverySize('own-and-deleted', 'document-tools’ page: Its items lists skill charts (plain: on in Pi), skill pdf-reader “Not brought in: you have your own”, and skill spreadsheet, deleted from Central Knot, “Deleted here: tick to bring it back”', true, '.plugin-items-section');
   // charts deleted too: nothing of document-tools is linked any more, and its page still says why each isn't brought in.
-  await a.click('#nav-skills'); await openRow('charts'); await a.click('#delete-charts'); await a.click('#delete-confirm-charts'); await a.settle();
+  await a.click('#nav-skills'); await openRow('skills', 'charts'); await a.click(`#${rowPart('delete', 'skills', 'charts')}`); await a.click(`#${rowPart('delete-confirm', 'skills', 'charts')}`); await a.settle();
   await a.click('#nav-plugins'); await refresh(); await waitFor(a, `(document.querySelector('.plugin-items-section')?.textContent.match(/Not brought in/g) ?? []).length === 3`, 15000);
   await show('.plugin-items-section');
   await shot(a, 'none-linked-1280', 'charts deleted too, so no item of document-tools is linked any more: its page still lists all three under Its items (charts and spreadsheet “Deleted here: tick to bring it back”, pdf-reader your own), and Pi’s box is empty, with why under it: a tick brings back the two you deleted (1280×800)');
   await atEverySize('not-in-pi', 'The same page’s Your tools: Claude Code, Copilot CLI and Codex have no CLI here, so their boxes are off and each line says “No … command-line tool here”; Pi’s box is empty, and under it one sentence per reason none of document-tools’ items is on in Pi: charts and spreadsheet were deleted here (tick to bring them back), and pdf-reader is a skill of your own by that name (delete yours on its row to take the plugin’s)', true, '.plugin-panel', 'start');
-  await a.click('#nav-mcp'); await openRow('issues');
-  await atEverySize('item-row', 'On MCP servers, issues is on in Pi with “from the plugin issue-tracker” after its name; opened, Claude Code’s, Copilot CLI’s and Codex’s lines say it comes only with the plugin, which isn’t installed there, and the line at the end says it is from the plugin issue-tracker, follows it in the tools that take no plugins, and that a change made here makes it yours, with a link to Plugins', true, '.ov-row[data-key="issues"]', 'start');
+  await a.click('#nav-mcp'); await openRow('mcp', 'issues');
+  await atEverySize('item-row', 'On MCP servers, issues is on in Pi with “from the plugin issue-tracker” after its name; opened, Claude Code’s, Copilot CLI’s and Codex’s lines say it comes only with the plugin, which isn’t installed there, and the line at the end says it is from the plugin issue-tracker, follows it in the tools that take no plugins, and that a change made here makes it yours, with a link to Plugins', true, `.ov-row[data-key="${rowPart('', 'mcp', 'issues')}"]`, 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
@@ -2864,8 +2867,8 @@ if (wanted('parts-migration')) {
   await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`, 20000);
   await a.click('#popen-0-document-tools'); await waitFor(a, `/Its items/.test(document.querySelector('.plugin-page')?.textContent ?? '')`, 15000);
   await atEverySize('migrated-page', 'One look after the upgrade: document-tools’ parts are its items. Its items lists skill pdf-reader, edited in Pi, “Not brought in: you have your own”, and skill spreadsheet, left out of Pi, kept out there; Pi’s line counts its items on', true, '.plugin-items-section', 'start');
-  await a.click('#nav-skills'); await openRow('triage');
-  await atEverySize('migrated-row', 'On Skills, triage, a part in Pi before, is an item “from the plugin issue-tracker”, on in Pi, opened: its tools’ lines and the line saying it follows the plugin', true, '.ov-row[data-key="triage"]', 'start');
+  await a.click('#nav-skills'); await openRow('skills', 'triage');
+  await atEverySize('migrated-row', 'On Skills, triage, a part in Pi before, is an item “from the plugin issue-tracker”, on in Pi, opened: its tools’ lines and the line saying it follows the plugin', true, `.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`, 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
@@ -2882,7 +2885,7 @@ if (wanted('sort')) {
   }
   await refresh();
   await a.click('#nav-skills');
-  for (const key of ['notes', 'release-notes', 'standup']) { await turnOnRow(key); await switchOn(key); }
+  for (const key of ['notes', 'release-notes', 'standup']) { await turnOnRow('skills', key); await switchOn('skills', key); }
   edit(join(practice, '.claude/skills/standup/SKILL.md'), text => `${text}\nEdited in Claude Code.\n`);
   await refresh();
   await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = 'updated'; select.dispatchEvent(new Event('change')); })()`);
@@ -2893,9 +2896,9 @@ if (wanted('sort')) {
     for (const [width, height] of [[860, 528], ...SIZES.slice(1)]) { await a.size(width, height); await shot(a, `skills-${theme}-${width}`, `${caption} (${width}×${height}, ${theme})`); }
   }
   await a.theme('dark'); await a.size(1440, 900);
-  await openRow('notes');
+  await openRow('skills', 'notes');
   await shot(a, 'skills-docked-1440', 'Opened notes at 1440×900, about the narrowest window that docks a row’s details: beside them the table is at its narrowest, and its rows still say when');
-  await a.click('#files-notes');
+  await a.click(`#${rowPart('files', 'skills', 'notes')}`);
   await shot(a, 'skills-files-1440', 'Clicked Files and contents: the list beside the skill keeps the table’s headings and its order under each, without the times');
   await a.size(1280, 800);
   await a.click('#nav-mcp'); await shot(a, 'mcp', 'MCP servers, sorted the same way (one choice for the three pages): every server is found, and an MCP entry has no time of its own, so none says when and they go by name');
@@ -2923,7 +2926,7 @@ if (wanted('usage')) {
   }
   await refresh();
   await a.click('#nav-skills');
-  for (const key of ['notes', 'release-notes', 'standup', 'review']) { await turnOnRow(key); await switchOn(key); }
+  for (const key of ['notes', 'release-notes', 'standup', 'review']) { await turnOnRow('skills', key); await switchOn('skills', key); }
   await shot(a, 'opened-home', 'Skills as the home opened: usage was collected by itself at launch, before this history was written, so beside Update usage statistics it says when and that there are no sessions yet, with no band, and no Used column');
   // Readings held back, so the page can be seen while one runs (a development run only: it reaches main).
   const requests = await requestHandles(a);
@@ -2931,12 +2934,12 @@ if (wanted('usage')) {
     // The practice copy opened again: its first reading starts afresh, held back while an opened row is drawn.
     await requests.slow('usage:read', 15000);
     await a.click('#home-fixture');
-    await waitFor(a, `document.querySelector('#usage-when')?.textContent === 'Collecting…' && !!document.querySelector('#open-release-notes')`);
-    await openRow('release-notes');
+    await waitFor(a, `document.querySelector('#usage-when')?.textContent === 'Collecting…' && !!document.querySelector('#${rowPart('open', 'skills', 'release-notes')}')`);
+    await openRow('skills', 'release-notes');
     await atEverySize('first-reading', 'The home opened again, its first reading running (held back here): the Used column holds its room with empty cells, and the opened row’s lines say Collecting…, so nothing moves when it lands', true, '.details-usage');
     await requests.restore('usage:read');
     await waitFor(a, `/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`, 30000);
-    await closeRow('release-notes');
+    await closeRow('skills', 'release-notes');
   }
   if (requests) await requests.slow('usage:read', 15000);
   await a.click('#collect-usage');
@@ -2949,9 +2952,9 @@ if (wanted('usage')) {
   await atEverySize('collected', 'The reading landed: the band, as high as while it collected, says it was collected, with its close button (the time is beside the button); each row says used how long ago and, fainter, in how many sessions, or no use seen since the latest date its tools’ history starts (release-notes)', true);
   await a.click('#usage-line-close');
   await atEverySize('closed', 'Closed the band: it takes no room, and when it was collected stays beside the button', true);
-  await openRow('release-notes');
+  await openRow('skills', 'release-notes');
   await atEverySize('opened', 'Opened release-notes, docked beside the table from 1728: each tool’s line says its figure, a history that starts 20 days ago, or that it keeps no sessions here', false, '.details-usage');
-  await closeRow('release-notes');
+  await closeRow('skills', 'release-notes');
   await a.click('.chip[data-tip="No use seen in 30 days"]');
   await atEverySize('chip', 'Clicked the chip No use seen in 30 days: the rows it holds, and its band: how many and what Turn these off does lead, Turn these off at its end; each tool’s history and what it left out follow, fainter', true);
   // Sort by Last used, release-notes (On, with no use until now) used just now, Update: the rows stay where they were, and Put in order is offered beside Sort.

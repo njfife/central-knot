@@ -119,6 +119,18 @@ export async function mountsGone(folder) {
 /** One day in milliseconds, for History events made to look days old. */
 export const DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * The id of a row's element on the item pages, as src/itemrow.ts partId makes it, or with no part the row's own id, its
+ * `data-key` (src/itemrow.ts rowId): rowPart('switch', 'skills', 'notes') is "switch-skills-notes", rowPart('cell', 'mcp',
+ * 'files', 'claude-cli') "cell-mcp-files-claude-cli", rowPart('', 'agents', 'review') "agents-review". The one way scripts/
+ * name a row or one of its elements: a check that names one by hand, the old way ("#switch-notes"), finds nothing. As a
+ * selector, `#${rowPart(…)}` serves a plain key; a plugin row's key holds "@", "/" and "." and needs byId. A check that
+ * something is absent passes on a mistyped id, so build its id here too.
+ */
+export const rowPart = (part, kind, key, ...within) => [...(part ? [part] : []), kind, key, ...within].join('-');
+/** A selector for the element with this id, right for any id, a plugin row's key with "@", "/" and "." in it too: [id="…"]. */
+export const byId = id => `[id="${id}"]`;
+
 /** Chooses `days` in Settings' Keep history for select, as picking it from the system's own menu (which can't be driven) would. */
 export async function keepFor(page, days) {
   await page.run(`(select => { select.value = '${days}'; select.dispatchEvent(new Event('change', { bubbles: true })); })(document.querySelector('#history-days'))`);

@@ -1,5 +1,5 @@
-// An item (a skill, an MCP server or an agent) as the item pages draw it (ItemRow), with its kind, and a row's identity on a
-// page (rowId), each kind's items in a home as every page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
+// An item (a skill, an MCP server or an agent) as the item pages draw it (ItemRow), with its kind, a row's identity on a page
+// (rowId) and the ids of its elements (partId), each kind's items in a home as every page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
 // orderChoice; a row's last use, usagerow.ts lastUse), and the rows a click pins where they were, on every list that orders
 // rows by their state, the Plugins list too (Pinned). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is libraryrow.ts's,
 // from the kind's view (types.ts LibraryView).
@@ -70,6 +70,16 @@ export interface ItemRow {
  * the flash, the armed Delete, a plugin item's file shown), since a skill and an agent may share a key.
  */
 export const rowId = (kind: PageKind, key: string) => `${kind}-${key}`;
+/**
+ * The id of one of a row's elements on the item lists (the Skills, MCP servers and Agents pages, a tool's tabs of them under
+ * Harnesses, and the Skills page's Files view): its part, the row's id (rowId, also the row's `data-key`), and what within the
+ * row it is of, a tool or a place: "switch-skills-review", "cell-skills-review-claude-cli". The one place these ids are made;
+ * the scripts name them the same way (scripts/cdp.mjs rowPart). dom.ts fileBlocks extends an id made here with each block's
+ * place ("-0"). Lists that are no rows of the item lists keep ids of their own: Profiles' ticks (by profileplan.ts itemId),
+ * Sources' lines, a plugin page's items, the Git repo's rows, the base card, a plugin's Open on a tool's page, and the
+ * Instructions page's shown texts (`shown-<key>`, editparts.ts).
+ */
+export const partId = (part: string, row: string, ...within: (string | number)[]) => [part, row, ...within].join('-');
 
 // ---------- Each kind in a home, as the pages read it ----------
 
