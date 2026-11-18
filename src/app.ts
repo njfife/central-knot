@@ -1,8 +1,9 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
 // state (`state`), the page shown (showPage), what is said after a click (tell, announce) and when a result goes by itself
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
-// item page sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick) or in its turn in the page's
-// list (queueClick), its result kept for the page (lastResult), a run's said once (sayRun); History's actions (restoreEvent); the reads of
+// item page sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
+// (applyByKind) or in its turn in the page's list (queueClick), its result kept for the page (lastResult), a run's said once
+// (sayRun), an Undo's kind by kind (undoClick); History's actions (restoreEvent); the reads of
 // the home (loadHome, readAgain, readHomeOnce), usage collected when a home opens and on Update (collectUsage), and the Sync
 // switch, Sync once and Synchronize everything's row; the rows a click pins where they were (pinnedRows, drawPage); and the
 // Instructions, base instructions and Profiles pages' actions.

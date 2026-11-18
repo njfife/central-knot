@@ -1140,8 +1140,9 @@ export function itemsTable(which: PageKind, harness?: Tool) {
 const nameOf = (row: ItemRow | PluginRow) => row.name ?? row.key;
 
 /**
- * A click on this page other than a row's own switch or Add (Turn these off, a tool's switch in an opened row, Delete, Make
- * current): it pins no row (flip does), so once its result is shown a row not pinned already is under its own heading.
+ * A click on this page other than a row's own switch or Add (a tool's switch in an opened row, Delete, Make current; Turn these
+ * off is one per kind: turnTheseOff): it pins no row (flip does), so once its result is shown a row not pinned already is under
+ * its own heading.
  */
 const click = (what: Click) => { void applyClick(what); };
 

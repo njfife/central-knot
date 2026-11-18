@@ -1175,6 +1175,11 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   const stopSays = await a.text('.band-danger .band-text') ?? '', saidIn = async selector => ((await a.text(selector)) ?? '').split(stopSays).length - 1;
   same('a damaged skills record: the Skills page says why once, as the stop', [stopSays.length > 0, await saidIn('.bands')], [true, 1]);
+  // A row's controls ask their own kind's gate: every skill's switch is off, and on Agents the switches still work.
+  const controlsOff = () => a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].map(item => item.disabled)`);
+  same('and every skill’s switch is off', (await controlsOff()).every(Boolean), true);
+  await a.click('#nav-agents');
+  same('while the agents’ switches work', (await controlsOff()).some(off => !off), true);
   await a.click('#nav-overview');
   same('and the Overview once, as Skills’ problem, with the way to Skills', [await saidIn('#overview-needs'), await a.exists('#overview-stopped'), await a.exists('#overview-skills-problem-0-open')], [1, false, true]);
   await a.click('#nav-skills');

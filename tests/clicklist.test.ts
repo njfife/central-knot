@@ -46,7 +46,7 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, leaveResults, pinnedRows, whyReadOnly,
+const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, whyReadOnly,
   loadHome, queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
@@ -595,6 +595,8 @@ test('A skill and an agent both named review, and a server, switched on one page
   assert.deepEqual(main.sent, ['review off, seen on', 'agent review off', 'server github off']);
   assert.equal(app.outcome?.text, '3 items are off: review (skill), review (agent) and github.');
   assert.deepEqual(['skills-review', 'agents-review', 'mcp-github'].map(id => flashRequests.has(id)), [true, true, true]);
+  // Each kind's last result, which its problem lines are read from, holds its own clicks' results alone.
+  assert.deepEqual((['skills', 'agents', 'mcp'] as const).map(kind => lastResult(kind)?.results.map(entry => entry.item)), [['review'], ['review'], ['github']]);
   flashRequests.clear();
   app.outcome!.act!.run();
   await settled();
