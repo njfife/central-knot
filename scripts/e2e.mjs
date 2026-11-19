@@ -7768,7 +7768,13 @@ async function libraryFlow() {
   await c.click('#chip-attention');
   await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const top = () => c.run(`Math.round(document.querySelector('#table-library-all').scrollTop)`);
-  await c.run(`document.querySelector('#table-library-all').scrollTop = 80`);
+  // A row opened whose details run past the list's bottom is brought to the top with a smooth scroll (matrix.ts openRow): the
+  // list is scrolled by hand once that has ended, so the place noted is the one Files leaves from.
+  const scrollWhenStill = async (table, top) => {
+    for (let last = -1, tries = 0; tries < 40; tries++) { const now = await c.run(`document.querySelector('${table}').scrollTop`); if (now === last) break; last = now; await wait(100); }
+    await c.run(`document.querySelector('${table}').scrollTop = ${top}`);
+  };
+  await scrollWhenStill('#table-library-all', 80);
   const before = await top();
   await c.click(`#${rowPart('diff', 'skills', 'review')}`);
   same('Read both copies shows the skill’s Files beside the list of skills, its back naming the Library', [await c.exists('#skills-list'), await c.text('#skill-detail h2'), await c.text('#files-back .btn-label')], [true, 'review', 'Library']);
@@ -7789,7 +7795,7 @@ async function libraryFlow() {
   await c.click('#chip-attention');
   await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const tabTop = () => c.run(`Math.round(document.querySelector('#table-skills-claude-cli')?.scrollTop ?? -1)`);
-  await c.run(`document.querySelector('#table-skills-claude-cli').scrollTop = 30`);
+  await scrollWhenStill('#table-skills-claude-cli', 30);
   const tabBefore = await tabTop();
   await c.click(`#${rowPart('diff', 'skills', 'review')}`);
   same('Files opened from Claude Code’s Skills tab: review, its back naming the tool', [await c.text('#skill-detail h2'), await c.text('#files-back .btn-label'), await c.run(`document.querySelector('#files-back').getAttribute('aria-label')`)],
