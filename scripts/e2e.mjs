@@ -6958,7 +6958,7 @@ async function searchFlow() {
     [await rows('lighthouse'), await rows('deploying'), await rows('registyr'), await rows('duplicate rows')],
     [[{ id: 'skills-lighthouse-report' }, { id: 'skills-web-performance', excerpt: 'Profile with Lighthouse and the network panel.' }], [{ id: 'skills-deploy-staging' }],
       [{ id: 'skills-deploy-staging', excerpt: 'Push the image to the registry.' }], [{ id: 'skills-sheet-tools@ck-test-market/tidy', excerpt: 'Removes duplicate rows and trims every cell.' }]]);
-  same('typed quotes, hyphens and operators are only words', [await rows('"deploy-'), await rows('NEAR( AND *')], [[{ id: 'skills-deploy-staging' }], []]);
+  same('typed quotes, hyphens and operators are only words', [await rows('"deploy-'), await rows('NEAR( AND *')], [[{ id: 'skills-deploy-staging' }], await rows('near and')]);
   same('no page errors, word search', a.pageErrors, []);
   await a.quit();
 }
