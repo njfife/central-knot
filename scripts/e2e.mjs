@@ -3681,8 +3681,9 @@ async function updateFlow() {
     // main's message, sent now: the control drawn in its place has it.
     await a.run(`(window.ckDrawn = document.getElementById('update-control'), true)`);
     const late = await main?.run(`(contents => { delete contents.send; globalThis.ckEnded.forEach(rest => contents.send('updates:changed', ...rest)); return globalThis.ckEnded.length; })(${contents})`);
-    for (let i = 0; late && i < 100 && await a.run(`document.getElementById('update-control') === window.ckDrawn`); i++) await wait(100);
+    for (let i = 0; main && i < 100 && await a.run(`document.getElementById('update-control') === window.ckDrawn`); i++) await wait(100);
     main?.close();
+    if (main) same('main’s message, held until the answer, came last and drew the control again', [late, await a.run(`document.getElementById('update-control') !== window.ckDrawn`)], [1, true]);
     for (let i = 0; i < 40 && await focused() !== 'update-control'; i++) await wait(100);
     same('and it takes the focus back', await focused(), 'update-control');
     await a.quit();
