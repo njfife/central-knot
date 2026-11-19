@@ -1055,12 +1055,14 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   current = next;
   forgetMissing();
   try {
-    const shown = await syncThenView();
+    const { view: shown, passes } = await syncAndView();
     // Saving the settings rebuilds the menus with the new home.
     await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
-    // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched.
+    // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched; a window its
+    // first pass started is looked at again, as after any pass.
     stopWatching();
     void startWatching();
+    lookAgainSoon(passes[passes.length - 1]);
     return shown;
   } catch (error) { ({ current, handoff, lastPresent } = previous); throw error; }
 }

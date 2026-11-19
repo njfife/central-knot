@@ -272,6 +272,27 @@ test('An entry seen again in part ends its absence: back as no server at the rer
   } finally { await box.cleanup(); }
 });
 
+test('A click on another server reads this one too: that read starts no window for it, and seen there in part, its window ends', async () => {
+  const box = await sandbox();
+  try {
+    const more = { type: 'local', command: 'more' };
+    await writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'npx' }, more } }));
+    await box.send(on('docs'));
+    await box.send(on('more'));
+    // Automatic sync off: a click on more alone is a pass for more alone.
+    const waiting = { ...box.context, settleMs: 2000 }, clickMore = (now: number) => applyServers(waiting, all, [on('more')], { now, only: new Set(['more']) });
+    const without = JSON.stringify({ mcpServers: { more } });
+    await writeFile(box.path('copilot-cli'), without);
+    await clickMore(1000);
+    assert.equal((await applyServers(waiting, all, [], { now: 3000 })).settling, true, 'the click started no window for docs: the full pass starts it');
+    await writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { docs: null, more } }));
+    await clickMore(3500);
+    await writeFile(box.path('copilot-cli'), without);
+    const brief = await applyServers(waiting, all, [], { now: 300_000 });
+    assert.deepEqual([brief.settling, (await box.row('docs'))?.on, await commandIn(box, 'codex-cli')], [true, true, 'npx']);
+  } finally { await box.cleanup(); }
+});
+
 test('A settings file whose look fails for another reason than “not there” starts no window: deleted after, it gets the whole window', { skip: process.getuid?.() === 0 }, async () => {
   const box = await sandbox();
   try {
