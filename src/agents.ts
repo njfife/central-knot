@@ -8,7 +8,7 @@
 // Writes and removals are checked (share.ts), so a save that lands meanwhile is never lost.
 //
 // Around the pass: applyAgents and restoreAgent run it for agents (the page's clicks);
-// agentsView is the Agents page's reading (types.ts LibraryView: lookFor, copiesOf, plan), so a mark says what a pass will
+// agentsView is the Library's reading of agents (types.ts LibraryView: lookFor, copiesOf, plan), so a mark says what a pass will
 // do; agentsForRepo is what the Git repo's Push sends. Elsewhere: where each thing is kept on disk, agentstore.ts; the
 // harnesses' file formats, agentfiles.ts; an agent's row, the clicks its controls send and its words, libraryrow.ts (the
 // same row for every kind on the library) with librarypages.ts; History's sentences and actions for agents,
@@ -223,7 +223,7 @@ export const restoreAgent = (context: ShareContext, tools: HarnessId[], eventId:
 
 // ---------- For the callers around a pass ----------
 
-/** One version's content, for the Agents page to show: undefined when the store no longer has it. */
+/** One version's content, for the Library to show: undefined when the store no longer has it. */
 export const agentVersion = (context: ShareContext, key: string, hash: string) => readVersion(context, key, hash);
 
 /**
@@ -261,7 +261,7 @@ async function changesOf(context: ShareContext, item: LibraryItem): Promise<Vers
 }
 
 /**
- * The Agents page's rows: every agent in the library (On, or Off: in Central Knot only) and every found one (in a managed
+ * The Library's agent rows: every agent in the library (On, or Off: in Central Knot only) and every found one (in a managed
  * harness, not in the library). `library` gives the page and History each item as the library holds it, deleted ones too.
  */
 export async function agentsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<LibraryView> {

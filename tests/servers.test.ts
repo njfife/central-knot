@@ -128,7 +128,7 @@ test('A tool installed later gets an On server from the pass of the whole home, 
     assert.equal(await commandIn(box, 'pi-cli'), 'npx');
     // A pass with nothing to write tells nothing: the next view has no band.
     assert.deepEqual(bandAfter(await pass()), { items: [], tools: [] });
-    // An edit in Copilot CLI spreads to Codex and Pi: the MCP servers page's notice says so, so the band leaves docs out.
+    // An edit in Copilot CLI spreads to Codex and Pi: the Library's notice says so, so the band leaves docs out.
     await writeFile(box.path('copilot-cli'), (await box.files())['copilot-cli']!.replace('"docs"\n', '"docs",\n        "--v2"\n'));
     const edited = await pass();
     assert.deepEqual([edited.servers?.notices?.map(itemNotice).map(notice => notice.kind), await argsIn(box, 'pi-cli')], [['edit'], ['-y', 'docs', '--v2']]);

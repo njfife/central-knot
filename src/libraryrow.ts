@@ -1,4 +1,4 @@
-// A library item's row on its kind's page (library.ts: skills, MCP servers and agents), without the DOM: where it stands, what each harness's
+// A library item's row in the Library (library.ts: skills, MCP servers and agents), without the DOM: where it stands, what each harness's
 // mark says, the clicks its controls send, and every sentence the page says about it (its status, its switch, a click's
 // result, a notice). The same for every kind on the library: a kind supplies only its words (RowWords; each kind's are in
 // libraryWords), and the sentences that name the item or its copies are made in them (sentences). matrix.ts draws these, with
@@ -192,7 +192,7 @@ const rowAsItIs = (row: LibraryRow, item: LibraryItem | undefined): Change =>
   ({ ...asItIs(row.key, inLibrary(item)), seenOn: !!inLibrary(item)?.on });
 
 /**
- * The clicks a row's controls send. Each is a types.ts Change, as every item page sends it, which main.ts's `changes`
+ * The clicks a row's controls send. Each is a types.ts Change, as every item list sends it, which main.ts's `changes`
  * sanitizer passes on field by field to the library's pass.
  */
 export const rowClicks = {

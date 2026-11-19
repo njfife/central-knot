@@ -1,4 +1,4 @@
-// What plugins installed whole bring, as rows of the Skills, MCP servers and Agents pages (no DOM): one row per item of a
+// What plugins installed whole bring, as rows of the Library (no DOM): one row per item of a
 // plugin across every tool that has the plugin. An item the person also has as their own (the same skill, or the plugin's item
 // linked to it in Pi and OpenCode) stays on that row, whose box says "Through a plugin" (types.ts LibraryFacts plugin); one
 // that only shares a name is a row of its own here. These rows are never managed: no sync, no profile, no repo; a box turns the
@@ -95,7 +95,7 @@ export const pluginItemCount = (home: HomeView, page: Page, tool?: HarnessId): n
 /** Whether a row of the person's own is also brought by a plugin installed in a tool: the "From plugins" chip holds it too. */
 export const fromAPlugin = (row: { plugin?: object }) => Object.keys(row.plugin ?? {}).length > 0;
 /**
- * What a kind's page's "From plugins" chip holds (matrix.ts pluginCount; the Overview's card says it too): a plugin's own rows, and
+ * What the Library's "From plugins" chip holds (matrix.ts pluginCount; the Overview's card says it too): a plugin's own rows, and
  * the person's own a plugin also brings; on a tool's page (`tool`), those that tool has.
  */
 export const fromPluginsCount = (home: HomeView, page: Page, tool?: HarnessId): number =>

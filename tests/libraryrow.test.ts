@@ -1,4 +1,4 @@
-// A library item's row as worked examples on plain values (src/libraryrow.ts), an agent's on the Agents page: where it
+// A library item's row as worked examples on plain values (src/libraryrow.ts), an agent's on the Library: where it
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

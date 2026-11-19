@@ -102,7 +102,7 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string };
 
-export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; /** A held or failed removal. */ removal?: boolean; replaced?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; }
+export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; /** A held or failed removal. */ removal?: boolean; replaced?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** The kind of the item, where a pass of the whole home tells it (homepass.ts passTells), so two kinds' items of one name stay apart. */ of?: 'skills' | 'mcp' | 'agents'; }
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, its record's gate and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** The tools whose own record of their plugins can't be read (plugins.ts recordReadable): what they have installed isn't known. */ pluginRecordsUnread?: HarnessId[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Other builds of Central Knot on this Mac (otherbuilds.ts): while one is found this build is held (model.ts holdingBuild) and the window shows only the held screen. Unset where they aren't looked for (main.ts buildsContext: only an installed app on a Mac, or a test with its stand-ins) and where an Applications folder can't be read. */ otherBuilds?: OtherBuild[]; /** Where this copy of the app runs from, when that is not the top of an Applications folder (otherbuilds.ts runsOutside): it replaces no build from there. */ runsOutside?: string; /** What this build said on taking the home's record over at this view's look, where it carried the other build's choices (main.ts lookForOthers, takeOverHome): the page says it once. */ tookOver?: string; /** Central Knot's own settings file couldn't be read at this launch (main.ts loadAppSettings): the Overview and Settings say so this launch, until closed on Settings (settingspage.ts keptNote). `keptAs`: where it is kept aside; absent, it is still in place. */ settingsUnread?: { keptAs?: string }; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
 
@@ -417,7 +417,7 @@ export interface Change {
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, and what is not as it asked. */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'>; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
- * What sync did on its own, told once on its kind's page: to one item (ItemNotice), the found items Synchronize everything
+ * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
  * took in, in one pass (TakenInNotice), or what a plugin did to one of its items (PluginItemNotice). Each is keyed by `history`.
  */
 export type SyncNotice = ItemNotice | TakenInNotice | PluginItemNotice;
@@ -869,7 +869,7 @@ export type SearchAnswer = { ready: false } | { ready: true; home: string; readI
 // ---------- A kind on Central Knot's library (library.ts): its page's view ----------
 
 /**
- * A library kind's page (agents.ts agentsView): every item in the library and every one found in a managed harness, read
+ * A library kind as the Library reads it (agents.ts agentsView): every item in the library and every one found in a managed harness, read
  * the way a pass reads them, so each mark says what the next pass will do. The page reads it through itemrow.ts kindSource.
  */
 export interface LibraryView {
@@ -889,7 +889,7 @@ export interface LibraryView {
   notices: SyncNotice[];
 }
 
-/** One row of a library kind's page: what each managed harness holds of the item and, for one in the library, what the next pass does. */
+/** One row of a library kind in the Library: what each managed harness holds of the item and, for one in the library, what the next pass does. */
 export interface LibraryFacts {
   key: string;
   name: string;

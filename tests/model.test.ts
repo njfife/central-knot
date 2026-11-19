@@ -8,21 +8,25 @@ test('plural words read naturally', () => {
   assert.equal(plural(0, 'skill'), '0 skills');
 });
 
-test('The Caught up band names each item written once, of any kind, with the tools it went to; an item a notice on any page tells, and a write that waits, are left out', () => {
+test('The Caught up band names each item written once, of any kind, with the tools it went to, a skill and an agent of one name apart; an item a notice tells on its own kind, and a write that waits, are left out', () => {
   const caughtUp = [
-    { item: 'review', harness: 'codex-cli', outcome: 'written' },
-    { item: 'review', harness: 'pi-cli', outcome: 'written' },
-    { item: 'docs', harness: 'pi-cli', outcome: 'written' },
-    { item: 'docs', harness: 'claude-cli', outcome: 'held', waits: true },
-    { item: 'reviewer', harness: 'codex-cli', outcome: 'written' },
-    { item: 'notes', harness: 'codex-cli', outcome: 'removed' },
+    { item: 'review', harness: 'codex-cli', outcome: 'written', of: 'skills' },
+    { item: 'review', harness: 'pi-cli', outcome: 'written', of: 'skills' },
+    { item: 'docs', harness: 'pi-cli', outcome: 'written', of: 'mcp' },
+    { item: 'docs', harness: 'claude-cli', outcome: 'held', waits: true, of: 'mcp' },
+    { item: 'reviewer', harness: 'codex-cli', outcome: 'written', of: 'agents' },
+    { item: 'review', harness: 'codex-cli', outcome: 'written', of: 'agents' },
+    { item: 'notes', harness: 'codex-cli', outcome: 'removed', of: 'skills' },
   ];
   const told = (item: string) => [{ kind: 'edit', item }];
   const view = (notices: { skills?: object[]; mcp?: object[]; agents?: object[] }) =>
     ({ sync: { caughtUp }, skills: { notices: notices.skills ?? [] }, mcp: { notices: notices.mcp ?? [] }, agents: { notices: notices.agents ?? [] } }) as unknown as Parameters<typeof caughtUpNames>[0];
-  assert.deepEqual(caughtUpNames(view({})), { items: ['review', 'docs', 'reviewer'], tools: ['codex-cli', 'pi-cli'] });
-  // reviewer's edit is told on the Agents page, docs's on the MCP servers page: neither is named again.
-  assert.deepEqual(caughtUpNames(view({ agents: told('reviewer'), mcp: told('docs') })), { items: ['review'], tools: ['codex-cli', 'pi-cli'] });
+  // The skill review and the agent review are two items, each named with its kind, as a run's words name them (words.ts rowNames).
+  assert.deepEqual(caughtUpNames(view({})), { items: ['review (skill)', 'docs', 'reviewer', 'review (agent)'], tools: ['codex-cli', 'pi-cli'] });
+  // reviewer's edit is told by an agents notice, docs's by an MCP servers one: neither is named again.
+  assert.deepEqual(caughtUpNames(view({ agents: told('reviewer'), mcp: told('docs') })), { items: ['review (skill)', 'review (agent)'], tools: ['codex-cli', 'pi-cli'] });
+  // A skills notice for review tells the skill only: the agent review is still named, now on its own.
+  assert.deepEqual(caughtUpNames(view({ skills: told('review') })), { items: ['docs', 'reviewer', 'review'], tools: ['pi-cli', 'codex-cli'] });
 });
 
 test('Every row of a list says its time in one form: how long ago while that tells them apart, else the clock, to the second where two would match', () => {

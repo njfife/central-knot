@@ -7,17 +7,17 @@
 // own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { afterLayout, button, fitBars, h, icon, keepClicksAcrossRedraws, keepSelection, runAfterLayout, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
-import type { HomeKind } from './presence.ts';
+import { heldKinds, type HomeKind } from './presence.ts';
 import { kindNouns, pageNames } from './words.ts';
-import { pluginItemCount } from './pluginrows.ts';
-import { agentsPage, mcpPage, skillsPage } from './pages.ts';
+import { rowCount } from './pluginrows.ts';
+import { libraryPage } from './pages.ts';
 import { overviewPage } from './overview.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage, pluginsResult } from './pluginspage.ts';
-import { listResult, resultInHeader } from './matrix.ts';
+import { backFromFiles, kindsShown, listResult, resultInHeader, unseenNotices } from './matrix.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
@@ -33,8 +33,8 @@ import { fullPlace, listenForTravel, recordDraw, restoring } from './places.ts';
 import { placeKey } from './visits.ts';
 
 const region = (id: string) => document.getElementById(id)!;
-/** Each page's title, in the header and the sidebar: a kind's page by its kind's title (words.ts kindNouns). */
-const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', sources: pageNames.sources, repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
+/** Each page's title, in the header and the sidebar: Instructions' and the plugins' page by their kind's title (words.ts kindNouns). */
+const titles: Record<Page, string> = { overview: 'Overview', library: 'Library', instructions: kindNouns.instructions.title, plugins: kindNouns.plugins.title, profiles: 'Profiles', history: 'History', sources: pageNames.sources, repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
 /** From this content width (laptop full screen and up), an open row's details dock beside its table instead of under the row. */
@@ -61,13 +61,16 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number | str
     type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': countTitle ? `${label}: ${countTitle}` : label, title: label,
     onclick: () => showPage(page),
   }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 || quiet ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true', title: countTitle }, String(count)),
-    // A change sync made on its own shows as a dot on its page until that notice is seen or dismissed there.
-    !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
+    // A change sync made on its own shows as a dot on its page until that notice is painted (seen) or dismissed.
+    unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
 
 const anythingOn = () => !!state.home && anyOn(state.home);
-const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.skills.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents.notices : [];
-const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history) && !state.seenNotices.has(notice.history)).length;
+/** The automatic changes a page shows: the Library's, of every kind it lists. */
+const noticesFor = (page: Page) => (!state.home || page !== 'library' ? [] : heldKinds(state.home).flatMap(kind => state.home![kind].notices));
+/** The Library's automatic changes not painted yet; on the open Library, of the kinds not on show (a segment of another kind hides theirs). */
+const unseen = (page: Page) => (!state.home || page !== 'library' ? 0
+  : heldKinds(state.home).filter(kind => state.page !== 'library' || !kindsShown().includes(kind)).flatMap(unseenNotices).length);
 const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`; };
 
 const homeHelp: Record<HomeMode, string> = {
@@ -109,14 +112,13 @@ function renderSidebar() {
   if (heldBy(home)) { region('nav').replaceChildren(); region('homes').replaceChildren(); region('sidebar-end').replaceChildren(...sidebarEnd()); return; }
   // A kind no tool here can hold has no row (app.ts absentKinds).
   const absent = absentKinds();
-  const row = (page: HomeKind, ...rest: [IconName, number?]) => (absent.includes(page) ? null : navRow(page, titles[page], ...rest));
+  const row = (page: Extract<HomeKind, Page>, glyph: IconName) => (absent.includes(page) ? null : navRow(page, titles[page], glyph));
+  // The Library's total: every row of the kinds a tool here can hold, a plugin's items included, whatever its filters say.
+  const held = home ? heldKinds(home) : [];
   region('nav').replaceChildren(...[
     navRow('overview', titles.overview, 'layout-grid'),
     navRow('harnesses', titles.harnesses, 'boxes'),
-    // Each page's rows, a plugin's items included.
-    row('skills', 'wand-sparkles', home && home.skills.items.length + pluginItemCount(home, 'skills')),
-    row('mcp', 'plug', home && home.mcp.items.length + pluginItemCount(home, 'mcp')),
-    row('agents', 'bot', home && home.agents.items.length + pluginItemCount(home, 'agents')),
+    home && !held.length ? null : navRow('library', titles.library, 'layers', home ? held.reduce((sum, kind) => sum + rowCount(home, kind), 0) : undefined),
     row('instructions', 'pencil-line'),
     row('plugins', 'puzzle'),
     // Where items come from, beside the plugins' page: how many links are added, once there is one.
@@ -159,7 +161,7 @@ function renderPage() {
   const held = heldBy(state.home);
   if (held) { region('page').replaceChildren(heldScreen(state.home!, held)); return; }
   forgetHeldResult();
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'sources' ? sourcesPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'library' ? libraryPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'sources' ? sourcesPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
 }
 
 /** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */
@@ -237,9 +239,10 @@ function render() {
   const scrolled = remembered();
   const selected = keepSelection();
   const { rail } = applyLayout();
-  renderSidebar();
   renderHeader(rail);
   drawPage(renderPage);
+  // After the page, which marks the notices it paints seen: the sidebar's dot is for those it didn't.
+  renderSidebar();
   recordDraw();
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
   runAfterLayout();
@@ -287,7 +290,7 @@ document.addEventListener('keydown', event => {
     if (find) { event.preventDefault(); find.focus(); }
   }
   // Escape leaves the Files and contents view for the table, except in a text box, where it clears the box (matrix.ts).
-  if (event.key === 'Escape' && !typing && state.page === 'skills' && state.skillsView === 'files') showSkillsTable();
+  if (event.key === 'Escape' && !typing && state.page === 'library' && state.libraryView === 'files') backFromFiles();
 });
 
 // Updates are followed once the home is open, so what the opening said doesn't cover "now on the new version".

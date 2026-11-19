@@ -1,6 +1,6 @@
 // Plugins: the steps one click runs, their order, their words and their way back: for the Plugins page's clicks
-// (pluginstate.ts applyPluginOps), a plugin's one switch (marketplaces.ts turn), the item pages' switches (app.ts) and the
-// automatic updates (pluginupdates.ts). What a switch owes each tool is pluginrecord.ts's. Also the item pages' scratch for one
+// (pluginstate.ts applyPluginOps), a plugin's one switch (marketplaces.ts turn), the item lists' switches (app.ts) and the
+// automatic updates (pluginupdates.ts). What a switch owes each tool is pluginrecord.ts's. Also the item lists' scratch for one
 // click (PluginDraft). Pure functions over plain data, so a run can be read, tested and changed without the page or the engine.
 import { partWords, toolSaid } from './pluginstatus.ts';
 import type { ItemState } from './pluginlibrary.ts';
@@ -55,7 +55,7 @@ export interface ResultLine {
 /** What one op did, as its tool reported it. */
 export interface PluginDone extends PluginOp { report: ActionReport }
 
-/** One click's choices while the item pages work them out (pluginswitch.ts), keyed by marketplace source, plugin and tool. Nothing here has run. */
+/** One click's choices while the item lists work them out (pluginswitch.ts), keyed by marketplace source, plugin and tool. Nothing here has run. */
 export type PluginDraft = Map<string, PluginOp>;
 
 /** A failure for each tool of a step that could not run at all, so the report says so and Undo leaves it alone. */

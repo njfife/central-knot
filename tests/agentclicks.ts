@@ -1,4 +1,4 @@
-// One agent ("reviewer") in a temp home, and the clicks the Agents page and History send for it, built by the page's own
+// One agent ("reviewer") in a temp home, and the clicks the Library and History send for it, built by the page's own
 // code (src/libraryrow.ts rowClicks, src/historyactions.ts). Shared by the tests that replay clicks on real files:
 // agents.test.ts and agentswalk.test.ts.
 import { pendingChanges } from '../src/library.ts';
@@ -45,7 +45,7 @@ export const historyOf = async (box: Box, context = box.context) => (await readH
 /** A plain pass, as the background runs it. */
 export const pass = (box: Box, context = box.context) => applyAgents(context, box.tools, [], { background: true });
 
-/** The agent as the Agents page reads it: its row's facts, and its item in the library (deleted or not). */
+/** The agent as the Library reads it: its row's facts, and its item in the library (deleted or not). */
 export async function seen(box: Box, context = box.context): Promise<{ fact?: LibraryFacts; item?: LibraryItem; row: LibraryRow }> {
   const view = await agentsView(context, box.tools);
   const fact = view.items.find(entry => entry.key === 'reviewer');

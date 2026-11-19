@@ -1,4 +1,4 @@
-// The page's one list of clicks, carried out one at a time in the order clicked: a row's switch or Add on the item pages
+// The page's one list of clicks, carried out one at a time in the order clicked: a row's switch or Add on the item lists
 // (app.ts queueClick) and a plugin's switch or tool's box on Plugins (pluginstate.ts turnPlugin) join it, each a Turn. While
 // clicks wait or run, the page acts (app.ts acting): the writes it names are off and say why, the page stays live (it scrolls,
 // rows open, switches take clicks), and the background refresh waits: the home is read once when the list is empty and anything
@@ -6,13 +6,13 @@
 // joins the run on its place while that run still has a click waiting or running, or within FADE_MS after its last click ended,
 // unless something ended it (endRun: its result's ×, its Undo or any other action, another page or tool's page, another home).
 // Here: the list, the runs, a click's place in them, taking a waiting click back, and the state a row's switch is drawn in
-// meanwhile (wantedOn). Each route keeps its own work, its row while its click waits (the item pages draw the new state; Plugins
+// meanwhile (wantedOn). Each route keeps its own work, its row while its click waits (the item lists draw the new state; Plugins
 // say "Waiting to…": pluginparts.ts clickNote) and its result with its Undo (app.ts sayRun; pluginstate.ts market.lastRun).
 import { afterActing, FADE_MS, homeReadOwed, readHomeOnce, rerender, showActing, type PageKind } from './app.ts';
 import type { RowKey } from './itemrow.ts';
 
 /**
- * A run of clicks: its place (an item page, or a tool's tab of one kind under Harnesses: app.ts placeNow; or Plugins), and
+ * A run of clicks: its place (an item list, or a tool's tab of one kind under Harnesses: app.ts placeNow; or Plugins), and
  * when its last click ended (0 before one has). Its clicks are the turns that name it.
  */
 export interface Run { place: string; lastAt: number }
@@ -23,7 +23,7 @@ export interface Turn {
   /** Its work, done in its turn. Each route says its own failures; a click whose work throws ends all the same. */
   work: () => Promise<void>;
   run: Run;
-  /** An item page's row (its kind and key) and the state its switch asks for, which the row is drawn in until the click ends. */
+  /** An item list's row (its kind and key) and the state its switch asks for, which the row is drawn in until the click ends. */
   row?: RowKey & { on: boolean };
   /** Said when the list empties after it ran (Plugins: its run's clicks said as a whole). */
   ended?: () => void;
@@ -62,7 +62,7 @@ export function join(turn: Turn): void {
 /** These clicks leave the list: a run's ended clicks once a new run starts on their place, or what another home leaves behind. */
 export function drop(which: (turn: Turn) => boolean): void { clickList.turns = clickList.turns.filter(turn => !which(turn)); }
 
-/** The latest unended click on an item page's row, if one is there. */
+/** The latest unended click on an item list's row, if one is there. */
 const latestOn = (kind: PageKind, key: string) => clickList.turns.findLast(turn => turn.state !== 'ended' && turn.row?.kind === kind && turn.row.key === key);
 
 /** The state a row's switch is drawn in: the one its latest unended click asks for; undefined when none is (the view's, then). */

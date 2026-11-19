@@ -1,5 +1,5 @@
 // Agents on the library, as worked examples on real files in a temp home (src/agents.ts; the model is src/library.ts).
-// One agent, "reviewer", in Claude Code, Copilot CLI and Codex; every click is sent as the Agents page sends it
+// One agent, "reviewer", in Claude Code, Copilot CLI and Codex; every click is sent as the Library sends it
 // (tests/agentclicks.ts). In order: the harnesses' formats, Off and On, edits and deletions by hand, copies that can't be
 // seen, found agents, versions, Delete, and what a crash or a damaged record leaves. Agents are the pass's worked kind, so its
 // own rules (src/librarypass.ts: the folder guards, the settle window, the gate, the order of steps) are exampled here.
@@ -121,7 +121,7 @@ test('What is written for a description reads back as exactly that description, 
   } finally { await box.cleanup(); }
 });
 
-inBox('The Agents page reads an agent as On or Off, with the tools it is kept out of', async box => {
+inBox('The Library reads an agent as On or Off, with the tools it is kept out of', async box => {
   await on(box);
   await keepOut(box, 'codex-cli');
   assert.deepEqual([(await seen(box)).fact?.on, (await seen(box)).fact?.except], [true, ['codex-cli']]);
@@ -428,7 +428,7 @@ inBox('A harness installed later gets an On agent from the pass of the whole hom
   assert.match((await readOf(box, 'codex-cli'))!, /Be brief/);
   // A pass with nothing to write tells nothing: the next view has no band.
   assert.deepEqual(bandAfter(await wholeHome()), { items: [], tools: [] });
-  // An edit in Claude Code spreads: the Agents page's notice says so, so the band leaves reviewer out.
+  // An edit in Claude Code spreads: the Library's notice says so, so the band leaves reviewer out.
   await edit(box, 'claude-cli', 'Be thorough.');
   const edited = await wholeHome();
   assert.deepEqual([edited.agents?.notices?.map(itemNotice).map(notice => notice.kind), edited.agents?.writes], [['edit'], 2]);

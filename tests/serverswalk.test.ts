@@ -1,5 +1,5 @@
 // A seeded random walk over one MCP server ("docs", with fields of each tool's own in each tool) on real settings files in a
-// temp home, with a skill and an agent on the library in the same home: every click the MCP servers page and History offer
+// temp home, with a skill and an agent on the library in the same home: every click the Library and History offer
 // (src/libraryrow.ts rowClicks, src/historyactions.ts), edits by hand (the server's values, or only a
 // tool's own fields), entries deleted and made by hand, a settings file deleted, rewritten without its servers or made
 // unreadable, Automatic sync off and on, a crash at each step of a write or a removal, a tool left out and managed again,

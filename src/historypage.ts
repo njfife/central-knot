@@ -8,7 +8,7 @@ import { acting, noToolManaged, restoreEvent, showPage, shownPath, state, touche
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changes, homeItems, NO_PROFILE, turnsWords, undoPlan } from './profileplan.ts';
-import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
+import { changePanel, openKind, outcomeBand, seeChangeLink } from './matrix.ts';
 import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
@@ -168,7 +168,7 @@ export function historyPage() {
   const events = state.history.data;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.history.state === 'failed' ? 'History could not be read.' : 'Reading History…')));
   if (!events.length && noToolManaged()) return h('div.page', {}, noToolsState('history'));
-  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or turning something on adds or replaces a copy, it shows up here with Undo. Turn a skill on to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
+  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or turning something on adds or replaces a copy, it shows up here with Undo. Turn a skill on to begin.', button({ variant: 'outline', label: 'Open the Library', id: 'history-open-library', onclick: () => openKind('all') })));
   const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   const reread = rereadBand(state.history);
   // A refused Undo made here is a warning band, as on the other pages; other results here are in the status bar.
