@@ -160,9 +160,9 @@ export function inOrder<Row extends Pick<ItemRow, 'kind' | 'key' | 'versions'>>(
 export interface Pin<Group> { group: Group; time?: number }
 /**
  * The rows pinned on one list, by the id its rows have there: an item list's row id (rowId), a plugin's name on Plugins. `list`:
- * which list, as its page names it: where it is, its Sort and its chip, and the Library's Find text (matrix.ts listNow). Every
- * page that orders rows by their state reads it: the item tables (matrix.ts itemsTable), the Skills Files view's list (matrix.ts
- * skillsBrowser) and the Plugins list (pluginstate.ts shownPlugins). The one kept, and when it is let go: app.ts pinnedRows.
+ * which list, as its page names it: where it is, its Sort and its chip (never Find). Every page that orders rows by their state
+ * reads it: the item tables (matrix.ts itemsTable), the Skills Files view's list (matrix.ts skillsBrowser) and the Plugins list
+ * (pluginstate.ts shownPlugins). The one kept, and when it is let go: app.ts pinnedRows.
  */
 export interface Pinned<Group = string | number> { list: string; rows: Map<string, Pin<Group>> }
 export const noPins = <Group = string | number>(): Pinned<Group> => ({ list: '', rows: new Map() });

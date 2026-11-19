@@ -18,7 +18,7 @@
 // A row's switch or Add joins the page's list of clicks (flip, pluginRowSwitch → app.ts queueClick) and is worked out in its turn,
 // perhaps while another table is drawn: its closures hold the row and the table it was clicked on, so it is worked out there.
 // The Library's Find is answered by word search in main (search.ts, asked by askFind): while it has text the list is one list,
-// best first, under one heading (foundRows). A tool's tabs and the Files view match their Find themselves (findMatches).
+// best first, under one heading (foundRows). A tool's tabs match their Find here (holdsFindText); the Files view, itself.
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
@@ -47,7 +47,7 @@ import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid,
 import { pageOfPart, partOfPage } from './pluginstatus.ts';
 import { cellWords, fromAPlugin, fromPluginsCount, handledWhere, inTool, insideTitle, offIn, pageRows, rowCount, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
-import { pageData, readPageData } from './pagedata.ts';
+import { pageData, readPageData, resetPageData } from './pagedata.ts';
 
 const names = toolNames as Record<Tool, string>;
 
@@ -223,16 +223,11 @@ function pluginSection(t: Table, list: PluginRow[]) {
     list.flatMap(row => pluginRowEl(t, row)));
 }
 
-/**
- * The Library's one heading while its Find has text, over every row it lists in its order (foundRows), each drawn as under its
- * own heading, with its switch and its state's words. Its count: the rows Find finds that the chip shows (a row kept only by a pin
- * aside), as the kind switch counts them.
- */
+/** The Library's one heading while its Find has text, over its rows (foundRows), each drawn as under its own heading; its count is listedRows'. */
 function foundSection(t: Table, rows: (ItemRow | PluginRow)[]) {
   if (!rows.length) return null;
-  const counted = rows.filter(each => isPluginRow(each) || onChip(t, each)).length;
   return h('div', { role: 'rowgroup' },
-    h('div.ov-section', { role: 'row', 'data-section': 'results' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'Results'), h('span.ov-section-count', {}, String(counted)))),
+    h('div.ov-section', { role: 'row', 'data-section': 'results' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'Results'), h('span.ov-section-count', {}, String(listedRows(t).length)))),
     rows.flatMap(each => (isPluginRow(each) ? pluginRowEl(t, each) : row(t, each))));
 }
 
@@ -344,7 +339,7 @@ export function differingIn({ facts }: KindSource, tool: Tool) {
 type Filter = 'all' | 'attention' | 'plugins' | 'unused';
 const newView = () => ({
   filter: 'all' as Filter,
-  /** Find's text: on the Library, asked of word search (askFind); on a tool's tab, matched here (findMatches). Changed through newFind. */
+  /** Find's text: on the Library, asked of word search (askFind); on a tool's tab, matched here (holdsFindText). Changed through newFind. */
   find: '',
   // A row's fields name it by its row id (itemrow.ts rowId).
   /** The row whose details are open. */
@@ -408,12 +403,13 @@ export function showRow(which: PageKind, key: string) {
   if (segment() !== 'all' && segment() !== which) state.libraryKind = 'all';
   if (state.page !== 'library') showPage('library');
   if (state.libraryView === 'files') leaveFiles();
-  const t = useLibrary(), id = rowId(which, key), row = rowsIn(t).find(each => idOf(each) === id);
+  const t = useLibrary(), id = rowId(which, key), row = [...rowsIn(t), ...plugged(t).rows].find(each => idOf(each) === id);
   if (row) reveal(t, row); else openFromAway(t.view, id);
 }
-/** A link to a row where the person is (a notice's name, the walkthrough): Find and the chip let go only where they hide it. */
-function reveal(t: Table, row: ItemRow) {
-  if (!(onChip(t, row) && matchesFind(t, row))) { newFind(t.view, ''); t.view.filter = 'all'; }
+/** A link to a row where the person is (a notice's name, the walkthrough): Find let go only if it hides the row, the chip only if it does. */
+function reveal(t: Table, row: ItemRow | PluginRow) {
+  if (!matchesFind(t, row)) newFind(t.view, '');
+  if (!chipShows(t, row)) t.view.filter = 'all';
   openFromAway(t.view, idOf(row));
 }
 /** Opens a row once the page is drawn, as its own click opens it (markOpen), and brings it to the list's top: every link to a row ends here. */
@@ -451,8 +447,8 @@ const chipNames = { attention: 'Copies differ', plugins: 'From plugins', unused:
  */
 function filterBar(t: Table) {
   const view = t.view, attention = rowsIn(t).filter(skill => needsChoice(t, skill)).length;
-  // `count`: how many it shows, amber when they need something (`warn`).
-  const chip = (id: Filter, label: string, glyph: IconName, count: number, warn = false) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn && count ? '.chip-warn' : ''}`,
+  // `count`: how many it shows, amber when they need something (`warn`); while the Library's Find has text, of what Find leaves.
+  const chip = (id: Filter, label: string, glyph: IconName, all: number, warn = false, count = searching(t) ? listedRows({ ...t, view: { ...view, filter: id } }).length : all) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn && count ? '.chip-warn' : ''}`,
     { type: 'button', id: `chip-${id}`, 'aria-pressed': String(view.filter === id), 'aria-label': `${label} ${count}`, 'data-tip': label, onclick: () => { view.filter = view.filter === id ? 'all' : id; rerender(); } },
     icon(glyph, 13, 'chip-icon'), h('span.chip-label', {}, label), h('span.chip-count', {}, String(count)));
   // A chip is offered while something matches it, over every kind the Library holds (overEveryKind), or while it is the one on.
@@ -817,11 +813,13 @@ function nameCell(t: Table, skill: ItemRow, attention: boolean) {
  */
 function aboutLine(t: Table, row: ItemRow | PluginRow) {
   const excerpt = excerptOf(t, row);
-  if (excerpt) return h('span.ov-name-about.ov-excerpt', { title: `In its text: ${excerpt}` }, h('span.excerpt-mark', {}, 'In its text:'), ` ${excerpt}`);
+  if (excerpt) return h('span.ov-name-about.ov-excerpt', { title: `In its text: ${excerpt}` }, ...inItsText(excerpt));
   return row.description ? h('span.ov-name-about', { title: row.description }, row.description) : null;
 }
 /** An opened row's line of its file's text, where Find found the row only there (excerptOf). */
-const excerptLine = (t: Table, row: ItemRow | PluginRow) => { const excerpt = excerptOf(t, row); return excerpt ? h('p.details-description.details-excerpt', {}, h('span.excerpt-mark', {}, 'In its text:'), ` ${excerpt}`) : null; };
+const excerptLine = (t: Table, row: ItemRow | PluginRow) => { const excerpt = excerptOf(t, row); return excerpt ? h('p.details-description.details-excerpt', {}, ...inItsText(excerpt)) : null; };
+/** An excerpt as a row and its details show it: led by a faint "In its text:". */
+const inItsText = (excerpt: string) => [h('span.excerpt-mark', {}, 'In its text:'), ` ${excerpt}`];
 
 /** The chevron that opens or closes a row's details, at the row's end. */
 function openButton(t: Table, row: ItemRow | PluginRow) {
@@ -1245,8 +1243,8 @@ const useTableShown = (): Table | undefined => {
 
 /** Whether a row is one the chip that is on shows (none on shows every row). */
 const onChip = (t: Table, skill: ItemRow) => { const { filter } = t.view; return filter === 'all' || (filter === 'plugins' ? fromAPlugin(skill) : filter === 'unused' ? inUnusedChip(t, skill) : needsChoice(t, skill)); };
-/** Whether Find's text is in a row's key (a plugin's own row: its name) or its description, whatever its kind: a tool's tab's Find, and the Library's until main answers it (matchesFind). */
-const findMatches = (t: Table, row: ItemRow | PluginRow) => {
+/** Whether a row's key (a plugin's own row: its name) or its description holds Find's text whole: a tool's tab's Find, and the Library's until main has answered it (matchesFind). */
+const holdsFindText = (t: Table, row: ItemRow | PluginRow) => {
   const needle = t.view.find.trim().toLowerCase();
   return !needle || (isPluginRow(row) ? row.name.toLowerCase() : row.key).includes(needle) || row.description.toLowerCase().includes(needle);
 };
@@ -1257,68 +1255,89 @@ const findMatches = (t: Table, row: ItemRow | PluginRow) => {
 interface FindAnswer { text: string; home: string; hits: Map<string, SearchHit> }
 /**
  * The answer in hand: the latest ask's (an older ask's answer is dropped, pagedata.ts), kept across reads and through a reply
- * that main has no index yet, until another is kept. Used only for the text it was asked for and its home (hitsFor).
+ * that main has no index yet, until another is kept or another home is taken (findInHome). Used only for its text and home (hitsFor).
  */
 const findAnswer = pageData<FindAnswer>();
 /** Two answers alike: the same text and home, and the same rows in the same order, with the same excerpts. */
 const sameAnswer = (one?: FindAnswer, other?: FindAnswer) => !!one && !!other && JSON.stringify([one.text, one.home, [...one.hits.values()]]) === JSON.stringify([other.text, other.home, [...other.hits.values()]]);
 /**
  * Asks main for the Library's Find text (preload.ts search), answered at once from the index last published; it never causes a
- * read of the home. What came of it: 'dropped' (a newer ask is on its way), 'same' (the answer in hand, again), or 'new'
- * (another answer kept, or main had no index: the list falls back to findMatches until there is one).
+ * read of the home. What came of it: 'dropped' (a newer ask is on its way); 'same' (the answer in hand again, or no index again);
+ * or 'new': another answer kept, which a hold in force follows (followHold), or no index (an answer in hand for this text and
+ * home is still used, else holdsFindText).
  */
 async function askFind(text: string): Promise<'dropped' | 'same' | 'new'> {
-  const before = findAnswer.data;
+  const before = { data: findAnswer.data, noIndex: findAnswer.state === 'failed' };
   const read = await readPageData(findAnswer, async () => {
     const answer = await window.centralKnot.search(text);
     return answer.ready ? { text, home: answer.home, hits: new Map(answer.rows.map(hit => [hit.id, hit])) } : null;
   });
-  return read === 'dropped' ? 'dropped' : read === 'ready' && sameAnswer(before, findAnswer.data) ? 'same' : 'new';
+  if (read === 'dropped') return 'dropped';
+  if (read === 'ready' ? sameAnswer(before.data, findAnswer.data) : before.noIndex) return 'same';
+  if (read === 'ready') followHold();
+  return 'new';
 }
-// Each index main publishes (search.ts searchFollower, at every view): while the Library's Find has text, it is asked again,
-// wherever the person is, so the answer in hand is the newest on return, and the Library is drawn again only for another answer.
-window.centralKnot.onSearchPublished(() => {
+/** The Library's Find asked again while it has text, wherever the person is; the Library is drawn again only for another answer. */
+function askAgain() {
   const text = views.library.find;
   if (text.trim()) void askFind(text).then(came => { if (came === 'new' && state.page === 'library') rerender(); });
-});
-/** Find given new text (typed, Escape, a link that lets it go, a view started afresh): an armed Delete disarms, and the rows pinned under the old text are let go at the next draw (listNow names the Library's text). */
-const newFind = (view: View, text: string) => { Object.assign(view, { find: text, confirmDelete: undefined }); };
-/** Find typed: a tool's tab is drawn at once; the Library's list once main has answered (askFind), at once with Find empty. */
+}
+// At each index main publishes (search.ts searchFollower, at every view), so the answer in hand is the newest on return.
+window.centralKnot.onSearchPublished(askAgain);
+/** Another home taken (app.ts accept): the answer in hand, and an ask on its way, let go unless it is that home's already; asked again. */
+export function findInHome(home: string) {
+  if (findAnswer.data?.home !== home) resetPageData(findAnswer);
+  askAgain();
+}
+/** Find given new text (typed, Escape, Clear Find, a link that lets it go, a view started afresh): an armed Delete disarms, and on the Library the rows held are let go. */
+const newFind = (view: View, text: string) => { Object.assign(view, { find: text, confirmDelete: undefined }); if (view === views.library) unpin(); };
+/** Find emptied: Escape in it, or Clear Find under "Nothing matches". */
+const clearFind = (view: View) => { newFind(view, ''); rerender(); };
+/**
+ * Find typed: a tool's tab is drawn at once; the Library's list once main has answered (askFind), at once with Find empty. Until
+ * then the list on screen is the text before's, and nothing below the toolbar acts (inert).
+ */
 function findTyped(t: Table, text: string) {
   newFind(t.view, text);
   if (!searching(t)) { rerender(); return; }
+  for (const before of document.querySelectorAll<HTMLElement>('.ov-page .toolbar ~ *, .ov-page .dock-main ~ *')) before.inert = true;
   void askFind(text).then(came => { if (came !== 'dropped') rerender(); });
 }
 /** The Library's list while its Find has text: one list of the rows Find finds (foundRows), under one heading, Sort at Best match. */
 const searching = (t: Table) => !t.tool && !filesView(t) && !!t.view.find.trim();
 /** The rows the answer in hand found, by row id, best first, on the Library's list while its Find has text and the answer is for that text and the home on screen; else none. */
 const hitsFor = (t: Table) => { const answer = findAnswer.data; return searching(t) && answer?.text === t.view.find && answer.home === state.home?.home ? answer.hits : undefined; };
-/** Whether Find finds a row: in the answer in hand (hitsFor), else as findMatches says. */
-const matchesFind = (t: Table, row: ItemRow | PluginRow) => { const hits = hitsFor(t); return hits ? hits.has(idOf(row)) : findMatches(t, row); };
-/** Where Find found a row only in its file's text, that text around the match (search.ts snippet), else none. */
+/** Whether Find finds a row: in the answer in hand (hitsFor), else as holdsFindText says. */
+const matchesFind = (t: Table, row: ItemRow | PluginRow) => { const hits = hitsFor(t); return hits ? hits.has(idOf(row)) : holdsFindText(t, row); };
+/** Where Find found a row only in its file's text, that text around the match (search.ts around), else none. */
 const excerptOf = (t: Table, row: ItemRow | PluginRow) => hitsFor(t)?.get(idOf(row))?.excerpt;
-/**
- * The order of the Library's list while its Find has text: the rows pinned there first, in the order they were pinned
- * (holdFound); then best first (the answer in hand), or until there is one, by name.
- */
+/** The order of the Library's list while its Find has text: the rows held first, as they were held (holdFound); then best first, or until there is an answer, by name. */
 function foundOrder(t: Table, rows: (ItemRow | PluginRow)[], pins: Pinned<Role>) {
   const place = new Map<string, number>();
   for (const id of [...pins.rows.keys(), ...(hitsFor(t)?.keys() ?? [])]) if (!place.has(id)) place.set(id, place.size);
   const named = (row: ItemRow | PluginRow) => ({ key: nameOf(row).toLowerCase(), kind: kindOf(row) });
   return [...rows].sort((one, other) => (place.get(idOf(one)) ?? place.size) - (place.get(idOf(other)) ?? place.size) || byName(named(one), named(other)));
 }
-/** The Library's list while its Find has text, in its order (foundOrder): what drawTable draws, holdFound pins and Put in order compares. */
+/** The Library's list while its Find has text, as drawTable draws it (drawnRows, in foundOrder): what holdFound holds and Put in order compares. */
 const foundRows = (t: Table, pins: Pinned<Role>) => { const { shown, plugins } = drawnRows(t, pins); return foundOrder(t, [...shown, ...plugins], pins); };
-/**
- * While the Library's Find has text, a click on a row (flip, pluginRowSwitch) or a reading as it lands (holdOrder) pins every row
- * drawn where it is, in the order drawn (itemrow.ts pin keeps a row pinned first where it was): none moves, and a row a later
- * answer brings goes below them (foundOrder). They are let go with the text (listNow), by Put in order or Refresh.
- */
+/** While the Library's Find has text, a click on a row (flip, pluginRowSwitch) or a reading as it lands (holdOrder) holds every row drawn where it is (itemrow.ts pin). */
 function holdFound(t: Table) { const pins = pinnedHere(t); for (const row of foundRows(t, pins)) pin(pins, idOf(row), 'results'); }
+/** A hold in force follows each new answer (askFind): a row held that it no longer finds is let go for good, and a row it brings is held below, as drawn. */
+function followHold() {
+  const t = useTableShown(), hits = t && hitsFor(t), pins = t && pinnedHere(t);
+  if (!t || !hits || !pins?.rows.size) return;
+  for (const id of pins.rows.keys()) if (!hits.has(id)) pins.rows.delete(id);
+  holdFound(t);
+}
 
-/** A plugin's own row is listed with no chip or From plugins, on a harness's page where that tool has it, and as Find says. */
-const pluginListed = (t: Table, row: PluginRow) => (t.view.filter === 'all' || t.view.filter === 'plugins') && (!t.tool || !!row.copies[t.tool as HarnessId]) && matchesFind(t, row);
-/** The rows Find and the chip leave on a table, a plugin's own among them: what drawTable lists (with the rows pinned there) and the kind switch counts. */
+/** Whether the chip that is on shows a row, a plugin's own too (with no chip, or From plugins). */
+const chipShows = (t: Table, row: ItemRow | PluginRow) => (isPluginRow(row) ? t.view.filter === 'all' || t.view.filter === 'plugins' : onChip(t, row));
+/** A plugin's own row is listed as the chip says, on a harness's page where that tool has it, and as Find says. */
+const pluginListed = (t: Table, row: PluginRow) => chipShows(t, row) && (!t.tool || !!row.copies[t.tool as HarnessId]) && matchesFind(t, row);
+/**
+ * The rows Find and the chip leave on a table, a plugin's own among them: what the kind switch, the Library's one heading while
+ * its Find has text, the chips then (filterBar), and Turn these off count. drawTable draws them and the rows pinned there.
+ */
 const listedRows = (t: Table): (ItemRow | PluginRow)[] => [...rowsIn(t).filter(row => onChip(t, row) && matchesFind(t, row)), ...plugged(t).rows.filter(row => pluginListed(t, row))];
 /**
  * The rows a table draws: the person's that Find finds and the chip shows, or that are pinned there (a row stays listed under the
@@ -1401,11 +1420,12 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   const sections = found ? [foundSection(t, found)] : [section(t, 'on', ...under('on')), section(t, 'found', ...under('found')), pluginSection(t, plugins), tool ? section(t, 'away', ...under('away')) : null, section(t, 'off', ...under('off'))];
   // Nothing listed: none of the segment's kind here, or nothing Find and the chip leave (said apart from a home with nothing).
   const nothing = shown.length || plugins.length ? null : !all.length && !plugged(t).rows.length && none ? none(t.kinds[0]!)
-    : emptyState('search-x', 'Nothing matches', [view.find.trim() ? `“${view.find.trim()}”` : '', view.filter !== 'all' ? `Only: ${chipNames[view.filter]}` : ''].filter(Boolean).join(' · '));
+    : emptyState('search-x', 'Nothing matches', [view.find.trim() ? `“${view.find.trim()}”` : '', view.filter !== 'all' ? `Only: ${chipNames[view.filter]}` : ''].filter(Boolean).join(' · '),
+      view.find.trim() ? button({ variant: 'outline', size: 'small', label: 'Clear Find', id: 'find-clear', onclick: () => clearFind(view) }) : undefined);
   const table = [
     h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), orderChoice(t), h('div.toolbar-end', {}, toolbarState(t), usageControls(t))),
     usageBand(t),
-    view.filter === 'unused' ? unusedBand(t, shown.filter(skill => onChip(t, skill))) : null,
+    view.filter === 'unused' ? unusedBand(t, listedRows(t).filter((row): row is ItemRow => !isPluginRow(row))) : null,
     notices(t),
     // A stable id per segment (and per harness and kind), so a redraw (the dock's breakpoint crossed, say) keeps the table where it
     // was scrolled, and another segment or harness's table opens at its own top.
@@ -1432,8 +1452,8 @@ const nameOf = (row: ItemRow | PluginRow) => row.name ?? row.key;
  */
 const click = (what: Click) => { void applyClick(what); };
 
-/** A table's list, as the rows pinned on it are named (app.ts pinnedRows): the Skills Files view's list or the table, with its Sort and chip, and the Library's Find text (a new text lets its pins go). */
-const listNow = (t: Table) => [filesView(t) ? 'files' : 'table', t.kinds.join('+'), t.tool, chosenOrder(t), t.view.filter, searching(t) ? t.view.find : ''].join(' ');
+/** A table's list, as the rows pinned on it are named (app.ts pinnedRows): the Skills Files view's list or the table, with its Sort and chip. */
+const listNow = (t: Table) => [filesView(t) ? 'files' : 'table', t.kinds.join('+'), t.tool, chosenOrder(t), t.view.filter].join(' ');
 /** The rows pinned on a table's list, each with the heading it is pinned under. */
 const pinnedHere = (t: Table) => pinnedRows<Role>(listNow(t));
 /** The table is the Library's Files view: its list of skills, and the chosen skill's switch in its pane (`detail-` ids). */
@@ -1555,7 +1575,7 @@ const turningLabel = (name: string, on: boolean) => `${name}: being turned ${on 
  * The switch's click: off everywhere, or on everywhere (a found item taken in, after a copy choice where its copies differ). It
  * joins the page's list (app.ts queueClick), its row drawn in its new state at once and worked out in its turn, from the view as
  * the clicks before it left it; a second click while it waits takes it back (clicklist.ts takeBack). Its row is pinned where it is
- * (itemrow.ts Pinned; while the Library's Find has text, every row drawn: holdFound) until another list or none is drawn, or Refresh (app.ts pinnedRows).
+ * (itemrow.ts Pinned; while the Library's Find has text, every row drawn: holdFound) until app.ts pinnedRows lets it go.
  */
 function flip(t: Table, skill: ItemRow, on: boolean) {
   const { kind, key } = skill;
@@ -1934,10 +1954,10 @@ function orderChoice(t: Table) {
   if (t.tool) return null;
   const choose = (event: Event) => { const value = (event.target as HTMLSelectElement).value; writeFlag(BY_UPDATED, value === 'updated'); writeFlag(BY_USED, value === 'used'); rerender(); };
   const order = chosenOrder(t), option = (value: RowOrder, label: string) => h('option', { value, selected: order === value }, label);
-  // While the Library's Find has text, the rows go by best match: Sort says so and can't be changed; the order chosen is back once Find is empty.
+  // While the Library's Find has text: Best match, greyed, its tooltip saying why.
   const best = searching(t), options = best ? [h('option', { value: 'best', selected: true }, 'Best match')] : [option('name', 'Name'), option('updated', 'Last updated'), option('used', 'Last used')];
-  return [h('span.order', { title: best ? 'While Find has text, the rows go by best match' : 'The order of the rows under each heading' }, h('label.order-word', { for: 'item-order' }, 'Sort'),
-    h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: 'Sort by', disabled: best, onchange: choose }, options), icon('chevrons-up-down', 14))),
+  return [h('span.order', { title: best ? 'Best match while Find has text; the Sort you chose comes back when Find is cleared' : 'The order of the rows under each heading' }, h('label.order-word', { for: 'item-order' }, 'Sort'),
+    h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: 'Sort by', disabled: best, onchange: choose }, options), best ? null : icon('chevrons-up-down', 14))),
     roomHeld(rowsHeld(t), held => button({ variant: 'ghost', size: 'small', icon: 'list', label: 'Put in order', id: held ? 'put-in-order' : undefined, collapse: true, onclick: () => { unpin(); rerender(); } }))];
 }
 /**
@@ -2128,7 +2148,7 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${skill.kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
   // The copy question is asked in one place: by first setup's walkthrough where it is at this row, else here.
   const asked = walkingAt();
-  if (differs) return box(close, asked?.kind === skill.kind && asked.key === skill.key ? h('p.compare-note', {}, 'Choosing copies, above, asks which copy to use.') : compareChoices(t, skill, inFiles));
+  if (differs) return box(close, excerptLine(t, skill), asked?.kind === skill.kind && asked.key === skill.key ? h('p.compare-note', {}, 'Choosing copies, above, asks which copy to use.') : compareChoices(t, skill, inFiles));
   // A found row none of whose copies can be read has no files to show.
   const files = lib.files && !inFiles && (inLibrary(itemOf(skill)) || canAdd(skill)) ? smallAction('Files and contents', elId('files', skill), () => openFiles(skill.key)) : null;
   const remove = !inFiles ? libraryDelete(t, lib, skill) : null;
@@ -2313,5 +2333,5 @@ document.addEventListener('keydown', event => {
   if (event.key !== 'Escape' || (id !== 'find' && id !== 'skills-find')) return;
   const view = useTableShown()?.view;
   if (id === 'skills-find' && view?.listFind) { view.listFind = ''; rerender(); }
-  if (id === 'find' && view?.find) { newFind(view, ''); rerender(); }
+  if (id === 'find' && view?.find) clearFind(view);
 });
