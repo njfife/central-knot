@@ -68,7 +68,7 @@ test('an item kept Off is found by its text; another version made current, delet
     assert.deepEqual([await search.found('questions'), await search.found('ledger')], [[{ id: 'skills-notes', excerpt: 'Track the open questions. templates/decision.md' }], []], 'Off, its current version’s text');
     await makeCurrent(box, first);
     assert.deepEqual([await search.found('ledger'), await search.found('questions'), await search.found('decision template')],
-      [[{ id: 'skills-notes', excerpt: 'Keep a ledger of every decision. templates/decision.md' }], [], [{ id: 'skills-notes', excerpt: 'Keep a ledger of every decision. templates/decision.md' }]],
+      [[{ id: 'skills-notes', excerpt: 'Keep a ledger of every decision. templates/decision.md' }], [], [{ id: 'skills-notes', excerpt: '…ledger of every decision. templates/decision.md' }]],
       'the version made current, with its other file’s name');
     await remove(box);
     assert.deepEqual(await search.found('ledger'), [], 'deleted');

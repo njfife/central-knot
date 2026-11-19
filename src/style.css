@@ -548,6 +548,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
    when it takes more than half its name cell (.name-cut, below). */
 .ov-name-about { flex: 1 1 0; min-width: 0; color: var(--ink-soft); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .no-about .ov-name-about { display: none; }
+/* Where Find found a row only in its file's text, that text takes the description's place, led by a faint mark (matrix.ts aboutLine). */
+.excerpt-mark { color: var(--ink-faint); }
 .row-tag ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
 /*
  * A row's name cell gives way in order. The description shortens (and, table-wide, steps aside; see above); the
