@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover, findApp, forgetVersions, probeVersion } from '../src/discovery.ts';
-import { appCandidates, executableCandidates, shellPath } from '../src/platform.ts';
+import { appCandidates, executableCandidates, hasStatusNotifierWatcher, shellPath } from '../src/platform.ts';
 import { isPresent } from '../src/presence.ts';
 
 async function fixture() {
@@ -178,6 +178,25 @@ test('The terminal’s PATH is read from the login shell, whatever its startup f
     await writeFile(join(dir, 'broken'), '#!/bin/sh\nexit 3\n', { mode: 0o755 });
     await writeFile(join(dir, 'hangs'), '#!/bin/sh\nsleep 30\n', { mode: 0o755 });
     assert.deepEqual([await shellPath(join(dir, 'broken')), await shellPath(join(dir, 'hangs'), 200), await shellPath('')], [undefined, undefined, undefined]);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('A Linux desktop has a system tray when its session bus has a StatusNotifierWatcher; no answer counts as none', { skip: process.platform === 'win32' }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ck-bus-'));
+  try {
+    // Stand-ins for dbus-send that answer only the question asked, with the reply a KDE session's bus gave (KDE's panel holds the
+    // name) and the one a GNOME session's gives without its AppIndicator extension.
+    const asked = '--session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner string:org.kde.StatusNotifierWatcher';
+    const bus = (owned: boolean) => `#!/bin/sh\n[ "$*" = '${asked}' ] || exit 1\necho 'method return time=1795096544.277007 sender=org.freedesktop.DBus -> destination=:1.5626 serial=4294967295 reply_serial=2'\necho '   boolean ${owned}'\n`;
+    await writeFile(join(dir, 'kde'), bus(true), { mode: 0o755 });
+    await writeFile(join(dir, 'gnome'), bus(false), { mode: 0o755 });
+    // No session bus to ask, a bus that never answers, and no dbus-send at all: no tray, so closing the window quits.
+    await writeFile(join(dir, 'no-bus'), `#!/bin/sh\necho 'Failed to open connection to "session" message bus' >&2\nexit 1\n`, { mode: 0o755 });
+    await writeFile(join(dir, 'hangs'), '#!/bin/sh\nsleep 30\n', { mode: 0o755 });
+    const answers = await Promise.all([
+      hasStatusNotifierWatcher(join(dir, 'kde')), hasStatusNotifierWatcher(join(dir, 'gnome')), hasStatusNotifierWatcher(join(dir, 'no-bus')),
+      hasStatusNotifierWatcher(join(dir, 'hangs'), 200), hasStatusNotifierWatcher(join(dir, 'missing'))]);
+    assert.deepEqual(answers, [true, false, false, false, false]);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 

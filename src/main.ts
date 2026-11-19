@@ -17,7 +17,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, wri
 import { access, constants, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps, forgetVersions } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
-import { appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
+import { appCandidates, executableCandidates, hasStatusNotifierWatcher, macPlaces, searchPath } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
 import { errorCode, forgetStale, keepUnreadable, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
@@ -549,10 +549,17 @@ function appMenu() {
   ]));
 }
 
-function makeTray() {
+/** The app's colour icon: the window's and the tray's off a Mac (macOS takes the app's icon from its bundle). */
+const appIcon = join(__dirname, '../assets/icon.png');
+async function makeTray() {
   if (smoke || tray) return;
-  const image = nativeImage.createFromBuffer(Buffer.from(trayIconPng, 'base64'), { scaleFactor: 2 });
-  image.setTemplateImage(true);
+  // A Linux desktop with no system tray would show no icon, and Quit is only in its menu: with no tray, closing the window quits.
+  if (process.platform === 'linux' && !(await hasStatusNotifierWatcher())) { log('no system tray on this desktop: closing the window quits'); return; }
+  // On a Mac a template image, which macOS draws in the menu bar's own colours; elsewhere the colour icon, seen on a dark panel too.
+  const mac = process.platform === 'darwin';
+  const image = mac ? nativeImage.createFromBuffer(Buffer.from(trayIconPng, 'base64'), { scaleFactor: 2 })
+    : nativeImage.createFromPath(appIcon).resize({ width: 64 });
+  image.setTemplateImage(mac);
   tray = new Tray(image);
   tray.on('click', () => { if (process.platform !== 'darwin') showWindow(); });
   // Its menu is rebuilt as the pointer reaches the icon, so it shows a change made in System Settings while no window was open.
@@ -1215,7 +1222,10 @@ function handleNow(channel: string, work: (...args: unknown[]) => Promise<unknow
   });
 }
 
-/** The main window. Closing it hides it and, on a Mac, takes Central Knot out of the Dock (PLT-04); if it is ever gone, Open from the menu bar makes a new one. */
+/**
+ * The main window. Closing it hides it and, on a Mac, takes Central Knot out of the Dock (PLT-04); if it is ever gone, Open from
+ * the menu bar or tray icon makes a new one. Where there is no tray (makeTray), closing it quits.
+ */
 let loading: Promise<void> = Promise.resolve();
 function createWindow(show: boolean) {
   // One window at a time: a second would get no answers (requests are only taken from the current window).
@@ -1224,7 +1234,7 @@ function createWindow(show: boolean) {
     width: 1280, height: 800, minWidth: 860, minHeight: 560, show,
     title: 'Central Knot', backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#fbfbfc',
     // macOS takes the app's icon from its bundle; Windows and Linux take the window's.
-    ...(process.platform === 'darwin' ? {} : { icon: join(__dirname, '../assets/icon.png') }),
+    ...(process.platform === 'darwin' ? {} : { icon: appIcon }),
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -1243,7 +1253,7 @@ function createWindow(show: boolean) {
   window.on('close', event => {
     // A held build is never left running out of sight: closing its window quits it.
     if (heldReason()) quitting = true;
-    log(`window close (${quitting ? 'quitting' : tray ? 'hidden' : 'no menu bar icon'})`);
+    log(`window close (${quitting ? 'quitting' : tray ? 'hidden' : 'no tray icon'})`);
     if (quitting || !tray) return;
     event.preventDefault();
     const shown = window;
@@ -1324,9 +1334,10 @@ app.whenReady().then(async () => {
   applyAppearance();
   // Where other builds are looked for, this waits for the first look to find none (lookForOthers).
   if (!heldReason()) await freed();
-  makeTray();
-  createWindow(!smoke && !startedHidden());
-  // Started at sign-in with no window: the menu bar icon only.
+  await makeTray();
+  // Started at sign-in: no window, the menu bar or tray icon only. With no tray there is nothing to hide in, so the window shows
+  // (a Mac always has its tray).
+  createWindow(!smoke && (!startedHidden() || !tray));
   if (!smoke && startedHidden()) leaveDock();
   // A read waits for settings writes already under way, so the page never sees a value older than one it just saved.
   handleNow('settings:get', async () => settingsWrites.then(preferences));
@@ -1503,7 +1514,7 @@ app.whenReady().then(async () => {
   // Word search: answered at once from the index last published (search.ts), which reads no file and waits for no pass.
   handleNow('search:ask', async typed => search.ask(typeof typed === 'string' ? typed : ''));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
-  handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
+  handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined), true) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)
     : { stopped: notOpenHome }));
