@@ -865,16 +865,24 @@ export function outcomeBand(): HTMLElement | null {
     closeButton(closeResult, { id: 'outcome-dismiss' }));
 }
 
-/** Sync off: what waits, and the two ways on. Shown on every managed page, since the switch covers all of them. */
+/**
+ * Sync off: what waits, and the two ways on. Shown on every managed page, since the switch covers all of them. One height whatever
+ * it says (style.css .band-sync-off): one line, the count, then every name as far as the line goes, cut with "…"; the whole
+ * sentence, every name in it, is its tooltip. Not covered: while a sync notice shows and nothing waits, the band is not drawn (the
+ * notice stands in for it, below), so the first change to wait then adds the band above the list.
+ */
 function syncOffBand(t: Table): HTMLElement | null {
   if (!state.home || state.home.syncOn) return null;
   const waiting = rowsIn(t).filter(waitsForSync);
   const editedIn = (skill: ItemRow) => (skill.edited?.length ? `, edited in ${andList(skill.edited.map(tool => names[tool]))}` : '');
-  const what = waiting.slice(0, 3).flatMap((skill, index) => [index ? ', ' : '', h('strong.item-name', {}, skill.name ?? skill.key), editedIn(skill)]).concat(waiting.length > 3 ? [` and ${waiting.length - 3} more`] : []);
+  const what = waiting.flatMap((skill, index) => [index ? ', ' : '', h('strong.item-name', {}, skill.name ?? skill.key), editedIn(skill)]);
   // Right after a sync, its notice says what spread; the idle banner comes back once that is dismissed.
   if (!waiting.length && visibleNotices(t).length) return null;
-  return h('div.band.band-sync-off', { role: 'status' }, icon('circle-minus', 14, waiting.length ? 'tone-warning' : 'tone-muted'),
-    h('span.band-text', {}, ...(waiting.length ? [`Automatic sync is off. ${waiting.length} ${waiting.length === 1 ? 'change' : 'changes'} waiting: `, ...what, '.'] : ['Automatic sync is off. Edits and deletions in your tools will wait here.'])),
+  const text = h('span.band-text', {}, ...(waiting.length
+    ? [`Automatic sync is off. ${waiting.length} ${waiting.length === 1 ? 'change' : 'changes'} waiting: `, ...what, '.']
+    : ['Automatic sync is off. Edits and deletions in your tools will wait here.']));
+  text.title = text.textContent!;
+  return h('div.band.band-sync-off', { role: 'status' }, icon('circle-minus', 14, waiting.length ? 'tone-warning' : 'tone-muted'), text,
     waiting.length ? button({ variant: 'outline', size: 'small', label: 'Sync once', id: 'sync-now', disabled: acting(), attrs: { title: 'Copy the waiting change once; automatic sync stays off' }, onclick: () => void syncNow() }) : null,
     (() => { const on = smallAction('Turn sync on', 'sync-turn-on', () => void setSync(true)); on.title = 'Copy waiting changes now and keep syncing from here on'; return on; })());
 }
