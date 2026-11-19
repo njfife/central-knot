@@ -5,10 +5,10 @@
 // rest). History's days (Settings) are its only retention rule, applied on every read and by pruneHistory (main.ts, when the
 // days are shortened); after a write, a deleted skill's versions older than those days go too (skillstore.ts pruneDeleted), so
 // nothing History can no longer restore is kept for it.
-import { readFile, rename } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
-import { errorCode, storeDirectory, syncsHere, writeDurably, type ShareContext } from './share.ts';
+import { errorCode, keepUnreadable, storeDirectory, syncsHere, writeDurably, type ShareContext } from './share.ts';
 import { pruneDeleted } from './skillstore.ts';
 import type { HistoryEvent, HistoryPrune } from './types.ts';
 
@@ -43,7 +43,7 @@ export async function appendHistory(context: ShareContext, events: HistoryEvent[
 async function writeHistory(home: string, events: HistoryEvent[]) {
   let sound = true;
   try { sound = Array.isArray(JSON.parse(await readFile(historyPath(home), 'utf8'))?.events); } catch (error) { sound = errorCode(error) === 'ENOENT'; }
-  if (!sound) await rename(historyPath(home), join(storeDirectory(home), `history.unreadable-${Date.now()}.json`)).catch(() => undefined);
+  if (!sound) await keepUnreadable(historyPath(home));
   await writeDurably(historyPath(home), `${JSON.stringify({ events }, null, 2)}\n`);
 }
 

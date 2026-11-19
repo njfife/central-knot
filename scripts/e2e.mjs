@@ -44,6 +44,8 @@ function check(name, ok, detail) {
 const same = (name, actual, expected) => check(name, JSON.stringify(actual) === JSON.stringify(expected), { actual, expected });
 // A file a poll reads; empty for the moment the app's checked write has it moved aside.
 const readNow = path => { try { return readFileSync(path, 'utf8'); } catch { return ''; } };
+/** A JSON file's value, or undefined where it is missing or isn't JSON. */
+const jsonOrNothing = path => { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return undefined; } };
 /** A settings file with its MCP entries in name order: an entry Central Knot puts back goes at the end, so its place is Central Knot's; every other part is compared as it is. */
 const entriesSorted = text => {
   if (!text.trimStart().startsWith('{')) { const [head, ...tables] = text.split(/^(?=\[)/m); return [head.trim(), ...tables.map(table => table.trim()).sort()]; }
@@ -3750,7 +3752,8 @@ async function updateFlow() {
  * A released build starts on this computer's home and offers no Practice copy, and its main process refuses one. Where the
  * real home is written (machine.ts writesRealHome), its first open of a fresh home asks first setup's question, and Yes takes
  * a skill found in Codex into OpenCode's folder under ~/.config (Codex and OpenCode are the home's only tools: OpenCode reads
- * Claude Code's skills folder, so a skill there gets no copy of its own).
+ * Claude Code's skills folder, so a skill there gets no copy of its own). Then its settings file damaged: it is kept aside,
+ * the Overview and Settings say so until Close, and the home waits for Resume before anything is written there.
  */
 async function releasedStartupFlow() {
   // A development build (--electron) starts as a released one with --as-released; a packaged build needs no switch.
@@ -3775,6 +3778,34 @@ async function releasedStartupFlow() {
   same('Yes takes the skill found in Codex into OpenCode, byte for byte', readNow(join(fresh, '.config/opencode/skills/handoff/SKILL.md')), handoff);
   same('no page errors, a released build’s first open', b.pageErrors, []);
   await b.quit();
+  // Its settings file damaged since (cut short), and a skill found in Codex since, which Synchronize everything would take in.
+  const data = join(scratch, 'first-open-data'), damaged = '{"home": {"mode": "actual"}, "appearance": "da', later = join(fresh, '.config/opencode/skills/later/SKILL.md');
+  writeFileSync(join(data, 'app-settings.json'), damaged);
+  // Saved hours ago, so it is past the settle window (librarypass.ts SETTLE_MS) and the first pass would take it in.
+  const found = skill(join(fresh, '.codex/skills'), 'later'), hoursAgo = new Date(Date.now() - 5 * 3_600_000);
+  for (const path of [join(found, 'SKILL.md'), found]) utimesSync(path, hoursAgo, hoursAgo);
+  const c = await launch(data, asReleased, fresh, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const kept = readdirSync(data).filter(name => /^app-settings\.unreadable-\d+\.json$/.test(name));
+  same('a settings file that can’t be read is kept beside the new one, byte for byte, never written over',
+    [kept.map(name => readFileSync(join(data, name), 'utf8')), !!jsonOrNothing(join(data, 'app-settings.json'))], [[damaged], true]);
+  check('and nothing is written to the home it opened before Resume: the skill found since is not taken in', !existsSync(later));
+  const said = 'Central Knot couldn’t read its settings file, so it started with the defaults.';
+  same('the Overview says so first, with the way to Settings', [await c.text('#overview-needs > :first-child'), await c.text('#overview-settings-kept-open')], [`${said} Open Settings`, 'Open Settings']);
+  await fitsAtMinimum(c, 'the Overview saying the settings file couldn’t be read');
+  await c.click('#overview-settings-kept-open');
+  same('Settings says it at its top, naming the file kept', [await c.text('#settings-scroll > :first-child .intro-text')], [`${said} The old file is kept as ${kept[0]}.`]);
+  await fitsAtMinimum(c, 'Settings saying the settings file couldn’t be read');
+  await c.click('#settings-kept-close');
+  await c.click('#nav-overview');
+  same('Close ends it on Settings and the Overview, and main’s next view no longer has it',
+    [await c.exists('#settings-kept'), await c.exists('#overview-settings-kept'), (await c.run('window.centralKnot.refresh()')).settingsKeptAs], [false, false, undefined]);
+  await c.click('#nav-skills');
+  check('the home waits for Resume, and still nothing is taken in', await c.exists('#resume') && !existsSync(later), await c.text('.bands'));
+  await c.click('#resume');
+  await c.run(`window.centralKnot.syncNow(${JSON.stringify(fresh)})`);
+  check('Resume carries on: the skill found since is taken into OpenCode', existsSync(later));
+  same('no page errors, a settings file that couldn’t be read', c.pageErrors, []);
+  await c.quit();
 }
 
 /**

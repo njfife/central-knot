@@ -2,7 +2,8 @@
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. One row is
 // the open home's, not the app's: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
 // and switched through app.ts switchSyncEverything. Help's Log row also shows Central Knot's own log under it (Show log: its
-// last lines, read by main.ts readLog, never stored); the log is written by main.ts log.
+// last lines, read by main.ts readLog, never stored); the log is written by main.ts log. A settings file that couldn't be read at
+// launch is said in a note at the top (keptNote) until it is closed, and first on the Overview (overview.ts needsYou).
 import { acting, announce, machine, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { oneUndoCovers } from './historyactions.ts';
 import { button, h, icon, toggle } from './dom.ts';
@@ -460,6 +461,17 @@ function syncEverythingRow(): HTMLElement | null {
     notice, added.length ? h('div.setting-added', {}, added) : undefined);
 }
 
+/** What a settings file that couldn't be read at launch led to (types.ts HomeView settingsKeptAs), said first on the Overview (overview.ts needsYou) and here. */
+export const settingsReset = 'Central Knot couldn’t read its settings file, so it started with the defaults.';
+/** The note at the top of the page: what happened, which file the old one is kept as, and Close, which ends it here and on the Overview. */
+function keptNote(path: string): HTMLElement {
+  const close = () => { state.home = { ...state.home!, settingsKeptAs: undefined }; rerender(); void window.centralKnot.closeSettingsKept(); };
+  return h('div.intro', { id: 'settings-kept', role: 'note' },
+    h('div.intro-text', {}, `${settingsReset} The old file is kept as ${path.split(/[\\/]/).pop()}.`),
+    button({ variant: 'outline', size: 'small', label: 'Show in folder', id: 'settings-kept-show', onclick: () => void window.centralKnot.showFile(path) }),
+    button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Close this note', id: 'settings-kept-close', onclick: close }));
+}
+
 const settingsSection = (id: string, title: string, ...rows: (HTMLElement | null)[]) =>
   h('section.settings-section', { 'aria-labelledby': `settings-${id}` }, h('h2.eyebrow', { id: `settings-${id}` }, title), ...rows);
 
@@ -470,6 +482,7 @@ export function settingsPage(): HTMLElement {
   const cannot = signIn?.available ? undefined : signIn?.reason?.text;
   const systemSays: RowMessage | undefined = signIn?.reason && signIn.place ? { text: signIn.reason.text, tone: 'system', action: openSignInPlace(signIn.place) } : undefined;
   return h('div.page', {}, h('div.scroll.settings-scroll', { id: 'settings-scroll' },
+    state.home?.settingsKeptAs ? keptNote(state.home.settingsKeptAs) : null,
     settingsSection('general', 'General',
       settingRow('sign-in', 'Start at sign-in', cannot ?? signInHint,
         // Off and unchangeable until main has said, so a click never acts on a guess. No tooltip: the row's title already says it.

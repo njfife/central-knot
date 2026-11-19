@@ -8,7 +8,8 @@
 //   syncGate (whether the record can be read and saved, is the one this build remembers, or waits for Resume). A write of the library
 //   asks libraryGate, never the two apart; the views read them apart, to say why on the page;
 // - checked writes: a tool's file written or removed only while it holds what was read (writeFileChecked, removeFileChecked,
-//   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably);
+//   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably), or kept beside
+//   themselves where they can't be read (keepUnreadable);
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
 //   place (stagingFolder, placeCopy).
 // Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
@@ -257,6 +258,16 @@ export async function readRecord(home: string): Promise<{ record?: SyncRecord; p
   } catch { return { problem: 'The sync record is damaged.' }; }
 }
 
+/**
+ * Keeps one of Central Knot's own files that is there and can't be read (History, its settings) beside it as
+ * `<name>.unreadable-<time>.json`, so the next write never writes over it: it may be recoverable by hand. Answers where it is
+ * now: there, or its own path where it couldn't be moved (a folder that can't be written, where the next write fails too).
+ */
+export async function keepUnreadable(path: string): Promise<string> {
+  const kept = path.replace(/\.json$/, `.unreadable-${Date.now()}.json`);
+  return rename(path, kept).then(() => kept, () => path);
+}
+
 export async function writeDurably(path: string, text: string) {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -407,14 +418,15 @@ export async function remember(context: ShareContext, generation: string) {
   await writeDurably(context.settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 /**
- * Lets go of this build's memory of a home it remembers by another generation of its record than `generation` (a folder it
- * synced before it was set up afresh elsewhere), so the home waits for Resume instead of stopping for good: main.ts
- * takeOverHome, where a take-over isn't carried. A memory of `generation` itself stays.
+ * Lets go of this build's memory of a home, so it waits for Resume instead of syncing, or stopping for good; a memory of the
+ * generation `keep` stays. main.ts takeOverHome, where a take-over isn't carried, keeps the record's own generation (a folder
+ * this build synced before it was set up afresh elsewhere is let go); main.ts startHome keeps none, for this computer's home
+ * opened after settings that couldn't be read, so nothing syncs there before the person has read why.
  */
-export async function forgetStale(context: ShareContext, generation: string) {
+export async function forgetHome(context: Pick<ShareContext, 'home' | 'settingsPath'>, keep?: string) {
   const settings = await readSettings(context.settingsPath), remembered = settings.homes?.[context.home]?.generation;
-  if (!remembered || remembered === generation) return;
-  const { [context.home]: _stale, ...homes } = settings.homes!;
+  if (!remembered || remembered === keep) return;
+  const { [context.home]: _forgotten, ...homes } = settings.homes!;
   await writeDurably(context.settingsPath, `${JSON.stringify({ ...settings, homes }, null, 2)}\n`);
 }
 
