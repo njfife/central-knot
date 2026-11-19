@@ -1578,7 +1578,13 @@ span.ins-confirm { margin-top: 0; }
 .ins-part { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ins-part-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; font-size: 12.5px; }
 .ins-part-line > .path-text { flex: 0 1 auto; min-width: 8ch; max-width: 100%; }
-.ins-part-says { flex: 1 1 auto; color: var(--ink-soft); }
+.ins-part-says { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--ink-soft); }
+.ins-part-says.tone-warning { display: flex; align-items: flex-start; gap: 4px; color: var(--warning); }
+.ins-part-says > svg { flex: none; margin-top: 3px; }
+.ins-part-line > .btn { margin-left: auto; }
+.ins-parts-group { display: flex; flex-direction: column; gap: 6px; }
+.ins-parts-sub { margin: 2px 0 0; font-size: 11.5px; font-weight: 600; color: var(--ink-soft); }
+.ins-part-end { display: flex; justify-content: flex-end; }
 .base-legend { margin: 0; display: flex; gap: 14px; font-size: 12px; color: var(--ink-soft); }
 .base-legend-removed { color: var(--danger, #f85149); }
 .base-legend-added { color: var(--success, #3fb950); }

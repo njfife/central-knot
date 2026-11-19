@@ -1,8 +1,9 @@
-// Instructions: each tool's own user-wide instruction file, viewed and edited in place (INS-01, INS-02), with the other files the
-// tool reads with it, read only to be shown (instructionparts.ts: never a file a save, the base or Restore writes).
+// Instructions: each tool's own user-wide instruction file, viewed and edited in place (INS-01, INS-02), and for the page's view
+// the other files the tool reads with it (instructionparts.ts), shown there and written only as a tool's own file, from its card.
 // A save is a checked write of one file: it must still hold what the editor opened, the text it replaces is kept first, and every
 // earlier version can be put back. Nothing here empties a file; the only deletion is an Undo removing a file its own base save
-// created, while it still holds what was written. No project or workspace file is read or written.
+// created, while it still holds what was written. No project or workspace file is written, and none is read but one a home's
+// file imports by its path (shown as a part).
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { lineDiff } from './diff.ts';
@@ -148,8 +149,8 @@ const writable = (bound: Destination[]) => bound.filter(entry => !entry.leftOutR
 /** Why a file a tool left out reads too is not written. */
 const linkedOut = (path: string, tool: HarnessId) => `${basename(path)} is the same file as ${toolName(tool)} reads (a link), and ${toolName(tool)} is left out of Central Knot here`;
 
-/** Every managed tool's instruction file, read as it is now. */
-export async function instructionsView(context: ShareContext, snapshots: Snapshot[]): Promise<InstructionFile[]> {
+/** Every managed tool's instruction file, read as it is now; `withParts` (the page's view only): with the other files each reads. */
+export async function instructionsView(context: ShareContext, snapshots: Snapshot[], withParts = false): Promise<InstructionFile[]> {
   const files: InstructionFile[] = [];
   const base = await readBase(context.home, (await writeAccess(context)).allowed);
   for (const { snapshot, path, readers, notes, sameFile, leftOutReads } of await destinations(context, snapshots)) {
@@ -158,7 +159,12 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
     const text = await readText(path);
     files.push({ tool: snapshot.harness, path, exists: text !== undefined, text: text ?? '', hash: hashOf(text), readers, notes, nextStep: 'Start a new session to use the change.',
       versions: describe(await shelf(context.home, snapshot.harness), text ?? ''), base: baseIfInvolved(baseState(text ?? '', readersOfFile(snapshot.harness, sameFile), base)), sameFile,
-      parts: await instructionParts(context, snapshot.harness, snapshot.root, path, text ?? '') });
+      ...(withParts ? { parts: await instructionParts(context, snapshot.harness, snapshot.root, path, text ?? '') } : {}) });
+  }
+  // A part that is another tool's own file says so: that tool's card edits it and the base writes it.
+  for (const file of files) for (const part of file.parts ?? []) {
+    const owner = files.find(other => other.tool !== file.tool && other.path === part.path);
+    if (owner) part.ownedBy = owner.tool;
   }
   return files;
 }
