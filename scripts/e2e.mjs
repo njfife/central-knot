@@ -7589,7 +7589,9 @@ async function searchFlow() {
     await findText('changelog');
     await glimpse('chip-without-rows');
     await b.click('#chip-plugins');
+    // At 860 with the sidebar open, the long name leaves the descriptions no room: every row's steps aside, the opened row has it.
     await sizeTo(b, 860, 600);
+    await b.click('#sidebar-toggle');
     await press(`#${rowPart('open', 'skills', 'release-checklist')}`);
     await b.run(`document.querySelector('.ov-row[aria-expanded="true"]')?.scrollIntoView({ block: 'start' })`);
     await theme('dark');
@@ -7597,8 +7599,12 @@ async function searchFlow() {
     await theme('light');
     await b.shot('find-descriptions-aside-860');
     await press(`#${rowPart('open', 'skills', 'release-checklist')}`);
+    await b.click('#sidebar-toggle');
     await fullSize(b);
+    // Sort chosen with Find empty (while Find has text it can't be), then a text, then Escape.
+    await findText('');
     await sortTo('updated');
+    await findText('changelog');
     await b.run(`document.querySelector('#find').focus()`);
     await b.press('Escape');
     await glimpse('cleared');

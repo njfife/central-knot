@@ -148,10 +148,10 @@ function around(marked: string) {
 }
 /** How many different words a snippet has marked. */
 const matched = (snippet: string) => new Set([...snippet.matchAll(/\u0001([^\u0002]*)\u0002/gu)].map(match => match[1].toLowerCase())).size;
-/** `text` with the first word marked whose camelCase parts hold the first part marked in `parts` ("prepareReleaseNotes" for "Release"). */
+/** `text` with the first camelCase word marked whose parts hold the first part marked in `parts` ("prepareReleaseNotes" for "Release"). */
 function markWord(text: string, parts: string) {
   const part = parts.slice(parts.indexOf(OPEN) + 1, parts.indexOf(CLOSE)).toLowerCase(), all = text.split(/\s+/);
-  const at = all.findIndex(word => cut(apart(word)).includes(part));
+  const at = all.findIndex(word => CAMEL.test(word) && cut(apart(word)).includes(part));
   return all.map((word, each) => (each === at ? `${OPEN}${word}${CLOSE}` : word)).join(' ');
 }
 
