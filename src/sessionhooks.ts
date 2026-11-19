@@ -1,13 +1,15 @@
-// A hook as the pages show it (hookLine, on a plugin's page and the Instructions page alike), and "Also in every session": what
-// else adds text to a tool's sessions besides its instruction file and the base, as the lines the Instructions page draws on
-// each tool's card (instructionspage.ts alsoInEverySession). Pure: nothing here reads a file or runs a hook. Its facts:
+// A hook as the pages show it (hookLine, on a plugin's page and the Instructions page alike), and the strip on each tool's card on
+// the Instructions page, "Hooks that can add text" (Pi's packages, OpenCode's plugins), drawn by instructionspage.ts
+// sessionStripView. Pure: nothing here reads a file or runs a hook. Its facts:
 // - each plugin installed whole in the tool and On there, with its hooks as its installed copy declares them (HomeView
 //   pluginItems, read by pluginitems.ts readPluginItems);
 // - the person's own hooks, and Pi's packages and OpenCode's plugins, as the tool's own settings name them (InstructionFile
 //   ownHooks and extensions, read by pluginitems.ts sessionSettings).
-// Which events can add text, when each runs and each tool's own note are pluginoutcomes.ts's (canAddText, whenItRuns,
-// sessionTextNote). A hook's text is known only when it runs, so a line says when it runs, never what it adds.
-import { canAddText, sessionTextNote, whenItRuns } from './pluginoutcomes.ts';
+// What it lists: hooks that start a program when a session starts or with a prompt, by each tool's rule (pluginoutcomes.ts
+// addsText, whenItRuns, and the tool's own note, sessionTextNote). A hook's text is known only when it runs, so the strip says
+// when it runs, never what it adds. Not listed: other kinds of hook (one that calls a URL or an MCP tool, or asks a model), a
+// project's or an organisation's hooks, a skill's or an agent's own hooks, and `additionalContext` printed by other events.
+import { addsText, ignoresText, sessionTextNote, textEventsWords, whenItRuns } from './pluginoutcomes.ts';
 import { commandLine, toolNames } from './words.ts';
 import type { DeclaredHook, HarnessId, InstalledPlugin, InstructionFile } from './types.ts';
 
@@ -28,42 +30,54 @@ export function originMark(name: string): string {
 }
 const YOURS = 'origin-yours';
 
-/** One line of the strip: whose it is (`name`, written beside its `mark`), what it says of it, and where it is turned off. */
-export interface SessionLine {
+/** One origin on the strip: whose it is (`name`, beside its `mark`), where it is turned off, and its hooks beneath. */
+export interface SessionGroup {
   name: string;
   mark: string;
-  /** When its hook runs and that what it adds is known only then; or why its hooks aren't known; or that only the running tool knows an extension's text. */
-  says: string;
-  /** A hook's launch, in one line (hookLine). */
-  command?: string;
   /** The plugin it comes with, whose page holds its switch when its marketplace is listed (InstalledPlugin listed). */
   plugin?: InstalledPlugin;
-  /** The person's own settings file that declares the hook. */
+  /** The person's own settings file that declares its hooks. */
   settings?: string;
+  /** Where else it is turned off: a plugin whose marketplace isn't listed here. */
+  says?: string;
+  /** Why its hooks aren't known: its installed copy couldn't be read. */
+  problem?: string;
+  /** Each of its hooks files that couldn't be read: what those declare isn't known. */
+  unread: string[];
+  /** Each hook that can add text: when it runs, and its command (hookLine). */
+  hooks: { when: string; command: string }[];
 }
+export interface SessionStrip { heading: string; about: string; note?: string; groups: SessionGroup[] }
+
+/** Each tool's own word for what it loads into every session from its settings: Pi's packages, OpenCode's plugins. */
+const EXTENSIONS: Partial<Record<HarnessId, string>> = { 'pi-cli': 'packages', 'opencode-cli': 'plugins' };
 
 /**
- * The strip on a tool's card: the person's own hooks that can add text, then each plugin installed whole in the tool and On
- * there, by name (a line per such hook that starts a program, or one saying its installed copy couldn't be read), then Pi's or
- * OpenCode's extensions; and the tool's note, once. Undefined with nothing to show.
+ * The strip on a tool's card: its heading, one sentence on what it lists and what it doesn't, the tool's note, then the person's
+ * own hooks that can add text (a group per settings file), each plugin installed whole in the tool and On there, by name (its
+ * hooks, or why they aren't known), and Pi's or OpenCode's extensions. Undefined with nothing to show; a tool whose note says
+ * why its hooks have no rows (Copilot CLI's prompt hooks) shows the note alone.
  */
-export function sessionLines(tool: HarnessId, items: InstalledPlugin[], file: Pick<InstructionFile, 'ownHooks' | 'extensions'>): { lines: SessionLine[]; note?: string } | undefined {
-  const adding = (hooks: DeclaredHook[] = []) => hooks.filter(hook => canAddText(hook.event) && hook.launch);
-  const runs = (hook: DeclaredHook, after = '') => ({ says: `Runs ${whenItRuns(hook.event)}. What it adds is known only when it runs.${after}`, command: hookLine(hook) });
+export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pick<InstructionFile, 'ownHooks' | 'ownHooksUnread' | 'extensions'>): SessionStrip | undefined {
+  const rows = (hooks: DeclaredHook[] = []) => hooks.filter(hook => addsText(tool, hook)).map(hook => ({ when: whenItRuns(tool, hook), command: hookLine(hook) }));
   const plugins = items.filter(install => install.tool === tool && !install.off)
     .sort((first, second) => first.plugin.localeCompare(second.plugin) || first.marketName.localeCompare(second.marketName));
   // One plugin name in two marketplaces is told apart by its marketplace.
   const named = (install: InstalledPlugin) => (plugins.some(other => other !== install && other.plugin === install.plugin) ? `${install.plugin} (${install.marketName})` : install.plugin);
-  const offHere = (install: InstalledPlugin) => (install.listed ? '' : ` ${toolNames[tool]}’s own plugin commands turn it off.`);
-  const lines: SessionLine[] = [
-    ...adding(file.ownHooks).map(hook => ({ name: 'yours', mark: YOURS, ...runs(hook), settings: hook.declaredIn })),
-    ...plugins.flatMap(install => {
-      const origin = { name: named(install), mark: originMark(`${install.plugin}@${install.marketName}`), plugin: install };
-      if (install.problem) return [{ ...origin, says: `${install.problem} What its hooks add isn’t known.${offHere(install)}` }];
-      return adding(install.hooks).map(hook => ({ ...origin, ...runs(hook, offHere(install)) }));
-    }),
-    ...(file.extensions ?? []).map(name => ({ name, mark: originMark(name), says: 'An extension’s text is known only to the running tool.' })),
+  const own = file.ownHooks ?? [], unread = file.ownHooksUnread ?? [];
+  const groups: SessionGroup[] = [
+    ...[...new Set([...own.filter(hook => addsText(tool, hook)).map(hook => hook.declaredIn), ...unread])].map(settings =>
+      ({ name: 'yours', mark: YOURS, settings, unread: unread.filter(path => path === settings), hooks: rows(own.filter(hook => hook.declaredIn === settings)) })),
+    ...plugins.map((install): SessionGroup => ({ name: named(install), mark: originMark(`${install.plugin}@${install.marketName}`), plugin: install,
+      ...(install.listed ? {} : { says: `${toolNames[tool]}’s own plugin commands turn it off.` }),
+      ...(install.problem ? { problem: `${install.problem} What its hooks add isn’t known.` } : {}), unread: install.hooksUnread ?? [], hooks: rows(install.hooks) }))
+      .filter(group => group.problem || group.unread.length || group.hooks.length),
+    ...(file.extensions ?? []).map(name => ({ name, mark: originMark(name), unread: [], hooks: [] })),
   ];
-  const note = sessionTextNote(tool);
-  return lines.length ? { lines, ...(note ? { note } : {}) } : undefined;
+  const note = sessionTextNote(tool), word = EXTENSIONS[tool];
+  if (!groups.length && ![...own, ...plugins.flatMap(install => install.hooks ?? [])].some(hook => ignoresText(tool, hook))) return undefined;
+  return word
+    ? { heading: `${word[0]!.toUpperCase()}${word.slice(1)} that can add text`, about: `${toolNames[tool]} loads these ${word} into every session, and they can add text to it; what they add is known only when they run.`, groups }
+    : { heading: 'Hooks that can add text', groups, ...(note ? { note } : {}),
+      about: `These hooks run a program ${textEventsWords(tool)}, and what it prints can be added to the session; that is known only when it runs. Other kinds of hook (one that calls a URL or an MCP tool), and a project’s or an organisation’s hooks, aren’t listed.` };
 }

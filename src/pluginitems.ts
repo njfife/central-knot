@@ -11,7 +11,7 @@ import { record, text } from './values.ts';
 import { installedCopies, installedPlugins, registeredMarketplaces, type PluginContext } from './plugins.ts';
 import { samePart } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
-import type { HarnessId, InstalledPlugin, InstructionFile, PartKind, PluginItem } from './types.ts';
+import type { DeclaredHook, HarnessId, InstalledPlugin, InstructionFile, PartKind, PluginItem } from './types.ts';
 
 /** Why a copy's items couldn't be listed, when its record says it is there. */
 export const UNREADABLE = 'Its files couldn’t be read.';
@@ -39,7 +39,7 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
       ];
       const skillsOff = (state.skillsOff ?? []).map(entry => entry.skill);
       const skillsHeld = Object.fromEntries((state.skillsOff ?? []).flatMap(entry => (entry.held ? [[entry.skill, entry.held]] : [])));
-      return { ...base, version: state.version, items, ...(contents.hooks.length ? { hooks: contents.hooks } : {}), ...(skillsOff.length ? { skillsOff } : {}), ...(serversOff?.length ? { serversOff } : {}), ...(agentsOff?.length ? { agentsOff } : {}),
+      return { ...base, version: state.version, items, ...(contents.hooks.length ? { hooks: contents.hooks } : {}), ...(contents.hooksUnread ? { hooksUnread: contents.hooksUnread } : {}), ...(skillsOff.length ? { skillsOff } : {}), ...(serversOff?.length ? { serversOff } : {}), ...(agentsOff?.length ? { agentsOff } : {}),
         ...(state.switchesHeld ? { switchesHeld: state.switchesHeld } : {}), ...(serversHeld ? { serversHeld } : {}), ...(state.live ? { live: true } : {}), ...(Object.keys(skillsHeld).length ? { skillsHeld } : {}) };
     });
   }));
@@ -51,19 +51,34 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
  * (`ownHooks`), as Claude Code keeps them (settings.json, https://code.claude.com/docs/en/hooks), Codex (hooks.json, or inline in
  * config.toml, https://learn.chatgpt.com/docs/hooks) and Copilot CLI (settings.json, and each hooks/*.json,
  * https://docs.github.com/en/copilot/reference/hooks-reference); Pi's packages (settings.json `packages`, but one told to load no
- * extensions) and OpenCode's plugins (its settings file's `plugin`), as each is listed (`extensions`). A file missing or not read
- * adds nothing.
+ * extensions) and OpenCode's plugins (its settings file's `plugin`), as each is listed (`extensions`). A file missing adds nothing;
+ * a hooks file that is there but can't be read, or doesn't parse, is named (`ownHooksUnread`), so it never reads as no hooks.
+ * Read with the tool's instruction file (instructions.ts instructionsView); its lines are sessionhooks.ts's.
  */
-export async function sessionSettings(tool: HarnessId, root: string): Promise<Pick<InstructionFile, 'ownHooks' | 'extensions'>> {
-  const textOf = (file: string) => readFile(file, 'utf8').catch(() => '');
-  const json = async (file: string) => { try { return record(readJsonc(await textOf(file))); } catch { return undefined; } };
-  const hooksIn = async (file: string) => readHooks(file, record((await json(file))?.hooks) ?? {});
+export async function sessionSettings(tool: HarnessId, root: string): Promise<Pick<InstructionFile, 'ownHooks' | 'ownHooksUnread' | 'extensions'>> {
+  const unread: string[] = [];
+  /** A file's text: '' where there is none; undefined, and named in `unread`, where it is there but can't be read. */
+  const textOf = (file: string) => readFile(file, 'utf8').catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? '' : void unread.push(file)));
+  const json = async (file: string) => { try { return record(readJsonc((await textOf(file)) ?? '')); } catch { return undefined; } };
+  const hooksIn = async (file: string) => {
+    const raw = await textOf(file);
+    let settings: Record<string, unknown> | undefined;
+    try { settings = raw ? record(readJsonc(raw)) : {}; } catch { /* named below */ }
+    if (raw !== undefined && !settings) unread.push(file);
+    return readHooks(tool, file, record(settings?.hooks) ?? {});
+  };
   switch (tool) {
-    case 'claude-cli': return { ownHooks: await hooksIn(join(root, 'settings.json')) };
-    case 'codex-cli': return { ownHooks: [...await hooksIn(join(root, 'hooks.json')), ...readHooks(join(root, 'config.toml'), tomlHooks(await textOf(join(root, 'config.toml'))))] };
+    case 'claude-cli': return { ownHooks: await hooksIn(join(root, 'settings.json')), ownHooksUnread: unread };
+    case 'codex-cli': {
+      const toml = join(root, 'config.toml'), inToml = tomlHooks((await textOf(toml)) ?? '');
+      if (!inToml) unread.push(toml);
+      return { ownHooks: [...await hooksIn(join(root, 'hooks.json')), ...readHooks(tool, toml, inToml ?? {})], ownHooksUnread: unread };
+    }
     case 'copilot-cli': {
       const files = (await readdir(join(root, 'hooks')).catch(() => [])).filter(name => name.endsWith('.json')).sort().map(name => join(root, 'hooks', name));
-      return { ownHooks: (await Promise.all([join(root, 'settings.json'), ...files].map(hooksIn))).flat() };
+      const ownHooks: DeclaredHook[] = [];
+      for (const file of [join(root, 'settings.json'), ...files]) ownHooks.push(...await hooksIn(file));
+      return { ownHooks, ownHooksUnread: unread };
     }
     case 'pi-cli': {
       const packages = (await json(join(root, 'settings.json')))?.packages;
@@ -82,15 +97,18 @@ export async function sessionSettings(tool: HarnessId, root: string): Promise<Pi
   }
 }
 
-/** Codex's hooks written inline in config.toml (`[[hooks.Event]]` groups, each with `[[hooks.Event.hooks]]`), as the JSON form reads them. */
-function tomlHooks(toml: string): Record<string, unknown> {
+/**
+ * Codex's hooks written inline in config.toml (`[[hooks.Event]]` groups, each with `[[hooks.Event.hooks]]` or an inline
+ * `hooks = [{ … }]` list), as the JSON form reads them; undefined where the file isn't TOML this reader follows.
+ */
+function tomlHooks(toml: string): Record<string, unknown> | undefined {
   const hooks: Record<string, { hooks: unknown[] }[]> = {};
-  let tables: ReturnType<typeof readTomlTables> = [];
-  try { tables = readTomlTables(toml); } catch { /* not TOML this reader follows: none */ }
+  let tables: ReturnType<typeof readTomlTables>;
+  try { tables = readTomlTables(toml); } catch { return undefined; }
   for (const { path: [top, event, inner, ...more], array, entries } of tables) {
     const fields = Object.fromEntries(entries.map(entry => [entry.keys.join('.'), entry.value]));
     if (top !== 'hooks' || !event || !array || more.length) continue;
-    if (inner === undefined) (hooks[event] ??= []).push({ ...fields, hooks: [] });
+    if (inner === undefined) (hooks[event] ??= []).push({ ...fields, hooks: Array.isArray(fields.hooks) ? fields.hooks : [] });
     else if (inner === 'hooks') hooks[event]?.at(-1)?.hooks.push(fields);
   }
   return hooks;

@@ -2,21 +2,21 @@
 // saving and earlier versions (INS-01, INS-02), and the other files the tool reads with it, shown only (otherFiles); the page
 // puts the Base instructions card (basecard.ts) first, then the tools' cards under a heading (one a row, two on a wide page:
 // style.css .ins-tool-cards), and keeps what explains the files (who reads each, the tools' own notes) in one info box at the
-// top. On each tool's card, after those files, what else adds text to its sessions (alsoInEverySession, from
-// sessionhooks.ts). A tool's card has its actions in its head at every stage, so a long text never hides them (the base card's,
+// top. On each tool's card, after those files, the hooks and extensions that can add text to its sessions
+// (sessionStripView, from sessionhooks.ts). A tool's card has its actions in its head at every stage, so a long text never hides them (the base card's,
 // too, except while its Draft panel is open: basecard.ts). There is no turn-off switch: instruction files are edited, never
 // disabled or emptied by Central Knot (the one deletion is an Undo of a base save removing a file that save created, while
 // unchanged).
 import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
-import { fileName, lineCount, toolNames } from './words.ts';
+import { fileName, lineCount, sentence, toolNames } from './words.ts';
 import { button, h, icon, lockAttrs, pathText, rereadBand } from './dom.ts';
 import { noToolsState } from './pages.ts';
 import { brandMark, openPlugin, outcomeBand } from './matrix.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { plural } from './model.ts';
-import { sessionLines, type SessionLine } from './sessionhooks.ts';
+import { sessionStrip, type SessionGroup } from './sessionhooks.ts';
 import type { HarnessId, InstructionFile, InstructionPart } from './types.ts';
 import { lineDiff } from './diff.ts';
 import { keepLineBreaks } from './drafts.ts';
@@ -217,28 +217,32 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
       stage.actions),
     stage.body,
     otherFiles(file),
-    alsoInEverySession(file),
+    sessionStripView(file),
     versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!acting() || readOnly || otherDirty || (editing && draftUnsaved()),
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));
 }
 
 /**
- * "Also in every session", on a tool's card after its text: what else adds text to its sessions (sessionhooks.ts sessionLines), each line
- * with its origin's mark and name, and where it is turned off: the plugin's page, or the settings file that holds the person's
- * own hook. None with nothing to show.
+ * The strip on a tool's card after the files read with it (sessionhooks.ts sessionStrip): its heading, the sentence on what it
+ * lists and what it doesn't, the tool's note, then each origin by its mark and name with where it is turned off (its plugin's
+ * page, or the settings file that holds the person's own), what couldn't be read in the warning tone, and each hook beneath it:
+ * when it runs, then its command. None with nothing to show.
  */
-function alsoInEverySession(file: InstructionFile) {
-  const strip = sessionLines(file.tool, state.home?.pluginItems ?? [], file);
+function sessionStripView(file: InstructionFile) {
+  const strip = sessionStrip(file.tool, state.home?.pluginItems ?? [], file);
   if (!strip) return null;
-  const where = ({ plugin, settings }: SessionLine, at: number) => (plugin?.listed
-    ? button({ variant: 'link', size: 'micro', label: 'Plugin’s page', id: `session-page-${file.tool}-${at}`, onclick: () => openPlugin({ source: plugin.source, plugin: plugin.plugin, marketplace: plugin.marketName }) })
-    : settings ? pathText(shownPath(settings), settings) : null);
-  return h('section.session-strip', { id: `session-${file.tool}`, 'aria-label': `Also in every ${toolNames[file.tool]} session` },
-    h('h4.session-title', {}, 'Also in every session'),
-    h('ul.session-lines', {}, strip.lines.map((line, at) => h('li.session-line', {}, h(`span.origin-mark.${line.mark}`, { 'aria-hidden': 'true' }),
-      h('div.session-what', {}, h('p.session-head', {}, h('strong.session-name', {}, line.name), h('span', {}, line.says), where(line, at)),
-        line.command ? h('code.session-command', {}, line.command) : null)))),
-    strip.note ? h('p.session-note', {}, ...inlineMarkdown(`${strip.note}.`, () => undefined)) : null);
+  const where = ({ plugin, settings, says }: SessionGroup, at: number) => (plugin?.listed
+    ? button({ variant: 'link', size: 'micro', label: 'Plugin’s page: turn it off there', id: `session-page-${file.tool}-${at}`, onclick: () => openPlugin({ source: plugin.source, plugin: plugin.plugin, marketplace: plugin.marketName }) })
+    : settings ? h('span.session-in', {}, 'in ', pathText(shownPath(settings), settings)) : says ? h('span', {}, says) : null);
+  const warning = (words: string, path?: string) => h('p.session-warning.tone-warning', {}, icon('triangle-alert', 12), h('span', {}, words, path ? pathText(shownPath(path), path) : null));
+  return h('section.session-strip', { id: `session-${file.tool}`, 'aria-label': `${strip.heading}: ${toolNames[file.tool]}` },
+    h('h4.session-title', {}, strip.heading), h('p.session-about', {}, strip.about),
+    strip.note ? h('p.session-note', {}, ...inlineMarkdown(`${strip.note}.`, () => undefined)) : null,
+    strip.groups.length ? h('ul.session-groups', {}, strip.groups.map((group, at) => h('li.session-group', {},
+      h('p.session-head', {}, h(`span.origin-mark.${group.mark}`, { 'aria-hidden': 'true' }), h('strong.session-name', {}, group.settings ? `${group.name},` : group.name), where(group, at)),
+      group.problem ? warning(group.problem) : null,
+      ...group.unread.map(path => (path === group.settings ? warning('Its hooks couldn’t be read.') : warning('Its hooks couldn’t be read: ', path))),
+      group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map(hook => h('li.session-hook', {}, h('span.session-when', {}, sentence(hook.when)), h('code.session-command', {}, hook.command)))) : null))) : null);
 }
 
 /**

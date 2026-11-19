@@ -1577,25 +1577,30 @@ span.ins-confirm { margin-top: 0; }
 .base-strip-line strong { color: var(--ink); font-weight: 600; }
 
 /*
- * "Also in every session", on a tool's card (instructionspage.ts alsoInEverySession): a line per hook or extension, its
- * origin's mark first, then its name, what it says and where it is turned off, and a hook's command under them, wrapped whole.
- * The marks (sessionhooks.ts originMark): a plugin's or an extension's colour, one of eight by its name, each at least 4.5:1
- * against the card in both themes; the person's own, fixed, in the text's colour. Hidden from a screen reader: the name says it.
+ * The strip on a tool's card (instructionspage.ts sessionStripView): its heading, its sentence and the tool's note, then a group
+ * per origin: its mark, its name and where it is turned off on one line, what couldn't be read, and each hook beneath, when it
+ * runs and then its command, wrapped whole. The marks (sessionhooks.ts originMark): small dots, a plugin's or an extension's
+ * colour one of eight by its name, each at least 4.5:1 against the card in both themes; the person's own, fixed, in the text's
+ * colour. Hidden from a screen reader: the name says it.
  */
 .session-strip { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
 .session-title { font-size: 12.5px; font-weight: 600; }
-.session-lines { display: flex; flex-direction: column; gap: 8px; }
-.session-line { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
-.session-what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.session-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; font-size: 12.5px; color: var(--ink-soft); }
-.session-head > .path-text { min-width: 0; max-width: 100%; }
+.session-about, .session-note { font-size: 12px; color: var(--ink-soft); }
+.session-note code { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.session-groups { display: flex; flex-direction: column; gap: 8px; }
+.session-group { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.session-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-width: 0; font-size: 12.5px; color: var(--ink-soft); }
+.session-in, .session-warning > span { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; min-width: 0; max-width: 100%; }
+.session-in > .path-text, .session-warning .path-text { min-width: 0; max-width: 100%; }
 /* The line's own gap spaces its link, so wrapped under the name it lines up with it, at the text's height. */
 .session-head > .btn.link { height: auto; padding: 0; }
 .session-name { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
-.session-command { font-family: var(--mono); font-size: 12px; line-height: 18px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-.session-note { font-size: 12px; color: var(--ink-soft); }
-.session-note code { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
-.origin-mark { flex: none; width: 10px; height: 10px; margin-top: 5px; border-radius: 3px; background: var(--mark); }
+.session-warning { display: flex; align-items: flex-start; gap: 4px; padding-left: 16px; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.session-hooks { display: flex; flex-direction: column; gap: 2px; padding-left: 16px; }
+.session-hook { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
+.session-when { font-size: 12px; color: var(--ink-soft); }
+.session-command { min-width: 0; font-family: var(--mono); font-size: 12px; line-height: 18px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.origin-mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--mark); }
 .origin-0 { --mark: #dc2626; }
 .origin-1 { --mark: #c2410c; }
 .origin-2 { --mark: #a16207; }

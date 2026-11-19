@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { inside, installedContents, marketplacePage, pluginContents, pluginFiles, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
+import { inside, installedContents, marketplacePage, pluginContents, pluginFiles, readHooks, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
 import { componentsFrom, outcomes } from '../src/pluginoutcomes.ts';
 import { hookLine } from '../src/sessionhooks.ts';
 
@@ -166,6 +166,7 @@ test('Each hook is kept as declared, in Claude Code’s form and Copilot CLI’s
     } }));
     const contents = await pluginContents(root, {}, root);
     const file = join(root, 'hooks/hooks.json');
+    // Read for every tool (the marketplace's copy), each hook starts by the rule of the tool whose form it is written in.
     assert.deepEqual(contents.hooks, [
       { declaredIn: file, event: 'PreToolUse', matcher: 'Bash', at: 0, launch: { shell: 'check-bash' } },
       { declaredIn: file, event: 'SessionStart', matcher: 'startup', at: 0, launch: { shell: claudeStart } },
@@ -180,36 +181,76 @@ test('Each hook is kept as declared, in Claude Code’s form and Copilot CLI’s
     ]);
     // Each is shown as it starts, an argument with a space quoted.
     assert.deepEqual(contents.hooks.map(hookLine).slice(3, 4), ['uv run --directory ${CLAUDE_PLUGIN_ROOT}/hooks "end of turn.py"']);
+    // Read for Claude Code, which takes no `bash` or `exec`, Copilot CLI's form starts nothing but a `command`.
+    const asClaude = (await pluginContents(root, {}, root, { tool: 'claude-cli' })).hooks;
+    assert.deepEqual(asClaude.filter(hook => hook.event === 'sessionStart').map(hook => hook.launch), [undefined, { shell: './any-shell.sh' }, undefined]);
     const sessionText = (components: ReturnType<typeof componentsFrom>) => (['claude-cli', 'copilot-cli', 'codex-cli'] as const).map(tool => outcomes(tool, components).filter(outcome => outcome.component === 'Session text').map(outcome => [outcome.result, outcome.text]));
     assert.deepEqual(sessionText(componentsFrom(contents)), [
       [['works', 'comes from start-of-session and prompt hooks']],
-      [['limited', 'is limited: Copilot CLI adds only what a start-of-session hook prints as `{"additionalContext": …}` at the top level; Claude Code’s `hookSpecificOutput` form and prompt hooks’ output are ignored']],
+      [['limited', 'is limited: Copilot CLI uses only what a start-of-session hook prints as `additionalContext`; it ignores what prompt hooks print']],
       [['limited', 'waits for trust: Codex runs a hook only after you trust it in `/hooks`']],
     ]);
     // A plugin whose hooks all listen elsewhere has hooks, and no Session text line.
     await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'check-bash' }] }], Stop: [] } }));
     const only = componentsFrom(await pluginContents(root, {}, root));
-    assert.deepEqual([only.hooks, only.sessionTextHooks, sessionText(only)], [true, false, [[], [], []]]);
+    assert.deepEqual([only.hooks, only.sessionTextHooks, sessionText(only)], [true, [], [[], [], []]]);
     // An event listed with nothing under it declares no hook: nothing runs, so no hooks and no Session text line.
     await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [] } }));
     const none = componentsFrom(await pluginContents(root, {}, root));
-    assert.deepEqual([none.hooks, none.sessionTextHooks], [false, false]);
-    // A plugin in Copilot CLI's form alone: its start-of-session hook can add text too.
+    assert.deepEqual([none.hooks, none.sessionTextHooks], [false, []]);
+    // A plugin in Copilot CLI's form alone: its start-of-session hook can add text there, and only there.
     await put(join(root, 'hooks/hooks.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: './start.sh' }] } }));
-    assert.equal(componentsFrom(await pluginContents(root, {}, root)).sessionTextHooks, true);
+    assert.deepEqual(componentsFrom(await pluginContents(root, {}, root)).sessionTextHooks, ['copilot-cli']);
+    // A prompt hook alone adds text in Claude Code and Codex; Copilot CLI ignores what it prints.
+    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: './prompt.sh' }] }] } }));
+    assert.deepEqual(componentsFrom(await pluginContents(root, {}, root)).sessionTextHooks, ['claude-cli', 'codex-cli']);
   } finally { await cleanup(); }
 });
 
-test('How a hook starts on macOS and Linux, by each tool’s rule: `args`, even empty, starts the program directly; Copilot CLI’s `bash` comes before its `command`', async () => {
+test('How a hook starts on macOS and Linux is each tool’s own rule: Claude Code starts `command` directly with `args`, even empty; Codex’s command is a shell line; Copilot CLI runs `bash` before `command`, and `exec` with `args` directly', () => {
+  const hooks = { SessionStart: [{ hooks: [
+    { type: 'command', bash: './unix.sh', command: 'node', args: ['start.mjs'] },
+    { type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/start.sh', args: [] },
+    { type: 'command', command: 'echo plain' },
+    // `exec` is Copilot CLI's alone: elsewhere it starts nothing.
+    { type: 'command', exec: 'run-me' },
+  ] }] };
+  const launches = (tool: 'claude-cli' | 'codex-cli' | 'copilot-cli') => readHooks(tool, '/hooks.json', hooks).map(hook => hook.launch);
+  assert.deepEqual(launches('claude-cli'), [{ program: 'node', args: ['start.mjs'] }, { program: '${CLAUDE_PLUGIN_ROOT}/start.sh', args: [] }, { shell: 'echo plain' }, undefined]);
+  assert.deepEqual(launches('codex-cli'), [{ shell: 'node' }, { shell: '${CLAUDE_PLUGIN_ROOT}/start.sh' }, { shell: 'echo plain' }, undefined]);
+  assert.deepEqual(launches('copilot-cli'), [{ shell: './unix.sh' }, { shell: '${CLAUDE_PLUGIN_ROOT}/start.sh' }, { shell: 'echo plain' }, { program: 'run-me', args: [] }]);
+  assert.deepEqual(readHooks('copilot-cli', '/hooks.json', { sessionStart: [{ type: 'command', exec: 'node', args: ['a b'], command: 'ignored' }] }).map(hook => hook.launch), [{ program: 'node', args: ['a b'] }]);
+});
+
+test('A plugin’s manifest names its hooks in each form its tool takes: Codex and Copilot CLI read its files in place of their default ones, Claude Code beside hooks/hooks.json; inline objects count, alone or in a list', async () => {
   const { root, cleanup } = await box();
   try {
-    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: {
-      SessionStart: [{ hooks: [{ type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/start.sh', args: [] }, { type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/start.sh' }] }],
-      sessionStart: [{ type: 'command', bash: './unix.sh', command: './any-shell.sh' }],
-    } }));
-    assert.deepEqual((await pluginContents(root, {}, root)).hooks.map(hook => hook.launch), [
-      { program: '${CLAUDE_PLUGIN_ROOT}/start.sh', args: [] }, { shell: '${CLAUDE_PLUGIN_ROOT}/start.sh' }, { shell: './unix.sh' },
-    ]);
+    const group = (command: string) => [{ matcher: 'startup', hooks: [{ type: 'command', command }] }];
+    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: group('echo default') } }));
+    await put(join(root, 'hooks/custom.json'), JSON.stringify({ hooks: { SessionStart: group('echo named') } }));
+    for (const manifest of ['.codex-plugin/plugin.json', '.claude-plugin/plugin.json']) await put(join(root, manifest), JSON.stringify({ name: 'p', hooks: './hooks/custom.json' }));
+    const commands = async (tool: 'claude-cli' | 'codex-cli') => (await installedContents(tool, root)).hooks.map(hookLine);
+    assert.deepEqual([await commands('codex-cli'), await commands('claude-cli')], [['echo named'], ['echo default', 'echo named']]);
+    // Copilot CLI's manifest is the first of its places that holds one (a root plugin.json here): the file it names is read in
+    // place of its default ones (https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference).
+    await put(join(root, 'hooks/copilot.json'), JSON.stringify({ hooks: { sessionStart: [{ type: 'command', bash: 'echo copilot' }] } }));
+    await put(join(root, 'plugin.json'), JSON.stringify({ name: 'p', hooks: './hooks/copilot.json' }));
+    assert.deepEqual((await installedContents('copilot-cli', root)).hooks.map(hookLine), ['echo copilot']);
+    // https://learn.chatgpt.com/docs/hooks: a path, a list of paths, an inline hooks object, or a list of inline hooks objects.
+    await put(join(root, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'p', hooks: [{ SessionStart: group('echo inline one') }, { hooks: { UserPromptSubmit: group('echo inline two') } }] }));
+    assert.deepEqual(await commands('codex-cli'), ['echo inline one', 'echo inline two']);
+  } finally { await cleanup(); }
+});
+
+test('A hooks file that is there but can’t be read as JSON is named, so its hooks read as unknown, never as none', async () => {
+  const { root, cleanup } = await box();
+  try {
+    await put(join(root, 'hooks/hooks.json'), '{ "hooks": ');
+    const contents = await pluginContents(root, {}, root);
+    assert.deepEqual([contents.hooks, contents.hooksUnread], [[], [join(root, 'hooks/hooks.json')]]);
+    // No hooks file at all is no hooks, and nothing unread.
+    await rm(join(root, 'hooks'), { recursive: true });
+    assert.equal((await pluginContents(root, {}, root)).hooksUnread, undefined);
   } finally { await cleanup(); }
 });
 

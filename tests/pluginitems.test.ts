@@ -89,27 +89,31 @@ test('Codex: its plugin table turned off, a skill switched off by name, and no a
   } finally { await box.cleanup(); }
 });
 
-test('an installed plugin keeps its hooks as each tool’s installed copy has them, arguments and all, not as its marketplace has them now', async () => {
+test('an installed plugin keeps its hooks as each tool’s installed copy declares them, in that tool’s form, not as its marketplace has them now; a hooks file it can’t read is named', async () => {
   const box = await sandbox();
   try {
     const market = join(box.home, '.claude/plugins/marketplaces/team');
     await put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'demo', source: './plugins/demo' }] }));
     await put(join(market, 'plugins/demo/hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo a newer version' }] }] } }));
-    const hooks = (args: string[]) => JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'node', args }] }], Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] } });
+    const hooks = (start: Record<string, unknown>) => JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', ...start }] }], Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] } });
     const claudeCopy = join(box.home, '.claude/plugins/cache/team/demo/1.2.0'), codexCopy = join(box.home, '.codex/plugins/cache/team/demo/1.2.0');
     for (const folder of [claudeCopy, codexCopy]) await copy(folder);
-    await put(join(claudeCopy, 'hooks/hooks.json'), hooks(['${CLAUDE_PLUGIN_ROOT}/start.mjs', '--mode', 'full text']));
-    await put(join(codexCopy, 'hooks/hooks.json'), hooks(['${PLUGIN_ROOT}/start.mjs']));
+    // Claude Code's form keeps a program's arguments apart; Codex's is one command line.
+    await put(join(claudeCopy, 'hooks/hooks.json'), hooks({ command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/start.mjs', '--mode', 'full text'] }));
+    await put(join(codexCopy, 'hooks/hooks.json'), hooks({ command: 'node "${PLUGIN_ROOT}/start.mjs"' }));
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'demo@team': [{ scope: 'user', installPath: claudeCopy, version: '1.2.0' }] } }));
     await put(join(box.home, '.codex/config.toml'), '[plugins."demo@team"]\nenabled = true\n');
-    const declared = (copy: string, args: string[]) => [
-      { declaredIn: join(copy, 'hooks/hooks.json'), event: 'SessionStart', at: 0, launch: { program: 'node', args } },
+    const declared = (copy: string, launch: Record<string, unknown>) => [
+      { declaredIn: join(copy, 'hooks/hooks.json'), event: 'SessionStart', at: 0, launch },
       { declaredIn: join(copy, 'hooks/hooks.json'), event: 'Stop', at: 0, launch: { shell: 'echo bye' } },
     ];
     assert.deepEqual((await readPluginItems(box.context, ['claude-cli', 'codex-cli'])).map(found => [found.tool, found.hooks]), [
-      ['claude-cli', declared(claudeCopy, ['${CLAUDE_PLUGIN_ROOT}/start.mjs', '--mode', 'full text'])],
-      ['codex-cli', declared(codexCopy, ['${PLUGIN_ROOT}/start.mjs'])],
+      ['claude-cli', declared(claudeCopy, { program: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/start.mjs', '--mode', 'full text'] })],
+      ['codex-cli', declared(codexCopy, { shell: 'node "${PLUGIN_ROOT}/start.mjs"' })],
     ]);
+    await put(join(codexCopy, 'hooks/hooks.json'), '{ "hooks": ');
+    const codex = (await readPluginItems(box.context, ['codex-cli']))[0]!;
+    assert.deepEqual([codex.hooks, codex.hooksUnread], [undefined, [join(codexCopy, 'hooks/hooks.json')]]);
   } finally { await box.cleanup(); }
 });
 

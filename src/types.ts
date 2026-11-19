@@ -593,8 +593,8 @@ export interface HistoryEvent {
 // ---------- Marketplaces and plugins ----------
 export interface Components {
   skills: number; commands: number; agents: number; hooks: boolean; mcp: number; mcpRootVariable: boolean; bin: boolean;
-  /** Some hook listens to an event whose hooks can add text to sessions (pluginoutcomes.ts canAddText). */
-  sessionTextHooks: boolean;
+  /** The tools in which one of its hooks can add text to sessions (pluginoutcomes.ts addsText). */
+  sessionTextHooks: HarnessId[];
   /** The skills' folder names, to show how a tool will name them. */
   skillNames?: string[];
 }
@@ -702,6 +702,7 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
   /** Loaded live from a folder marketplace, nothing copied (Copilot CLI): turned off, such a plugin is no longer installed. */ live?: boolean;
   items: PluginItem[];
   /** Its hooks as that tool's installed copy declares them; absent when it has none or `problem`. */ hooks?: DeclaredHook[];
+  /** Each hooks file of that copy that couldn't be read as JSON (PluginContents hooksUnread). */ hooksUnread?: string[];
   /** Why what it brings couldn't be read; then `items` is empty. */ problem?: string;
   /** Its marketplace is on the Plugins page (it is added in a tool), so the plugin's page can be opened there. */ listed: boolean;
   /** Where that tool has its marketplace from, as it records it. */ source?: string }
@@ -802,6 +803,8 @@ export interface PluginContents {
   onlyInstructions: boolean;
   /** Its hooks, each as it is declared. */
   hooks: DeclaredHook[];
+  /** Each hooks file it has that couldn't be read as JSON: what those declare isn't known (catalogdetail.ts pluginHooks). */
+  hooksUnread?: string[];
   /** Each MCP server with what it runs or connects to, and its entry as the plugin writes it, as JSON. */
   mcpServers: { name: string; runs: string; entry: string }[];
   /** Some server refers to ${CLAUDE_PLUGIN_ROOT}, which only Claude Code fills in. */
@@ -1016,6 +1019,8 @@ export interface InstructionFile {
   sameFile: HarnessId[];
   /** The person's own hooks, as the tool's own settings declare them (pluginitems.ts sessionSettings). */
   ownHooks?: DeclaredHook[];
+  /** Each of those settings files that is there but couldn't be read or doesn't parse: its hooks aren't known. */
+  ownHooksUnread?: string[];
   /** Pi's packages and OpenCode's plugins, each as its settings list it (pluginitems.ts sessionSettings): code that can add to its sessions. */
   extensions?: string[];
   /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
