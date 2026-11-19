@@ -447,15 +447,16 @@ test('A take-in’s Undo is not offered once the place it was found in no longer
   } finally { await box.cleanup(); }
 });
 
-test('A pass of the whole home says which found items it left, so a new one the rule leaves waiting reaches an open page', async () => {
+test('A pass of the whole home says which found items it left, with each copy’s hash, so a new one the rule leaves waiting reaches an open page', async () => {
   const box = await sandbox();
   try {
     await turnOn(box);
-    assert.deepEqual((await background(box)).skills.found, []);
+    assert.deepEqual((await background(box)).skills.found, {});
     await putSkill(box, 'claude-cli', 'review', 'Review gently.');
     await putSkill(box, 'codex-cli', 'review', 'Review hard.');
-    const done = await background(box);
-    assert.deepEqual([done.skills.writes, done.skills.found], [0, ['review']]);
+    const done = await background(box), hashes = Object.values(done.skills.found?.review ?? {});
+    assert.deepEqual([done.skills.writes, Object.keys(done.skills.found ?? {}), Object.keys(done.skills.found?.review ?? {})], [0, ['review'], ['claude-cli', 'codex-cli']]);
+    assert.equal(new Set(hashes).size, 2, 'copies that differ, each by its own hash');
   } finally { await box.cleanup(); }
 });
 

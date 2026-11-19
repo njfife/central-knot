@@ -95,7 +95,7 @@ export function takeUpdates(view: UpdateView) {
 }
 /** Nothing but the check's own state differs between two views. */
 const sameOffer = (a: UpdateView, b: UpdateView) =>
-  a.available?.tag === b.available?.tag && a.available?.zip === b.available?.zip && a.step === b.step && a.failed === b.failed
+  a.available?.tag === b.available?.tag && a.available?.download === b.available?.download && a.step === b.step && a.failed === b.failed
   && a.reason?.key === b.reason?.key && a.updated?.tag === b.updated?.tag && a.checked?.failed === b.checked?.failed;
 
 export const loadUpdates = async () => takeUpdates(await window.centralKnot.updates());
@@ -154,7 +154,9 @@ export function settingUpdateButton() {
 function clickFor(shown: Indicator): () => void {
   // Typing doesn't redraw the page, so a draft typed since the control was drawn is looked for again at the click.
   const restartUnlessHeld = () => (unsavedWork() ? openUpdatesRow() : restart());
-  return { check: () => void checkNow(), update: startUpdate, restart: restartUnlessHeld, settings: openUpdatesRow }[shown.does];
+  // `page` is shown only while a release is available (updates.ts updateIndicator).
+  const releasePage = () => openPage(updates.view!.available!.page);
+  return { check: () => void checkNow(), update: startUpdate, restart: restartUnlessHeld, settings: openUpdatesRow, page: releasePage }[shown.does];
 }
 
 /**
@@ -175,7 +177,7 @@ export function updateLine(): HTMLElement | null {
 }
 
 /**
- * The sidebar's end: the update control, or nothing where there are no releases (only Macs have them). In the folded sidebar
+ * The sidebar's end: the update control, or nothing where there are no releases (only Macs and Linux have them). In the folded sidebar
  * (the rail) its label is hidden like every row's (style.css) and its name and tooltip say it whole.
  */
 export function sidebarEnd(): Node[] {
