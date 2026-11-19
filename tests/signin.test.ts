@@ -76,6 +76,8 @@ test('the two desktop entry files, exactly as written: the launcher opens the Ap
   // A line break or a tab in the path is written as the string type's escape, so no file name can start a line of its own.
   const odd = { ...app, appImage: '/home/a/Knot\nExec=/bin/false\r\t.AppImage' };
   assert.equal(desktopEntry(odd, 'launcher').split('\n')[3], 'Exec="/home/a/Knot\\nExec=/bin/false\\r\\t.AppImage"');
+  // A backslash followed by n (two characters) is written as a quoted backslash, doubled again: four backslashes, then n.
+  assert.equal(desktopEntry({ ...app, appImage: '/home/a/back\\new.AppImage' }, 'launcher').split('\n')[3], 'Exec="/home/a/back\\\\\\\\new.AppImage"');
 });
 
 /** A throwaway home for one example, its places, and the bytes of an icon. */
@@ -157,8 +159,8 @@ test('the person’s edits are kept: an Exec they added to still names this AppI
   assert.deepEqual(await keepEntries(places, app, icon), [], 'still this AppImage: left as it is');
   assert.deepEqual(await keepEntries(places, moved, icon), wrote(places.launcher, places.autostart));
   assert.deepEqual([readFileSync(places.launcher, 'utf8'), readFileSync(places.autostart, 'utf8')], [edit(desktopEntry(moved, 'launcher')), edit(desktopEntry(moved, 'autostart'))]);
-  // An Exec they wrote unquoted, one letter long: its program is that letter, so it is a move, and only the letter changes.
-  writeFileSync(places.launcher, readFileSync(places.launcher, 'utf8').replace(/^Exec=.*$/m, 'Exec=x --no-sandbox'));
+  // An older AppImage named unquoted is a move too, and only its path changes.
+  writeFileSync(places.launcher, readFileSync(places.launcher, 'utf8').replace(/^Exec=.*$/m, 'Exec=/home/a/Old/central-knot.APPIMAGE --no-sandbox'));
   assert.deepEqual(await keepEntries(places, moved, icon), wrote(places.launcher));
   assert.equal(readFileSync(places.launcher, 'utf8'), edit(desktopEntry(moved, 'launcher')));
   // A path with a line break, a tab and quotes parses back to the one path: no move is seen where there is none.
@@ -166,6 +168,36 @@ test('the person’s edits are kept: an Exec they added to still names this AppI
   assert.deepEqual(await keepEntries(places, odd, icon), wrote(places.launcher, places.autostart));
   assert.deepEqual(await keepEntries(places, odd, icon), []);
   assert.equal(readFileSync(places.launcher, 'utf8'), edit(desktopEntry(odd, 'launcher')));
+  // A backslash followed by n (two characters) comes back as those two characters, not a line break.
+  const back = { ...app, appImage: '/home/a/back\\new.AppImage' };
+  assert.deepEqual(await keepEntries(places, back, icon), wrote(places.launcher, places.autostart));
+  assert.deepEqual(await keepEntries(places, back, icon), []);
+}));
+
+/** An app's Exec value as its entry writes it: the quoted, escaped path. */
+const execOf = (of: typeof app) => desktopEntry(of, 'launcher').split('\n')[3].slice('Exec='.length);
+
+test('only an entry whose program is another AppImage has moved: anything else in front is the person’s, and the file is left whole', () => inHome(async (places, icon) => {
+  await keepEntries(places, app, icon);
+  const launcher = (text: string) => { writeFileSync(places.launcher, text); return text; };
+  const keptThrough = async (text: string) => {
+    for (const to of [app, moved]) assert.deepEqual([await keepEntries(places, to, icon), readFileSync(places.launcher, 'utf8')], [[], text], `${text.split('\n')[3]}, opened as ${to.appImage}`);
+  };
+  // What KDE's menu editor writes for an environment variable, and a wrapper script: each is kept through a start and a move.
+  await keptThrough(launcher(desktopEntry(app, 'launcher').replace(/^Exec=/m, 'Exec=env VAR=x ')));
+  await keptThrough(launcher(desktopEntry(app, 'launcher').replace(/^Exec=.*$/m, 'Exec=/home/a/bin/knot-wrapper.sh --flag')));
+  // A move with an escaped part after the path: only the path's own text changes, and \s stays \s.
+  const suffix = ' --title=a\\sb\\\\c %U';
+  launcher(desktopEntry(app, 'launcher').replace(/^(Exec=.*)$/m, `$1${suffix}`));
+  assert.deepEqual(await keepEntries(places, moved, icon), wrote(places.launcher));
+  assert.equal(readFileSync(places.launcher, 'utf8'), desktopEntry(moved, 'launcher').replace(/^(Exec=.*)$/m, `$1${suffix}`));
+  // A [Desktop Action] group's own Exec is left as it is: only the main group's changes.
+  const action = `Actions=new;\n\n[Desktop Action new]\nName=New\nExec=${execOf(app)} --new\n`;
+  launcher(`${desktopEntry(app, 'launcher')}${action}`);
+  assert.deepEqual(await keepEntries(places, moved, icon), wrote(places.launcher));
+  assert.equal(readFileSync(places.launcher, 'utf8'), `${desktopEntry(moved, 'launcher')}${action}`);
+  // A file with CRLF line endings doesn't carry the mark line as written, so it is another file: left whole.
+  await keptThrough(launcher(desktopEntry(app, 'launcher').replaceAll('\n', '\r\n')));
 }));
 
 test('an icon already at its path is left as it is, and one that can’t be written stops neither entry', () => inHome(async (places, icon) => {

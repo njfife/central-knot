@@ -5,12 +5,13 @@
 // file starts it at sign-in: written when start at sign-in is turned on, removed when it is turned off (placeAutostart). The
 // launcher entry and its icon are how the launcher and, on Wayland, the taskbar know it (main.ts names its windows after the
 // entry: app.setDesktopName): at each start the entry is written where there is none and the icon where nothing is, and nothing
-// removes either (keepEntries). When the AppImage has moved, the program an entry of its own names becomes the AppImage (the
-// autostart file's too, while it is on), and nothing else in the file changes. Nothing is ever written over, through or in place
-// of what Central Knot didn't write: an entry without the X-Central-Knot mark or that can't be read, a link, or anything already
-// at the icon's path. Each file is what the freedesktop.org specifications say: Desktop Entry 1.5 (the files' keys, the Exec
-// value's quoting and escapes), Desktop Application Autostart 0.5 (the autostart folder, Hidden), XDG Base Directory 0.8 (the
-// folders, made 0700) and Icon Theme 0.13 (hicolor).
+// removes either (keepEntries). An entry of its own has moved only when its main Exec runs another AppImage (a file ending
+// .AppImage): then that program's text becomes this AppImage's (the autostart file's too, while it is on) and nothing else in the
+// file changes; an Exec that runs anything else (env, a wrapper) is the person's, left whole. Nothing is ever written over,
+// through or in place of what Central Knot didn't write: an entry without the X-Central-Knot mark or that can't be read, a link,
+// or anything already at the icon's path. Each file is what the freedesktop.org specifications say: Desktop Entry 1.5 (the
+// files' keys, the Exec value's quoting and escapes), Desktop Application Autostart 0.5 (the autostart folder, Hidden), XDG
+// Base Directory 0.8 (the folders, made 0700) and Icon Theme 0.13 (hicolor).
 import { lstatSync, readFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -114,14 +115,20 @@ const quoted = (path: string) => `"${path.replace(/["`$\\]/g, '\\$&').replaceAll
 /** ...then the string type's escapes: `\` doubled, and a line break or tab written `\n`, `\r`, `\t`, so no path starts a line. */
 const asString = (value: string) => value.replaceAll('\\', '\\\\').replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t');
 const escapes: Record<string, string> = { '\\': '\\', n: '\n', r: '\r', t: '\t', s: ' ' };
-/** An Exec value's program (its first argument, undone layer by layer) and the rest of its command line as it is. */
-function program(value: string): [path: string, rest: string] {
-  const line = value.replace(/\\([\\nrts])/g, (_, code: string) => escapes[code]);
+/** An Exec value's program (its first argument, undone layer by layer), and where the program's own text ends in the value. */
+function program(value: string): [path: string, end: number] {
+  // The string type's escapes first, each character remembering where its text ends in the value.
+  const chars: string[] = [], ends: number[] = [];
+  for (let at = 0; at < value.length; at++) {
+    chars.push(value[at] === '\\' && value[at + 1] in escapes ? escapes[value[++at]] : value[at]);
+    ends.push(at + 1);
+  }
+  const line = chars.join('');
   let end = line.includes(' ') ? line.indexOf(' ') : line.length;
   // Quoted: up to the first quote no backslash escapes.
-  if (line.startsWith('"')) { end = 1; while (end < line.length && line[end] !== '"') end += line[end] === '\\' ? 2 : 1; end += 1; }
+  if (line.startsWith('"')) { end = 1; while (end < line.length && line[end] !== '"') end += line[end] === '\\' ? 2 : 1; end = Math.min(end + 1, line.length); }
   const first = line.slice(0, end);
-  return [(first.startsWith('"') ? first.slice(1, -1).replace(/\\(.)/g, '$1') : first).replaceAll('%%', '%'), line.slice(end)];
+  return [(first.startsWith('"') ? first.slice(1, -1).replace(/\\(.)/g, '$1') : first).replaceAll('%%', '%'), end ? ends[end - 1] : 0];
 }
 
 /** A file's text: the launcher entry opens the AppImage, in the Development menu; the autostart file opens it hidden (signInArgs). */
@@ -139,11 +146,21 @@ function found(path: string): Found {
     return lines.includes(MARK) ? lines : 'another';
   } catch (error) { return errorCode(error) === 'ENOENT' ? 'none' : 'another'; }
 }
-/** Its own entry with its program changed to this AppImage, every other line and the rest of Exec as they are; none where it names this one already. */
-function moved(lines: string[], app: LinuxApp): string | undefined {
-  const at = lines.findIndex(line => line.startsWith('Exec='));
-  const [path, rest] = at < 0 ? [app.appImage, ''] : program(lines[at].slice('Exec='.length));
-  return path === app.appImage ? undefined : lines.with(at, `Exec=${asString(quoted(app.appImage) + rest)}`).join('\n');
+/**
+ * Its own entry pointed at this AppImage, where the main [Desktop Entry] group's Exec runs another AppImage (it moved): only that
+ * program's text changes. None where it runs this one, or anything else (env, a wrapper: the person's).
+ */
+function retargeted(lines: string[], app: LinuxApp): string | undefined {
+  const group = lines.indexOf('[Desktop Entry]'), after = lines.findIndex((line, index) => index > group && line.startsWith('['));
+  const at = lines.findIndex((line, index) => index > group && (after < 0 || index < after) && line.startsWith('Exec='));
+  if (group < 0 || at < 0) return undefined;
+  const value = lines[at].slice('Exec='.length), [path, end] = program(value);
+  if (path === app.appImage || !/\.appimage$/i.test(path)) return undefined;
+  return lines.with(at, `Exec=${asString(quoted(app.appImage))}${value.slice(end)}`).join('\n');
+}
+/** Whether nothing at all is at `path`, not even a link: where the icon is written (a PNG has no mark to read). */
+function vacant(path: string) {
+  try { lstatSync(path); return false; } catch (error) { return errorCode(error) === 'ENOENT'; }
 }
 /** Written whole (share.ts writeDurably), in a folder made 0700 where there is none, as the Base Directory spec asks. */
 async function put(path: string, content: string | Uint8Array) {
@@ -169,8 +186,8 @@ export async function placeAutostart(places: LinuxPlaces, app: LinuxApp, on: boo
 }
 
 /**
- * At each start of the AppImage: the launcher entry is written where there is none; where its own names another program (the
- * AppImage moved), only that program changes, and so in an autostart file that is on (one turned off stays off); the icon is
+ * At each start of the AppImage: the launcher entry is written where there is none; where its own runs another AppImage (it
+ * moved), only that program's text changes, and so in an autostart file that is on (one turned off stays off); the icon is
  * written where nothing is at its path. Each is tried alone, so one that fails stops no other. Answers a line each, for the log.
  */
 export async function keepEntries(places: LinuxPlaces, app: LinuxApp, icon: Uint8Array): Promise<string[]> {
@@ -178,8 +195,8 @@ export async function keepEntries(places: LinuxPlaces, app: LinuxApp, icon: Uint
   const tryPut = (path: string, content: string | Uint8Array | undefined) => content !== undefined && put(path, content)
     .then(() => said.push(`wrote ${path}`), (error: Error) => said.push(`couldn’t write ${path}: ${error.message}`));
   const launcher = found(places.launcher), autostart = found(places.autostart);
-  await tryPut(places.launcher, launcher === 'none' ? desktopEntry(app, 'launcher') : Array.isArray(launcher) ? moved(launcher, app) : undefined);
-  if (autostartOn(autostart)) await tryPut(places.autostart, moved(autostart, app));
-  if (found(places.icon) === 'none') await tryPut(places.icon, icon);
+  await tryPut(places.launcher, launcher === 'none' ? desktopEntry(app, 'launcher') : Array.isArray(launcher) ? retargeted(launcher, app) : undefined);
+  if (autostartOn(autostart)) await tryPut(places.autostart, retargeted(autostart, app));
+  if (vacant(places.icon)) await tryPut(places.icon, icon);
   return said;
 }
