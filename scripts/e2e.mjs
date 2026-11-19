@@ -7029,7 +7029,12 @@ const homeWith = name => {
  * each view it hands over, and answers the page beside its queue. On a made-up home, through the page's own call: the name
  * weighted above the text (bm25()), an excerpt of the text (snippet()), another form of a word (porter), a word only the
  * text has, mistyped, corrected from the index's vocabulary (fts5vocab), a plugin's skill, typed punctuation, and each answer
- * tagged with the view its index was built from.
+ * tagged with the view its index was built from. Then the Library's Find on a made-up home (matrix.ts askFind, foundRows): typed
+ * a letter at a time during a read, one heading, Best match, the kind switch's counts and a text's excerpt; a row found by its
+ * text switched and held through another view, its better match going below; Escape bringing back the Sort chosen; three
+ * background views with no other list drawn; a name, wrong letters, nothing; Files and back at 860×600; a view caught up while
+ * away; in a development run, one ask per text and per publication, a late answer dropped, no index yet, no redraw for the same
+ * answer and no read of the home; the Practice copy and back; an Off item deleted and restored; a plugin's second copy removed.
  */
 async function searchFlow() {
   const home = join(scratch, 'search-home'), data = join(scratch, 'search-data'), skills = join(home, '.claude/skills');
@@ -7078,7 +7083,8 @@ async function searchFlow() {
   const copilotRelay = join(S.home, '.copilot/installed-plugins/m/relay');
   skill(join(copilotRelay, 'skills'), 'courier', doc('courier', 'Carries parcels.', 'Check the provenance of every parcel.'));
   writeFileSync(join(S.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'relay', marketplace: 'm', version: '2.0.0', cache_path: copilotRelay, enabled: true }] }));
-  const b = await launch(S.data, [], S.home);
+  // --practice-copy: an app as built offers the Practice copy only when asked to.
+  const b = await launch(S.data, ['--practice-copy'], S.home);
   const id = (kind, key) => rowPart('', kind, key), checklist = id('skills', 'release-checklist');
   const keys = () => b.all('.ov-row[data-key]', 'e.dataset.key');
   const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
@@ -7095,9 +7101,9 @@ async function searchFlow() {
   const places = () => b.all('.ov-row[data-key]', `Math.round(e.getBoundingClientRect().top - e.closest('.scroll').getBoundingClientRect().top)`);
   // A view handed over, with its index published: a new skill in Claude Code's folder, read by the next background pass.
   const published = () => b.run('window.ckPublished.length'), total = () => b.text('#nav-library .nav-count');
-  const anotherView = async name => {
+  const anotherView = async (name, content) => {
     const reads = await published(), was = await total();
-    skill(S.claude, name);
+    skill(S.claude, name, content);
     check(`a background view lands, ${name} in it, and its index is published`, await until(async () => (await published()) > reads && (await total()) !== was, 30000), [await published(), await total()]);
     await b.settle();
   };
@@ -7122,9 +7128,12 @@ async function searchFlow() {
   const before = [await keys(), await places()];
   await press(`#${rowPart('switch', 'skills', 'release-checklist')}`);
   await done();
-  await anotherView('extra-one');
-  same('the switched row, Off now, and every other row keep their places through another view',
-    [await keys(), await places(), await b.run(`document.getElementById(${JSON.stringify(rowPart('switch', 'skills', 'release-checklist'))})?.getAttribute('aria-checked')`)], [...before, 'false']);
+  // The next view brings changelog-writer, a better match by its name: it goes below the rows held.
+  await anotherView('changelog-writer', doc('changelog-writer', 'Drafts release entries.', 'Group the merged work by area.'));
+  const [keysNow, placesNow] = [await keys(), await places()];
+  same('the switched row, Off now, and every other row keep their places through another view, and the better match it brings goes below them',
+    [keysNow, placesNow.slice(0, before[1].length), await b.run(`document.getElementById(${JSON.stringify(rowPart('switch', 'skills', 'release-checklist'))})?.getAttribute('aria-checked')`)],
+    [[...before[0], id('skills', 'changelog-writer')], before[1], 'false']);
   await b.run(`document.querySelector('#find').focus()`);
   await b.press('Escape');
   same('Escape: Find empty, the chosen Sort back and changeable, the headings back', [await b.run(`document.querySelector('#find').value`), await sort(), (await sections()).includes('off')], ['', ['updated', 'Last updated', false], true]);
@@ -7176,13 +7185,13 @@ async function searchFlow() {
     check('and "kubernetes" again is answered and drawn', await until(async () => JSON.stringify(await keys()) === JSON.stringify([id('skills', 'kubernetes-rollout')])), await keys());
     await inspector.run('(globalThis.ckNoIndex = true)');
     await findText('changelog');
-    same('main with no index yet: the rows whose own words hold the text, under the one heading', [await sections(), await keys()], [['results'], [id('mcp', 'release-feed')]]);
+    same('main with no index yet: the rows whose own words hold the text, by name, under the one heading', [await sections(), await keys()], [['results'], [id('skills', 'changelog-writer'), id('mcp', 'release-feed')]]);
     await inspector.run('(globalThis.ckNoIndex = false)');
     // A publication (sent here as main sends it): asked again, and drawn, as the answer differs; then again, and nothing is drawn.
     const tellPublished = () => inspector.run(`(contents => (Object.getPrototypeOf(contents).send.call(contents, 'search:published', '', 0), true))(electron.BrowserWindow.getAllWindows()[0].webContents)`);
     await tellPublished();
     check('a publication asks again, and the answer is drawn', await until(async () => (await keys()).includes(checklist)), await keys());
-    await b.run(`(window.ckMutations = 0, window.ckWatch = new MutationObserver(records => { window.ckMutations += records.length; }), window.ckWatch.observe(document.querySelector('.matrix'), { childList: true, subtree: true, attributes: true, characterData: true }), true)`);
+    await b.run(`(window.ckMutations = 0, window.ckWatch = new MutationObserver(records => { window.ckMutations += records.length; }), window.ckWatch.observe(document.body, { childList: true, subtree: true }), true)`);
     const askedBefore = (await inspector.run('globalThis.ckAsked')).length;
     await tellPublished();
     await wait(500);
@@ -7200,6 +7209,10 @@ async function searchFlow() {
     const inView = () => b.run(`document.querySelector('.ov-row[aria-expanded="true"]')?.scrollIntoView({ block: 'start' })`);
     for (const [width, height] of [[860, 600], [1316, 822], [1728, 1080]]) { await sizeTo(b, width, height); await inView(); await theme('dark'); await b.shot(`find-${name}-${width}-dark`); }
     await sizeTo(b, 1316, 822); await inView(); await theme('light'); await b.shot(`find-${name}-1316-light`);
+    // The owner's own window, its sidebar open and as a rail.
+    await sizeTo(b, 1316, 819);
+    for (const rail of [false, true]) { if (rail) await b.click('#sidebar-toggle'); await inView(); await b.shot(`find-${name}-1316x819${rail ? '-rail' : ''}`); }
+    await b.click('#sidebar-toggle');
     await fullSize(b);
   };
   await pictures('text');
@@ -7500,6 +7513,11 @@ async function libraryFlow() {
   await press('#outcome-undo');
   await done(a);
   same('its Undo puts tidy back; idle stays off', [existsSync(join(A.claude, 'tidy')), existsSync(join(A.claude, 'idle'))], [true, false]);
+  // A reading that says tidy was used lands: tidy, out of the chip now, stays where it was, as Find lists it.
+  writeFileSync(join(A.home, '.claude/projects/-work/s3.jsonl'), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'tidy' } }] }, timestamp: ago(1).toISOString() })}\n`);
+  await a.click('#collect-usage');
+  check('the new reading says tidy was used', await until(async () => /^used/.test(await a.text(`${row('skills', 'tidy')} .ov-used`) ?? '')), await a.text(row('skills', 'tidy')));
+  same('a reading that lands with Find holding text moves no row: tidy stays listed by its pin, and nothing counts it', [await a.all('.ov-row[data-key]', 'e.dataset.key'), (await counts(a)).all], [[rowPart('', 'skills', 'tidy')], '0']);
   await letGo('unused');
   await press(`#${rowPart('switch', 'skills', 'idle')}`);
   await done(a);
