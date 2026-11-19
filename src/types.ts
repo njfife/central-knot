@@ -106,6 +106,9 @@ export interface DestinationResult { item: string; harness?: HarnessId; /** `swi
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, its record's gate and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** The tools whose own record of their plugins can't be read (plugins.ts recordReadable): what they have installed isn't known. */ pluginRecordsUnread?: HarnessId[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Other builds of Central Knot on this Mac (otherbuilds.ts): while one is found this build is held (model.ts holdingBuild) and the window shows only the held screen. Unset where they aren't looked for (main.ts buildsContext: only an installed app on a Mac, or a test with its stand-ins) and where an Applications folder can't be read. */ otherBuilds?: OtherBuild[]; /** Where this copy of the app runs from, when that is not the top of an Applications folder (otherbuilds.ts runsOutside): it replaces no build from there. */ runsOutside?: string; /** What this build said on taking the home's record over at this view's look, where it carried the other build's choices (main.ts lookForOthers, takeOverHome): the page says it once. */ tookOver?: string; /** Central Knot's own settings file couldn't be read at this launch (main.ts loadAppSettings): the Overview and Settings say so this launch, until closed on Settings (settingspage.ts keptNote). `keptAs`: where it is kept aside; absent, it is still in place. */ settingsUnread?: { keptAs?: string }; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
 
+/** A reason under a result: its own words, or a tool's refusal in the parts the header draws (matrix.ts problemLines): the item's name, then its tool and what failed. */
+export type Reason = string | [item: string, what: string];
+
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   /** The home read again, after a pass. `asked`: the person's Refresh, which asks each tool its version again too (discovery.ts forgetVersions). */
@@ -125,7 +128,7 @@ export interface DesktopApi {
   /** The home last opened, else this computer's home (dev builds: the practice copy). */
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
-  syncNow(home: string): Promise<{ view: HomeView; text: string; warn: boolean; history: boolean } | null>;
+  syncNow(home: string): Promise<{ view: HomeView; text: string; reasons: Reason[]; warn: boolean; history: boolean } | null>;
   onSyncRequest(callback: () => void): void;
   /**
    * Turns the open home's standing rule, Synchronize everything, on or off (everything.ts setSyncEverything), then reads and syncs
