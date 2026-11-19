@@ -12,6 +12,9 @@
 //   (the first LOOKED_UP of them) gets the known words nearest it (`nearest`) beside it and every word is asked again; if
 //   still nothing, any of the typed words. Every word is quoted, so nothing typed reaches MATCH as syntax. Ranked by bm25()
 //   with the name weighted most (`WEIGHTS`), ties by row id;
+// - the excerpt of a row found in its text alone (`around`): the file's own words from BEFORE words before the first that
+//   matched, EXCERPT_WORDS in all, "…" where cut; where more of the typed words matched in a camelCase word's parts than in
+//   the text, around that word (`markWord`);
 // - the one index main keeps (`searchFollower`): built from a view's documents in slices that give way to main's other work,
 //   superseded by a newer view while it gathers or builds, tagged again (not rebuilt) when the content is the same, closed
 //   when replaced or superseded, when another home opens and at quit.
@@ -29,8 +32,10 @@ export interface SearchDoc { id: string; names: string[]; description: string; t
  * tests/search.test.ts's query set, then frozen.
  */
 const WEIGHTS = [10, 4, 1, 1];
-/** How many words an excerpt of the text holds around its match. */
-const EXCERPT_WORDS = 12;
+/** How many words an excerpt of the text holds around its match, and how many of them before the first word that matched. */
+const EXCERPT_WORDS = 12, BEFORE = 3;
+/** The marks SQLite puts around each word that matched in a snippet, taken out of an excerpt once it is cut (`around`). */
+const OPEN = '\u0001', CLOSE = '\u0002';
 /** Documents indexed between two give-ways of main's event loop: 3,394 public plugin items held it 44 ms at most, unsliced 440 ms. */
 const SLICE = 100;
 /** How many of the typed words that find nothing are looked up for nearest words: a pasted paragraph asks no more. */
@@ -91,8 +96,16 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
   const ids = sorted.map(doc => doc.id);
   const stems = (db.prepare('SELECT term FROM stems ORDER BY term').all() as { term: string }[]).map(row => row.term);
   const known = [...surface].sort();
+  // The text's snippet and its camelCase parts', each matched word marked; none for a row its names and description explain.
   const ranked = db.prepare(`SELECT rowid, CASE WHEN rowid IN (SELECT rowid FROM docs WHERE docs MATCH ?) THEN NULL
-    ELSE snippet(docs, 2, '', '', '…', ${EXCERPT_WORDS}) END AS excerpt FROM docs WHERE docs MATCH ? ORDER BY bm25(docs, ${WEIGHTS.join(', ')}), rowid`);
+    ELSE snippet(docs, 2, char(1), char(2), '…', ${EXCERPT_WORDS}) || char(0) || snippet(docs, 3, char(1), char(2), '', 2) END AS excerpt
+    FROM docs WHERE docs MATCH ? ORDER BY bm25(docs, ${WEIGHTS.join(', ')}), rowid`);
+  const textOf = db.prepare('SELECT text FROM docs WHERE rowid = ?');
+  /** A row's excerpt: around the first word of its text that matched; where more words matched in camelCase words' parts, around such a word (markWord). */
+  const excerptOf = (rowid: number, snippets: string) => {
+    const [text, parts] = snippets.split('\0');
+    return marked(text).length >= marked(parts).length ? around(text) : around(markWord((textOf.get(rowid) as { text: string }).text, parts));
+  };
   const any = db.prepare('SELECT 1 FROM docs WHERE docs MATCH ? LIMIT 1');
   /** The rows `expr` finds, best first; an excerpt for a row its names and description alone don't explain. */
   const find = (expr: string) => ranked.all(`{names description} : (${expr})`, expr) as { rowid: number; excerpt: string | null }[];
@@ -118,10 +131,32 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
       for (const expr of tries) if ((found = find(expr())).length) break;
       const exact = byName.get(typed.trim().normalize('NFC').toLowerCase()) ?? [];
       const rows = [...exact.map(rowid => ({ rowid, excerpt: null })), ...found.filter(row => !exact.includes(row.rowid))];
-      return rows.map(({ rowid, excerpt }) => ({ id: ids[rowid - 1], ...(excerpt ? { excerpt: excerpt.replace(/\s+/g, ' ').trim() } : {}) }));
+      return rows.map(({ rowid, excerpt }) => ({ id: ids[rowid - 1], ...(excerpt ? { excerpt: excerptOf(rowid, excerpt) } : {}) }));
     },
     close: () => db.close(),
   };
+}
+
+/**
+ * An excerpt of `marked` (text with the words that matched marked) that shows the first of them: from BEFORE words before it, to
+ * EXCERPT_WORDS words in all, "…" where cut, on one line, the marks taken out.
+ */
+function around(marked: string) {
+  const cutBefore = marked.startsWith('…'), text = cutBefore ? marked.slice(1) : marked;
+  const start = text.slice(0, Math.max(0, text.indexOf(OPEN))).search(/\S*$/);
+  const before = text.slice(0, start).split(/\s+/).filter(Boolean), after = text.slice(start).split(/\s+/).filter(Boolean);
+  const kept = before.slice(-BEFORE), shown = after.slice(0, EXCERPT_WORDS - kept.length);
+  const lead = cutBefore || kept.length < before.length ? '…' : '', tail = shown.length < after.length ? '…' : '';
+  return `${lead}${[...kept, ...shown].join(' ')}${tail}`.replaceAll(OPEN, '').replaceAll(CLOSE, '');
+}
+/** The different words a snippet has marked, in lower case, in the order first marked. */
+const marked = (snippet: string) => [...new Set([...snippet.matchAll(/\u0001([^\u0002]*)\u0002/gu)].map(match => match[1].toLowerCase()))];
+/** `text` with one camelCase word marked: the first whose parts hold every part marked in `parts`, else the first that holds the first. */
+function markWord(text: string, parts: string) {
+  const wanted = marked(parts), all = text.split(/\s+/), pieces = (word: string) => (CAMEL.test(word) ? cut(apart(word)) : []);
+  const every = all.findIndex(word => wanted.every(part => pieces(word).includes(part)));
+  const at = every >= 0 ? every : all.findIndex(word => pieces(word).includes(wanted[0]));
+  return all.map((word, each) => (each === at ? `${OPEN}${word}${CLOSE}` : word)).join(' ');
 }
 
 /**

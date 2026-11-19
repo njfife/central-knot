@@ -548,6 +548,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
    when it takes more than half its name cell (.name-cut, below). */
 .ov-name-about { flex: 1 1 0; min-width: 0; color: var(--ink-soft); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .no-about .ov-name-about { display: none; }
+/* Where Find found a row only in its file's text, that text takes the description's place, led by a faint mark (matrix.ts aboutLine). */
+.excerpt-mark { color: var(--ink-faint); }
 .row-tag ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
 /*
  * A row's name cell gives way in order. The description shortens (and, table-wide, steps aside; see above); the
@@ -1574,6 +1576,20 @@ span.ins-confirm { margin-top: 0; }
 .base-strip-line > span { flex: 1; min-width: 0; }
 .base-strip-line strong { color: var(--ink); font-weight: 600; }
 .base-copy { background: transparent; border-style: dashed; }
+/* The other files a tool reads with its own (instructionspage.ts otherFiles): one line each, the path shortened in its middle. */
+.ins-parts { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.ins-parts-head { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
+.ins-parts-head strong { color: var(--ink); font-weight: 600; }
+.ins-part { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ins-part-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; font-size: 12.5px; }
+.ins-part-line > .path-text { flex: 0 1 auto; min-width: 8ch; max-width: 100%; }
+.ins-part-says { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--ink-soft); }
+.ins-part-says.tone-warning { display: flex; align-items: flex-start; gap: 4px; color: var(--warning); }
+.ins-part-says > svg { flex: none; margin-top: 3px; }
+.ins-part-line > .btn { margin-left: auto; }
+.ins-parts-group { display: flex; flex-direction: column; gap: 6px; }
+.ins-parts-sub { margin: 2px 0 0; font-size: 11.5px; font-weight: 600; color: var(--ink-soft); }
+.ins-part-end { display: flex; justify-content: flex-end; }
 .base-legend { margin: 0; display: flex; gap: 14px; font-size: 12px; color: var(--ink-soft); }
 .base-legend-removed { color: var(--danger, #f85149); }
 .base-legend-added { color: var(--success, #3fb950); }
