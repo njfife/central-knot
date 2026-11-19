@@ -9,7 +9,7 @@
 //   asks libraryGate, never the two apart; the views read them apart, to say why on the page;
 // - checked writes: a tool's file written or removed only while it holds what was read (writeFileChecked, removeFileChecked,
 //   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably), or kept beside
-//   themselves where they can't be read (keepUnreadable);
+//   themselves where they can't be read (keepUnreadable); and a wait for Resume held in memory (ShareContext resumeFirst);
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
 //   place (stagingFolder, placeCopy).
 // Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
@@ -63,6 +63,11 @@ export interface ShareContext {
   allowActualWrites?: boolean;
   /** Why nothing at all may be written now: another build of Central Knot is on this Mac, one install at a time (main.ts heldReason). Unset: not held. */
   held?: string;
+  /**
+   * A wait for Resume this build holds in memory for the home, whatever its record or this build's memory of it would say (main.ts
+   * startHome): while it has a reason, syncGate says the home waits, after its stops; a Resume let in ends it (libraryGate).
+   */
+  resumeFirst?: { reason?: string };
   overrides?: Partial<Record<HarnessId, string>>;
   /** Reads shared within one pass or one view (what each tool has through its plugins): set only on a context made for that one use. */
   reads?: Map<string, Promise<unknown>>;
@@ -261,11 +266,12 @@ export async function readRecord(home: string): Promise<{ record?: SyncRecord; p
 /**
  * Keeps one of Central Knot's own files that is there and can't be read (History, its settings) beside it as
  * `<name>.unreadable-<time>.json`, so the next write never writes over it: it may be recoverable by hand. Answers where it is
- * now: there, or its own path where it couldn't be moved (a folder that can't be written, where the next write fails too).
+ * kept; fails where it can't be moved (a folder that can't be written), and the file stays where it is.
  */
 export async function keepUnreadable(path: string): Promise<string> {
   const kept = path.replace(/\.json$/, `.unreadable-${Date.now()}.json`);
-  return rename(path, kept).then(() => kept, () => path);
+  await rename(path, kept);
+  return kept;
 }
 
 export async function writeDurably(path: string, text: string) {
@@ -418,15 +424,14 @@ export async function remember(context: ShareContext, generation: string) {
   await writeDurably(context.settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 /**
- * Lets go of this build's memory of a home, so it waits for Resume instead of syncing, or stopping for good; a memory of the
- * generation `keep` stays. main.ts takeOverHome, where a take-over isn't carried, keeps the record's own generation (a folder
- * this build synced before it was set up afresh elsewhere is let go); main.ts startHome keeps none, for this computer's home
- * opened after settings that couldn't be read, so nothing syncs there before the person has read why.
+ * Lets go of this build's memory of a home it remembers by another generation of its record than `generation` (a folder it
+ * synced before it was set up afresh elsewhere), so the home waits for Resume instead of stopping for good: main.ts
+ * takeOverHome, where a take-over isn't carried. A memory of `generation` itself stays.
  */
-export async function forgetHome(context: Pick<ShareContext, 'home' | 'settingsPath'>, keep?: string) {
+export async function forgetStale(context: ShareContext, generation: string) {
   const settings = await readSettings(context.settingsPath), remembered = settings.homes?.[context.home]?.generation;
-  if (!remembered || remembered === keep) return;
-  const { [context.home]: _forgotten, ...homes } = settings.homes!;
+  if (!remembered || remembered === generation) return;
+  const { [context.home]: _stale, ...homes } = settings.homes!;
   await writeDurably(context.settingsPath, `${JSON.stringify({ ...settings, homes }, null, 2)}\n`);
 }
 
@@ -460,6 +465,7 @@ export async function libraryGate(context: ShareContext, asked: Entering = {}): 
   let { record } = await readRecord(context.home);
   if (!record && asked.start) { record = newRecord(context); await saveRecord(context.home, record); await remember(context, record.generation); }
   else if (record && gate.state === 'needs-resume' && asked.resume) await remember(context, record.generation);
+  if (asked.resume && context.resumeFirst) context.resumeFirst.reason = undefined;
   return { record };
 }
 
@@ -477,9 +483,11 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   try { await access(folder, constants.W_OK | constants.X_OK); }
   catch (error) { return { state: 'stopped', reason: plainError(error) }; }
   const remembered = (await readSettings(context.settingsPath)).homes?.[context.home]?.generation;
-  if (!record) return remembered ? { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` } : { state: 'first-setup' };
+  if (!record && remembered) return { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` };
+  if (record && remembered && remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
+  if (context.resumeFirst?.reason) return { state: 'needs-resume', reason: context.resumeFirst.reason };
+  if (!record) return { state: 'first-setup' };
   if (!remembered) return { state: 'needs-resume', reason: 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.' };
-  if (remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
   return { state: 'ready' };
 }
 

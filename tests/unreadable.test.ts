@@ -28,13 +28,14 @@ test('An unreadable file is kept beside it as name.unreadable-time.json, byte fo
   } finally { await rm(folder, { recursive: true, force: true }); }
 });
 
-test('An unreadable file in a folder that can’t be written stays where it is, and is said to be there', async () => {
+// Root may rename in a folder it can't write, so this one can't be shown as root.
+test('An unreadable file in a folder that can’t be written can’t be kept aside: that fails, and the file stays where it is', { skip: process.getuid?.() === 0 && 'root can rename in a read-only folder' }, async () => {
   const folder = await mkdtemp(join(tmpdir(), 'ck-unreadable-'));
   const path = join(folder, 'app-settings.json');
   try {
     await writeFile(path, '');
     await chmod(folder, 0o555);
-    assert.equal(await keepUnreadable(path), path);
+    await assert.rejects(keepUnreadable(path), { code: 'EACCES' });
     assert.deepEqual(await readdir(folder), ['app-settings.json']);
   } finally { await chmod(folder, 0o755); await rm(folder, { recursive: true, force: true }); }
 });

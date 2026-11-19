@@ -120,7 +120,7 @@ function needsYou(home: HomeView): HTMLElement | null {
     link('Sync once', 'overview-sync-now', () => void syncNow(), acting()), '.');
   const setup = empty ? null : setupLead(home);
   const setupAfterStop = asksNow(home) === 'question' && kinds.some(kind => home[kind].gate.state === 'stopped');
-  const reset = home.settingsKeptAs ? line('overview-settings-kept', 'circle-alert', 'tone-warning', `${settingsReset} `, link('Open Settings', 'overview-settings-kept-open', () => showPage('settings'))) : null;
+  const reset = home.settingsUnread ? line('overview-settings-kept', 'circle-alert', 'tone-warning', `${settingsReset} `, link('Open Settings', 'overview-settings-kept-open', () => showPage('settings'))) : null;
   const lines = [reset, setupAfterStop ? null : setup, updateLine(), readOnlyLine(home), ...problems, setupAfterStop ? setup : null, ...differ, syncOff].filter((each): each is HTMLElement => !!each);
   return lines.length ? h('div.overview-needs', { id: 'overview-needs' }, lines) : null;
 }

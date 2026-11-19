@@ -461,14 +461,15 @@ function syncEverythingRow(): HTMLElement | null {
     notice, added.length ? h('div.setting-added', {}, added) : undefined);
 }
 
-/** What a settings file that couldn't be read at launch led to (types.ts HomeView settingsKeptAs), said first on the Overview (overview.ts needsYou) and here. */
+/** What a settings file that couldn't be read at launch led to (types.ts HomeView settingsUnread), said first on the Overview (overview.ts needsYou) and here. */
 export const settingsReset = 'Central Knot couldn’t read its settings file, so it started with the defaults.';
-/** The note at the top of the page: what happened, which file the old one is kept as, and Close, which ends it here and on the Overview. */
-function keptNote(path: string): HTMLElement {
-  const close = () => { state.home = { ...state.home!, settingsKeptAs: undefined }; rerender(); void window.centralKnot.closeSettingsKept(); };
+/** The note at the top of the page: what happened, where the old file is, and Close, which ends it here and on the Overview. */
+function keptNote({ keptAs }: { keptAs?: string }): HTMLElement {
+  const close = () => { state.home = { ...state.home!, settingsUnread: undefined }; rerender(); void window.centralKnot.closeSettingsKept(); };
+  const where = keptAs ? `The old file is kept as ${keptAs.split(/[\\/]/).pop()}.` : 'The old file is still in place, and no change is saved until it can be moved aside.';
   return h('div.intro', { id: 'settings-kept', role: 'note' },
-    h('div.intro-text', {}, `${settingsReset} The old file is kept as ${path.split(/[\\/]/).pop()}.`),
-    button({ variant: 'outline', size: 'small', label: 'Show in folder', id: 'settings-kept-show', onclick: () => void window.centralKnot.showFile(path) }),
+    h('div.intro-text', {}, `${settingsReset} ${where}`),
+    keptAs ? button({ variant: 'outline', size: 'small', label: 'Show in folder', id: 'settings-kept-show', onclick: () => void window.centralKnot.showFile(keptAs) }) : null,
     button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Close this note', id: 'settings-kept-close', onclick: close }));
 }
 
@@ -482,7 +483,7 @@ export function settingsPage(): HTMLElement {
   const cannot = signIn?.available ? undefined : signIn?.reason?.text;
   const systemSays: RowMessage | undefined = signIn?.reason && signIn.place ? { text: signIn.reason.text, tone: 'system', action: openSignInPlace(signIn.place) } : undefined;
   return h('div.page', {}, h('div.scroll.settings-scroll', { id: 'settings-scroll' },
-    state.home?.settingsKeptAs ? keptNote(state.home.settingsKeptAs) : null,
+    state.home?.settingsUnread ? keptNote(state.home.settingsUnread) : null,
     settingsSection('general', 'General',
       settingRow('sign-in', 'Start at sign-in', cannot ?? signInHint,
         // Off and unchangeable until main has said, so a click never acts on a guess. No tooltip: the row's title already says it.

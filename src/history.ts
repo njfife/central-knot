@@ -43,7 +43,7 @@ export async function appendHistory(context: ShareContext, events: HistoryEvent[
 async function writeHistory(home: string, events: HistoryEvent[]) {
   let sound = true;
   try { sound = Array.isArray(JSON.parse(await readFile(historyPath(home), 'utf8'))?.events); } catch (error) { sound = errorCode(error) === 'ENOENT'; }
-  if (!sound) await keepUnreadable(historyPath(home));
+  if (!sound) await keepUnreadable(historyPath(home)).catch(() => undefined);
   await writeDurably(historyPath(home), `${JSON.stringify({ events }, null, 2)}\n`);
 }
 
