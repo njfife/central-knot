@@ -26,12 +26,12 @@ import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, lookFor, restore, runPass, takeInAnswers, unreadIn, unseenIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { mergeAgent } from './merge.ts';
-import { partsHolding, pluginHolds } from './plugins.ts';
+import { partsHolding, pluginHolds, type ThroughWhichPlugin } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
 import { errorCode, exists, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
 import { sourceFacts } from './sources.ts';
 import type { ShareContext } from './share.ts';
-import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
+import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ToolCopy } from './types.ts';
 import { throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -39,12 +39,11 @@ const nameOf = (tool: HarnessId) => toolName(tool);
 
 // ---------- What the harnesses hold ----------
 
-type ThroughPlugins = Map<HarnessId, Map<string, ThroughPlugin>>;
 /**
  * The managed harnesses' agent files now (librarypass.ts Disk), what each harness's plugins bring, which the page shows, and
  * (`skills`) the keys of the person's skills in a harness that keeps agents as skills, which hold the agent there (agentHeld).
  */
-interface AgentDisk extends Disk<AgentEntry> { through: ThroughPlugins; skills: Map<HarnessId, Set<string>>; linked: Awaited<ReturnType<typeof pluginHolds>> }
+interface AgentDisk extends Disk<AgentEntry> { viaPlugin: ThroughWhichPlugin; skills: Map<HarnessId, Set<string>>; linked: Awaited<ReturnType<typeof pluginHolds>> }
 type AgentLook = Look<SharedAgent, AgentEntry, AgentDisk>;
 
 /**
@@ -54,7 +53,7 @@ type AgentLook = Look<SharedAgent, AgentEntry, AgentDisk>;
  */
 async function readDisk(context: ShareContext, managed: HarnessId[], library: KindLibrary): Promise<AgentDisk> {
   const disk: AgentDisk = {
-    byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], through: await agentsThroughPlugins(context, managed, library.items),
+    byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], viaPlugin: await agentsThroughPlugins(context, managed, library.items),
     skills: await skillsLoaded(context, managed),
     // A plugin's item, in a tool that takes the plugin, is held by the plugin alone (plugins.ts pluginHolds); its can't-take
     // answer keeps a copy the tool has.
@@ -63,7 +62,7 @@ async function readDisk(context: ShareContext, managed: HarnessId[], library: Ki
       const linked = disk.linked(item, tool);
       if (linked) return linked;
       // A plugin installed there that brings the agent is a way it has it: Central Knot's copy goes (library.ts THE RULE).
-      const given = disk.through.get(tool)?.get(item.key);
+      const given = disk.viaPlugin(item, tool);
       if (given) return { why: throughPlugin(tool, given, 'agent'), anotherWay: true };
       const why = agentHeld(disk, managed, item, tool);
       return why ? { why } : undefined;
@@ -115,13 +114,13 @@ async function skillsLoaded(context: ShareContext, managed: HarnessId[]): Promis
 }
 
 /**
- * The agents each harness has through its installed plugins, by key (plugins.ts partsHolding): such a harness gets no file of
- * its own beside the plugin's. The same agent is one whose shared part is the item's current version.
+ * The plugin a harness has an agent through, if it has one (plugins.ts partsHolding): such a harness gets no file of its own
+ * beside the plugin's. A plugin's agent is the same agent when its shared part is the item's current version.
  */
-const agentsThroughPlugins = (context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ThroughPlugins> =>
+const agentsThroughPlugins = (context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ThroughWhichPlugin> =>
   partsHolding(context, tools, 'agent', items, (key, part) => {
     const agent = part.text === undefined ? undefined : parseAgent('claude-cli', part.name ?? key, part.text);
-    return !!agent && !items[key]?.deleted && agentHash(agent) === items[key]?.hash;
+    return agent && agentHash(agent);
   });
 
 /**
@@ -295,7 +294,7 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
     copies[tool] = { hash, directory: file, rootLabel: nameOf(tool), lines, modified: iso(at), summary, body, writable: true, folder, ownPart };
   }
   const cannot: LibraryFacts['cannot'] = {}, plugin: NonNullable<LibraryFacts['plugin']> = {}, unseen: NonNullable<LibraryFacts['unseen']> = {};
-  for (const tool of look.managed) { const given = look.disk.through.get(tool)?.get(key); if (given && !slot[tool]) plugin[tool] = given; }
+  for (const tool of look.managed) { const given = item && look.disk.viaPlugin(item, tool); if (given && !slot[tool]) plugin[tool] = given; }
   const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
   const tombstone = item ? undefined : look.library.items[key];
   for (const tool of look.managed) {
