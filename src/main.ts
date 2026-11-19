@@ -17,7 +17,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, wri
 import { access, constants, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps, forgetVersions } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
-import { appCandidates, executableCandidates, hasStatusNotifierWatcher, macPlaces, searchPath } from './platform.ts';
+import { appCandidates, executableCandidates, macPlaces, searchPath, TRAY_ASKS, trayWithin } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
 import { errorCode, forgetStale, keepUnreadable, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
@@ -565,10 +565,16 @@ function appMenu() {
 
 /** The app's colour icon: the window's and the tray's off a Mac (macOS takes the app's icon from its bundle). */
 const appIcon = join(__dirname, '../assets/icon.png');
+/**
+ * The menu bar or tray icon. A Linux desktop has a tray only while something holds its session bus's StatusNotifierWatcher
+ * (platform.ts). At sign-in the panel that holds it may still be starting, so a start at sign-in (--hidden) asks again, about once
+ * a second for about ten seconds (trayWithin), before it decides there is none and its window shows; any other start asks once
+ * and isn't held up. A Mac never asks.
+ */
 async function makeTray() {
   if (smoke || tray) return;
   // A Linux desktop with no system tray would show no icon, and Quit is only in its menu: with no tray, closing the window quits.
-  if (process.platform === 'linux' && !(await hasStatusNotifierWatcher())) { log('no system tray on this desktop: closing the window quits'); return; }
+  if (process.platform === 'linux' && !(await trayWithin(startedHidden() ? TRAY_ASKS : 1))) { log('no system tray on this desktop: closing the window quits'); return; }
   // On a Mac a template image, which macOS draws in the menu bar's own colours; elsewhere the colour icon, seen on a dark panel too.
   const mac = process.platform === 'darwin';
   const image = mac ? nativeImage.createFromBuffer(Buffer.from(trayIconPng, 'base64'), { scaleFactor: 2 })

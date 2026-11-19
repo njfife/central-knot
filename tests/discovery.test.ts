@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover, findApp, forgetVersions, probeVersion } from '../src/discovery.ts';
-import { appCandidates, executableCandidates, hasStatusNotifierWatcher, shellPath } from '../src/platform.ts';
+import { appCandidates, executableCandidates, hasStatusNotifierWatcher, shellPath, TRAY_ASKS, TRAY_PAUSE_MS, trayWithin } from '../src/platform.ts';
 import { isPresent } from '../src/presence.ts';
 
 async function fixture() {
@@ -197,6 +197,26 @@ test('A Linux desktop has a system tray when its session bus has a StatusNotifie
       hasStatusNotifierWatcher(join(dir, 'kde')), hasStatusNotifierWatcher(join(dir, 'gnome')), hasStatusNotifierWatcher(join(dir, 'no-bus')),
       hasStatusNotifierWatcher(join(dir, 'hangs'), 200), hasStatusNotifierWatcher(join(dir, 'missing'))]);
     assert.deepEqual(answers, [true, false, false, false, false]);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('A start at sign-in asks for the tray again, about once a second for about ten seconds, until the panel’s watcher is there', { skip: process.platform === 'win32' }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ck-bus-'));
+  try {
+    // Stand-ins for dbus-send that note each ask: a panel whose watcher is on the bus from the second ask, and a desktop with none.
+    const bus = async (name: string, from: number) => {
+      const asks = join(dir, `${name}.asks`);
+      await writeFile(join(dir, name), `#!/bin/sh\necho ask >> '${asks}'\n[ "$(wc -l < '${asks}')" -ge ${from} ] && echo '   boolean true' || echo '   boolean false'\n`, { mode: 0o755 });
+      return { path: join(dir, name), asked: async () => (await readFile(asks, 'utf8').catch(() => '')).split('\n').filter(Boolean).length };
+    };
+    const late = await bus('late', 2), none = await bus('none', 99), once = await bus('once', 99);
+    assert.deepEqual([TRAY_ASKS, TRAY_PAUSE_MS], [10, 1000]);
+    // The watcher there from the second ask: a tray, found at that ask.
+    assert.deepEqual([await trayWithin(TRAY_ASKS, 10, late.path), await late.asked()], [true, 2]);
+    // Never there: no tray, after the limit's asks.
+    assert.deepEqual([await trayWithin(TRAY_ASKS, 10, none.path), await none.asked()], [false, TRAY_ASKS]);
+    // Any other start asks once.
+    assert.deepEqual([await trayWithin(1, 10, once.path), await once.asked()], [false, 1]);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 

@@ -141,13 +141,17 @@ function seedHome() {
 // ---------- App ----------
 // On Linux the file manager the app opens is this stand-in: it notes what it was asked to open. So is the session bus's
 // dbus-send, asked whether the desktop has a system tray (platform.ts hasStatusNotifierWatcher): it has, as KDE's does, unless
-// a launch sets NO_TRAY, as on GNOME without its AppIndicator extension.
+// a launch sets NO_TRAY, as on GNOME without its AppIndicator extension, or TRAY_FROM, the ask from which it has (a panel still
+// starting at sign-in). A launch that sets TRAY_ASKED has each ask noted there, a line each.
 const fileManagerAsked = join(scratch, 'opened.txt');
 if (process.platform === 'linux') {
   mkdirSync(join(scratch, 'bin'));
   writeFileSync(join(scratch, 'bin/xdg-open'), `#!/bin/sh\necho "$*" >> '${fileManagerAsked}'\n`);
   chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
-  writeFileSync(join(scratch, 'bin/dbus-send'), `#!/bin/sh\n[ -n "$NO_TRAY" ] && echo '   boolean false' || echo '   boolean true'\n`, { mode: 0o755 });
+  writeFileSync(join(scratch, 'bin/dbus-send'), `#!/bin/sh
+[ -n "$TRAY_ASKED" ] && echo ask >> "$TRAY_ASKED" && asks=$(wc -l < "$TRAY_ASKED") || asks=1
+[ -n "$NO_TRAY" ] || [ "$asks" -lt "\${TRAY_FROM:-1}" ] && echo '   boolean false' || echo '   boolean true'
+`, { mode: 0o755 });
 }
 let app;
 // Every app this run started, and a flow's stand-in running app (standInApp), is closed when the run ends, however it ends: a
@@ -3115,13 +3119,15 @@ async function practiceFlow() {
   if (process.platform !== 'linux') return;
   const noTray = join(scratch, 'home-no-tray'), noTrayData = join(scratch, 'no-tray-data');
   mkdirSync(noTray);
-  const b = await launch(noTrayData, ['--hidden'], noTray, { NO_TRAY: '1' });
+  const asked = name => readNow(join(scratch, `${name}.asks`)).split('\n').filter(Boolean).length;
+  const b = await launch(noTrayData, ['--hidden'], noTray, { NO_TRAY: '1', TRAY_ASKED: join(scratch, 'never.asks') });
   // The page is told it started hidden (location.search: main.ts createWindow) only when its window was made hidden; a
   // development run also asks the window itself, through main's debugger. (Electron paints a hidden window, so the page's
   // visibilityState says visible either way.)
   const bMain = b.main && await b.main();
-  same('on a Linux desktop with no system tray, a start at sign-in (--hidden) shows the window',
-    [await b.run('location.search'), await bMain?.run('electron.BrowserWindow.getAllWindows()[0].isVisible()') ?? true], ['', true]);
+  // At sign-in the panel may still be starting: such a start asks again, about once a second up to ten times (platform.ts trayWithin).
+  same('on a Linux desktop with no system tray, a start at sign-in (--hidden) asks ten times, then shows the window',
+    [asked('never'), await b.run('location.search'), await bMain?.run('electron.BrowserWindow.getAllWindows()[0].isVisible()') ?? true], [10, '', true]);
   // Closed through the window's own close, as a person's click is (main's debugger). A packaged app has no debugger: there the
   // page closes itself, which skips the window's close handler and quits from window-all-closed.
   if (bMain) {
@@ -3132,6 +3138,17 @@ async function practiceFlow() {
   same('on a Linux desktop with no system tray, closing the window quits', b.child.exitCode, 0);
   if (bMain) check('and the window’s own close handler saw no tray', readNow(join(noTrayData, 'central-knot.log')).includes('window close (no tray icon)'), readNow(join(noTrayData, 'central-knot.log')).slice(-400));
   if (b.child.exitCode === null) await b.quit();
+  // The panel's watcher on the bus from the second ask: a tray, so the start at sign-in stays hidden.
+  const late = await launch(join(scratch, 'late-tray-data'), ['--hidden'], noTray, { TRAY_FROM: '2', TRAY_ASKED: join(scratch, 'late.asks') });
+  const lateMain = late.main && await late.main();
+  same('with the panel’s tray there from the second ask, a start at sign-in asks twice and stays hidden',
+    [asked('late'), await late.run('location.search'), await lateMain?.run('electron.BrowserWindow.getAllWindows()[0].isVisible()') ?? false], [2, '?start=hidden', false]);
+  lateMain?.close();
+  await late.quit();
+  // A start that isn't at sign-in asks once and isn't held up: with no tray, its window shows at once.
+  const notHidden = await launch(join(scratch, 'once-tray-data'), [], noTray, { NO_TRAY: '1', TRAY_ASKED: join(scratch, 'once.asks') });
+  same('a start that isn’t hidden asks for the tray once', asked('once'), 1);
+  await notHidden.quit();
 }
 
 /**
