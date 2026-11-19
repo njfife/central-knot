@@ -98,10 +98,10 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
     ELSE snippet(docs, 2, char(1), char(2), '…', ${EXCERPT_WORDS}) || char(0) || snippet(docs, 3, char(1), char(2), '', 2) END AS excerpt
     FROM docs WHERE docs MATCH ? ORDER BY bm25(docs, ${WEIGHTS.join(', ')}), rowid`);
   const textOf = db.prepare('SELECT text FROM docs WHERE rowid = ?');
-  /** A row's excerpt: around the first word of its text that matched; where only a camelCase word's parts did, around that word. */
+  /** A row's excerpt: around the first word of its text that matched; where more words matched in camelCase words' parts, around the first of those words. */
   const excerptOf = (rowid: number, snippets: string) => {
     const [text, parts] = snippets.split('\0');
-    return text.includes(OPEN) || !parts.includes(OPEN) ? around(text) : around(markWord((textOf.get(rowid) as { text: string }).text, parts));
+    return matched(text) >= matched(parts) ? around(text) : around(markWord((textOf.get(rowid) as { text: string }).text, parts));
   };
   const any = db.prepare('SELECT 1 FROM docs WHERE docs MATCH ? LIMIT 1');
   /** The rows `expr` finds, best first; an excerpt for a row its names and description alone don't explain. */
@@ -146,6 +146,8 @@ function around(marked: string) {
   const lead = cutBefore || kept.length < before.length ? '…' : '', tail = shown.length < after.length ? '…' : '';
   return `${lead}${[...kept, ...shown].join(' ')}${tail}`.replaceAll(OPEN, '').replaceAll(CLOSE, '');
 }
+/** How many different words a snippet has marked. */
+const matched = (snippet: string) => new Set([...snippet.matchAll(/\u0001([^\u0002]*)\u0002/gu)].map(match => match[1].toLowerCase())).size;
 /** `text` with the first word marked whose camelCase parts hold the first part marked in `parts` ("prepareReleaseNotes" for "Release"). */
 function markWord(text: string, parts: string) {
   const part = parts.slice(parts.indexOf(OPEN) + 1, parts.indexOf(CLOSE)).toLowerCase(), all = text.split(/\s+/);

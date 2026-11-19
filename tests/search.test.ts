@@ -134,8 +134,9 @@ test('an excerpt starts a few words before the match, so a row cut at its end st
   } finally { index.close(); }
 });
 
-test('a match in a camelCase word quotes that word and the words around it, not an earlier passage', async () => {
-  const text = 'Approve each package before it ships. Check the licence of every dependency and record who approved it. When all is done, run prepareReleaseNotes and attach the file.';
+test('a match in a camelCase word quotes that word and the words around it, not an earlier passage where fewer words matched', async () => {
+  // "notes" is also found in "note" (a prefix, stemmed), earlier: "release" is found in prepareReleaseNotes alone, which holds both.
+  const text = 'Approve each package before it ships. Check the licence of every dependency and note who approved it. When all is done, run prepareReleaseNotes and attach the file.';
   const index = (await buildIndex([{ id: 'skills-ship-it', names: ['ship-it'], description: 'Gets a package out.', text }]))!;
   try {
     assert.deepEqual(index.ask('release notes'), [{ id: 'skills-ship-it', excerpt: '…is done, run prepareReleaseNotes and attach the file.' }]);
