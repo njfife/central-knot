@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { desktopEntry, keepEntries, linuxPlaces, placeAutostart, readAutostart, signInLabel, signInState, type LoginItems } from '../src/signin.ts';
@@ -42,12 +42,12 @@ test('Start at sign-in shows the system’s answer, and why it is off or can’t
     assert.equal(asked, items !== undefined, `${name}: system asked`);
   }
   // The menus carry the same reason as Settings, shortened.
-  const label = (index: number) => signInLabel(signInState(cases[index][1], () => cases[index][2]!));
-  assert.equal(label(3), 'Start at sign-in (move to Applications first)');
-  assert.equal(label(4), 'Start at sign-in');
-  assert.equal(label(2), 'Start at sign-in (AppImage only)');
+  const named = (name: string) => { const [, facts, items] = cases.find(([each]) => each === name)!; return signInState(facts, () => items!); };
+  assert.equal(signInLabel(named('macOS outside Applications')), 'Start at sign-in (move to Applications first)');
+  assert.equal(signInLabel(named('macOS on')), 'Start at sign-in');
+  assert.equal(signInLabel(named('installed on Linux, not from an AppImage')), 'Start at sign-in (AppImage only)');
   // The file left alone is named, so the person can find it.
-  assert.equal(signInState(cases[13][1], () => cases[13][2]!).reason?.text, 'Another file is in its place, which Central Knot didn’t write and leaves as it is: /home/a/.config/autostart/com.centralknot.firstlook.desktop.');
+  assert.equal(named('Linux AppImage, a file it didn’t write in its place').reason?.text, 'Another file is in its place, which Central Knot didn’t write and leaves as it is: /home/a/.config/autostart/com.centralknot.firstlook.desktop.');
 });
 
 test('XDG places: the config and data folders the environment names, else ~/.config and ~/.local/share; a relative one is ignored', () => {
@@ -73,62 +73,114 @@ test('the two desktop entry files, exactly as written: the launcher opens the Ap
   assert.equal(desktopEntry(app, 'autostart'), [
     '[Desktop Entry]', 'Type=Application', 'Name=Central Knot Alpha', `${exec} --hidden`, 'Icon=com.centralknot.alpha', 'Terminal=false', 'X-Central-Knot=true', '',
   ].join('\n'));
+  // A line break or a tab in the path is written as the string type's escape, so no file name can start a line of its own.
+  const odd = { ...app, appImage: '/home/a/Knot\nExec=/bin/false\r\t.AppImage' };
+  assert.equal(desktopEntry(odd, 'launcher').split('\n')[3], 'Exec="/home/a/Knot\\nExec=/bin/false\\r\\t.AppImage"');
 });
 
-test('Linux start at sign-in is Central Knot’s own autostart file: written whole when on, removed when off, read back as on or off', async () => {
+/** A throwaway home for one example, its places, and the bytes of an icon. */
+async function inHome(example: (places: ReturnType<typeof linuxPlaces>, icon: Buffer) => Promise<void>) {
   const home = mkdtempSync(join(tmpdir(), 'ck-signin-'));
-  try {
-    const places = linuxPlaces(home, {}, app.id);
-    assert.deepEqual(readAutostart(places), { openAtLogin: false }, 'none yet: off');
-    assert.equal(await placeAutostart(places, app, true), true);
-    assert.equal(readFileSync(places.autostart, 'utf8'), desktopEntry(app, 'autostart'), 'on: the folder is made and the file written');
-    assert.deepEqual(readAutostart(places), { openAtLogin: true });
-    // The desktop's own settings turned it off the spec's way: it reads as off, and on again writes it whole.
-    writeFileSync(places.autostart, `${desktopEntry(app, 'autostart')}Hidden = true\n`);
-    assert.deepEqual(readAutostart(places), { openAtLogin: false }, 'Hidden=true is off, with or without spaces around =');
-    assert.equal(await placeAutostart(places, app, true), true);
-    assert.equal(readFileSync(places.autostart, 'utf8'), desktopEntry(app, 'autostart'));
-    assert.equal(await placeAutostart(places, app, false), true);
-    assert.equal(existsSync(places.autostart), false, 'off: removed');
-    assert.equal(await placeAutostart(places, app, false), true, 'off again with none there: nothing to do');
-  } finally { rmSync(home, { recursive: true, force: true }); }
-});
+  try { await example(linuxPlaces(home, {}, app.id), Buffer.from([137, 80, 78, 71])); } finally { rmSync(home, { recursive: true, force: true }); }
+}
+const wrote = (...paths: string[]) => paths.map(path => `wrote ${path}`);
+const moved = { ...app, appImage: '/home/a/Applications/Central-Knot-Alpha.AppImage' };
 
-test('a file in either place that Central Knot didn’t write is never written over or removed, and sign-in says so', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'ck-signin-'));
-  try {
-    const places = linuxPlaces(home, {}, app.id);
-    const theirs = '[Desktop Entry]\nType=Application\nName=Mine\nExec=/usr/bin/true\n';
-    for (const path of [places.autostart, places.launcher]) { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, theirs); }
-    assert.deepEqual(readAutostart(places), { openAtLogin: false, another: places.autostart });
-    assert.equal(await placeAutostart(places, app, true), false, 'not turned on over it');
-    assert.equal(await placeAutostart(places, app, false), false, 'not removed to turn it off');
-    assert.deepEqual(await keepEntries(places, app, Buffer.from('icon')), [], 'the launcher entry is not put over it');
-    assert.deepEqual([readFileSync(places.autostart, 'utf8'), readFileSync(places.launcher, 'utf8'), existsSync(places.icon)], [theirs, theirs, false]);
-  } finally { rmSync(home, { recursive: true, force: true }); }
-});
+test('Linux start at sign-in is Central Knot’s own autostart file: written whole when on, removed when off, read back as on or off', () => inHome(async places => {
+  assert.deepEqual(readAutostart(places), { openAtLogin: false }, 'none yet: off');
+  assert.equal(await placeAutostart(places, app, true), true);
+  assert.equal(readFileSync(places.autostart, 'utf8'), desktopEntry(app, 'autostart'), 'on: the folder is made and the file written');
+  // A folder made for it is the owner's alone (0700), as the Base Directory spec asks.
+  assert.equal(statSync(join(places.autostart, '..')).mode & 0o777, 0o700);
+  assert.deepEqual(readAutostart(places), { openAtLogin: true });
+  // The desktop's own settings turned it off the spec's way: it reads as off, and on again writes it whole.
+  writeFileSync(places.autostart, `${desktopEntry(app, 'autostart')}Hidden = true\n`);
+  assert.deepEqual(readAutostart(places), { openAtLogin: false }, 'Hidden=true is off, with or without spaces around =');
+  assert.equal(await placeAutostart(places, app, true), true);
+  assert.equal(readFileSync(places.autostart, 'utf8'), desktopEntry(app, 'autostart'));
+  assert.equal(await placeAutostart(places, app, false), true);
+  assert.equal(existsSync(places.autostart), false, 'off: removed');
+  assert.equal(await placeAutostart(places, app, false), true, 'off again with none there: nothing to do');
+}));
 
-test('at each start the launcher entry and its icon are put in place, and follow the AppImage when it moves; an autostart file that is on follows too', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'ck-signin-'));
+test('a file in either place that Central Knot didn’t write is never written over or removed, and sign-in says so', () => inHome(async (places, icon) => {
+  const theirs = '[Desktop Entry]\nType=Application\nName=Mine\nExec=/usr/bin/true\n';
+  for (const path of [places.autostart, places.launcher]) { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, theirs); }
+  assert.deepEqual(readAutostart(places), { openAtLogin: false, another: places.autostart });
+  assert.equal(await placeAutostart(places, app, true), false, 'not turned on over it');
+  assert.equal(await placeAutostart(places, app, false), false, 'not removed to turn it off');
+  assert.deepEqual(await keepEntries(places, app, icon), wrote(places.icon), 'the launcher entry is not put over it; the icon goes where nothing is');
+  assert.deepEqual([readFileSync(places.autostart, 'utf8'), readFileSync(places.launcher, 'utf8')], [theirs, theirs]);
+}));
+
+test('a link at any of the three places is the person’s: never written through, replaced or removed, whatever it leads to', () => inHome(async (places, icon) => {
+  const elsewhere = join(places.icon, '../../../../../../elsewhere');
+  mkdirSync(elsewhere, { recursive: true });
+  const own = join(elsewhere, 'own.desktop');
+  writeFileSync(own, desktopEntry(app, 'autostart'));
+  const links: [string, string][] = [[places.autostart, own], [places.launcher, join(elsewhere, 'gone.desktop')], [places.icon, join(elsewhere, 'gone.png')]];
+  for (const [path, target] of links) { mkdirSync(join(path, '..'), { recursive: true }); symlinkSync(target, path); }
+  assert.deepEqual(readAutostart(places), { openAtLogin: false, another: places.autostart }, 'a link to its own entry is still a link');
+  assert.equal(await placeAutostart(places, moved, true), false);
+  assert.equal(await placeAutostart(places, app, false), false);
+  assert.deepEqual(await keepEntries(places, moved, icon), [], 'a dangling link is not an empty place');
+  assert.deepEqual(links.map(([path]) => readlinkSync(path)), links.map(([, target]) => target));
+  assert.deepEqual([readFileSync(own, 'utf8'), existsSync(join(elsewhere, 'gone.desktop')), existsSync(join(elsewhere, 'gone.png'))], [desktopEntry(app, 'autostart'), false, false]);
+}));
+
+test('at each start the launcher entry and its icon are put in place, and follow the AppImage when it moves; an autostart file that is on follows too', () => inHome(async (places, icon) => {
+  assert.deepEqual(await keepEntries(places, app, icon), wrote(places.launcher, places.icon), 'first open: the entry, then its icon');
+  assert.deepEqual([readFileSync(places.launcher, 'utf8'), readFileSync(places.icon)], [desktopEntry(app, 'launcher'), icon]);
+  assert.deepEqual(await keepEntries(places, app, icon), [], 'the next start: nothing to do');
+  assert.equal(existsSync(places.autostart), false, 'start at sign-in off: no autostart file appears');
+  // Turned on, then the AppImage is moved: both entries name the new place at the next start.
+  await placeAutostart(places, app, true);
+  assert.deepEqual(await keepEntries(places, moved, icon), wrote(places.launcher, places.autostart));
+  assert.deepEqual([readFileSync(places.launcher, 'utf8'), readFileSync(places.autostart, 'utf8')], [desktopEntry(moved, 'launcher'), desktopEntry(moved, 'autostart')]);
+  // One the desktop turned off (Hidden=true) is not turned back on by a move.
+  writeFileSync(places.autostart, `${desktopEntry(moved, 'autostart')}Hidden=true\n`);
+  assert.deepEqual(await keepEntries(places, app, icon), wrote(places.launcher));
+  assert.equal(readFileSync(places.autostart, 'utf8').includes(moved.appImage), true);
+  // An icon or a launcher entry the person removed comes back by itself: they are how the launcher and the taskbar know the app.
+  rmSync(places.icon);
+  assert.deepEqual(await keepEntries(places, app, icon), wrote(places.icon));
+  rmSync(places.launcher);
+  assert.deepEqual(await keepEntries(places, app, icon), wrote(places.launcher));
+}));
+
+test('the person’s edits are kept: an Exec they added to still names this AppImage, and a move changes only the program’s path', () => inHome(async (places, icon) => {
+  await keepEntries(places, app, icon);
+  await placeAutostart(places, app, true);
+  // KDE's menu editor adds an argument and a comment; README tells Ubuntu 24.04 people to add --no-sandbox.
+  const edit = (text: string) => `${text.replace(/^(Exec=.*)$/m, '$1 --no-sandbox')}Comment=Mine\n`;
+  for (const path of [places.launcher, places.autostart]) writeFileSync(path, edit(readFileSync(path, 'utf8')));
+  assert.deepEqual(await keepEntries(places, app, icon), [], 'still this AppImage: left as it is');
+  assert.deepEqual(await keepEntries(places, moved, icon), wrote(places.launcher, places.autostart));
+  assert.deepEqual([readFileSync(places.launcher, 'utf8'), readFileSync(places.autostart, 'utf8')], [edit(desktopEntry(moved, 'launcher')), edit(desktopEntry(moved, 'autostart'))]);
+  // An Exec they wrote unquoted, one letter long: its program is that letter, so it is a move, and only the letter changes.
+  writeFileSync(places.launcher, readFileSync(places.launcher, 'utf8').replace(/^Exec=.*$/m, 'Exec=x --no-sandbox'));
+  assert.deepEqual(await keepEntries(places, moved, icon), wrote(places.launcher));
+  assert.equal(readFileSync(places.launcher, 'utf8'), edit(desktopEntry(moved, 'launcher')));
+  // A path with a line break, a tab and quotes parses back to the one path: no move is seen where there is none.
+  const odd = { ...app, appImage: '/home/a/Knot\n"\t`$\\%.AppImage' };
+  assert.deepEqual(await keepEntries(places, odd, icon), wrote(places.launcher, places.autostart));
+  assert.deepEqual(await keepEntries(places, odd, icon), []);
+  assert.equal(readFileSync(places.launcher, 'utf8'), edit(desktopEntry(odd, 'launcher')));
+}));
+
+test('an icon already at its path is left as it is, and one that can’t be written stops neither entry', () => inHome(async (places, icon) => {
+  mkdirSync(join(places.icon, '..'), { recursive: true });
+  writeFileSync(places.icon, 'his own picture');
+  assert.deepEqual(await keepEntries(places, app, icon), wrote(places.launcher));
+  assert.equal(readFileSync(places.icon, 'utf8'), 'his own picture');
+  // No icon, and its folder can't be written: after a move both entries still follow the AppImage, and the log says why there's no icon.
+  rmSync(places.icon);
+  chmodSync(join(places.icon, '..'), 0o555);
+  await placeAutostart(places, app, true);
   try {
-    const places = linuxPlaces(home, {}, app.id), icon = Buffer.from([137, 80, 78, 71]);
-    assert.deepEqual(await keepEntries(places, app, icon), [places.icon, places.launcher], 'first open: icon, then the entry that names it');
-    assert.deepEqual([readFileSync(places.launcher, 'utf8'), readFileSync(places.icon)], [desktopEntry(app, 'launcher'), icon]);
-    // Its own entry, edited by the person (a menu editor's comment, say), still naming this AppImage: left as it is. Off stays off.
-    writeFileSync(places.launcher, `${desktopEntry(app, 'launcher')}Comment=Mine\n`);
-    assert.deepEqual(await keepEntries(places, app, icon), []);
-    assert.equal(existsSync(places.autostart), false, 'start at sign-in off: no autostart file appears');
-    // Turned on, then the AppImage is moved: both entries name the new place at the next start.
-    await placeAutostart(places, app, true);
-    const moved = { ...app, appImage: '/home/a/Applications/Central-Knot-Alpha.AppImage' };
-    assert.deepEqual(await keepEntries(places, moved, icon), [places.icon, places.launcher, places.autostart]);
+    const said = await keepEntries(places, moved, icon);
+    assert.deepEqual(said.slice(0, 2), wrote(places.launcher, places.autostart));
+    assert.match(said[2], new RegExp(`^couldn’t write ${places.icon}: EACCES`));
     assert.deepEqual([readFileSync(places.launcher, 'utf8'), readFileSync(places.autostart, 'utf8')], [desktopEntry(moved, 'launcher'), desktopEntry(moved, 'autostart')]);
-    // One the desktop turned off (Hidden=true) is not turned back on by a move.
-    writeFileSync(places.autostart, `${desktopEntry(moved, 'autostart')}Hidden=true\n`);
-    assert.deepEqual(await keepEntries(places, app, icon), [places.icon, places.launcher]);
-    assert.equal(readFileSync(places.autostart, 'utf8').includes(moved.appImage), true);
-    // A launcher entry the person removed comes back: it is how the launcher and the taskbar know the app.
-    rmSync(places.launcher);
-    assert.deepEqual(await keepEntries(places, app, icon), [places.icon, places.launcher]);
-  } finally { rmSync(home, { recursive: true, force: true }); }
-});
+  } finally { chmodSync(join(places.icon, '..'), 0o755); }
+}));

@@ -343,7 +343,7 @@ async function applySignIn() {
 async function keepLauncher() {
   if (process.platform !== 'linux' || whyNoSignIn(signInFacts())) return;
   try {
-    for (const path of await keepEntries(linux().places, linux().app, readFileSync(join(__dirname, '../assets/icon.png')))) log(`desktop: wrote ${path}`);
+    for (const line of await keepEntries(linux().places, linux().app, readFileSync(join(__dirname, '../assets/icon.png')))) log(`desktop: ${line}`);
   } catch (error) { logFailure('launcher entry', error); }
 }
 /** On by default (PLT-03): registered at the first launch of an installed app, then left alone. */

@@ -1,15 +1,19 @@
 // Start at sign-in: whether Central Knot can open itself when the person signs in, and whether it will. Settings, the menu bar
 // menu, the app menu, the first launch and the first-close dialog all ask this one function, so they agree and use one wording.
 // macOS and Windows keep login items themselves (Electron's login-item calls, in main.ts). Linux has none: there Central Knot
-// keeps the desktop's own files for itself, in the XDG places of the home it runs in (linuxPlaces), and only from an AppImage:
-// the autostart file that starts it at sign-in, and its launcher entry and icon, which are how the launcher and, on Wayland, the
-// taskbar know it (main.ts names its windows after the launcher entry: app.setDesktopName). Each file is what the freedesktop.org
-// specifications say: Desktop Entry 1.5 (the files' keys, the Exec value's quoting), Desktop Application Autostart 0.5 (the
-// autostart folder, Hidden), XDG Base Directory 0.8 (the folders) and Icon Theme 0.13 (hicolor). A file in either place that
-// Central Knot didn't write (no X-Central-Knot mark) is never written over or removed.
-import { readFileSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+// keeps three files of its own in the XDG places of the home it runs in (linuxPlaces), and only from an AppImage. The autostart
+// file starts it at sign-in: written when start at sign-in is turned on, removed when it is turned off (placeAutostart). The
+// launcher entry and its icon are how the launcher and, on Wayland, the taskbar know it (main.ts names its windows after the
+// entry: app.setDesktopName): at each start the entry is written where there is none and the icon where nothing is, and nothing
+// removes either (keepEntries). When the AppImage has moved, the program an entry of its own names becomes the AppImage (the
+// autostart file's too, while it is on), and nothing else in the file changes. Nothing is ever written over, through or in place
+// of what Central Knot didn't write: an entry without the X-Central-Knot mark or that can't be read, a link, or anything already
+// at the icon's path. Each file is what the freedesktop.org specifications say: Desktop Entry 1.5 (the files' keys, the Exec
+// value's quoting and escapes), Desktop Application Autostart 0.5 (the autostart folder, Hidden), XDG Base Directory 0.8 (the
+// folders, made 0700) and Icon Theme 0.13 (hicolor).
+import { lstatSync, readFileSync } from 'node:fs';
+import { mkdir, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { errorCode, writeDurably } from './share.ts';
 import type { SignIn, SignInPlace, SignInReason } from './types.ts';
 
@@ -105,25 +109,49 @@ export function linuxPlaces(home: string, env: Record<string, string | undefined
 
 /** Marks a file as Central Knot's own (an X- key, as the Desktop Entry spec allows): only such a file is ever rewritten or removed. */
 const MARK = 'X-Central-Knot=true';
-/** The Exec key's one argument: quoted, `"`, `` ` ``, `$` and `\` escaped, then every `\` doubled (the string type's escape), and `%` doubled. */
-const execArg = (path: string) => `"${path.replace(/["`$\\]/g, '\\$&')}"`.replaceAll('\\', '\\\\').replaceAll('%', '%%');
+/** The Exec key's two layers: an argument quoted, with `"`, `` ` ``, `$` and `\` escaped and `%` doubled (a field code's escape)... */
+const quoted = (path: string) => `"${path.replace(/["`$\\]/g, '\\$&').replaceAll('%', '%%')}"`;
+/** ...then the string type's escapes: `\` doubled, and a line break or tab written `\n`, `\r`, `\t`, so no path starts a line. */
+const asString = (value: string) => value.replaceAll('\\', '\\\\').replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t');
+const escapes: Record<string, string> = { '\\': '\\', n: '\n', r: '\r', t: '\t', s: ' ' };
+/** An Exec value's program (its first argument, undone layer by layer) and the rest of its command line as it is. */
+function program(value: string): [path: string, rest: string] {
+  const line = value.replace(/\\([\\nrts])/g, (_, code: string) => escapes[code]);
+  let end = line.includes(' ') ? line.indexOf(' ') : line.length;
+  // Quoted: up to the first quote no backslash escapes.
+  if (line.startsWith('"')) { end = 1; while (end < line.length && line[end] !== '"') end += line[end] === '\\' ? 2 : 1; end += 1; }
+  const first = line.slice(0, end);
+  return [(first.startsWith('"') ? first.slice(1, -1).replace(/\\(.)/g, '$1') : first).replaceAll('%%', '%'), line.slice(end)];
+}
 
 /** A file's text: the launcher entry opens the AppImage, in the Development menu; the autostart file opens it hidden (signInArgs). */
 export function desktopEntry(app: LinuxApp, kind: 'launcher' | 'autostart'): string {
-  const exec = [execArg(app.appImage), ...(kind === 'autostart' ? signInArgs : [])].join(' ');
+  const exec = asString([quoted(app.appImage), ...(kind === 'autostart' ? signInArgs : [])].join(' '));
   return ['[Desktop Entry]', 'Type=Application', `Name=${app.name}`, `Exec=${exec}`, `Icon=${app.id}`, 'Terminal=false', ...(kind === 'launcher' ? ['Categories=Development;'] : []), MARK, ''].join('\n');
 }
 
-/** What is at a place: nothing, Central Knot's own file (its lines), or another (no mark, or it can't be read), which is left alone. */
+/** What is at a place itself: nothing, Central Knot's own entry (its lines), or another (a link, wherever it leads; no mark; unreadable), left alone. */
 type Found = 'none' | 'another' | string[];
 function found(path: string): Found {
-  let lines: string[];
-  try { lines = readFileSync(path, 'utf8').split('\n'); } catch (error) { return errorCode(error) === 'ENOENT' ? 'none' : 'another'; }
-  return lines.includes(MARK) ? lines : 'another';
+  try {
+    if (lstatSync(path).isSymbolicLink()) return 'another';
+    const lines = readFileSync(path, 'utf8').split('\n');
+    return lines.includes(MARK) ? lines : 'another';
+  } catch (error) { return errorCode(error) === 'ENOENT' ? 'none' : 'another'; }
 }
-const execLine = (lines: string[]) => lines.find(line => line.startsWith('Exec='));
+/** Its own entry with its program changed to this AppImage, every other line and the rest of Exec as they are; none where it names this one already. */
+function moved(lines: string[], app: LinuxApp): string | undefined {
+  const at = lines.findIndex(line => line.startsWith('Exec='));
+  const [path, rest] = at < 0 ? [app.appImage, ''] : program(lines[at].slice('Exec='.length));
+  return path === app.appImage ? undefined : lines.with(at, `Exec=${asString(quoted(app.appImage) + rest)}`).join('\n');
+}
+/** Written whole (share.ts writeDurably), in a folder made 0700 where there is none, as the Base Directory spec asks. */
+async function put(path: string, content: string | Uint8Array) {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await writeDurably(path, content);
+}
 /** On: Central Knot's own autostart file is there and not hidden (Hidden=true, spaces around = allowed, is the Autostart spec's off, which a desktop's settings may write). */
-const autostartOn = (at: Found) => Array.isArray(at) && !at.some(line => /^Hidden\s*=\s*true\s*$/.test(line));
+const autostartOn = (at: Found): at is string[] => Array.isArray(at) && !at.some(line => /^Hidden\s*=\s*true\s*$/.test(line));
 
 /** Linux's answer for signInState, read from the autostart file each time it is asked. */
 export function readAutostart(places: LinuxPlaces): LoginItems {
@@ -135,25 +163,23 @@ export function readAutostart(places: LinuxPlaces): LoginItems {
 export async function placeAutostart(places: LinuxPlaces, app: LinuxApp, on: boolean): Promise<boolean> {
   const at = found(places.autostart);
   if (at === 'another') return false;
-  if (on) await writeDurably(places.autostart, desktopEntry(app, 'autostart'));
+  if (on) await put(places.autostart, desktopEntry(app, 'autostart'));
   else if (at !== 'none') await rm(places.autostart, { force: true });
   return true;
 }
 
 /**
- * At each start of the AppImage: the launcher entry is written where there is none or where Central Knot's own names another
- * file (the AppImage moved), its icon first; an autostart file that is on follows a move too. Each other file is left as it is
- * (one the person edited stays edited; one turned off stays off). Answers the paths written, for the log.
+ * At each start of the AppImage: the launcher entry is written where there is none; where its own names another program (the
+ * AppImage moved), only that program changes, and so in an autostart file that is on (one turned off stays off); the icon is
+ * written where nothing is at its path. Each is tried alone, so one that fails stops no other. Answers a line each, for the log.
  */
 export async function keepEntries(places: LinuxPlaces, app: LinuxApp, icon: Uint8Array): Promise<string[]> {
-  const written: string[] = [];
-  const moved = (at: Found, kind: 'launcher' | 'autostart') => Array.isArray(at) && execLine(at) !== execLine(desktopEntry(app, kind).split('\n'));
+  const said: string[] = [];
+  const tryPut = (path: string, content: string | Uint8Array | undefined) => content !== undefined && put(path, content)
+    .then(() => said.push(`wrote ${path}`), (error: Error) => said.push(`couldn’t write ${path}: ${error.message}`));
   const launcher = found(places.launcher), autostart = found(places.autostart);
-  if (launcher === 'none' || moved(launcher, 'launcher')) {
-    await writeDurably(places.icon, icon);
-    await writeDurably(places.launcher, desktopEntry(app, 'launcher'));
-    written.push(places.icon, places.launcher);
-  }
-  if (autostartOn(autostart) && moved(autostart, 'autostart')) { await writeDurably(places.autostart, desktopEntry(app, 'autostart')); written.push(places.autostart); }
-  return written;
+  await tryPut(places.launcher, launcher === 'none' ? desktopEntry(app, 'launcher') : Array.isArray(launcher) ? moved(launcher, app) : undefined);
+  if (autostartOn(autostart)) await tryPut(places.autostart, moved(autostart, app));
+  if (found(places.icon) === 'none') await tryPut(places.icon, icon);
+  return said;
 }
