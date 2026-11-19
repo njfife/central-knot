@@ -864,9 +864,10 @@ export function outcomeBand(): HTMLElement | null {
 }
 
 /**
- * Sync off: what waits, and the two ways on. Shown on every managed page, since the switch covers all of them. One line whatever
- * it says (style.css .band-sync-off), so a click that leaves a change waiting moves no row: the count, then every name as far as
- * the line goes, cut with "…"; the whole sentence, every name in it, is its tooltip.
+ * Sync off: what waits, and the two ways on. Shown on every managed page, since the switch covers all of them. One height whatever
+ * it says (style.css .band-sync-off): one line, the count, then every name as far as the line goes, cut with "…"; the whole
+ * sentence, every name in it, is its tooltip. Not covered: while a sync notice shows and nothing waits, the band is not drawn (the
+ * notice stands in for it, below), so the first change to wait then adds the band above the list.
  */
 function syncOffBand(t: Table): HTMLElement | null {
   if (!state.home || state.home.syncOn) return null;

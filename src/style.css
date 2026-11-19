@@ -453,8 +453,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 }
 .band-help { color: var(--ink-soft); }
 .band-sync-off .text-action + .text-action { margin-left: 4px; }
-/* Sync off (matrix.ts syncOffBand): one line, as tall as Sync once's button (.band .btn), idle or waiting, so a click never moves
-   the list; the words give way before the two actions, cut with "…" (the tooltip has them whole). */
+/* Sync off (matrix.ts syncOffBand): one line, as tall as Sync once's button (.band .btn), so the band is one height idle or
+   waiting; the words give way before the two actions, cut with "…" (the tooltip has them whole). */
 .band-sync-off > .band-text { line-height: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .sync-notice-lines { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
