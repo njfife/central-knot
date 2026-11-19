@@ -7524,9 +7524,9 @@ async function searchFlow() {
   await done();
   check('typed quickly during a read: the rows found for the last text, by their text too', await until(async () => (await keys()).includes(checklist)), await keys());
   const foundRows = await keys();
-  same('one heading, Sort says Best match with no arrows to press, its tooltip saying the chosen sort comes back, no date column, the kind switch counts what is found, and a row found by its text shows that text from a few words before the match',
-    [await sections(), await sort(), await b.exists('.order svg'), /comes back when Find is cleared/.test(await b.run(`document.querySelector('.order').title`)), await b.exists('.ov-when'), [checklist, id('skills', 'archive-notes'), id('agents', 'scribe'), id('mcp', 'release-feed')].every(key => foundRows.includes(key)), await counts(), await excerpt(checklist)],
-    [['results'], ['best', 'Best match', true], false, true, false, true, { all: '5', skills: '3', mcp: '1', agents: '1' }, 'In its text: …and write the changelog.']);
+  same('one heading, Sort says Best match with no arrows to press, its one tooltip saying the chosen sort comes back, no date column, the kind switch counts what is found, and a row found by its text shows that text from a few words before the match',
+    [await sections(), await sort(), await b.exists('.order svg'), /comes back when Find is cleared/.test(await b.run(`document.querySelector('.order').title`)), await b.run(`document.querySelector('#item-order').title`), await b.exists('.ov-when'), [checklist, id('skills', 'archive-notes'), id('agents', 'scribe'), id('mcp', 'release-feed')].every(key => foundRows.includes(key)), await counts(), await excerpt(checklist)],
+    [['results'], ['best', 'Best match', true], false, true, '', false, true, { all: '5', skills: '3', mcp: '1', agents: '1' }, 'In its text: …and write the changelog.']);
   // A row found by its text switched: it keeps its place through the click and another view, and so does every row.
   const before = [await keys(), await places()];
   await press(`#${rowPart('switch', 'skills', 'release-checklist')}`);
@@ -7627,19 +7627,34 @@ async function searchFlow() {
     await press(`#${rowPart('open', 'skills', 'archive-notes')}`);
     await press(`#${rowPart('delete', 'skills', 'archive-notes')}`);
     await b.run(type('changelo'));
-    if (await b.exists(`#${rowPart('delete-confirm', 'skills', 'archive-notes')}`)) await pointerAt(b, `#${rowPart('delete-confirm', 'skills', 'archive-notes')}`);
+    const confirmThere = await b.exists(`#${rowPart('delete-confirm', 'skills', 'archive-notes')}`);
+    check('the armed Delete’s confirmation is still on screen to press', confirmThere);
+    if (confirmThere) await pointerAt(b, `#${rowPart('delete-confirm', 'skills', 'archive-notes')}`);
     await wait(3000);
     await b.settle();
     const archived = jsonOrNothing(join(S.home, '.central-knot/skills.json'))?.items?.['archive-notes'];
     same('Delete armed, a letter typed, its confirmation pressed before main answered: nothing is deleted', [!!archived && !archived.deleted, (await keys()).includes(id('skills', 'archive-notes'))], [true, true]);
     await findText('changelog');
     if (await b.exists(`.ov-row[aria-expanded="true"]`)) await press(`#${rowPart('open', 'skills', 'archive-notes')}`);
+    // The list made inert by a keystroke is drawn again by the ask that outlives it: "changelo" then "changelog" typed, the answer
+    // to "changelog" held, and an index published meanwhile, whose ask (for the same text) supersedes the typed one and finds
+    // the answer in hand again. Once both are answered, a row pressed by the mouse opens.
+    await inspector.run(`(globalThis.ckLate = { changelog: 1500 })`);
+    await b.run(`(${type('changelo')}, ${type('changelog')})`);
+    await tellPublished();
+    await wait(2500);
+    await b.settle();
+    await pointerAt(b, `#${rowPart('open', 'skills', 'notes')}`);
+    await b.settle();
+    same('a typed ask outlived by a publication’s for the same text: the list is drawn again, and a row pressed opens', await b.all('.ov-row[aria-expanded="true"]', 'e.dataset.key'), [id('skills', 'notes')]);
+    if (await b.exists(`.ov-row[aria-expanded="true"]`)) await press(`#${rowPart('open', 'skills', 'notes')}`);
     await inspector.run(`(() => { const handlers = electron.ipcMain._invokeHandlers; handlers.set('search:ask', globalThis.ckSearch); handlers.set('discovery:refresh', globalThis.ckRefresh); return true; })()`);
     inspector.close();
   }
 
   // Pictures (with --shots), and what each shows: a name, a text with its excerpt, a wrong letter, nothing, a row opened.
-  const theme = look => b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+  // The colour scheme, given its moment to take on the page before a picture is taken.
+  const theme = async look => { await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] }); await wait(300); };
   const pictures = async name => {
     if (!shots) return;
     const inView = () => b.run(`document.querySelector('.ov-row[aria-expanded="true"]')?.scrollIntoView({ block: 'start' })`);
@@ -7736,7 +7751,7 @@ async function searchFlow() {
   same('the person’s own courier and the plugin’s, each its own row', [couriers.includes(id('skills', 'courier')), couriers.includes(pluginCourier)], [true, true]);
   // More pictures (with --shots), each at 1316×819 light and 860×600 dark: a long query; two words found in different rows (a found
   // row whose copies differ and a plugin's own); a chip on with Find, with and without rows; a match in a description alone; an
-  // excerpt from the middle of a long file, and from a camelCase word; descriptions stepping aside at 860, a row opened; the list
+  // excerpt from the middle of a long file, and from a camelCase word; at 860 with the sidebar open, a row opened; the list
   // just after Find is cleared, the chosen Sort back.
   if (shots) {
     const glimpse = async name => {
@@ -7758,15 +7773,15 @@ async function searchFlow() {
     await findText('changelog');
     await glimpse('chip-without-rows');
     await b.click('#chip-plugins');
-    // At 860 with the sidebar open, the long name leaves the descriptions no room: every row's steps aside, the opened row has it.
+    // At 860 with the sidebar open, a row found by its text opened: its excerpt on its row and in its details.
     await sizeTo(b, 860, 600);
     await b.click('#sidebar-toggle');
     await press(`#${rowPart('open', 'skills', 'release-checklist')}`);
     await b.run(`document.querySelector('.ov-row[aria-expanded="true"]')?.scrollIntoView({ block: 'start' })`);
     await theme('dark');
-    await b.shot('find-descriptions-aside-860-dark');
+    await b.shot('find-opened-860-sidebar-open-dark');
     await theme('light');
-    await b.shot('find-descriptions-aside-860');
+    await b.shot('find-opened-860-sidebar-open');
     await press(`#${rowPart('open', 'skills', 'release-checklist')}`);
     await b.click('#sidebar-toggle');
     await fullSize(b);
@@ -8006,7 +8021,9 @@ async function libraryFlow() {
     const held = await a.main();
     await held.run(`(() => { const handlers = electron.ipcMain._invokeHandlers, real = handlers.get('search:ask'); globalThis.ckSearch = real; handlers.set('search:ask', (event, typed) => typed === 'bod' ? new Promise(done => setTimeout(done, 2500)).then(() => real(event, typed)) : real(event, typed)); return true; })()`);
     await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'bod'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-    if (await a.exists('#turn-unused-off')) await pointerAt(a, '#turn-unused-off');
+    const turnThere = await a.exists('#turn-unused-off');
+    check('Turn these off is still on screen to press', turnThere);
+    if (turnThere) await pointerAt(a, '#turn-unused-off');
     await wait(3000);
     await done(a);
     same('Turn these off pressed after a letter typed, before main answered: nothing is turned off', [existsSync(join(A.claude, 'idle')), existsSync(join(A.claude, 'tidy'))], [true, true]);

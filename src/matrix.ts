@@ -447,14 +447,16 @@ const chipNames = { attention: 'Copies differ', plugins: 'From plugins', unused:
  */
 function filterBar(t: Table) {
   const view = t.view, attention = rowsIn(t).filter(skill => needsChoice(t, skill)).length;
-  // `count`: how many it shows, amber when they need something (`warn`); while the Library's Find has text, of what Find leaves.
-  const chip = (id: Filter, label: string, glyph: IconName, all: number, warn = false, count = searching(t) ? listedRows({ ...t, view: { ...view, filter: id } }).length : all) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn && count ? '.chip-warn' : ''}`,
+  // How many a chip shows: while the Library's Find has text, of what Find leaves (listedRows with that chip on), as the kind switch counts.
+  const shows = (id: Filter, all: number) => (searching(t) ? listedRows({ ...t, view: { ...view, filter: id } }).length : all);
+  // `count`: how many it shows, amber when they need something (`warn`).
+  const chip = (id: Filter, label: string, glyph: IconName, count: number, warn = false) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn && count ? '.chip-warn' : ''}`,
     { type: 'button', id: `chip-${id}`, 'aria-pressed': String(view.filter === id), 'aria-label': `${label} ${count}`, 'data-tip': label, onclick: () => { view.filter = view.filter === id ? 'all' : id; rerender(); } },
     icon(glyph, 13, 'chip-icon'), h('span.chip-label', {}, label), h('span.chip-count', {}, String(count)));
   // A chip is offered while something matches it, over every kind the Library holds (overEveryKind), or while it is the one on.
   const over = overEveryKind(t), offered = (id: Filter, matching: boolean) => matching || view.filter === id;
-  const chips = [offered('attention', copiesDifferChipShown(over)) ? chip('attention', chipNames.attention, 'diff', attention, true) : null, offered('plugins', pluginChipShown(over)) ? chip('plugins', chipNames.plugins, 'puzzle', pluginCount(t)) : null,
-    offered('unused', !!unusedCount(over)) ? chip('unused', chipNames.unused, 'history', unusedCount(t)) : null].filter(Boolean);
+  const chips = [offered('attention', copiesDifferChipShown(over)) ? chip('attention', chipNames.attention, 'diff', shows('attention', attention), true) : null, offered('plugins', pluginChipShown(over)) ? chip('plugins', chipNames.plugins, 'puzzle', shows('plugins', pluginCount(t))) : null,
+    offered('unused', !!unusedCount(over)) ? chip('unused', chipNames.unused, 'history', shows('unused', unusedCount(t))) : null].filter(Boolean);
   return chips.length ? h('div.chips', { role: 'group', 'aria-label': 'Show only' }, chips) : null;
 }
 
@@ -1310,13 +1312,14 @@ const newFind = (view: View, text: string) => { Object.assign(view, { find: text
 const clearFind = (view: View) => { newFind(view, ''); rerender(); };
 /**
  * Find typed: a tool's tab is drawn at once; the Library's list once main has answered (askFind), at once with Find empty. Until
- * then the list on screen is the text before's, and nothing below the toolbar acts (inert).
+ * the page is next drawn (a draw builds it anew), the list on screen is the text before's and nothing below the toolbar acts
+ * (inert): this ask draws it when it returns, unless the text has changed since, whose own ask then does.
  */
 function findTyped(t: Table, text: string) {
   newFind(t.view, text);
   if (!searching(t)) { rerender(); return; }
   for (const before of document.querySelectorAll<HTMLElement>('.ov-page .toolbar ~ *, .ov-page .dock-main ~ *')) before.inert = true;
-  void askFind(text).then(came => { if (came !== 'dropped') rerender(); });
+  void askFind(text).then(came => { if (came !== 'dropped' || t.view.find === text) rerender(); });
 }
 /** The Library's list while its Find has text: one list of the rows Find finds (foundRows), under one heading, Sort at Best match. */
 const searching = (t: Table) => !t.tool && !filesView(t) && !!t.view.find.trim();
@@ -1975,7 +1978,7 @@ function orderChoice(t: Table) {
   // While the Library's Find has text: Best match, greyed, its tooltip saying why.
   const best = searching(t), options = best ? [h('option', { value: 'best', selected: true }, 'Best match')] : [option('name', 'Name'), option('updated', 'Last updated'), option('used', 'Last used')];
   return [h('span.order', { title: best ? 'Best match while Find has text; the Sort you chose comes back when Find is cleared' : 'The order of the rows under each heading' }, h('label.order-word', { for: 'item-order' }, 'Sort'),
-    h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: 'Sort by', disabled: best, onchange: choose }, options), best ? null : icon('chevrons-up-down', 14))),
+    h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: best ? undefined : 'Sort by', disabled: best, onchange: choose }, options), best ? null : icon('chevrons-up-down', 14))),
     roomHeld(rowsHeld(t), held => button({ variant: 'ghost', size: 'small', icon: 'list', label: 'Put in order', id: held ? 'put-in-order' : undefined, collapse: true, onclick: () => { unpin(); rerender(); } }))];
 }
 /**

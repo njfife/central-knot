@@ -12,6 +12,9 @@
 //   (the first LOOKED_UP of them) gets the known words nearest it (`nearest`) beside it and every word is asked again; if
 //   still nothing, any of the typed words. Every word is quoted, so nothing typed reaches MATCH as syntax. Ranked by bm25()
 //   with the name weighted most (`WEIGHTS`), ties by row id;
+// - the excerpt of a row found in its text alone (`around`): the file's own words from BEFORE words before the first that
+//   matched, EXCERPT_WORDS in all, "…" where cut; where more of the typed words matched in a camelCase word's parts than in
+//   the text, around that word (`markWord`);
 // - the one index main keeps (`searchFollower`): built from a view's documents in slices that give way to main's other work,
 //   superseded by a newer view while it gathers or builds, tagged again (not rebuilt) when the content is the same, closed
 //   when replaced or superseded, when another home opens and at quit.
@@ -98,10 +101,10 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
     ELSE snippet(docs, 2, char(1), char(2), '…', ${EXCERPT_WORDS}) || char(0) || snippet(docs, 3, char(1), char(2), '', 2) END AS excerpt
     FROM docs WHERE docs MATCH ? ORDER BY bm25(docs, ${WEIGHTS.join(', ')}), rowid`);
   const textOf = db.prepare('SELECT text FROM docs WHERE rowid = ?');
-  /** A row's excerpt: around the first word of its text that matched; where more words matched in camelCase words' parts, around the first of those words. */
+  /** A row's excerpt: around the first word of its text that matched; where more words matched in camelCase words' parts, around such a word (markWord). */
   const excerptOf = (rowid: number, snippets: string) => {
     const [text, parts] = snippets.split('\0');
-    return matched(text) >= matched(parts) ? around(text) : around(markWord((textOf.get(rowid) as { text: string }).text, parts));
+    return marked(text).length >= marked(parts).length ? around(text) : around(markWord((textOf.get(rowid) as { text: string }).text, parts));
   };
   const any = db.prepare('SELECT 1 FROM docs WHERE docs MATCH ? LIMIT 1');
   /** The rows `expr` finds, best first; an excerpt for a row its names and description alone don't explain. */
@@ -146,12 +149,13 @@ function around(marked: string) {
   const lead = cutBefore || kept.length < before.length ? '…' : '', tail = shown.length < after.length ? '…' : '';
   return `${lead}${[...kept, ...shown].join(' ')}${tail}`.replaceAll(OPEN, '').replaceAll(CLOSE, '');
 }
-/** How many different words a snippet has marked. */
-const matched = (snippet: string) => new Set([...snippet.matchAll(/\u0001([^\u0002]*)\u0002/gu)].map(match => match[1].toLowerCase())).size;
-/** `text` with the first camelCase word marked whose parts hold the first part marked in `parts` ("prepareReleaseNotes" for "Release"). */
+/** The different words a snippet has marked, in lower case, in the order first marked. */
+const marked = (snippet: string) => [...new Set([...snippet.matchAll(/\u0001([^\u0002]*)\u0002/gu)].map(match => match[1].toLowerCase()))];
+/** `text` with one camelCase word marked: the first whose parts hold every part marked in `parts`, else the first that holds the first. */
 function markWord(text: string, parts: string) {
-  const part = parts.slice(parts.indexOf(OPEN) + 1, parts.indexOf(CLOSE)).toLowerCase(), all = text.split(/\s+/);
-  const at = all.findIndex(word => CAMEL.test(word) && cut(apart(word)).includes(part));
+  const wanted = marked(parts), all = text.split(/\s+/), pieces = (word: string) => (CAMEL.test(word) ? cut(apart(word)) : []);
+  const every = all.findIndex(word => wanted.every(part => pieces(word).includes(part)));
+  const at = every >= 0 ? every : all.findIndex(word => pieces(word).includes(wanted[0]));
   return all.map((word, each) => (each === at ? `${OPEN}${word}${CLOSE}` : word)).join(' ');
 }
 
