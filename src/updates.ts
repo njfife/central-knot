@@ -1,8 +1,8 @@
 // Updates (PLT-02): the release lines (alpha, preview, final) and the app each line's builds are, which GitHub release this
-// build would update to, whether this copy can replace itself, and what the sidebar's update control and Settings say about
-// it. No Node imports: the main process (updater.ts, updateflow.ts) checks and installs, the page (updateview.ts) shows these
-// words, and packaging (scripts/package-app.mjs, package-mac.mjs, package-linux.mjs, mac-dmg.mjs) names the app and its
-// downloads from the same rules.
+// build would update to (a Mac's zip, Linux's AppImage), whether this copy can replace itself (on Linux not yet), and what the
+// sidebar's update control and Settings say about it. No Node imports: the main process (updater.ts, updateflow.ts) checks
+// and installs, the page (updateview.ts) shows these words, and packaging (scripts/package-app.mjs, package-mac.mjs,
+// package-linux.mjs, mac-dmg.mjs) names the app and its downloads from the same rules.
 import { PRODUCT, STANDARD_BUILD, compareVersions, isHttps, record, text } from './values.ts';
 import type { UpdateReason, UpdateRelease, UpdateView } from './types.ts';
 
@@ -86,8 +86,8 @@ export const downloadName = (name: string) => name.trim().replace(/\s+/g, '-');
 export const macDownload = (appName: string, version: string, kind: 'zip' | 'dmg') => `${downloadName(appName)}-${version}-mac-arm64.${kind}`;
 /**
  * An app's Linux download for one version: "Central-Knot-Alpha-0.6.0-linux-x86_64.AppImage" (scripts/package-linux.mjs). No
- * Mac rule takes it (otherDownloads, isMacZip), so Mac packaging leaves it be and no Mac build is ever offered it. Nothing in
- * the app reads it yet: Linux has no updates.
+ * Mac rule takes it (otherDownloads, isOwnDownload), so Mac packaging leaves it be and no Mac build is ever offered it. A Linux
+ * copy is offered a release for it (newerRelease) and doesn't download it yet: the release's page does.
  */
 export const linuxDownload = (appName: string, version: string) => `${downloadName(appName)}-${version}-linux-x86_64.AppImage`;
 /**
@@ -96,19 +96,25 @@ export const linuxDownload = (appName: string, version: string) => `${downloadNa
  * release that also carried the standard app's zip would be offered to every installed preview.
  */
 export const otherDownloads = (files: string[], keep: string[]) => files.filter(file => /-mac-arm64\.(?:zip|dmg)$/.test(file) && !keep.includes(file));
-/** Whether a release's file is the named app's Mac zip, of any version: another app's download (the alpha's, for the standard app) is not. */
-function isMacZip(file: string, appName: string): boolean {
-  const before = `${downloadName(appName)}-`, after = '-mac-arm64.zip';
+/**
+ * Whether a release's file is the named app's download for `platform`, of any version: on Linux its AppImage, elsewhere its Mac
+ * zip, the one the Mac's updater installs. Another app's download (the alpha's, for the standard app) is not. Each name is the
+ * app's name, a dash, the version and the platform's own ending, as linuxDownload and macDownload make it.
+ */
+function isOwnDownload(file: string, appName: string, platform: string): boolean {
+  const named = (version: string) => (platform === 'linux' ? linuxDownload(appName, version) : macDownload(appName, version, 'zip'));
+  const before = `${downloadName(appName)}-`, after = named('').slice(before.length);
   const version = file.slice(before.length, -after.length);
   return file.startsWith(before) && file.endsWith(after) && tagVersion(version) === version;
 }
 
 /**
  * The newest release newer than the tag this build was made from, in a line this build's line is offered (OFFERED), that has
- * this build's own Mac zip (lineApp's name), from GitHub's list of releases. Tags compare as versions, pre-releases by semver's
- * rules. A final build also passes over anything GitHub marks as a pre-release. Drafts and anything malformed are passed over.
+ * this build's own download for its platform (lineApp's name; isOwnDownload), from GitHub's list of releases: a release with
+ * Mac files alone is no update on Linux. Tags compare as versions, pre-releases by semver's rules. A final build also passes
+ * over anything GitHub marks as a pre-release. Drafts and anything malformed are passed over.
  */
-export function newerRelease(list: unknown, current: string): UpdateRelease | undefined {
+export function newerRelease(list: unknown, current: string, platform: string): UpdateRelease | undefined {
   const mine = tagVersion(current), line = releaseLine(current);
   if (!mine || !line || !Array.isArray(list)) return undefined;
   const app = lineApp(line);
@@ -118,17 +124,21 @@ export function newerRelease(list: unknown, current: string): UpdateRelease | un
     if (!entry || !version || entry.draft === true || !isHttps(page)) continue;
     if (!OFFERED[line].includes(releaseLine(tag)!) || (line === 'final' && entry.prerelease === true)) continue;
     if (compareVersions(version, mine) <= 0 || (best && compareVersions(version, tagVersion(best.tag)!) <= 0)) continue;
-    const zip = (Array.isArray(entry.assets) ? entry.assets : []).map(record).find(asset => isMacZip(text(asset?.name), app.name));
-    const url = text(zip?.browser_download_url), size = zip?.size;
+    const file = (Array.isArray(entry.assets) ? entry.assets : []).map(record).find(asset => isOwnDownload(text(asset?.name), app.name, platform));
+    const url = text(file?.browser_download_url), size = file?.size;
     if (!/^https?:\/\/\S+$/.test(url) || typeof size !== 'number' || size <= 0) continue;
-    best = { tag, zip: url, size, page };
+    best = { tag, download: url, size, page };
   }
   return best;
 }
 
-/** What decides whether this copy can replace itself, as the main process finds it. */
-export interface UpdateFacts {
-  platform: string;
+/**
+ * What decides whether this copy can replace itself, as the main process finds it. On Linux, where no copy replaces itself
+ * yet, that is only what the build is; on a Mac, also where the app is and who signed it.
+ */
+export type UpdateFacts = MacFacts | { platform: 'linux'; packaged: boolean; tag?: string };
+export interface MacFacts {
+  platform: 'darwin';
   /** An installed app, not a development run. */
   packaged: boolean;
   /** The release tag the build was made from, when it was made from one. */
@@ -149,19 +159,23 @@ const reasons: Record<UpdateReason, string> = {
   // The same words as Start at sign-in (signin.ts): a copy run from Downloads, a disk image or a translocated folder.
   applications: 'Move Central Knot to the Applications folder first.',
   readonly: 'Your account can’t change apps in this Applications folder. Download the new release and replace Central Knot by hand.',
+  linux: 'This copy of Central Knot doesn’t install updates itself yet. Download a newer release’s AppImage from its page.',
 };
 
-/** Whether updates show at all: there are only Mac releases, so elsewhere nothing about them is shown. */
-export const updatesShown = (platform: string) => platform === 'darwin';
+/** Whether updates show at all: releases are made for Macs and for Linux (its AppImage), so elsewhere nothing about them is shown. */
+export const updatesShown = (platform: string) => platform === 'darwin' || platform === 'linux';
 
 /**
- * Why this copy can't update itself, or nothing when it can. An app replaces itself only where it was installed: the
- * Applications folder, or the one in the person's home, never a translocated copy or a disk image.
+ * Why this copy can't update itself, or nothing when it can. A development build and one not made from a release never
+ * check; a Linux release build checks, and says it doesn't install updates itself yet. A Mac app replaces itself only where it
+ * was installed: the Applications folder, or the one in the person's home, never a translocated copy or a disk image.
  */
-export function whyNoUpdate({ packaged, tag, bundle, home, team, writable }: UpdateFacts): UpdateView['reason'] {
+export function whyNoUpdate(facts: UpdateFacts): UpdateView['reason'] {
   const because = (key: UpdateReason) => ({ key, text: reasons[key] });
-  if (!packaged) return because('dev');
-  if (!tag || !tagVersion(tag)) return because('untagged');
+  if (!facts.packaged) return because('dev');
+  if (!facts.tag || !tagVersion(facts.tag)) return because('untagged');
+  if (facts.platform === 'linux') return because('linux');
+  const { bundle, home, team, writable } = facts;
   if (!team) return because('unsigned');
   const inApplications = bundle.startsWith('/Applications/') || bundle.startsWith(`${home.replace(/\/$/, '')}/Applications/`);
   if (!inApplications || bundle.includes('/AppTranslocation/')) return because('applications');
@@ -209,7 +223,8 @@ export function updateButton(view: UpdateView, { held, restarting = false }: { h
  * - `ready`: prepared; a click restarts into it.
  * - `held`: prepared, but something unsaved or a plugin run under way keeps it from restarting by itself. It never restarts on a click: it opens Settings'
  *   Updates row, which says what restarting would lose, beside its own Restart button.
- * - `elsewhere`: a newer release this copy can't install itself (Settings says why and links the release). It opens Settings.
+ * - `elsewhere`: a newer release this copy can't install itself, outlined. It opens Settings, which says why and links the
+ *   release; on Linux, where updating is downloading the new AppImage, it opens the release's page (`page`).
  * `does` is what a click does; `name` is the control's full name for a screen reader and the folded sidebar, whose control
  * shows only its icon; `title` is the tooltip.
  */
@@ -217,7 +232,7 @@ export type IndicatorLook = 'off' | 'check' | 'checking' | 'available' | 'workin
 export interface Indicator {
   look: IndicatorLook; glyph: 'refresh-cw' | 'circle-arrow-down' | 'arrow-down' | 'circle-alert' | 'circle-check' | 'triangle-alert' | 'clock';
   label: string; name: string; title: string; busy: boolean;
-  does: 'check' | 'update' | 'restart' | 'settings';
+  does: 'check' | 'update' | 'restart' | 'settings' | 'page';
   /** While downloading: how much has arrived, 0 to 1. */
   progress?: number;
 }
@@ -236,6 +251,11 @@ export function updateIndicator(view: UpdateView, { held, restarting = false, ch
   }
   if (view.available && view.reason) {
     const words = tagWords(view.available.tag);
+    // On Linux updating is downloading the new AppImage from the release's page, so the click opens that page.
+    if (view.reason.key === 'linux') {
+      return { look: 'elsewhere', glyph: 'circle-arrow-down', label: 'Update available', name: `${words} is available. Open its release page`,
+        title: `${words} is available. ${view.reason.text} Click to open the release’s page.`, busy: false, does: 'page' };
+    }
     return { look: 'elsewhere', glyph: 'circle-arrow-down', label: 'Update available', name: `${words} is available. Open Settings`, title: `${words} is available. ${view.reason.text} Open Settings for the release page.`, busy: false, does: 'settings' };
   }
   if (!view.tag || view.reason?.key === 'dev' || view.reason?.key === 'untagged') {

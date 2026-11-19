@@ -1,5 +1,6 @@
 // A stand-in for GitHub's releases for update tests: a list shaped like `GET /repos/{owner}/{repo}/releases`, and each
-// release's Mac zip, served on this computer only. The app reads it through CK_UPDATE_RELEASES (src/updater.ts).
+// release's one download (a Mac zip, or with `asset` an AppImage), served on this computer only. The app reads it through
+// CK_UPDATE_RELEASES (src/updater.ts).
 import { createServer } from 'node:http';
 import { readFileSync, statSync } from 'node:fs';
 
@@ -7,7 +8,8 @@ import { readFileSync, statSync } from 'node:fs';
  * Serves `releases`: each `{ tag, zip }`, `zip` a file path, newest first. Options per release: `cut` (send only that share of
  * the zip, then drop the connection: an interrupted download), `stall` (send only that share, then say nothing more with the
  * connection left open: a download that goes quiet), `bytesPerSecond` (a slow download, for watching progress), `asset` (the
- * zip's name in the list: the standard app's `Central-Knot-0.5.0-mac-arm64.zip` unless given, as for an alpha's zip).
+ * download's name in the list: the standard app's Mac zip `Central-Knot-0.5.0-mac-arm64.zip` unless given, as for an alpha's
+ * zip or an AppImage).
  * `port`: a fixed port, for builds that have the fixture's address built in. Returns `{ url, releasesUrl, served, close }`;
  * `served` lists the zip requests.
  */

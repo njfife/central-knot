@@ -3,7 +3,8 @@
 // Squirrel checks that the new app satisfies this app's own code signature requirement (the same Developer ID team), unpacks
 // it aside and swaps it in only at the restart, so a failed or interrupted update leaves the installed app as it was. Squirrel
 // wants a feed URL that answers with the zip's address; a loopback-only server gives that one answer, and the zip itself, for
-// the length of one update.
+// the length of one update. On Linux there is no Squirrel and no codesign: a copy there checks, and says that it doesn't install
+// updates itself yet (updates.ts whyNoUpdate), so nothing is downloaded.
 import { app, autoUpdater, net } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -21,9 +22,9 @@ export type { PendingUpdate, UpdaterHost } from './updateflow.ts';
 /**
  * Test-only inputs, read only when set:
  * - CK_UPDATE_RELEASES: the URL of a releases list to read instead of GitHub's (a local fixture shaped like GitHub's answer).
- * - CK_UPDATE_STUB: a tag. The app acts as an installed copy of that release that can update itself, and the install step
- *   only records the update and quits, for the end-to-end test, which can't replace a real app. It skips the signature check:
- *   a test of the real update never sets it.
+ * - CK_UPDATE_STUB: a tag. The app acts as an installed copy of that release: on a Mac one that can update itself, whose
+ *   install step only records the update and quits, for the end-to-end test, which can't replace a real app (it skips the
+ *   signature check: a test of the real update never sets it); on Linux an AppImage, which doesn't update itself yet.
  */
 const releasesUrl = process.env.CK_UPDATE_RELEASES || releasesApi;
 const stub = process.env.CK_UPDATE_STUB;
@@ -57,17 +58,21 @@ export function startUpdater(host: UpdaterHost) {
   let waiting = false;
   let late: (error?: Error) => void = () => undefined;
   // Squirrel reports a failure as an 'error' event; with no listener Node would throw it.
-  autoUpdater.on('error', error => { host.log(`update: ${error.message}`); if (!waiting) late(error); });
-  autoUpdater.on('update-downloaded', () => { if (!waiting) late(); });
+  if (process.platform === 'darwin') {
+    autoUpdater.on('error', error => { host.log(`update: ${error.message}`); if (!waiting) late(error); });
+    autoUpdater.on('update-downloaded', () => { if (!waiting) late(); });
+  }
 
   /** What decides whether this copy can update itself, read once at the start. */
   async function reason() {
-    if (!shown || stub) return undefined;
+    if (!shown) return undefined;
+    if (process.platform === 'linux') return whyNoUpdate({ platform: 'linux', packaged: app.isPackaged || !!stub, tag });
+    if (stub) return undefined;
     const exe = app.getPath('exe');
     const bundle = exe.replace(/\/Contents\/MacOS\/[^/]+$/, '');
     const packaged = app.isPackaged && bundle !== exe;
     const team = packaged && tag ? await signingTeam(bundle) : undefined;
-    return whyNoUpdate({ platform: process.platform, packaged, tag, bundle, home: homedir(), team,
+    return whyNoUpdate({ platform: 'darwin', packaged, tag, bundle, home: homedir(), team,
       writable: packaged && await writable(dirname(bundle)) && await writable(bundle) });
   }
 
@@ -114,7 +119,7 @@ export function startUpdater(host: UpdaterHost) {
   }
 
   return updateFlow(host, {
-    shown, version: app.getVersion(), tag, releasesUrl,
+    shown, platform: process.platform, version: app.getVersion(), tag, releasesUrl,
     fetch: (url, init) => net.fetch(url, init),
     reason, temp: () => app.getPath('temp') || tmpdir(),
     prepare, onLate: heard => { late = heard; },

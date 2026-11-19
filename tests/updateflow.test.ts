@@ -33,7 +33,7 @@ async function folderRemoved(temp: string) {
  * An installed preview 6 with a stand-in for everything outside the steps. Tests change what the stand-ins answer: `list` (the
  * releases), `download` (the zip's answer), `prepare` (Squirrel's), `quit` (the restart), `save` (the settings file).
  */
-function installed(t: TestContext, { tag = 'v0.5.0-preview.6', untagged = false, pending = undefined as PendingUpdate | undefined, page = true } = {}) {
+function installed(t: TestContext, { tag = 'v0.5.0-preview.6', untagged = false, pending = undefined as PendingUpdate | undefined, page = true, platform = 'darwin', reason = undefined as UpdateView['reason'] } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const temp = mkdtempSync(join(tmpdir(), 'ck-updateflow-'));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
@@ -74,7 +74,7 @@ function installed(t: TestContext, { tag = 'v0.5.0-preview.6', untagged = false,
     savePending: async next => { await world.save(next); world.pending = next; world.saves.push(next?.tag); changed(); },
     quitting: on => { world.quitting = on; },
   }, {
-    shown: true, version: '0.5.0', tag: untagged ? undefined : tag, releasesUrl: RELEASES,
+    shown: true, platform, version: '0.5.0', tag: untagged ? undefined : tag, releasesUrl: RELEASES,
     fetch: async (url, { signal }) => {
       if (url !== RELEASES) return world.download(signal);
       world.reads += 1;
@@ -82,7 +82,7 @@ function installed(t: TestContext, { tag = 'v0.5.0-preview.6', untagged = false,
       await world.held;
       return new Response(JSON.stringify(world.list), { status: world.status });
     },
-    reason: async () => undefined,
+    reason: async () => reason,
     temp: () => temp,
     prepare: async (release, zip) => { world.prepared.push({ tag: release.tag, bytes: statSync(zip).size }); await world.prepare(release, zip); },
     onLate: heard => { world.late = heard; },
@@ -145,6 +145,21 @@ test('coming back to the window checks again once the last check is five minutes
   assert.equal(world.reads, 2);
   world.tick(1000);
   await world.until('the clock’s next check', () => world.reads === 3);
+});
+
+test('on Linux a newer release with an AppImage is offered, and Update downloads nothing: this copy doesn’t install updates itself yet', async t => {
+  const linux = { key: 'linux' as const, text: 'This copy of Central Knot doesn’t install updates itself yet.' };
+  const { world, flow } = await offered(t, { platform: 'linux', reason: linux });
+  const offer = () => world.view?.available;
+  assert.equal(offer(), undefined, 'the Mac zip alone is no update here');
+  const appImage = { name: 'Central-Knot-0.5.0-linux-x86_64.AppImage', browser_download_url: 'https://fixture.test/download/v0.5.0-preview.7/appimage', size: 1000 };
+  world.list = [{ ...listed('v0.5.0-preview.7'), assets: [...listed('v0.5.0-preview.7').assets, appImage] }];
+  await flow.check();
+  assert.deepEqual([offer()?.tag, offer()?.download, world.view?.reason?.key], ['v0.5.0-preview.7', appImage.browser_download_url, 'linux']);
+  let downloads = 0;
+  world.download = () => { downloads += 1; return bytes(1000); };
+  const after = await flow.install();
+  assert.deepEqual([downloads, after.step, world.prepared, world.saves], [0, undefined, [], []]);
 });
 
 test('a build that wasn’t made from a release never checks', async t => {
