@@ -7800,8 +7800,9 @@ async function headerResultFlow() {
     chmodSync(claude, 0o755);
   }
 
-  // Beside a folded problem result the toolbar takes each press; with the card open, a press on a control in view folds the card
-  // and does that control's work, once: a segment of the kind switch where one is in view, and a row's switch.
+  // With the card open, a press on a control in view folds the card and does that control's work, once: a row's switch, pressed
+  // at once so its click joins the run (a click joins within 8 seconds of the last: clicklist.ts runAt), and a segment of the kind
+  // switch where one is in view. Beside the folded result the toolbar takes each press.
   await a.run(`window.segmentClicks = 0; document.addEventListener('click', event => { if (event.target.closest?.('.kind-seg')) window.segmentClicks++; }, true)`);
   const kindNow = () => a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id`);
   for (const size of [[860, 600], [1316, 822]]) {
@@ -7810,6 +7811,10 @@ async function headerResultFlow() {
     const at = `at ${size.join('×')}`, filesBefore = files();
     chmodSync(claude, 0o555);
     await clickRun(names.slice(0, 3));
+    await pressOn('#problems-show-all');
+    await pressOn(switchOf(names[6]));
+    same(`${at}, with the card open, a press on a row’s switch folds it and turns that row off, once, in the same run`,
+      [await toggle(), await a.run(`document.querySelector(${JSON.stringify(switchOf(names[6]))}).getAttribute('aria-checked')`)], [['Show all 4', 'false'], 'false']);
     await pressOn('#library-kind-skills');
     const chosen = await kindNow();
     await pressOn('#chip-plugins');
@@ -7824,7 +7829,7 @@ async function headerResultFlow() {
     await sortBy(sortWas);
     await pressOn('#find');
     same(`${at}, beside a problem result the kind switch, the chip and Find each take a press, Sort its choice, and the result stays`, [chosen, chip, sorted, await a.run(`document.activeElement?.id`), await toggle()],
-      ['library-kind-skills', 'true', true, 'find', ['Show all 3', 'false']]);
+      ['library-kind-skills', 'true', true, 'find', ['Show all 4', 'false']]);
     // Skills chosen, so All, the switch's first segment, is the one to press beside the open card (it covers the switch's middle).
     await pressOn('#problems-show-all');
     const segment = await a.run(`[...document.querySelectorAll('.kind-seg[aria-pressed="false"]')].map(seg => seg.id).find(id => { const seg = document.getElementById(id), box = seg.getBoundingClientRect(); return seg.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)); }) ?? null`);
@@ -7832,12 +7837,9 @@ async function headerResultFlow() {
     if (segment) {
       const clicks = await a.run('window.segmentClicks');
       await pressOn(`#${segment}`);
-      same(`${at}, with the card open, a press on the kind switch folds the card and chooses that kind, once`, [await toggle(), await kindNow(), await a.run('window.segmentClicks') - clicks], [['Show all 3', 'false'], segment, 1]);
+      same(`${at}, with the card open, a press on the kind switch folds the card and chooses that kind, once`, [await toggle(), await kindNow(), await a.run('window.segmentClicks') - clicks], [['Show all 4', 'false'], segment, 1]);
     }
     await pressOn('#library-kind-all');
-    await pressOn('#problems-show-all');
-    await pressOn(switchOf(names[6]));
-    same(`${at}, with the card open, a press on a row’s switch folds it and turns that row off, once`, [(await toggle())?.[1], await a.run(`document.querySelector(${JSON.stringify(switchOf(names[6]))}).getAttribute('aria-checked')`)], ['false', 'false']);
     await undo();
     chmodSync(claude, 0o755);
     asBefore(`${at}, the run’s Undo puts every copy back as it was`, filesBefore);
