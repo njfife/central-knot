@@ -74,6 +74,7 @@ import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, Lib
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
 import { errorCode, libraryGate } from './share.ts';
 import { hideParts } from './partsmigrate.ts';
+import type { ThroughWhichPlugin } from './plugins.ts';
 import { pluginLink } from './sourcelink.ts';
 import { recordedIds, type Recorded } from './sourcestore.ts';
 import type { ShareContext } from './share.ts';
@@ -132,6 +133,12 @@ export interface Disk<Entry extends Seen> {
    * off, the rule leaves it found. A kind with no such switch (agents) leaves it out.
    */
   switchedOff?: Map<string, HarnessId[]>;
+  /**
+   * The plugin's part a harness has the item through (plugins.ts partsHolding), for a kind whose copy found beside it is one a
+   * take-in takes over, to go at the next pass (takeIn): agents and MCP servers. Skills leave it out: a skill's copy beside its
+   * plugin's stays the person's own, both ways.
+   */
+  viaPlugin?: ThroughWhichPlugin;
 }
 /**
  * An item as Disk.held is told of it: its name, where it is wanted (library.ts wantedIn), what was applied where, and its
@@ -516,7 +523,7 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * What was asked of a pass for one item (a click, what Pull brings, or what a source holds), as the History entry it becomes:
  * begun when it is recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn' | 'link' | 'seen'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
  * part's text (Claude Code's file, for an agent); or its removal.
@@ -677,6 +684,9 @@ async function saveIfChanged(pass: Pass) {
 async function syncItem(pass: Pass, item: LibraryItem) {
   const { kind, context } = pass, slot = pass.disk.byKey.get(item.key) ?? {}, giveBack = pass.giveBack.get(item.key) ?? {};
   const copies = copiesOf(pass, item), made = plan(item, copies);
+  // A copy a take-in took over beside a plugin (takeIn): this plan leaves it in place, as the tool's own, and it is on record as
+  // Central Knot's before any file changes, so the next pass removes it (telling History) and an Undo meanwhile gives it back.
+  for (const { tool, hash } of pass.asked.get(item.key)?.tookFrom ?? []) item.applied[tool] = hash;
   let told: Told = { events: [], named: new Map() };
   const held = await carryOut(item, made, {
     ...pass.shelf,
@@ -787,7 +797,7 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   const can = (tools: HarnessId[]) => tools.filter(tool => !pass.disk.locked.has(tool));
   const did = { written: can(made.write), removed: can(made.remove.filter(tool => !giveBack[tool])) };
   // The copies a click takes over: each one Central Knot had not put there, which it writes over or counts as the item's.
-  const tookFrom = [...made.current, ...made.write].filter(tool => slot[tool] && item.applied[tool] === undefined).map(tool => ({ tool, hash: slot[tool]!.hash }));
+  const tookFrom = [...(pass.asked.get(item.key)?.tookFrom ?? []), ...[...made.current, ...made.write].filter(tool => slot[tool] && item.applied[tool] === undefined).map(tool => ({ tool, hash: slot[tool]!.hash }))];
   /**
    * An entry; `writes`: those of its losers it names as written or removed (Told). `orderProved` is true but where an entry
    * says otherwise: the edit taken in, the one entry that chooses between edits (Plan orderProved).
@@ -1048,8 +1058,15 @@ async function takeIn(pass: Pass, key: string, answer: { take: FoundCopy; chosen
   const winner = { tool: source.tool, hash: source.hash };
   const gaveWay = found.filter(entry => entry.hash !== source.hash).map(entry => ({ tool: entry.tool, hash: entry.hash }));
   const foundIn = found.map(entry => entry.tool);
-  if (answer.chosen) pass.asked.set(key, { kind: 'chosen', winner, losers: gaveWay, foundIn });
-  else pass.asked.set(key, { kind: 'on', cause: by === 'click' ? 'found' : 'sync-everything', winner, fill: 'written', foundIn });
+  // A copy found in a tool that has the item through a plugin too (Disk.viaPlugin) is taken over, kept as a version where it differs
+  // from the one taken in; syncItem puts it on record, and the next pass removes it, so that tool keeps the plugin's alone.
+  const beside = found.filter(entry => pass.disk.viaPlugin?.(item, entry.tool));
+  for (const entry of beside.filter(copy => copy.hash !== source.hash)) {
+    await keepVersion(pass.shelf, item, { hash: entry.hash, at: versionAt(entry.at), from: { how: 'was-in', harness: entry.tool, replacedBy: source.hash } }, pass.kind.contentOf(entry));
+  }
+  const tookFrom = beside.length ? { tookFrom: beside.map(entry => ({ tool: entry.tool, hash: entry.hash })) } : {};
+  if (answer.chosen) pass.asked.set(key, { kind: 'chosen', winner, losers: gaveWay, foundIn, ...tookFrom });
+  else pass.asked.set(key, { kind: 'on', cause: by === 'click' ? 'found' : 'sync-everything', winner, fill: 'written', foundIn, ...tookFrom });
 }
 
 /** Synchronize everything's one notice for a pass: how many it took in, by name, and the tools they were found in. */
