@@ -20,6 +20,7 @@ import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { managedNow } from '../src/share.ts';
 import { writesRealHome } from '../src/machine.ts';
+import { STANDARD_BUILD } from '../src/values.ts';
 import { applySkills } from '../src/skills.ts';
 
 const args = process.argv.slice(2);
@@ -29,6 +30,8 @@ const shots = option('--shots');
 const named = option('--flows')?.split(',');
 const crashRounds = Number(option('--crash-rounds', 6));
 const canWriteRealHome = writesRealHome(process.platform);
+// The packaged app on Linux is the AppImage, which starts at sign-in from its first open (signin.ts): appImageSignIn.
+const appImageRun = !flag('--electron') && process.platform === 'linux';
 const root = resolve(import.meta.dirname, '..');
 const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : packagedApp();
 
@@ -138,13 +141,17 @@ function seedHome() {
 // ---------- App ----------
 // On Linux the file manager the app opens is this stand-in: it notes what it was asked to open. So is the session bus's
 // dbus-send, asked whether the desktop has a system tray (platform.ts hasStatusNotifierWatcher): it has, as KDE's does, unless
-// a launch sets NO_TRAY, as on GNOME without its AppIndicator extension.
+// a launch sets NO_TRAY, as on GNOME without its AppIndicator extension, or TRAY_FROM, the ask from which it has (a panel still
+// starting at sign-in). A launch that sets TRAY_ASKED has each ask noted there, a line each.
 const fileManagerAsked = join(scratch, 'opened.txt');
 if (process.platform === 'linux') {
   mkdirSync(join(scratch, 'bin'));
   writeFileSync(join(scratch, 'bin/xdg-open'), `#!/bin/sh\necho "$*" >> '${fileManagerAsked}'\n`);
   chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
-  writeFileSync(join(scratch, 'bin/dbus-send'), `#!/bin/sh\n[ -n "$NO_TRAY" ] && echo '   boolean false' || echo '   boolean true'\n`, { mode: 0o755 });
+  writeFileSync(join(scratch, 'bin/dbus-send'), `#!/bin/sh
+[ -n "$TRAY_ASKED" ] && echo ask >> "$TRAY_ASKED" && asks=$(wc -l < "$TRAY_ASKED") || asks=1
+[ -n "$NO_TRAY" ] || [ "$asks" -lt "\${TRAY_FROM:-1}" ] && echo '   boolean false' || echo '   boolean true'
+`, { mode: 0o755 });
 }
 let app;
 // Every app this run started, and a flow's stand-in running app (standInApp), is closed when the run ends, however it ends: a
@@ -1128,6 +1135,28 @@ async function blockedCopyKeepsItsRow(a, practice) {
   for (const root of Object.keys(folders)) rmSync(join(practice, root, 'loose'), { recursive: true, force: true });
   await a.click('#header-refresh');
   check('the check’s own skill is gone again', !(await rowKeys(a, 'skills')).includes('loose'), await rowKeys(a, 'skills'));
+}
+
+/**
+ * The AppImage on Linux, as packaged (signin.ts): its first open put its launcher entry and icon in this run's throwaway home
+ * and turned start at sign-in on with its autostart file, each naming the AppImage ($APPIMAGE, which the AppImage's runtime sets
+ * to its file's real path). Settings' switch removes the autostart file and writes it again; the launcher entry stays.
+ */
+async function appImageSignIn(a, savedSettings) {
+  const file = realpathSync(command), named = folder => join(HOME, folder, `${STANDARD_BUILD}.desktop`);
+  const autostart = named('.config/autostart'), launcher = named('.local/share/applications');
+  const icon = join(HOME, '.local/share/icons/hicolor/512x512/apps', `${STANDARD_BUILD}.png`);
+  const exec = path => readNow(path).split('\n').find(line => line.startsWith('Exec='));
+  const state = () => a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`);
+  const firstOpen = [await state(), exec(autostart), exec(launcher), existsSync(icon) && readFileSync(icon).equals(readFileSync(join(root, 'assets/icon.png')))];
+  await a.click('#start-at-sign-in');
+  for (let tries = 0; tries < 30 && existsSync(autostart); tries++) await wait(100);
+  const off = [await state(), existsSync(autostart), existsSync(launcher), (await savedSettings()).startAtSignIn];
+  await a.click('#start-at-sign-in');
+  for (let tries = 0; tries < 30 && !existsSync(autostart); tries++) await wait(100);
+  same('the AppImage: its first open put its launcher entry and icon in the home and turned start at sign-in on, each naming the AppImage; the switch removes the autostart file and writes it again, and the launcher entry stays',
+    [firstOpen, off, [await state(), exec(autostart), (await savedSettings()).startAtSignIn]],
+    [[['true', false], `Exec="${file}" --hidden`, `Exec="${file}"`, true], [['false', false], false, true, false], [['true', false], `Exec="${file}" --hidden`, true]]);
 }
 
 async function practiceFlow() {
@@ -2964,15 +2993,18 @@ async function practiceFlow() {
   same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
     [(await savedSettings()).historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
     [7, ['aged-5'], true, false, true, false, 'What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 7 days. Change in Settings.', true]);
-  // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
-  // in its hint's place: on a Mac, one outside the Applications folder; on Linux, any (signin.ts whyNoSignIn). Main refuses a
-  // change too, and nothing about it is saved.
-  const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : process.platform === 'darwin' ? 'Move Central Knot to the Applications folder first.' : 'Not available on Linux yet.';
-  const refused = await a.run(`window.centralKnot.setStartAtSignIn(true).then(() => 'saved', error => String(error))`);
-  same('Start at sign-in that can’t be changed is off and disabled, says why, and main refuses a change', [
-    await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
-    await a.run(`document.getElementById(document.querySelector('#start-at-sign-in').getAttribute('aria-describedby'))?.textContent`),
-    refused.includes(signInReason), 'startAtSignIn' in (await savedSettings())], [['false', true], signInReason, true, false]);
+  // Start at sign-in: only an installed app can register a login item, so in a development run, and on a Mac outside the
+  // Applications folder, the row is off, can't be changed, and says why in its hint's place (signin.ts whyNoSignIn). Main refuses
+  // a change too, and nothing about it is saved. The AppImage on Linux can: appImageSignIn.
+  if (appImageRun) await appImageSignIn(a, savedSettings);
+  else {
+    const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
+    const refused = await a.run(`window.centralKnot.setStartAtSignIn(true).then(() => 'saved', error => String(error))`);
+    same('Start at sign-in that can’t be changed is off and disabled, says why, and main refuses a change', [
+      await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
+      await a.run(`document.getElementById(document.querySelector('#start-at-sign-in').getAttribute('aria-describedby'))?.textContent`),
+      refused.includes(signInReason), 'startAtSignIn' in (await savedSettings())], [['false', true], signInReason, true, false]);
+  }
   // The installed-app checks below stand in main's platform and login items, which only works where they are Linux's own: elsewhere a
   // stood-in packaged app could reach the real system's login items.
   if (a.main && process.platform === 'linux') {
@@ -3010,21 +3042,31 @@ async function practiceFlow() {
     same('Start at sign-in on an installed Windows app (stand-in system): Settings and the menu change it and the row shows the system’s answer; a change the system ignored is said, its action keeps focus through a redraw, opens Startup apps, and the line clears once put right',
       [fromSettings, fromMenu, ignored, redrawn && focused, putRight, await main.run(`[ck.asked, ck.opened]`)],
       [['true', null, null], ['false', null, null], unchanged, true, ['true', null, null], [[true, false, true], ['ms-settings:startupapps']]]);
-    // As an installed app on Linux: coming back to the window reads it again.
+    // As an installed app on Linux not run from an AppImage: coming back to the window reads it again, and the tray's item agrees.
     await main.run(`(ck.as('linux'), ck.asked = [])`);
-    const saved = (await savedSettings()).startAtSignIn;
     await refocus(main);
-    const reread = await until('Not available on Linux yet.', () => a.text('#setting-sign-in-hint'));
-    const menuItem = await main.run(`(({ label, visible, enabled, checked }) => ({ label, visible, enabled, checked }))(ck.menus.at(-1).find(item => item.label?.startsWith('Start at sign-in')))`);
-    // The first close explains where the app went; on Linux it offers no start at sign-in.
+    const menuItem = () => main.run(`(({ label, enabled, checked }) => ({ label, enabled, checked }))(ck.menus.at(-1).find(item => item.label?.startsWith('Start at sign-in')))`);
+    const notAppImage = [await until('Only the AppImage can start at sign-in.', () => a.text('#setting-sign-in-hint')), await menuItem()];
+    // Run from an AppImage ($APPIMAGE stood in: a path in this run's scratch folder), the switch is the autostart file in this
+    // run's throwaway home, read back each time: off before any change (the choice saved above was for Windows), Settings and the
+    // tray write it and remove it, and the first close offers it (the stand-in dialog ticks the box). Never a login-item call.
+    const appImage = join(scratch, 'Central Knot.AppImage'), autostart = join(HOME, '.config/autostart', `${STANDARD_BUILD}.desktop`);
+    await main.run(`process.env.APPIMAGE = ${JSON.stringify(appImage)}`);
+    await refocus(main);
+    const offBefore = [await until(false, () => a.run(`document.querySelector('#start-at-sign-in').disabled`)), await row(), existsSync(autostart)];
+    await a.click('#start-at-sign-in');
+    const turnedOn = [await until(['true', null, null], row), readNow(autostart).split('\n').find(line => line.startsWith('Exec=')), await menuItem()];
+    await main.run(`ck.menus.at(-1).find(item => item.label === 'Start at sign-in').click({ checked: false })`);
+    const turnedOff = [await until(['false', null, null], row), existsSync(autostart)];
     await main.run(`electron.BrowserWindow.getAllWindows()[0].close()`);
-    for (let tries = 0; tries < 20 && !(await savedSettings()).closeExplained; tries++) await wait(100);
-    const dialogs = await main.run(`ck.dialogs.map(options => 'checkboxLabel' in options)`);
-    // The rest of the run has the real system back: platform, packaging, login items, menus, dialogs and links.
-    await main.run(`(ck.restore(), electron.BrowserWindow.getAllWindows()[0].show())`);
-    same('an installed app on Linux: the row (read again on focus), the menu (hidden) and the first-close dialog agree it isn’t available; no login-item call, nothing saved',
-      [reread, menuItem, dialogs, await main.run(`ck.asked`), (await savedSettings()).startAtSignIn === saved],
-      ['Not available on Linux yet.', { label: 'Start at sign-in (not on Linux yet)', visible: false, enabled: false, checked: false }, [false], [], true]);
+    for (let tries = 0; tries < 30 && !((await savedSettings()).closeExplained && existsSync(autostart)); tries++) await wait(100);
+    const dialogs = await main.run(`ck.dialogs.map(({ checkboxLabel, checkboxChecked }) => [checkboxLabel, checkboxChecked])`);
+    // The rest of the run has the real system back: platform, packaging, $APPIMAGE, login items, menus, dialogs and links.
+    await main.run(`(delete process.env.APPIMAGE, ck.restore(), electron.BrowserWindow.getAllWindows()[0].show())`);
+    same('an installed app on Linux: not from an AppImage, the row and the tray say only the AppImage can; from one, Settings, the tray and the first-close dialog write and remove its autostart file in the home, with no login-item call',
+      [notAppImage, offBefore, turnedOn, turnedOff, dialogs, existsSync(autostart), await main.run(`ck.asked`)],
+      [['Only the AppImage can start at sign-in.', { label: 'Start at sign-in (AppImage only)', enabled: false, checked: false }], [false, ['false', null, null], false],
+        [['true', null, null], `Exec="${appImage}" --hidden`, { label: 'Start at sign-in', enabled: true, checked: true }], [['false', null, null], false], [['Start Central Knot at sign-in', false]], true, []]);
     main.close();
   }
   await openKind(a, 'skills');
@@ -3079,13 +3121,15 @@ async function practiceFlow() {
   if (process.platform !== 'linux') return;
   const noTray = join(scratch, 'home-no-tray'), noTrayData = join(scratch, 'no-tray-data');
   mkdirSync(noTray);
-  const b = await launch(noTrayData, ['--hidden'], noTray, { NO_TRAY: '1' });
+  const asked = name => readNow(join(scratch, `${name}.asks`)).split('\n').filter(Boolean).length;
+  const b = await launch(noTrayData, ['--hidden'], noTray, { NO_TRAY: '1', TRAY_ASKED: join(scratch, 'never.asks') });
   // The page is told it started hidden (location.search: main.ts createWindow) only when its window was made hidden; a
   // development run also asks the window itself, through main's debugger. (Electron paints a hidden window, so the page's
   // visibilityState says visible either way.)
   const bMain = b.main && await b.main();
-  same('on a Linux desktop with no system tray, a start at sign-in (--hidden) shows the window',
-    [await b.run('location.search'), await bMain?.run('electron.BrowserWindow.getAllWindows()[0].isVisible()') ?? true], ['', true]);
+  // At sign-in the panel may still be starting: such a start asks again, about once a second up to ten times (platform.ts trayWithin).
+  same('on a Linux desktop with no system tray, a start at sign-in (--hidden) asks ten times, then shows the window',
+    [asked('never'), await b.run('location.search'), await bMain?.run('electron.BrowserWindow.getAllWindows()[0].isVisible()') ?? true], [10, '', true]);
   // Closed through the window's own close, as a person's click is (main's debugger). A packaged app has no debugger: there the
   // page closes itself, which skips the window's close handler and quits from window-all-closed.
   if (bMain) {
@@ -3096,6 +3140,17 @@ async function practiceFlow() {
   same('on a Linux desktop with no system tray, closing the window quits', b.child.exitCode, 0);
   if (bMain) check('and the window’s own close handler saw no tray', readNow(join(noTrayData, 'central-knot.log')).includes('window close (no tray icon)'), readNow(join(noTrayData, 'central-knot.log')).slice(-400));
   if (b.child.exitCode === null) await b.quit();
+  // The panel's watcher on the bus from the second ask: a tray, so the start at sign-in stays hidden.
+  const late = await launch(join(scratch, 'late-tray-data'), ['--hidden'], noTray, { TRAY_FROM: '2', TRAY_ASKED: join(scratch, 'late.asks') });
+  const lateMain = late.main && await late.main();
+  same('with the panel’s tray there from the second ask, a start at sign-in asks twice and stays hidden',
+    [asked('late'), await late.run('location.search'), await lateMain?.run('electron.BrowserWindow.getAllWindows()[0].isVisible()') ?? false], [2, '?start=hidden', false]);
+  lateMain?.close();
+  await late.quit();
+  // A start that isn't at sign-in asks once and isn't held up: with no tray, its window shows at once.
+  const notHidden = await launch(join(scratch, 'once-tray-data'), [], noTray, { NO_TRAY: '1', TRAY_ASKED: join(scratch, 'once.asks') });
+  same('a start that isn’t hidden asks for the tray once', asked('once'), 1);
+  await notHidden.quit();
 }
 
 /**
@@ -4583,8 +4638,9 @@ async function freedOtherWaysFlow() {
   const c = await other.open();
   await openKind(c, 'skills');
   same('opened with the alpha gone: nothing holds this build, and the record names it, by its name', [await c.exists('#held'), other.record().owner, other.record().ownerName], [false, 'com.centralknot.firstlook', 'Central Knot']);
+  // (The AppImage's first open also turns start at sign-in on: this build's own default, not the alpha's.)
   same('of the alpha’s choices only History’s days are this build’s now (the longer): Automatic sync, plugin updates and the home it opens are as they were',
-    [readFileSync(join(other.data, 'sync-settings.json'), 'utf8'), JSON.parse(readFileSync(join(other.data, 'app-settings.json'), 'utf8'))], [ownSync, { ...ownApp, historyDays: 90 }]);
+    [readFileSync(join(other.data, 'sync-settings.json'), 'utf8'), JSON.parse(readFileSync(join(other.data, 'app-settings.json'), 'utf8'))], [ownSync, { ...ownApp, historyDays: 90, ...(appImageRun ? { startAtSignIn: true } : {}) }]);
   check('Skills asks Resume, and nothing on the page names the alpha', await c.exists('#resume') && !(await c.run('document.body.innerText')).includes('Central Knot Alpha'), await c.text('.bands'));
   same('nothing in its tools changed before Resume', toolFiles(other.home), files);
   await c.click('#resume');
@@ -8088,6 +8144,14 @@ async function libraryFlow() {
   const find = async (a, text) => { await a.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle(); };
   const pressed = a => a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id.replace('library-kind-', '') ?? null`);
   const opened = a => a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key');
+  /**
+   * Whether the list `id` came to rest (still for six frames) within 3 s; it is found by its id each frame, as a redraw replaces it. A
+   * row opened with details past the list's bottom glides the list to it (matrix.ts openRow); a scroll place written while it glides
+   * still has the glide's later steps added to it, some after the place was read. A check that writes a scroll place checks this
+   * first, so a list that never rests fails under its own name.
+   */
+  const stillList = (a, id) => a.run(`new Promise(done => { const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop, end = Date.now() + 3000; let last = at(), still = 0;
+    const look = () => { still = at() === last ? still + 1 : 0; last = at(); if (still === 6) done(true); else if (Date.now() > end) done(false); else requestAnimationFrame(look); }; requestAnimationFrame(look); })`);
   /** The mouse's Back button, pressed and let go over the page (places.ts listenForTravel). */
   const mouseBack = async a => {
     for (const [type, buttons] of [['mousePressed', 8], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button: 'back', buttons, clickCount: 1 });
@@ -8470,13 +8534,8 @@ async function libraryFlow() {
   await c.click('#chip-attention');
   await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const top = () => c.run(`Math.round(document.querySelector('#table-library-all').scrollTop)`);
-  // A row opened whose details run past the list's bottom is brought to the top with a smooth scroll (matrix.ts openRow): the
-  // list is scrolled by hand once that has ended, so the place noted is the one Files leaves from.
-  const scrollWhenStill = async (table, top) => {
-    for (let last = -1, tries = 0; tries < 40; tries++) { const now = await c.run(`document.querySelector('${table}').scrollTop`); if (now === last) break; last = now; await wait(100); }
-    await c.run(`document.querySelector('${table}').scrollTop = ${top}`);
-  };
-  await scrollWhenStill('#table-library-all', 80);
+  check('the Library’s list comes to rest once review’s row has opened', await stillList(c, 'table-library-all'));
+  await c.run(`document.querySelector('#table-library-all').scrollTop = 80`);
   const before = await top();
   await c.click(`#${rowPart('diff', 'skills', 'review')}`);
   same('Read both copies shows the skill’s Files beside the list of skills, its back naming the Library', [await c.exists('#skills-list'), await c.text('#skill-detail h2'), await c.text('#files-back .btn-label')], [true, 'review', 'Library']);
@@ -8497,7 +8556,8 @@ async function libraryFlow() {
   await c.click('#chip-attention');
   await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const tabTop = () => c.run(`Math.round(document.querySelector('#table-skills-claude-cli')?.scrollTop ?? -1)`);
-  await scrollWhenStill('#table-skills-claude-cli', 30);
+  check('Claude Code’s Skills list comes to rest once review’s row has opened', await stillList(c, 'table-skills-claude-cli'));
+  await c.run(`document.querySelector('#table-skills-claude-cli').scrollTop = 30`);
   const tabBefore = await tabTop();
   await c.click(`#${rowPart('diff', 'skills', 'review')}`);
   same('Files opened from Claude Code’s Skills tab: review, its back naming the tool', [await c.text('#skill-detail h2'), await c.text('#files-back .btn-label'), await c.run(`document.querySelector('#files-back').getAttribute('aria-label')`)],
