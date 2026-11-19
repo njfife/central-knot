@@ -7738,7 +7738,11 @@ async function headerResultFlow() {
   const toggle = () => a.run(`(toggle => toggle && !toggle.hidden ? [toggle.textContent, toggle.getAttribute('aria-expanded')] : null)(document.querySelector('#problems-show-all'))`);
   const lines = async () => (await a.all('#header .problem-text')).length;
   const dismiss = async () => { await a.run(`document.querySelector('#outcome-dismiss, #problems-dismiss')?.click()`); await a.settle(); };
-  const files = () => [claude, copilot].map(folder => tree(folder));
+  /** Both tools' skill folders, byte for byte; `asBefore` names only the paths that differ from `before`. */
+  const files = () => Object.fromEntries([['claude', claude], ['copilot', copilot]].flatMap(([tool, folder]) => Object.entries(tree(folder)).map(([path, what]) => [`${tool}/${path}`, what])));
+  const asBefore = (name, before) => { const now = files(); same(name, [...new Set([...Object.keys(before), ...Object.keys(now)])].filter(path => before[path] !== now[path]), []); };
+  /** The result's Undo, pressed once the run is over and it can be (a click still running holds it off), then the page settled. */
+  const undo = async () => { await until(() => a.run(`(undo => !!undo && !undo.disabled)(document.querySelector('#outcome-undo'))`)); await pressOn('#outcome-undo'); };
   const toolbarInView = async () => { const seen = []; for (const control of ['#library-kind-skills', '#find', '#chip-plugins', '#item-order']) seen.push(await inView(control)); return seen; };
   const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
   /** Pictures (with --shots): light at the size it is at, dark at 860×600, 1316×822 and 1728×1080, then back at that size. */
@@ -7762,8 +7766,8 @@ async function headerResultFlow() {
   await pressOn('#problems-show-all');
   same('Show all: the sentence whole, as a card over the page, and nothing under it moved', [await linesOf(sentence) > 2, await toggle(), await places()], [true, ['Show less', 'true'], quiet]);
   await pictures('long-success-whole', [860, 600]);
-  await pressOn('#outcome-undo');
-  same('its Undo, from the card, puts the three back in both tools', files(), before);
+  await undo();
+  asBefore('its Undo, from the card, puts the three back in both tools', before);
 
   // Three switches in a run with Claude Code's folder read-only: a problem line each. At each size the second row, the list and
   // the header stay where they were through the result, the card opened and folded, and the result let go.
@@ -7811,12 +7815,16 @@ async function headerResultFlow() {
     await pressOn('#chip-plugins');
     const chip = await a.run(`document.querySelector('#chip-plugins').getAttribute('aria-pressed')`);
     await pressOn('#chip-plugins');
-    await pressOn('#item-order');
-    const sort = await a.run(`document.activeElement?.id`);
-    await key('Escape', 27);
+    // Sort opens a menu of the system's on the Mac, which a press would leave open over the checks: in view (above), and chosen
+    // as its menu chooses, then put back.
+    const sortBy = async value => { await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })()`); await a.settle(); };
+    const [sortWas, sortOther] = await a.run(`(select => [select.value, [...select.options].find(option => !option.selected).value])(document.querySelector('#item-order'))`);
+    await sortBy(sortOther);
+    const sorted = await a.run(`document.querySelector('#item-order').value`) === sortOther;
+    await sortBy(sortWas);
     await pressOn('#find');
-    same(`${at}, beside a problem result the kind switch, the chip, Sort and Find each take a press, and the result stays`, [chosen, chip, sort, await a.run(`document.activeElement?.id`), await toggle()],
-      ['library-kind-skills', 'true', 'item-order', 'find', ['Show all 3', 'false']]);
+    same(`${at}, beside a problem result the kind switch, the chip and Find each take a press, Sort its choice, and the result stays`, [chosen, chip, sorted, await a.run(`document.activeElement?.id`), await toggle()],
+      ['library-kind-skills', 'true', true, 'find', ['Show all 3', 'false']]);
     // Skills chosen, so All, the switch's first segment, is the one to press beside the open card (it covers the switch's middle).
     await pressOn('#problems-show-all');
     const segment = await a.run(`[...document.querySelectorAll('.kind-seg[aria-pressed="false"]')].map(seg => seg.id).find(id => { const seg = document.getElementById(id), box = seg.getBoundingClientRect(); return seg.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)); }) ?? null`);
@@ -7830,9 +7838,9 @@ async function headerResultFlow() {
     await pressOn('#problems-show-all');
     await pressOn(switchOf(names[6]));
     same(`${at}, with the card open, a press on a row’s switch folds it and turns that row off, once`, [(await toggle())?.[1], await a.run(`document.querySelector(${JSON.stringify(switchOf(names[6]))}).getAttribute('aria-checked')`)], ['false', 'false']);
-    await pressOn('#outcome-undo');
+    await undo();
     chmodSync(claude, 0o755);
-    same(`${at}, the run’s Undo puts every copy back as it was`, files(), filesBefore);
+    asBefore(`${at}, the run’s Undo puts every copy back as it was`, filesBefore);
   }
 
   // More reasons than the window holds at 860×600: eight refused in both tools. Opened, the card ends in the window with Undo and ×
@@ -7856,9 +7864,9 @@ async function headerResultFlow() {
   for (let tabs = 0; tabs < 4 && await a.run(`document.activeElement?.id`) !== 'problems-show-all'; tabs++) await key('Tab', 9);
   same('the keyboard reaches the last reason: Tab to Show less, at its end, brings it into view', [await a.run(`document.activeElement?.id`), await lastInView(), await inView('#outcome-dismiss')], ['problems-show-all', true, true]);
   if (shots) await a.shot('result-dozen-reasons-end-860');
-  await pressOn('#outcome-undo');
+  await undo();
   for (const folder of [claude, copilot]) chmodSync(folder, 0o755);
-  same('its Undo puts every copy back as it was', files(), eightBefore);
+  asBefore('its Undo puts every copy back as it was', eightBefore);
 
   // The same on a tool's tab under Harnesses: a refused removal, its line, and Show all at 860.
   await a.click('#nav-harnesses');
@@ -7871,7 +7879,7 @@ async function headerResultFlow() {
   await pictures('tool-tab', [860, 600]);
   await pressOn('#problems-show-all');
   await pictures('tool-tab-whole', [860, 600]);
-  await pressOn('#outcome-undo');
+  await undo();
   chmodSync(claude, 0o755);
   same('no page errors, the header’s result', a.pageErrors, []);
   await a.quit();
