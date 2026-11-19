@@ -4205,15 +4205,16 @@ async function pluginRowsFitFlow() {
 }
 
 /**
- * A list beside an opened row (docked from 1200 px of content: renderer.ts DOCK_FROM) keeps every name whole and its toolbar
- * on two lines at most, on the Library and on a tool's tab, from the owner's own window as a rail (1260 px of content) up.
- * Names as long as his (30 letters), five tools' marks, the Used column and two toolbar chips leave a row as little room as his.
+ * A list beside an opened row (docked from 1200 px of content: renderer.ts DOCK_FROM) shows each name whole and its toolbar on
+ * two lines at most, from the owner's own window as a rail (1260 px of content) up: on the Library in each Sort, and on a tool's
+ * tab. Names as long as his (30 letters), five tools' marks, the Used column and two toolbar chips leave a row as little room as his.
  */
 async function dockedListFlow() {
   const home = join(scratch, 'home-docked'), claude = join(home, '.claude/skills');
-  // Two-figure counts on the kind switch, as his are.
-  for (const name of ['finishing-a-development-branch', 'verification-before-completion', 'subagent-driven-development', 'evaluate-dilutive-filings', 'dispatching-parallel-agents',
-    'test-driven-development', 'using-git-worktrees', 'brainstorming', 'diagnosing-bugs', 'diagnosing-superpowers', 'research']) skill(claude, name);
+  // His names, eleven of them for two-figure counts on the kind switch, as his are.
+  const names = ['finishing-a-development-branch', 'verification-before-completion', 'subagent-driven-development', 'evaluate-dilutive-filings', 'dispatching-parallel-agents',
+    'test-driven-development', 'using-git-worktrees', 'brainstorming', 'diagnosing-bugs', 'diagnosing-superpowers', 'research'];
+  for (const name of names) skill(claude, name);
   toolClis(home);
   for (const name of ['pi', 'opencode']) { writeFileSync(join(home, '.local/bin', name), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.0.0" && exit 0\nexit 9\n'); chmodSync(join(home, '.local/bin', name), 0o755); }
   // The toolbar's chips: copies that differ, and a plugin's items. Claude Code keeps sessions, so the Used column is drawn.
@@ -4228,25 +4229,34 @@ async function dockedListFlow() {
   for (let tries = 0; tries < 100 && !(await a.exists('#walk-skip')); tries++) await wait(100);
   await a.click('#walk-skip');
   const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
-  // The docked list's content width, its toolbar's lines (its parts' middles a line apart), and each name or kind word cut.
+  // The docked list's content width, its toolbar's lines (its parts' middles a line apart), how many of the names it shows and
+  // which of them are cut, and how many of the kind switch's words show whole.
   const dockedList = () => a.run(`(() => {
     const bar = document.querySelector('.dock-main .toolbar');
     if (!bar) return 'not docked';
     const middles = [...bar.children].filter(part => part.offsetWidth).map(part => { const box = part.getBoundingClientRect(); return (box.top + box.bottom) / 2; }).sort((x, y) => x - y);
-    const cut = selector => [...document.querySelectorAll('.dock-main ' + selector)].filter(text => !text.offsetWidth || text.scrollWidth > text.clientWidth).map(text => text.textContent);
-    return { content: document.getElementById('main').clientWidth, toolbarLines: middles.filter((middle, index) => !index || middle - middles[index - 1] > 8).length, namesCut: cut('.ov-row[data-key] .ov-name-text'), kindWordsCut: cut('.kind-seg-label') };
+    const whole = text => text.offsetWidth && text.scrollWidth <= text.clientWidth;
+    const shown = [...document.querySelectorAll('.dock-main .ov-row[data-key] .ov-name-text')].filter(text => ${JSON.stringify(names)}.includes(text.textContent));
+    return { content: document.getElementById('main').clientWidth, toolbarLines: middles.filter((middle, index) => !index || middle - middles[index - 1] > 8).length,
+      names: shown.length, namesCut: shown.filter(text => !whole(text)).map(text => text.textContent), kindWords: [...document.querySelectorAll('.dock-main .kind-seg-label')].filter(whole).length };
   })()`);
-  for (const [where, open] of [['the Library', ['#nav-library', '#library-kind-all']], ['Claude Code’s Skills tab', ['#nav-harnesses', '#harness-claude-cli', '#harness-tab-skills']]]) {
-    for (const selector of [...open, `#${rowPart('open', 'skills', 'research')}`]) await a.click(selector);
-    for (const [width, height, sidebar, content] of [[1316, 787, false, 1260], [1728, 980, true, 1520], [1728, 980, false, 1672], [2616, 1408, false, 2560]]) {
-      await sizeTo(a, width, height); await sidebarOpen(sidebar);
-      const list = await dockedList();
-      check(`on ${where} at ${content} px of content with a row docked, every name is whole, the toolbar on two lines at most and the kind switch’s words whole`,
-        list.content === content && !list.namesCut.length && list.toolbarLines <= 2 && !list.kindWordsCut.length, list);
-    }
+  const fits = async (where, content, kindWords) => {
+    const [width, height, sidebar] = { 1200: [1256, 787, false], 1260: [1316, 787, false], 1520: [1728, 980, true], 1672: [1728, 980, false], 2560: [2616, 1408, false] }[content];
+    await sizeTo(a, width, height); await sidebarOpen(sidebar);
+    const list = await dockedList();
+    check(`on ${where} at ${content} px of content with a row docked, the ${names.length} names show whole and the toolbar is on two lines at most${kindWords ? ', the kind switch’s four words whole' : ''}`,
+      list.content === content && list.names === names.length && !list.namesCut.length && list.toolbarLines <= 2 && list.kindWords === kindWords, list);
+  };
+  for (const selector of ['#nav-library', '#library-kind-all', `#${rowPart('open', 'skills', 'research')}`]) await a.click(selector);
+  // Each Sort the menu offers, from the dock's narrowest (1200 px of content): Last updated adds a column (style.css .ov-dated).
+  for (const [order, label, widths] of [['name', 'Name', [1200, 1260, 1520, 1672, 2560]], ['updated', 'Last updated', [1200, 1260, 1520]], ['used', 'Last used', [1200, 1260]]]) {
+    await a.run(`(() => { const sort = document.querySelector('#item-order'); sort.value = '${order}'; sort.dispatchEvent(new Event('change')); })()`);
+    await a.settle();
+    for (const content of widths) await fits(`the Library by ${label}`, content, 4);
   }
+  for (const selector of ['#nav-harnesses', '#harness-claude-cli', '#harness-tab-skills', `#${rowPart('open', 'skills', 'research')}`]) await a.click(selector);
+  await fits('Claude Code’s Skills tab', 1260, 0);
   // Across the dock's breakpoint (the sidebar opened at 1316: 1108 px of content), the opened row stays open where it was in its table.
-  await sizeTo(a, 1316, 787); await sidebarOpen(false);
   await a.run(`document.querySelector('.ov-row.open').scrollIntoView({ block: 'center' })`);
   const place = () => a.run(`(() => { const row = document.querySelector('.ov-row.open'), table = row?.closest('.scroll');
     return row ? [document.querySelector('.dock-main') ? 'docked' : 'under its row', table.scrollTop, Math.round(row.getBoundingClientRect().top - table.getBoundingClientRect().top)] : 'no row open'; })()`);
@@ -4256,7 +4266,6 @@ async function dockedListFlow() {
   await sidebarOpen(false);
   same('across the dock’s breakpoint and back, the opened row stays open, where it was in its table', [under, await place()], [['under its row', top, offset], ['docked', top, offset]]);
   same('no page errors, the docked list', a.pageErrors, []);
-  await fullSize(a);
   await a.quit();
 }
 
