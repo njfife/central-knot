@@ -45,8 +45,10 @@ export interface UpdaterHost {
 
 /** The parts of an update that belong to the computer: Electron's in the app (updater.ts), stand-ins in the tests. */
 export interface UpdateSystem {
-  /** Whether updates show at all here, this build's version, and the release tag it was made from (none: it never checks). */
+  /** Whether updates show at all here, the platform whose download a release is read for, this build's version, and the
+   *  release tag it was made from (none: it never checks). */
   shown: boolean;
+  platform: string;
   version: string;
   tag?: string;
   /** The releases list to read: GitHub's. */
@@ -86,7 +88,7 @@ export function updateFlow(host: UpdaterHost, system: UpdateSystem) {
       const limited = response.status === 429 || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0');
       throw Object.assign(new Error(`releases answered ${response.status}`), { status: response.status, limited });
     }
-    return newerRelease(await response.json(), view.tag!);
+    return newerRelease(await response.json(), view.tag!, system.platform);
   }
 
   /** The check under way, so a click on Update during it waits for it rather than being dropped. */
@@ -129,7 +131,7 @@ export function updateFlow(host: UpdaterHost, system: UpdateSystem) {
     let quiet = setTimeout(() => stalled.abort(), STALLED_MS);
     let received = 0, told = 0;
     try {
-      const response = await system.fetch(release.zip, { headers: { 'User-Agent': headers['User-Agent'] }, signal: stalled.signal });
+      const response = await system.fetch(release.download, { headers: { 'User-Agent': headers['User-Agent'] }, signal: stalled.signal });
       if (!response.ok || !response.body) throw new Error(`download answered ${response.status}`);
       await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), async function* (chunks: AsyncIterable<Buffer>) {
         for await (const chunk of chunks) {

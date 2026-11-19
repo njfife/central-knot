@@ -2039,8 +2039,8 @@ async function practiceFlow() {
   await a.settle();
   const failedSaid = [await a.text('#header [data-outcome] .band-text'), await a.exists('#outcome-undo'), await switchOn(a, 'skills', outside), await a.exists('#header .problem-line')];
   await a.click('#outcome-undo');
-  same('a plugin’s click that fails among others: not counted, said as a problem, and the run keeps its Undo, which turns release-notes back on',
-    [notesOnBefore, ...failedSaid, await switchOn(a, 'skills', 'release-notes'), outsideOff()], [true, '1 skill is off: release-notes.', true, true, true, true, false]);
+  same('a plugin’s click that fails among others: said first as not gone through, not counted, its reason a problem line, and the run keeps its Undo, which turns release-notes back on',
+    [notesOnBefore, ...failedSaid, await switchOn(a, 'skills', 'release-notes'), outsideOff()], [true, '1 of 2 didn’t go through in every tool: outside-skill. 1 skill is off: release-notes.', true, true, true, true, false]);
   await a.run(`document.querySelector('#outcome-dismiss')?.click()`);
   writeFileSync(outsideStub, outsideStubBefore);
   if (outsideSettings) writeFileSync(join(practice, '.claude/settings.json'), outsideSettings); else rmSync(join(practice, '.claude/settings.json'), { force: true });
@@ -3099,8 +3099,9 @@ async function listDiffersFlow() {
   console.log(`(Plugins list drawn ${drawn} ms after opening it; the differing copies known after ${known} ms)`);
   same('no page errors, list differs', a.pageErrors, []);
   await a.quit();
-  // Update all runs both updates in one run, with one result. A newer release of the app, downloading meanwhile, becomes ready
-  // during that run and waits: a restart between two of its steps would stop the rest.
+  // Update all runs both updates in one run, with one result. On a Mac a newer release of the app, downloading meanwhile, becomes
+  // ready during that run and waits: a restart between two of its steps would stop the rest. (A Linux copy downloads none: updateFlow.)
+  const appUpdates = process.platform === 'darwin';
   const claudeStub = join(HOME, '.local/bin/claude'), stubBefore = readFileSync(claudeStub, 'utf8'), cache = join(home, '.claude/plugins/cache/ck-test-market');
   writeFileSync(claudeStub, `#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)" && exit 0\ncase "$1 $2 $4 $5" in\n  "plugin update --scope user") sleep 3; name="\${3%@*}"; for copy in '${cache}'/"$name"/*/; do cp -R '${join(market, 'plugins')}'/"$name"/. "$copy"; done ;;\n  *) exit 9 ;;\nesac\n`);
   const zip = join(scratch, 'update-all.zip');
@@ -3111,17 +3112,17 @@ async function listDiffersFlow() {
     const look = () => b.run(`document.getElementById('update-control')?.dataset.look`), busy = () => b.run(`document.body.dataset.busy === 'true'`);
     const behind = async () => await b.exists(row('issue-tracker')) || await b.exists(row('document-tools'));
     await b.run(`(document.querySelector('#nav-plugins').click(), true)`);
-    for (let tries = 0; tries < 200 && !(await b.exists(row('issue-tracker')) && await b.exists(row('document-tools')) && await look() === 'available'); tries++) await wait(100);
+    for (let tries = 0; tries < 200 && !(await b.exists(row('issue-tracker')) && await b.exists(row('document-tools')) && (!appUpdates || await look() === 'available')); tries++) await wait(100);
     same('Update all says before the click what it runs, the copies it replaces, and that it can’t be undone', await b.run(`document.querySelector('#market-update-all-0').title`),
       'Updates document-tools in Claude Code and issue-tracker in Claude Code. It replaces the copies that differ from the marketplace’s: document-tools and issue-tracker. Runs now. An update can’t be undone.');
     // The release downloads in about 3 seconds; each plugin's update takes 3.
-    await b.run(`(document.getElementById('update-control').click(), document.getElementById('market-update-all-0').click(), true)`);
+    await b.run(`(${appUpdates} && document.getElementById('update-control').click(), document.getElementById('market-update-all-0').click(), true)`);
     // A restart in the middle (the stand-in's install quits the app) would leave the page unreachable: that is raced, not waited on.
     const quit = new Promise(done => b.child.once('exit', () => done('restarted mid-run')));
-    const held = (async () => { for (let tries = 0; tries < 80 && await look() !== 'held'; tries++) await wait(250); return 'waited'; })();
-    same('the app’s update, ready during the run, waits for it rather than restarting', await Promise.race([quit, held]), 'waited');
+    const held = (async () => { for (let tries = 0; appUpdates && tries < 80 && await look() !== 'held'; tries++) await wait(250); return 'waited'; })();
+    if (appUpdates) same('the app’s update, ready during the run, waits for it rather than restarting', await Promise.race([quit, held]), 'waited');
     if (b.child.exitCode === null) {
-      same('and the control says why while the run goes on', [await look(), await busy(), /Restarting now stops the plugin changes under way\./.test(await b.run(`document.getElementById('update-control').title`))], ['held', true, true]);
+      if (appUpdates) same('and the control says why while the run goes on', [await look(), await busy(), /Restarting now stops the plugin changes under way\./.test(await b.run(`document.getElementById('update-control').title`))], ['held', true, true]);
       for (let tries = 0; tries < 150 && (await busy() || await behind()); tries++) await wait(100);
       const said = await b.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
       check('the run went to its end: both updates in one result, no Undo, no row behind, and the app still running', !(await behind()) && !(await b.exists('#plugins-undo')) && b.child.exitCode === null
@@ -3551,7 +3552,8 @@ async function sourcesFlow() {
  * of that release, and "installing" records the update and quits; scripts/update-proof.mjs proves the real install on a Mac).
  * The sidebar's update control, at the bottom left, is the quiet Check for updates until the first check finds a newer release;
  * then it stands out, and one click downloads it with progress; something unsaved holds the restart, and the control says so;
- * the next launch says once that it is on the new version. It fits, open and in the rail, in the smallest window.
+ * the next launch says once that it is on the new version. It fits, open and in the rail, in the smallest window. On Linux,
+ * appImageNotice instead.
  */
 async function updateFlow() {
   const zip = join(scratch, 'update.zip');
@@ -3581,7 +3583,67 @@ async function updateFlow() {
     if (label.getBoundingClientRect().width > 0 && label.scrollWidth > label.clientWidth + 1) out.push('its words are cut: ' + label.textContent);
     return out;
   })()`);
+  /**
+   * On Linux, where an AppImage doesn't install updates itself yet (updates.ts whyNoUpdate), this instead: a newer release with
+   * Mac files alone is no update; one with an AppImage turns the control into the outlined Update available, whose click opens
+   * the release's page in the browser (the system's xdg-open, stood in for by one that records the address), and Settings says
+   * why, with that page. Nothing is downloaded. It fits, open and in the rail, in the smallest window.
+   */
+  const appImageNotice = async () => {
+    const bin = join(scratch, 'update-browser'), opened = join(scratch, 'update-opened');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'xdg-open'), `#!/bin/sh\nprintf '%s\\n' "$1" >> '${opened}'\n`, { mode: 0o755 });
+    const browser = () => readNow(opened).split('\n').filter(Boolean);
+    const page = 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.5';
+    const why = 'This copy of Central Knot doesn’t install updates itself yet. Download a newer release’s AppImage from its page.';
+    const line = async id => [await a.text(`#${id} .setting-message-text`), await a.text(`#${id}-action`)];
+    releases.splice(0, 1, { tag: 'v0.5.0-preview.5', zip });
+    a = await launch(join(scratch, 'update-linux-data'), ['--practice-copy'], HOME, { ...as('v0.5.0-preview.4'), PATH: `${bin}:${join(scratch, 'bin')}:/usr/bin:/bin` });
+    for (let i = 0; i < 80 && !(await control())?.title.startsWith('Up to date'); i++) await wait(250);
+    same('a newer release with Mac files alone is no update here: after the first check the control is the quiet arrows', [(await control())?.look, (await control())?.title], ['check', 'Up to date. Click to check now.']);
+    await a.click('#nav-settings');
+    same('Settings › Updates says this copy doesn’t install updates itself, with the releases page, beside Check now', [await line('setting-updates-reason'), await a.exists('#check-updates'), await a.exists('#setting-update')], [[why, 'Open the releases page'], true, false]);
+    releases.splice(0, 1, { tag: 'v0.5.0-preview.5', zip, asset: 'Central-Knot-0.5.0-linux-x86_64.AppImage' });
+    await a.click('#check-updates');
+    same('a newer release with an AppImage: the control becomes Update available', await reaches('elsewhere'), 'elsewhere');
+    const notice = await control();
+    same('it says so, and its name and tooltip say a click opens the release’s page', [notice.label, notice.name, notice.title], ['Update available', '0.5.0 preview 5 is available. Open its release page', `0.5.0 preview 5 is available. ${why} Click to open the release’s page.`]);
+    same('outlined, not the filled Update button', await a.run(`getComputedStyle(document.getElementById('update-control')).boxShadow.includes('inset')`), true);
+    same('Settings names the release and why it isn’t installed here, with its page; there is no Update button', [await a.text('#setting-updates-notice .setting-message-text'), await line('setting-updates-reason'), await a.exists('#setting-update')],
+      ['0.5.0 preview 5 is available.', [why, 'Open 0.5.0 preview 5’s page'], false]);
+    await openKind(a, 'skills');
+    await a.click('#update-control');
+    for (let i = 0; i < 40 && !browser().length; i++) await wait(250);
+    same('a click on the control opens the release’s page in the browser, and the page stays where it was', [browser(), await a.run(`document.querySelector('#nav-settings').getAttribute('aria-current')`)], [[page], null]);
+    await a.click('#nav-settings');
+    await a.click('#setting-updates-reason-action');
+    for (let i = 0; i < 40 && browser().length < 2; i++) await wait(250);
+    same('so does Settings’ link; nothing was downloaded, and the app keeps running', [browser(), fixture.served, a.child.exitCode], [[page, page], [], null]);
+    await sizeTo(a, ...SMALLEST);
+    same('at 860×560, in the rail, the sidebar fits with the control its icon alone', [await a.run(`document.body.classList.contains('rail')`), await sidebarFit()], [true, []]);
+    await a.click('#sidebar-toggle');
+    same('and open, it fits with its words whole', [await a.run(`document.body.classList.contains('rail')`), await sidebarFit()], [false, []]);
+    // With --shots: the control on Skills and Settings' row, at 860×600 (the sidebar open) and 1316×819, dark and light.
+    const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+    if (shots) for (const [width, height] of [[860, 600], [1316, 819]]) for (const look of ['dark', 'light']) {
+      await sizeTo(a, width, height);
+      await theme(look);
+      await openKind(a, 'skills');
+      await a.shot(`update-notice-${width}-${look}`);
+      await a.click('#nav-settings');
+      await a.run(`document.getElementById('setting-updates').scrollIntoView({ block: 'center' })`);
+      await a.shot(`update-notice-settings-${width}-${look}`);
+    }
+    same('no page errors on Linux', a.pageErrors, []);
+    await a.quit();
+    a = await launch(join(scratch, 'update-untagged'), ['--practice-copy'], HOME, { CK_UPDATE_RELEASES: fixture.releasesUrl });
+    await a.click('#nav-settings');
+    check('a build not made from a release says it doesn’t update itself', /(development build|wasn’t made from a release)/.test(await a.text('#setting-updates') ?? ''), await a.text('#setting-updates'));
+    same('and its sidebar control is the faint Updates, which never offers one', (await control())?.look, 'off');
+    await a.quit();
+  };
   try {
+    if (process.platform === 'linux') return await appImageNotice();
     a = await launch(data, ['--practice-copy'], HOME, { ...as('v0.5.0-preview.4'), ...reading });
     same('the status bar names the build by its release', await a.text('#status-end'), 'Central Knot 0.5.0 preview 4');
     same('before the first check the sidebar ends in the quiet Check for updates', [(await control())?.look, (await control())?.label], ['check', 'Check for updates']);
@@ -3765,12 +3827,12 @@ async function updateFlow() {
     same('nor after the restart, where the note is its mark and the release notes link waits in Settings', [await a.exists('#status-profile'), await a.run(`getComputedStyle(document.getElementById('said-link')).display`), await crowding()], [true, 'none', []]);
     same('no page errors in the narrow window', a.pageErrors, []);
     await a.quit();
-    // A build with no release tag never offers updates, and Settings says why (on macOS; elsewhere nothing is shown).
+    // A build with no release tag never offers updates, and Settings says why (on macOS; on Windows nothing is shown).
     a = await launch(join(scratch, 'update-untagged'), ['--practice-copy'], HOME, { CK_UPDATE_RELEASES: fixture.releasesUrl });
     await a.click('#nav-settings');
     if (process.platform === 'darwin') check('an untagged or development build says it doesn’t update itself', /(development build|wasn’t made from a release)/.test(await a.text('#setting-updates') ?? ''), await a.text('#setting-updates'));
     else same('off macOS there is no Updates row', await a.exists('#setting-updates'), false);
-    // On a Mac its sidebar control is faint and opens Settings, which says why; elsewhere there is none (no releases there).
+    // On a Mac its sidebar control is faint and opens Settings, which says why; on Windows there is none (no releases there).
     same('and its sidebar control never offers an update', (await control())?.look, process.platform === 'darwin' ? 'off' : undefined);
     await a.quit();
   } finally { await fixture.close(); silent.close(); }
@@ -5204,6 +5266,10 @@ async function firstSetupFlow() {
   await d.click('#setup-yes');
   same('Yes with Automatic sync off: the band says nothing is added until Sync once and offers it; nothing is written yet',
     [await d.text('[data-outcome] .band-text'), await d.text('#setup-sync-once'), existsSync(join(third.codex, 'notes'))], ['Synchronize everything is on. Automatic sync is off, so nothing is added until you click Sync once.', 'Sync once', false]);
+  // The Overview's result is a band above its cards, which stays until acted on or closed: past the header's 8 seconds.
+  await wait(10000);
+  same('ten seconds on, the Overview’s band and its Sync once are still there', [await d.exists('.page > .bands [data-outcome]'), await d.exists('#setup-sync-once')], [true, true]);
+  if (shots) { await sizeTo(d, 860, 600); await d.shot('result-overview-setup-offer-860'); await fullSize(d); }
   await d.click('#setup-sync-once');
   for (let tries = 0; tries < 40 && !readNow(join(third.codex, 'notes/SKILL.md')); tries++) await wait(100);
   same('and its Sync once takes notes in', readNow(join(third.codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
@@ -5288,19 +5354,29 @@ async function firstSetupFlow() {
   try {
     await d.click('#sync-now');
     const words = await d.text('[data-outcome] .band-text');
-    check('a held removal names the surviving tool and its lock alongside the removal, with a warning',
-      /locked from Codex/.test(words) && /remove locked from Claude Code.*lock/i.test(words) && await d.exists('[data-outcome] .tone-warning')
-      && !!JSON.parse(readNow(settings)).mcpServers.locked, words);
-    check('a large Sync once shows two successful items, counts the rest and offers their History',
-      (words?.match(/Took in guide-/g) ?? []).length === 2 && /took in 6 more items/i.test(words)
-      && await d.exists('#outcome-history'), words);
     same('the folded result fits the smallest window and covers no controls below the header', [
       await d.run(CUT_OFF), await d.run("document.querySelector('.header-result').getBoundingClientRect().bottom <= document.querySelector('#page').getBoundingClientRect().top + 1"),
     ], [[], true]);
     await d.shot('sync-once-folded-minimum');
+    // What it could not do is its problem lines, each its own; its sentence says first that not everything was synced.
+    if (/^Show all/.test(await d.text('#problems-show-all') ?? '')) await d.click('#problems-show-all');
+    const reasons = await d.all('#header .problem-text');
+    check('a held removal: the sentence says first that not everything was synced, then Codex’s removal, and the refusal is a line of its own, its item, its tool and its lock, with a warning',
+      /^Not everything was synced\..* Removed locked from Codex\./.test(words) && reasons.filter(line => /locked/.test(line)).length === 1 && reasons.some(line => /^locked \(Claude Code\): .*lock/i.test(line))
+      && await d.exists('[data-outcome] .tone-warning') && !!JSON.parse(readNow(settings)).mcpServers.locked, [words, reasons]);
+    check('a large Sync once shows two successful items, counts the rest and offers their History',
+      (words?.match(/Took in guide-/g) ?? []).length === 2 && /took in 6 more items/i.test(words)
+      && await d.exists('#outcome-history'), words);
     await d.click('#outcome-history');
     const guides = (await d.all('.history-row[data-kind="on"] .history-what strong')).filter(name => name.startsWith('guide-'));
     same('History lists all eight guides, including the six folded into the count', new Set(guides).size, 8);
+    // On the Overview, its band says the same: the sentence, then each refusal on a line of its own.
+    await d.click('#nav-overview');
+    await d.click('#overview-sync-now');
+    const lines = await d.all('.page > .bands .band-reason', 'getComputedStyle(e).display + " " + e.textContent');
+    check('Sync once from the Overview with the removal still held: its sentence says so first, then the refusal on a line of its own',
+      /^Not everything was synced\./.test(await d.text('.page > .bands [data-outcome] .band-text') ?? '') && lines.length === 1 && /^block locked \(Claude Code\): .*lock/.test(lines[0]), lines);
+    if (shots) { await sizeTo(d, 860, 600); await d.shot('result-overview-sync-once-860'); await sizeTo(d, ...SMALLEST); }
   } finally { rmSync(settings + '.lock', { recursive: true }); }
   if (d.inspect) {
     await d.click('#nav-overview');
@@ -6218,8 +6294,8 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.run(`void window.centralKnot.applyServers([{ key: 'srv-35', on: false, except: [] }], false, ${JSON.stringify(home)})`);
   await letRunGo();
   await a.shot('rows-mcp-one-refused');
-  same('three clicks where the second is refused: the first and third are done, its row is as it truly is, and the header’s problem line names it',
-    [three.map(key => inClaude().includes(key)), await switchOn(a, 'mcp', 'srv-35'), await headerSays(), await a.all('#header .problem-text')], [[false, false, false], false, '2 MCP servers are off: srv-34 and srv-36.', ['srv-35 changed since the page was read. Nothing was changed; read again.']]);
+  same('three clicks where the second is refused: the first and third are done, its row is as it truly is, the sentence says it first and the header’s problem line names it',
+    [three.map(key => inClaude().includes(key)), await switchOn(a, 'mcp', 'srv-35'), await headerSays(), await a.all('#header .problem-text')], [[false, false, false], false, '1 of 3 didn’t go through in every tool: srv-35. 2 MCP servers are off: srv-34 and srv-36.', ['srv-35 changed since the page was read. Nothing was changed; read again.']]);
   // The run's one result at the four sizes: it stays (it has a problem line), so it is pictured whole.
   for (const [width, height] of [SMALLEST, [1728, 1117], [2560, 1440], [1280, 800]]) { await sizeTo(a, width, height); await a.shot(`rows-mcp-run-result-${width}`); }
   await wait(9000);
@@ -6274,9 +6350,9 @@ fs.writeFileSync(record, JSON.stringify(now));
   same('an Undo Claude Code can’t take: the reason once, and the result ends above the first row', [await reasonsIn(), (await resultBottom()) < (await firstRowTop())], [1, true]);
   await putAt(table, row('srv-02'), 200);
   await clickAt(await middleOf(`#${rowPart('switch', 'mcp', 'srv-02')}`)); await done();
-  const lineCut = () => a.run(`[...document.querySelectorAll('#header .problem-text')].some(text => text.scrollWidth > text.clientWidth)`);
+  const lineCut = () => a.run(`[...document.querySelectorAll('#header .problem-text, #header .problem-text > *')].some(text => text.scrollWidth > text.clientWidth)`);
   const expanded = () => a.run(`document.querySelector('#problems-show-all')?.getAttribute('aria-expanded')`);
-  same('a click no tool took: the sentence says so, with no reason; the reason once, cut to its line, with Show all', [await sentence(), await reasonsIn(), await lineCut(), await a.text('#problems-show-all'), await expanded()], ['srv-02 is not on in any tool yet.', 1, true, 'Show all', 'false']);
+  same('a click no tool took: the sentence says so first, with no reason; the reason once, cut to its line, with Show all', [await sentence(), await reasonsIn(), await lineCut(), await a.text('#problems-show-all'), await expanded()], ['Didn’t go through in every tool: srv-02 is not on in any tool yet.', 1, true, 'Show all', 'false']);
   await press('#problems-show-all');
   same('Show all: the reason whole, then Show less', [await lineCut(), await a.text('#problems-show-all'), await expanded()], [false, 'Show less', 'true']);
   await press('#outcome-dismiss');
@@ -6386,8 +6462,8 @@ fs.writeFileSync(record, JSON.stringify(now));
   const stillAtTop = await placesNow(list, 'data-plugin');
   same('at the top of the list, a failure that goes from the header moves no row, nor does the click after it', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => afterClose.at[name]), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])],
     [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name]), ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
-  // Three failing plugins (plug-04, -05, -08) and one that installs (plug-10), in one list (each takes a second): one ×, two
-  // reasons and Show all 3; shown, each reason whole; × closes it all.
+  // Three failing plugins (plug-04, -05, -08) and one that installs (plug-10), in one list (each takes a second): one ×, the first
+  // reason and Show all 3 reasons; shown, each reason whole; × closes it all.
   const failNow = ['plug-04', 'plug-05', 'plug-08'];
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
   await putAt(list, '[data-plugin="plug-04"]', 20);
@@ -6396,13 +6472,48 @@ fs.writeFileSync(record, JSON.stringify(now));
   for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
   await done();
   for (const name of failNow) rmSync(join(home, `fail-${name}`));
-  const plugReasons = () => a.run(`[...document.querySelectorAll('#header .problem-text')].map(text => text.scrollWidth > text.clientWidth ? 'cut' : 'whole')`);
-  same('three failing plugins: one ×, two reasons and Show all 3', [await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')], [1, 2, 'Show all 3']);
+  const plugReasons = () => a.run(`[...document.querySelectorAll('#header .problem-text')].map(text => [text, ...text.children].some(part => part.scrollWidth > part.clientWidth) ? 'cut' : 'whole')`);
+  // (The run holds plug-06's click before them too, within its time: 3 of 5.)
+  same('three failing plugins and one installed: the sentence says first what didn’t go through, then one ×, the first reason and Show all 3 reasons',
+    [/^3 of \d didn’t go through in every tool: plug-04, plug-05 and plug-08\./.test(await a.text('#plugins-result .toolbar-result-text') ?? ''), await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')],
+    [true, 1, 1, 'Show all 3 reasons']);
+  // Folded, only the name gives way, and no more than its own width: what failed begins right after it.
+  same('folded, what failed begins right after the plugin’s name, with no gap', await a.run(`(text => { const name = text.querySelector('.item-name'), range = document.createRange(); range.selectNodeContents(name); const next = name.nextElementSibling; if (!next) return null; const end = range.getBoundingClientRect().right; range.selectNodeContents(next); return Math.round(range.getBoundingClientRect().left - end); })(document.querySelector('#header .problem-text'))`), 0);
+  /** Pictures of the run's result (with --shots): light at 1280×800, dark at 860×600 and 1728×1080, then back light at 1280. */
+  const resultShots = async name => {
+    if (!shots) return;
+    await a.shot(`result-${name}-1280`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    for (const [width, height] of [[860, 600], [1728, 1080]]) { await sizeTo(a, width, height); await a.shot(`result-${name}-${width}-dark`); }
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await sizeTo(a, 1280, 800);
+  };
+  await resultShots('plugins');
   await press('#problems-show-all');
   same('shown, each reason whole', await plugReasons(), ['whole', 'whole', 'whole']);
+  await resultShots('plugins-whole');
+  // Escape with the card open folds it and does nothing else: the marketplace's search keeps its words.
+  const pluginFind = value => a.run(`(find => { find.value = ${JSON.stringify(value)}; find.dispatchEvent(new Event('input', { bubbles: true })); find.focus(); })(document.querySelector('#plugin-find'))`);
+  await pluginFind('plug');
+  // Typing draws the field again: the focus goes to the one there now, as a person's would stay in it.
+  await a.settle();
+  await a.run(`document.querySelector('#plugin-find').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await a.settle();
+  same('Escape in the marketplace’s search with the card open folds the card, and the search keeps its words', [await a.text('#problems-show-all'), await a.run(`document.querySelector('#plugin-find').value`)], ['Show all 3 reasons', 'plug']);
+  await pluginFind('');
   await press('#header .band-dismiss');
   same('× closes it all', await a.exists('#header .header-result'), false);
   rmSync(join(home, 'slow'));
+  // A run where nothing went through, with no Undo to offer, says so first too.
+  writeFileSync(join(home, 'fail-plug-11'), '');
+  await putAt(list, '[data-plugin="plug-11"]', 200);
+  await clickAt(await middleOf('#pswitch-0-plug-11'));
+  for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
+  await done();
+  rmSync(join(home, 'fail-plug-11'));
+  same('a run where nothing went through, with no Undo: its sentence counts it first, and its reason follows', [await a.text('#plugins-result .toolbar-result-text'), (await plugReasons()).length], ['1 of 1 didn’t go through in every tool: plug-11. ', 1]);
+  await press('#header .band-dismiss');
   // A plugin's page and back, then Refresh: the list in its order again, installed first.
   const inOrder = on => [...plugins.filter(name => on.includes(name)), ...plugins.filter(name => !on.includes(name))];
   const installedNow = [...installedFirst.filter(name => name !== 'plug-06'), 'plug-01', 'plug-10', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
@@ -6641,6 +6752,113 @@ async function pluginTextFlow() {
   await pictures('reading', [[860, 600]]);
   await a.quit();
   silent.close();
+}
+
+/**
+ * What changes outside the app reaches the page and the search index without a Refresh (homepass.ts pageSees, main.ts
+ * seenChanged; the watch on the tools' plugin records, main.ts startWatching). One home with Claude Code, its found skills kept
+ * found by a record whose Synchronize everything is off. With Automatic sync off, then on, each change waited for as a newer
+ * index for this home whose answers hold it and the row's going or coming: a plugin's first install (which makes Claude Code's
+ * plugins folder), a found skill edited, one deleted, the plugin taken out of Claude Code's record and put back, with what was
+ * typed in Find and the row opened kept. With it on, the home brought back to what a view had, after views that made no value.
+ * Then, with it on, how light it stays: no signal for .claude.json and the plugin record written again with the same content;
+ * none after a click's own view and a minute idle; while a skill changes every second, no more than the watch's debounce and
+ * the poll allow.
+ */
+async function staleFlow() {
+  const home = join(scratch, 'stale-home'), data = join(scratch, 'stale-data'), skills = join(home, '.claude/skills');
+  const notes = join(skills, 'notes/SKILL.md'), record = join(home, '.claude/plugins/installed_plugins.json'), servers = join(home, '.claude.json');
+  skill(skills, 'notes', text('notes', 'Write it down in the lantern log.'));
+  // Each body has a word of its own, which only that skill's text holds.
+  for (const [name, body] of [['review', 'Read the diff twice.'], ['spare', 'A tyre for the road.'], ['keep', 'Nothing changes here.'], ['busy', 'Round one.']]) skill(skills, name, text(name, body));
+  writeFileSync(servers, `${JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' } } }, null, 2)}\n`);
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  writeFileSync(join(data, 'sync-settings.json'), JSON.stringify({ syncOn: false }));
+  const a = await launch(data);
+  await a.click('#nav-overview');
+  await a.click('#setup-no');
+  await openKind(a, 'all');
+  await a.run(`(window.ckSignals = 0, window.ckPublished = [], window.centralKnot.onSyncChanged(() => window.ckSignals++), window.centralKnot.onSearchPublished((home, readId) => window.ckPublished.push({ home, readId })), true)`);
+  const ids = async typed => (await a.run(`window.centralKnot.search(${JSON.stringify(typed)})`)).rows.map(row => row.id);
+  const shown = id => a.exists(`.ov-row[data-key="${id}"]`);
+  const plugin = 'skills-sheet-tools@ck-test-market/tidy', install = () => writeClaudeInstall(home, 'ck-test-market', 'sheet-tools', '1.0.0', { 'skills/tidy/SKILL.md': text('tidy', 'Removes duplicate rows and trims every cell.') });
+  /** After a change made outside: how long until an index newer than the last one for this home answers as `holds` says; undefined, it never did. */
+  const arrives = async (change, holds) => {
+    const since = await a.run(`Math.max(0, ...window.ckPublished.filter(tag => tag.home === ${JSON.stringify(home)}).map(tag => tag.readId))`), from = Date.now();
+    await change();
+    while (Date.now() - from < 30000) {
+      if (await a.run(`window.ckPublished.some(tag => tag.home === ${JSON.stringify(home)} && tag.readId > ${since})`) && await holds()) return Date.now() - from;
+      await wait(100);
+    }
+    return undefined;
+  };
+  const took = {};
+  const sequences = async (mode, edit, [deleted, word]) => {
+    const [was, now] = edit;
+    took[`${mode}: edited`] = await arrives(() => writeFileSync(notes, text('notes', `Write it down in the ${now} log.`)), async () => (await ids(now)).includes('skills-notes') && !(await ids(was)).includes('skills-notes'));
+    took[`${mode}: deleted`] = await arrives(() => rmSync(join(skills, deleted), { recursive: true }), async () => !(await shown(`skills-${deleted}`)) && !(await ids(word)).length);
+    const installs = readFileSync(record, 'utf8');
+    took[`${mode}: out of the record`] = await arrives(() => writeFileSync(record, JSON.stringify({ version: 2, plugins: {} })), async () => !(await shown(plugin)) && !(await ids('duplicate rows')).length);
+    // Put back while Find holds what was typed and a row is open: both are as they were once the view lands.
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'keep'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    if (await a.run(`document.querySelector('.ov-row[data-key="skills-keep"]').getAttribute('aria-expanded')`) !== 'true') await a.click(`.ov-row[data-key="skills-keep"]`);
+    const place = () => a.run(`[document.querySelector('#find').value, document.querySelector('.ov-row[data-key="skills-keep"]')?.getAttribute('aria-expanded'), Math.round(document.querySelector('.ov-row[data-key="skills-keep"]')?.getBoundingClientRect().top ?? -1)]`);
+    const before = await place();
+    took[`${mode}: put back`] = await arrives(() => writeFileSync(record, installs), async () => (await ids('duplicate rows')).includes(plugin));
+    same(`${mode}: what was typed in Find and the opened row stay where they were after the view`, await place(), before);
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    check(`${mode}: and the plugin’s row is back`, await shown(plugin));
+  };
+
+  // ---------- Automatic sync off: a watch event asks for a view ----------
+  took['off: first install'] = await arrives(install, async () => (await shown(plugin)) && (await ids('duplicate rows')).includes(plugin));
+  await sequences('off', ['lantern', 'compass'], ['review', 'diff']);
+  // ---------- Automatic sync on: a pass tells the page when what it read differs ----------
+  await a.click('#sync-switch');
+  same('Automatic sync is on', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
+  await sequences('on', ['compass', 'harbour'], ['spare', 'tyre']);
+  // A view whose pass made no value (the home's record set aside while two views are read: the switch off, then on) leaves the
+  // page nothing to compare with, so the home brought back to what an earlier view had is told all the same.
+  const record0 = join(home, '.central-knot/sync.json'), harbour = readFileSync(notes, 'utf8');
+  took['on: a view with no value'] = await arrives(async () => {
+    renameSync(record0, `${record0}.aside`);
+    writeFileSync(notes, text('notes', 'Write it down in the beacon log.'));
+    for (let turn = 0; turn < 2; turn++) await a.click('#sync-switch');
+  }, async () => (await ids('beacon')).includes('skills-notes'));
+  same('and Automatic sync is on again', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
+  took['on: back as an earlier view had it'] = await arrives(() => { renameSync(`${record0}.aside`, record0); writeFileSync(notes, harbour); },
+    async () => (await ids('harbour')).includes('skills-notes') && !(await ids('beacon')).includes('skills-notes'));
+  console.log(`staleFlow ms: ${JSON.stringify(took)}`);
+  for (const [name, ms] of Object.entries(took)) check(`${name}: reaches the page and the index without a Refresh`, ms !== undefined);
+
+  // ---------- It stays light ----------
+  const signals = () => a.run('window.ckSignals');
+  await wait(3000);
+  let from = await signals();
+  const same20 = [servers, record].map(path => [path, readFileSync(path, 'utf8')]);
+  for (let round = 0; round < 20; round++) { for (const [path, content] of same20) writeFileSync(path, content); await wait(500); }
+  await wait(4000);
+  const rewrites = await signals() - from;
+  // A click's own view sets what the page has: the poll's passes after it find nothing new.
+  await a.click(`#${rowPart('add', 'skills', 'notes')}`);
+  from = await signals();
+  await wait(60000);
+  const idle = await signals() - from;
+  from = await signals();
+  const busy = join(skills, 'busy/SKILL.md'), started = Date.now(), times = [];
+  for (let round = 0; round < 12; round++) { writeFileSync(busy, text('busy', `Round ${round}.`)); times.push(Date.now()); await wait(1000); }
+  await wait(4000);
+  // The debounce lets one pass through after each pause longer than it, and the poll one each 20 s; a pass that tells sends one.
+  const allowed = 1 + times.slice(1).filter((at, index) => at - times[index] > 1500).length + Math.ceil((Date.now() - started) / 20000);
+  const burst = await signals() - from;
+  console.log(`staleFlow signals: same-content rewrites ${rewrites}, a minute after a click ${idle}, a skill changed each second ${burst} (allowed ${allowed})`);
+  same('.claude.json and Claude Code’s plugin record written again 20 times in 10 s with the same content, with Automatic sync on, tell the page nothing', rewrites, 0);
+  same('after a click’s own view, a minute idle tells the page nothing', idle, 0);
+  check('a skill changed every second tells the page no more often than the debounce and the poll allow', burst <= allowed, { burst, allowed });
+  same('no page errors, the page follows what a pass read', a.pageErrors, []);
+  await a.quit();
 }
 
 /**
@@ -7415,8 +7633,15 @@ async function libraryFlow() {
   // Each kind's refusal is its own line, led by its kind, on every segment.
   const refused = async () => (await a.all('#header .problem-text')).filter(line => /tidy \(Copilot CLI\)/.test(line)).map(line => line.split(':')[0]).sort();
   same('both tidys’ refusals, told apart by their kinds', await refused(), ['Agents', 'Skills']);
-  await a.click('#library-kind-skills');
-  same('and both still there with Skills chosen', await refused(), ['Agents', 'Skills']);
+  // The result is the run's, whatever the segment (app.ts placeNow): a press on the kind switch folds the card, and the same lines,
+  // counted the same, are there to open again.
+  const whole = await a.all('#header .problem-text');
+  for (const kind of ['skills', 'agents']) {
+    await a.click(`#library-kind-${kind}`);
+    const folded = await a.text('#problems-show-all');
+    await a.click('#problems-show-all');
+    same(`and with ${kind === 'skills' ? 'Skills' : 'Agents'} chosen, the same lines behind the same count`, [folded, await refused(), await a.all('#header .problem-text')], [`Show all ${whole.length} reasons`, ['Agents', 'Skills'], whole]);
+  }
   await a.click('#library-kind-all');
   for (const folder of copilotFolders) chmodSync(folder, 0o755);
   const stopLines = async () => (await a.all('.bands .band-text', 'e.textContent')).filter(line => line.includes('The MCP record is damaged'));
@@ -7886,10 +8111,296 @@ echo "$*" >> "$HOME/claude-calls.txt"
   await a.quit();
 }
 
+/**
+ * A click's result on a list page (renderer.ts resultHere): in the header's own two lines whatever it holds, so nothing under it
+ * moves or is covered, and the whole of it only on Show all, as a card that folds like a menu. A home whose skills have long
+ * names, in Claude Code and Copilot CLI, with an agent and a server (so the kind switch shows) and a plugin's skill (so a chip
+ * does); a tool's folder made read-only refuses each removal from it, one problem line per item.
+ */
+async function headerResultFlow() {
+  const home = join(scratch, 'result-home'), data = join(scratch, 'result-data'), real = join(scratch, 'result-real');
+  const claude = join(home, '.claude/skills'), copilot = join(home, '.copilot/skills');
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const [tool, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.']]) writeFileSync(join(home, '.local/bin', tool), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  // Eight long names with hyphens, and one long name with none, which only a break inside it can wrap.
+  const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'].map(word => `${word}-quarterly-platform-engineering-incident-summary-writer`);
+  const unbroken = 'indiaquarterlyplatformengineeringincidentsummarywriterfortheteam';
+  // A server's name with no break in it, longer than the opened card is wide at 860.
+  const longServer = 'referenceplatformdocumentationserverforeveryengineeringteamacrossthewholecompanyanditspartners';
+  for (const name of [...names, unbroken]) for (const folder of [claude, copilot]) skill(folder, name);
+  for (const file of [join(home, '.claude/agents/helper.md'), join(home, '.copilot/agents/helper.agent.md')]) { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, '---\nname: helper\ndescription: The helper agent.\n---\n\nYou help.\n'); }
+  writeFileSync(join(home, '.claude.json'), `${JSON.stringify({ mcpServers: { [longServer]: { type: 'http', url: 'https://docs.example.test/mcp' } } })}\n`);
+  writeClaudeInstall(home, 'local-market', 'kit', '1.0.0', { 'skills/zulu/SKILL.md': text('zulu', 'Plugin skill.') });
+  const a = await launch(data, [], real);
+  const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+  const done = async () => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  check('Yes takes the nine skills in', await until(() => Object.keys(JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 9));
+  await done();
+  await openKind(a, 'all');
+  // What Yes took in is said in notices above the list: let go, so the list has its room.
+  for (let tries = 0; tries < 10 && await a.exists('[id^="notice-dismiss-"], #notices-dismiss'); tries++) await a.click('#notices-dismiss, [id^="notice-dismiss-"]');
+  const row = name => `.ov-row[data-key="${rowPart('', 'skills', name)}"]`, switchOf = name => `#${rowPart('switch', 'skills', name)}`;
+  /** Switches clicked one after another, one run with one result (clicklist.ts runAt). */
+  const clickRun = async list => { await a.run(`${JSON.stringify(list.map(switchOf))}.forEach(selector => document.querySelector(selector).click())`); await done(); };
+  const middle = selector => a.run(`(node => node && (box => ({ x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }))(node.getBoundingClientRect()))(document.querySelector(${JSON.stringify(selector)}))`);
+  /** A person's click: the mouse moved to the middle of `selector`, pressed and let go; none where it isn't there (the check after it then fails). */
+  const pressOn = async selector => { const at = await middle(selector); if (!at) return; await mouse(a, 'mouseMoved', at, 0); await mouse(a, 'mousePressed', at, 1); await mouse(a, 'mouseReleased', at, 0); await done(); };
+  const key = async (key, code) => { for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: code }); await a.settle(); };
+  /** Whether a press at the middle of `selector` reaches it: in the window, and nothing lying over it. */
+  const inView = selector => a.run(`(node => { if (!node) return false; const box = node.getBoundingClientRect(), at = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2); return box.top >= 0 && box.bottom <= innerHeight && !!at && node.contains(at); })(document.querySelector(${JSON.stringify(selector)}))`);
+  /** What a result must never move: the second row's top, the list's top and the header's height. */
+  const places = () => a.run(`({ row: Math.round(document.querySelector(${JSON.stringify(row(names[1]))}).getBoundingClientRect().top), list: Math.round(document.querySelector('[id^="table-library-"]').getBoundingClientRect().top), header: document.querySelector('#header').offsetHeight })`);
+  /** Show all (or Show less) as shown, and whether the result is shown whole; null where there is none on show. */
+  const toggle = () => a.run(`(toggle => toggle && !toggle.hidden ? [toggle.textContent, toggle.getAttribute('aria-expanded')] : null)(document.querySelector('#problems-show-all'))`);
+  const lines = async () => (await a.all('#header .problem-text')).length;
+  const dismiss = async () => { await a.run(`document.querySelector('#outcome-dismiss, #problems-dismiss')?.click()`); await a.settle(); };
+  /** Both tools' skill folders, byte for byte; `asBefore` names only the paths that differ from `before`. */
+  const files = () => Object.fromEntries([['claude', claude], ['copilot', copilot]].flatMap(([tool, folder]) => Object.entries(tree(folder)).map(([path, what]) => [`${tool}/${path}`, what])));
+  const asBefore = (name, before) => { const now = files(); same(name, [...new Set([...Object.keys(before), ...Object.keys(now)])].filter(path => before[path] !== now[path]), []); };
+  /** The result's Undo, pressed once the run is over and it can be (a click still running holds it off), then the page settled. */
+  const undo = async () => { await until(() => a.run(`(undo => !!undo && !undo.disabled)(document.querySelector('#outcome-undo'))`)); await pressOn('#outcome-undo'); };
+  const toolbarInView = async () => { const seen = []; for (const control of ['#library-kind-skills', '#find', '#chip-plugins', '#item-order']) seen.push(await inView(control)); return seen; };
+  /** The words of an opened result that can't be read: a text running past its box sideways (its first words, to name it). */
+  const hidden = () => a.run(`[...document.querySelectorAll('#header .result-whole :is(.band-text, .problem-text, .problem-text > *, .toolbar-result-text)')].filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent.slice(0, 40))`);
+  /** Whether Show less ends the last words the opened result shows, as it does on a problem card and on a success card alike. */
+  const toggleAtEnd = () => a.run(`(toggle => { const last = Math.max(...[...document.querySelectorAll('#header .header-result :is(.band-text, .problem-text)')].map(node => node.getBoundingClientRect().bottom)); return !!toggle && Math.abs(toggle.getBoundingClientRect().bottom - last) <= 4; })(document.querySelector('#problems-show-all'))`);
+  /** In the card, whether each reason starts with its item's name in bold and has room above it. */
+  const reasonsApart = () => a.run(`[...document.querySelectorAll('#header .lines-whole .problem-line')].every((line, at, all) => !!line.querySelector('.problem-text > .item-name') && (!at || line.getBoundingClientRect().top - all[at - 1].getBoundingClientRect().bottom >= 3))`);
+  /** A point inside `selector` that nothing lies over (where it shows beside an open card), or null. */
+  const freePoint = selector => a.run(`(node => { if (!node) return null; const box = node.getBoundingClientRect(); for (const fy of [0.9, 0.75, 0.5, 0.25]) for (const fx of [0.5, 0.25, 0.75, 0.1, 0.9]) { const x = Math.round(box.left + box.width * fx), y = Math.round(box.top + box.height * fy); if (node.contains(document.elementFromPoint(x, y))) return { x, y }; } return null; })(document.querySelector(${JSON.stringify(selector)}))`);
+  const openCard = async () => { if ((await toggle())?.[1] !== 'true') await pressOn('#problems-show-all'); };
+  const findSays = value => a.run(`(find => { find.value = ${JSON.stringify(value)}; find.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#find'))`);
+  /** Whether `words` show whole on the first reason's folded line (its tool, what failed), however long the name before them. */
+  const reasonShows = words => a.run(`((text, words) => { const walk = document.createTreeWalker(text, NodeFilter.SHOW_TEXT); for (let node = walk.nextNode(); node; node = walk.nextNode()) { const at = node.textContent.indexOf(words); if (at < 0) continue; const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + words.length); const right = range.getBoundingClientRect().right; return right <= node.parentElement.getBoundingClientRect().right + 1 && right <= text.getBoundingClientRect().right + 1; } return false; })(document.querySelector('#header .problem-text'), ${JSON.stringify(words)})`);
+  const failedInView = () => reasonShows('copy yet.');
+  const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  /** In dark, whether the opened card is raised over the page: its surface is not the header's own. */
+  const raised = async () => { await theme('dark'); const [card, header] = await a.run(`[getComputedStyle(document.querySelector('#header .result-whole')).backgroundColor, getComputedStyle(document.querySelector('#header')).backgroundColor]`); await theme('light'); return card !== header; };
+  /** Pictures (with --shots): light at the size it is at, dark at 860×600, 1316×822 and 1728×1080, then back at that size. */
+  const pictures = async (name, [width, height]) => {
+    if (!shots) return;
+    await a.shot(`result-${name}-${width}-light`);
+    await theme('dark');
+    for (const size of [[860, 600], [1316, 822], [1728, 1080]]) { await sizeTo(a, ...size); await a.shot(`result-${name}-${size[0]}`); }
+    await theme('light'); await sizeTo(a, width, height);
+  };
+
+  // A long success at 860×600: three long names run past the header's two lines; Show all opens the sentence whole.
+  await sizeTo(a, 860, 600);
+  const quiet = await places(), before = files(), sentence = '#header [data-outcome] .band-text';
+  const linesOf = selector => a.run(`(text => Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)))(document.querySelector(${JSON.stringify(selector)}))`);
+  await clickRun(names.slice(0, 3));
+  same('a long success at 860×600: its sentence in two lines, then Show all, in the header’s 48px; the toolbar whole, nothing moved',
+    [await linesOf(sentence), await toggle(), await a.run(`document.querySelector('#header .header-result').getBoundingClientRect().bottom <= 48`), await toolbarInView(), await places()],
+    [2, ['Show all', 'false'], true, [true, true, true, true], quiet]);
+  await pictures('long-success', [860, 600]);
+  await pressOn('#problems-show-all');
+  same('Show all: the sentence whole, as a card over the page, Show less at its end, nothing of it hidden, and nothing under it moved',
+    [await linesOf(sentence) > 2, await toggle(), await toggleAtEnd(), await hidden(), await places()], [true, ['Show less', 'true'], true, [], quiet]);
+  await pictures('long-success-whole', [860, 600]);
+  // Opened, it stays whatever the pointer and the focus do, past the 8 seconds in which a folded success goes.
+  await mouse(a, 'mouseMoved', await middle(row(names[6])), 0);
+  await a.run(`document.activeElement?.blur()`);
+  await wait(9000);
+  same('an opened success stays past its 8 seconds, the pointer and the focus elsewhere', await toggle(), ['Show less', 'true']);
+  // A press on Find where it shows below the open card folds the card, and Find has the focus.
+  const findAt = await freePoint('#find');
+  if (findAt) { await mouse(a, 'mouseMoved', findAt, 0); await mouse(a, 'mousePressed', findAt, 1); await mouse(a, 'mouseReleased', findAt, 0); await done(); }
+  same('with the card open, a press on Find where it shows folds the card, and Find has the focus', [!!findAt, await toggle(), await a.run(`document.activeElement?.id`)], [true, ['Show all', 'false'], 'find']);
+  await openCard();
+  await undo();
+  asBefore('its Undo, from the card, puts the three back in both tools', before);
+
+  // One click with a long unbroken name, Claude Code's folder read-only, at 860×600: its first words say what wasn't done, its
+  // reason says what failed before the name is cut, and opened, every word can be read.
+  await dismiss();
+  chmodSync(claude, 0o555);
+  await a.click(switchOf(unbroken));
+  await done();
+  same('one click a tool refused, its name long and unbroken: the sentence says first that it didn’t go through, the reason what failed',
+    [(await a.text(sentence))?.startsWith('Didn’t go through in every tool: '), await failedInView()], [true, true]);
+  await pictures('one-click-long-name', [860, 600]);
+  await pressOn('#problems-show-all');
+  same('opened, every word of it can be read: the long name wraps', await hidden(), []);
+  await pictures('one-click-long-name-whole', [860, 600]);
+  await undo();
+  chmodSync(claude, 0o755);
+  // The long unbroken server name, its removal refused in Copilot CLI: opened, it wraps in the sentence and in the reason.
+  await dismiss();
+  chmodSync(join(home, '.copilot'), 0o555);
+  await a.click(`#${rowPart('switch', 'mcp', longServer)}`);
+  await done();
+  await openCard();
+  same('a long unbroken server name a tool refused: opened, it wraps in the sentence and in the reason, nothing of it hidden', [await lines(), await hidden()], [1, []]);
+  await undo();
+  chmodSync(join(home, '.copilot'), 0o755);
+
+  // Three switches in a run with Claude Code's folder read-only: a problem line each. At each size the second row, the list and
+  // the header stay where they were through the result, the card opened and folded, and the result let go.
+  for (const size of [[860, 600], [1280, 800], [1316, 822]]) {
+    await sizeTo(a, ...size);
+    await dismiss();
+    const was = await places(), at = `at ${size.join('×')}`;
+    chmodSync(claude, 0o555);
+    await clickRun(names.slice(0, 3));
+    same(`${at}, three refused removals: the first reason, its tool and what failed in view, then Show all 3 reasons, Undo clear of the window’s top, and nothing moved`,
+      [await lines(), await reasonShows('(Claude Code)'), await failedInView(), await toggle(), await a.run(`document.querySelector('#outcome-undo').getBoundingClientRect().top >= 5`), await places()], [1, true, true, ['Show all 3 reasons', 'false'], true, was]);
+    same(`${at}, beside it the kind switch, Find, the chip and Sort are in view`, await toolbarInView(), [true, true, true, true]);
+    if (size[0] === 1316) await pictures('three-problems', size);
+    await pressOn('#problems-show-all');
+    same(`${at}, Show all: every reason whole as a card inside the window, each led by its name, Show less at the end, Undo and × in view, and nothing moved`,
+      [await lines(), await toggle(), await reasonsApart(), await toggleAtEnd(), await hidden(), await inView('#outcome-undo'), await inView('#outcome-dismiss'), await a.run(`document.querySelector('#header .header-result').getBoundingClientRect().bottom <= innerHeight`), await places()],
+      [3, ['Show less', 'true'], true, true, [], true, true, true, was]);
+    if (size[0] === 1316) { same('in dark, the opened card lies raised over the page', await raised(), true); await pictures('three-problems-whole', size); }
+    await key('Escape', 27);
+    same(`${at}, Escape folds it into the header’s two lines, the result still there, and nothing moved`, [await toggle(), await places()], [['Show all 3 reasons', 'false'], was]);
+    await pressOn('#problems-show-all');
+    // × lets the click's result go; a background pass that tries the removal again says its own failure after it.
+    await pressOn('#outcome-dismiss');
+    same(`${at}, × on the card lets the click’s result go, and nothing moved`, [await a.exists('#header [data-outcome]'), await places()], [false, was]);
+    if (size[0] === 1316) {
+      // The card let go with its result, the next Escape, with no click between, is the page's own again: it clears Find.
+      await findSays('quarterly');
+      await a.run(`document.querySelector('#find').focus()`);
+      await key('Escape', 27);
+      same(`${at}, after ×, the next Escape is the page’s: it clears Find`, await a.run(`document.querySelector('#find').value`), '');
+    }
+    // Back on: Claude Code's copies never left.
+    await clickRun(names.slice(0, 3));
+    chmodSync(claude, 0o755);
+  }
+
+  // Beside the folded result the toolbar takes each press. With the card open, a press on a control in view folds the card and
+  // does that control's work, once (a segment of the kind switch where one is in view, a row's switch; Find, where it shows,
+  // above); Escape folds it and does nothing else; a press that begins in the card and is let go outside it is no press outside.
+  await a.run(`window.segmentClicks = 0; document.addEventListener('click', event => { if (event.target.closest?.('.kind-seg')) window.segmentClicks++; }, true)`);
+  const kindNow = () => a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id`);
+  for (const size of [[860, 600], [1316, 822]]) {
+    await sizeTo(a, ...size);
+    await dismiss();
+    const at = `at ${size.join('×')}`, filesBefore = files();
+    chmodSync(claude, 0o555);
+    await clickRun(names.slice(0, 3));
+    await pressOn('#library-kind-skills');
+    const chosen = await kindNow();
+    await pressOn('#chip-plugins');
+    const chip = await a.run(`document.querySelector('#chip-plugins').getAttribute('aria-pressed')`);
+    await pressOn('#chip-plugins');
+    // Sort opens a menu of the system's on the Mac, which a press would leave open over the checks: in view (above), and chosen
+    // as its menu chooses, then put back.
+    const sortBy = async value => { await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })()`); await a.settle(); };
+    const [sortWas, sortOther] = await a.run(`(select => [select.value, [...select.options].find(option => !option.selected).value])(document.querySelector('#item-order'))`);
+    await sortBy(sortOther);
+    const sorted = await a.run(`document.querySelector('#item-order').value`) === sortOther;
+    await sortBy(sortWas);
+    await pressOn('#find');
+    same(`${at}, beside a problem result the kind switch, the chip and Find each take a press, Sort its choice, and the result stays`, [chosen, chip, sorted, await a.run(`document.activeElement?.id`), await toggle()],
+      ['library-kind-skills', 'true', true, 'find', ['Show all 3 reasons', 'false']]);
+    await findSays('quarterly');
+    await openCard();
+    await a.run(`document.querySelector('#find').focus()`);
+    await key('Escape', 27);
+    same(`${at}, Escape in Find with the card open folds the card, and Find keeps its words`, [await toggle(), await a.run(`document.querySelector('#find').value`)], [['Show all 3 reasons', 'false'], 'quarterly']);
+    await findSays('');
+    // Skills chosen, so All, the switch's first segment, is the one to press beside the open card (it covers the switch's middle).
+    await openCard();
+    const segment = await a.run(`[...document.querySelectorAll('.kind-seg[aria-pressed="false"]')].map(seg => seg.id).find(id => { const seg = document.getElementById(id), box = seg.getBoundingClientRect(); return seg.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)); }) ?? null`);
+    check(`${at}, a segment of the kind switch is in view beside the open card`, !!segment || size[0] === 860, await a.all('.kind-seg', 'e.id'));
+    if (segment) {
+      const clicks = await a.run('window.segmentClicks');
+      await pressOn(`#${segment}`);
+      same(`${at}, with the card open, a press on the kind switch folds the card and chooses that kind, once`, [await toggle(), await kindNow(), await a.run('window.segmentClicks') - clicks], [['Show all 3 reasons', 'false'], segment, 1]);
+    } else await pressOn('#problems-show-all');
+    await pressOn('#library-kind-all');
+    await openCard();
+    await a.run(`document.querySelector(${JSON.stringify(row(names[6]))}).scrollIntoView({ block: 'end' })`);
+    const from = await middle('#header .problem-text'), to = await middle(switchOf(names[6]));
+    await mouse(a, 'mouseMoved', from, 0); await mouse(a, 'mousePressed', from, 1); await mouse(a, 'mouseMoved', to, 1); await mouse(a, 'mouseReleased', to, 0);
+    await done();
+    same(`${at}, a reason pressed in the open card and let go on a row’s switch: the card stays, and the row is untouched`,
+      [await toggle(), await a.run(`document.querySelector(${JSON.stringify(switchOf(names[6]))}).getAttribute('aria-checked')`)], [['Show less', 'true'], 'true']);
+    await pressOn(switchOf(names[6]));
+    same(`${at}, with the card open, a press on a row’s switch folds it and turns that row off, once`, [(await toggle())?.[1], await a.run(`document.querySelector(${JSON.stringify(switchOf(names[6]))}).getAttribute('aria-checked')`)], ['false', 'false']);
+    // Back on by their switches (whichever run golf's click joined), Claude Code's copies never having left.
+    await clickRun([...names.slice(0, 3), names[6]]);
+    chmodSync(claude, 0o755);
+    asBefore(`${at}, switched back on, every copy is as it was`, filesBefore);
+  }
+
+  // More reasons than the window holds at 860×600: eight refused in both tools. Opened, the card ends in the window with Undo and ×
+  // in view; its lines scroll, with a scrollbar to say so; the keyboard reaches the last of them.
+  await sizeTo(a, 860, 600);
+  await dismiss();
+  const eightBefore = files();
+  for (const folder of [claude, copilot]) chmodSync(folder, 0o555);
+  await clickRun(names);
+  const many = Number((await toggle())?.[0].replace(/\D/g, '') || 0);
+  same('eight refused in both tools: sixteen reasons, one for each tool’s refusal, behind a Show all that says what it counts', (await toggle())?.[0], 'Show all 16 reasons');
+  await pictures('dozen-reasons', [860, 600]);
+  await pressOn('#problems-show-all');
+  const lastInView = () => a.run(`(text => { const box = text.getBoundingClientRect(); return text.contains(document.elementFromPoint(box.left + 4, box.top + box.height / 2)); })([...document.querySelectorAll('#header .problem-text')].at(-1))`);
+  // A scrollbar takes room of its own: the width the box gives up beyond its borders.
+  const scrollbar = () => a.run(`[document.querySelector('#header .header-result'), ...document.querySelectorAll('#header .header-result *')].some(node => { const style = getComputedStyle(node); return node.scrollHeight > node.clientHeight + 1 && ['auto', 'scroll'].includes(style.overflowY) && node.offsetWidth - node.clientWidth - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth) > 0; })`);
+  same('opened, the card ends in the window, Undo and × in view, its lines scroll with a scrollbar to say so, the last out of view',
+    [await lines(), await a.run(`document.querySelector('#header .header-result').getBoundingClientRect().bottom <= innerHeight`), await inView('#outcome-undo'), await inView('#outcome-dismiss'), await scrollbar(), await lastInView()],
+    [many, true, true, true, true, false]);
+  await pictures('dozen-reasons-whole', [860, 600]);
+  await a.run(`document.querySelector('#outcome-undo').focus()`);
+  for (let tabs = 0; tabs < 4 && await a.run(`document.activeElement?.id`) !== 'problems-show-all'; tabs++) await key('Tab', 9);
+  same('the keyboard reaches the last reason: Tab to Show less, at its end, brings it into view', [await a.run(`document.activeElement?.id`), await lastInView(), await inView('#outcome-dismiss')], ['problems-show-all', true, true]);
+  if (shots) await a.shot('result-dozen-reasons-end-860');
+  await undo();
+  for (const folder of [claude, copilot]) chmodSync(folder, 0o755);
+  asBefore('its Undo puts every copy back as it was', eightBefore);
+
+  // The same on a tool's tab under Harnesses: a refused removal, its line, and Show all at 860.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-skills');
+  chmodSync(claude, 0o555);
+  await a.click(switchOf(names[0]));
+  await done();
+  same('on Claude Code’s Skills tab, a refused removal: its line in the header, then Show all', [await lines(), (await toggle())?.[0]], [1, 'Show all']);
+  await pictures('tool-tab', [860, 600]);
+  await pressOn('#problems-show-all');
+  await pictures('tool-tab-whole', [860, 600]);
+  await undo();
+  chmodSync(claude, 0o755);
+
+  // Sync once with Automatic sync off, two copies deleted by hand in Copilot CLI and Claude Code's folder read-only: what it did is
+  // its sentence, which says first that not everything was synced, and each refusal is a reason of its own, in the header and in
+  // the Overview's band.
+  await openKind(a, 'all');
+  await dismiss();
+  await a.click('#sync-switch');
+  for (const name of names.slice(3, 5)) rmSync(join(copilot, name), { recursive: true });
+  chmodSync(claude, 0o555);
+  await a.click('#header-refresh');
+  check('the two deletions wait for Sync once', await until(() => a.exists('#sync-now')), await a.text('.bands'));
+  await pressOn('#sync-now');
+  same('Sync once from the Library: “Not everything was synced.” first, and a reason for each refusal', [(await a.text(sentence))?.startsWith('Not everything was synced.'), (await toggle())?.[0]], [true, 'Show all 2 reasons']);
+  await pictures('sync-once', [860, 600]);
+  await pressOn('#problems-show-all');
+  await pictures('sync-once-whole', [860, 600]);
+  await a.click('#nav-overview');
+  await a.click('#overview-sync-now');
+  await done();
+  same('Sync once from the Overview: its band says “Not everything was synced.” first, then each refusal on a line of its own',
+    [(await a.text('.page > .bands [data-outcome] .band-text'))?.startsWith('Not everything was synced.'), (await a.all('.page > .bands .band-reason')).length], [true, 2]);
+  await pictures('overview-two-reasons', [860, 600]);
+  chmodSync(claude, 0o755);
+  same('no page errors, the header’s result', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow, searchFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.

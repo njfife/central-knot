@@ -41,6 +41,13 @@ const joined = (items: string[], word: 'and' | 'or') => (items.length > 2 ? `${i
 
 /** Names in a sentence, the first three and how many more ("notes, standup, idle and 37 more"); all of them when four or fewer. */
 export const fewNames = (items: string[]) => (items.length > 4 ? `${items.slice(0, 3).join(', ')} and ${items.length - 3} more` : andList(items));
+/**
+ * The first words of a result over several items (a run of clicks, Turn these off, a Plugins run) where some didn't go through
+ * in every tool, so the header's cut never hides it (renderer.ts resultHere): how many of `of`, and which.
+ */
+export const notAllThrough = (short: string[], of: number) => `${short.length} of ${of} didn’t go through in every tool: ${fewNames(short)}.`;
+/** Rows a lead has just named, said after it by count alone ("Both are off", "All 3 are off"), so a result names each row once. */
+export const countedAs = (count: number, of: number, on: boolean) => `${count === of && count > 1 ? (count === 2 ? 'Both' : `All ${count}`) : count} ${count === 1 ? 'is' : 'are'} ${on ? 'on' : 'off'}`;
 
 /** The text with its first letter capitalised, to start a sentence. */
 export const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;

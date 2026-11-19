@@ -7,7 +7,9 @@
 //      brought into line, in that order, each on its own: one that crashes is told as a failure and the next still runs.
 //      This is the pass of the whole home, the one in which Synchronize everything takes found items in
 //      (librarypass.ts PassOptions background).
-// What such a pass tells the page is decided here too, for every kind alike (passTells): main.ts keeps it until the page reads.
+// What such a pass tells the page is decided here too, for every kind alike (passTells): main.ts keeps it until the page reads;
+// and what a person would see of the home as the pass read it, as one value (pageSees), which main.ts compares with the last
+// the page was given (seenChanged).
 // Sync once reports just its own passes (syncOnceReport), with each kind's results still apart.
 // The other three one-time migrations run as each library is opened (skillstore.ts, serverstore.ts, agentstore.ts
 // openLibrary): only in memory for a reader such as the pages' views, and written by the first pass that may write.
@@ -18,17 +20,23 @@ import { agentKind, applyAgents } from './agents.ts';
 import { migrateParts, type PluginNow } from './partsmigrate.ts';
 import { migrateProfiles } from './profilemigrate.ts';
 import { applyServers, serverKind } from './servers.ts';
-import { syncsHere, type ShareContext } from './share.ts';
+import { sha256, syncsHere, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
-import type { DestinationResult, HarnessId, PassResult } from './types.ts';
+import { installedCopies, type InstalledCopyOf } from './plugins.ts';
+import { takesPlugins } from './presence.ts';
+import type { DestinationResult, HarnessId, PassResult, Reason } from './types.ts';
 
 /**
  * What one pass did. `synced`: absent when step 3 did not run (Sync off, or this build doesn't sync the home); a kind's result
  * is absent when it crashed, and the crash is in `crashes`. `profilesFailed`, `partsFailed`: why step 1 or 2 failed, for the log;
- * `partsWait`: why step 2 waits, for the log and the Plugins page (main.ts keeps it: MarketplaceHost partsWait).
+ * `partsWait`: why step 2 waits, for the log and the Plugins page (main.ts keeps it: MarketplaceHost partsWait). `seen`: what
+ * a person would see of the home as step 3 read it (pageSees); absent where that isn't known. `seenFailed`: why pageSees threw,
+ * for the log.
  */
 export interface HomePass {
   synced?: { skills?: PassResult; servers?: PassResult; agents?: PassResult; crashes: DestinationResult[] };
+  seen?: string;
+  seenFailed?: unknown;
   profilesFailed?: unknown;
   partsFailed?: unknown;
   partsWait?: string;
@@ -59,8 +67,51 @@ export async function homePass(context: ShareContext, managed: HarnessId[], writ
   const skills = await applySkills(context, managed, [], whole).catch(crashed(passNames.skills));
   const servers = await applyServers(context, managed, [], whole).catch(crashed(passNames.servers));
   const agents = await applyAgents(context, managed, [], whole).catch(crashed(passNames.agents));
-  return { ...failure, synced: { skills, servers, agents, crashes } };
+  let seenFailed: unknown;
+  const synced = { skills, servers, agents, crashes };
+  const seen = await pageSees(context, managed, synced).catch((error: unknown) => { seenFailed = error ?? 'failed'; return undefined; });
+  return { ...failure, synced, ...(seen ? { seen } : {}), ...(seenFailed === undefined ? {} : { seenFailed }) };
 }
+
+/**
+ * What a person would see of the home, from what one pass of the whole home read, as one value (a hash): main.ts tells an open
+ * page when a background pass's differs from the last one the page was given (main.ts seenChanged), so an edit, a loss or a gain
+ * no pass writes for still reaches the page and its search index. Made from this pass's own reads (`context.reads`, as main.ts
+ * pass gives them), nothing read again, and sorted so that no order changes it:
+ *   - each found item's copies, by kind and key: the hash of each managed tool's copy (PassResult found; a skill's of its
+ *     copyable tree, an agent's of its name, description and prompt, an MCP server's of its neutral fields);
+ *   - each plugin a managed tool has installed, as this pass read it (plugins.ts installedCopies, which the skills' read made:
+ *     skills.ts readDisk, through plugins.ts throughPlugins), field by field: its name and marketplace, whether the tool has it
+ *     off, its copy's state and version, whether it is loaded live from a folder marketplace, which of its skills, MCP servers
+ *     and agents the tool has off, and the text of each skill, MCP server and agent of it the page lists. Why a switch is held
+ *     comes from a tool's switch file, whose every event tells the page (main.ts startWatching).
+ * Left out on purpose: any time, and the folder a plugin is cached in (named for a commit where it has no version); Codex's
+ * plugin agents (the page lists none); a plugin's manifest, commands, hooks, instructions and LSP servers, and the marketplace
+ * entries a tool added itself (the plugins' own page reads those itself: marketplaces.ts). Not told by it either: a tool's own
+ * field that a found agent's or server's hash leaves out (an agent's `model:` or `tools:` line, say), an edit of a library
+ * item's copy that leaves its hash as it was, and usage (its own reader). Undefined, never an empty home's value, where
+ * a kind's pass didn't reach its look (refused, no record, crashed) or a plugin read threw; a tool's plugin record that can't
+ * be read is read as none, as its rows are.
+ */
+export async function pageSees(context: ShareContext, managed: HarnessId[], synced: NonNullable<HomePass['synced']>): Promise<string | undefined> {
+  const kinds = [['skills', synced.skills], ['mcp', synced.servers], ['agents', synced.agents]] as const;
+  if (kinds.some(([, done]) => !done?.found)) return undefined;
+  const found = kinds.map(([kind, done]) => [kind,
+    Object.entries(done!.found!).map(([key, copies]) => [key, Object.entries(copies).sort(byName)] as const).sort(byName)]);
+  const reading = { home: context.home, dataDir: '', binaries: {}, overrides: context.overrides, reads: context.reads };
+  const named = (parts: { name: string; text?: string; entry?: string }[]) => parts.map(part => [part.name, part.text ?? part.entry] as const).sort(byName);
+  const shown = (tool: HarnessId) => ({ plugin, marketplace, off, state, contents, serversOff = [], agentsOff = [] }: InstalledCopyOf) => {
+    const installed = state.state === 'installed' ? state : undefined, sorted = (names: string[]) => [...names].sort();
+    const parts = contents && [named(contents.skills), named(contents.mcpServers), named(tool === 'codex-cli' ? [] : contents.agents)];
+    return [`${plugin}@${marketplace}`, { off, state: state.state, version: installed?.version, live: installed?.live,
+      skillsOff: sorted((installed?.skillsOff ?? []).map(each => each.skill)), serversOff: sorted(serversOff), agentsOff: sorted(agentsOff), parts }] as const;
+  };
+  const plugins = await Promise.all(managed.filter(takesPlugins).sort()
+    .map(async tool => [tool, (await installedCopies(reading, tool)).map(shown(tool)).sort(byName)]));
+  return sha256(JSON.stringify({ found, plugins }));
+}
+/** Sorts entries by their first part, a name. */
+const byName = (one: readonly [string, unknown], other: readonly [string, unknown]) => one[0].localeCompare(other[0]);
 
 /**
  * What the page is told of one pass of the whole home, every kind alike (main.ts keeps it for the next view: types.ts SyncView
@@ -80,9 +131,10 @@ export function passTells(synced: NonNullable<HomePass['synced']>): { copies: De
 
 /** The result of one explicit request. Keep each kind apart and name the tools from the writes themselves.
  * For each tool its last result decides whether a refusal still stands. A deleted-by-hand notice says what turned Off
- * when no copy result already describes the removal. Fold only completed items; keep every outstanding problem. */
+ * when no copy result already describes the removal. What was done goes in the sentence, folded past three items; each
+ * refusal in a tool is a reason of its own, never folded. */
 export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stopped?: string) {
-  const completed: { text: string; taken: boolean }[] = [], problems = new Set(passes.flatMap(pass => pass.crashes.map(crash => crash.message)));
+  const completed: { text: string; taken: boolean; refused: boolean }[] = [], refused: Reason[] = [], problems = new Set(passes.flatMap(pass => pass.crashes.map(crash => crash.message)));
   if (stopped) problems.add(stopped);
   const kinds = (['skills', 'mcp', 'agents'] as const).map(kind => {
     const key = kind === 'mcp' ? 'servers' : kind;
@@ -98,34 +150,36 @@ export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stoppe
     const say = sentences(libraryWords[kind]);
     for (const name of names) {
       const label = rowNames([{ kind, name }], among)[0]!;
-      const copies = results.get(name) ?? [], parts: string[] = [];
-      let taken = false, refused = false;
+      // What it did with the item goes in the sentence; each refusal, in a tool, is a reason of its own, in the Library's parts.
+      const copies = results.get(name) ?? [], parts: string[] = [], refusals: Reason[] = [];
+      let taken = false;
       for (const outcome of ['removed', 'written'] as const) {
         const tools = [...new Set(copies.flatMap(copy => copy.harness && copy.outcome === outcome ? [copy.harness] : []))];
         if (tools.length) parts.push(outcome === 'removed' ? `Removed ${label} from ${toolList(tools)}.` : `Copied ${label} to ${toolList(tools)}.`);
       }
       for (const copy of new Map(copies.map(copy => [copy.harness, copy])).values()) {
         if (copy.outcome !== 'held' && copy.outcome !== 'failed') continue;
-        refused = true;
-        const action = copy.removal ? 'remove' : 'change', where = copy.removal ? 'from' : 'in';
-        parts.push(`Couldn’t ${action} ${label}${copy.harness ? ` ${where} ${toolName(copy.harness)}` : ''}. ${copy.message}`);
+        refusals.push([label, `${copy.harness ? ` (${toolName(copy.harness)})` : ''}: ${copy.message}`]);
       }
       for (const notice of notices) {
         if (notice.kind === 'taken-in' && notice.items.includes(name)) { taken = true; parts.push(`Took in ${label}.`); }
-        else if (notice.kind !== 'taken-in' && notice.item === name && (!parts.length || notice.kind !== 'deleted-by-hand')) {
+        else if (notice.kind !== 'taken-in' && notice.item === name && ((!parts.length && !refusals.length) || notice.kind !== 'deleted-by-hand')) {
           parts.push(say.noticeWords({ ...notice, item: label }).text);
         }
       }
-      if (refused) problems.add(parts.join(' '));
-      else if (parts.length) completed.push({ text: parts.join(' '), taken });
+      refused.push(...refusals);
+      if (parts.length) completed.push({ text: parts.join(' '), taken, refused: refusals.length > 0 });
     }
   }
   const last = passes.at(-1);
   if (last?.skills?.settling || last?.servers?.settling || last?.agents?.settling) problems.add('Some copies are still settling. Sync again after they finish saving.');
-  const folded = completed.length > 3 ? completed.splice(2) : [];
+  // What was done with an item a tool refused stays beside its refusal; the rest folds past three items.
+  const folded = completed.length > 3 ? completed.filter((item, at) => at >= 2 && !item.refused) : [];
   const taken = folded.filter(item => item.taken).length, changed = folded.length - taken;
-  const lines = completed.map(item => item.text);
+  const lines = completed.filter(item => !folded.includes(item)).map(item => item.text);
   if (taken) lines.push(`Sync once ${tookInCount(taken, true)}.`);
   if (changed) lines.push(`Changed ${plural(changed, 'more item')}.`);
-  return { text: [...lines, ...problems].join('\n') || 'Nothing to do.', warn: problems.size > 0, history: folded.length > 0 };
+  // What it could not do is its reasons, each a problem line of its own (app.ts Outcome); its sentence says so first.
+  const text = [problems.size || refused.length ? 'Not everything was synced.' : '', ...lines].filter(Boolean).join(' ') || 'Nothing to do.';
+  return { text, reasons: [...problems, ...refused], warn: problems.size + refused.length > 0, history: folded.length > 0 };
 }

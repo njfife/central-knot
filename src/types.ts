@@ -106,6 +106,9 @@ export interface DestinationResult { item: string; harness?: HarnessId; /** `swi
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, its record's gate and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** The tools whose own record of their plugins can't be read (plugins.ts recordReadable): what they have installed isn't known. */ pluginRecordsUnread?: HarnessId[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Other builds of Central Knot on this Mac (otherbuilds.ts): while one is found this build is held (model.ts holdingBuild) and the window shows only the held screen. Unset where they aren't looked for (main.ts buildsContext: only an installed app on a Mac, or a test with its stand-ins) and where an Applications folder can't be read. */ otherBuilds?: OtherBuild[]; /** Where this copy of the app runs from, when that is not the top of an Applications folder (otherbuilds.ts runsOutside): it replaces no build from there. */ runsOutside?: string; /** What this build said on taking the home's record over at this view's look, where it carried the other build's choices (main.ts lookForOthers, takeOverHome): the page says it once. */ tookOver?: string; /** Central Knot's own settings file couldn't be read at this launch (main.ts loadAppSettings): the Overview and Settings say so this launch, until closed on Settings (settingspage.ts keptNote). `keptAs`: where it is kept aside; absent, it is still in place. */ settingsUnread?: { keptAs?: string }; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
 
+/** A reason under a result: its own words, or a tool's refusal in the parts the header draws (matrix.ts problemLines): the item's name, then its tool and what failed. */
+export type Reason = string | [item: string, what: string];
+
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   /** The home read again, after a pass. `asked`: the person's Refresh, which asks each tool its version again too (discovery.ts forgetVersions). */
@@ -125,7 +128,7 @@ export interface DesktopApi {
   /** The home last opened, else this computer's home (dev builds: the practice copy). */
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
-  syncNow(home: string): Promise<{ view: HomeView; text: string; warn: boolean; history: boolean } | null>;
+  syncNow(home: string): Promise<{ view: HomeView; text: string; reasons: Reason[]; warn: boolean; history: boolean } | null>;
   onSyncRequest(callback: () => void): void;
   /**
    * Turns the open home's standing rule, Synchronize everything, on or off (everything.ts setSyncEverything), then reads and syncs
@@ -972,8 +975,12 @@ export interface PassResult {
   stopped?: string; results: DestinationResult[]; writes: number; made?: string[]; notices?: SyncNotice[];
   /** A deletion is inside its settle window: look again shortly. */
   settling?: boolean;
-  /** A pass of the whole home (librarypass.ts PassOptions background): the found keys it left found; main.ts tells an open page when one is new (foundGained). */
-  found?: string[];
+  /**
+   * A pass of the whole home (librarypass.ts PassOptions background): each found key it left found, with the hash of each
+   * managed harness's copy it would be taken in from (librarypass.ts foundCopies). homepass.ts pageSees puts it in what the
+   * page sees.
+   */
+  found?: Record<string, Partial<Record<HarnessId, string>>>;
   /**
    * A pass with a source's read (librarypass.ts fromSourceStep): the table's answer for each item, but `nothing` and `same`
    * (which change nothing a person sees), with the History entry that says it, whether the item is On once the step is done
@@ -1112,11 +1119,14 @@ export interface PluginUpdatesView {
   updated: PluginUpdateLine[]; failed: PluginUpdateLine[]; first: boolean;
 }
 /** Why this copy can't update itself (see updates.ts for each one's words). */
-export type UpdateReason = 'dev' | 'untagged' | 'unsigned' | 'applications' | 'readonly';
-/** A newer release: its tag, its Mac zip (where and how many bytes) and its page, which has the release notes. */
-export interface UpdateRelease { tag: string; zip: string; size: number; page: string }
+export type UpdateReason = 'dev' | 'untagged' | 'unsigned' | 'applications' | 'readonly' | 'linux';
 /**
- * Updates as the main process has them. `shown`: false where there are no releases (not macOS), and nothing is said anywhere.
+ * A newer release: its tag, this platform's download of it (where and how many bytes: a Mac's zip, which the updater installs;
+ * Linux's AppImage, which nothing downloads yet) and its page, which has the release notes.
+ */
+export interface UpdateRelease { tag: string; download: string; size: number; page: string }
+/**
+ * Updates as the main process has them. `shown`: false where there are no releases (not macOS or Linux), and nothing is said anywhere.
  * `tag`: the release tag this build was made from; `reason`: why it can't update itself. `checked`: the last check, and why
  * it failed. `available`: a newer release; `step` and `progress` (0 to 1): an update under way; `failed`: why the last update
  * stopped (the installed app unchanged). `updated`: this launch is the first after an update to that release.
