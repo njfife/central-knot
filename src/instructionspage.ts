@@ -1,11 +1,12 @@
 // Instructions: each tool's own instruction file, a plain editor (opened by a click on the text or by Edit), a diff before
-// saving and earlier versions (INS-01, INS-02); the page puts the Base instructions card (basecard.ts) first, then the tools'
-// cards under a heading (one a row, two on a wide page: style.css .ins-tool-cards), and keeps what explains the files (who reads
-// each, the tools' own notes) in one info box at the top. On each tool's card, after its text and base strip, what else
-// adds text to its sessions (alsoInEverySession, from sessionhooks.ts). A tool's card has its actions in its head at every stage, so a long
-// text never hides them (the base card's, too, except while its Draft panel is open: basecard.ts). There is no turn-off switch:
-// instruction files are edited, never disabled or emptied by Central Knot (the one deletion is an Undo of a base save removing a
-// file that save created, while unchanged).
+// saving and earlier versions (INS-01, INS-02), and the other files the tool reads with it, shown only (otherFiles); the page
+// puts the Base instructions card (basecard.ts) first, then the tools' cards under a heading (one a row, two on a wide page:
+// style.css .ins-tool-cards), and keeps what explains the files (who reads each, the tools' own notes) in one info box at the
+// top. On each tool's card, after those files, what else adds text to its sessions (alsoInEverySession, from
+// sessionhooks.ts). A tool's card has its actions in its head at every stage, so a long text never hides them (the base card's,
+// too, except while its Draft panel is open: basecard.ts). There is no turn-off switch: instruction files are edited, never
+// disabled or emptied by Central Knot (the one deletion is an Undo of a base save removing a file that save created, while
+// unchanged).
 import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
@@ -14,8 +15,9 @@ import { button, h, icon, lockAttrs, pathText, rereadBand } from './dom.ts';
 import { noToolsState } from './pages.ts';
 import { brandMark, openPlugin, outcomeBand } from './matrix.ts';
 import { inlineMarkdown } from './markdown.ts';
+import { plural } from './model.ts';
 import { sessionLines, type SessionLine } from './sessionhooks.ts';
-import type { HarnessId, InstructionFile } from './types.ts';
+import type { HarnessId, InstructionFile, InstructionPart } from './types.ts';
 import { lineDiff } from './diff.ts';
 import { keepLineBreaks } from './drafts.ts';
 export { lineDiff } from './diff.ts';
@@ -140,6 +142,52 @@ function resting(file: InstructionFile, lockedWhy: string | undefined, goTo: Nod
   };
 }
 
+/** The other files whose text is open on their card, by tool and path, across redraws. */
+const openParts = new Set<string>();
+/** Each part's own number, by tool and path, given when it is first drawn: its controls' ids, distinct for every path. */
+const partNumbers = new Map<string, number>();
+const numberOf = (key: string) => partNumbers.get(key) ?? partNumbers.set(key, partNumbers.size).size - 1;
+/** An opened part longer than this many lines has a second Hide at its end, so its closer is in reach from there too. */
+const LONG_PART = 30;
+
+/**
+ * The other files a tool reads with its own (instructionparts.ts), after its file and base strip: under "Also read with" the
+ * file's name, those read in every session, then those read only for matching files, each in the tool's order.
+ */
+function otherFiles(file: InstructionFile) {
+  if (!file.parts?.length) return null;
+  const heading = `Also read with ${fileName(file.path)}`;
+  const group = (title: string, parts: InstructionPart[]) => (parts.length ? h('div.ins-parts-group', {}, h('p.ins-parts-sub', {}, title), parts.map(part => partView(file.tool, part))) : null);
+  return h('section.ins-parts', { id: `ins-parts-${file.tool}`, 'aria-label': heading },
+    h('p.ins-parts-head', {}, icon('link', 13, 'tone-muted'), h('span', {}, h('strong', {}, heading), ' · shown as they are, not changed here')),
+    group('In every session', file.parts.filter(part => !part.only)), group('Only for matching files', file.parts.filter(part => part.only)));
+}
+
+/**
+ * One part: a line with where it comes from, its scope, whose own file it is when another tool's, and its size; or why it isn't
+ * shown; or, in the warning tone, why the tool can't read it. Show opens its text below as quoted text (a plugin file's look) and
+ * Hide closes it, in place: the card is not redrawn, so an editor open on it keeps its caret. Keyed by its path, not its place.
+ */
+function partView(tool: HarnessId, part: InstructionPart): HTMLElement {
+  const key = `${tool}:${part.path}`, open = openParts.has(key), id = `ins-part-${tool}-${numberOf(key)}`;
+  const toggle = () => {
+    if (open) openParts.delete(key); else openParts.add(key);
+    const next = partView(tool, part);
+    view.replaceWith(next);
+    next.querySelector<HTMLElement>(`#${id}`)?.focus();
+  };
+  const press = (pressId: string) => button({ variant: 'link', size: 'micro', label: open ? 'Hide' : 'Show', id: pressId, attrs: { 'aria-expanded': String(open) }, onclick: toggle });
+  const shown = 'text' in part ? (part.text ? plural(lineCount(part.text), 'line') : 'empty') : 'notShown' in part ? part.notShown : part.problem;
+  const says = [part.from, part.only && `for ${part.only}`, part.ownedBy && `${toolNames[part.ownedBy]}’s own file: edited on its card`, shown];
+  const view = h('div.ins-part', { 'data-path': part.path },
+    h('div.ins-part-line', {}, pathText(shownPath(part.path), part.path),
+      h(`span.ins-part-says${'problem' in part ? '.tone-warning' : ''}`, {}, 'problem' in part ? icon('triangle-alert', 12) : null, says.filter(Boolean).join(' · ')),
+      'text' in part ? press(id) : null),
+    'text' in part && open ? h('pre.content.mono', { id: `${id}-text`, tabindex: '0', 'aria-label': `${fileName(part.path)} contents` }, part.text.replace(/\n$/, '')) : null,
+    'text' in part && open && lineCount(part.text) > LONG_PART ? h('div.ins-part-end', {}, press(`${id}-end`)) : null);
+  return view;
+}
+
 /**
  * One tool's file: shown on Instructions for every tool, and on that tool's Harnesses page. `titled`: false on a harness's
  * page, where the header already names the tool, so the card leads with the file's path. `goToOther`: where the open
@@ -168,6 +216,7 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
         editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: !draftUnsaved() }, 'Unsaved changes') : null),
       stage.actions),
     stage.body,
+    otherFiles(file),
     alsoInEverySession(file),
     versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!acting() || readOnly || otherDirty || (editing && draftUnsaved()),
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));

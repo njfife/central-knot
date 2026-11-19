@@ -36,11 +36,9 @@ export const pagePlatform = (userAgent: string): string => (userAgent.includes('
 /**
  * Whether Central Knot writes a real home on this platform, as `process.platform` spells it: on macOS and Linux; elsewhere
  * (Windows) a real home is preview only (share.ts writeAccess). Read by main.ts (ShareContext allowActualWrites, never in a
- * smoke test) and by the checks that expect its writes (scripts/e2e.mjs, scripts/bundled-check.mjs). Two things the Mac has
- * are not on Linux yet: one install at a time (main.ts looksForBuilds: an installed app looks only on a Mac), so two installed
+ * smoke test) and by the checks that expect its writes (scripts/e2e.mjs, scripts/bundled-check.mjs). One thing the Mac has
+ * is not on Linux yet: one install at a time (main.ts looksForBuilds: an installed app looks only on a Mac), so two installed
  * builds with settings folders of their own, the standard and the alpha AppImage, both write a home they both open (a
- * development run shares the standard app's settings folder and its single-instance lock, so it never runs beside it); and
- * where the desktop has no system tray (GNOME without its AppIndicator extension), a closed window keeps syncing with no Quit
- * to reach.
+ * development run shares the standard app's settings folder and its single-instance lock, so it never runs beside it).
  */
 export const writesRealHome = (platform: string): boolean => platform === 'darwin' || platform === 'linux';

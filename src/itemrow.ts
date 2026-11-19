@@ -154,6 +154,8 @@ export function inOrder<Row extends Pick<ItemRow, 'kind' | 'key' | 'versions'>>(
  * there, and its time in the list's order then (timeIn), so it keeps its place among its neighbours too (Add gives a found
  * item a time). A click never moves a row: it stays where it was, drawn in its new state, while the person works down the list.
  * Nor does a usage reading that lands: on a list that goes by last used, every row is pinned where it is first (matrix.ts holdOrder).
+ * On the Library while its Find has text, every row drawn is pinned, with no time, in the order drawn: the order the rows were
+ * pinned in is their order there (matrix.ts holdFound, foundOrder).
  */
 export interface Pin<Group> { group: Group; time?: number }
 /**
