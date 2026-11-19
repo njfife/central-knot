@@ -379,7 +379,7 @@ function settingRow(id: string, title: string, hint: string, control: HTMLElemen
 
 /**
  * Updates: the build in use, Check now and the Update button, what the last check or update found, and why this copy can't
- * update itself, with the release page instead. Not shown where there are no releases (only Macs have them).
+ * update itself, with the release page instead. Not shown where there are no releases (only Macs and Linux have them).
  */
 function updatesRow(): HTMLElement | null {
   const view = updates.view;

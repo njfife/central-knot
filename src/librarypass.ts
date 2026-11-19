@@ -643,7 +643,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   keepFolders(library, pass.foldersNow, managed, !options.only && !sourceScope);
   await saveIfChanged(pass);
   return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made,
-    ...(options.background ? { found: foundKeys(pass), unread } : {}), ...(options.source ? { sourced: [...pass.sourced.values()] } : {}) };
+    ...(options.background ? { found: foundNow(pass), unread } : {}), ...(options.source ? { sourced: [...pass.sourced.values()] } : {}) };
 }
 
 /**
@@ -1037,6 +1037,9 @@ async function takeInByRule(pass: Pass) {
 /** The keys a managed harness has a copy of (its own, or one it has another way) that the library has no live item for. */
 const foundKeys = (pass: Pass) => [...new Set([...pass.disk.byKey.keys(), ...(pass.disk.outside?.keys() ?? [])])]
   .filter(key => !pass.library.items[key] || pass.library.items[key].deleted).sort();
+/** Each found key the pass leaves found (foundKeys), with the hash of each copy it would be taken in from (foundCopies), by harness. */
+const foundNow = (pass: Pass) => Object.fromEntries(foundKeys(pass)
+  .map(key => [key, Object.fromEntries(foundCopies(pass, key, []).map(copy => [copy.tool, copy.hash]))]));
 
 /**
  * Takes a found item into the library, On, from the copy the take-in table answered: the one content every harness holds, or
