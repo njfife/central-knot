@@ -1078,7 +1078,7 @@ export interface BaseUndo { text: string; list: BaseList;
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';
 /** Why starting at sign-in can't be changed here, or why the system has it off (see signin.ts for each one's words). */
-export type SignInReason = 'testing' | 'dev' | 'linux' | 'applications' | 'approval' | 'startupApps';
+export type SignInReason = 'testing' | 'dev' | 'appImage' | 'applications' | 'approval' | 'startupApps' | 'another';
 /** The system's own place for start at sign-in, in its words: the action that opens it, and what the page says around it. */
 export interface SignInPlace { open: string; unopened: string; unchanged: string }
 /**
