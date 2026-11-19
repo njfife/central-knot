@@ -577,6 +577,8 @@ interface BackgroundPass { synced?: HomePass['synced']; seen?: string; skills?: 
 
 /** Each reason the move of plugin parts waited that the log has had this launch (pass). */
 const partsWaitsLogged = new Set<string>();
+/** Each reason what the page sees couldn't be made (homepass.ts seenFailed) that the log has had this launch (pass). */
+const seenFailures = new Set<string>();
 /** Why the move of plugin parts waits, as the last pass gave it (homepass.ts partsWait); none when it doesn't. The Plugins page says it (MarketplaceHost partsWait). */
 let partsWaiting: string | undefined;
 /**
@@ -591,10 +593,12 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   // While plugin parts from before the library wait to be moved there, the plugins record's first read comes first (its install
   // alpha 1 waited for read from pluginUpdates, made before any pass), and the move may read a plugin (homepass.ts step 2).
   const pluginNow = await carriedMarket?.beforeParts().catch((error: unknown) => { logFailure('plugins record', error); return undefined; });
-  const { synced, seen, profilesFailed, partsFailed, partsWait } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
+  const { synced, seen, seenFailed, profilesFailed, partsFailed, partsWait } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
   partsWaiting = partsWait;
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
   if (partsFailed !== undefined) logFailure('moving plugin parts', partsFailed);
+  // What the page sees couldn't be made: once per launch and reason, as it may fail again at every poll.
+  if (seenFailed !== undefined && !seenFailures.has(String(seenFailed))) { seenFailures.add(String(seenFailed)); logFailure('what the page sees', seenFailed); }
   // Why the move of plugin parts waits, once per launch and reason (a home can wait for good: its rows say only "waiting").
   if (partsWait && !partsWaitsLogged.has(partsWait)) { partsWaitsLogged.add(partsWait); log(`plugin parts: waiting to be moved to the library: ${partsWait}`); }
   if (!synced) return {};
@@ -631,8 +635,9 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   const passed = passes[passes.length - 1], { skills } = passed;
   passes.forEach(keepPass);
   lookAgainSoon(passed);
-  // The page is given this view: what it sees is kept, silently, so the next pass tells it nothing it already has.
-  seenChanged(passed);
+  // The page is given this view, and what it sees is this view's own pass's value, silently: the next pass tells it nothing it
+  // already has. Not known (Sync off, a refusal, no record), the next value a pass makes tells it.
+  lastSeen = passed.seen;
   const caughtUp = pendingResults.splice(0), notices = pendingNotices.splice(0);
   const profiles = await readProfiles(current!.home);
   // The home is read again after a pass that may have written (Sync on, or Sync once): a pass that stopped part-way reports
@@ -883,10 +888,11 @@ let poller: NodeJS.Timeout | undefined;
 let soon: NodeJS.Timeout | undefined;
 let followUp: NodeJS.Timeout | undefined;
 /**
- * What a person would see of the open home as the page was last given it (homepass.ts pageSees): set by each view's own pass
- * (syncAndView) and by each background pass that makes one; a background pass whose value differs tells the page, though it
- * wrote nothing (a found item edited, gained or gone; a plugin installed, removed, switched or changed in place). A pass that
- * makes no value (Sync off, a refusal, no record, a crash) leaves it; a home switch that fails puts it back (selectHome).
+ * What a person would see of the open home as the page was last given it (homepass.ts pageSees): each view's own pass's value,
+ * undefined where that pass made none (syncAndView), then each background pass's that makes one; a background pass whose value
+ * differs tells the page, though it wrote nothing (a found item edited, gained or gone; a plugin installed, removed, switched
+ * or changed in place). A background pass that makes no value (Sync off, a refusal, no record, a crash) leaves it; a home
+ * switch that fails puts it back (selectHome).
  */
 let lastSeen: string | undefined;
 function seenChanged({ seen }: BackgroundPass): boolean {
@@ -1022,13 +1028,19 @@ function stopWatching() {
   clearTimeout(soon); clearTimeout(followUp);
 }
 
-/** A folder not made yet: the folder above it is watched for its making, which starts the watch again and reads. */
+/**
+ * A folder not made yet: the folder above it is watched for its making, which starts the watch again and reads. One removed
+ * and made again while the app is open isn't watched for again: the poll reads it with Sync on; with Sync off, Refresh does.
+ */
 function watchFor(folder: string) {
   const made = (_event: string, name: string | null) => { if (name === basename(folder)) { void startWatching(); nudge(); } };
   try { watchers.push(watch(dirname(folder), { persistent: false }, made)); } catch { /* not there either: polling covers it */ }
 }
 
-/** Watches each tool's skills folders (an event only prompts a read, CON-04), with polling as the fallback (T-08: at most 30 s). */
+/**
+ * Watches each tool's skills and agents folders, its settings files and its own record of its plugins (an event only prompts
+ * a read, CON-04), with polling as the fallback (T-08: at most 30 s).
+ */
 async function startWatching() {
   closeWatchers();
   if (!current || smoke) return;

@@ -86,6 +86,30 @@ test('A plugin’s part changed in place, the plugin or one part turned off by t
   } finally { await box.cleanup(); }
 });
 
+test('The same plugin cached at another path, or the same skills turned off in another order, is no change', async () => {
+  const box = await sandbox();
+  try {
+    // Claude Code caches a plugin with no version in a folder named for its commit: cached again, the folder is another.
+    const [first, again] = ['1a2b3c4', '5d6e7f8'].map(commit => join(box.home, '.claude/plugins/cache/team/kit', commit));
+    for (const folder of [first, again]) await put(join(folder, 'skills/tidy/SKILL.md'), skill('tidy'));
+    const cachedAt = (folder: string) =>
+      put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'kit@team': [{ scope: 'user', installPath: folder }] } }));
+    // Copilot CLI turns two of a plugin's skills off by its own list, in whatever order it writes it.
+    const copy = join(box.home, '.copilot/installed-plugins/m/demo');
+    await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'demo', version: '1.0.0' }));
+    for (const name of ['hello', 'bye']) await put(join(copy, `skills/${name}/SKILL.md`), skill(name));
+    await put(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'demo', marketplace: 'm', version: '1.0.0', cache_path: copy }] }));
+    const turnedOff = (names: string[]) => put(join(box.home, '.copilot/settings.json'), JSON.stringify({ disabledSkills: names.map(name => `demo:${name}`) }));
+    await cachedAt(first);
+    await turnedOff(['hello', 'bye']);
+    const before = await box.seen();
+    await cachedAt(again);
+    assert.equal(await box.seen(), before, 'cached again at another path');
+    await turnedOff(['bye', 'hello']);
+    assert.equal(await box.seen(), before, 'the same skills turned off, listed in another order');
+  } finally { await box.cleanup(); }
+});
+
 test('Codex’s plugin agents are not in it, as the page lists none; its plugin’s skill is', async () => {
   const box = await sandbox();
   try {
@@ -109,5 +133,17 @@ test('A pass that does not see the whole home makes no value, never an empty hom
     assert.equal(await box.seen(false), undefined, 'Sync off: the pass reads no kind');
     await rm(join(box.home, '.central-knot'), { recursive: true });
     assert.equal(await box.seen(), undefined, 'no record: each kind’s pass stops before its look');
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin read that throws makes no value and says why, for the log', async () => {
+  const box = await sandbox();
+  try {
+    // The pass's own read of Claude Code's installed copies failed (plugins.ts installedCopies, cached in the pass's reads).
+    const failed = Promise.reject(new Error('the copies could not be listed'));
+    failed.catch(() => undefined);
+    const reads = new Map<string, Promise<unknown>>([['installed-copies:claude-cli', failed]]);
+    const done = await homePass({ ...box.context, reads }, tools, true);
+    assert.deepEqual([done.seen, (done.seenFailed as Error | undefined)?.message], [undefined, 'the copies could not be listed']);
   } finally { await box.cleanup(); }
 });

@@ -6698,9 +6698,10 @@ async function pluginTextFlow() {
  * found by a record whose Synchronize everything is off. With Automatic sync off, then on, each change waited for as a newer
  * index for this home whose answers hold it and the row's going or coming: a plugin's first install (which makes Claude Code's
  * plugins folder), a found skill edited, one deleted, the plugin taken out of Claude Code's record and put back, with what was
- * typed in Find and the row opened kept. Then, with it on, how light it stays: no signal for .claude.json and the plugin record
- * written again with the same content; none after a click's own view and a minute idle; while a skill changes every second,
- * no more than the watch's debounce and the poll allow.
+ * typed in Find and the row opened kept. With it on, the home brought back to what a view had, after views that made no value.
+ * Then, with it on, how light it stays: no signal for .claude.json and the plugin record written again with the same content;
+ * none after a click's own view and a minute idle; while a skill changes every second, no more than the watch's debounce and
+ * the poll allow.
  */
 async function staleFlow() {
   const home = join(scratch, 'stale-home'), data = join(scratch, 'stale-data'), skills = join(home, '.claude/skills');
@@ -6723,7 +6724,7 @@ async function staleFlow() {
   /** After a change made outside: how long until an index newer than the last one for this home answers as `holds` says; undefined, it never did. */
   const arrives = async (change, holds) => {
     const since = await a.run(`Math.max(0, ...window.ckPublished.filter(tag => tag.home === ${JSON.stringify(home)}).map(tag => tag.readId))`), from = Date.now();
-    change();
+    await change();
     while (Date.now() - from < 30000) {
       if (await a.run(`window.ckPublished.some(tag => tag.home === ${JSON.stringify(home)} && tag.readId > ${since})`) && await holds()) return Date.now() - from;
       await wait(100);
@@ -6756,6 +6757,17 @@ async function staleFlow() {
   await a.click('#sync-switch');
   same('Automatic sync is on', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
   await sequences('on', ['compass', 'harbour'], ['spare', 'tyre']);
+  // A view whose pass made no value (the home's record set aside while two views are read: the switch off, then on) leaves the
+  // page nothing to compare with, so the home brought back to what an earlier view had is told all the same.
+  const record0 = join(home, '.central-knot/sync.json'), harbour = readFileSync(notes, 'utf8');
+  took['on: a view with no value'] = await arrives(async () => {
+    renameSync(record0, `${record0}.aside`);
+    writeFileSync(notes, text('notes', 'Write it down in the beacon log.'));
+    for (let turn = 0; turn < 2; turn++) await a.click('#sync-switch');
+  }, async () => (await ids('beacon')).includes('skills-notes'));
+  same('and Automatic sync is on again', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
+  took['on: back as an earlier view had it'] = await arrives(() => { renameSync(`${record0}.aside`, record0); writeFileSync(notes, harbour); },
+    async () => (await ids('harbour')).includes('skills-notes') && !(await ids('beacon')).includes('skills-notes'));
   console.log(`staleFlow ms: ${JSON.stringify(took)}`);
   for (const [name, ms] of Object.entries(took)) check(`${name}: reaches the page and the index without a Refresh`, ms !== undefined);
 
