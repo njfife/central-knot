@@ -7,6 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, closeSync, constants as fsConstants, cpSync, existsSync, openSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { createServer as tcpServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -149,7 +150,7 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   // OpenCode's CLI is looked for only inside the throwaway home, and on a Mac every app in the stand-in for /Applications
   // (CK_TEST_APPS, empty here): a machine that has them installed (the Mac these run on does) would otherwise bring them into
   // every flow that opens "This Mac's home".
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -3559,6 +3560,12 @@ async function updateFlow() {
   const fixture = await serveReleases(releases);
   const data = join(scratch, 'update-data');
   const as = tag => ({ CK_UPDATE_STUB: tag, CK_UPDATE_RELEASES: fixture.releasesUrl });
+  // A plugin read is in flight through the restart: the fixture marketplace's GitHub plugin waits on a host that never answers.
+  const silent = await silentServer(), market = join(scratch, 'update-market');
+  writeMarket(market, 'ck-update-market');
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'marketplaces.json'), JSON.stringify([market]));
+  const reading = { CK_PLUGIN_TEXT: 'on', ...silent.instead };
   let a;
   /** The sidebar's update control as the person and a screen reader meet it: its look, its words, its name and its tooltip. */
   const control = () => a.run(`(b => b && { look: b.dataset.look, label: b.textContent.trim(), name: b.getAttribute('aria-label'), title: b.title, disabled: b.disabled })(document.getElementById('update-control'))`);
@@ -3575,7 +3582,7 @@ async function updateFlow() {
     return out;
   })()`);
   try {
-    a = await launch(data, ['--practice-copy'], HOME, as('v0.5.0-preview.4'));
+    a = await launch(data, ['--practice-copy'], HOME, { ...as('v0.5.0-preview.4'), ...reading });
     same('the status bar names the build by its release', await a.text('#status-end'), 'Central Knot 0.5.0 preview 4');
     same('before the first check the sidebar ends in the quiet Check for updates', [(await control())?.look, (await control())?.label], ['check', 'Check for updates']);
     // The first check runs shortly after launch, on its own.
@@ -3630,9 +3637,13 @@ async function updateFlow() {
     same('no page errors while updating', a.pageErrors, []);
     // Restarting there is the person's choice: the app restarts (here: quits, the stub's install).
     const exited = new Promise(done => a.child.once('exit', done));
+    check('a plugin read is in flight', (await a.run('window.centralKnot.pluginText()'))?.reading === true);
     // Clicked a moment later, from the page: the app quits at once, so a reply to the click itself might never come.
+    const clicked = Date.now();
     await a.run(`(setTimeout(() => document.getElementById('setting-update').click(), 100), true)`);
     check('Restart to update quits for the update', await Promise.race([exited.then(() => true), wait(15000).then(() => false)]));
+    const kept = JSON.parse(readNow(join(data, 'plugins/plugin-text.json')) || '{"plugins":[]}').plugins;
+    check('with a plugin read in flight, the restart waits for its stop and its save, not the 15 seconds', Date.now() - clicked < 5000 && kept.length === 4, [Date.now() - clicked, kept.length]);
     const pending = JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).update;
     same('the update is recorded for the next launch', pending && [pending.tag, pending.from], ['v0.5.0-preview.5', 'v0.5.0-preview.4']);
     // The next launch is the new version: it says so once, with the release notes.
@@ -3750,7 +3761,17 @@ async function updateFlow() {
     // On a Mac its sidebar control is faint and opens Settings, which says why; elsewhere there is none (no releases there).
     same('and its sidebar control never offers an update', (await control())?.look, process.platform === 'darwin' ? 'off' : undefined);
     await a.quit();
-  } finally { await fixture.close(); }
+  } finally { await fixture.close(); silent.close(); }
+}
+
+/** A host that takes a connection and never answers (a Git fetch from it waits, as from a stalled server), with the Git setting that sends GitHub to it. */
+async function silentServer() {
+  const sockets = new Set(), server = tcpServer(socket => { sockets.add(socket); socket.on('error', () => {}); });
+  await new Promise(done => server.listen(0, '127.0.0.1', done));
+  return {
+    instead: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.http://127.0.0.1:${server.address().port}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' },
+    close: () => { for (const socket of sockets) socket.destroy(); server.close(); },
+  };
 }
 
 /**
@@ -6465,6 +6486,83 @@ esac
 }
 
 /**
+ * What plugins hold, read in the background (plugintext.ts), on screen, over a marketplace Central Knot lists whose one plugin kept
+ * elsewhere is on GitHub. First Git's url.insteadOf sends GitHub to a port where nothing answers: the four kept in the marketplace
+ * are read, Settings says the fifth couldn't be and is tried again. Then, launched again, to a local repository standing in for
+ * GitHub (no network either): all five are read; turned off, what was read stays and the row says so.
+ */
+async function pluginTextFlow() {
+  const home = join(scratch, 'text-home'), data = join(scratch, 'text-data'), real = join(scratch, 'text-real'), market = join(scratch, 'text-market'), hosts = join(scratch, 'text-hosts');
+  writeMarket(market, 'ck-text-market');
+  for (const folder of [data, real, join(home, '.claude')]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(home, '.claude/settings.json'), '{}');
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  writeFileSync(join(data, 'marketplaces.json'), JSON.stringify([market]));
+  writeFileSync(join(scratch, 'text-gitconfig'), '[url "http://127.0.0.1:9/"]\n\tinsteadOf = https://github.com/\n');
+  let a = await launch(data, [], real, { CK_PLUGIN_TEXT: 'on', GIT_CONFIG_GLOBAL: join(scratch, 'text-gitconfig') });
+  const kept = () => { try { return JSON.parse(readFileSync(join(data, 'plugins/plugin-text.json'), 'utf8')).plugins; } catch { return []; } };
+  const switched = () => a.run(`document.querySelector('#plugin-text-on')?.getAttribute('aria-checked')`);
+  const said = async () => [(await a.text('#setting-plugin-text-notice'))?.trim() ?? '', await a.text('#setting-plugin-text-hint') ?? ''];
+  const saying = async (pattern, tries = 150) => { while (tries-- > 0 && !pattern.test((await said())[0])) await wait(100); return pattern.test((await said())[0]); };
+  // With --shots: the row at the two smaller sizes (or only the first), dark and light.
+  const pictures = async (name, sizes = [[860, 600], [1280, 800]], themes = ['dark', 'light']) => {
+    if (!shots) return;
+    for (const [width, height] of sizes) for (const value of themes) {
+      await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false });
+      await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+      await a.run(`document.querySelector('#setting-plugin-text')?.scrollIntoView({ block: 'center' })`);
+      await wait(300);
+      await a.shot(`plugin-text-${name}-${width}-${value}`);
+    }
+    await a.send('Emulation.clearDeviceMetricsOverride');
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+  };
+  const toSettings = async () => {
+    for (let tries = 0; tries < 50 && !(await a.exists('#nav-settings')); tries++) await wait(100);
+    if (await a.exists('#setup-no')) await a.click('#setup-no');
+    await a.click('#nav-settings');
+  };
+  await toSettings();
+  check('Settings has the switch, on, how much is read and that the fifth is tried again, and what the first reading downloads', await switched() === 'true'
+    && await saying(/^Read 4 of 5 plugins\. 1 couldn’t be read; Central Knot tries again later\.$/)
+    && /Nothing is installed or run\. The one plugin outside its marketplace is downloaded once \(under 1 MB\), then only changes, or daily if on a branch\.$/.test((await said())[1]), await said());
+  same('the four kept in the marketplace are kept as text; nothing of the one Git could not reach', kept().map(entry => entry.plugin).sort(), ['document-tools', 'issue-tracker', 'release-helper', 'starter-skills']);
+  check('a skill is kept by its name and description', kept().find(entry => entry.plugin === 'document-tools')?.items.some(item => item.kind === 'skill' && item.name === 'pdf-reader' && item.description), kept().find(entry => entry.plugin === 'document-tools'));
+  await pictures('failed', [[860, 600]], ['dark']);
+  await a.quit();
+
+  // GitHub's plugins repository, standing in, served as Git serves a folder (it filters, as GitHub does).
+  const spark = join(hosts, 'github.com/github/copilot-plugins.git');
+  mkdirSync(join(spark, 'plugins/spark/skills/spark-app'), { recursive: true });
+  writeFileSync(join(spark, 'plugins/spark/skills/spark-app/SKILL.md'), '---\nname: spark-app\ndescription: Builds a small app.\n---\nSteps.\n');
+  for (const args of [['init', '--quiet', '--initial-branch=main'], ['add', '-A'], ['-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', 'commit', '--quiet', '-m', 'spark'], ['config', 'uploadpack.allowFilter', 'true']]) spawnSync('git', ['-C', spark, ...args]);
+  a = await launch(data, [], real, { CK_PLUGIN_TEXT: 'on', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
+  await toSettings();
+  check('launched again, the fifth is read too', await saying(/^Read 5 of 5 plugins\.$/) && kept().some(entry => entry.plugin === 'spark' && entry.items.some(item => item.name === 'spark-app')), [await said(), kept().map(entry => entry.plugin)]);
+  await pictures('read');
+  await a.click('#plugin-text-on');
+  for (let tries = 0; tries < 50 && await switched() !== 'false'; tries++) await wait(100);
+  check('turned off, the choice is saved, what was read stays, and the row says so', await switched() === 'false' && JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginText === false
+    && await saying(/^Off\. What was read from 5 of 5 plugins is kept\.$/) && kept().length === 5, await said());
+  await pictures('off');
+  await a.click('#plugin-text-on');
+  for (let tries = 0; tries < 50 && await switched() !== 'true'; tries++) await wait(100);
+  check('turned on again, it is saved on', await switched() === 'true' && JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginText === true);
+  await a.quit();
+
+  // A fresh data folder, GitHub on a host that never answers: the four kept in the marketplace are read, the fifth is being read.
+  const silent = await silentServer(), fresh = join(scratch, 'text-data-reading');
+  mkdirSync(fresh, { recursive: true });
+  for (const name of ['app-settings.json', 'marketplaces.json']) writeFileSync(join(fresh, name), readFileSync(join(data, name)));
+  a = await launch(fresh, [], real, { CK_PLUGIN_TEXT: 'on', ...silent.instead });
+  await toSettings();
+  check('while the fifth is read, the row says how far it has got', await saying(/^Reading: 4 of 5 plugins\.$/), await said());
+  await pictures('reading', [[860, 600]]);
+  await a.quit();
+  silent.close();
+}
+
+/**
  * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
  * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
  * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
@@ -7571,7 +7669,7 @@ async function libraryFlow() {
 
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow, libraryFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, overviewFlow, searchFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
