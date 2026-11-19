@@ -12,12 +12,12 @@ import { afterLayout, button, fitBars, h, icon, keepClicksAcrossRedraws, keepSel
 import type { IconName } from './icons.ts';
 import { heldKinds, type HomeKind } from './presence.ts';
 import { kindNouns, pageNames } from './words.ts';
-import { pluginItemCount } from './pluginrows.ts';
+import { rowCount } from './pluginrows.ts';
 import { libraryPage } from './pages.ts';
 import { overviewPage } from './overview.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage, pluginsResult } from './pluginspage.ts';
-import { backFromFiles, listResult, resultInHeader } from './matrix.ts';
+import { backFromFiles, listResult, resultInHeader, unseenNotices } from './matrix.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
@@ -59,14 +59,15 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number | str
     type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': countTitle ? `${label}: ${countTitle}` : label, title: label,
     onclick: () => showPage(page),
   }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 || quiet ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true', title: countTitle }, String(count)),
-    // A change sync made on its own shows as a dot on its page until that notice is seen or dismissed there.
-    !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
+    // A change sync made on its own shows as a dot on its page until that notice is painted (seen) or dismissed.
+    unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
 
 const anythingOn = () => !!state.home && anyOn(state.home);
 /** The automatic changes a page shows: the Library's, of every kind it lists. */
 const noticesFor = (page: Page) => (!state.home || page !== 'library' ? [] : heldKinds(state.home).flatMap(kind => state.home![kind].notices));
-const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history) && !state.seenNotices.has(notice.history)).length;
+/** The Library's automatic changes not painted yet: on the Library too, where a kind not on show hides its notice. */
+const unseen = (page: Page) => (!state.home || page !== 'library' ? 0 : heldKinds(state.home).flatMap(unseenNotices).length);
 const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`; };
 
 const homeHelp: Record<HomeMode, string> = {
@@ -114,7 +115,7 @@ function renderSidebar() {
   region('nav').replaceChildren(...[
     navRow('overview', titles.overview, 'layout-grid'),
     navRow('harnesses', titles.harnesses, 'boxes'),
-    home && !held.length ? null : navRow('library', titles.library, 'layers', home ? held.reduce((sum, kind) => sum + home[kind].items.length + pluginItemCount(home, kind), 0) : undefined),
+    home && !held.length ? null : navRow('library', titles.library, 'layers', home ? held.reduce((sum, kind) => sum + rowCount(home, kind), 0) : undefined),
     row('instructions', 'pencil-line'),
     row('plugins', 'puzzle'),
     // Where items come from, beside the plugins' page: how many links are added, once there is one.
@@ -234,9 +235,10 @@ function render() {
   const scrolled = remembered();
   const selected = keepSelection();
   const { rail } = applyLayout();
-  renderSidebar();
   renderHeader(rail);
   drawPage(renderPage);
+  // After the page, which marks the notices it paints seen: the sidebar's dot is for those it didn't.
+  renderSidebar();
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
   runAfterLayout();
   renderStatus();
@@ -284,7 +286,7 @@ document.addEventListener('keydown', event => {
     if (find) { event.preventDefault(); find.focus(); }
   }
   // Escape leaves the Files and contents view for the table, except in a text box, where it clears the box (matrix.ts).
-  if (event.key === 'Escape' && !typing && state.page === 'library' && state.skillsView === 'files') backFromFiles();
+  if (event.key === 'Escape' && !typing && state.page === 'library' && state.libraryView === 'files') backFromFiles();
 });
 
 // Updates are followed once the home is open, so what the opening said doesn't cover "now on the new version".

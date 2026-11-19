@@ -113,7 +113,10 @@ export const anyOn = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) =>
 export type RowOrder = 'name' | 'updated' | 'used';
 
 /** By name, a leading dot aside (".hidden" sorts with the h's). */
-const byName = (first: { key: string }, second: { key: string }) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, ''));
+/** The order by name (a leading dot aside), and one name by kind: skill, server, agent (the Library's mixed list; its plugin rows too). */
+export const byName = (first: { key: string; kind: PageKind }, second: { key: string; kind: PageKind }) =>
+  first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, '')) || KIND_ORDER.indexOf(first.kind) - KIND_ORDER.indexOf(second.kind);
+const KIND_ORDER: readonly PageKind[] = ['skills', 'mcp', 'agents'];
 
 /**
  * When an item was last updated, in ms: its current version's own time (library.ts Version `at`, on the newest entry with the
@@ -142,8 +145,7 @@ export const timeIn = <Row extends Pick<ItemRow, 'key' | 'versions'>>(row: Row, 
 export function inOrder<Row extends Pick<ItemRow, 'kind' | 'key' | 'versions'>>(rows: readonly Row[], order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined, usedAt: (row: Row) => number | undefined = () => undefined, pins?: Pinned<unknown>): Row[] {
   const id = (row: Row) => rowId(row.kind, row.key);
   const time = new Map(rows.map(row => { const pinned = pins?.rows.get(id(row)); return [id(row), (pinned ? pinned.time : timeIn(row, order, itemOf, usedAt)) ?? -Infinity]; }));
-  const kindRank = (row: Row) => ['skills', 'mcp', 'agents'].indexOf(row.kind);
-  return [...rows].sort((first, second) => (time.get(id(second))! - time.get(id(first))!) || byName(first, second) || kindRank(first) - kindRank(second));
+  return [...rows].sort((first, second) => (time.get(id(second))! - time.get(id(first))!) || byName(first, second));
 }
 
 // ---------- Rows pinned where they were ----------

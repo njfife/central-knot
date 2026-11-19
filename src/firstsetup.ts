@@ -94,6 +94,8 @@ const walking = () => !!state.home && walk.home === state.home.home;
 
 /** Where it is in the open home (setupcounts.ts walkPlace). */
 const place = (home: HomeView) => walkPlace(waitingForChoice(home), walk.passed);
+/** The item the walkthrough asks about now, if it is open: its row doesn't ask again (matrix.ts details). */
+export const walkingAt = () => (state.home && walking() ? place(state.home).at : undefined);
 
 /** Opens the walkthrough at its first item, its row shown in the Library (Yes, Settings' count, the Overview's line). */
 export function openWalkthrough() {

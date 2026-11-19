@@ -1,4 +1,4 @@
-// One skill ("notes") in a temp home, and the clicks the Skills page and History send for it, built by the page's own code
+// One skill ("notes") in a temp home, and the clicks the Library and History send for it, built by the page's own code
 // (src/libraryrow.ts rowClicks, src/historyactions.ts). Shared by the tests that replay clicks on real folders:
 // skills.test.ts, skillmigrate.test.ts and the seeded walk (librarywalk.test.ts).
 import { pendingChanges } from '../src/library.ts';

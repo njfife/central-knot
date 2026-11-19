@@ -15,7 +15,7 @@ import { agentsKeptIn, hasCowork, takesPlugins } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
-import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyKind, showFiltered } from './matrix.ts';
+import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyList, showFiltered } from './matrix.ts';
 import { kindSource } from './itemrow.ts';
 import { aboutInstructions, instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, loadPlugins, market } from './pluginstate.ts';
@@ -273,7 +273,7 @@ function kindTab(home: HomeView, kind: PageKind, tool: HarnessId) {
   if (rowCount(home, kind)) return itemsTable(kind, tool);
   // Nothing of this kind anywhere: the kind's own empty state, under the table's bands, so a file that could not be read still says why.
   const empty = kindEmpty(kind);
-  return emptyKind(kind, tool, emptyState(empty.glyph, empty.title, empty.body));
+  return emptyList(emptyState(empty.glyph, empty.title, empty.body), { kind, tool });
 }
 
 /** This tool's instruction file, with the same card, bands and editor as the Instructions page. */

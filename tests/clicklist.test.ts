@@ -605,7 +605,7 @@ test('Turn these off where one skill’s Off is refused as stale: the result cou
   app.home!.skills.library.notes!.on = false;
   await main.pass({ results: [...did('notes').results, ...refusedAsStale('spare').results], writes: 1, made: ['off-skills-notes'] });
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, flashRequests.has('skills-notes'), flashRequests.has('skills-spare')],
-    ['Turned off 1 skill with no use seen in the last 30 days: notes. Central Knot keeps them, and turning one on puts it back as it was.',
+    ['Turned off 1 skill with no use seen in the last 30 days: notes. Central Knot keeps it, and turning it on puts it back as it was.',
       ['spare changed since the page was read. Nothing was changed; read again.'], true, false]);
   // The result kept is about notes alone too: its names and rows, which a notice that moves its Undo reads (app.ts undoMoved).
   assert.deepEqual([app.outcome?.items, app.outcome?.rows], [['notes'], [{ kind: 'skills', key: 'notes', name: 'notes' }]]);

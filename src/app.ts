@@ -1,7 +1,7 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
 // state (`state`), the page shown (showPage), what is said after a click (tell, announce) and when a result goes by itself
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
-// item page sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
+// item list sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
 // (applyByKind) or in its turn in the page's list (queueClick), its result kept for the page (lastResult), a run's said once
 // (sayRun), an Undo's kind by kind (undoClick); History's actions (restoreEvent); the reads of
 // the home (loadHome, readAgain, readHomeOnce), usage collected when a home opens and on Update (collectUsage), and the Sync
@@ -112,7 +112,7 @@ export const state = {
   /** What the last click on skills did, shown until the next action or read. */
   skillsResult: undefined as PassResult | undefined,
   /** The Library: its list, or one skill's files and contents beside a list of the skills (its Files view). */
-  skillsView: 'table' as 'table' | 'files',
+  libraryView: 'list' as 'list' | 'files',
   /**
    * The Library's segment: every kind, or one (its kind switch, matrix.ts kindSwitch). All at launch; kept while the window is
    * open, across pages and homes, never stored; one with no segment in the open home is shown as All (matrix.ts segmentKinds).
@@ -131,7 +131,7 @@ export const state = {
   shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | undefined,
   /** What the tools' session history shows was used (usage.ts), for this home: collected when it opens and on Update usage statistics (collectUsage). */
   usage: pageData<UsageReading>(),
-  /** Whether the usage band shows above an item list's list (matrix.ts usageBand): opened by Update usage statistics and by a reading that fails, closed by its close button and when a home opens. */
+  /** Whether the usage band shows above the Library's list (matrix.ts usageBand): opened by Update usage statistics and by a reading that fails, closed by its close button and when a home opens. */
   usageBand: false,
   /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
   instructions: pageData<InstructionFile[]>(),
@@ -367,8 +367,9 @@ export async function busy(message: string, work: (page: Page) => Promise<void>)
  */
 function accept(view: HomeView): HomeView {
   state.home = undefined;
-  state.skillsResult = undefined;
-  state.item = undefined;
+  // The last results, and the rows pinned where they were, are the last home's.
+  Object.assign(state, { skillsResult: undefined, mcpResult: undefined, agentsResult: undefined, item: undefined });
+  unpin();
   // A harness page belongs to the home it was opened in.
   state.harness = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
@@ -926,7 +927,7 @@ export function showPage(page: Page) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   if (page !== state.page || leavingHarness) leaveResults(page);
-  if (page !== state.page) { state.skillsView = 'table'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); }
+  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   state.page = page;
@@ -938,8 +939,8 @@ export function showPage(page: Page) {
 }
 
 /** Leaves the Library's Files view for its list (its Back button, or Escape: matrix.ts backFromFiles, which puts its scroll back). */
-export function showSkillsTable() {
-  state.skillsView = 'table';
+export function leaveFiles() {
+  state.libraryView = 'list';
   state.item = undefined;
   rerender();
 }
@@ -1018,7 +1019,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (past && libraryEntry(past)) { sayLibraryAction(page, past, result); return; }
   if (past?.kind === 'everything') { sayEverything(page, past, result, switchesOn); return; }
   // A Pull's change to an agent's Claude Code settings alone (gitrepo.ts undoSettingsChange): the one entry with an Undo of its own,
-  // an agent's (its row flashes on Agents).
+  // an agent's (its row flashes in the Library).
   const item = restored[0]?.item ?? past?.item ?? '', row = { kind: 'agents' as const, key: itemKey(item) };
   const done = !result.stopped && restored.length > 0;
   tell(done ? { page, item, rows: [row], history: true, text: `Undid the change to ${item}. The earlier version is back in ${everywhere}.` } : undefined, result.stopped ?? `Restored in ${plural(0, 'tool')}.`);
@@ -1655,8 +1656,8 @@ function sayBackgroundNews() {
   }
   // Each item once, its kind named where another kind's news has its name (words.ts rowNames).
   const items = [...new Set(rowNames(news.flatMap(({ kind, notice }) => noticeNames(notice).map(name => ({ kind, name })))))];
-  // Quiet where the table on screen shows the news (its kinds' notices) already.
-  announce(`Sync changed ${andList(items)}.`, news.some(({ kind }) => kindsShown().includes(kind)));
+  // Quiet where the table on screen shows all of the news (its kinds' notices) already.
+  announce(`Sync changed ${andList(items)}.`, news.every(({ kind }) => kindsShown().includes(kind)));
 }
 
 /** A background refresh asked for while the page acted or while another ran: run it now, once, if nothing is running. */

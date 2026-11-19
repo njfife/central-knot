@@ -7,9 +7,9 @@ import { acting, announce, noToolManaged, noToolManagedSentence, homeToolNames, 
 import { button, emptyState, fileBlocks, h, icon, section } from './dom.ts';
 import { toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill } from './types.ts';
-import { brandMark, kindGlyph, libraryTable, notAllRead, outcomeBand, resultInHeader, skillsBrowser, wrappingPath } from './matrix.ts';
+import { brandMark, emptyList, kindGlyph, libraryTable, notAllRead, outcomeBand, resultInHeader, skillsBrowser, wrappingPath } from './matrix.ts';
 import { heldKinds } from './presence.ts';
-import { andList, kindNouns, noToolsSentence, orList } from './words.ts';
+import { andList, kindNouns, noToolsSentence, orList, sentence } from './words.ts';
 import { rowCount } from './pluginrows.ts';
 import { partId, rowId } from './itemrow.ts';
 
@@ -71,10 +71,10 @@ export function kindEmpty(kind: PageKind): Empty {
   return unread(kind) ? { glyph, title: `No ${many} read here`, body: `${title} couldn’t all be read here, so there may be some. ${hint}` }
     : { glyph, title: `No ${many} here yet`, body: `None of ${whose()} has ${a} in this home. ${hint}` };
 }
-/** The Library with nothing of any kind: no tool managed, nothing read of any kind, or some of it couldn't be read. */
+/** The Library with nothing of any kind: nothing read of any kind, or the kinds that couldn't all be read named. */
 function libraryEmpty(kinds: PageKind[]): Empty {
-  const hint = addHint([...new Set(kinds.flatMap(kind => state.home?.[kind].tools ?? []))], 'any of them');
-  return kinds.some(unread) ? { glyph: 'layers', title: 'Nothing read here', body: `Some of this home couldn’t be read, so there may be items. ${hint}` }
+  const hint = addHint([...new Set(kinds.flatMap(kind => state.home?.[kind].tools ?? []))], 'any of them'), stopped = kinds.filter(unread);
+  return stopped.length ? { glyph: 'layers', title: 'Nothing read here', body: `${sentence(andList(stopped.map(kind => kindNouns[kind].many)))} couldn’t all be read here, so there may be some. ${hint}` }
     : { glyph: 'layers', title: 'Nothing in the Library yet', body: `None of ${whose()} has a skill, MCP server or agent in this home. ${hint}` };
 }
 /** Shown before any home has been read, or when reading failed. */
@@ -134,8 +134,11 @@ export function libraryPage() {
   const home = state.home;
   if (!home) return notRead();
   const kinds = heldKinds(home);
-  if (noToolManaged() || !kinds.some(kind => rowCount(home, kind))) return nothingHere(libraryEmpty(kinds), 'library-empty');
-  if (state.skillsView !== 'files') return libraryTable(kind => emptyWithActions(kindEmpty(kind), `${kind}-empty`));
+  const none = (kind: PageKind) => emptyWithActions(kindEmpty(kind), `${kind}-empty`);
+  if (noToolManaged()) return nothingHere(libraryEmpty(kinds), 'library-empty');
+  // Nothing of any kind: the empty words under the Library's bands (a kind's stop, its problems, Resume).
+  if (!kinds.some(kind => rowCount(home, kind))) return emptyList(emptyWithActions(libraryEmpty(kinds), 'library-empty'));
+  if (state.libraryView !== 'files') return libraryTable(none);
   return skillsBrowser(key => {
     if (!home) return { where: [], contents: [] };
     const copies = copiesOf(home, key);
@@ -148,7 +151,7 @@ export function libraryPage() {
         h('section.section', {}, h('h3.eyebrow.eyebrow-file', {}, 'SKILL.md'), contents(key, copies)),
       ],
     };
-  }, selectItem);
+  }, selectItem, none);
 }
 
 export function copyButton(text: string, what: string, id: string, label?: string) {

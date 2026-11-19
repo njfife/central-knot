@@ -18,7 +18,7 @@ import { applyPluginOps, market, openLink, shownDetail, toggleOpened } from './p
 import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginHook, PluginItemLine, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, toolNames as names } from './words.ts';
-import { openItem } from './matrix.ts';
+import { openKind } from './matrix.ts';
 
 /** Tools that can take the plugin itself here (or have it): what "In each tool" describes. A tool that can't is left out. */
 const nativeTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
@@ -134,7 +134,7 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     items.problem ? h('p.plugin-muted', {}, `${items.problem} Its items stay as they are.`) : null,
     h('ul.plugin-outcome-list.plugin-items-list', {}, lines.map(line => h('li.plugin-outcome-row', { 'data-key': `${line.kind}:${line.key}` },
       h('span.plugin-items-name', {}, `${partWords[line.kind][0]} `, linked(line)
-        ? h('button.inline-link.plugin-part-link', { type: 'button', title: `Open ${line.name} in the Library`, onclick: () => openItem(pageOfPart[line.kind], line.name) }, h('code.plugin-name', {}, line.name))
+        ? h('button.inline-link.plugin-part-link', { type: 'button', title: `Open ${line.name} in the Library`, onclick: () => openKind(pageOfPart[line.kind], { key: line.key }) }, h('code.plugin-name', {}, line.name))
         : h('code.plugin-name', {}, line.name)),
       h('span.plugin-outcome-what', {}, state(line))))));
 }

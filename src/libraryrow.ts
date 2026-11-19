@@ -192,7 +192,7 @@ const rowAsItIs = (row: LibraryRow, item: LibraryItem | undefined): Change =>
   ({ ...asItIs(row.key, inLibrary(item)), seenOn: !!inLibrary(item)?.on });
 
 /**
- * The clicks a row's controls send. Each is a types.ts Change, as every item page sends it, which main.ts's `changes`
+ * The clicks a row's controls send. Each is a types.ts Change, as every item list sends it, which main.ts's `changes`
  * sanitizer passes on field by field to the library's pass.
  */
 export const rowClicks = {

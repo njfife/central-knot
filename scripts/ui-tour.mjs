@@ -340,7 +340,7 @@ if (wanted('skills')) {
   await openRow('skills', 'standup');
   await a.click(`#${rowPart('files', 'skills', 'standup')}`); await a.settle();
   await atEverySize('files-view', 'Clicked "Files and contents" in standup’s details: the list of skills beside standup’s switch; stacked, its SKILL.md comes first, then each tool’s line and where each copy is ("← Skills" goes back)', true);
-  await a.click('#skills-table');
+  await a.click('#files-back');
   // For History's switch actions (the owner asked what its "Turn on" means): the first skill that is on is kept out of Codex in
   // its opened row, and the second turned off, so History offers "Turn it on in Codex" and "Turn it on".
   const [outOfCodex, turnedOff] = await a.run(`[...document.querySelectorAll('[id^="${rowPart('switch', 'skills', '')}"][aria-checked="true"]')].map(each => each.id.slice(${rowPart('switch', 'skills', '').length}))`);
@@ -1539,7 +1539,7 @@ async function everyPage(tag) {
       else if (await a.has('.details-paths[open]')) { await a.run(`document.querySelector('.details-paths').scrollIntoView({ block: 'nearest' })`); await shot(a, `${tag}-skills-files-where`, `"Where each copy is" is open from the start ${at}: the skill's details in their column at the right, the status first and Delete everywhere… last.`); }
       const toggle = await a.run(`document.querySelector('[id^="detail-switch-"]')?.id ?? ''`);
       if (toggle) { await a.click(`#${toggle}`); await shot(a, `${tag}-skills-files-switched`, `Turned its switch in the Files view: it applies at once; the result and Undo are in the header ${at}.`); if (await a.has('#outcome-undo')) await a.click('#outcome-undo'); }
-      await a.click('#skills-table');
+      await a.click('#files-back');
     }
     if (await a.has('.ov-row.open')) await a.click(`#${first}`);
   }
