@@ -7068,6 +7068,40 @@ async function usageFlow() {
   rmSync(pipe);
 }
 
+/**
+ * Word search in the app as built (search.ts, searchdocs.ts): main indexes the Library with SQLite's own full-text search from
+ * each view it hands over, and answers the page beside its queue. On a made-up home, through the page's own call: the name
+ * weighted above the text (bm25()), an excerpt of the text (snippet()), another form of a word (porter), a word only the
+ * text has, mistyped, corrected from the index's vocabulary (fts5vocab), a plugin's skill, typed punctuation, and each answer
+ * tagged with the view its index was built from.
+ */
+async function searchFlow() {
+  const home = join(scratch, 'search-home'), data = join(scratch, 'search-data'), skills = join(home, '.claude/skills');
+  skill(skills, 'web-performance', text('web-performance', 'Profile with Lighthouse and the network panel.'));
+  skill(skills, 'lighthouse-report', text('lighthouse-report', 'Scores, and what to fix first.'));
+  skill(skills, 'deploy-staging', text('deploy-staging', 'Push the image to the registry.'));
+  writeClaudeInstall(home, 'ck-test-market', 'sheet-tools', '1.0.0', { 'skills/tidy/SKILL.md': text('tidy', 'Removes duplicate rows and trims every cell.') });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const a = await launch(data);
+  // The index published for a new view, told by the push: the answer's tag is taken from it, so a background view landing
+  // between cannot fail the check, and an answer with no push cannot pass it.
+  const viewRead = await a.run(`(window.ckPublished = [], window.centralKnot.onSearchPublished((home, readId) => window.ckPublished.push({ home, readId })), window.centralKnot.refresh().then(view => view.readId))`);
+  for (let tries = 0; tries < 100 && !(await a.run(`window.ckPublished.some(tag => tag.readId >= ${viewRead})`)); tries++) await wait(50);
+  const ask = typed => a.run(`window.centralKnot.search(${JSON.stringify(typed)})`);
+  const rows = async typed => (await ask(typed)).rows;
+  const answer = await ask('lighthouse'), pushed = await a.run('window.ckPublished');
+  same('one push told the answer’s own home and read, the open home and a read no older than the view just handed over',
+    [answer.ready, pushed.some(tag => tag.home === answer.home && tag.readId === answer.readId), answer.home, answer.readId >= viewRead], [true, true, home, true]);
+  same('a name above a text (bm25), the text matched with its excerpt (snippet), another form of a word (porter), a mistyped word the text alone has (fts5vocab), a plugin’s skill',
+    [await rows('lighthouse'), await rows('deploying'), await rows('registyr'), await rows('duplicate rows')],
+    [[{ id: 'skills-lighthouse-report' }, { id: 'skills-web-performance', excerpt: 'Profile with Lighthouse and the network panel.' }], [{ id: 'skills-deploy-staging' }],
+      [{ id: 'skills-deploy-staging', excerpt: 'Push the image to the registry.' }], [{ id: 'skills-sheet-tools@ck-test-market/tidy', excerpt: 'Removes duplicate rows and trims every cell.' }]]);
+  same('typed quotes, hyphens and operators are only words', [await rows('"deploy-'), await rows('NEAR( AND *')], [[{ id: 'skills-deploy-staging' }], await rows('near and')]);
+  same('no page errors, word search', a.pageErrors, []);
+  await a.quit();
+}
+
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
@@ -7080,7 +7114,7 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group passes on its own.
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];

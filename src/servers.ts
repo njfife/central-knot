@@ -25,11 +25,11 @@
 // serversForRepo is what the Git repo's Push sends. Elsewhere: the formats, mcp.ts; where things are kept and
 // the migration from the earlier record, serverstore.ts and servermigrate.ts; the row and its words, libraryrow.ts with
 // librarypages.ts; History's sentences and actions, historyactions.ts.
-import { readFile, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
 import { listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, unreadIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, lookFor, restore, runPass, sharedFileAt, takeInAnswers, unreadIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { mergeServer } from './merge.ts';
 import { cannotHold, editEntry, fromJson, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
@@ -144,9 +144,7 @@ export const serverKind: Kind<NeutralServer, McpEntry, ServerDisk> = {
   historyPrefix: 'mcp:',
   harnesses: tools => tools.filter(tool => mcpTools.includes(tool)),
   folder: mcpFile,
-  // Every server of a tool is in one file: the settle clock is kept per entry.
-  pathOf: (context, tool, name) => `${mcpFile(context, tool)}#${itemKey(name)}`,
-  folderSeen: async (context, tool) => sharedFileSeen(mcpFile(context, tool), await stat(mcpFile(context, tool)).then(() => true, () => false)),
+  folderSeen: (context, tool) => sharedFileAt(mcpFile(context, tool)),
   open: openLibrary,
   save: saveLibrary,
   store: (context, item, _hash, server) => storeVersion(context, item.key, server),

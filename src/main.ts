@@ -38,11 +38,13 @@ import { clearDraftFolders, draftSources, draftTools, promptNow, writeDraft } fr
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { addSource, checkDue, checkSource, previewSource, removeSource, rowClick, sourcesView } from './sources.ts';
+import { searchFollower } from './search.ts';
+import { libraryDocs } from './searchdocs.ts';
 import { readUsage } from './usage.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
-import { SETTLE_MS } from './librarypass.ts';
+import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { homePass, passTells, syncOnceReport, type HomePass } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
@@ -150,6 +152,8 @@ async function read(): Promise<Snapshot[]> {
  * (Plugins after a Refresh or a home switch) passes the id back and uses this read rather than reading the home again.
  */
 let handoff = { id: 0, home: '', snapshots: [] as Snapshot[] };
+/** Word search's one index, which follows each view handed over (syncAndView); the page hears each one published. */
+const search = searchFollower(tag => send('search:published', tag.home, tag.readId));
 
 function context(): ShareContext {
   return {
@@ -186,7 +190,7 @@ async function pluginUpdatesSwitched(on: boolean) {
 }
 
 /** Sends the page a message, when there is a window to send it to. */
-function send(channel: 'sync:changed' | 'sync:request' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'plugin-text:changed' | 'said' | 'window:shown', ...args: unknown[]) {
+function send(channel: 'sync:changed' | 'sync:request' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'plugin-text:changed' | 'said' | 'window:shown' | 'search:published', ...args: unknown[]) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
@@ -663,6 +667,8 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   followProfiles(made.profiles, homeItems(made));
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
   handoff = { id: readId, home: current!.home, snapshots };
+  // Word search's index follows the view, gathered from it and built beside the queue: the view never waits for it.
+  void search.follow(made.home, readId, () => libraryDocs(shared, made)).catch(error => logFailure('search index', error));
   toolsChangedHere(snapshots);
   addCarriedSoon(managed);
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
@@ -1057,14 +1063,17 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   // A switch that fails changes nothing: the home on screen stays the home open here, with its hand-off and watchers.
   const previous = { current, handoff, lastPresent };
   current = next;
+  forgetMissing();
   try {
-    const shown = await syncThenView();
+    const { view: shown, passes } = await syncAndView();
     // Saving the settings rebuilds the menus with the new home.
     await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
     pluginText?.restart();
-    // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched.
+    // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched; a window its
+    // first pass started is looked at again, as after any pass.
     stopWatching();
     void startWatching();
+    lookAgainSoon(passes[passes.length - 1]);
     return shown;
   } catch (error) { ({ current, handoff, lastPresent } = previous); throw error; }
 }
@@ -1466,6 +1475,8 @@ app.whenReady().then(async () => {
   // computer's home reads OpenCode's data where XDG_DATA_HOME moves it, as each tool's folder follows its own variable.
   handleNow('usage:read', async home => (current && home === current.home
     ? readUsage({ home: current.home, overrides: context().overrides, dataHome: current.mode === 'actual' ? process.env.XDG_DATA_HOME : undefined }) : null));
+  // Word search: answered at once from the index last published (search.ts), which reads no file and waits for no pass.
+  handleNow('search:ask', async typed => search.ask(typeof typed === 'string' ? typed : ''));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
@@ -1637,4 +1648,4 @@ app.whenReady().then(async () => {
 }).catch(() => { console.error('Central Knot could not open.'); app.exit(1); });
 
 app.on('window-all-closed', () => { if (tray && !quitting) return; stopWatching(); app.quit(); });
-app.on('will-quit', () => { stopWatching(); if (practiceHome) rmSync(practiceHome, { recursive: true, force: true }); });
+app.on('will-quit', () => { stopWatching(); search.close(); if (practiceHome) rmSync(practiceHome, { recursive: true, force: true }); });

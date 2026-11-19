@@ -5,13 +5,13 @@
 import { test } from 'node:test';
 import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
-import { clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
+import { applySkills, clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
 import { pruneDeleted } from '../src/skillstore.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -159,6 +159,49 @@ test('A folder really deleted by hand in one tool turns the skill Off everywhere
     const off = (await historyOf(box)).find(event => event.kind === 'off')!;
     await restore(box, off.id);
     assert.deepEqual(await everywhere(box), before);
+  } finally { await box.cleanup(); }
+});
+
+test('A folder seen again in part ends its absence: moved away by a save, back without its SKILL.md, later away again for a moment, it turns nothing Off', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli', rich);
+    await turnOn(box);
+    const before = await everywhere(box);
+    const waiting = { ...box.context, settleMs: 2000 }, codex = folderOf(box, 'codex-cli'), aside = join(box.base, 'saving');
+    // An editor's save moves Codex's folder away as Sync once runs: its window starts.
+    await rename(codex, aside);
+    assert.equal((await applySkills(waiting, box.tools, [], { now: 1000 })).settling, true);
+    // Sync once reads again: the folder is back, without its SKILL.md yet. Something is there, so that absence is over.
+    await rename(join(aside, 'SKILL.md'), join(box.base, 'SKILL.md'));
+    await rename(aside, codex);
+    assert.equal((await applySkills(waiting, box.tools, [], { now: 3500 })).writes, 0);
+    // The save finishes. Minutes later the next save moves the folder away for a moment as Sync once runs: a new window.
+    await rename(join(box.base, 'SKILL.md'), join(codex, 'SKILL.md'));
+    await rename(codex, aside);
+    const brief = await applySkills(waiting, box.tools, [], { now: 300_000 });
+    assert.deepEqual([brief.settling, brief.writes, (await itemOf(box))!.on], [true, 0, true]);
+    await rename(aside, codex);
+    assert.equal((await applySkills(waiting, box.tools, [], { now: 303_000 })).writes, 0);
+    assert.deepEqual([(await itemOf(box))!.on, await everywhere(box)], [true, before]);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy held while it is missing (its skills folder can’t be written) ends its absence too: once the folder can be, the window starts again', { skip: process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  const folder = join(box.home, roots['codex-cli']);
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    const waiting = { ...box.context, settleMs: 2000 };
+    await rm(folderOf(box, 'codex-cli'), { recursive: true });
+    assert.equal((await applySkills(waiting, box.tools, [], { now: 1000 })).settling, true);
+    await chmod(folder, 0o555);
+    try { await applySkills(waiting, box.tools, [], { now: 1500 }); } finally { await chmod(folder, 0o755); }
+    const writable = await applySkills(waiting, box.tools, [], { now: 300_000 });
+    assert.deepEqual([writable.settling, (await itemOf(box))!.on], [true, true]);
+    await applySkills(waiting, box.tools, [], { now: 302_500 });
+    assert.equal((await itemOf(box))!.on, false, 'a deletion that stays still turns the skill Off');
   } finally { await box.cleanup(); }
 });
 

@@ -203,6 +203,10 @@ export interface DesktopApi {
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
   /** Reads which skills, agents and MCP servers the tools' session history shows were used (usage.ts readUsage), when the page collects usage (app.ts collectUsage); null for another home than the open one. */
   readUsage(home: string): Promise<UsageReading | null>;
+  /** Word search over what the Library holds (search.ts), answered beside main's queue from the index last published. */
+  search(typed: string): Promise<SearchAnswer>;
+  /** A search index was published: built or tagged again for a newer view of `home` (search.ts searchFollower). */
+  onSearchPublished(callback: (home: string, readId: number) => void): void;
   /** A skill edit's SKILL.md before and after, for "See change". */
   eventChange(eventId: string): Promise<{ before: string; after: string } | undefined>;
   /** Shows a file in the system file manager (Finder, Explorer); nothing is opened or changed. */
@@ -850,6 +854,17 @@ export interface ToolUsage {
 }
 /** One reading of a home's session history, made when the page collects usage (app.ts collectUsage): when, and every tool's. */
 export interface UsageReading { at: string; tools: ToolUsage[] }
+
+// ---------- Word search (search.ts) ----------
+
+/** One row a search found: its row id (itemrow.ts rowId), and where it matched only in its text, a fragment of that text around the match. */
+export interface SearchHit { id: string; excerpt?: string }
+/**
+ * A search's answer: not ready while main holds no index (before the first, and from a switch of home until that home's
+ * first); else from the index last published, for the home and the read (HomeView readId) it names, which the page compares
+ * both with its own view's, and the rows found, best first.
+ */
+export type SearchAnswer = { ready: false } | { ready: true; home: string; readId: number; rows: SearchHit[] };
 
 // ---------- A kind on Central Knot's library (library.ts): its page's view ----------
 

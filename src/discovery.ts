@@ -154,6 +154,8 @@ export async function findBinary(tool: HarnessId, home: string, searchPath: stri
 
 const OPENING = /^﻿?---[ \t]*\r?\n/;
 const FRONTMATTER = /^﻿?---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
+/** A Markdown file's body: what follows its frontmatter, when it has one. */
+export const bodyOf = (content: string) => content.replace(FRONTMATTER, '');
 
 /** The metadata fields, or null when there is no frontmatter. Throws when it cannot be read. */
 function frontmatter(content: string): Record<string, unknown> | null {

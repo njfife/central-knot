@@ -15,6 +15,8 @@ const api: DesktopApi = {
   instructions: readId => ipcRenderer.invoke('instructions:view', readId),
   agentVersion: (key, hash) => ipcRenderer.invoke('agents:version', key, hash),
   readUsage: home => ipcRenderer.invoke('usage:read', home),
+  search: typed => ipcRenderer.invoke('search:ask', typed),
+  onSearchPublished: callback => { ipcRenderer.on('search:published', (_event, home, readId) => callback(String(home), Number(readId))); },
   eventChange: eventId => ipcRenderer.invoke('history:change', eventId),
   showFile: path => ipcRenderer.invoke('file:show', path),
   marketplaceReadme: source => ipcRenderer.invoke('plugins:readme', source),
