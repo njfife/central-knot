@@ -162,7 +162,6 @@ export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
   historyPrefix: 'agent:',
   harnesses: tools => tools.filter(isAgentTool),
   folder: agentsFolder,
-  pathOf: (context, tool, name) => fileFor(context, tool as AgentTool, name),
   open: openLibrary,
   save: saveLibrary,
   store: (context, item, hash, agent) => storeVersion(context, item.key, hash, agent),

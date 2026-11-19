@@ -42,7 +42,7 @@ import { readUsage } from './usage.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
-import { SETTLE_MS } from './librarypass.ts';
+import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { homePass, passTells, syncOnceReport, type HomePass } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
@@ -1036,6 +1036,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   // A switch that fails changes nothing: the home on screen stays the home open here, with its hand-off and watchers.
   const previous = { current, handoff, lastPresent };
   current = next;
+  forgetMissing();
   try {
     const shown = await syncThenView();
     // Saving the settings rebuilds the menus with the new home.

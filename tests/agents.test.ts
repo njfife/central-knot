@@ -18,6 +18,7 @@ import { librarySentence } from '../src/historyactions.ts';
 import { listed, originWords } from '../src/library.ts';
 import { readHistory } from '../src/history.ts';
 import { homePass, passTells } from '../src/homepass.ts';
+import { forgetMissing } from '../src/librarypass.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -557,6 +558,80 @@ inBox('A copy Central Knot has just written, deleted by hand at once, still gets
   await applyAgents(waiting, tools, [], { now: 5200 });
   assert.equal((await itemOf(box))!.on, false);
 });
+
+inBox('A file seen again in part ends its absence: back half-written at the reread, later away again for a moment, it turns nothing Off', async box => {
+  await on(box);
+  const text = (await readOf(box, 'codex-cli'))!, waiting = { ...box.context, settleMs: 2000 };
+  await rm(fileOf(box, 'codex-cli'));
+  assert.equal((await applyAgents(waiting, tools, [], { now: 1000 })).settling, true);
+  await write(box, 'codex-cli', 'name = "reviewer"\n');
+  await applyAgents(waiting, tools, [], { now: 3500 });
+  await write(box, 'codex-cli', text);
+  await rm(fileOf(box, 'codex-cli'));
+  const brief = await applyAgents(waiting, tools, [], { now: 300_000 });
+  assert.deepEqual([brief.settling, (await itemOf(box))!.on], [true, true]);
+  await write(box, 'codex-cli', text);
+  await applyAgents(waiting, tools, [], { now: 303_000 });
+  assert.deepEqual([(await itemOf(box))!.on, (await filesOf(box))['copilot-cli'] !== undefined], [true, true]);
+});
+
+inBox('A copy found under its name in another case ends the absence its name in the first case began', async box => {
+  await on(box);
+  const text = (await readOf(box, 'codex-cli'))!, waiting = { ...box.context, settleMs: 2000 }, renamed = join(box.home, '.codex/agents/Reviewer.toml');
+  await rm(fileOf(box, 'codex-cli'));
+  assert.equal((await applyAgents(waiting, tools, [], { now: 1000 })).settling, true);
+  await writeFile(renamed, text);
+  await applyAgents(waiting, tools, [], { now: 1500 });
+  await rm(renamed);
+  const brief = await applyAgents(waiting, tools, [], { now: 300_000 });
+  assert.deepEqual([brief.settling, (await itemOf(box))!.on], [true, true]);
+});
+
+inBox('Another home taken forgets when each copy went missing: a copy that came and went while that home was open gets a whole window here', async box => {
+  await on(box);
+  const text = (await readOf(box, 'codex-cli'))!, waiting = { ...box.context, settleMs: 2000 };
+  await rm(fileOf(box, 'codex-cli'));
+  assert.equal((await applyAgents(waiting, tools, [], { now: 1000 })).settling, true);
+  forgetMissing();
+  await write(box, 'codex-cli', text);
+  await rm(fileOf(box, 'codex-cli'));
+  // This home opened again: the window starts at its first pass, and a deletion that stays still turns the agent Off.
+  const back = await applyAgents(waiting, tools, [], { now: 300_000 });
+  assert.deepEqual([back.settling, (await itemOf(box))!.on], [true, true]);
+  await applyAgents(waiting, tools, [], { now: 302_500 });
+  assert.equal((await itemOf(box))!.on, false);
+});
+
+inBox('A look at a folder that fails for another reason than “not there” establishes nothing: no window starts or runs on it, and a real absence after it gets the whole window', async box => {
+  await on(box);
+  // As in this computer's own home: a folder opened as home that can't be looked into is preview only (share.ts writeAccess).
+  const waiting: ShareContext = { ...box.context, mode: 'actual', realHome: box.home, allowActualWrites: true, settleMs: 2000 };
+  const codex = join(box.home, '.codex'), agents = join(codex, 'agents');
+  // Codex's agents folder can't be looked at (no permission on the folder above it): it is not away, so no window starts.
+  await chmod(codex, 0o000);
+  try { assert.equal((await applyAgents(waiting, tools, [], { now: 1000 })).settling, false); } finally { await chmod(codex, 0o755); }
+  await rm(agents, { recursive: true });
+  const away = await applyAgents(waiting, tools, [], { now: 3500 });
+  assert.deepEqual([away.settling, away.writes], [true, 0], 'really away now: its window starts now');
+  await chmod(codex, 0o000);
+  try { await applyAgents(waiting, tools, [], { now: 4000 }); } finally { await chmod(codex, 0o755); }
+  const again = await applyAgents(waiting, tools, [], { now: 6000 });
+  assert.deepEqual([again.settling, again.writes], [true, 0], 'a failed look in between ages nothing: the window starts again');
+  assert.equal((await applyAgents(waiting, tools, [], { now: 8500 })).writes, 1, 'past it, the folder is written afresh');
+}, { skip: process.getuid?.() === 0 });
+
+inBox('A folder that can’t be listed for a while ages no copy’s absence: once it can be, a copy deleted by hand gets the whole window', async box => {
+  await on(box);
+  const waiting = { ...box.context, settleMs: 2000 }, agents = join(box.home, '.codex/agents');
+  await rm(fileOf(box, 'codex-cli'));
+  assert.equal((await applyAgents(waiting, tools, [], { now: 1000 })).settling, true);
+  await chmod(agents, 0o000);
+  try { await applyAgents(waiting, tools, [], { now: 2000 }); } finally { await chmod(agents, 0o755); }
+  const listed = await applyAgents(waiting, tools, [], { now: 3500 });
+  assert.deepEqual([listed.settling, (await itemOf(box))!.on], [true, true]);
+  await applyAgents(waiting, tools, [], { now: 6000 });
+  assert.equal((await itemOf(box))!.on, false, 'a deletion that stays still turns the agent Off');
+}, { skip: process.getuid?.() === 0 });
 
 inBox('An edit in one harness and a deletion in another: the edit is the current version, and the agent turns Off', async box => {
   await on(box);

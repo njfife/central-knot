@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import { bandAfter, itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
-import fs, { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import fs, { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
@@ -249,6 +249,44 @@ test('A settings file that can’t be seen is no set of deletions: missing is aw
     await box.send(off('docs'));
     assert.equal((await box.files())['codex-cli'], '[mcp_servers.docs\ncommand = ');
     assert.match((await box.row('docs'))?.unseen?.['codex-cli'] ?? '', /could not be read as TOML/);
+  } finally { await box.cleanup(); }
+});
+
+test('An entry seen again in part ends its absence: back as no server at the reread, later gone again for a moment, it turns nothing Off', async () => {
+  const box = await sandbox();
+  try {
+    const whole = JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'npx' } } });
+    await writeFile(box.path('copilot-cli'), whole);
+    await box.send(on('docs'));
+    const waiting = { ...box.context, settleMs: 2000 };
+    await writeFile(box.path('copilot-cli'), '{ "mcpServers": {} }\n');
+    assert.equal((await applyServers(waiting, all, [], { now: 1000 })).settling, true);
+    await writeFile(box.path('copilot-cli'), '{ "mcpServers": { "docs": null } }\n');
+    await applyServers(waiting, all, [], { now: 3500 });
+    await writeFile(box.path('copilot-cli'), '{ "mcpServers": {} }\n');
+    const brief = await applyServers(waiting, all, [], { now: 300_000 });
+    assert.deepEqual([brief.settling, (await box.row('docs'))?.on, await commandIn(box, 'codex-cli')], [true, true, 'npx']);
+    await writeFile(box.path('copilot-cli'), whole);
+    await applyServers(waiting, all, [], { now: 303_000 });
+    assert.deepEqual([(await box.row('docs'))?.on, await commandIn(box, 'codex-cli')], [true, 'npx']);
+  } finally { await box.cleanup(); }
+});
+
+test('A settings file whose look fails for another reason than “not there” starts no window: deleted after, it gets the whole window', { skip: process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'npx' } } }));
+    await box.send(on('docs'));
+    // As in this computer's own home: a folder opened as home that can't be looked into is preview only (share.ts writeAccess).
+    const waiting: ShareContext = { ...box.context, mode: 'actual', realHome: box.home, allowActualWrites: true, settleMs: 2000 };
+    const codex = join(box.home, '.codex');
+    await chmod(codex, 0o000);
+    try { assert.equal((await applyServers(waiting, all, [], { now: 1000 })).settling, false); } finally { await chmod(codex, 0o755); }
+    await rm(box.path('codex-cli'));
+    const away = await applyServers(waiting, all, [], { now: 3500 });
+    assert.deepEqual([away.settling, await commandIn(box, 'codex-cli')], [true, undefined], 'really missing now: its window starts now');
+    await applyServers(waiting, all, [], { now: 6000 });
+    assert.deepEqual([await commandIn(box, 'codex-cli'), (await box.row('docs'))?.on], ['npx', true], 'past it, written afresh');
   } finally { await box.cleanup(); }
 });
 

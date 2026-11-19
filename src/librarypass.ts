@@ -34,8 +34,8 @@
 // One member exists for a kind whose copies are entries in one shared file (MCP servers), and a kind of folders (skills,
 // agents) leaves it out: Kind.folderSeen answers the guard's look in place of its `stat` of a directory: a missing file is away
 // (its entries are written afresh once the settle window has passed, never read as deletions), one that is there keeps one
-// fixed identity (every save replaces the file, so an inode says nothing), and a file the pass itself made is noted as there
-// at its end.
+// fixed identity (every save replaces the file, so an inode says nothing), one that can't be looked at is no answer (as a
+// folder's: guardFolders), and a file the pass itself made is noted as there at its end.
 //
 // Words: a `Kind` is what one kind implements (below); its `Disk` is what it read of the managed harnesses now; a `Look` is
 // one pass's or one page's reading (the Disk with the record, the folders and the settle clock); a `Shelf` (library.ts)
@@ -87,7 +87,7 @@ const now = () => new Date().toISOString();
 /** One harness's copy of an item as the kind read it: what the pass needs of it (a kind's own entry carries more). */
 export interface Seen {
   tool: HarnessId;
-  /** The item's name as this copy has it: a found item is taken in under it, and its path is pathOf this name. */
+  /** The item's name as this copy has it: a found item is taken in under it. */
   name: string;
   /** Its content's hash: the version it would be. */
   hash: string;
@@ -159,17 +159,15 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   historyPrefix: string;
   /** Of the harnesses Central Knot manages, those that can hold this kind. */
   harnesses(tools: readonly HarnessId[]): HarnessId[];
-  /** A harness's folder for this kind, which the pass guards (gone, moved, made again), and the path of one item's copy in it. */
+  /** A harness's folder for this kind, which the pass guards (gone, moved, made again); with an item's key, it keys the settle clock. */
   folder(context: ShareContext, harness: HarnessId): string;
-  /** One copy's path, which keys the settle clock: unique per item in a harness (an MCP server's is its entry in the settings file). */
-  pathOf(context: ShareContext, harness: HarnessId, name: string): string;
   /**
    * The guard's look at a harness's folder, in place of its `stat` of a directory (guardFolders): for a kind whose copies share
    * one file (MCP servers' settings file), the file away when it is missing, else one fixed identity, so a file rewritten by a
-   * save is never a folder made again. Asked again at the end of a pass for a file noted away (runPass), since the pass may have
-   * made it. A kind of folders leaves it out.
+   * save is never a folder made again; undefined when it can't be looked at (sharedFileAt). Asked again at the end of a pass for
+   * a file noted away (runPass), since the pass may have made it. A kind of folders leaves it out.
    */
-  folderSeen?(context: ShareContext, harness: HarnessId): Promise<FolderSeen>;
+  folderSeen?(context: ShareContext, harness: HarnessId): Promise<FolderSeen | undefined>;
   /**
    * Its record: opened (an older one migrated; `persist`: the caller may write it; nothing recorded yet: an empty one) and
    * saved. A `problem` stops every write.
@@ -312,6 +310,8 @@ export const unseenIn = (disk: Disk<Seen>, tool: HarnessId, key: string) => disk
  * "H unseen is never H gone" for a whole folder, and a harness managed again, on `items` as a pass's clicks left them. A
  * harness's identity is let go when it stops being managed (keepFolders), so "no identity on record" is a harness managed
  * again, or one seen for the first time. One line per branch, in the order the code takes them:
+ * - Can't be looked at, for any reason but its not being there: nothing noted, and no settle window starts or runs
+ *   (stillSettling); what the kind read there stands (what it couldn’t read is unseen).
  * - Not there, and managed again with something applied there: nothing noted, so the folder's arrival runs cameBack.
  * - Not there (any other harness is noted as away), inside the settle window: unseen, so nothing happens there.
  * - Not there, past the window: items wanted there are written afresh; a removal owed there waits for the folder (unseen).
@@ -326,6 +326,7 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
     const path = look.kind.folder(look.context, tool), was = look.library.folders[tool];
     const here = look.kind.folderSeen ? await look.kind.folderSeen(look.context, tool) : await folderAt(path);
     const forget = (which: LibraryItem[]) => { for (const item of which) delete item.applied[tool]; };
+    if (!here) { absenceEnds(look, path); continue; }
     if ('away' in here) {
       const backWithoutFolder = !was && Object.values(look.library.items).some(item => item.applied[tool] !== undefined);
       if (!backWithoutFolder) look.foldersNow[tool] = here;
@@ -339,24 +340,30 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
       continue;
     }
     look.foldersNow[tool] = here;
-    seenAgain(look, path);
+    absenceEnds(look, path);
     if (!was) await cameBack(look, tool, shelf);
     else if (was.path !== path) forget(items);
     else if ('away' in was || was.ino !== here.ino || was.birth !== here.birth) forget(items.filter(item => !look.disk.byKey.get(item.key)?.[tool]));
   }
 }
 
-/** A folder's identity on disk, or away when it is not a folder there. */
-async function folderAt(path: string): Promise<FolderSeen> {
-  const info = await stat(path).catch(() => undefined);
-  return info?.isDirectory() ? { path, ino: info.ino, birth: Math.round(info.birthtimeMs) } : { path, away: true };
+/** A folder's identity on disk; away when it is not a folder there; undefined when it can't be looked at (notThere). */
+async function folderAt(path: string): Promise<FolderSeen | undefined> {
+  try {
+    const info = await stat(path);
+    return info.isDirectory() ? { path, ino: info.ino, birth: Math.round(info.birthtimeMs) } : { path, away: true };
+  } catch (error) { return notThere(error) ? { path, away: true } : undefined; }
 }
+/** The one failed look that says something is away: it is not there (ENOTDIR: a folder on its path is a file). Any other proves nothing. */
+const notThere = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes(errorCode(error));
 
 /**
  * A file every copy of a kind shares, as the guard sees it (Kind.folderSeen: MCP servers' settings file): away when it is
  * missing, else one fixed identity, since every save (Central Knot's too) replaces the file and its own identity tells nothing.
  */
 export const sharedFileSeen = (path: string, exists: boolean): FolderSeen => (exists ? { path, ino: 0, birth: 0 } : { path, away: true });
+/** The guard's look at such a file now: sharedFileSeen, or undefined when it can't be looked at (notThere). */
+export const sharedFileAt = (path: string) => stat(path).then(() => sharedFileSeen(path, true), error => (notThere(error) ? sharedFileSeen(path, false) : undefined));
 
 /**
  * A harness managed again (library.ts managedAgain), for every item in the record, deleted ones too, not only the pass's: A
@@ -395,13 +402,21 @@ export function copiesOf(look: AnyLook, item: LibraryItem): Copies {
   const slot = look.disk.byKey.get(item.key) ?? {};
   return Object.fromEntries(look.managed.map(tool => [tool, copyIn(look, item, tool, slot[tool])]));
 }
+/** A harness's copy as read (copyRead), with the settle window: absent where it was applied and is wanted, it is unseen until its window has passed. */
 function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | undefined): HarnessCopy {
+  const copy = copyRead(look, item, tool, here), at = `${look.kind.folder(look.context, tool)}#${look.kind.kind}:${item.key}`;
+  if (copy.is === 'absent' && wantedIn(item, tool) && item.applied[tool] !== undefined && stillSettling(look, at)) {
+    const { copy: noun, item: kindNoun } = look.kind.words;
+    return { is: 'unseen', why: `${toolName(tool)}’s ${noun} for it is missing just now. If it stays missing, the ${kindNoun} turns off.` };
+  }
+  absenceEnds(look, at);
+  return copy;
+}
+function copyRead(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | undefined): HarnessCopy {
   const unseen = unseenIn(look.disk, tool, item.key);
   if (unseen) return { is: 'unseen', why: unseen };
-  const path = look.kind.pathOf(look.context, tool, here?.name ?? item.name);
   const wanted = wantedIn(item, tool), kindHeld = wanted ? look.disk.held(item, tool) : undefined;
   if (here) {
-    seenAgain(look, path);
     // A harness that won't load the current version keeps the copy it has: nothing is written over it (writeCopy asks the
     // same of what it writes, through Kind.refusesToLoad).
     const refused = wanted && !kindHeld?.anotherWay ? look.disk.refuses?.(item, tool) : undefined;
@@ -411,30 +426,37 @@ function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | 
   }
   const locked = look.disk.locked.get(tool);
   const held = kindHeld ?? (wanted && locked ? { why: locked.why } : undefined);
-  if (held) return { is: 'held', ...held };
-  const { copy, item: noun } = look.kind.words;
-  const missing = `${toolName(tool)}’s ${copy} for it is missing just now. If it stays missing, the ${noun} turns off.`;
-  if (wanted && item.applied[tool] !== undefined && stillSettling(look, path)) return { is: 'unseen', why: missing };
-  seenAgain(look, path);
-  return { is: 'absent' };
+  return held ? { is: 'held', ...held } : { is: 'absent' };
 }
 
 /** Default window shared by writing passes and the follow-up in main.ts. */
 export const SETTLE_MS = 2000;
 
-/** When each file or folder was first seen missing, kept while the app runs (the settle window). A restart forgets them, which only delays an Off. */
+/** When each copy, or a harness's folder, was first found missing: the settle clock's dates (stillSettling says when one is set and ends). */
 const firstSeenMissingAt = new Map<string, number>();
-/** Whether something missing at `path` may still be a save in progress. Only a pass keeps the clock (Look `settle`). */
-function stillSettling(look: AnyLook, path: string): boolean {
+/**
+ * The settle clock: whether what a pass finds missing at `at` may still be a save in progress, so nothing is done about it
+ * yet. Only a pass keeps the clock (Look `settle`); the page's look reads every window as passed. `at` is a harness's folder
+ * for the kind (guardFolders), or one copy's: that folder, the kind and the item's key (copyIn), the same in any case of its name.
+ * - A date is set by a pass that finds no copy where one was applied and is wanted (copyIn: `absent`), or no folder where
+ *   something was applied (guardFolders), and by nothing else: never by the page's look, a look that failed, or a copy never
+ *   applied there. It is inside the window until it is the window's length old; a clock that went back restarts it.
+ * - A copy's date ends (absenceEnds) at a pass that finds anything else of it: there whole, there in part or unreadable
+ *   (unseen, its folder's listing too), held, not owed there, or missing past its window. A folder's ends at a pass that finds
+ *   it there, or can't look at it. Every date ends when another home is taken (forgetMissing, from main.ts selectHome).
+ * - The dates are kept while the app runs: a restart forgets them, which only delays an Off.
+ */
+function stillSettling(look: AnyLook, at: string): boolean {
   if (!look.settle) return false;
-  // A clock that went back (the system's, or a test's) restarts the window rather than holding it open.
-  const first = Math.min(firstSeenMissingAt.get(path) ?? look.settle.clock, look.settle.clock);
-  firstSeenMissingAt.set(path, first);
+  const first = Math.min(firstSeenMissingAt.get(at) ?? look.settle.clock, look.settle.clock);
+  firstSeenMissingAt.set(at, first);
   if (look.settle.clock - first >= look.settle.ms) return false;
   look.settle.settling = true;
   return true;
 }
-const seenAgain = (look: AnyLook, path: string) => { if (look.settle) firstSeenMissingAt.delete(path); };
+const absenceEnds = (look: AnyLook, at: string) => { if (look.settle) firstSeenMissingAt.delete(at); };
+/** Every date forgotten, when another home is taken (main.ts selectHome): a copy here may come and go unseen meanwhile. */
+export const forgetMissing = () => firstSeenMissingAt.clear();
 
 /**
  * The copies a found item is taken in from: one per managed harness that has it, can be read and isn't kept out (`except`): its
@@ -586,7 +608,9 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   if (options.source?.plugin) for (const [key, said] of pass.sourced) if (said.answer === 'drop' && said.history) pass.notices.push({ kind: 'dropped', key, item: said.name, link: options.source.link, history: said.history });
   // A file noted away that this pass made (a kind of files: Kind.folderSeen) is noted as it is now, so the next pass doesn't
   // take Central Knot's own write for a file made again (keepFolders: a click's pass still moves no known identity on).
-  if (kind.folderSeen) for (const tool of managed) if (pass.foldersNow[tool] && 'away' in pass.foldersNow[tool]) pass.foldersNow[tool] = await kind.folderSeen(context, tool);
+  if (kind.folderSeen) for (const tool of managed) {
+    if (pass.foldersNow[tool] && 'away' in pass.foldersNow[tool]) pass.foldersNow[tool] = await kind.folderSeen(context, tool) ?? pass.foldersNow[tool];
+  }
   keepFolders(library, pass.foldersNow, managed, !options.only && !sourceScope);
   await saveIfChanged(pass);
   return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made,
