@@ -3605,9 +3605,10 @@ async function updateFlow() {
     same('Check now takes the focus back when the check ends', await focused(), 'check-updates');
     same('and a screen reader is told what it found, which the row already shows', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], ['0.5.0 preview 5 is available. Updating downloads it and restarts Central Knot.', true]);
     same('the row’s buttons are the size of the page’s other row buttons', await a.run(`['setting-update', 'check-updates', 'show-log', 'open-log-folder'].map(id => document.getElementById(id).getBoundingClientRect().height)`), [32, 32, 32, 32]);
-    // Something typed and not saved holds the restart: an instruction file's draft.
+    // Something typed and not saved holds the restart: an instruction file's draft, typed once the page has read its files.
     const typeDraft = async () => {
       await a.click('#nav-instructions');
+      for (let i = 0; i < 120 && !(await a.exists('[id^="ins-edit-"]')); i++) await wait(250);
       const tool = await a.run(`document.querySelector('[id^="ins-edit-"]')?.id.slice('ins-edit-'.length) ?? ''`);
       await a.click(`#ins-edit-${tool}`);
       await a.run(`(() => { const area = document.querySelector('#ins-text-${tool}'); area.value += '\\n- Not saved yet.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
@@ -4915,11 +4916,15 @@ async function syncEverythingFlow() {
     [await ruleOn(), await ruleSays()], ['false', 'Turning it on adds the 2 items found in your tools now. 1 found item has copies that differ and waits for your choice of copy.']);
   await fitsAtMinimum(a, 'Settings with Synchronize everything off');
   await a.shot('everything-off');
-  // Saved just now, as a tool writes a new skill: the pass right after the switch leaves it inside the settle window, and the
-  // pass soon after takes it in by itself, whose read keeps the notices no page has shown yet.
-  skill(claude, 'fresh', text('fresh', 'Just saved.'));
-  await a.click('#sync-everything-on');
-  for (let tries = 0; tries < 40 && await ruleOn() !== 'true'; tries++) await wait(100);
+  // Still being saved, as a tool writes a new skill, until the page shows the switch's answer: its time is kept at now, so
+  // the pass the switch starts leaves it inside the settle window however late that pass runs. Left still, a pass soon after
+  // takes it in by itself, whose read keeps the notices no page has shown yet.
+  const fresh = join(skill(claude, 'fresh', text('fresh', 'Just saved.')), 'SKILL.md');
+  const stillSaving = setInterval(() => utimesSync(fresh, new Date(), new Date()), 100);
+  try {
+    await a.click('#sync-everything-on');
+    for (let tries = 0; tries < 40 && await ruleOn() !== 'true'; tries++) await wait(100);
+  } finally { clearInterval(stillSaving); }
   const record = JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8'));
   same('turned on, it is kept in the home’s sync record, and the row says what still waits for a choice', [await ruleOn(), record.syncEverything, await ruleSays()], ['true', true, '1 found item has copies that differ and waits for your choice of copy.']);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
@@ -4929,7 +4934,7 @@ async function syncEverythingFlow() {
   same('a skill saved just before is taken in soon after, with no click, once it has settled', readNow(join(codex, 'fresh/SKILL.md')), text('fresh', 'Just saved.'));
   // The read after that pass reaches the page: the sidebar's dot names both skills' notices, neither shown yet.
   const unseenOnLibrary = () => a.run(`document.querySelector('#nav-library .nav-unseen')?.title ?? ''`);
-  for (let tries = 0; tries < 40 && !/fresh/.test(await unseenOnLibrary()); tries++) await wait(100);
+  for (let tries = 0; tries < 300 && !/fresh/.test(await unseenOnLibrary()); tries++) await wait(100);
   same('a notice no page has shown stays until shown: the sidebar’s Library names both passes’ notices, of every kind', await unseenOnLibrary(), '3 automatic changes: notes, fresh, files');
   await a.shot('everything-on');
   await a.click('#nav-overview');
