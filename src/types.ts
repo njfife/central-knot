@@ -961,8 +961,12 @@ export interface PassResult {
   stopped?: string; results: DestinationResult[]; writes: number; made?: string[]; notices?: SyncNotice[];
   /** A deletion is inside its settle window: look again shortly. */
   settling?: boolean;
-  /** A pass of the whole home (librarypass.ts PassOptions background): the found keys it left found; main.ts tells an open page when one is new (foundGained). */
-  found?: string[];
+  /**
+   * A pass of the whole home (librarypass.ts PassOptions background): each found key it left found, with the hash of each
+   * managed harness's copy it would be taken in from (librarypass.ts foundCopies). homepass.ts pageSees puts it in what the
+   * page sees.
+   */
+  found?: Record<string, Partial<Record<HarnessId, string>>>;
   /**
    * A pass with a source's read (librarypass.ts fromSourceStep): the table's answer for each item, but `nothing` and `same`
    * (which change nothing a person sees), with the History entry that says it, whether the item is On once the step is done
