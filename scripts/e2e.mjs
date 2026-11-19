@@ -3605,9 +3605,10 @@ async function updateFlow() {
     same('Check now takes the focus back when the check ends', await focused(), 'check-updates');
     same('and a screen reader is told what it found, which the row already shows', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], ['0.5.0 preview 5 is available. Updating downloads it and restarts Central Knot.', true]);
     same('the row’s buttons are the size of the page’s other row buttons', await a.run(`['setting-update', 'check-updates', 'show-log', 'open-log-folder'].map(id => document.getElementById(id).getBoundingClientRect().height)`), [32, 32, 32, 32]);
-    // Something typed and not saved holds the restart: an instruction file's draft.
+    // Something typed and not saved holds the restart: an instruction file's draft, typed once the page has read its files.
     const typeDraft = async () => {
       await a.click('#nav-instructions');
+      for (let i = 0; i < 120 && !(await a.exists('[id^="ins-edit-"]')); i++) await wait(250);
       const tool = await a.run(`document.querySelector('[id^="ins-edit-"]')?.id.slice('ins-edit-'.length) ?? ''`);
       await a.click(`#ins-edit-${tool}`);
       await a.run(`(() => { const area = document.querySelector('#ins-text-${tool}'); area.value += '\\n- Not saved yet.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
@@ -3665,13 +3666,23 @@ async function updateFlow() {
     // The sidebar's control checks from any page: the arrows spin while it checks, and the status bar says what it found.
     await openKind(a, 'skills');
     await watchLooks();
+    // Main's own "check ended" message can reach the page after the check's answer, as on a busy machine: where the checks reach
+    // main (a development run), it is held until the page has the answer, so the control's redraw for it comes last.
+    const main = a.main && await a.main(), contents = 'electron.BrowserWindow.getAllWindows()[0].webContents';
+    await main?.run(`(contents => { globalThis.ckEnded = []; contents.send = (channel, ...rest) => (channel === 'updates:changed' && rest[0]?.checking === false
+      ? globalThis.ckEnded.push(rest) : Object.getPrototypeOf(contents).send.call(contents, channel, ...rest)); return true; })(${contents})`);
     await press('update-control');
     const found = 'Updated to 0.5.0 preview 5, the newest release.';
     for (let i = 0; i < 40 && (await a.run(`document.getElementById('announcement').dataset.text`)) !== found; i++) await wait(100);
     same('clicked on another page, it checks and the status bar says what it found', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], [found, false]);
     check('the control showed the check, then went back to the quiet arrows', (await a.run('window.ckLooks')).includes('checking Checking…') && (await control()).look === 'check', await a.run('window.ckLooks'));
     same('its tooltip says it is up to date', (await control()).title, 'Up to date. Click to check now.');
-    // It takes the focus back once it can be pressed again, a redraw after the look changes.
+    // It takes the focus back once it can be pressed again, a redraw after the look changes, and keeps it through the redraw for
+    // main's message, sent now: the control drawn in its place has it.
+    await a.run(`(window.ckDrawn = document.getElementById('update-control'), true)`);
+    const late = await main?.run(`(contents => { delete contents.send; globalThis.ckEnded.forEach(rest => contents.send('updates:changed', ...rest)); return globalThis.ckEnded.length; })(${contents})`);
+    for (let i = 0; late && i < 100 && await a.run(`document.getElementById('update-control') === window.ckDrawn`); i++) await wait(100);
+    main?.close();
     for (let i = 0; i < 40 && await focused() !== 'update-control'; i++) await wait(100);
     same('and it takes the focus back', await focused(), 'update-control');
     await a.quit();

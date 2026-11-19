@@ -8,7 +8,7 @@
 //   a button with the sidebar control's own click (clickFor, one function for both).
 // Restarting is held while something typed isn't saved or a plugin run is under way: the sidebar's control and the Overview's
 // button then open Settings, whose Updates row says what restarting would lose beside its own Restart button.
-import { announce, baseDraftTyped, rerender, showPage, state, toolDraftTyped } from './app.ts';
+import { announce, baseDraftTyped, keepingFocus, rerender, showPage, state, toolDraftTyped } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import { market } from './pluginstate.ts';
 import { buildWords, restartWaits, tagWords, updateButton, updateIndicator, updateStatus, type Indicator } from './updates.ts';
@@ -189,9 +189,9 @@ export function sidebarEnd(): Node[] {
     glyph, h('span.nav-label', {}, shown.label))];
 }
 
-/** The sidebar's control drawn again on its own (renderer.ts draws it with the rest of the sidebar on a redraw). */
+/** The sidebar's control drawn again on its own (renderer.ts draws it with the rest of the sidebar on a redraw), keeping its focus. */
 function paintSidebarEnd() {
-  document.getElementById('sidebar-end')?.replaceChildren(...sidebarEnd());
+  keepingFocus(() => document.getElementById('sidebar-end')?.replaceChildren(...sidebarEnd()));
 }
 
 /** Download progress, painted in place so a redraw never interrupts typing elsewhere on the page. */
