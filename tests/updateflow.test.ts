@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { CHECK_EVERY_MS, FIRST_CHECK_MS, FRESH_MS, RESTART_MS, STALLED_MS, updateFlow, type PendingUpdate } from '../src/updateflow.ts';
 import { prepareUnfinished } from '../src/updates.ts';
 import type { UpdateRelease, UpdateView } from '../src/types.ts';
+import { within } from './within.ts';
 
 const RELEASES = 'https://fixture.test/releases';
 const zipOf = (tag: string) => `https://fixture.test/download/${tag}/Central-Knot-0.5.0-mac-arm64.zip`;
@@ -17,17 +18,6 @@ const listed = (tag: string, size = 1000) => ({
 });
 /** A download's answer: `sent` bytes, then the end, or with `open` a connection that stays open and says nothing more. */
 const bytes = (sent: number, open = false) => new Response(new ReadableStream<Uint8Array>({ start(stream) { stream.enqueue(new Uint8Array(sent)); if (!open) stream.close(); } }));
-
-// The test deadline uses real time even when the updater's clock stands still.
-const realTimeout = setTimeout, clearRealTimeout = clearTimeout;
-async function within<T>(what: string, work: Promise<T>): Promise<T> {
-  let timer: NodeJS.Timeout;
-  const missing = new Promise<never>((_, reject) => {
-    timer = realTimeout(() => reject(new Error(`never happened: ${what}`)), 30_000);
-  });
-  try { return await Promise.race([work, missing]); }
-  finally { clearRealTimeout(timer!); }
-}
 
 /** install() returns at the click. Its final action, after deciding whether to restart, removes the zip's folder. */
 async function folderRemoved(temp: string) {
