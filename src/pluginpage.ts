@@ -15,7 +15,8 @@ import { pluginKey } from './pluginplan.ts';
 import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
-import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginHook, PluginItemLine, PluginView, PluginsView } from './types.ts';
+import type { Components, DeclaredHook, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView } from './types.ts';
+import { hookLine } from './sessionhooks.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, toolNames as names } from './words.ts';
 import { openKind } from './matrix.ts';
@@ -228,12 +229,12 @@ const fileKinds: Record<FileKind, { title: string; file: string; about?: string 
 const SESSION_HOOKS_ABOUT = 'These run when a session starts or you send a prompt (in Codex, once you trust them); what they add is known only when they run.';
 
 /**
- * One group of hooks: its heading, an optional line under it, and a row per command (the event, then the command as written;
- * an event whose hooks run none is a row of its own), so the count in the heading is the rows under it. Both groups under
- * What it holds are drawn by it.
+ * One group of hooks: its heading, an optional line under it, and a row per hook (its event, then how it starts:
+ * sessionhooks.ts hookLine, blank for one that starts nothing here), so the count in the heading is the rows under it. Both
+ * groups under What it holds are drawn by it.
  */
-function hookGroup(owner: string, title: string, hooks: PluginHook[], about?: string) {
-  const rows = hooks.flatMap(hook => (hook.runs.length ? hook.runs : ['']).map((run, at) => ({ name: hook.event, text: run, mono: true, key: `${hook.event}\u0000${at}` })));
+function hookGroup(owner: string, title: string, hooks: DeclaredHook[], about?: string) {
+  const rows = hooks.map((hook, at) => ({ name: hook.event, text: hookLine(hook), mono: true, key: `${hook.event}\u0000${at}` }));
   return rows.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${rows.length})`), about ? h('p.plugin-group-note', {}, about) : null, partList(owner, rows)) : null;
 }
 

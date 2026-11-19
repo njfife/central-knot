@@ -4,8 +4,9 @@
 import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
-import type { HarnessId, NamedPart, PluginContents, PluginDetail, PluginHook } from './types.ts';
+import type { DeclaredHook, HarnessId, NamedPart, PluginContents, PluginDetail } from './types.ts';
 import { githubRepo, isFolder, isHttps, nameOfFile, record, strings, text } from './values.ts';
+import { commandLine } from './words.ts';
 
 const README_LIMIT = 60_000;
 /** No file from a repository is read past this; front matter and READMEs need far less. */
@@ -170,22 +171,38 @@ async function instructionsIn(root: string, folder: string): Promise<NamedPart[]
 }
 
 /**
- * A command as a tool runs it: the command, then each argument as written, an argument with a space in it (or an empty one)
- * in double quotes so it reads as one. A hook's and an MCP server's are both shown so.
+ * A hooks section as a file declares it (`hooks`: each event with its entries, from `declaredIn`), one DeclaredHook per hook in
+ * each event's order. Claude Code's and Codex's form groups hooks under a matcher (`{ matcher, hooks: [{ command, args }] }`);
+ * Copilot CLI's lists each with its own (`{ matcher, bash, powershell, command, exec, args, cwd, env, timeoutSec }`). How each
+ * starts, on macOS and Linux: https://code.claude.com/docs/en/hooks (`args`, even empty, starts `command` directly; else a shell
+ * runs it), https://learn.chatgpt.com/docs/hooks (a command string), https://docs.github.com/en/copilot/reference/hooks-reference
+ * (`exec` with `args` directly; else `bash`, or `command` where it has none; `powershell` is Windows').
  */
-const commandLine = (command: string, args: string[] = []) => [command, ...args.map(arg => (arg === '' || /\s/.test(arg) ? JSON.stringify(arg) : arg))].join(' ');
+export function readHooks(declaredIn: string, hooks: Record<string, unknown>): DeclaredHook[] {
+  return Object.keys(hooks).sort().flatMap(event => (Array.isArray(hooks[event]) ? hooks[event] : []).map(record)
+    .flatMap(entry => (Array.isArray(entry?.hooks) ? entry.hooks.map(hook => ({ hook: record(hook), matcher: entry.matcher })) : [{ hook: entry, matcher: entry?.matcher }]))
+    .map(({ hook, matcher }, at): DeclaredHook => {
+      const launch = launchOf(hook ?? {}), timeout = hook?.timeoutSec ?? hook?.timeout, env = record(hook?.env);
+      return { declaredIn, event, at, ...(text(matcher) ? { matcher: text(matcher) } : {}), ...(launch ? { launch } : {}), ...(typeof timeout === 'number' ? { timeout } : {}),
+        ...(text(hook?.cwd) ? { cwd: text(hook?.cwd) } : {}), ...(env ? { env: Object.fromEntries(Object.entries(env).map(([name, value]) => [name, text(value)])) } : {}) };
+    }));
+}
+function launchOf(hook: Record<string, unknown>): DeclaredHook['launch'] {
+  if (text(hook.exec)) return { program: text(hook.exec), args: strings(hook.args) ?? [] };
+  if (text(hook.command) && Array.isArray(hook.args)) return { program: text(hook.command), args: strings(hook.args)! };
+  const shell = text(hook.bash) || text(hook.command);
+  return shell ? { shell } : undefined;
+}
 
 /**
- * Each event in a plugin's hooks section with the commands its hooks run then, as written: Claude Code's and Codex's form
- * keeps them in an entry's `hooks[].command` with its `args`, Copilot CLI's in an entry's `bash`, else its `powershell`, else
- * its `command`.
+ * A plugin's hooks: from each of its default files (`defaults`) and each file its manifest or entry names, and inline there
+ * (`named`), each hook with where it is declared. Every declaration counts, none replaces another.
  */
-const hooksOf = (hooks: Record<string, unknown>): PluginHook[] =>
-  Object.keys(hooks).sort().map(event => ({ event, runs: (Array.isArray(hooks[event]) ? hooks[event] : []).flatMap(hookRuns) }));
-function hookRuns(value: unknown): string[] {
-  const entry = record(value);
-  if (Array.isArray(entry?.hooks)) return entry.hooks.map(record).filter(hook => text(hook?.command)).map(hook => commandLine(text(hook!.command), strings(hook!.args)));
-  return [text(entry?.bash) || text(entry?.powershell) || text(entry?.command)].filter(Boolean);
+async function pluginHooks(root: string, folder: string, named: unknown, defaults: string[]): Promise<DeclaredHook[]> {
+  const sectionOf = (value: Record<string, unknown> | undefined) => record(value?.hooks) ?? value ?? {};
+  const files = [...new Set([...defaults, ...namedFiles(named)].map(path => resolve(folder, path)))];
+  const fromFiles = await Promise.all(files.map(async file => readHooks(file, sectionOf(await jsonInside(root, file)))));
+  return [...fromFiles.flat(), ...readHooks(folder, sectionOf(record(named)))];
 }
 
 /** What an MCP server runs: its command and arguments, or the URL it connects to. */
@@ -231,7 +248,7 @@ async function section(root: string, folder: string, named: unknown, key: string
  * How to read a plugin's parts: as Codex does, by the one manifest it picks (`codex`); as Copilot CLI does, where a listed
  * skills folder replaces skills/ (`skillsListReplaces`); and whether the plugin is its marketplace's own root.
  */
-export interface ReadAs { codex?: Record<string, unknown>; skillsListReplaces?: boolean; atMarketplaceRoot?: boolean }
+export interface ReadAs { codex?: Record<string, unknown>; skillsListReplaces?: boolean; atMarketplaceRoot?: boolean; /** Where its hooks are declared unless it names other files: hooks/hooks.json when unset. */ hookFiles?: string[] }
 
 /** A plugin's manifest as `readAs` says it is read, and the entry that adds to it (none for Codex). */
 async function manifestOf(folder: string, entry: Record<string, unknown>, root: string, { codex }: ReadAs) {
@@ -287,13 +304,13 @@ export async function skillNamesIn(folder: string, entry: Record<string, unknown
  * Lists are paths, lists of paths, or (commands) a map of name to { source }: such a command is named by its file, not
  * its key, and an inline { content } one isn't listed. Agents folders are read too, though Claude Code takes only files.
  * An entry with "strict": false that also lists parts beside a plugin.json is one Claude Code refuses; it is read merged.
- * Hooks and servers are read from their default files plus whatever plugin.json or the entry names. Instruction files are
- * read at their fixed places (INSTRUCTION_FILES), in every copy alike.
+ * Hooks and servers are read from their default files (Copilot CLI's own hooks files: `readAs`) plus whatever plugin.json or
+ * the entry names. Instruction files are read at their fixed places (INSTRUCTION_FILES), in every copy alike.
  */
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs = {}): Promise<PluginContents> {
   const manifests = await manifestOf(folder, entry, root, readAs), { own, added } = manifests;
   const declared: Record<string, unknown> = { ...own, ...added, version: text(own.version) || added.version };
-  const hooks = (await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json')).values;
+  const hooks = await pluginHooks(root, folder, declared.hooks, readAs.hookFiles ?? ['hooks/hooks.json']);
   const servers = (await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json')).values;
   const lsp = (await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json')).values;
   const read: Omit<PluginContents, 'onlyInstructions'> = {
@@ -301,7 +318,7 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
     commands: await markdownIn(root, folder, listedOr(folder, manifests, 'commands')),
     agents: await markdownIn(root, folder, listedOr(folder, manifests, 'agents')),
     instructions: await instructionsIn(root, folder),
-    hooks: hooksOf(hooks),
+    hooks,
     mcpServers: serverList(servers),
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),
     lspServers: Object.keys(lsp).sort(),
@@ -363,11 +380,18 @@ async function holdsOnlyInstructions(root: string, folder: string, declared: Rec
 
 /**
  * What a tool's installed copy of a plugin holds (in `path`), as that tool reads it: Codex by its own manifest, Copilot CLI
- * with a skills list replacing the skills folder. `entry`: its marketplace entry, where known.
+ * with a skills list replacing the skills folder and its own hooks files. `entry`: its marketplace entry, where known.
  */
 export async function installedContents(tool: HarnessId, path: string, entry: Record<string, unknown> = {}, atMarketplaceRoot = false): Promise<PluginContents> {
-  return pluginContents(path, entry, path, { codex: tool === 'codex-cli' ? await codexManifest(path) : undefined, skillsListReplaces: tool === 'copilot-cli', atMarketplaceRoot });
+  return pluginContents(path, entry, path, { codex: tool === 'codex-cli' ? await codexManifest(path) : undefined, skillsListReplaces: tool === 'copilot-cli', atMarketplaceRoot,
+    ...(tool === 'copilot-cli' ? { hookFiles: COPILOT_HOOK_FILES } : {}) });
 }
+/**
+ * Where Copilot CLI finds a plugin's hooks: a plugin's own hooks.json or hooks/hooks.json, an Agent Plugin's
+ * com.github.copilot/hooks/hooks.json (https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference).
+ * A plugin is one kind or the other, so all three are read.
+ */
+const COPILOT_HOOK_FILES = ['hooks.json', 'hooks/hooks.json', 'com.github.copilot/hooks/hooks.json'];
 
 /** The files behind a plugin's skills, agents and MCP servers, read as its items in Pi and OpenCode (pluginlibrary.ts readPlugin). */
 export interface PluginFiles {

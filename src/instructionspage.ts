@@ -1,7 +1,8 @@
 // Instructions: each tool's own instruction file, a plain editor (opened by a click on the text or by Edit), a diff before
 // saving and earlier versions (INS-01, INS-02); the page puts the Base instructions card (basecard.ts) first, then the tools'
 // cards under a heading (one a row, two on a wide page: style.css .ins-tool-cards), and keeps what explains the files (who reads
-// each, the tools' own notes) in one info box at the top. A tool's card has its actions in its head at every stage, so a long
+// each, the tools' own notes) in one info box at the top. On each tool's card, after its text and base strip, what else
+// adds text to its sessions (alsoInEverySession, from sessionhooks.ts). A tool's card has its actions in its head at every stage, so a long
 // text never hides them (the base card's, too, except while its Draft panel is open: basecard.ts). There is no turn-off switch:
 // instruction files are edited, never disabled or emptied by Central Knot (the one deletion is an Undo of a base save removing a
 // file that save created, while unchanged).
@@ -11,7 +12,9 @@ import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend
 import { fileName, lineCount, toolNames } from './words.ts';
 import { button, h, icon, lockAttrs, pathText, rereadBand } from './dom.ts';
 import { noToolsState } from './pages.ts';
-import { brandMark, outcomeBand } from './matrix.ts';
+import { brandMark, openPlugin, outcomeBand } from './matrix.ts';
+import { inlineMarkdown } from './markdown.ts';
+import { sessionLines, type SessionLine } from './sessionhooks.ts';
 import type { HarnessId, InstructionFile } from './types.ts';
 import { lineDiff } from './diff.ts';
 import { keepLineBreaks } from './drafts.ts';
@@ -165,8 +168,28 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
         editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: !draftUnsaved() }, 'Unsaved changes') : null),
       stage.actions),
     stage.body,
+    alsoInEverySession(file),
     versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!acting() || readOnly || otherDirty || (editing && draftUnsaved()),
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));
+}
+
+/**
+ * "Also in every session", on a tool's card after its text: what else adds text to its sessions (sessionhooks.ts sessionLines), each line
+ * with its origin's mark and name, and where it is turned off: the plugin's page, or the settings file that holds the person's
+ * own hook. None with nothing to show.
+ */
+function alsoInEverySession(file: InstructionFile) {
+  const strip = sessionLines(file.tool, state.home?.pluginItems ?? [], file);
+  if (!strip) return null;
+  const where = ({ plugin, settings }: SessionLine, at: number) => (plugin?.listed
+    ? button({ variant: 'link', size: 'micro', label: 'Plugin’s page', id: `session-page-${file.tool}-${at}`, onclick: () => openPlugin({ source: plugin.source, plugin: plugin.plugin, marketplace: plugin.marketName }) })
+    : settings ? pathText(shownPath(settings), settings) : null);
+  return h('section.session-strip', { id: `session-${file.tool}`, 'aria-label': `Also in every ${toolNames[file.tool]} session` },
+    h('h4.session-title', {}, 'Also in every session'),
+    h('ul.session-lines', {}, strip.lines.map((line, at) => h('li.session-line', {}, h(`span.origin-mark.${line.mark}`, { 'aria-hidden': 'true' }),
+      h('div.session-what', {}, h('p.session-head', {}, h('strong.session-name', {}, line.name), h('span', {}, line.says), where(line, at)),
+        line.command ? h('code.session-command', {}, line.command) : null)))),
+    strip.note ? h('p.session-note', {}, ...inlineMarkdown(`${strip.note}.`, () => undefined)) : null);
 }
 
 /**

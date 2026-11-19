@@ -62,7 +62,7 @@ const KIT: Record<string, string> = {
   'skills/notes/SKILL.md': skillMd('notes'), 'extra/tools/SKILL.md': skillMd('tools'), 'agents/helper.md': helperMd(),
   '.mcp.json': mcpJson({ relay: { command: 'npx', args: ['relay'] }, local: { command: '${CLAUDE_PLUGIN_ROOT}/bin/local' } }),
   'commands/go.md': '---\ndescription: Go.\n---\nGo.\n', 'commands/stop.md': '---\ndescription: Stop.\n---\nStop.\n', 'commands/status.md': '---\ndescription: Status.\n---\nStatus.\n',
-  'hooks/hooks.json': JSON.stringify({ hooks: { PreToolUse: [] } }), '.lsp.json': JSON.stringify({ rust: { command: 'rust-analyzer' } }), 'bin/kit': '#!/bin/sh\n',
+  'hooks/hooks.json': JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'check-bash' }] }] } }), '.lsp.json': JSON.stringify({ rust: { command: 'rust-analyzer' } }), 'bin/kit': '#!/bin/sh\n',
   'README.md': '# kit\n',
 };
 

@@ -347,12 +347,12 @@ test('A start-of-session hook printing Claude Code’s JSON, installed in Claude
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'explainer@team': [{ scope: 'user', installPath: claudeCopy, version: '1.0.0' }] } }));
     await put(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'explainer', marketplace: 'team', version: '1.0.0', cache_path: copilotCopy, enabled: true }] }));
     const detail = (await box.markets.detail(root, 'explainer'))!;
-    assert.deepEqual(detail.hooks, [{ event: 'SessionStart', runs: [start] }]);
+    assert.deepEqual(detail.hooks, [{ declaredIn: join(root, 'plugins/explainer/hooks/hooks.json'), event: 'SessionStart', at: 0, launch: { shell: start } }]);
     assert.deepEqual(Object.entries(detail.installed ?? {}).map(([tool, copy]) => [tool, copy.instructions.map(file => file.name)]), [['claude-cli', ['AGENTS.md']], ['copilot-cli', ['AGENTS.md']]]);
     // Each tool's line is its fixed rule for start-of-session hooks (capability data, Appendix D), never a reading of what this
     // hook prints: Claude Code's works; Copilot CLI's says which form it takes and that Claude Code's is ignored.
     const line = (tool: HarnessId) => outcomes(tool, componentsFrom(detail)).find(outcome => outcome.component === 'Session text');
-    assert.deepEqual([line('claude-cli')?.result, line('copilot-cli')?.result, line('copilot-cli')?.text], ['works', 'limited', 'is limited: only a start-of-session hook that prints `{"additionalContext": …}` at the top level adds it; Claude Code’s `hookSpecificOutput` form and prompt hooks’ output are ignored']);
+    assert.deepEqual([line('claude-cli')?.result, line('copilot-cli')?.result, line('copilot-cli')?.text], ['works', 'limited', 'is limited: Copilot CLI adds only what a start-of-session hook prints as `{"additionalContext": …}` at the top level; Claude Code’s `hookSpecificOutput` form and prompt hooks’ output are ignored']);
   } finally { await box.cleanup(); }
 });
 

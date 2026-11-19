@@ -7748,8 +7748,146 @@ async function libraryFlow() {
   await g.quit();
 }
 
+/**
+ * "Also in every session" on each tool's card (sessionhooks.ts): a made-up home with release-helper installed in Claude Code and
+ * in Codex, its start-of-session hooks with arguments and one very long command, two more plugins in Claude Code, the person's
+ * own hooks (Claude Code, Copilot CLI) and Pi's and OpenCode's extensions. Every hook is a plain string: nothing here runs one.
+ * Each tool's strip; a plugin's link and Back; the long command wrapped at the smallest size; the plugin taken out of Claude
+ * Code on its page takes its lines away there, and Codex's stay; a tool's own Instructions tab has the same strip.
+ */
+async function sessionStripFlow() {
+  const home = join(scratch, 'home-session'), data = join(scratch, 'session-data'), market = join(scratch, 'market-session'), name = 'ck-session-market';
+  writeMarket(market, name);
+  // The tools' stand-in CLIs live in the app's own HOME, apart from the home it is shown (as pluginSwitchFlow has them): a shown
+  // home that is the app's HOME reaches its real configuration, so Central Knot only previews it, and no box could be clicked.
+  const tools = join(scratch, 'home-session-tools'), bin = join(tools, '.local/bin');
+  mkdirSync(bin, { recursive: true });
+  for (const [cli, version] of [['copilot', 'GitHub Copilot CLI 1.0.113.'], ['codex', 'codex-cli 0.169.1'], ['pi', '1.5.2']]) writeFileSync(join(bin, cli), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  mkdirSync(join(tools, '.opencode/bin'), { recursive: true });
+  writeFileSync(join(tools, '.opencode/bin/opencode'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.19.6" && exit 0\nexit 9\n', { mode: 0o755 });
+  // Claude Code's stand-in takes release-helper out as its own uninstall does, and refuses anything else. Central Knot runs it
+  // with HOME set to the home it shows, so its log is there.
+  const record = join(home, '.claude/plugins/installed_plugins.json');
+  writeFileSync(join(bin, 'claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.327 (Claude Code)" && exit 0
+echo "$*" >> "$HOME/claude-calls.txt"
+[ "$*" = "plugin uninstall release-helper@${name} --scope user" ] || exit 9
+"${process.execPath}" -e "const fs = require('fs'), now = JSON.parse(fs.readFileSync('${record}', 'utf8')); delete now.plugins['release-helper@${name}']; fs.writeFileSync('${record}', JSON.stringify(now))"
+`, { mode: 0o755 });
+  const long = `"\${CLAUDE_PLUGIN_ROOT}/hooks/start.sh" --with-a-very-long-option-name=${'x'.repeat(120)} --from /${'deep-folder/'.repeat(14)}notes.md`;
+  const hooks = (event, ...commands) => JSON.stringify({ hooks: { [event]: [{ matcher: 'startup', hooks: commands }], PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }] } });
+  const remind = { type: 'command', command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/hooks/remind.mjs', '--days', '2'] };
+  const helperHooks = hooks('SessionStart', remind, { type: 'command', command: long });
+  writeClaudeInstall(home, name, 'release-helper', '0.4.1', { 'hooks/hooks.json': helperHooks });
+  writeClaudeInstall(home, name, 'document-tools', '1.2.0', { 'hooks/hooks.json': hooks('SessionStart', { type: 'command', command: 'cat "${CLAUDE_PLUGIN_ROOT}/STYLE.md"' }) });
+  writeClaudeInstall(home, name, 'issue-tracker', '2.0.0', { 'hooks/hooks.json': hooks('UserPromptSubmit', { type: 'command', command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/prompt.mjs' }) });
+  // Added from Git, so Claude Code reads each plugin from its copy in the cache (one from a folder marketplace it reads in place).
+  writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ [name]: { source: { source: 'git', url: market } } }));
+  writeFileSync(join(home, '.claude/settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: '~/bin/greet.sh', args: ['--short'] }] }] } }));
+  const codexCopy = join(home, '.codex/plugins/cache', name, 'release-helper/0.4.1');
+  mkdirSync(join(codexCopy, 'hooks'), { recursive: true });
+  writeFileSync(join(codexCopy, 'hooks/hooks.json'), helperHooks);
+  writeFileSync(join(home, '.codex/config.toml'), `[marketplaces.${name}]\nsource = ${JSON.stringify(market)}\n\n[plugins."release-helper@${name}"]\nenabled = true\n`);
+  mkdirSync(join(home, '.copilot/hooks'), { recursive: true });
+  writeFileSync(join(home, '.copilot/hooks/team.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: './team-start.sh', powershell: './team-start.ps1' }] } }));
+  mkdirSync(join(home, '.pi/agent'), { recursive: true });
+  writeFileSync(join(home, '.pi/agent/settings.json'), JSON.stringify({ packages: ['npm:@example/pi-tools@1.0.0'] }));
+  mkdirSync(join(home, '.config/opencode'), { recursive: true });
+  writeFileSync(join(home, '.config/opencode/opencode.json'), JSON.stringify({ plugin: ['opencode-wakatime'] }));
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  writeFileSync(join(data, 'marketplaces.json'), JSON.stringify([market]));
+  const toolFolders = () => Object.fromEntries(['.claude', '.codex', '.copilot', '.pi', '.config/opencode'].map(folder => [folder, tree(join(home, folder))]));
+  const before = toolFolders();
+  const a = await launch(data, [], tools, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const strip = tool => a.run(`[...document.querySelectorAll('#session-${tool} .session-line')].map(line => [line.querySelector('.session-name').textContent, line.querySelector('.session-command')?.textContent ?? null])`);
+  const showStrips = async () => { for (let tries = 0; tries < 100 && !(await a.exists('#session-codex-cli')); tries++) await wait(100); };
+  await a.click('#nav-instructions');
+  await showStrips();
+  same('Claude Code’s strip: your own hook, then each plugin’s that can add text, by name, each command as written', await strip('claude-cli'), [
+    ['yours', '~/bin/greet.sh --short'], ['document-tools', 'cat "${CLAUDE_PLUGIN_ROOT}/STYLE.md"'], ['issue-tracker', 'node ${CLAUDE_PLUGIN_ROOT}/hooks/prompt.mjs'],
+    ['release-helper', 'node ${CLAUDE_PLUGIN_ROOT}/hooks/remind.mjs --days 2'], ['release-helper', long]]);
+  check('each line says when it runs and that what it adds is known only then, never what it adds',
+    /yours\s*Runs when a session starts\. What it adds is known only when it runs\.[\s\S]*issue-tracker\s*Runs when you send a prompt\. What it adds is known only when it runs\./.test(await a.text('#session-claude-cli') ?? ''), await a.text('#session-claude-cli'));
+  same('your own hook names the file that holds it; a plugin’s line links to its page', [await a.run(`document.querySelector('#session-claude-cli .path-text')?.title`), await a.all('#session-claude-cli .session-line button', 'e.textContent')],
+    [join(home, '.claude/settings.json'), ['Plugin’s page', 'Plugin’s page', 'Plugin’s page', 'Plugin’s page']]);
+  same('Codex’s strip: the same plugin, then its note once', [await strip('codex-cli'), await a.text('#session-codex-cli .session-note')],
+    [[['release-helper', 'node ${CLAUDE_PLUGIN_ROOT}/hooks/remind.mjs --days 2'], ['release-helper', long]], 'Codex runs a hook only after you trust it in /hooks.']);
+  check('Copilot CLI’s strip: your own hook from hooks/, and its note on what it takes', JSON.stringify(await strip('copilot-cli')) === JSON.stringify([['yours', './team-start.sh']])
+    && /^Copilot CLI adds only what a start-of-session hook prints as \{"additionalContext": …\} at the top level/.test(await a.text('#session-copilot-cli .session-note') ?? ''), [await strip('copilot-cli'), await a.text('#session-copilot-cli')]);
+  same('Pi’s and OpenCode’s extensions by name, known only to the running tool', [await a.text('#session-pi-cli .session-line'), await a.text('#session-opencode-cli .session-line')],
+    ['npm:@example/pi-tools@1.0.0An extension’s text is known only to the running tool.', 'opencode-wakatimeAn extension’s text is known only to the running tool.']);
+  same('one plugin has one mark in every tool, hidden from a screen reader', await a.run(`[...document.querySelectorAll('.session-line')].filter(line => line.textContent.startsWith('release-helper')).map(line => [line.querySelector('.origin-mark').className, line.querySelector('.origin-mark').getAttribute('aria-hidden')]).filter((each, at, all) => JSON.stringify(each) !== JSON.stringify(all[0])).length`), 0);
+  // The very long command wraps whole at the smallest window, the sidebar open or as a rail; and so at every size pictured.
+  const wraps = () => a.run(`(() => { const command = [...document.querySelectorAll('#session-claude-cli .session-command')].at(-1); command.scrollIntoView(); const box = command.getBoundingClientRect(), card = command.closest('.ins-card').getBoundingClientRect();
+    return [command.scrollWidth <= command.clientWidth + 1, box.height > 40, box.right <= card.right + 1]; })()`);
+  await sizeTo(a, ...SMALLEST);
+  same('at 860×560 the long command wraps inside its card', await wraps(), [true, true, true]);
+  await fullSize(a);
+  await fitsAtMinimum(a, 'Instructions with each tool’s strip');
+  const pictures = async label => {
+    if (!shots) return;
+    for (const [width, height, rail] of [[...SMALLEST, false], [1316, 819, false], [1316, 819, true], [1728, 1080, false], [2560, 1440, false]]) {
+      await sizeTo(a, width, height);
+      const railed = await a.run(`document.body.classList.contains('rail') || document.querySelector('#sidebar')?.getBoundingClientRect().width < 100`);
+      if (railed !== rail) await a.click('#sidebar-toggle');
+      for (const scheme of ['light', 'dark']) {
+        await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+        await a.run(`document.querySelector('#session-claude-cli')?.scrollIntoView({ block: 'start' })`);
+        await a.shot(`${label}-${width}x${height}${rail ? '-rail' : ''}-${scheme}`);
+      }
+      same(`at ${width}×${height}${rail ? ' with the rail' : ''} the long command wraps inside its card`, await wraps(), [true, true, true]);
+    }
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+    await fullSize(a);
+  };
+  await pictures('session-strip');
+  // Its link opens release-helper's page; Back returns to the Instructions page with its strips.
+  const helperLink = await a.run(`[...document.querySelectorAll('#session-claude-cli .session-line')].find(line => line.textContent.startsWith('release-helper')).querySelector('button').id`);
+  await a.click(byId(helperLink));
+  for (let tries = 0; tries < 100 && (await a.text('.crumb-here')) !== 'release-helper'; tries++) await wait(100);
+  same('the link opens the plugin’s page', await a.text('.crumb-here'), 'release-helper');
+  const back = async () => { await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.settle(); await showStrips(); };
+  await back();
+  same('Back returns to the Instructions page with the same strips', [await a.run(`document.querySelector('.nav-row[aria-current=page]')?.id`), await strip('claude-cli').then(lines => lines.length), await strip('codex-cli').then(lines => lines.length)], ['nav-instructions', 5, 2]);
+  // Taken out of Claude Code on its page (its box unticked), it leaves Claude Code's strip; Codex's lines stay.
+  await a.click(byId(helperLink));
+  // Its box for Claude Code, on its page (the marketplace is the first listed); drawn once the page has read the tools' copies.
+  const box = '#pbox-0-release-helper-claude-cli';
+  const boxIs = () => a.run(`(() => { const b = document.querySelector('${box}'); return b ? [b.getAttribute('aria-checked'), b.disabled, b.dataset.state] : null; })()`);
+  for (let tries = 0; tries < 100 && (await boxIs())?.[2] !== 'installed'; tries++) await wait(100);
+  check('on its page, its box for Claude Code is ticked: it is there', JSON.stringify(await boxIs()) === JSON.stringify(['true', false, 'installed']),
+    [await boxIs(), await a.run(`document.querySelector('${box}')?.title`)]);
+  await a.click(box);
+  for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+  await a.settle();
+  same('its own uninstall ran in Claude Code alone', readNow(join(home, 'claude-calls.txt')).trim().split('\n'), [`plugin uninstall release-helper@${name} --scope user`]);
+  await back();
+  for (let tries = 0; tries < 100 && (await strip('claude-cli')).length !== 3; tries++) await wait(100);
+  same('taken out of Claude Code, its lines leave Claude Code’s strip, and Codex’s stay', [await strip('claude-cli').then(lines => lines.map(([plugin]) => plugin)), await strip('codex-cli').then(lines => lines.length)], [['yours', 'document-tools', 'issue-tracker'], 2]);
+  // A tool's own Instructions tab under Harnesses has the same strip.
+  await a.click(byId('nav-harnesses'));
+  await a.click(byId('harness-codex-cli'));
+  await a.click(byId('harness-tab-instructions'));
+  for (let tries = 0; tries < 100 && !(await a.exists('#session-codex-cli')); tries++) await wait(100);
+  same('Codex’s Instructions tab has its strip', await strip('codex-cli').then(lines => lines.length), 2);
+  if (shots) for (const scheme of ['light', 'dark']) {
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+    await sizeTo(a, 1316, 819);
+    await a.shot(`session-strip-harness-tab-1316x819-${scheme}`);
+  }
+  await a.send('Emulation.setEmulatedMedia', { features: [] });
+  await fullSize(a);
+  // Nothing the strips offer wrote a file: in the tools' folders, only the uninstall's record changed.
+  const after = toolFolders();
+  same('in the tools’ folders only the uninstall’s record changed', Object.entries(after).flatMap(([folder, files]) => Object.keys({ ...files, ...before[folder] }).filter(path => files[path] !== before[folder][path]).map(path => join(folder, path))),
+    ['.claude/plugins/installed_plugins.json']);
+  same('no page errors on the strips', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
-  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow],
+  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
