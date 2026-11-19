@@ -6459,33 +6459,28 @@ esac
 }
 
 /**
- * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
- * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
- * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
- * The lead never says nothing was found above a card that counts something, and why a home can't be written is said with no tool
- * managed too. Made-up homes: Claude Code and Codex stand-ins, and a plugin from a marketplace no tool lists.
- */
-/**
- * What plugins hold, read in the background (plugintext.ts), on screen: a marketplace Central Knot lists, whose one plugin kept
- * elsewhere is on GitHub, sent by Git's url.insteadOf to a port where nothing answers (no network is used). The four kept in the
- * marketplace are read and kept, Settings says how much and what the first reading costs; turned off, what was read stays.
+ * What plugins hold, read in the background (plugintext.ts), on screen, over a marketplace Central Knot lists whose one plugin kept
+ * elsewhere is on GitHub. First Git's url.insteadOf sends GitHub to a port where nothing answers: the four kept in the marketplace
+ * are read, Settings says the fifth couldn't be and is tried again. Then, launched again, to a local repository standing in for
+ * GitHub (no network either): all five are read; turned off, what was read stays and the row says so.
  */
 async function pluginTextFlow() {
-  const home = join(scratch, 'text-home'), data = join(scratch, 'text-data'), real = join(scratch, 'text-real'), market = join(scratch, 'text-market');
+  const home = join(scratch, 'text-home'), data = join(scratch, 'text-data'), real = join(scratch, 'text-real'), market = join(scratch, 'text-market'), hosts = join(scratch, 'text-hosts');
   writeMarket(market, 'ck-text-market');
   for (const folder of [data, real, join(home, '.claude')]) mkdirSync(folder, { recursive: true });
   writeFileSync(join(home, '.claude/settings.json'), '{}');
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
   writeFileSync(join(data, 'marketplaces.json'), JSON.stringify([market]));
   writeFileSync(join(scratch, 'text-gitconfig'), '[url "http://127.0.0.1:9/"]\n\tinsteadOf = https://github.com/\n');
-  const a = await launch(data, [], real, { CK_PLUGIN_TEXT: 'on', GIT_CONFIG_GLOBAL: join(scratch, 'text-gitconfig') });
+  let a = await launch(data, [], real, { CK_PLUGIN_TEXT: 'on', GIT_CONFIG_GLOBAL: join(scratch, 'text-gitconfig') });
   const kept = () => { try { return JSON.parse(readFileSync(join(data, 'plugins/plugin-text.json'), 'utf8')).plugins; } catch { return []; } };
   const switched = () => a.run(`document.querySelector('#plugin-text-on')?.getAttribute('aria-checked')`);
-  const said = async () => [await a.text('#setting-plugin-text-notice'), await a.text('#setting-plugin-text-hint')];
-  // With --shots: the row at the two smaller sizes, dark and light.
-  const pictures = async name => {
+  const said = async () => [(await a.text('#setting-plugin-text-notice'))?.trim() ?? '', await a.text('#setting-plugin-text-hint') ?? ''];
+  const saying = async (pattern, tries = 150) => { while (tries-- > 0 && !pattern.test((await said())[0])) await wait(100); return pattern.test((await said())[0]); };
+  // With --shots: the row at the two smaller sizes (or only the first), dark and light.
+  const pictures = async (name, sizes = [[860, 600], [1280, 800]], themes = ['dark', 'light']) => {
     if (!shots) return;
-    for (const [width, height] of [[860, 600], [1280, 800]]) for (const value of ['dark', 'light']) {
+    for (const [width, height] of sizes) for (const value of themes) {
       await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false });
       await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
       await a.run(`document.querySelector('#setting-plugin-text')?.scrollIntoView({ block: 'center' })`);
@@ -6495,19 +6490,33 @@ async function pluginTextFlow() {
     await a.send('Emulation.clearDeviceMetricsOverride');
     await a.send('Emulation.setEmulatedMedia', { features: [] });
   };
-  for (let tries = 0; tries < 50 && !(await a.exists('#nav-settings')); tries++) await wait(100);
-  if (await a.exists('#setup-no')) await a.click('#setup-no');
-  await a.click('#nav-settings');
-  for (let tries = 0; tries < 150 && !/^Read 4 of 5 plugins\.$/.test((await said())[0]?.trim() ?? ''); tries++) await wait(100);
-  check('Settings has the switch, on, how much is read, and what the first reading downloads', await switched() === 'true' && /^Read 4 of 5 plugins\.$/.test((await said())[0]?.trim() ?? '')
-    && /Nothing is installed or run\. Under 1 MB the first time for 1 plugin kept in another repository; after that only what changed\.$/.test((await said())[1] ?? ''), await said());
+  const toSettings = async () => {
+    for (let tries = 0; tries < 50 && !(await a.exists('#nav-settings')); tries++) await wait(100);
+    if (await a.exists('#setup-no')) await a.click('#setup-no');
+    await a.click('#nav-settings');
+  };
+  await toSettings();
+  check('Settings has the switch, on, how much is read and that the fifth is tried again, and what the first reading downloads', await switched() === 'true'
+    && await saying(/^Read 4 of 5 plugins\. 1 couldn’t be read; Central Knot tries again later\.$/)
+    && /Nothing is installed or run\. The one kept outside its marketplace is downloaded the first time \(under 1 MB\), then only what changed\.$/.test((await said())[1]), await said());
   same('the four kept in the marketplace are kept as text; nothing of the one Git could not reach', kept().map(entry => entry.plugin).sort(), ['document-tools', 'issue-tracker', 'release-helper', 'starter-skills']);
   check('a skill is kept by its name and description', kept().find(entry => entry.plugin === 'document-tools')?.items.some(item => item.kind === 'skill' && item.name === 'pdf-reader' && item.description), kept().find(entry => entry.plugin === 'document-tools'));
+  await pictures('failed', [[860, 600]], ['dark']);
+  await a.quit();
+
+  // GitHub's plugins repository, standing in, served as Git serves a folder (it filters, as GitHub does).
+  const spark = join(hosts, 'github.com/github/copilot-plugins.git');
+  mkdirSync(join(spark, 'plugins/spark/skills/spark-app'), { recursive: true });
+  writeFileSync(join(spark, 'plugins/spark/skills/spark-app/SKILL.md'), '---\nname: spark-app\ndescription: Builds a small app.\n---\nSteps.\n');
+  for (const args of [['init', '--quiet', '--initial-branch=main'], ['add', '-A'], ['-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', 'commit', '--quiet', '-m', 'spark'], ['config', 'uploadpack.allowFilter', 'true']]) spawnSync('git', ['-C', spark, ...args]);
+  a = await launch(data, [], real, { CK_PLUGIN_TEXT: 'on', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
+  await toSettings();
+  check('launched again, the fifth is read too', await saying(/^Read 5 of 5 plugins\.$/) && kept().some(entry => entry.plugin === 'spark' && entry.items.some(item => item.name === 'spark-app')), [await said(), kept().map(entry => entry.plugin)]);
   await pictures('read');
   await a.click('#plugin-text-on');
   for (let tries = 0; tries < 50 && await switched() !== 'false'; tries++) await wait(100);
-  check('turned off, the choice is saved and what was read stays', await switched() === 'false' && JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginText === false
-    && /^Read 4 of 5 plugins\.$/.test((await said())[0]?.trim() ?? '') && kept().length === 4, await said());
+  check('turned off, the choice is saved, what was read stays, and the row says so', await switched() === 'false' && JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginText === false
+    && await saying(/^Off\. What was read from 5 of 5 plugins is kept\.$/) && kept().length === 5, await said());
   await pictures('off');
   await a.click('#plugin-text-on');
   for (let tries = 0; tries < 50 && await switched() !== 'true'; tries++) await wait(100);
@@ -6515,6 +6524,13 @@ async function pluginTextFlow() {
   await a.quit();
 }
 
+/**
+ * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
+ * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
+ * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
+ * The lead never says nothing was found above a card that counts something, and why a home can't be written is said with no tool
+ * managed too. Made-up homes: Claude Code and Codex stand-ins, and a plugin from a marketplace no tool lists.
+ */
 async function overviewFlow() {
   const home = join(scratch, 'overview-home'), data = join(scratch, 'overview-data'), real = join(scratch, 'overview-real');
   const standIns = folder => { mkdirSync(join(folder, '.local/bin'), { recursive: true });

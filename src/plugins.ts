@@ -1,6 +1,6 @@
 // Marketplaces and plugins for the CLIs: read a catalog without running anything from it, show what each tool would get,
 // and install or uninstall through each tool's own commands, confirmed by reading the record that tool keeps (PLG-03).
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -82,32 +82,53 @@ const fetchUrl = (source: string) => { const repo = githubRepo(source); return r
 export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15' });
 
 /**
- * What a run may also be given: `signal` stops it (killed, as at its timeout); `input` is written to its input; `maxBytes` is
- * the most output kept per stream (4 MB unless said); `env`, variables added to its environment.
+ * What a run may also be given: `signal` stops it, as its timeout does; `input` is written to its input; `maxBytes` is the most
+ * output kept per stream (4 MB unless said); `env`, variables added to its environment.
  */
 export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv }
-/** A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` its output byte for byte. */
+/**
+ * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` its output byte for
+ * byte. A run stopped by its `signal` reads as one that timed out (`'timeout'`).
+ */
 type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer };
 
-function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number } & RunOptions): Promise<RunResult> {
-  const maxBytes = options.maxBytes ?? 4 * 1024 * 1024;
+/**
+ * Runs a command, stopped at its timeout or its `signal`. `group` (git's runs, off Windows): it runs in a process group of its
+ * own, and stopping it stops the whole group, the helpers it started (git's remote-http) with it.
+ */
+function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
+  const maxBytes = options.maxBytes ?? 4 * 1024 * 1024, group = !!options.group && process.platform !== 'win32';
   return new Promise(done => {
-    const child = execFile(file, args, { env: options.env, cwd: options.cwd, timeout: options.timeoutMs, killSignal: 'SIGKILL', maxBuffer: maxBytes, encoding: 'buffer', windowsHide: true, signal: options.signal }, (error, out, err) => {
-      const stdout = Buffer.from(out ?? ''), output = `${stdout.toString('utf8')}${Buffer.from(err ?? '').toString('utf8')}`.replace(/\r/g, '').trim();
-      if (!error) { done({ code: 0, output, stdout }); return; }
-      const failure = error as NodeJS.ErrnoException & { killed?: boolean; code?: number | string };
-      if (failure.code === 'ENOENT') done({ code: 'missing', output, stdout });
-      // Node stops a command whose output passes maxBuffer; it ran, it just said too much.
-      else if (failure.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout });
-      else if (failure.killed || failure.code === 'ABORT_ERR') done({ code: 'timeout', output, stdout });
-      else done({ code: typeof failure.code === 'number' ? failure.code : 1, output, stdout });
-    });
-    if (options.input !== undefined) child.stdin?.end(options.input);
+    const out: Buffer[] = [], err: Buffer[] = [];
+    let stopped = false, cut = false, ended = false;
+    const child = spawn(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
+    const kill = () => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } };
+    const stop = () => { stopped = true; kill(); };
+    // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said first is kept.
+    const take = (chunks: Buffer[]) => { let size = 0; return (chunk: Buffer) => { if ((size += chunk.length) > maxBytes) { cut = true; kill(); } else chunks.push(chunk); }; };
+    const end = (code: RunResult['code']) => {
+      if (ended) return;
+      ended = true;
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', stop);
+      const stdout = Buffer.concat(out), output = `${stdout.toString('utf8')}${Buffer.concat(err).toString('utf8')}`.replace(/\r/g, '').trim();
+      if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout });
+      else done({ code: stopped && code !== 0 ? 'timeout' : code, output, stdout });
+    };
+    child.stdout.on('data', take(out));
+    child.stderr.on('data', take(err));
+    child.on('error', error => end(errorCode(error) === 'ENOENT' ? 'missing' : 1));
+    child.on('close', code => end(code ?? 1));
+    const timer = setTimeout(stop, options.timeoutMs);
+    if (options.signal?.aborted) stop(); else options.signal?.addEventListener('abort', stop, { once: true });
+    // A command that ends without reading all its input (stopped, say) is no error here.
+    child.stdin.on('error', () => undefined);
+    if (options.input !== undefined) child.stdin.end(options.input);
   });
 }
 
 /** Git run with hooks and prompts off: an SSH host, key or credential that would ask fails at once instead (MKT-05). */
-const git = (args: string[], timeoutMs: number, options: RunOptions = {}) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { timeoutMs, ...options, env: { ...gitEnv(), ...options.env } });
+const git = (args: string[], timeoutMs: number, options: RunOptions = {}) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { timeoutMs, ...options, group: true, env: { ...gitEnv(), ...options.env } });
 /** The same Git, for other features (the git repo of the Managed set, the plugin text: plugintext.ts): hooks and prompts off, this computer's own sign-in. */
 export const runGit = (args: string[], timeoutMs = 60_000, options: RunOptions = {}) => git(args, timeoutMs, options);
 

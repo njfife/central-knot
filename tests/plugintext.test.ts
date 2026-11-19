@@ -6,12 +6,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer, request as forward, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { searchedParts } from '../src/catalogdetail.ts';
+import { readCatalog, runGit } from '../src/plugins.ts';
 import { pluginTextJob, type PluginText } from '../src/plugintext.ts';
 import type { PluginTextView } from '../src/types.ts';
 
@@ -31,9 +32,9 @@ async function commit(folder: string, files: Record<string, string>, message = '
   return git(folder, 'rev-parse', 'HEAD');
 }
 
-/** The plugin kept in another repository: a skill named unlike its plugin, one through a link inside it, one through a link out of it, agents six levels down, two servers. */
+/** The plugin kept in another repository: a skill named unlike its plugin, one through a link inside it, one through a link out of it, agents six levels down, three servers (one in a file named without a suffix). */
 const ALPHA = {
-  'plugins/alpha/.claude-plugin/plugin.json': JSON.stringify({ name: 'alpha', mcpServers: './servers.json' }),
+  'plugins/alpha/.claude-plugin/plugin.json': JSON.stringify({ name: 'alpha', mcpServers: ['./servers.json', './config/more-servers'] }),
   'plugins/alpha/skills/pdf-wrangler/SKILL.md': '---\nname: pdf-wrangler\ndescription: Turns PDFs into tidy text.\n---\nRead the PDF, then write it out as plain text.\n',
   'plugins/alpha/docs/shared.md': '---\nname: shared-notes\ndescription: Notes kept beside the skills.\n---\nShared body.\n',
   'plugins/alpha/skills/linked/SKILL.md': '->../../docs/shared.md',
@@ -42,6 +43,7 @@ const ALPHA = {
   'plugins/alpha/agents/deep/er/digger.md': '---\ndescription: Digs deep.\n---\nDeep.\n',
   'plugins/alpha/.mcp.json': JSON.stringify({ mcpServers: { fetcher: { command: 'npx', args: ['fetch-server'] } } }),
   'plugins/alpha/servers.json': JSON.stringify({ lister: { url: 'https://example.invalid/mcp' } }),
+  'plugins/alpha/config/more-servers': JSON.stringify({ helper: { command: 'helper-tool' } }),
   'outside.md': '---\nname: outside\ndescription: Not the plugin’s.\n---\n',
   // What a whole copy would bring: 300 kB that does not compress.
   'other/big.bin': randomBytes(150_000).toString('hex'),
@@ -82,16 +84,24 @@ async function world() {
   ] }));
   await put(join(market, 'plugins/inside/skills/tidy-desk/SKILL.md'), '---\nname: tidy-desk\ndescription: Keeps a desk tidy.\n---\nBody.\n');
   await writeMarket(pin);
+  /** Serves the repository in `src/<name>` as `<name>.git`, filtering. */
+  const serve = (name: string) => { git(base, 'clone', '-q', '--bare', join(base, 'src', name), join(served, `${name}.git`)); git(join(served, `${name}.git`), 'config', 'uploadpack.allowFilter', 'true'); };
+  /** Git processes still running for one of this world's repositories (its port is this world's alone). */
+  const gitAlive = (repo: string) => execFileSync('ps', ['-eo', 'args='], { encoding: 'utf8' }).split('\n').filter(line => line.includes(`127.0.0.1:${port}/${repo}`));
   return {
-    base, market, pin, served, proxy, writeMarket, dataDir: join(base, 'data'),
+    base, market, pin, served, proxy, writeMarket, serve, gitAlive, dataDir: join(base, 'data'),
     async close() { proxy.server.close(); await stopped(fixture); process.env.GIT_CONFIG_GLOBAL = saved; await rm(base, { recursive: true, force: true }); },
   };
 }
 
-/** Forwards to the fixture; requests for a repository named in `hold` wait until `release`; `asked` counts requests and `sent` bytes, by repository. */
+/**
+ * Forwards to the fixture; requests for a repository named in `hold` (one, or several) wait until `release`; one named in
+ * `failNext` gets a 502 once; `asked` counts requests and `sent` bytes, by repository.
+ */
 function holdingProxy(target: string) {
   const waiting: (() => void)[] = [];
-  const state = { hold: '', asked: new Map<string, number>(), sent: new Map<string, number>(), waiting, server: undefined as unknown as Server, release() { state.hold = ''; waiting.splice(0).forEach(go => go()); } };
+  const state = { hold: '' as string | string[], failNext: new Set<string>(), asked: new Map<string, number>(), sent: new Map<string, number>(), waiting, server: undefined as unknown as Server,
+    release() { state.hold = ''; waiting.splice(0).forEach(go => go()); } };
   state.server = createServer((request, response) => {
     const repo = /\/([\w-]+\.git)\//.exec(request.url ?? '')?.[1] ?? '';
     state.asked.set(repo, (state.asked.get(repo) ?? 0) + 1);
@@ -105,7 +115,8 @@ function holdingProxy(target: string) {
       upstream.on('error', () => response.destroy());
       request.pipe(upstream);
     };
-    if (state.hold && repo === state.hold) waiting.push(go); else go();
+    if (state.failNext.delete(repo)) response.writeHead(502).end('gateway unavailable');
+    else if (repo && [state.hold].flat().includes(repo)) waiting.push(go); else go();
   });
   return state;
 }
@@ -115,14 +126,17 @@ function stopped(server: ChildProcess): Promise<void> {
 }
 const until = async (ok: () => boolean, what: string) => { for (let tries = 0; tries < 600 && !ok(); tries++) await new Promise(done => setTimeout(done, 25)); assert.ok(ok(), `waited for ${what}`); };
 
-/** A job over these sources, with what it said: each view and what was kept when it said it, each finished run, its log. */
-function jobOver(dataDir: string, sources: () => string[] | undefined, now = Date.now) {
+/** A job over these sources (all read, unless `complete` says not), with what it said: each view and what was kept when it said it, each finished run, its log. */
+function jobOver(dataDir: string, sources: () => string[] | undefined, now = Date.now, complete = () => true) {
   const views: PluginTextView[] = [], keptThen: PluginText[][] = [], logs: string[] = [];
   let on = true, ends = 0;
-  const job = pluginTextJob({ dataDir, on: () => on, listings: async () => sources(), log: line => logs.push(line), now,
+  const listed = () => { const now = sources(); return now && { sources: now, complete: complete() }; };
+  const job = pluginTextJob({ dataDir, on: () => on, listings: async () => listed(), log: line => logs.push(line), now,
     changed: view => { views.push(view); keptThen.push(job.texts()); if (!view.reading) ends++; } });
   return {
     job, views, keptThen, logs, switch(value: boolean) { on = value; },
+    /** The marketplaces listed again, as the Plugins page does: `fresh` as after a Refresh. */
+    tell: (fresh = true) => job.listed(listed()!, fresh),
     /** Starts (or restarts) and waits for that run to end. */
     async run(start = () => job.restart()) { const before = ends; start(); await until(() => ends > before, 'the run to end'); },
     ended: () => ends,
@@ -130,6 +144,14 @@ function jobOver(dataDir: string, sources: () => string[] | undefined, now = Dat
   };
 }
 const names = (entry: PluginText | undefined) => entry?.items.map(item => `${item.kind} ${item.name}`).sort();
+const saved = async (dataDir: string) => (JSON.parse(await readFile(join(dataDir, 'plugin-text.json'), 'utf8')).plugins as PluginText[]).map(entry => entry.plugin).sort();
+/** A second marketplace folder, for another home: one plugin kept in it. */
+async function lampMarket(base: string) {
+  const other = join(base, 'other-market');
+  await put(join(other, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'other', plugins: [{ name: 'lamp', source: './lamp' }] }));
+  await put(join(other, 'lamp/skills/night-light/SKILL.md'), '---\nname: night-light\ndescription: Dims.\n---\n');
+  return other;
+}
 
 test('What is fetched for a plugin kept in another repository is what the reader finds in a whole copy of it; only text is kept, and nothing of Git', { skip: noPosix }, async () => {
   const w = await world();
@@ -142,7 +164,7 @@ test('What is fetched for a plugin kept in another repository is what the reader
     git(w.base, 'clone', '-q', join(w.served, 'tools.git'), whole);
     const folder = join(whole, 'plugins/alpha'), read = await searchedParts(folder, {}, folder);
     assert.deepEqual(names(alpha), [...read.skills.map(part => `skill ${part.name}`), ...read.agents.map(part => `agent ${part.name}`), ...read.mcpServers.map(server => `mcp ${server.name}`)].sort());
-    assert.deepEqual(names(alpha), ['agent digger', 'agent reviewer', 'mcp fetcher', 'mcp lister', 'skill pdf-wrangler', 'skill shared-notes'], 'a link out of the plugin’s folder is not followed');
+    assert.deepEqual(names(alpha), ['agent digger', 'agent reviewer', 'mcp fetcher', 'mcp helper', 'mcp lister', 'skill pdf-wrangler', 'skill shared-notes'], 'a link out of the plugin’s folder is not followed; a server file the manifest names is read whatever its suffix');
     const skill = alpha.items.find(item => item.name === 'pdf-wrangler')!;
     assert.deepEqual(skill, { kind: 'skill', name: 'pdf-wrangler', description: 'Turns PDFs into tidy text.', start: ALPHA['plugins/alpha/skills/pdf-wrangler/SKILL.md'], path: 'skills/pdf-wrangler' });
     assert.deepEqual(alpha.items.find(item => item.name === 'lister'), { kind: 'mcp', name: 'lister', description: '', start: JSON.stringify({ url: 'https://example.invalid/mcp' }), runs: 'https://example.invalid/mcp' });
@@ -153,18 +175,21 @@ test('What is fetched for a plugin kept in another repository is what the reader
     const file = JSON.parse(await readFile(join(w.dataDir, 'plugin-text.json'), 'utf8'));
     assert.equal(file.format, 1);
     assert.deepEqual(file.plugins.map((entry: PluginText) => entry.plugin).sort(), ['alpha', 'inside', 'solo']);
-    assert.deepEqual(await readdir(join(w.dataDir, 'text-fetch')).catch(() => []), [], 'no copy of Git is left');
+    assert.equal(await readdir(join(w.dataDir, 'text-fetch')).catch(() => 'none'), 'none', 'no copy of Git is left, nor its folder');
   } finally { await w.close(); }
 });
 
 test('A repository that is gone, or a server that declines a filtered fetch, leaves the others read and is said in the log; the declined one costs no download', { skip: noPosix }, async () => {
   const w = await world();
   try {
-    await w.writeMarket(w.pin, [{ name: 'unfiltered', source: { source: 'url', url: 'https://example.test/plain.git', path: 'plugins/alpha' } }]);
+    await w.writeMarket(w.pin, [{ name: 'unfiltered', source: { source: 'url', url: 'https://example.test/plain.git', path: 'plugins/alpha' } },
+      { name: 'absent', source: { source: 'url', url: 'https://example.test/tools.git', path: 'plugins/absent', sha: w.pin } }]);
     const kept = jobOver(w.dataDir, () => [w.market]);
     const began = Date.now();
     await kept.run();
     assert.deepEqual(kept.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside', 'solo']);
+    assert.match(kept.logs.join('\n'), /absent: its folder is not in the repository at that commit\./, 'a folder that is not there is a read that failed, not one with nothing in it');
+    assert.deepEqual(kept.views.at(-1), { read: 3, of: 6, elsewhere: 5, reading: false });
     assert.match(kept.logs.join('\n'), /missing\.git at HEAD: No access, or no repository there.*Tried again in 10 minutes\./);
     assert.match(kept.logs.join('\n'), /plain\.git at HEAD: its server declines a filtered fetch, and a whole copy is never taken\./);
     assert.ok((w.proxy.sent.get('plain.git') ?? 0) < 20_000, `the declining server sent ${w.proxy.sent.get('plain.git')} bytes, not its 300 kB`);
@@ -174,6 +199,96 @@ test('A repository that is gone, or a server that declines a filtered fetch, lea
     await kept.run();
     assert.equal(w.proxy.asked.get('missing.git'), asked.get('missing.git'));
     assert.equal(w.proxy.asked.get('plain.git'), asked.get('plain.git'));
+  } finally { await w.close(); }
+});
+
+test('A repository is fetched only once its server has said it filters: one that could not be asked is not fetched, and waits its turn', { skip: noPosix }, async () => {
+  const w = await world();
+  try {
+    await put(join(w.market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'made-up', plugins: [{ name: 'unfiltered', source: { source: 'url', url: 'https://example.test/plain.git', path: 'plugins/alpha' } }] }));
+    w.proxy.failNext.add('plain.git');
+    const kept = jobOver(w.dataDir, () => [w.market]);
+    await kept.run();
+    assert.ok((w.proxy.sent.get('plain.git') ?? 0) < 20_000, `one 502 on the question, then ${w.proxy.sent.get('plain.git')} bytes sent, not its 300 kB`);
+    assert.match(kept.logs.join('\n'), /plain\.git at HEAD: .*Tried again in 10 minutes\./);
+    assert.deepEqual(kept.views.at(-1), { read: 0, of: 1, elsewhere: 1, reading: false });
+  } finally { await w.close(); }
+});
+
+test('Refresh tries again at once a repository that could not be read', { skip: noPosix }, async () => {
+  const w = await world();
+  try {
+    const kept = jobOver(w.dataDir, () => [w.market]);
+    await kept.run();
+    assert.equal(kept.text('gone'), undefined);
+    // It comes back; within its ten minutes, Refresh asks for it again.
+    await rename(join(w.base, 'src/solo'), join(w.base, 'src/missing'));
+    w.serve('missing');
+    const asked = w.proxy.asked.get('missing.git')!;
+    await kept.run(() => kept.tell());
+    assert.ok(w.proxy.asked.get('missing.git')! > asked);
+    assert.deepEqual(names(kept.text('gone')), ['skill quiet-hours']);
+  } finally { await w.close(); }
+});
+
+test('A repository that keeps failing does not wake the job again before its wait is over', { skip: noPosix }, async () => {
+  const w = await world();
+  try {
+    let offset = 0;
+    const kept = jobOver(w.dataDir, () => [w.market], () => Date.now() + offset);
+    await kept.run();
+    // A day later solo's check fails too (its server is gone): its read is a day old, but it waits ten minutes like any failure.
+    await rename(join(w.served, 'solo.git'), join(w.served, 'solo-away.git'));
+    offset = 25 * 60 * 60_000;
+    await kept.run(() => kept.tell());
+    assert.match(kept.logs.join('\n'), /solo\.git at HEAD: .*Tried again in 10 minutes\./);
+    const ends = kept.ended();
+    await new Promise(done => setTimeout(done, 3000));
+    assert.equal(kept.ended(), ends, 'no run came by itself in the next three seconds');
+    await kept.job.stop();
+  } finally { await w.close(); }
+});
+
+test('What is outstanding follows the listing: a fetch not yet begun for a marketplace removed meanwhile is never made', { skip: noPosix }, async () => {
+  const w = await world();
+  try {
+    const many = join(w.base, 'many'), plugins: object[] = [];
+    for (let n = 0; n < 9; n++) {
+      const pin = await commit(join(w.base, 'src', `r${n}`), { [`skills/s${n}/SKILL.md`]: `---\nname: s${n}\ndescription: Skill ${n}.\n---\n` });
+      w.serve(`r${n}`);
+      plugins.push({ name: `p${n}`, source: { source: 'url', url: `https://example.test/r${n}.git`, sha: pin } });
+    }
+    await put(join(many, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'many', plugins }));
+    let sources = [many];
+    const kept = jobOver(w.dataDir, () => sources);
+    w.proxy.hold = plugins.slice(0, 8).map((_, n) => `r${n}.git`);
+    kept.job.restart();
+    await until(() => w.proxy.waiting.length === 8, 'eight fetches held, the ninth waiting its turn');
+    sources = [];
+    kept.tell(false);
+    const before = kept.ended();
+    w.proxy.release();
+    await until(() => kept.ended() > before, 'the run to end');
+    assert.equal(w.proxy.asked.get('r8.git'), undefined, 'the ninth, not begun when its marketplace went, is never asked for');
+    assert.deepEqual(kept.job.texts(), []);
+  } finally { await w.close(); }
+});
+
+test('A home switched while the first home’s marketplaces are still being asked for never brings the first home’s back', { skip: noPosix }, async () => {
+  const w = await world();
+  try {
+    const other = await lampMarket(w.base);
+    const answers: ((listed: { sources: string[]; complete: boolean }) => void)[] = [];
+    let ends = 0;
+    const job = pluginTextJob({ dataDir: w.dataDir, on: () => true, log: () => {}, listings: () => new Promise(done => answers.push(done)), changed: view => { if (!view.reading) ends++; } });
+    job.restart();
+    await until(() => answers.length === 1, 'the first home asked for');
+    job.restart();
+    answers[0]!({ sources: [w.market], complete: true });
+    await until(() => answers.length === 2, 'the second home asked for');
+    answers[1]!({ sources: [other], complete: true });
+    await until(() => ends > 0 && job.texts().length > 0, 'the second home’s run');
+    assert.deepEqual(job.texts().map(entry => entry.plugin), ['lamp']);
   } finally { await w.close(); }
 });
 
@@ -190,7 +305,7 @@ test('A repository that could not be read is tried again by itself once its wait
     w.proxy.release();
     await until(() => kept.logs.filter(line => line.includes('missing.git')).length === 2, 'the second try');
     assert.match(kept.logs.filter(line => line.includes('missing.git'))[1]!, /Tried again in 20 minutes\./, 'the wait doubles');
-    kept.job.stop();
+    await kept.job.stop();
   } finally { await w.close(); }
 });
 
@@ -204,7 +319,7 @@ test('A pin that moves while its fetch runs keeps nothing of that fetch: the new
     kept.job.restart();
     await until(() => w.proxy.waiting.length > 0, 'the fetch to be held');
     await w.writeMarket(moved);
-    kept.job.listed([w.market], true);
+    kept.tell();
     const before = kept.ended(), told = kept.keptThen.length;
     w.proxy.release();
     await until(() => kept.ended() > before, 'the run to end');
@@ -225,10 +340,13 @@ test('Refresh during a pin change, then the marketplace’s last alias removed: 
     git(join(w.base, 'src/tools'), 'push', '-q', join(w.served, 'tools.git'), 'main');
     w.proxy.hold = 'tools.git';
     await w.writeMarket(moved);
-    kept.job.listed(sources, true);
+    kept.tell();
     await until(() => w.proxy.waiting.length > 0, 'the late fetch to be held');
+    // Until the new pin is read, the text read at the old one is still given (for finding a skill, better than none); the count leaves it out.
+    assert.equal(kept.text('alpha')?.commit, w.pin);
+    assert.deepEqual(kept.job.view(), { read: 2, of: 4, elsewhere: 3, reading: true });
     sources = [];
-    kept.job.listed(sources, false);
+    kept.tell(false);
     const before = kept.ended(), told = kept.keptThen.length;
     w.proxy.release();
     await until(() => kept.ended() > before, 'the run to end');
@@ -241,9 +359,7 @@ test('Refresh during a pin change, then the marketplace’s last alias removed: 
 test('A home switched during a fetch keeps nothing of it for a marketplace the new home does not list', { skip: noPosix }, async () => {
   const w = await world();
   try {
-    const other = join(w.base, 'other-market');
-    await put(join(other, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'other', plugins: [{ name: 'lamp', source: './lamp' }] }));
-    await put(join(other, 'lamp/skills/night-light/SKILL.md'), '---\nname: night-light\ndescription: Dims.\n---\n');
+    const other = await lampMarket(w.base);
     let sources = [w.market];
     const kept = jobOver(w.dataDir, () => sources);
     w.proxy.hold = 'tools.git';
@@ -257,32 +373,110 @@ test('A home switched during a fetch keeps nothing of it for a marketplace the n
   } finally { await w.close(); }
 });
 
-test('Turned off mid-run, what was read is kept; quit twice within a minute, the next launch has it at once and fetches only what is left', { skip: noPosix }, async () => {
+test('Quit stops git and every helper it started, leaves no temporary repository, and saves what had finished; the next launch has it at once and fetches only what is left', { skip: noPosix }, async () => {
   const w = await world();
   try {
     const first = jobOver(w.dataDir, () => [w.market]);
     w.proxy.hold = 'solo.git';
     first.job.restart();
     await until(() => first.text('alpha') !== undefined && w.proxy.waiting.length > 0, 'alpha read while solo is held');
-    first.switch(false);
-    first.job.stop();
+    await first.job.stop();
+    await until(() => w.gitAlive('solo.git').length === 0, 'no git process left for the held fetch');
+    assert.equal(await readdir(join(w.dataDir, 'text-fetch')).catch(() => 'none'), 'none', 'no temporary repository, nor its folder');
+    assert.deepEqual(await saved(w.dataDir), ['alpha', 'inside'], 'what had finished was saved before it stopped');
     w.proxy.release();
-    await until(() => !first.job.view().reading && first.ended() > 0, 'the run to stop');
-    assert.deepEqual(first.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside']);
-    // Quit: a new launch over the same data folder, stopped again at once, then one left to finish.
-    const second = jobOver(w.dataDir, () => [w.market]);
-    second.job.restart();
-    second.job.stop();
-    await until(() => second.ended() > 0, 'the second launch to stop');
     const asked = w.proxy.asked.get('tools.git');
-    const third = jobOver(w.dataDir, () => [w.market]);
-    await third.run();
-    assert.deepEqual(third.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside', 'solo']);
-    assert.equal(w.proxy.asked.get('tools.git'), asked, 'alpha, read before, is not fetched again');
+    const next = jobOver(w.dataDir, () => [w.market]);
+    await next.run();
+    assert.deepEqual(next.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside', 'solo']);
+    assert.equal(w.proxy.asked.get('tools.git'), asked, 'alpha, saved before, is not fetched again');
   } finally { await w.close(); }
 });
 
-test('Unchanged, nothing is fetched again; an unpinned repository is looked at again after a day, and only its tree while its tip has not moved', { skip: noPosix }, async () => {
+test('A git run that times out, or is cancelled, ends with every process it started; git ending with its input unread is no error here', { skip: noPosix }, async () => {
+  const w = await world();
+  try {
+    w.proxy.hold = 'solo.git';
+    const ask = (options = {}) => runGit(['ls-remote', '--', 'https://example.test/solo.git', 'HEAD'], 1500, options);
+    assert.equal((await ask()).code, 'timeout');
+    await until(() => w.gitAlive('solo.git').length === 0, 'its helper gone with it after a timeout');
+    const cancel = new AbortController(), asking = ask({ signal: cancel.signal });
+    await until(() => w.gitAlive('solo.git').length > 0, 'the second run under way');
+    cancel.abort();
+    assert.equal((await asking).code, 'timeout', 'a cancelled run reads as one that timed out');
+    await until(() => w.gitAlive('solo.git').length === 0, 'its helper gone with it after a cancel');
+    w.proxy.release();
+    assert.equal((await runGit(['--version'], 5000, { input: Buffer.alloc(16 * 1024 * 1024) })).code, 0);
+  } finally { await w.close(); }
+});
+
+test('What was read is there whether the switch is on or off: matched to what is listed, with nothing fetched while it is off', { skip: noPosix }, async () => {
+  const w = await world();
+  try {
+    await jobOver(w.dataDir, () => [w.market]).run();
+    const asked = JSON.stringify([...w.proxy.asked]);
+    let sources = [w.market];
+    const off = jobOver(w.dataDir, () => sources);
+    off.switch(false);
+    await off.run();
+    assert.deepEqual(off.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside', 'solo'], 'a launch with it off has what was read');
+    assert.deepEqual(off.job.view(), { read: 3, of: 4, elsewhere: 3, reading: false });
+    sources = [await lampMarket(w.base)];
+    await off.run();
+    assert.deepEqual(off.job.texts().map(entry => entry.plugin), ['lamp'], 'another home, while off: the first home’s text goes');
+    assert.equal(JSON.stringify([...w.proxy.asked]), asked, 'nothing was fetched while off');
+  } finally { await w.close(); }
+});
+
+test('A listing that could not be read whole takes nothing away', { skip: noPosix }, async () => {
+  const w = await world();
+  try {
+    let sources = [w.market], complete = true;
+    const kept = jobOver(w.dataDir, () => sources, Date.now, () => complete);
+    await kept.run();
+    // Central Knot's own list of added marketplaces (or a tool's) could not be read: this one seems not listed.
+    sources = []; complete = false;
+    await kept.run(() => kept.tell(false));
+    assert.deepEqual(kept.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside', 'solo']);
+    complete = true;
+    await kept.run(() => kept.tell(false));
+    assert.deepEqual(kept.job.texts(), [], 'read whole, it is not listed: its plugins go');
+  } finally { await w.close(); }
+});
+
+test('A marketplace whose catalog the Plugins page fetched first is read when the page lists it again', { skip: noPosix }, async () => {
+  const w = await world();
+  try {
+    git(w.market, 'init', '-q', '-b', 'main'); git(w.market, 'add', '-A'); git(w.market, 'commit', '-qm', 'catalog');
+    git(w.base, 'clone', '-q', '--bare', w.market, join(w.served, 'market.git'));
+    const source = 'https://example.test/market.git';
+    const kept = jobOver(w.dataDir, () => [source]);
+    await kept.run();
+    assert.deepEqual(kept.views.at(-1), { read: 0, of: 0, elsewhere: 0, reading: false }, 'no copy of its catalog yet');
+    assert.equal((await readCatalog({ home: w.base, dataDir: w.dataDir, binaries: {} }, source)).problem, undefined, 'the page’s own read');
+    await kept.run(() => kept.tell(false));
+    assert.deepEqual(kept.views.at(-1), { read: 3, of: 4, elsewhere: 3, reading: false });
+  } finally { await w.close(); }
+});
+
+test('A save that failed is made at the next chance', { skip: noPosix }, async () => {
+  const w = await world();
+  try {
+    const kept = jobOver(w.dataDir, () => [w.market]);
+    w.proxy.hold = 'solo.git';
+    kept.job.restart();
+    await until(() => kept.text('alpha') !== undefined && w.proxy.waiting.length > 0, 'alpha read (its fetch made the data folder), solo held');
+    await chmod(w.dataDir, 0o555);
+    try {
+      w.proxy.release();
+      await until(() => kept.logs.some(line => line.includes('not saved')) && !kept.job.view().reading, 'the save refused');
+    } finally { await chmod(w.dataDir, 0o755); }
+    await kept.run(() => kept.tell());
+    assert.deepEqual(await saved(w.dataDir), ['alpha', 'inside', 'solo']);
+  } finally { await w.close(); }
+});
+
+test('Unchanged, nothing is fetched again; an unpinned repository is read again after a day', { skip: noPosix }, async () => {
   const w = await world();
   try {
     let clock = Date.now();
@@ -290,13 +484,13 @@ test('Unchanged, nothing is fetched again; an unpinned repository is looked at a
     await kept.run();
     const asked = () => ({ tools: w.proxy.asked.get('tools.git') ?? 0, solo: w.proxy.asked.get('solo.git') ?? 0 });
     const first = asked(), soloAt = kept.text('solo')!.readAt;
-    await kept.run(() => kept.job.listed([w.market], true));
+    await kept.run(() => kept.tell());
     assert.deepEqual(asked(), first, 'within the day, a Refresh fetches nothing');
     clock += 25 * 60 * 60_000;
-    await kept.run(() => kept.job.listed([w.market], true));
+    await kept.run(() => kept.tell());
     const later = asked();
     assert.equal(later.tools, first.tools, 'a pinned repository is never looked at again while its pin holds');
-    assert.ok(later.solo > first.solo && later.solo - first.solo < first.solo, `the tip looked at, its files not fetched again (${first.solo} requests, then ${later.solo - first.solo})`);
+    assert.ok(later.solo > first.solo, 'the unpinned one is read again');
     assert.notEqual(kept.text('solo')!.readAt, soloAt);
   } finally { await w.close(); }
 });
@@ -309,11 +503,11 @@ test('A plugin its marketplace no longer lists goes, one kept in it follows its 
     const catalog = join(w.market, '.claude-plugin/marketplace.json'), listed = JSON.parse(await readFile(catalog, 'utf8'));
     await writeFile(catalog, JSON.stringify({ ...listed, plugins: listed.plugins.filter((plugin: { name: string }) => plugin.name !== 'solo') }));
     await put(join(w.market, 'plugins/inside/skills/tidy-desk/SKILL.md'), '---\nname: tidy-desk\ndescription: Keeps a desk very tidy.\n---\n');
-    await kept.run(() => kept.job.listed([w.market], true));
+    await kept.run(() => kept.tell());
     assert.deepEqual(kept.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside']);
     assert.equal(kept.text('inside')!.items[0]!.description, 'Keeps a desk very tidy.');
     await writeFile(catalog, '{ broken');
-    await kept.run(() => kept.job.listed([w.market], true));
+    await kept.run(() => kept.tell());
     assert.deepEqual(kept.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside'], 'a failed read proves no removal');
   } finally { await w.close(); }
 });
@@ -330,13 +524,23 @@ test('Two spellings of one marketplace are one: each plugin is kept once', { ski
   } finally { await w.close(); }
 });
 
-test('A kept file that is damaged, or of another format, is thrown away with a line in the log and read again', { skip: noPosix }, async () => {
+test('A kept file of another format is thrown away with a line in the log and read again; an entry not of the kept shape is dropped and read again, the rest kept', { skip: noPosix }, async () => {
   const w = await world();
   try {
     await put(join(w.dataDir, 'plugin-text.json'), JSON.stringify({ format: 0, plugins: [] }));
     const kept = jobOver(w.dataDir, () => [w.market]);
     await kept.run();
     assert.match(kept.logs.join('\n'), /plugin-text\.json was damaged or of another format; it is read again/);
-    assert.equal(JSON.parse(await readFile(join(w.dataDir, 'plugin-text.json'), 'utf8')).plugins.length, 3);
+    assert.deepEqual(await saved(w.dataDir), ['alpha', 'inside', 'solo']);
+    // One entry's item loses its kind and its text (a hand edit, say).
+    const file = JSON.parse(await readFile(join(w.dataDir, 'plugin-text.json'), 'utf8'));
+    file.plugins.find((entry: PluginText) => entry.plugin === 'solo').items = [{ name: 'quiet-hours' }];
+    await put(join(w.dataDir, 'plugin-text.json'), JSON.stringify(file));
+    const asked = { tools: w.proxy.asked.get('tools.git'), solo: w.proxy.asked.get('solo.git')! };
+    const next = jobOver(w.dataDir, () => [w.market]);
+    await next.run();
+    assert.equal(next.text('solo')!.items[0]!.kind, 'skill');
+    assert.ok(w.proxy.asked.get('solo.git')! > asked.solo, 'the damaged entry is read again');
+    assert.equal(w.proxy.asked.get('tools.git'), asked.tools, 'the others are kept as they were');
   } finally { await w.close(); }
 });

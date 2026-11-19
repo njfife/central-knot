@@ -1255,18 +1255,19 @@ app.on('activate', () => { log('opened again'); showWindow(); });
 // A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer.
 // A plugin being updated by itself is let finish (a few seconds; fifteen at most): the tool's command runs on whatever the app
 // does, and what follows it here (turning a turned-off plugin off again, the note saved) must not be lost. No further step
-// starts, so the check ends with that one. A check that is only reading the marketplaces holds nothing up.
-let heldForPlugin = false;
+// starts, so the check ends with that one. A check that is only reading the marketplaces holds nothing up. The reading of what
+// plugins hold stops at once, git with it, and what it had finished is saved first (plugintext.ts stop).
+let heldForWork = false;
 app.on('before-quit', event => {
   quitting = true;
   drafting?.abort();
-  pluginText?.stop();
-  if (!pluginStep || heldForPlugin) return;
-  heldForPlugin = true;
+  const saving = pluginText?.stop();
+  if (heldForWork || (!pluginStep && !saving)) return;
+  heldForWork = true;
   event.preventDefault();
-  log('quit waits for a plugin update under way');
-  const check = pluginUpdates?.underWay() ?? pluginStep;
-  void Promise.race([check.catch(() => undefined), new Promise(done => setTimeout(done, 15_000))]).then(() => app.quit());
+  if (pluginStep) log('quit waits for a plugin update under way');
+  const check = pluginStep && (pluginUpdates?.underWay() ?? pluginStep).catch(() => undefined);
+  void Promise.race([Promise.all([check, saving]), new Promise(done => setTimeout(done, 15_000))]).then(() => app.quit());
 });
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
@@ -1376,7 +1377,7 @@ app.whenReady().then(async () => {
     // A change to a plugin that worked (an update, an uninstall) settles what failed there by itself before.
     changed: (source, plugin, tools) => void pluginUpdates?.settled(source, plugin, tools).catch(error => logFailure('plugin updates', error)),
     waitedBefore: async () => pluginUpdates?.waitedBefore() ?? [],
-    listed: (sources, fresh) => pluginText?.listed(sources, fresh),
+    listed: (listing, fresh) => pluginText?.listed(listing, fresh),
     notices: (kind, told) => { (kind === 'skill' ? pendingNotices : kind === 'mcp' ? pendingServerNotices : pendingAgentNotices).push(...told); },
     bundled: () => (bundle && custom ? { source: bundle.folder, view: {
       app: custom.name, displayName: custom.marketplace?.displayName, logo: custom.marketplace?.logo && `${CARRIED_FOLDER}/${custom.marketplace.logo}`,

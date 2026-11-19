@@ -17,7 +17,8 @@ import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ItemKind } from './library.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice } from './types.ts';
 import { harnessIds } from './harnesses.ts';
-import { syncGate, writeDurably, type ShareContext } from './share.ts';
+import { errorCode, syncGate, writeDurably, type ShareContext } from './share.ts';
+import type { Listed } from './plugintext.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
 import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, recordUnread, toolNow, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { readLink } from './sourcelink.ts';
@@ -61,7 +62,7 @@ export interface MarketplaceHost {
   /** The installs the version before waited to make in a tool new here, in the open home (pluginupdates.ts waitedBefore): read once, by the plugins record's first read. */
   waitedBefore?(): Promise<WaitedBefore[]>;
   /** Every marketplace was listed again (a view of them all; `fresh`: each Git catalog was fetched first), for the plugin text (plugintext.ts listed). */
-  listed?(sources: string[], fresh: boolean): void;
+  listed?(listing: Listed, fresh: boolean): void;
 }
 /** The engine calls that touch Git or a tool, replaceable in tests. */
 export interface MarketplaceEngine {
@@ -119,9 +120,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   const listPath = join(host.dataDir, 'marketplaces.json');
   /** How the page shows this marketplace when it is the one this build carries; undefined for any other. */
   const carriedAs = (source: string) => { const carried = host.bundled?.(); return carried && engine.sameSource(carried.source, source) ? carried.view : undefined; };
-  const added = async (): Promise<string[]> => {
-    try { const list = JSON.parse(await readFile(listPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
+  /** Central Knot's own list of added marketplaces: none where there is no file; undefined where there is one that can't be read. */
+  const readOwnList = async (): Promise<string[] | undefined> => {
+    try { const list = JSON.parse(await readFile(listPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : undefined; }
+    catch (error) { return errorCode(error) === 'ENOENT' ? [] : undefined; }
   };
+  const added = async () => (await readOwnList()) ?? [];
   const saveAdded = (list: string[]) => writeDurably(listPath, `${JSON.stringify(list, null, 2)}\n`);
   // Suggested marketplaces the person said no to (suggested.ts): never offered again on this computer.
   const declinedPath = join(host.dataDir, 'marketplaces-declined.json');
@@ -402,7 +406,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * The marketplaces listed for these tools, each once however it is spelled (sameSource), with where each is listed from; with
-   * the record of parts from before the library, which lists the marketplaces its plugins waiting to be moved come from.
+   * the record of parts from before the library, which lists the marketplaces its plugins waiting to be moved come from; and
+   * whether every list they come from could be read (`complete`).
    */
   async function listedSources(ctx: engine.PluginContext, tools: HarnessId[]) {
     const known: { source: string; origins: MarketplaceView['origins'] }[] = [];
@@ -413,7 +418,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // The marketplace this build carries comes first, whatever else is added.
     const carried = host.bundled?.();
     if (carried) note(carried.source, 'bundle');
-    for (const source of await added()) note(source, 'central-knot');
+    const ownList = await readOwnList();
+    for (const source of ownList ?? []) note(source, 'central-knot');
     // A source that could read as an option is never passed on to a tool or to Git.
     for (const tool of tools.filter(candidate => takesPlugins(candidate))) for (const entry of await engine.registeredMarketplaces(ctx, tool)) if (!entry.source.startsWith('-')) note(entry.source, tool);
     // A marketplace a plugin waiting to be moved comes from stays listed (after the tools', so "Added in Codex" still shows), and
@@ -421,13 +427,15 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const share = host.share?.();
     const parts = share ? await readPartsRecord(share.home) : 'absent', onRecord = typeof parts === 'object' ? parts.map(({ install }) => install) : [];
     for (const install of onRecord) if (!known.some(item => engine.sameSource(item.source, install.source))) note(install.source, 'central-knot');
-    return { known, parts, onRecord };
+    const readable = await Promise.all(tools.filter(takesPlugins).map(tool => engine.recordReadable(ctx, tool)));
+    return { known, parts, onRecord, complete: !!ownList && parts !== 'unreadable' && readable.every(Boolean) };
   }
 
   /** The marketplaces listed in the open home, as the page lists them, for the plugin text (plugintext.ts): no CLI is run and nothing is fetched. */
-  async function listings(readId?: number): Promise<string[] | undefined> {
+  async function listings(readId?: number): Promise<Listed | undefined> {
     if (!host.home()) return undefined;
-    return (await listedSources(await context(), columns((await host.read(readId)).tools))).known.map(item => item.source);
+    const { known, complete } = await listedSources(await context(), columns((await host.read(readId)).tools));
+    return { sources: known.map(item => item.source), complete };
   }
 
   /**
@@ -439,13 +447,13 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const read = await host.read(readId);
     const tools = columns(read.tools);
     const writing = await host.writeAccess();
-    const { known, parts, onRecord } = await listedSources(ctx, tools);
+    const { known, parts, onRecord, complete } = await listedSources(ctx, tools);
     const recordRead = await recordFor(ctx, tools, writing.allowed, parts);
     const marketplaces: MarketplaceView[] = [];
     // All at once: one unreachable source doesn't hold up the others.
     const listed = only ? known.filter(item => engine.sameSource(item.source, only)) : known;
     marketplaces.push(...await Promise.all(listed.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh, recordRead.record?.plugins ?? []))));
-    if (!only) host.listed?.(known.map(item => item.source), fresh);
+    if (!only) host.listed?.({ sources: known.map(item => item.source), complete }, fresh);
     for (const market of marketplaces) {
       const waiting = [...new Set(onRecord.filter(install => engine.sameSource(install.source, market.source)).map(install => install.plugin))];
       if (waiting.length) market.waiting = waiting;

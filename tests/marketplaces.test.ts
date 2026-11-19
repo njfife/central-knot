@@ -71,6 +71,29 @@ test('Adding a marketplace reads it once, stores how it was given, and the view 
   } finally { await box.cleanup(); }
 });
 
+test('The marketplaces listed, for the plugin text: complete only when every list they come from could be read; the page’s view says the same', async () => {
+  const { base, home, host, markets, cleanup } = await setup();
+  try {
+    const market = join(base, 'market');
+    await marketplace(market, 'tools', ['kit']);
+    const told: unknown[] = [];
+    host.listed = (listing, fresh) => { told.push({ ...listing, fresh }); };
+    await put(join(base, 'data/marketplaces.json'), JSON.stringify([market]));
+    assert.deepEqual(await markets.listings(), { sources: [market], complete: true });
+    await markets.view();
+    assert.deepEqual(told.at(-1), { sources: [market], complete: true, fresh: false });
+    // Central Knot's own list, half written: nothing in it can be told apart from nothing listed.
+    await put(join(base, 'data/marketplaces.json'), '[ "half');
+    assert.deepEqual(await markets.listings(), { sources: [], complete: false });
+    // Readable again, but a tool's own list of its marketplaces can't be read.
+    await put(join(base, 'data/marketplaces.json'), JSON.stringify([market]));
+    await put(join(home, '.claude/plugins/known_marketplaces.json'), '{ half');
+    assert.deepEqual(await markets.listings(), { sources: [market], complete: false });
+    await markets.view();
+    assert.deepEqual(told.at(-1), { sources: [market], complete: false, fresh: false });
+  } finally { await cleanup(); }
+});
+
 test('A Git marketplace that can’t be reached at Add is stopped by its access check: nothing is cloned or listed', async () => {
   const box = await setup();
   try {

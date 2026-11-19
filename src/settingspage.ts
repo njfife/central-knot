@@ -435,7 +435,7 @@ let textRead: PluginTextView | undefined;
 function showTextRead(view: PluginTextView) {
   textRead = view;
   const hint = document.getElementById('setting-plugin-text-hint'), line = document.querySelector('#setting-plugin-text-notice .setting-message-text');
-  if (hint && line && view.of) { hint.textContent = textHint(view); line.textContent = textCoverage(view); }
+  if (hint && line && view.of) { hint.textContent = textHint(view); line.textContent = textCoverage(view, !!current?.pluginText); }
   else if (state.page === 'settings') rerender();
 }
 window.centralKnot.onPluginTextChanged(showTextRead);
@@ -445,16 +445,22 @@ async function choosePluginText(on: boolean): Promise<void> {
   const kept = current ? `What plugins hold is still ${current.pluginText ? 'read' : 'not read'}.` : '';
   if (await save('plugin-text', () => window.centralKnot.setPluginText(on), kept)) announce(on ? 'Central Knot reads what plugins hold from now on.' : 'Central Knot no longer reads what plugins hold. What it read is kept.', true);
 }
-/** The first reading's size: about 0.1 MB a plugin kept in another repository (measured 2026-11-19: 26 to 29 MB on the wire for 277). */
-const firstSize = (plugins: number) => { const mb = plugins * 0.1; return mb < 1 ? 'Under 1 MB' : `About ${mb < 10 ? Math.round(mb) : Math.round(mb / 5) * 5} MB`; };
-const textHint = (view: PluginTextView | undefined) => `Central Knot reads the names and descriptions of the skills, agents and servers in your marketplaces’ plugins and keeps them on this computer. Nothing is installed or run.${
-  view?.elsewhere ? ` ${firstSize(view.elsewhere)} the first time for ${plural(view.elsewhere, 'plugin')} kept in ${view.elsewhere === 1 ? 'another repository' : 'other repositories'}; after that only what changed.` : ''}`;
-const textCoverage = (view: PluginTextView) => `${view.reading && view.read < view.of ? 'Reading:' : 'Read'} ${view.read} of ${plural(view.of, 'plugin')}.`;
+/** The first download, estimated: about 0.1 MB a plugin kept outside its marketplace (measured 2026-11-19: 26 to 29 MB on the wire for 277). */
+const firstSize = (plugins: number) => { const mb = plugins * 0.1; return mb < 1 ? 'under 1 MB' : `about ${mb < 10 ? Math.round(mb) : Math.round(mb / 5) * 5} MB`; };
+const textHint = (view: PluginTextView | undefined) => `Central Knot reads the names, descriptions and first lines of the skills, agents and MCP servers in your marketplaces’ plugins and keeps them here. Nothing is installed or run.${
+  view?.elsewhere ? ` ${view.elsewhere === 1 ? 'The one kept outside its marketplace is' : `The ${view.elsewhere} kept outside their marketplace are`} downloaded the first time (${firstSize(view.elsewhere)}), then only what changed.` : ''}`;
+/** The count: while it reads, when it is done (and how many couldn't be read), and while it is off. */
+const textCoverage = (view: PluginTextView, on: boolean) => {
+  const counted = `${view.read} of ${plural(view.of, 'plugin')}`, left = view.of - view.read;
+  if (!on) return `Off. What was read from ${counted} is kept.`;
+  if (view.reading && left) return `Reading: ${counted}.`;
+  return `Read ${counted}.${left ? ` ${left} couldn’t be read; Central Knot tries again later.` : ''}`;
+};
 
 /** Plugins: whether what they hold is read, what that costs, and how much is read. */
 function pluginTextRow(): HTMLElement {
   if (!textRead) void window.centralKnot.pluginText().then(showTextRead);
-  const notice: RowMessage | undefined = textRead?.of ? { text: textCoverage(textRead), tone: 'info' } : undefined;
+  const notice: RowMessage | undefined = textRead?.of ? { text: textCoverage(textRead, !!current?.pluginText), tone: 'info' } : undefined;
   return settingRow('plugin-text', 'Read what plugins hold', textHint(textRead),
     toggle({ on: !!current?.pluginText, label: 'Read what plugins hold', onchange: chosen => void choosePluginText(chosen), disabled: !current, id: 'plugin-text-on',
       attrs: { 'aria-describedby': notice ? 'setting-plugin-text-hint setting-plugin-text-notice' : 'setting-plugin-text-hint', title: null } }),
