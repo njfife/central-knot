@@ -33,7 +33,7 @@ export async function world() {
   return { base, remote, home, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
-/** The skills kind in one of these homes, with the tools it manages there: a pass with clicks, the Skills page's rows, a History action. */
+/** The skills kind in one of these homes, with the tools it manages there: a pass with clicks, the Library's rows, a History action. */
 const toolsOf = async (context: ShareContext) => managedNow(context, await context.read());
 export const applySkillsIn = async (context: ShareContext, changes: Change[] = []) => applySkills(context, await toolsOf(context), changes);
 export const skillRows = async (context: ShareContext) => (await skillsView(context, await toolsOf(context))).items;

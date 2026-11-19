@@ -7055,6 +7055,11 @@ async function libraryFlow() {
   const find = (a, text) => a.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const pressed = a => a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id.replace('library-kind-', '') ?? null`);
   const opened = a => a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key');
+  /** The mouse's Back button, pressed and let go over the page (places.ts listenForTravel). */
+  const mouseBack = async a => {
+    for (const [type, buttons] of [['mousePressed', 8], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button: 'back', buttons, clickCount: 1 });
+    await a.settle();
+  };
   /** Pictures (with --shots) at 860×600 and 1280×800, light and dark, then back to the full size and light. */
   const theme = (a, value) => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
   const pictures = async (a, name) => {
@@ -7150,7 +7155,7 @@ async function libraryFlow() {
     return [was, ids.map(top)];
   })()`);
   const tops = () => a.run(`${JSON.stringify(ids)}.map(id => Math.round(document.querySelector('.ov-row[data-key="' + id + '"]').getBoundingClientRect().top))`);
-  if (main) { check('the skill’s write lands first', await until(() => !existsSync(join(A.claude, 'review')))); same('once the first write has landed, the three rows are where they were', await tops(), was); }
+  if (main) { check('the skill’s write lands first, and the page shows it: its row flashes', await until(async () => (await a.run('window.flashedRows')).includes(ids[0]))); same('once the first write has landed, the three rows are where they were', await tops(), was); }
   await a.run(`document.getElementById('library-kind-skills').click()`);
   await done(a);
   // Its debugger let go too: a main process with one still attached doesn't quit.
@@ -7203,12 +7208,23 @@ async function libraryFlow() {
   same('and both still there with Skills chosen', await refused(), ['Agents', 'Skills']);
   await a.click('#library-kind-all');
   for (const folder of copilotFolders) chmodSync(folder, 0o755);
-  check('the MCP record’s stop is said once above the list, led by its kind', await until(async () => (await a.all('.band-danger .band-text', 'e.textContent')).filter(line => line.startsWith('MCP servers: ')).length === 1), await a.text('.bands'));
+  const stopLines = async () => (await a.all('.bands .band-text', 'e.textContent')).filter(line => line.includes('The MCP record is damaged'));
+  check('the MCP record’s stop is said once above the list, led by its kind', await until(async () => { const lines = await stopLines(); return lines.length === 1 && lines[0].startsWith('MCP servers: '); }), await a.text('.bands'));
   await pictures(a, 'turned-off-a-kind-stopped');
   writeFileSync(record('mcp'), mcpRecord);
   await a.click('#outcome-undo');
   await done(a);
   same('its Undo puts idle back in Claude Code only, where it was', [readNow(join(A.claude, 'idle/SKILL.md')), existsSync(join(A.copilot, 'idle'))], [text('idle'), false]);
+  // A lone refusal beside another kind's stop is led by its kind too: the result is of several kinds.
+  writeFileSync(record('mcp'), '{');
+  chmodSync(join(A.home, '.copilot/agents'), 0o555);
+  await a.run(`document.getElementById('turn-unused-off').click()`);
+  await done(a);
+  chmodSync(join(A.home, '.copilot/agents'), 0o755);
+  same('a lone agent’s refusal beside the MCP record’s stop is led by its kind', await refused(), ['Agents']);
+  writeFileSync(record('mcp'), mcpRecord);
+  await a.click('#outcome-undo');
+  await done(a);
   // The Overview's MCP servers card opens the Library on MCP servers.
   await a.click('#nav-overview');
   await a.click('#overview-mcp');
@@ -7228,13 +7244,22 @@ async function libraryFlow() {
   writeFileSync(reviewAgent, agentText('review', 'You review code, gently.'));
   utimesSync(reviewAgent, ago(0.0002), ago(0.0002));
   check('the pass tells the page of the agent’s edit', await until(() => a.exists('#nav-library .nav-unseen'), 30000), await a.text('#announcement'));
-  same('on Skills, the sidebar’s Library has its dot and the Agents segment is marked; the status bar says it', [await a.exists('#library-kind-agents .kind-seg-news'), await a.exists('#library-kind-skills .kind-seg-news'), /review/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? '')], [true, false, true]);
+  same('on Skills, the sidebar’s Library has its dot and the Agents segment is marked; the status bar says it', [await a.exists('#library-kind-agents .kind-seg-news'), await a.exists('#library-kind-skills .kind-seg-news'), await a.run(`(said => /review/.test(said.dataset.text ?? '') && !said.classList.contains('visually-hidden'))(document.querySelector('#announcement'))`)], [true, false, true]);
   await a.click('#library-kind-all');
   check('on All, the agent’s notice is there, naming its kind beside its name, and the dot goes', /review/.test(await a.text('.sync-notices') ?? '') && (await a.text('.sync-notices .row-kind')) === 'agent' && !(await a.exists('#nav-library .nav-unseen')), [await a.text('.sync-notices'), await a.exists('#nav-library .nav-unseen')]);
   // A notice's name is a link to its row, which shows it whatever Find says.
   await find(a, 'zzz');
   await a.click('[id^="notice-open-"]');
   same('a notice’s link with Find hiding its row: Find let go, the row open', [await a.run(`document.querySelector('#find').value`), await opened(a)], ['', [rowPart('', 'agents', 'review')]]);
+  // From a skill's Files view, a notice's link leaves Files for the list, its row open there.
+  const spareFile = join(A.claude, 'spare/SKILL.md');
+  writeFileSync(spareFile, text('spare', 'Spare, edited by hand.'));
+  utimesSync(spareFile, ago(0.0002), ago(0.0002));
+  check('the pass tells the page of spare’s edit', await until(async () => /spare/.test(await a.text('.sync-notices') ?? ''), 30000), await a.text('.bands'));
+  await a.click(`#${rowPart('open', 'skills', 'notes')}`);
+  await a.click(`#${rowPart('files', 'skills', 'notes')}`);
+  await a.click('.sync-notice [id^="notice-open-"]');
+  same('a notice’s link from notes’s Files: the list, spare’s row open', [await a.exists('#skill-detail'), await opened(a)], [false, [rowPart('', 'skills', 'spare')]]);
   // Another home's notices don't come along (a development run: it opens a folder through main's dialog).
   if (a.inspect) {
     const C = homeWith('library-other');
@@ -7290,6 +7315,14 @@ async function libraryFlow() {
   await b.click('#walk-skip');
   same('Skip goes on to the agent of the same name: its row is the one open', [await b.text('#walkthrough .walk-place'), await opened(b)], [' · 2 of 2', [rowPart('', 'agents', 'review')]]);
   await pictures(b, 'walkthrough-2-of-2');
+  // Go on from a skill's Files view is a move: the mouse's Back returns to that Files view.
+  await b.click(`#${rowPart('open', 'skills', 'meeting-notes')}`);
+  await b.click(`#${rowPart('files', 'skills', 'meeting-notes')}`);
+  await b.click('#walk-go-on');
+  same('Go on from Files: the list, the agent’s row open', [await b.exists('#skill-detail'), await opened(b)], [false, [rowPart('', 'agents', 'review')]]);
+  await mouseBack(b);
+  same('and the mouse’s Back returns to meeting-notes’s Files', await b.text('#skill-detail h2'), 'meeting-notes');
+  await b.click('#files-back');
   // On a segment that doesn't list the item's kind, the band says what is next and leads to its row.
   await b.click('#library-kind-skills');
   same('on Skills, the band names the agent next, and Go on leads to its row on All', [await b.text('#walkthrough .band-text'), await b.exists('#walk-go-on')], ['Next: review (agent).', true]);
@@ -7323,18 +7356,29 @@ async function libraryFlow() {
   same('a plugin’s item link opens the Library on its kind, Find let go, its row open', [await c.text('.page-title'), await pressed(c), await c.run(`document.querySelector('#find').value`), await opened(c)],
     ['Library', 'skills', '', [rowPart('', 'skills', 'triage')]]);
   await pictures(c, 'from-plugin-page');
-  // Its Files and back, from All (a list long enough to scroll): the Library as it was, its segment, Find, open row and scroll place.
+  // A skill's Files and back, from All under Copies differ (review's question opened, the list scrolled): the Library as it was, its
+  // segment, Find, chip, open row with its question, and scroll place. Four more skills whose copies differ make that list scroll.
+  for (const name of ['differ-one', 'differ-two', 'differ-three', 'differ-four']) {
+    skill(join(practice, '.claude/skills'), name, text(name, 'One way.'));
+    skill(join(practice, '.copilot/skills'), name, text(name, 'Another way.'));
+  }
+  await c.click('#header-refresh');
+  check('Copies differ counts the four more', await until(async () => (await c.text('#chip-attention .chip-count')) === '5'), await c.text('#chip-attention'));
   await sizeTo(c, 860, 600);
   await c.click('#library-kind-all');
   await find(c, 'e');
+  await c.click('#chip-attention');
+  await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const top = () => c.run(`Math.round(document.querySelector('#table-library-all').scrollTop)`);
   await c.run(`document.querySelector('#table-library-all').scrollTop = 80`);
   const before = await top();
-  await c.click(`#${rowPart('files', 'skills', 'triage')}`);
-  same('Files shows the skill beside the list of skills', [await c.exists('#skills-list'), await c.text('#skill-detail h2')], [true, 'triage']);
+  await c.click(`#${rowPart('diff', 'skills', 'review')}`);
+  same('Read both copies shows the skill’s Files beside the list of skills, its back naming the Library', [await c.exists('#skills-list'), await c.text('#skill-detail h2'), await c.text('#files-back .btn-label')], [true, 'review', 'Library']);
   await c.shot('library-files-860');
   await c.click('#files-back');
-  same('Back from Files: the Library as it was, its segment, Find, open row and scroll place', [await pressed(c), await c.run(`document.querySelector('#find').value`), await opened(c), await top()], ['all', 'e', [rowPart('', 'skills', 'triage')], before]);
+  same('Back from Files: the Library as it was, its segment, Find, chip, open row with its question, and scroll place',
+    [await pressed(c), await c.run(`document.querySelector('#find').value`), await c.exists('#chip-attention[aria-pressed="true"]'), await opened(c), await c.exists(`${row('skills', 'review')} + .details .compare-choices`), await top()],
+    ['all', 'e', true, [rowPart('', 'skills', 'review')], true, before]);
   check('the list was scrolled', before > 0, before);
   await c.shot('library-files-back-860');
   // Files opened from a tool's tab goes back to that tab, its Find, opened row and scroll place; the Library keeps its kind.
@@ -7343,14 +7387,20 @@ async function libraryFlow() {
   await c.click('#harness-claude-cli');
   await c.click('#harness-tab-skills');
   await find(c, 'e');
-  await c.click(`#${rowPart('open', 'skills', 'notes')}`);
+  // review's copies differ: under Copies differ, its question's Read both copies opens its Files.
+  await c.click('#chip-attention');
+  await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const tabTop = () => c.run(`Math.round(document.querySelector('#table-skills-claude-cli')?.scrollTop ?? -1)`);
   await c.run(`document.querySelector('#table-skills-claude-cli').scrollTop = 30`);
   const tabBefore = await tabTop();
-  await c.click(`#${rowPart('files', 'skills', 'notes')}`);
+  await c.click(`#${rowPart('diff', 'skills', 'review')}`);
+  same('Files opened from Claude Code’s Skills tab: review, its back naming the tool', [await c.text('#skill-detail h2'), await c.text('#files-back .btn-label'), await c.run(`document.querySelector('#files-back').getAttribute('aria-label')`)],
+    ['review', 'Claude Code', 'Back to Claude Code’s skills']);
   await c.click('#files-back');
-  same('Back from Files opened on Claude Code’s Skills tab: that tab, its Find, opened row and scroll place', [await c.exists('#harness-tab-skills[aria-selected="true"]'), await c.run(`document.querySelector('#find').value`), await opened(c), await tabTop()],
-    [true, 'e', [rowPart('', 'skills', 'notes')], tabBefore]);
+  same('Back from Files opened on Claude Code’s Skills tab: that tab, its Find and chip, review open with its question, and the scroll place',
+    [await c.exists('#harness-tab-skills[aria-selected="true"]'), await c.run(`document.querySelector('#find').value`), await c.exists('#chip-attention[aria-pressed="true"]'), await opened(c), await c.exists(`${row('skills', 'review')} + .details .compare-choices`), await tabTop()],
+    [true, 'e', true, [rowPart('', 'skills', 'review')], true, tabBefore]);
+  check('the tab’s list was scrolled', tabBefore > 0, tabBefore);
   await c.click('#nav-library');
   same('and the Library still on Agents', await pressed(c), 'agents');
   await fullSize(c);
@@ -7362,11 +7412,12 @@ async function libraryFlow() {
   // were their room not held, the Put in order and change-waiting a click brings would wrap the bar. Each place twice: a plain
   // Off, and one whose removal Claude Code refuses (a problem line, and the change left waiting).
   const T = homeWith('library-toolbar');
-  for (const name of ['alpha', 'beta', 'gamma']) skill(T.claude, name);
+  const toolbarSkills = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta'];
+  for (const name of toolbarSkills) skill(T.claude, name);
   const tb = await launch(T.data, [], T.real);
   await tb.click('#nav-overview');
   await tb.click('#setup-yes');
-  check('Yes takes the three in', await until(() => Object.keys(JSON.parse(readNow(join(T.home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 3));
+  check('Yes takes the seven in', await until(() => Object.keys(JSON.parse(readNow(join(T.home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 7));
   await done(tb);
   await openKind(tb, 'all');
   const placeOf = () => tb.run(`[Math.round(document.querySelector('[id^="table-library-"]').getBoundingClientRect().top), Math.round(document.querySelector('${row('skills', 'beta')}').getBoundingClientRect().top)]`);
@@ -7409,6 +7460,12 @@ async function libraryFlow() {
     await openAt(oneLine);
     await clickMovesNothing(`at ${oneLine}×600, the narrowest the bar keeps to one line with the sidebar open`, refused);
   }
+  // Seven deleted by hand at once, on All: six notices on show, the seventh past them, and no dot on the open Library, whose
+  // every kind is on show.
+  await fullSize(tb);
+  for (const name of toolbarSkills) rmSync(join(T.claude, name), { recursive: true });
+  check('seven skills deleted by hand: six notices on show', await until(async () => (await tb.all('.sync-notice')).length === 6, 30000), await tb.text('.bands'));
+  check('and the Library, open on All, has no dot', !(await tb.exists('#nav-library .nav-unseen')), await tb.run(`document.querySelector('#nav-library .nav-unseen')?.title`));
   same('no page errors, a click moves no row', tb.pageErrors, []);
   await tb.quit();
 
@@ -7422,16 +7479,21 @@ async function libraryFlow() {
   await d.click('#setup-no');
   await d.quit();
   writeFileSync(join(D.home, '.central-knot/skills.json'), '{');
-  const second = join(scratch, 'library-resume-data-2');
-  mkdirSync(second, { recursive: true });
-  writeFileSync(join(second, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: D.home } }));
-  d = await launch(second, [], D.real);
-  await openKind(d, 'all');
-  check('a home this app has no memory of asks Resume', await d.exists('#resume'), await d.text('.bands'));
-  await d.click('#resume');
-  await done(d);
-  same('Resume, with the skills record damaged, resumes: it doesn’t answer with the skills’ stop', [await d.text('#header [data-outcome] .band-text'), await d.exists('#resume')], ['Resumed: sync carries on from the record as it is.', false]);
-  await d.quit();
+  // Each in an app with no memory of the home, on the Skills segment and on Claude Code's Skills tab: what is on show is skills.
+  const resumeFrom = [['on the Skills segment', d => openKind(d, 'skills')],
+    ['on Claude Code’s Skills tab', async d => { await d.click('#nav-harnesses'); await d.click('#harness-claude-cli'); await d.click('#harness-tab-skills'); }]];
+  for (const [at, [place, open]] of resumeFrom.entries()) {
+    const data = join(scratch, `library-resume-data-${at + 2}`);
+    mkdirSync(data, { recursive: true });
+    writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: D.home } }));
+    d = await launch(data, [], D.real);
+    await open(d);
+    check(`${place}, a home this app has no memory of asks Resume`, await d.exists('#resume'), await d.text('.bands'));
+    await d.click('#resume');
+    await done(d);
+    same(`Resume ${place}, with the skills record damaged, resumes: it doesn’t answer with the skills’ stop`, [await d.text('#header [data-outcome] .band-text'), await d.exists('#resume')], ['Resumed: sync carries on from the record as it is.', false]);
+    await d.quit();
+  }
   // A home with nothing in it whose MCP record is damaged: the stop above the empty words, which name the kind.
   const E = homeWith('library-empty-stopped');
   mkdirSync(join(E.home, '.claude'), { recursive: true });
@@ -7440,7 +7502,19 @@ async function libraryFlow() {
   mkdirSync(join(E.home, '.central-knot'), { recursive: true });
   writeFileSync(join(E.home, '.central-knot/mcp.json'), '{');
   await e.click('#header-refresh');
-  same('nothing here and the MCP record damaged: its stop above, and the empty words name MCP servers', [(await e.all('.band-danger .band-text', 'e.textContent')).length, await e.text('.empty-title'), /MCP servers/.test(await e.text('.empty-body') ?? '')], [1, 'Nothing read here', true]);
+  // Under a kind that couldn't be read, the words follow the stop above them: not the way to add one.
+  const unreadMcp = 'What is named above couldn’t be read, so there may be MCP servers here. Put it back, then Refresh.';
+  same('nothing here and the MCP record damaged: its stop above, and the empty words follow it', [(await e.all('.band-danger .band-text', 'e.textContent')).length, await e.text('.empty-title'), await e.text('.empty-body')], [1, 'Nothing read here', unreadMcp]);
+  // Skills chosen (the Overview's card) with nothing here: still every kind's stop.
+  await e.click('#nav-overview');
+  await e.click('#overview-skills');
+  const mcpStop = async () => (await e.all('.band-danger .band-text', 'e.textContent')).filter(line => /^MCP servers: The MCP record is damaged/.test(line)).length;
+  same('nothing here with Skills chosen: the MCP record’s stop is still said', await mcpStop(), 1);
+  // A skill here, MCP servers chosen: none of that kind read, and the same words.
+  skill(E.claude, 'solo');
+  await e.click('#header-refresh');
+  await openKind(e, 'mcp');
+  same('a skill here, MCP servers chosen with its record damaged: no MCP servers read, and the words follow the stop', [await e.text('.empty-title'), await e.text('.empty-body')], ['No MCP servers read here', unreadMcp]);
   await e.quit();
   // The last skill deleted from its Files view, with Skills chosen and a server still here: no skills here yet.
   const F = homeWith('library-last-skill');

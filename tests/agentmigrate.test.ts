@@ -210,7 +210,7 @@ test('A crash at either step of the migration leaves the old record and its kept
       const crashing: ShareContext = { ...box.context, fault: at => { if (at === step) throw new Error(`crash at ${step}`); } };
       await assert.rejects(pass(box, crashing), new RegExp(`crash at ${step}`));
       assert.deepEqual([await oldFiles(box), await filesOf(box)], [before.kept, before.harnesses], step);
-      // A reader in between (the Agents page) sees the migrated agent without anything being written.
+      // A reader in between (the Library) sees the migrated agent without anything being written.
       assert.equal((await agentsView(box.context, tools)).library?.reviewer?.on, true);
       assert.deepEqual(await oldFiles(box), before.kept);
       assert.equal((await pass(box)).writes, 0);

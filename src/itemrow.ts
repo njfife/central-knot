@@ -112,7 +112,6 @@ export const anyOn = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) =>
 /** The orders the item lists offer: by name (as always, and the default), by last updated, or by last used (usage collected: usagerow.ts lastUse), newest first. */
 export type RowOrder = 'name' | 'updated' | 'used';
 
-/** By name, a leading dot aside (".hidden" sorts with the h's). */
 /** The order by name (a leading dot aside), and one name by kind: skill, server, agent (the Library's mixed list; its plugin rows too). */
 export const byName = (first: { key: string; kind: PageKind }, second: { key: string; kind: PageKind }) =>
   first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, '')) || KIND_ORDER.indexOf(first.kind) - KIND_ORDER.indexOf(second.kind);

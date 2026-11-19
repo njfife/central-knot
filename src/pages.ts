@@ -64,17 +64,21 @@ function addHint(holders: HarnessId[], noun: string) {
 const whose = () => (homeTools().length < (state.home?.sync.present.length ?? 0) ? 'the tools Central Knot manages' : 'your tools');
 /** Where a kind's own record or a tool's file of it couldn't be read (the kind switch's "?": matrix.ts notAllRead), so "none" isn't known. */
 const unread = (kind: PageKind) => !!state.home && notAllRead(state.home, kind);
+/**
+ * The words under kinds that couldn't all be read (`many` names them): the stop or problem above says what couldn't be read, so
+ * these follow it. The way to add one is for a kind known to have none.
+ */
+const mendHint = (many: string) => `What is named above couldn’t be read, so there may be ${many} here. Put it back, then Refresh.`;
 /** What the Library says when no tool in this home has one of a kind: under its segment, and on a harness's tab for that kind. */
 export function kindEmpty(kind: PageKind): Empty {
-  const { many, a, title } = kindNouns[kind], hint = addHint(state.home?.[kind].tools ?? [], many);
-  const glyph = kindGlyph[kind];
-  return unread(kind) ? { glyph, title: `No ${many} read here`, body: `${title} couldn’t all be read here, so there may be some. ${hint}` }
-    : { glyph, title: `No ${many} here yet`, body: `None of ${whose()} has ${a} in this home. ${hint}` };
+  const { many, a } = kindNouns[kind], glyph = kindGlyph[kind];
+  return unread(kind) ? { glyph, title: `No ${many} read here`, body: mendHint(many) }
+    : { glyph, title: `No ${many} here yet`, body: `None of ${whose()} has ${a} in this home. ${addHint(state.home?.[kind].tools ?? [], many)}` };
 }
-/** The Library with nothing of any kind: nothing read of any kind, or the kinds that couldn't all be read named. */
+/** The Library with nothing of any kind: the kinds that couldn't all be read named, or nothing here yet. */
 function libraryEmpty(kinds: PageKind[]): Empty {
-  const hint = addHint([...new Set(kinds.flatMap(kind => state.home?.[kind].tools ?? []))], 'any of them'), stopped = kinds.filter(unread);
-  return stopped.length ? { glyph: 'layers', title: 'Nothing read here', body: `${sentence(andList(stopped.map(kind => kindNouns[kind].many)))} couldn’t all be read here, so there may be some. ${hint}` }
+  const stopped = kinds.filter(unread), hint = addHint([...new Set(kinds.flatMap(kind => state.home?.[kind].tools ?? []))], 'any of them');
+  return stopped.length ? { glyph: 'layers', title: 'Nothing read here', body: mendHint(andList(stopped.map(kind => kindNouns[kind].many))) }
     : { glyph: 'layers', title: 'Nothing in the Library yet', body: `None of ${whose()} has a skill, MCP server or agent in this home. ${hint}` };
 }
 /** Shown before any home has been read, or when reading failed. */

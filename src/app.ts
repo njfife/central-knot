@@ -592,7 +592,7 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], notIn: 
   const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])), regroups = clicks.some(click => click.regroups);
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups }, undos) : undefined;
   for (const { done } of parts) if (done.kept) kindPages[done.kept.kind].keep(done.kept.results, done.kept.notices);
-  tell({ page, items: rowNames(changed), rows: changed, band: true, warn: parts.some(part => part.done.outcome.warn),
+  tell({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
     text: changed.length || !stops.length ? said(changed, went.flatMap(part => part.done.notIn ?? [])) : stops.join(' '),
     reasons: [...(changed.length ? stops : []), ...went.flatMap(part => part.done.outcome.reasons ?? [])],
     act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything this did', run: undo } });
@@ -870,7 +870,7 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
 
 /** When the open page's kind is no longer in this home (its last tool went; the Library's, every kind it lists), the Overview opens instead. */
 function leaveAbsentPage() {
-  const gone = state.page === 'library' ? (KINDS.every(kind => absentKinds().includes(kind)) ? KINDS : []) : absentKinds().filter(kind => kind === state.page);
+  const gone = state.page === 'library' ? (state.home && !heldKinds(state.home).length ? KINDS : []) : absentKinds().filter(kind => kind === state.page);
   if (!gone.length) return;
   // What the status bar said (a Refresh's summary, say) stays, with the reason the page moved.
   const said = state.said.text;
@@ -1107,6 +1107,8 @@ export interface Outcome {
   items?: string[];
   /** The rows it is about: an open copy question of one of them, or the Files view of another skill, hides it (matrix.ts outcomeShown). */
   rows?: RowKey[];
+  /** A run over several kinds (Turn these off: applyByKind): its kinds, so each problem line under it is led by its kind (matrix.ts listResult). */
+  kinds?: PageKind[];
   /** Said again on the next page opened (a home just opened). */
   carry?: boolean;
   /** A saved instruction goes on its card (instructionspage.ts); a Sync once result makes room for its lines. */

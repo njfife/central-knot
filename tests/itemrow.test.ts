@@ -107,7 +107,7 @@ test('Another Sort, or another list drawn in between, lets the pinned rows go, a
   const clicked = () => { const pins = pinsOn(noPins<string>(), byName); pin(pins, server('beta'), 'on'); return pins; };
   // Sort by Last updated: the page asks for another list's rows.
   assert.deepEqual(drawn(own, pinsOn(clicked(), 'MCP servers by last updated')), regrouped);
-  // Agents, then back on MCP servers: the Agents page let them go, so none are pinned on coming back.
+  // Agents, then back on MCP servers: the Agents segment let them go, so none are pinned on coming back.
   assert.deepEqual(drawn(own, pinsOn(pinsOn(clicked(), 'Agents by name'), byName)), regrouped);
 });
 

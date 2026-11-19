@@ -43,7 +43,7 @@ async function add(box: Box, link: string) {
 }
 const check = (box: Box, id: string) => checkSource(box.context, async () => box.tools, id, work => work());
 const sourceOf = async (box: Box) => (await sourcesView(box.context, box.tools)).sources[0];
-/** An agent as the Agents page reads it: its row's facts and its item. */
+/** An agent as the Library reads it: its row's facts and its item. */
 async function agent(box: Box, key: string): Promise<{ fact?: Awaited<ReturnType<typeof agentsView>>['items'][number]; item?: LibraryItem }> {
   const view = await agentsView(box.context, box.tools);
   return { fact: view.items.find(entry => entry.key === key), item: view.library[key] };

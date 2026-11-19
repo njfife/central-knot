@@ -17,7 +17,7 @@ import { libraryPage } from './pages.ts';
 import { overviewPage } from './overview.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage, pluginsResult } from './pluginspage.ts';
-import { backFromFiles, listResult, resultInHeader, unseenNotices } from './matrix.ts';
+import { backFromFiles, kindsShown, listResult, resultInHeader, unseenNotices } from './matrix.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
@@ -68,8 +68,9 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number | str
 const anythingOn = () => !!state.home && anyOn(state.home);
 /** The automatic changes a page shows: the Library's, of every kind it lists. */
 const noticesFor = (page: Page) => (!state.home || page !== 'library' ? [] : heldKinds(state.home).flatMap(kind => state.home![kind].notices));
-/** The Library's automatic changes not painted yet: on the Library too, where a kind not on show hides its notice. */
-const unseen = (page: Page) => (!state.home || page !== 'library' ? 0 : heldKinds(state.home).flatMap(unseenNotices).length);
+/** The Library's automatic changes not painted yet; on the open Library, of the kinds not on show (a segment of another kind hides theirs). */
+const unseen = (page: Page) => (!state.home || page !== 'library' ? 0
+  : heldKinds(state.home).filter(kind => state.page !== 'library' || !kindsShown().includes(kind)).flatMap(unseenNotices).length);
 const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`; };
 
 const homeHelp: Record<HomeMode, string> = {
