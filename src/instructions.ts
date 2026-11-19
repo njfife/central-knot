@@ -1,5 +1,6 @@
 // Instructions: each tool's own user-wide instruction file, viewed and edited in place (INS-01, INS-02), and for the page's view
-// the other files the tool reads with it (instructionparts.ts), shown there and written only as a tool's own file, from its card.
+// the other files the tool reads with it (instructionparts.ts), shown there. Writes go by destination: a tool's own file is
+// written from its card and by the base, whether or not a card also lists it as a part; no other part is written.
 // A save is a checked write of one file: it must still hold what the editor opened, the text it replaces is kept first, and every
 // earlier version can be put back. Nothing here empties a file; the only deletion is an Undo removing a file its own base save
 // created, while it still holds what was written. No project or workspace file is written, and none is read but one a home's

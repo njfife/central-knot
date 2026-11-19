@@ -140,6 +140,9 @@ function resting(file: InstructionFile, lockedWhy: string | undefined, goTo: Nod
 
 /** The other files whose text is open on their card, by tool and path, across redraws. */
 const openParts = new Set<string>();
+/** Each part's own number, by tool and path, given when it is first drawn: its controls' ids, distinct for every path. */
+const partNumbers = new Map<string, number>();
+const numberOf = (key: string) => partNumbers.get(key) ?? partNumbers.set(key, partNumbers.size).size - 1;
 /** An opened part longer than this many lines has a second Hide at its end, so its closer is in reach from there too. */
 const LONG_PART = 30;
 
@@ -162,7 +165,7 @@ function otherFiles(file: InstructionFile) {
  * Hide closes it, in place: the card is not redrawn, so an editor open on it keeps its caret. Keyed by its path, not its place.
  */
 function partView(tool: HarnessId, part: InstructionPart): HTMLElement {
-  const key = `${tool}:${part.path}`, open = openParts.has(key), id = `ins-part-${tool}-${part.path.replace(/\W+/g, '-')}`;
+  const key = `${tool}:${part.path}`, open = openParts.has(key), id = `ins-part-${tool}-${numberOf(key)}`;
   const toggle = () => {
     if (open) openParts.delete(key); else openParts.add(key);
     const next = partView(tool, part);

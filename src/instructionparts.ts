@@ -1,28 +1,32 @@
 // The other files a tool reads with its own instruction file at the home's level, in the tool's order, as its card on the
 // Instructions page lists them (instructionspage.ts otherFiles): `instructionParts`, one function per tool below. They are read
-// only to be shown: nothing here writes, fetches from the network or runs anything, and nothing read is kept. The card never
-// writes a part; a part that is another tool's own file is marked so (instructions.ts instructionsView), as that file is
-// edited on its own card and written by the base.
+// only to be shown: nothing here writes, fetches from the network or runs anything, and nothing read is kept. Writes go by
+// destination: a tool's own file is written from its card and by the base, whether or not a card also lists it as a part; a
+// part that is another tool's own file is marked so (instructions.ts instructionsView).
 // What each tool reads (M: measured by the groundwork of 2026-11-18 on the version named; D: its documentation; R: read in its code):
 //   Claude Code  the file's @ imports, each resolved against the file that holds it, "a maximum depth of four hops" (D,
 //                code.claude.com/docs/en/memory; R, 2.1.328: the limit is of a route, so a file past it on one route and within
 //                it on another is read), none in code or an HTML comment (D, R); then every `.md` under `rules/`, "discovered
-//                recursively", each with its own imports (D, R, 2.1.328; M, 2.1.327 for the top level). A rule with `paths` is
-//                read only for matching files (D): it is listed last, with them, and its imports are not followed.
+//                recursively", linked folders followed (D: it "supports symlinks"), each with its own imports (D, R, 2.1.328;
+//                M, 2.1.327 for the top level). A rule with `paths` is read only for matching files (D): it is listed last,
+//                with them; its own imports are not listed, as the documentation doesn't say when Claude Code reads them.
 //   Copilot CLI  `instructions/*.instructions.md`, front matter and all; one whose `applyTo` isn't `**` is read only for
 //                those files, so it is listed last, with them (M, 1.0.113).
 //   OpenCode     the files its config's `instructions` list names, after AGENTS.md (M, 1.19.6); `~/` is the home, a relative
 //                entry is looked for from a session's folder, a pattern is matched and a web address fetched by OpenCode (R, 1.19.6).
 //   Codex, Pi    nothing more at the home's level: each reads its own file, then the project's (M).
 // A project's files (the folder a session starts in) are not looked for here; one a home's file imports by its path is read.
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { frontMatter } from './agentfiles.ts';
-import { PART_FILE_LIMIT } from './catalogdetail.ts';
 import { errorCode, type ShareContext } from './share.ts';
 import { readSwitchFile } from './skillswitch.ts';
 import { linesOf } from './words.ts';
 import type { HarnessId, InstructionPart } from './types.ts';
+
+/** A part's text is sent to the page up to this size: kept light, and well below the 4 MB Claude Code 2.1.328 reads of a file
+ *  (read in its code). Past it the part's line says its size instead. */
+export const PART_TEXT_LIMIT = 256 * 1024;
 
 /** The other files `tool` reads with its own file (`file`, holding `text`; `root`: the tool's folder), in the tool's order. */
 export async function instructionParts(context: ShareContext, tool: HarnessId, root: string, file: string, text: string): Promise<InstructionPart[]> {
@@ -36,23 +40,40 @@ export async function instructionParts(context: ShareContext, tool: HarnessId, r
   return [];
 }
 
+/** What reading a part found (as InstructionPart holds it). */
+type Read = { text: string } | { notShown: string } | { problem: string };
+
 /**
- * A file's text; or why it isn't shown (larger than the cap, or not text: a zero byte in it); or why the tool can't read it
+ * A file's text; or why it isn't shown (its size, past the cap; or not text: a zero byte in it); or why the tool can't read it
  * (missing, not a file, can't be read), which is mended where it is named.
  */
-async function readPart(path: string): Promise<{ text: string } | { notShown: string } | { problem: string }> {
+async function readPart(path: string): Promise<Read> {
   try {
     const info = await stat(path);
     if (!info.isFile()) return { problem: 'not a file' };
-    if (info.size > PART_FILE_LIMIT) return { notShown: `larger than ${PART_FILE_LIMIT / 1024 / 1024} MB, so not shown here` };
+    const size = info.size < 1024 * 1024 ? `${Math.ceil(info.size / 1024)} KB` : `${(info.size / 1024 / 1024).toFixed(1)} MB`;
+    if (info.size > PART_TEXT_LIMIT) return { notShown: `${size}, so not shown here` };
     const bytes = await readFile(path);
     return bytes.includes(0) ? { notShown: 'not text' } : { text: bytes.toString('utf8') };
   } catch (error) { return { problem: ['ENOENT', 'ENOTDIR'].includes(errorCode(error)) ? 'missing' : 'can’t be read' }; }
 }
 
-/** The files in a folder (`deep`: and in its sub-folders) whose names end with `ending`, by path; none when there is no folder. */
-const filesIn = async (folder: string, ending: string, deep = false) =>
-  (await readdir(folder, { recursive: deep }).catch(() => [])).filter(name => name.endsWith(ending)).sort().map(name => join(folder, name));
+/** The files in a folder whose names end with `ending`, by name; none when there is no folder. */
+const filesIn = async (folder: string, ending: string) =>
+  (await readdir(folder).catch(() => [])).filter(name => name.endsWith(ending)).sort().map(name => join(folder, name));
+
+/** Every `.md` under `folder`, linked folders followed, each real folder read once (a loop of links ends); one that can't be
+ *  read is passed over and the rest kept. */
+async function markdownUnder(folder: string, visited = new Set<string>()): Promise<string[]> {
+  const real = await realpath(folder).catch(() => '');
+  if (!real || visited.has(real)) return [];
+  visited.add(real);
+  const found = await Promise.all((await readdir(folder).catch(() => [])).map(async name => {
+    const path = join(folder, name);
+    return (await stat(path).catch(() => undefined))?.isDirectory() ? markdownUnder(path, visited) : name.endsWith('.md') ? [path] : [];
+  }));
+  return found.flat();
+}
 
 /** A front matter field, its list joined by ", ": undefined when the file has none, or it is empty. */
 function field(text: string, name: string): string | undefined {
@@ -113,26 +134,25 @@ async function claudeImports(file: string, text: string, home: string, seen: See
     const from = `imported by ${basename(file)}, line ${line}`;
     if (seen.get(path) === 'listed' || (seen.has(path) && hop > IMPORT_HOPS)) continue;
     if (hop > IMPORT_HOPS) { seen.set(path, 'past'); parts.push({ path, from, notShown: PAST_HOPS }); continue; }
-    parts.push(...await withImports(path, from, home, seen, hop));
+    parts.push(...await withImports(path, from, await readPart(path), home, seen, hop));
   }
   return parts;
 }
 
-/** A file Claude Code reads, `hop` hops from the start of its route, then what it imports. */
-async function withImports(path: string, from: string, home: string, seen: Seen, hop: number): Promise<InstructionPart[]> {
+/** A file Claude Code reads (`read`: as readPart found it), `hop` hops from the start of its route, then what it imports. */
+async function withImports(path: string, from: string, read: Read, home: string, seen: Seen, hop: number): Promise<InstructionPart[]> {
   seen.set(path, 'listed');
-  const read = await readPart(path);
   return [{ path, from, ...read }, ...('text' in read ? await claudeImports(path, read.text, home, seen, hop + 1) : [])];
 }
 
 /** Claude Code's rules: every `.md` under `rules/`, by path, each with its imports; one with `paths` only for the files they match. */
 async function claudeRules(root: string, home: string, seen: Seen): Promise<InstructionPart[]> {
   const parts: InstructionPart[] = [];
-  for (const path of await filesIn(join(root, 'rules'), '.md', true)) {
+  for (const path of (await markdownUnder(join(root, 'rules'))).sort()) {
     if (seen.get(path) === 'listed') continue;
     const read = await readPart(path), only = 'text' in read ? field(read.text, 'paths') : undefined;
     if (only) seen.set(path, 'listed');
-    parts.push(...(only ? [{ path, from: 'a rule', only, ...read }] : await withImports(path, 'a rule', home, seen, 0)));
+    parts.push(...(only ? [{ path, from: 'a rule', only, ...read }] : await withImports(path, 'a rule', read, home, seen, 0)));
   }
   return scopedLast(parts);
 }

@@ -2,12 +2,12 @@
 // (instructionparts.ts), and that none of them is ever written: a save, the base and its Undo change only the tool's own file.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { applyBase, baseView, instructionsView, saveInstruction, undoBase } from '../src/instructions.ts';
-import { PART_FILE_LIMIT } from '../src/catalogdetail.ts';
+import { PART_TEXT_LIMIT } from '../src/instructionparts.ts';
 import { sha256, type ShareContext } from '../src/share.ts';
 import type { HarnessId, InstructionPart } from '../src/types.ts';
 
@@ -145,6 +145,25 @@ test('Claude Code’s rules: every .md under rules/, sub-folders too, each follo
   } finally { await box.cleanup(); }
 });
 
+test('Claude Code’s rules: a linked folder is followed and each real folder read once, so a loop of links ends; one that can’t be read leaves the rest listed', async () => {
+  const box = await sandbox();
+  const locked = join(box.home, '.claude/rules/locked');
+  try {
+    await box.write('.claude/rules/top.md', 'Top.\n');
+    await box.write('.claude/rules/sub/inner.md', 'Inner.\n');
+    await symlink('..', join(box.home, '.claude/rules/sub/back'));
+    await box.write('shared-rules/linked.md', 'Linked.\n');
+    await symlink(join(box.home, 'shared-rules'), join(box.home, '.claude/rules/team'));
+    await box.write('.claude/rules/locked/hidden.md', 'Not readable here.\n');
+    await chmod(locked, 0o000);
+    assert.deepEqual(await box.said('claude-cli'), [
+      '.claude/rules/sub/inner.md · a rule · Inner.\n',
+      '.claude/rules/team/linked.md · a rule · Linked.\n',
+      '.claude/rules/top.md · a rule · Top.\n',
+    ]);
+  } finally { await chmod(locked, 0o755); await box.cleanup(); }
+});
+
 test('Copilot CLI: its instructions files for every file are shown whole, front matter and all; a scoped one comes last, with its scope', async () => {
   const box = await sandbox();
   try {
@@ -180,14 +199,15 @@ test('OpenCode: the files its config’s instructions list names, in order, each
   } finally { await box.cleanup(); }
 });
 
-test('A file at the size the app reads is shown; one byte past it, or with a zero byte in it, is said instead', async () => {
+test('A part’s text is sent to the page up to its own cap, well below what the tool reads; past it, or with a zero byte in it, its size or why is said instead', async () => {
   const box = await sandbox();
   try {
-    await box.write('.claude/rules/at-limit.md', 'a'.repeat(PART_FILE_LIMIT));
-    await box.write('.claude/rules/past-limit.md', 'a'.repeat(PART_FILE_LIMIT + 1));
+    await box.write('.claude/rules/at-limit.md', 'a'.repeat(PART_TEXT_LIMIT));
+    await box.write('.claude/rules/past-limit.md', 'a'.repeat(PART_TEXT_LIMIT + 1));
     await box.write('.claude/rules/picture.md', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]));
+    await box.write('.claude/rules/very-large.md', 'a'.repeat(5 * 1024 * 1024));
     assert.deepEqual((await box.partsOf('claude-cli')).map(part => 'text' in part ? part.text.length : 'notShown' in part ? part.notShown : part.problem),
-      [PART_FILE_LIMIT, 'larger than 4 MB, so not shown here', 'not text']);
+      [PART_TEXT_LIMIT, '257 KB, so not shown here', 'not text', '5.0 MB, so not shown here']);
   } finally { await box.cleanup(); }
 });
 

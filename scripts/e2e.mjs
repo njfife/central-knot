@@ -6886,11 +6886,13 @@ async function ownPartsFlow() {
   const longPath = 'shared/projects/central-knot-team-handbook/chapters/onboarding/the-first-week-for-a-new-engineer-in-the-platform-group.md';
   put('.claude/notes/added.md', 'Added above.\n');
   put('.claude/notes/long.md', `${Array.from({ length: 200 }, (_, at) => `- Line ${at + 1} of a long file.`).join('\n')}\n`);
-  put('.claude/notes/huge.md', 'a'.repeat(4 * 1024 * 1024 + 1));
+  put('.claude/notes/huge.md', 'a'.repeat(300 * 1024));
+  put('.claude/notes/a-b.md', 'Dash.\n');
+  put('.claude/notes/a/b.md', 'Slash.\n');
   put(longPath, 'Read in the first week.\n');
   const wide = `generated-${'x'.repeat(170)}/**/*.ts`;
   put('.claude/rules/generated.md', `---\npaths: ["${wide}"]\n---\nLeave generated code alone.\n`);
-  put('.claude/CLAUDE.md', `@notes/added.md\n${claudeMd}@notes/long.md\n@notes/gone.md\n@notes\n@notes/huge.md\n@~/.codex/AGENTS.md\n@~/${longPath}\n`);
+  put('.claude/CLAUDE.md', `@notes/added.md\n${claudeMd}@notes/long.md\n@notes/gone.md\n@notes\n@notes/huge.md\n@~/.codex/AGENTS.md\n@~/${longPath}\n@notes/a-b.md\n@notes/a/b.md\n`);
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && !(await a.exists(part('claude-cli', '.claude/notes/added.md'))); tries++) await wait(100);
   same('after an import is put above it by hand, the open file is still the one open, its press the same; the new one is folded',
@@ -6900,7 +6902,9 @@ async function ownPartsFlow() {
   same('a file the tool can’t read stands out in the warning tone and names the line to mend; one shown or past the cap does not', [
     await says('.claude/notes/gone.md'), await says('.claude/notes'), await says('.claude/notes/huge.md'), await says('.claude/notes/long.md')], [
     ['imported by CLAUDE.md, line 7 · missing', true], ['imported by CLAUDE.md, line 8 · not a file', true],
-    ['imported by CLAUDE.md, line 9 · larger than 4 MB, so not shown here', false], ['imported by CLAUDE.md, line 6 · 200 lines', false]]);
+    ['imported by CLAUDE.md, line 9 · 300 KB, so not shown here', false], ['imported by CLAUDE.md, line 6 · 200 lines', false]]);
+  same('a file with nothing to show has no Show: one missing, a folder, one past the cap', await Promise.all(['.claude/notes/gone.md', '.claude/notes', '.claude/notes/huge.md'].map(path => a.exists(press('claude-cli', path)))), [false, false, false]);
+  same('each file’s press has its own id, two paths that differ only by / and - included', await a.run(`(() => { const ids = [...document.querySelectorAll('#ins-parts-claude-cli .ins-part-line .btn')].map(press => press.id); return [ids.length, new Set(ids).size]; })()`), [12, 12]);
   same('a part that is another tool’s own file says whose it is, and where it is edited', (await says('.codex/AGENTS.md'))[0], 'imported by CLAUDE.md, line 10 · Codex’s own file: edited on its card · 1 line');
   // A long file has its Hide at its end too, and that one folds it.
   await a.click(press('claude-cli', '.claude/notes/long.md'));
@@ -6940,11 +6944,11 @@ async function ownPartsFlow() {
   same('the base’s block goes to each tool’s own file', own.filter(path => readNow(at(path)).includes('- Shared by every tool.')), own);
   same('and to no file another one brings in', hashes(), before);
   // On a tool's Instructions tab under Harnesses, the same card lists the same files, and a part opens there.
+  const onInstructions = await lines('claude-cli');
   await a.click('#nav-harnesses');
   await a.click('#harness-claude-cli');
   await a.click('#harness-tab-instructions');
-  same('Claude Code’s Instructions tab under Harnesses lists the same files, in the same words', (await lines('claude-cli')).slice(0, 2), [
-    [at('.claude/notes/added.md'), 'imported by CLAUDE.md, line 1 · 1 line'], [at('.claude/notes/style.md'), 'imported by CLAUDE.md, line 5 · 20 lines']]);
+  same('Claude Code’s Instructions tab under Harnesses lists the same files, all fifteen, in the same words', [await lines('claude-cli'), onInstructions.length], [onInstructions, 15]);
   await a.click(press('claude-cli', '.claude/notes/style.md'));
   same('and Show opens a part there', (await opened('claude-cli', '.claude/notes/style.md')).slice(0, 4), ['Hide', 'true', 'content mono', 20]);
   await picture('parts-harness-tab-1316-dark', [1316, 819], { top: part('claude-cli', '.claude/notes/style.md') });

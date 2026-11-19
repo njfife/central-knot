@@ -1004,7 +1004,7 @@ export interface InstructionFile {
    *  and how that copy compares (see BaseHeld.state). */
   base?: BaseHeld;
   /** The other files the tool reads with this one, in its order (instructionparts.ts), read for the page's view only (absent
-   *  elsewhere): shown there, never written from this card. */
+   *  elsewhere): shown there. One is written only where it is some tool's own file: from that tool's card and by the base. */
   parts?: InstructionPart[];
 }
 /** A file a tool reads beside its own instruction file: its text, why it is not shown, or why the tool can't read it. */
