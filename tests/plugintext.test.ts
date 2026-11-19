@@ -307,6 +307,8 @@ test('A home switched while the first home’s marketplaces are still being aske
     await until(() => answers.length === 2, 'the second home asked for');
     answers[1]!({ sources: [other], complete: true });
     await until(() => ends > 0 && job.texts().length > 0, 'the second home’s run');
+    // Its run may still be saving: stopped (which waits for that) before anything is looked at or cleaned up.
+    await job.stop();
     assert.deepEqual(job.texts().map(entry => entry.plugin), ['lamp']);
   } finally { await w.close(); }
 });
