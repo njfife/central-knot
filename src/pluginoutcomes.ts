@@ -46,7 +46,7 @@ export function whenItRuns(tool: HarnessId, hook: DeclaredHook): string {
  */
 export function sessionTextNote(tool: HarnessId): string | undefined {
   if (tool === 'codex-cli') return 'Codex runs a hook only after you trust it in `/hooks`';
-  if (tool === 'copilot-cli') return 'Copilot CLI uses only what a start-of-session hook prints as `additionalContext`; it ignores what prompt hooks print';
+  if (tool === 'copilot-cli') return 'Copilot CLI uses only what a start-of-session hook prints as top-level `additionalContext`, not Claude Code’s `hookSpecificOutput` form; it ignores what prompt hooks print';
   return undefined;
 }
 

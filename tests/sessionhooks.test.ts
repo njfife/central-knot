@@ -103,7 +103,7 @@ test('Codex and Copilot CLI say once what they take of a hook, in the words thei
   assert.deepEqual([codex!.groups.length, codex!.note, copilot!.note], [2, sessionTextNote('codex-cli'), sessionTextNote('copilot-cli')]);
   // Trusting a project is not enough in Codex: each hook is trusted in its /hooks (https://learn.chatgpt.com/docs/hooks).
   assert.equal(codex!.note, 'Codex runs a hook only after you trust it in `/hooks`');
-  assert.equal(copilot!.note, 'Copilot CLI uses only what a start-of-session hook prints as `additionalContext`; it ignores what prompt hooks print');
+  assert.equal(copilot!.note, 'Copilot CLI uses only what a start-of-session hook prints as top-level `additionalContext`, not Claude Code’s `hookSpecificOutput` form; it ignores what prompt hooks print');
   const table = (tool: HarnessId) => outcomes(tool, { skills: 0, commands: 0, agents: 0, hooks: true, mcp: 0, mcpRootVariable: false, bin: false, sessionTextHooks: [tool] })
     .find(outcome => outcome.component === 'Session text')!.text;
   assert.deepEqual([table('codex-cli'), table('copilot-cli')], [`waits for trust: ${codex!.note}`, `is limited: ${copilot!.note}`]);

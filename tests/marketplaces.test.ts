@@ -352,7 +352,7 @@ test('A start-of-session hook printing Claude Code’s JSON, installed in Claude
     // Each tool's line is its fixed rule for start-of-session hooks (capability data, Appendix D), never a reading of what this
     // hook prints: Claude Code's works; Copilot CLI's says which form it takes and that Claude Code's is ignored.
     const line = (tool: HarnessId) => outcomes(tool, componentsFrom(detail)).find(outcome => outcome.component === 'Session text');
-    assert.deepEqual([line('claude-cli')?.result, line('copilot-cli')?.result, line('copilot-cli')?.text], ['works', 'limited', 'is limited: Copilot CLI uses only what a start-of-session hook prints as `additionalContext`; it ignores what prompt hooks print']);
+    assert.deepEqual([line('claude-cli')?.result, line('copilot-cli')?.result, line('copilot-cli')?.text], ['works', 'limited', 'is limited: Copilot CLI uses only what a start-of-session hook prints as top-level `additionalContext`, not Claude Code’s `hookSpecificOutput` form; it ignores what prompt hooks print']);
   } finally { await box.cleanup(); }
 });
 

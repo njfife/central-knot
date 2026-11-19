@@ -187,7 +187,7 @@ test('Each hook is kept as declared, in Claude Code’s form and Copilot CLI’s
     const sessionText = (components: ReturnType<typeof componentsFrom>) => (['claude-cli', 'copilot-cli', 'codex-cli'] as const).map(tool => outcomes(tool, components).filter(outcome => outcome.component === 'Session text').map(outcome => [outcome.result, outcome.text]));
     assert.deepEqual(sessionText(componentsFrom(contents)), [
       [['works', 'comes from start-of-session and prompt hooks']],
-      [['limited', 'is limited: Copilot CLI uses only what a start-of-session hook prints as `additionalContext`; it ignores what prompt hooks print']],
+      [['limited', 'is limited: Copilot CLI uses only what a start-of-session hook prints as top-level `additionalContext`, not Claude Code’s `hookSpecificOutput` form; it ignores what prompt hooks print']],
       [['limited', 'waits for trust: Codex runs a hook only after you trust it in `/hooks`']],
     ]);
     // A plugin whose hooks all listen elsewhere has hooks, and no Session text line.

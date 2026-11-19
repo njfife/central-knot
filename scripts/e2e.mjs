@@ -8815,7 +8815,7 @@ echo "$*" >> "$HOME/claude-calls.txt"
     await a.run(`!!(document.querySelector('#session-codex-cli .session-note').compareDocumentPosition(document.querySelector('#session-codex-cli .session-groups')) & Node.DOCUMENT_POSITION_FOLLOWING)`)],
     ['Codex runs a hook only after you trust it in /hooks.', [['release-helper', [['When a session starts or when a session resumes', 'node "${PLUGIN_ROOT}/hooks/remind.mjs" --days 2'], ['When a session starts or when a session resumes', long]], []]], true]);
   same('Copilot CLI with only a prompt hook: no row, its note says why', [await groups('copilot-cli'), await a.text('#session-copilot-cli .session-note')],
-    [[], 'Copilot CLI uses only what a start-of-session hook prints as additionalContext; it ignores what prompt hooks print.']);
+    [[], 'Copilot CLI uses only what a start-of-session hook prints as top-level additionalContext, not Claude Code’s hookSpecificOutput form; it ignores what prompt hooks print.']);
   same('Pi’s and OpenCode’s extensions by name, under each tool’s own word, the sentence once', [await a.text('#session-pi-cli .session-title'), await names('pi-cli'), await a.text('#session-opencode-cli .session-title'), await names('opencode-cli'),
     await a.text('#session-pi-cli .session-about')], ['Packages that can add text', ['npm:@example/pi-tools@1.0.0'], 'Plugins that can add text', ['opencode-wakatime'],
     'Pi loads these packages into every session, and they can add text to it; what they add is known only when they run.']);
