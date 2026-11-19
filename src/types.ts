@@ -1097,11 +1097,14 @@ export interface PluginUpdatesView {
   updated: PluginUpdateLine[]; failed: PluginUpdateLine[]; first: boolean;
 }
 /** Why this copy can't update itself (see updates.ts for each one's words). */
-export type UpdateReason = 'dev' | 'untagged' | 'unsigned' | 'applications' | 'readonly';
-/** A newer release: its tag, its Mac zip (where and how many bytes) and its page, which has the release notes. */
-export interface UpdateRelease { tag: string; zip: string; size: number; page: string }
+export type UpdateReason = 'dev' | 'untagged' | 'unsigned' | 'applications' | 'readonly' | 'linux';
 /**
- * Updates as the main process has them. `shown`: false where there are no releases (not macOS), and nothing is said anywhere.
+ * A newer release: its tag, this platform's download of it (where and how many bytes: a Mac's zip, which the updater installs;
+ * Linux's AppImage, which nothing downloads yet) and its page, which has the release notes.
+ */
+export interface UpdateRelease { tag: string; download: string; size: number; page: string }
+/**
+ * Updates as the main process has them. `shown`: false where there are no releases (not macOS or Linux), and nothing is said anywhere.
  * `tag`: the release tag this build was made from; `reason`: why it can't update itself. `checked`: the last check, and why
  * it failed. `available`: a newer release; `step` and `progress` (0 to 1): an update under way; `failed`: why the last update
  * stopped (the installed app unchanged). `updated`: this launch is the first after an update to that release.
