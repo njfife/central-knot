@@ -110,9 +110,9 @@ export function click(draft: PluginDraft, item: PluginItemAt): void {
  * A main switch's part for one item in every tool that has it through a plugin, toward `on`: each turns as its tool's line in
  * the opened row turns it (click; `turned`), so where the tool has no switch for one item (a skill in Claude Code, an agent in
  * Copilot CLI) the whole plugin turns there (wholeWords says so on the switch). One whose switch can't be written is left, and
- * said as a problem (`left`, `leftIn`).
+ * said as a problem, one for each tool (`left`, `leftIn`).
  */
-export function turnEvery(items: PluginItemAt[], on: boolean): { draft: PluginDraft; ops: PluginOp[]; turned: PluginItemAt[]; left?: string; leftIn: HarnessId[] } {
+export function turnEvery(items: PluginItemAt[], on: boolean): { draft: PluginDraft; ops: PluginOp[]; turned: PluginItemAt[]; left?: string[]; leftIn: HarnessId[] } {
   const draft: PluginDraft = new Map();
   const turned: PluginItemAt[] = [];
   const left: string[] = [];
@@ -121,7 +121,7 @@ export function turnEvery(items: PluginItemAt[], on: boolean): { draft: PluginDr
     if (held) left.push(`Still ${on ? 'off' : 'on'} in ${names[item.tool]}: ${held}`); else { click(draft, item); turned.push(item); }
   }
   const leftIn = items.filter(item => !turned.includes(item) && onNow(item) !== on).map(item => item.tool);
-  return { draft, ops: [...draft.values()], turned, left: left.join(' ') || undefined, leftIn };
+  return { draft, ops: [...draft.values()], turned, left: left.length ? left : undefined, leftIn };
 }
 
 /**
