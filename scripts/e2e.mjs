@@ -5043,11 +5043,21 @@ async function syncEverythingFlow() {
   // A folder home outside the HOME the app is given (that one counts as real, which Linux never writes).
   const real = join(scratch, 'everything-real');
   mkdirSync(real, { recursive: true });
-  // The poll starts with the app (main.ts POLL_MS, 20 s): no poll has run until 20 s after `opened` (takenInSoon).
-  let opened = Date.now(), a = await launch(data, [], real);
+  let a = await launch(data, [], real), opened;
   const foundNote = () => a.text('.ov-section[data-section="found"] .ov-section-after');
   const ruleSays = () => a.text('#setting-sync-everything-notice .setting-message-text');
   const ruleOn = () => a.run(`document.querySelector('#sync-everything-on')?.getAttribute('aria-checked')`);
+  /**
+   * Quits once its page had no errors, then opens again on Settings: the poll starts with the app (main.ts POLL_MS, 20 s), so
+   * none has run until 20 s after `opened` (takenInSoon).
+   */
+  const openAgainOnSettings = async page => {
+    same(`no page errors, Synchronize everything, ${page}`, a.pageErrors, []);
+    await a.quit();
+    opened = Date.now(); a = await launch(data, [], real);
+    await a.click('#nav-settings');
+    for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
+  };
   /**
    * Switches the rule on with `file` still being saved (its time kept at now) until the page shows the answer, so the switch's
    * pass leaves it inside the settle window however late that pass runs. Returns when saving stopped.
@@ -5085,6 +5095,7 @@ async function syncEverythingFlow() {
     [await ruleOn(), await ruleSays()], ['false', 'Turning it on adds the 2 items found in your tools now. 1 found item has copies that differ and waits for your choice of copy.']);
   await fitsAtMinimum(a, 'Settings with Synchronize everything off');
   await a.shot('everything-off');
+  await openAgainOnSettings('before switching on');
   // Still being saved, as a tool writes a new skill, as the switch's pass runs: left inside the settle window. Left still, a
   // pass soon after takes it in by itself (takenInSoon), whose read keeps the notices no page has shown yet.
   const freshSaved = await switchOnWhileSaving(join(skill(claude, 'fresh', text('fresh', 'Just saved.')), 'SKILL.md'));
@@ -5144,17 +5155,13 @@ async function syncEverythingFlow() {
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
   same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 1 found item was taken out of Central Knot earlier and isn’t added by itself again: Add on its row, or Restore in History, brings it back. 2 found items have copies that differ and wait for your choice of copy.']);
-  same('no page errors, Synchronize everything', a.pageErrors, []);
-  // Opened again, so the next poll is 20 s away again (takenInSoon). Saved just before the rule is switched on again, with
-  // nothing else for that pass to write, and still being saved as it runs: that pass leaves it, and a pass soon after takes it.
-  await a.quit();
-  opened = Date.now(); a = await launch(data, [], real);
-  await a.click('#nav-settings');
-  for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
+  await openAgainOnSettings('switched on and off');
+  // Saved just before the rule is switched on again, with nothing else for that pass to write, and still being saved as it
+  // runs: that pass leaves it, and a pass soon after takes it in (takenInSoon).
   const laterSaved = await switchOnWhileSaving(join(skill(claude, 'later', text('later', 'Saved just before.')), 'SKILL.md'));
   check('the switch’s own pass leaves a copy still being saved inside the settle window', !existsSync(join(codex, 'later')));
   await takenInSoon('later', text('later', 'Saved just before.'), laterSaved, 'a copy the pass left inside the settle window is taken in a moment later, by itself');
-  same('no page errors, Synchronize everything, opened again', a.pageErrors, []);
+  same('no page errors, Synchronize everything, switched on again', a.pageErrors, []);
   await a.quit();
 }
 
