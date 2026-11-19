@@ -1551,7 +1551,9 @@ async function practiceFlow() {
   await problemAfterPass('first-pass');
   const backgroundSaid = await a.text('#header .header-result');
   await a.run(`document.querySelector('#header .band-dismiss')?.click()`); await a.settle();
-  same('a background pass’s problem, alone in the header, is closed by its ×', [/standup \(Copilot CLI\)/.test(backgroundSaid ?? ''), await a.exists('#header .header-result')], [true, false]);
+  // A removal Automatic sync keeps trying is said in its own words (matrix.ts listResult).
+  const retried = /Automatic sync still couldn’t remove Copilot CLI’s copy of standup\. Central Knot will try again\./;
+  same('a background pass’s problem, alone in the header, is closed by its ×', [retried.test(backgroundSaid ?? ''), await a.exists('#header .header-result')], [true, false]);
   await a.click('#header-refresh');
   same('reported again by the next read, it stays closed', await a.exists('#header .header-result'), false);
   for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o644 : 0o755);
@@ -1559,7 +1561,7 @@ async function practiceFlow() {
   // Cleared (standup On again, nothing left to remove), then the same failure later: it is said again.
   for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o444 : 0o555);
   await problemAfterPass('repeat-pass');
-  same('the same failure, after it cleared, is said again', /standup \(Copilot CLI\)/.test(await a.text('#header .header-result') ?? ''), true);
+  same('the same failure, after it cleared, is said again', retried.test(await a.text('#header .header-result') ?? ''), true);
   for (const path of copilotLocked) chmodSync(path, path.endsWith('.md') ? 0o644 : 0o755);
   await a.click(standupSwitch);
   // Sync off: edits are noted, not spread; the page shows them pending; Sync once spreads them once.
