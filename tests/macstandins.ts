@@ -53,13 +53,20 @@ export function standInMac(root: string): StandInMac {
   };
 }
 
+/** Each stand-in app's word that it has been asked to quit (askedToQuit), listened for from its start. */
+const askedOf = new WeakMap<ChildProcess, Promise<void>>();
+
 /**
  * A process standing in for a running app, once it is ready to be asked: one that quits when asked (a signal to stop, as
  * Central Knot takes Quit), `afterMs` later where it finishes something first (a plugin step: main.ts before-quit), or one that
- * stays, as an app does that won't quit. The caller kills it.
+ * stays, as an app does that won't quit. It says when it is asked (askedToQuit). The caller kills it.
  */
 export function standInApp(quits: boolean, afterMs = 0): Promise<ChildProcess> {
-  const code = `process.on('SIGTERM', () => { ${quits ? `setTimeout(() => process.exit(0), ${afterMs});` : ''} }); setInterval(() => {}, 1e9); console.log('ready');`;
+  const code = `process.on('SIGTERM', () => { console.log('asked to quit'); ${quits ? `setTimeout(() => process.exit(0), ${afterMs});` : ''} }); setInterval(() => {}, 1e9); console.log('ready');`;
   const child = spawn(process.execPath, ['-e', code], { stdio: ['ignore', 'pipe', 'ignore'] });
+  askedOf.set(child, new Promise(heard => child.stdout!.on('data', said => { if (String(said).includes('asked to quit')) heard(); })));
   return new Promise((done, fail) => { child.stdout!.once('data', () => done(child)); child.once('error', fail); });
 }
+
+/** Settles once a stand-in app has been asked to quit: the moment its signal arrives, whether it then quits or not. */
+export const askedToQuit = (app: ChildProcess): Promise<void> => askedOf.get(app)!;
