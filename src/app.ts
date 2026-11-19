@@ -183,12 +183,14 @@ export const unpin = () => { state.pinned = noPins(); };
 
 let render = () => {};
 export const setRenderer = (next: () => void) => { render = next; };
-/** Re-renders and puts focus back on the control that had it, found by id. */
-export const rerender = () => {
+/** Draws, then puts focus back on the control that had it, found by id and without scrolling to it: a control drawn again is a new element. */
+export const keepingFocus = (draw: () => void) => {
   const focused = document.activeElement?.id;
-  render();
+  draw();
   if (focused && document.activeElement?.id !== focused) document.getElementById(focused)?.focus({ preventScroll: true });
 };
+/** Re-renders (renderer.ts render, which keeps the focus where it was). */
+export const rerender = () => render();
 
 /** The practice copy's note on the Overview, shown until the person hides it (kept per viewer, in this window's storage). */
 const PRACTICE_NOTE = 'ck-practice-banner-dismissed';
