@@ -6761,6 +6761,206 @@ async function pluginTextFlow() {
 }
 
 /**
+ * The other files each tool reads with its own instruction file (instructionparts.ts), on its card on Instructions and on its
+ * Instructions tab under Harnesses: under "Also read with" the tool's file, in two groups (in every session; only for matching
+ * files), in the tool's order; each opened and folded in place by a press, as quoted text that opens no editor, without
+ * touching the card's own editor; what is open follows the file. Never written: a save of a tool's own file and the base change
+ * only the tools' own files. A made-up home: Claude Code with three imports (one nested) and two rules (one only for some
+ * files), Copilot CLI with two instructions files (one scoped), OpenCode with a file, a relative pattern and a web address in
+ * its list, and Codex, which reads nothing more at the home's level. Then the awkward lines: a missing file, a folder, one too
+ * large, a 200-line one, another tool's own file, a path long enough to be cut and a scope of one 180-character piece.
+ */
+async function ownPartsFlow() {
+  const home = join(scratch, 'parts-home'), data = join(scratch, 'parts-data'), real = join(scratch, 'parts-real');
+  const put = (path, body) => { mkdirSync(dirname(join(home, path)), { recursive: true }); writeFileSync(join(home, path), body); };
+  const claudeMd = '# How I work\n- Keep changes small.\n\nSee @notes/style.md and @~/shared/team.md for more.\n';
+  put('.claude/CLAUDE.md', claudeMd);
+  put('.claude/notes/style.md', `# Style\n${Array.from({ length: 18 }, (_, at) => `- Rule ${at + 1}.`).join('\n')}\n@deeper.md\n`);
+  put('.claude/notes/deeper.md', 'Deeper: two levels down.\n');
+  put('shared/team.md', '# Team\n- Review every pull request.\n');
+  put('.claude/rules/testing.md', 'Run the tests before saying it is done.\n');
+  put('.claude/rules/typescript.md', '---\npaths: ["src/**/*.ts"]\n---\nPrefer types to comments.\n');
+  put('.copilot/copilot-instructions.md', 'Be brief.\n');
+  put('.copilot/instructions/all.instructions.md', '---\napplyTo: "**"\n---\nAnswer in English.\n');
+  put('.copilot/instructions/ts.instructions.md', '---\napplyTo: "**/*.ts"\n---\nTypes first.\n');
+  put('.config/opencode/AGENTS.md', 'Be kind.\n');
+  put('.config/opencode/opencode.json', JSON.stringify({ instructions: ['~/shared/team.md', 'docs/*.md', 'https://example.com/house-rules.md'] }, null, 2));
+  put('.codex/AGENTS.md', 'Codex only.\n');
+  const brought = ['.claude/notes/style.md', '.claude/notes/deeper.md', 'shared/team.md', '.claude/rules/testing.md', '.claude/rules/typescript.md',
+    '.copilot/instructions/all.instructions.md', '.copilot/instructions/ts.instructions.md', '.config/opencode/opencode.json'];
+  const hashes = () => brought.map(path => createHash('sha256').update(readFileSync(join(home, path))).digest('hex'));
+  const before = hashes();
+  for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  const a = await launch(data, [], real, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  if (await a.exists('#setup-no')) await a.click('#setup-no');
+  await a.click('#nav-instructions');
+  for (let tries = 0; tries < 50 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);
+  const card = tool => `article[aria-label="${{ 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'opencode-cli': 'OpenCode', 'codex-cli': 'Codex' }[tool]} instructions"]`;
+  const at = path => join(home, path);
+  /** A part's own block, found by its file. */
+  const part = (tool, path) => `#ins-parts-${tool} .ins-part[data-path=${JSON.stringify(at(path))}]`;
+  const press = (tool, path) => `${part(tool, path)} .ins-part-line .btn`;
+  /** Each line under a tool's card: the file's whole path, then how the tool comes to read it and its size, or why it isn't shown. */
+  const lines = tool => a.all(`#ins-parts-${tool} .ins-part-line`, `[e.querySelector('.path-text').title, e.querySelector('.ins-part-says').textContent]`);
+  /** The card's heading, then each group's sub-heading and how many files it has. */
+  const groups = tool => a.run(`(() => { const parts = document.querySelector('#ins-parts-${tool}'); return [parts.querySelector('.ins-parts-head strong').textContent,
+    ...[...parts.querySelectorAll('.ins-parts-group')].map(group => group.querySelector('.ins-parts-sub').textContent + ': ' + group.querySelectorAll('.ins-part').length)]; })()`);
+  /** An opened part: its press's words and state, what its text looks like, its lines, and the press at its end, if any. */
+  const opened = (tool, path) => a.run(`(() => { const block = document.querySelector(${JSON.stringify(part(tool, path))}); const pre = block?.querySelector('pre');
+    return [block?.querySelector('.ins-part-line .btn')?.textContent, block?.querySelector('.ins-part-line .btn')?.getAttribute('aria-expanded'), pre ? pre.className : null,
+      pre ? pre.textContent.split('\\n').length : 0, block?.querySelector('.ins-part-end .btn')?.textContent ?? null]; })()`);
+  same('Claude Code’s card: under “Also read with CLAUDE.md”, the files read in every session, then the one only for matching files', await groups('claude-cli'),
+    ['Also read with CLAUDE.md', 'In every session: 4', 'Only for matching files: 1']);
+  same('Claude Code’s card lists its imports as it reads them, each nested one after the file that imports it, then its rules, a scoped one last, with its scope and size', await lines('claude-cli'), [
+    [at('.claude/notes/style.md'), 'imported by CLAUDE.md, line 4 · 20 lines'],
+    [at('.claude/notes/deeper.md'), 'imported by style.md, line 20 · 1 line'],
+    [at('shared/team.md'), 'imported by CLAUDE.md, line 4 · 2 lines'],
+    [at('.claude/rules/testing.md'), 'a rule · 1 line'],
+    [at('.claude/rules/typescript.md'), 'a rule · for src/**/*.ts · 4 lines']]);
+  same('Copilot CLI’s card: its instructions files, the scoped one under its own sub-heading with its scope', [await groups('copilot-cli'), await lines('copilot-cli')], [
+    ['Also read with copilot-instructions.md', 'In every session: 1', 'Only for matching files: 1'],
+    [[at('.copilot/instructions/all.instructions.md'), 'an instructions file · 4 lines'], [at('.copilot/instructions/ts.instructions.md'), 'an instructions file · for **/*.ts · 4 lines']]]);
+  same('OpenCode’s card lists what its config names, in order: a file it reads, and the rest as written', await lines('opencode-cli'), [
+    [at('shared/team.md'), 'named in opencode.json · 2 lines'],
+    ['docs/*.md', 'named in opencode.json · a relative path: looked for from the folder a session starts in, as OpenCode resolves it'],
+    ['https://example.com/house-rules.md', 'named in opencode.json · a web address: OpenCode fetches it, Central Knot doesn’t']]);
+  check('Codex’s card has no other files: it reads none at the home’s level', !(await a.exists(`${card('codex-cli')} .ins-parts`)), await a.text(card('codex-cli')));
+  check('the parts come after the file’s own text', await a.run(`(() => { const card = document.querySelector(${JSON.stringify(card('claude-cli'))}); return !!(card.querySelector('.ins-body').compareDocumentPosition(card.querySelector('.ins-parts')) & Node.DOCUMENT_POSITION_FOLLOWING); })()`));
+  same('one line per part until it is opened', await a.all('.ins-parts pre', 'e.id'), []);
+  // A part opens in place, whole, as quoted text (a plugin's file's look), with one word to close it; a press folds it again.
+  await a.click(press('claude-cli', '.claude/notes/style.md'));
+  same('Show opens a part’s whole text in place, as quoted text, and Hide is the one word to close it', await opened('claude-cli', '.claude/notes/style.md'), ['Hide', 'true', 'content mono', 20, null]);
+  same('with no second way to fold it', await a.all(`${part('claude-cli', '.claude/notes/style.md')} .btn`, 'e.textContent'), ['Hide']);
+  await a.click(`${part('claude-cli', '.claude/notes/style.md')} pre`);
+  check('a part’s text opens no editor: it is not changed here', !(await a.exists('textarea')), await a.all('textarea', 'e.id'));
+  await a.click(press('claude-cli', '.claude/notes/style.md'));
+  same('Hide folds it: its text is gone and its press says Show', await opened('claude-cli', '.claude/notes/style.md'), ['Show', 'false', null, 0, null]);
+  // A scoped file opens too: its sub-heading says when it is read.
+  await a.click(press('claude-cli', '.claude/rules/typescript.md'));
+  same('a file read only for matching files opens as the others do', (await opened('claude-cli', '.claude/rules/typescript.md')).slice(0, 4), ['Hide', 'true', 'content mono', 4]);
+  // Typing in the card's own file, a part opened and folded leaves the editor as it is: the same box, the caret where it was.
+  await a.click('#ins-edit-claude-cli');
+  // A redraw of the page's own (not a press's) can land just after the editor opens: wait until the editor stays the same box a moment.
+  const editor = `document.querySelector('#ins-text-claude-cli')`;
+  for (let tries = 0; tries < 10; tries++) { await a.run(`(${editor}.ckQuiet = true)`); await wait(700); if (await a.run(`${editor}.ckQuiet === true`)) break; }
+  await a.run(`(() => { const area = ${editor}; area.ckSame = true; area.focus(); area.setSelectionRange(10, 10); return true; })()`);
+  await a.click(press('claude-cli', '.claude/notes/deeper.md'));
+  await a.click(press('claude-cli', '.claude/notes/deeper.md'));
+  same('Show and Hide on a part leave the card’s editor as it was, the caret where it was', await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); return [area?.ckSame ?? false, area?.selectionStart]; })()`), [true, 10]);
+  await a.click('#ins-cancel-claude-cli');
+  await sizeTo(a, 860, 600);
+  same('nothing cut off at 860×600 with a part open', await a.run(CUT_OFF), []);
+  await fitsAtMinimum(a, 'Instructions with a part open');
+  const picture = async (name, [width, height], { theme = 'dark', rail = false, top, block = 'start' } = {}) => {
+    if (!shots) return;
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`) !== rail) await a.click('#sidebar-toggle');
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+    await a.run(`document.querySelector(${JSON.stringify(top)})?.scrollIntoView({ block: ${JSON.stringify(block)} })`);
+    await wait(300);
+    await a.shot(name);
+  };
+  await a.click(press('claude-cli', '.claude/rules/typescript.md'));
+  await a.click(press('claude-cli', '.claude/notes/style.md'));
+  for (const [size, name] of [[[860, 600], '860'], [[1316, 819], '1316'], [[1728, 1080], '1728']]) await picture(`parts-claude-open-${name}-dark`, size, { top: '#ins-parts-claude-cli' });
+  await picture('parts-claude-open-1316-rail-dark', [1316, 819], { rail: true, top: '#ins-parts-claude-cli' });
+  await picture('parts-claude-open-1316-light', [1316, 819], { theme: 'light', top: '#ins-parts-claude-cli' });
+  await a.click(press('claude-cli', '.claude/notes/style.md'));
+  await picture('parts-claude-folded-1316-dark', [1316, 819], { top: card('claude-cli') });
+  await picture('parts-claude-folded-1316-rail-dark', [1316, 819], { rail: true, top: card('claude-cli') });
+  await picture('parts-claude-folded-860-light', [860, 600], { theme: 'light', top: card('claude-cli') });
+  for (const tool of ['copilot-cli', 'opencode-cli']) {
+    await picture(`parts-${tool}-1316-dark`, [1316, 819], { top: `#ins-parts-${tool}`, block: 'center' });
+    await picture(`parts-${tool}-860-dark`, [860, 600], { top: `#ins-parts-${tool}`, block: 'center' });
+  }
+  await picture('parts-opencode-cli-1728-light', [1728, 1080], { theme: 'light', top: `#ins-parts-opencode-cli`, block: 'center' });
+  await a.click(press('claude-cli', '.claude/rules/typescript.md'));
+  await picture('parts-claude-scoped-open-1316-dark', [1316, 819], { top: part('claude-cli', '.claude/rules/typescript.md') });
+  await a.click(press('claude-cli', '.claude/rules/typescript.md'));
+  // What is open follows the file: an import put above it by hand leaves it open, its press the same, the new one folded.
+  await a.click(press('claude-cli', '.claude/notes/style.md'));
+  const styleId = await a.run(`document.querySelector(${JSON.stringify(press('claude-cli', '.claude/notes/style.md'))}).id`);
+  // Then the awkward lines, all imported by CLAUDE.md: a missing file, a folder, one past the cap, a long one, Codex's own file,
+  // a path long enough to be cut; and a rule whose scope is one 180-character piece.
+  const longPath = 'shared/projects/central-knot-team-handbook/chapters/onboarding/the-first-week-for-a-new-engineer-in-the-platform-group.md';
+  put('.claude/notes/added.md', 'Added above.\n');
+  put('.claude/notes/long.md', `${Array.from({ length: 200 }, (_, at) => `- Line ${at + 1} of a long file.`).join('\n')}\n`);
+  put('.claude/notes/huge.md', 'a'.repeat(300 * 1024));
+  put('.claude/notes/a-b.md', 'Dash.\n');
+  put('.claude/notes/a/b.md', 'Slash.\n');
+  put(longPath, 'Read in the first week.\n');
+  const wide = `generated-${'x'.repeat(170)}/**/*.ts`;
+  put('.claude/rules/generated.md', `---\npaths: ["${wide}"]\n---\nLeave generated code alone.\n`);
+  put('.claude/CLAUDE.md', `@notes/added.md\n${claudeMd}@notes/long.md\n@notes/gone.md\n@notes\n@notes/huge.md\n@~/.codex/AGENTS.md\n@~/${longPath}\n@notes/a-b.md\n@notes/a/b.md\n`);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists(part('claude-cli', '.claude/notes/added.md'))); tries++) await wait(100);
+  same('after an import is put above it by hand, the open file is still the one open, its press the same; the new one is folded',
+    [await a.run(`document.querySelector(${JSON.stringify(press('claude-cli', '.claude/notes/style.md'))}).id`), (await opened('claude-cli', '.claude/notes/style.md')).slice(0, 2), (await opened('claude-cli', '.claude/notes/added.md')).slice(0, 2)],
+    [styleId, ['Hide', 'true'], ['Show', 'false']]);
+  const says = path => a.run(`(() => { const says = document.querySelector(${JSON.stringify(part('claude-cli', path))} + ' .ins-part-says'); return [says.textContent, says.classList.contains('tone-warning')]; })()`);
+  same('a file the tool can’t read stands out in the warning tone and names the line to mend; one shown or past the cap does not', [
+    await says('.claude/notes/gone.md'), await says('.claude/notes'), await says('.claude/notes/huge.md'), await says('.claude/notes/long.md')], [
+    ['imported by CLAUDE.md, line 7 · missing', true], ['imported by CLAUDE.md, line 8 · not a file', true],
+    ['imported by CLAUDE.md, line 9 · 300 KB, so not shown here', false], ['imported by CLAUDE.md, line 6 · 200 lines', false]]);
+  same('a file with nothing to show has no Show: one missing, a folder, one past the cap', await Promise.all(['.claude/notes/gone.md', '.claude/notes', '.claude/notes/huge.md'].map(path => a.exists(press('claude-cli', path)))), [false, false, false]);
+  same('each file’s press has its own id, two paths that differ only by / and - included', await a.run(`(() => { const ids = [...document.querySelectorAll('#ins-parts-claude-cli .ins-part-line .btn')].map(press => press.id); return [ids.length, new Set(ids).size]; })()`), [12, 12]);
+  same('a part that is another tool’s own file says whose it is, and where it is edited', (await says('.codex/AGENTS.md'))[0], 'imported by CLAUDE.md, line 10 · Codex’s own file: edited on its card · 1 line');
+  // A long file has its Hide at its end too, and that one folds it.
+  await a.click(press('claude-cli', '.claude/notes/long.md'));
+  same('a 200-line file opens whole, with Hide at its start and at its end', await opened('claude-cli', '.claude/notes/long.md'), ['Hide', 'true', 'content mono', 200, 'Hide']);
+  await a.click(press('claude-cli', '.claude/notes/added.md'));
+  same('three files open at once', (await a.all('#ins-parts-claude-cli pre', 'e.closest(".ins-part").dataset.path')).length, 3);
+  await picture('parts-claude-two-open-1316-dark', [1316, 819], { top: part('claude-cli', '.claude/notes/added.md') });
+  await picture('parts-claude-long-start-1316-dark', [1316, 819], { top: part('claude-cli', '.claude/notes/long.md') });
+  await picture('parts-claude-long-end-1316-dark', [1316, 819], { top: `${part('claude-cli', '.claude/notes/long.md')} .ins-part-end`, block: 'end' });
+  await picture('parts-claude-problems-1316-dark', [1316, 819], { top: part('claude-cli', '.claude/notes/gone.md'), block: 'center' });
+  await a.click(`${part('claude-cli', '.claude/notes/long.md')} .ins-part-end .btn`);
+  same('the Hide at its end folds it, and the press at its start takes the focus', [(await opened('claude-cli', '.claude/notes/long.md')).slice(0, 3),
+    await a.run(`document.activeElement === document.querySelector(${JSON.stringify(press('claude-cli', '.claude/notes/long.md'))})`)], [['Show', 'false', null], true]);
+  await a.click(press('claude-cli', '.claude/notes/added.md'));
+  await a.click(press('claude-cli', '.claude/notes/style.md'));
+  // At 860, nothing goes sideways: a long scope wraps, a long path is cut in its middle.
+  await sizeTo(a, 860, 600);
+  same('at 860×600 a scope of one long piece wraps and a long path is cut: nothing goes sideways and nothing is cut off',
+    [await a.run(`(() => { const scroll = document.querySelector('#instructions-scroll'); return scroll.scrollWidth <= scroll.clientWidth && document.documentElement.scrollWidth <= innerWidth; })()`), await a.run(CUT_OFF)], [true, []]);
+  await picture('parts-claude-long-scope-860-dark', [860, 600], { top: part('claude-cli', '.claude/rules/generated.md'), block: 'center' });
+  await picture('parts-claude-long-path-860-dark', [860, 600], { top: part('claude-cli', longPath), block: 'center' });
+  if (shots) await a.send('Emulation.setEmulatedMedia', { features: [] });
+  await fullSize(a);
+  // A save of the tool's own file, then the base for every tool: each tool's own file changes, and no file another one brings in.
+  await a.click('#ins-edit-claude-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += '- Saved here.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-claude-cli');
+  await a.click('#ins-save-claude-cli');
+  for (let tries = 0; tries < 30 && !readNow(at('.claude/CLAUDE.md')).includes('- Saved here.'); tries++) await wait(100);
+  check('saving CLAUDE.md writes CLAUDE.md, and no file it brings in', readNow(at('.claude/CLAUDE.md')).includes('- Saved here.') && JSON.stringify(hashes()) === JSON.stringify(before), readNow(at('.claude/CLAUDE.md')));
+  await a.click('#base-write');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value = '- Shared by every tool.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-review');
+  await a.click('#base-save');
+  const own = ['.claude/CLAUDE.md', '.copilot/copilot-instructions.md', '.config/opencode/AGENTS.md', '.codex/AGENTS.md'];
+  for (let tries = 0; tries < 30 && !own.every(path => readNow(at(path)).includes('- Shared by every tool.')); tries++) await wait(100);
+  same('the base’s block goes to each tool’s own file', own.filter(path => readNow(at(path)).includes('- Shared by every tool.')), own);
+  same('and to no file another one brings in', hashes(), before);
+  // On a tool's Instructions tab under Harnesses, the same card lists the same files, and a part opens there.
+  const onInstructions = await lines('claude-cli');
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-instructions');
+  same('Claude Code’s Instructions tab under Harnesses lists the same files, all fifteen, in the same words', [await lines('claude-cli'), onInstructions.length], [onInstructions, 15]);
+  await a.click(press('claude-cli', '.claude/notes/style.md'));
+  same('and Show opens a part there', (await opened('claude-cli', '.claude/notes/style.md')).slice(0, 4), ['Hide', 'true', 'content mono', 20]);
+  await picture('parts-harness-tab-1316-dark', [1316, 819], { top: part('claude-cli', '.claude/notes/style.md') });
+  await picture('parts-harness-tab-860-dark', [860, 600], { top: part('claude-cli', '.claude/notes/style.md') });
+  await picture('parts-harness-tab-1316-light', [1316, 819], { theme: 'light', top: part('claude-cli', '.claude/notes/style.md') });
+  if (shots) await a.send('Emulation.setEmulatedMedia', { features: [] });
+  await fitsAtMinimum(a, 'Claude Code’s Instructions tab with its other files');
+  same('no page errors, the files a tool reads with its own', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
  * What changes outside the app reaches the page and the search index without a Refresh (homepass.ts pageSees, main.ts
  * seenChanged; the watch on the tools' plugin records, main.ts startWatching). One home with Claude Code, its found skills kept
  * found by a record whose Synchronize everything is off. With Automatic sync off, then on, each change waited for as a newer
@@ -8320,7 +8520,7 @@ async function headerResultFlow() {
 
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow, searchFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];

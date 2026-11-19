@@ -1,7 +1,10 @@
-// Instructions: each tool's own user-wide instruction file, viewed and edited in place (INS-01, INS-02).
+// Instructions: each tool's own user-wide instruction file, viewed and edited in place (INS-01, INS-02), and for the page's view
+// the other files the tool reads with it (instructionparts.ts), shown there. Writes go by destination: a tool's own file is
+// written from its card and by the base, whether or not a card also lists it as a part; no other part is written.
 // A save is a checked write of one file: it must still hold what the editor opened, the text it replaces is kept first, and every
 // earlier version can be put back. Nothing here empties a file; the only deletion is an Undo removing a file its own base save
-// created, while it still holds what was written. No project or workspace file is read or written.
+// created, while it still holds what was written. No project or workspace file is written, and none is read but one a home's
+// file imports by its path (shown as a part).
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { lineDiff } from './diff.ts';
@@ -11,6 +14,7 @@ import { leftOutSentence, lineCount, linesOf, toolList, toolName } from './words
 import { harnessIds } from './harnesses.ts';
 import { isPresent } from './presence.ts';
 import { onlyAllowed } from './values.ts';
+import { instructionParts } from './instructionparts.ts';
 import type { BaseApply, BaseHeld, BaseList, BaseResult, BaseUndo, BaseView, HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
 
 const readText = (path: string) => readFile(path, 'utf8').then(text => text, () => undefined);
@@ -64,7 +68,6 @@ async function bind(tool: HarnessId, root: string, home: string): Promise<{ path
     }
     case 'copilot-cli': {
       const notes: string[] = [];
-      try { if ((await readdir(join(root, 'instructions'))).some(name => name.endsWith('.md'))) notes.push('Copilot CLI also reads the files in instructions/. Text repeated in both is read twice.'); } catch { /* none */ }
       notes.push('The Copilot app may not read it; that isn’t confirmed yet.');
       return { path: join(root, 'copilot-instructions.md'), readers: 'Copilot CLI reads this in every session.', notes };
     }
@@ -147,18 +150,22 @@ const writable = (bound: Destination[]) => bound.filter(entry => !entry.leftOutR
 /** Why a file a tool left out reads too is not written. */
 const linkedOut = (path: string, tool: HarnessId) => `${basename(path)} is the same file as ${toolName(tool)} reads (a link), and ${toolName(tool)} is left out of Central Knot here`;
 
-/** Every managed tool's instruction file, read as it is now. */
-export async function instructionsView(context: ShareContext, snapshots: Snapshot[]): Promise<InstructionFile[]> {
+/** Every managed tool's instruction file, read as it is now; `withParts` (the page's view only): with the other files each reads. */
+export async function instructionsView(context: ShareContext, snapshots: Snapshot[], withParts = false): Promise<InstructionFile[]> {
   const files: InstructionFile[] = [];
   const base = await readBase(context.home, (await writeAccess(context)).allowed);
   for (const { snapshot, path, readers, notes, sameFile, leftOutReads } of await destinations(context, snapshots)) {
     if (sameFile.length) notes.push(`This is the same file as ${toolList(sameFile)} reads (a link), so they get the same base instructions.`);
     if (leftOutReads) notes.push(`This is the same file as ${toolName(leftOutReads)} reads (a link), and ${toolName(leftOutReads)} is left out of Central Knot here, so it can’t be saved from here.`);
     const text = await readText(path);
-    // Lines starting with @ pull other files into Claude's context; those files are not shown or changed here.
-    if (snapshot.harness === 'claude-cli' && text && /^@\S/m.test(text)) notes.push('Lines starting with @ import other files. Those files are not shown or changed here.');
     files.push({ tool: snapshot.harness, path, exists: text !== undefined, text: text ?? '', hash: hashOf(text), readers, notes, nextStep: 'Start a new session to use the change.',
-      versions: describe(await shelf(context.home, snapshot.harness), text ?? ''), base: baseIfInvolved(baseState(text ?? '', readersOfFile(snapshot.harness, sameFile), base)), sameFile });
+      versions: describe(await shelf(context.home, snapshot.harness), text ?? ''), base: baseIfInvolved(baseState(text ?? '', readersOfFile(snapshot.harness, sameFile), base)), sameFile,
+      ...(withParts ? { parts: await instructionParts(context, snapshot.harness, snapshot.root, path, text ?? '') } : {}) });
+  }
+  // A part that is another tool's own file says so: that tool's card edits it and the base writes it.
+  for (const file of files) for (const part of file.parts ?? []) {
+    const owner = files.find(other => other.tool !== file.tool && other.path === part.path);
+    if (owner) part.ownedBy = owner.tool;
   }
   return files;
 }

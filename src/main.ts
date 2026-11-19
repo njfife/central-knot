@@ -1503,7 +1503,7 @@ app.whenReady().then(async () => {
   // Word search: answered at once from the index last published (search.ts), which reads no file and waits for no pass.
   handleNow('search:ask', async typed => search.ask(typeof typed === 'string' ? typed : ''));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
-  handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
+  handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined), true) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)
     : { stopped: notOpenHome }));
