@@ -42,7 +42,7 @@ import { readUsage } from './usage.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
-import { SETTLE_MS } from './librarypass.ts';
+import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { homePass, passTells, syncOnceReport, type HomePass } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
@@ -1053,13 +1053,16 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   // A switch that fails changes nothing: the home on screen stays the home open here, with its hand-off and watchers.
   const previous = { current, handoff, lastPresent };
   current = next;
+  forgetMissing();
   try {
-    const shown = await syncThenView();
+    const { view: shown, passes } = await syncAndView();
     // Saving the settings rebuilds the menus with the new home.
     await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
-    // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched.
+    // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched; a window its
+    // first pass started is looked at again, as after any pass.
     stopWatching();
     void startWatching();
+    lookAgainSoon(passes[passes.length - 1]);
     return shown;
   } catch (error) { ({ current, handoff, lastPresent } = previous); throw error; }
 }

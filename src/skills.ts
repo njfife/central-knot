@@ -249,7 +249,6 @@ export const skillKind: Kind<SkillContent, SkillCopy, SkillDisk> = {
   historyPrefix: '',
   harnesses: tools => [...tools],
   folder: rootOf,
-  pathOf: (context, tool, name) => join(rootOf(context, tool), name),
   open: (context, persist = false) => openLibrary(context, persist, readDisk),
   save: saveLibrary,
   store: (context, item, hash, content) => storeVersion(context, item.key, { directory: content.directory, hash }),

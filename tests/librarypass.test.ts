@@ -31,7 +31,6 @@ function noteKind(): Kind<string, Note> {
     kind: 'skill', words: { item: 'note', copy: 'file', folder: () => 'notes folder' }, historyPrefix: 'note:',
     harnesses: managed => managed.filter(tool => tools.includes(tool)),
     folder: folderOf,
-    pathOf: (context, tool, name) => join(folderOf(context, tool), `${name}.txt`),
     open: async context => ({ library: JSON.parse(await readFile(record(context.home), 'utf8').catch(() => 'null')) ?? { items: {}, folders: {} } }),
     save: (home, library: KindLibrary) => writeFile(record(home), JSON.stringify(library)),
     store: async (_context, item, hash, text) => { versions.set(`${item.key}:${hash}`, text); },
