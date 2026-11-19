@@ -2094,7 +2094,8 @@ const ABOUT_MIN = 90;
  * A table's descriptions are all shown or all left out, so rows never differ: when the narrowest one has room for fewer
  * than about twelve characters, every row leaves its description out (.no-about); its name's tooltip still has it.
  * A description pushed onto the cell's hidden second line, after a tag or pill that took the room, has none. A name that
- * takes more than half its row is cut first (.name-cut), so one long name doesn't take every description away.
+ * takes more than half its row is cut first (.name-cut), so one long name doesn't take every description away; once every
+ * description is left out, that cut no longer applies (style.css .name-cut) and the name has its whole cell.
  * Run after layout (dom.ts afterLayout).
  */
 function settleDescriptions(): void {
