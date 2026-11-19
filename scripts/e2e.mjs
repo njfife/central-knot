@@ -30,6 +30,8 @@ const shots = option('--shots');
 const named = option('--flows')?.split(',');
 const crashRounds = Number(option('--crash-rounds', 6));
 const canWriteRealHome = writesRealHome(process.platform);
+// The packaged app on Linux is the AppImage, which starts at sign-in from its first open (signin.ts): appImageSignIn.
+const appImageRun = !flag('--electron') && process.platform === 'linux';
 const root = resolve(import.meta.dirname, '..');
 const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : packagedApp();
 
@@ -2977,7 +2979,7 @@ async function practiceFlow() {
   // Start at sign-in: only an installed app can register a login item, so in a development run, and on a Mac outside the
   // Applications folder, the row is off, can't be changed, and says why in its hint's place (signin.ts whyNoSignIn). Main refuses
   // a change too, and nothing about it is saved. The AppImage on Linux can: appImageSignIn.
-  if (!flag('--electron') && process.platform === 'linux') await appImageSignIn(a, savedSettings);
+  if (appImageRun) await appImageSignIn(a, savedSettings);
   else {
     const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
     const refused = await a.run(`window.centralKnot.setStartAtSignIn(true).then(() => 'saved', error => String(error))`);
@@ -4522,8 +4524,9 @@ async function freedOtherWaysFlow() {
   const c = await other.open();
   await openKind(c, 'skills');
   same('opened with the alpha gone: nothing holds this build, and the record names it, by its name', [await c.exists('#held'), other.record().owner, other.record().ownerName], [false, 'com.centralknot.firstlook', 'Central Knot']);
+  // (The AppImage's first open also turns start at sign-in on: this build's own default, not the alpha's.)
   same('of the alpha’s choices only History’s days are this build’s now (the longer): Automatic sync, plugin updates and the home it opens are as they were',
-    [readFileSync(join(other.data, 'sync-settings.json'), 'utf8'), JSON.parse(readFileSync(join(other.data, 'app-settings.json'), 'utf8'))], [ownSync, { ...ownApp, historyDays: 90 }]);
+    [readFileSync(join(other.data, 'sync-settings.json'), 'utf8'), JSON.parse(readFileSync(join(other.data, 'app-settings.json'), 'utf8'))], [ownSync, { ...ownApp, historyDays: 90, ...(appImageRun ? { startAtSignIn: true } : {}) }]);
   check('Skills asks Resume, and nothing on the page names the alpha', await c.exists('#resume') && !(await c.run('document.body.innerText')).includes('Central Knot Alpha'), await c.text('.bands'));
   same('nothing in its tools changed before Resume', toolFiles(other.home), files);
   await c.click('#resume');
