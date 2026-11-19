@@ -3099,8 +3099,9 @@ async function listDiffersFlow() {
   console.log(`(Plugins list drawn ${drawn} ms after opening it; the differing copies known after ${known} ms)`);
   same('no page errors, list differs', a.pageErrors, []);
   await a.quit();
-  // Update all runs both updates in one run, with one result. A newer release of the app, downloading meanwhile, becomes ready
-  // during that run and waits: a restart between two of its steps would stop the rest.
+  // Update all runs both updates in one run, with one result. On a Mac a newer release of the app, downloading meanwhile, becomes
+  // ready during that run and waits: a restart between two of its steps would stop the rest. (A Linux copy downloads none: updateFlow.)
+  const appUpdates = process.platform === 'darwin';
   const claudeStub = join(HOME, '.local/bin/claude'), stubBefore = readFileSync(claudeStub, 'utf8'), cache = join(home, '.claude/plugins/cache/ck-test-market');
   writeFileSync(claudeStub, `#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)" && exit 0\ncase "$1 $2 $4 $5" in\n  "plugin update --scope user") sleep 3; name="\${3%@*}"; for copy in '${cache}'/"$name"/*/; do cp -R '${join(market, 'plugins')}'/"$name"/. "$copy"; done ;;\n  *) exit 9 ;;\nesac\n`);
   const zip = join(scratch, 'update-all.zip');
@@ -3111,17 +3112,17 @@ async function listDiffersFlow() {
     const look = () => b.run(`document.getElementById('update-control')?.dataset.look`), busy = () => b.run(`document.body.dataset.busy === 'true'`);
     const behind = async () => await b.exists(row('issue-tracker')) || await b.exists(row('document-tools'));
     await b.run(`(document.querySelector('#nav-plugins').click(), true)`);
-    for (let tries = 0; tries < 200 && !(await b.exists(row('issue-tracker')) && await b.exists(row('document-tools')) && await look() === 'available'); tries++) await wait(100);
+    for (let tries = 0; tries < 200 && !(await b.exists(row('issue-tracker')) && await b.exists(row('document-tools')) && (!appUpdates || await look() === 'available')); tries++) await wait(100);
     same('Update all says before the click what it runs, the copies it replaces, and that it can’t be undone', await b.run(`document.querySelector('#market-update-all-0').title`),
       'Updates document-tools in Claude Code and issue-tracker in Claude Code. It replaces the copies that differ from the marketplace’s: document-tools and issue-tracker. Runs now. An update can’t be undone.');
     // The release downloads in about 3 seconds; each plugin's update takes 3.
-    await b.run(`(document.getElementById('update-control').click(), document.getElementById('market-update-all-0').click(), true)`);
+    await b.run(`(${appUpdates} && document.getElementById('update-control').click(), document.getElementById('market-update-all-0').click(), true)`);
     // A restart in the middle (the stand-in's install quits the app) would leave the page unreachable: that is raced, not waited on.
     const quit = new Promise(done => b.child.once('exit', () => done('restarted mid-run')));
-    const held = (async () => { for (let tries = 0; tries < 80 && await look() !== 'held'; tries++) await wait(250); return 'waited'; })();
-    same('the app’s update, ready during the run, waits for it rather than restarting', await Promise.race([quit, held]), 'waited');
+    const held = (async () => { for (let tries = 0; appUpdates && tries < 80 && await look() !== 'held'; tries++) await wait(250); return 'waited'; })();
+    if (appUpdates) same('the app’s update, ready during the run, waits for it rather than restarting', await Promise.race([quit, held]), 'waited');
     if (b.child.exitCode === null) {
-      same('and the control says why while the run goes on', [await look(), await busy(), /Restarting now stops the plugin changes under way\./.test(await b.run(`document.getElementById('update-control').title`))], ['held', true, true]);
+      if (appUpdates) same('and the control says why while the run goes on', [await look(), await busy(), /Restarting now stops the plugin changes under way\./.test(await b.run(`document.getElementById('update-control').title`))], ['held', true, true]);
       for (let tries = 0; tries < 150 && (await busy() || await behind()); tries++) await wait(100);
       const said = await b.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
       check('the run went to its end: both updates in one result, no Undo, no row behind, and the app still running', !(await behind()) && !(await b.exists('#plugins-undo')) && b.child.exitCode === null
@@ -3551,7 +3552,8 @@ async function sourcesFlow() {
  * of that release, and "installing" records the update and quits; scripts/update-proof.mjs proves the real install on a Mac).
  * The sidebar's update control, at the bottom left, is the quiet Check for updates until the first check finds a newer release;
  * then it stands out, and one click downloads it with progress; something unsaved holds the restart, and the control says so;
- * the next launch says once that it is on the new version. It fits, open and in the rail, in the smallest window.
+ * the next launch says once that it is on the new version. It fits, open and in the rail, in the smallest window. On Linux,
+ * appImageNotice instead.
  */
 async function updateFlow() {
   const zip = join(scratch, 'update.zip');
@@ -3581,7 +3583,67 @@ async function updateFlow() {
     if (label.getBoundingClientRect().width > 0 && label.scrollWidth > label.clientWidth + 1) out.push('its words are cut: ' + label.textContent);
     return out;
   })()`);
+  /**
+   * On Linux, where an AppImage doesn't install updates itself yet (updates.ts whyNoUpdate), this instead: a newer release with
+   * Mac files alone is no update; one with an AppImage turns the control into the outlined Update available, whose click opens
+   * the release's page in the browser (the system's xdg-open, stood in for by one that records the address), and Settings says
+   * why, with that page. Nothing is downloaded. It fits, open and in the rail, in the smallest window.
+   */
+  const appImageNotice = async () => {
+    const bin = join(scratch, 'update-browser'), opened = join(scratch, 'update-opened');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'xdg-open'), `#!/bin/sh\nprintf '%s\\n' "$1" >> '${opened}'\n`, { mode: 0o755 });
+    const browser = () => readNow(opened).split('\n').filter(Boolean);
+    const page = 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.5';
+    const why = 'This copy of Central Knot doesn’t install updates itself yet. Download a newer release’s AppImage from its page.';
+    const line = async id => [await a.text(`#${id} .setting-message-text`), await a.text(`#${id}-action`)];
+    releases.splice(0, 1, { tag: 'v0.5.0-preview.5', zip });
+    a = await launch(join(scratch, 'update-linux-data'), ['--practice-copy'], HOME, { ...as('v0.5.0-preview.4'), PATH: `${bin}:${join(scratch, 'bin')}:/usr/bin:/bin` });
+    for (let i = 0; i < 80 && !(await control())?.title.startsWith('Up to date'); i++) await wait(250);
+    same('a newer release with Mac files alone is no update here: after the first check the control is the quiet arrows', [(await control())?.look, (await control())?.title], ['check', 'Up to date. Click to check now.']);
+    await a.click('#nav-settings');
+    same('Settings › Updates says this copy doesn’t install updates itself, with the releases page, beside Check now', [await line('setting-updates-reason'), await a.exists('#check-updates'), await a.exists('#setting-update')], [[why, 'Open the releases page'], true, false]);
+    releases.splice(0, 1, { tag: 'v0.5.0-preview.5', zip, asset: 'Central-Knot-0.5.0-linux-x86_64.AppImage' });
+    await a.click('#check-updates');
+    same('a newer release with an AppImage: the control becomes Update available', await reaches('elsewhere'), 'elsewhere');
+    const notice = await control();
+    same('it says so, and its name and tooltip say a click opens the release’s page', [notice.label, notice.name, notice.title], ['Update available', '0.5.0 preview 5 is available. Open its release page', `0.5.0 preview 5 is available. ${why} Click to open the release’s page.`]);
+    same('outlined, not the filled Update button', await a.run(`getComputedStyle(document.getElementById('update-control')).boxShadow.includes('inset')`), true);
+    same('Settings names the release and why it isn’t installed here, with its page; there is no Update button', [await a.text('#setting-updates-notice .setting-message-text'), await line('setting-updates-reason'), await a.exists('#setting-update')],
+      ['0.5.0 preview 5 is available.', [why, 'Open 0.5.0 preview 5’s page'], false]);
+    await openKind(a, 'skills');
+    await a.click('#update-control');
+    for (let i = 0; i < 40 && !browser().length; i++) await wait(250);
+    same('a click on the control opens the release’s page in the browser, and the page stays where it was', [browser(), await a.run(`document.querySelector('#nav-settings').getAttribute('aria-current')`)], [[page], null]);
+    await a.click('#nav-settings');
+    await a.click('#setting-updates-reason-action');
+    for (let i = 0; i < 40 && browser().length < 2; i++) await wait(250);
+    same('so does Settings’ link; nothing was downloaded, and the app keeps running', [browser(), fixture.served, a.child.exitCode], [[page, page], [], null]);
+    await sizeTo(a, ...SMALLEST);
+    same('at 860×560, in the rail, the sidebar fits with the control its icon alone', [await a.run(`document.body.classList.contains('rail')`), await sidebarFit()], [true, []]);
+    await a.click('#sidebar-toggle');
+    same('and open, it fits with its words whole', [await a.run(`document.body.classList.contains('rail')`), await sidebarFit()], [false, []]);
+    // With --shots: the control on Skills and Settings' row, at 860×600 (the sidebar open) and 1316×819, dark and light.
+    const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+    if (shots) for (const [width, height] of [[860, 600], [1316, 819]]) for (const look of ['dark', 'light']) {
+      await sizeTo(a, width, height);
+      await theme(look);
+      await openKind(a, 'skills');
+      await a.shot(`update-notice-${width}-${look}`);
+      await a.click('#nav-settings');
+      await a.run(`document.getElementById('setting-updates').scrollIntoView({ block: 'center' })`);
+      await a.shot(`update-notice-settings-${width}-${look}`);
+    }
+    same('no page errors on Linux', a.pageErrors, []);
+    await a.quit();
+    a = await launch(join(scratch, 'update-untagged'), ['--practice-copy'], HOME, { CK_UPDATE_RELEASES: fixture.releasesUrl });
+    await a.click('#nav-settings');
+    check('a build not made from a release says it doesn’t update itself', /(development build|wasn’t made from a release)/.test(await a.text('#setting-updates') ?? ''), await a.text('#setting-updates'));
+    same('and its sidebar control is the faint Updates, which never offers one', (await control())?.look, 'off');
+    await a.quit();
+  };
   try {
+    if (process.platform === 'linux') return await appImageNotice();
     a = await launch(data, ['--practice-copy'], HOME, { ...as('v0.5.0-preview.4'), ...reading });
     same('the status bar names the build by its release', await a.text('#status-end'), 'Central Knot 0.5.0 preview 4');
     same('before the first check the sidebar ends in the quiet Check for updates', [(await control())?.look, (await control())?.label], ['check', 'Check for updates']);
@@ -3765,12 +3827,12 @@ async function updateFlow() {
     same('nor after the restart, where the note is its mark and the release notes link waits in Settings', [await a.exists('#status-profile'), await a.run(`getComputedStyle(document.getElementById('said-link')).display`), await crowding()], [true, 'none', []]);
     same('no page errors in the narrow window', a.pageErrors, []);
     await a.quit();
-    // A build with no release tag never offers updates, and Settings says why (on macOS; elsewhere nothing is shown).
+    // A build with no release tag never offers updates, and Settings says why (on macOS; on Windows nothing is shown).
     a = await launch(join(scratch, 'update-untagged'), ['--practice-copy'], HOME, { CK_UPDATE_RELEASES: fixture.releasesUrl });
     await a.click('#nav-settings');
     if (process.platform === 'darwin') check('an untagged or development build says it doesn’t update itself', /(development build|wasn’t made from a release)/.test(await a.text('#setting-updates') ?? ''), await a.text('#setting-updates'));
     else same('off macOS there is no Updates row', await a.exists('#setting-updates'), false);
-    // On a Mac its sidebar control is faint and opens Settings, which says why; elsewhere there is none (no releases there).
+    // On a Mac its sidebar control is faint and opens Settings, which says why; on Windows there is none (no releases there).
     same('and its sidebar control never offers an update', (await control())?.look, process.platform === 'darwin' ? 'off' : undefined);
     await a.quit();
   } finally { await fixture.close(); silent.close(); }
@@ -6814,6 +6876,113 @@ async function ownPartsFlow() {
 }
 
 /**
+ * What changes outside the app reaches the page and the search index without a Refresh (homepass.ts pageSees, main.ts
+ * seenChanged; the watch on the tools' plugin records, main.ts startWatching). One home with Claude Code, its found skills kept
+ * found by a record whose Synchronize everything is off. With Automatic sync off, then on, each change waited for as a newer
+ * index for this home whose answers hold it and the row's going or coming: a plugin's first install (which makes Claude Code's
+ * plugins folder), a found skill edited, one deleted, the plugin taken out of Claude Code's record and put back, with what was
+ * typed in Find and the row opened kept. With it on, the home brought back to what a view had, after views that made no value.
+ * Then, with it on, how light it stays: no signal for .claude.json and the plugin record written again with the same content;
+ * none after a click's own view and a minute idle; while a skill changes every second, no more than the watch's debounce and
+ * the poll allow.
+ */
+async function staleFlow() {
+  const home = join(scratch, 'stale-home'), data = join(scratch, 'stale-data'), skills = join(home, '.claude/skills');
+  const notes = join(skills, 'notes/SKILL.md'), record = join(home, '.claude/plugins/installed_plugins.json'), servers = join(home, '.claude.json');
+  skill(skills, 'notes', text('notes', 'Write it down in the lantern log.'));
+  // Each body has a word of its own, which only that skill's text holds.
+  for (const [name, body] of [['review', 'Read the diff twice.'], ['spare', 'A tyre for the road.'], ['keep', 'Nothing changes here.'], ['busy', 'Round one.']]) skill(skills, name, text(name, body));
+  writeFileSync(servers, `${JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' } } }, null, 2)}\n`);
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  writeFileSync(join(data, 'sync-settings.json'), JSON.stringify({ syncOn: false }));
+  const a = await launch(data);
+  await a.click('#nav-overview');
+  await a.click('#setup-no');
+  await openKind(a, 'all');
+  await a.run(`(window.ckSignals = 0, window.ckPublished = [], window.centralKnot.onSyncChanged(() => window.ckSignals++), window.centralKnot.onSearchPublished((home, readId) => window.ckPublished.push({ home, readId })), true)`);
+  const ids = async typed => (await a.run(`window.centralKnot.search(${JSON.stringify(typed)})`)).rows.map(row => row.id);
+  const shown = id => a.exists(`.ov-row[data-key="${id}"]`);
+  const plugin = 'skills-sheet-tools@ck-test-market/tidy', install = () => writeClaudeInstall(home, 'ck-test-market', 'sheet-tools', '1.0.0', { 'skills/tidy/SKILL.md': text('tidy', 'Removes duplicate rows and trims every cell.') });
+  /** After a change made outside: how long until an index newer than the last one for this home answers as `holds` says; undefined, it never did. */
+  const arrives = async (change, holds) => {
+    const since = await a.run(`Math.max(0, ...window.ckPublished.filter(tag => tag.home === ${JSON.stringify(home)}).map(tag => tag.readId))`), from = Date.now();
+    await change();
+    while (Date.now() - from < 30000) {
+      if (await a.run(`window.ckPublished.some(tag => tag.home === ${JSON.stringify(home)} && tag.readId > ${since})`) && await holds()) return Date.now() - from;
+      await wait(100);
+    }
+    return undefined;
+  };
+  const took = {};
+  const sequences = async (mode, edit, [deleted, word]) => {
+    const [was, now] = edit;
+    took[`${mode}: edited`] = await arrives(() => writeFileSync(notes, text('notes', `Write it down in the ${now} log.`)), async () => (await ids(now)).includes('skills-notes') && !(await ids(was)).includes('skills-notes'));
+    took[`${mode}: deleted`] = await arrives(() => rmSync(join(skills, deleted), { recursive: true }), async () => !(await shown(`skills-${deleted}`)) && !(await ids(word)).length);
+    const installs = readFileSync(record, 'utf8');
+    took[`${mode}: out of the record`] = await arrives(() => writeFileSync(record, JSON.stringify({ version: 2, plugins: {} })), async () => !(await shown(plugin)) && !(await ids('duplicate rows')).length);
+    // Put back while Find holds what was typed and a row is open: both are as they were once the view lands.
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'keep'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    if (await a.run(`document.querySelector('.ov-row[data-key="skills-keep"]').getAttribute('aria-expanded')`) !== 'true') await a.click(`.ov-row[data-key="skills-keep"]`);
+    const place = () => a.run(`[document.querySelector('#find').value, document.querySelector('.ov-row[data-key="skills-keep"]')?.getAttribute('aria-expanded'), Math.round(document.querySelector('.ov-row[data-key="skills-keep"]')?.getBoundingClientRect().top ?? -1)]`);
+    const before = await place();
+    took[`${mode}: put back`] = await arrives(() => writeFileSync(record, installs), async () => (await ids('duplicate rows')).includes(plugin));
+    same(`${mode}: what was typed in Find and the opened row stay where they were after the view`, await place(), before);
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    check(`${mode}: and the plugin’s row is back`, await shown(plugin));
+  };
+
+  // ---------- Automatic sync off: a watch event asks for a view ----------
+  took['off: first install'] = await arrives(install, async () => (await shown(plugin)) && (await ids('duplicate rows')).includes(plugin));
+  await sequences('off', ['lantern', 'compass'], ['review', 'diff']);
+  // ---------- Automatic sync on: a pass tells the page when what it read differs ----------
+  await a.click('#sync-switch');
+  same('Automatic sync is on', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
+  await sequences('on', ['compass', 'harbour'], ['spare', 'tyre']);
+  // A view whose pass made no value (the home's record set aside while two views are read: the switch off, then on) leaves the
+  // page nothing to compare with, so the home brought back to what an earlier view had is told all the same.
+  const record0 = join(home, '.central-knot/sync.json'), harbour = readFileSync(notes, 'utf8');
+  took['on: a view with no value'] = await arrives(async () => {
+    renameSync(record0, `${record0}.aside`);
+    writeFileSync(notes, text('notes', 'Write it down in the beacon log.'));
+    for (let turn = 0; turn < 2; turn++) await a.click('#sync-switch');
+  }, async () => (await ids('beacon')).includes('skills-notes'));
+  same('and Automatic sync is on again', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
+  took['on: back as an earlier view had it'] = await arrives(() => { renameSync(`${record0}.aside`, record0); writeFileSync(notes, harbour); },
+    async () => (await ids('harbour')).includes('skills-notes') && !(await ids('beacon')).includes('skills-notes'));
+  console.log(`staleFlow ms: ${JSON.stringify(took)}`);
+  for (const [name, ms] of Object.entries(took)) check(`${name}: reaches the page and the index without a Refresh`, ms !== undefined);
+
+  // ---------- It stays light ----------
+  const signals = () => a.run('window.ckSignals');
+  await wait(3000);
+  let from = await signals();
+  const same20 = [servers, record].map(path => [path, readFileSync(path, 'utf8')]);
+  for (let round = 0; round < 20; round++) { for (const [path, content] of same20) writeFileSync(path, content); await wait(500); }
+  await wait(4000);
+  const rewrites = await signals() - from;
+  // A click's own view sets what the page has: the poll's passes after it find nothing new.
+  await a.click(`#${rowPart('add', 'skills', 'notes')}`);
+  from = await signals();
+  await wait(60000);
+  const idle = await signals() - from;
+  from = await signals();
+  const busy = join(skills, 'busy/SKILL.md'), started = Date.now(), times = [];
+  for (let round = 0; round < 12; round++) { writeFileSync(busy, text('busy', `Round ${round}.`)); times.push(Date.now()); await wait(1000); }
+  await wait(4000);
+  // The debounce lets one pass through after each pause longer than it, and the poll one each 20 s; a pass that tells sends one.
+  const allowed = 1 + times.slice(1).filter((at, index) => at - times[index] > 1500).length + Math.ceil((Date.now() - started) / 20000);
+  const burst = await signals() - from;
+  console.log(`staleFlow signals: same-content rewrites ${rewrites}, a minute after a click ${idle}, a skill changed each second ${burst} (allowed ${allowed})`);
+  same('.claude.json and Claude Code’s plugin record written again 20 times in 10 s with the same content, with Automatic sync on, tell the page nothing', rewrites, 0);
+  same('after a click’s own view, a minute idle tells the page nothing', idle, 0);
+  check('a skill changed every second tells the page no more often than the debounce and the poll allow', burst <= allowed, { burst, allowed });
+  same('no page errors, the page follows what a pass read', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
  * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
  * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
  * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
@@ -8214,7 +8383,7 @@ async function headerResultFlow() {
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.

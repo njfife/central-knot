@@ -381,7 +381,7 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
 
 // ---------- What each tool has ----------
 
-const configRootOf = (context: PluginContext, tool: HarnessId) => configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
+const configRootOf = (context: Pick<PluginContext, 'home' | 'overrides'>, tool: HarnessId) => configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
 
 /** A tool's JSON record as an object; Copilot's config.json starts with `//` comment lines, which are dropped first. */
 async function readJson(path: string): Promise<Record<string, unknown> | undefined> {
@@ -440,7 +440,7 @@ const hasFiles = async (path: string) => { try { return (await readdir(path)).le
  * One there that doesn't read (half written, say) makes what the tool has unknown, never "nothing" (pluginrecord.ts row 1).
  */
 export async function recordReadable(context: PluginContext, tool: PluginTool): Promise<boolean> {
-  const reads = await Promise.all(touched(context, tool).map(async path => {
+  const reads = await Promise.all(pluginRecordFiles(context, tool).map(async path => {
     let text: string;
     try { text = await readFile(path, 'utf8'); } catch (error) { return errorCode(error) === 'ENOENT'; }
     if (tool !== 'codex-cli') return !!parseObject(withoutBom(text).replace(/^\s*\/\/.*$/gm, ''));
@@ -1041,8 +1041,11 @@ export async function setWhole(context: PluginContext, marketplace: string, plug
 
 // ---------- Install and uninstall ----------
 
-/** Files a tool's plugin commands may change; their bytes are kept before and after each run (FIL-03). */
-const touched = (context: PluginContext, tool: PluginTool): string[] => {
+/**
+ * The files of a tool's own record of its plugins: what its plugin commands may change, whose bytes are kept before and after
+ * each run (FIL-03); what recordReadable reads; and what main.ts startWatching watches.
+ */
+export const pluginRecordFiles = (context: Pick<PluginContext, 'home' | 'overrides'>, tool: PluginTool): string[] => {
   const root = configRootOf(context, tool);
   switch (tool) {
     case 'claude-cli': return [join(root, 'settings.json'), join(root, 'plugins/installed_plugins.json'), join(root, 'plugins/known_marketplaces.json')];
@@ -1069,7 +1072,7 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
   const binary = context.binaries[tool];
   const command = `${harnesses[tool].binary} ${args.join(' ')}`;
   if (!binary) return { tool, command, ok: false, output: noCli(tool), changed: [] };
-  const files = touched(context, tool);
+  const files = pluginRecordFiles(context, tool);
   const before = await Promise.all(files.map(readOrNull));
   const env: NodeJS.ProcessEnv = { ...gitEnv(), HOME: context.home, USERPROFILE: context.home, PATH: pathBeside(binary) };
   const override = context.overrides?.[tool];
