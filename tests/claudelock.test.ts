@@ -13,9 +13,9 @@ import { libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { editEntry, readTool, type NeutralServer } from '../src/mcp.ts';
 import { applyServers, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
+import { within } from './within.ts';
 
 const docs: NeutralServer = { transport: 'stdio', command: 'npx', args: ['-y', 'docs'] };
-const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
 
 async function home() {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-claudelock-'))), home = join(base, 'home');
@@ -29,13 +29,21 @@ async function home() {
 }
 
 test('a save Claude Code makes holding its lock is waited for: the entry is written after it, and the save is kept', async () => {
-  const box = await home();
+  const box = await home(), original = fs.mkdir;
   try {
     // Claude Code takes its lock, reads the file and saves its own change from what it read, then lets the lock go.
     await mkdir(box.lock);
     const read = JSON.parse(await readFile(box.file, 'utf8'));
+    // The write is waiting once it has been refused the lock twice: it met the lock, and came back to ask again.
+    let refusals = 0, waiting!: () => void;
+    const waits = new Promise<void>(done => { waiting = done; });
+    fs.mkdir = (async (path: unknown, ...rest: unknown[]) => {
+      try { return await (original as (...args: unknown[]) => Promise<unknown>)(path, ...rest); }
+      catch (error) { if (String(path) === box.lock && ++refusals === 2) waiting(); throw error; }
+    }) as typeof fs.mkdir; syncBuiltinESMExports();
     const writing = editEntry(box.context, 'claude-cli', 'docs', undefined, docs);
-    await sleep(150);
+    try { await within('the write waiting on Claude Code’s held lock', waits); }
+    finally { fs.mkdir = original; syncBuiltinESMExports(); }
     assert.deepEqual(JSON.parse(await readFile(box.file, 'utf8')), read, 'nothing is written while Claude Code holds its lock');
     await writeFile(box.file, `${JSON.stringify({ ...read, numStartups: 2 }, null, 2)}\n`);
     await rmdir(box.lock);

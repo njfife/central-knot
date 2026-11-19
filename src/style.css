@@ -846,7 +846,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .overview-scroll > * { flex: none; }
 .intro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; line-height: 1.5; }
 .intro-text { flex: 1 1 22em; max-width: var(--measure); }
-.intro #intro-dismiss { margin-left: auto; }
+.intro #intro-dismiss, .intro #settings-kept-close { margin-left: auto; }
 .overview-lead { max-width: var(--measure); font-size: 14px; line-height: 1.5; color: var(--ink); }
 /* What needs you (overview.ts needsYou): a line each, close together. */
 .overview-needs { display: flex; flex-direction: column; gap: 8px; }
