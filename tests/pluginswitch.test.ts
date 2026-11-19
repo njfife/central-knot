@@ -286,8 +286,10 @@ test('a main switch never falls back to the whole plugin where the item’s own 
   // Codex's skill rules for this plugin are written in a form not edited here: its own switch can't be used.
   const held = installed('codex-cli', { switchesHeld: 'Codex’s skills.config is written inline.' });
   const off = turnEvery([item(held, 'skill', 'one')], false);
-  assert.deepEqual([chosen(off.draft), off.leftIn, off.left], [[], ['codex-cli'], 'Still on in Codex: Codex’s skills.config is written inline.']);
+  assert.deepEqual([chosen(off.draft), off.leftIn, off.left], [[], ['codex-cli'], ['Still on in Codex: Codex’s skills.config is written inline.']]);
   // Copilot CLI loads this plugin live from a folder, where turning it off is uninstalling it: its agent is left, and said.
   const live = [item(installed('copilot-cli', { live: true }), 'agent', 'helper')];
-  assert.deepEqual([chosen(turnEvery(live, false).draft), turnEvery(live, false).left, wholeWords(live, false)], [[], `Still on in Copilot CLI: ${LIVE_PLUGIN}`, '']);
+  assert.deepEqual([chosen(turnEvery(live, false).draft), turnEvery(live, false).left, wholeWords(live, false)], [[], [`Still on in Copilot CLI: ${LIVE_PLUGIN}`], '']);
+  // Held in both: a reason for each tool, never joined.
+  assert.deepEqual(turnEvery([item(held, 'skill', 'one'), ...live], false).left, ['Still on in Codex: Codex’s skills.config is written inline.', `Still on in Copilot CLI: ${LIVE_PLUGIN}`]);
 });

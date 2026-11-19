@@ -240,22 +240,42 @@ ul { list-style: none; }
 
 #header { position: relative; z-index: 4; height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line); }
 .page-title { flex: 1; min-width: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A list page's last result (renderer.ts resultHere), between the page's name and Refresh, centred while it fits; one taller starts
-   at the top, Undo and × on the header's line, over a panel (.result-taller::after, renderer.ts). Under 900px the name steps aside. */
+/* A list page's last result (renderer.ts resultHere says its rule), between the page's name and Refresh, in the header's 48px: its
+   sentence in two lines, or in one over its first problem line, its buttons shorter there so Undo keeps clear of the window's top.
+   Shown whole (.result-whole), a card raised over the page (a lighter surface in dark), as tall as it needs and at most the window
+   less 120px; past that it scrolls, its scrollbar always shown, the sentence with Undo and × held at its top; every word wraps,
+   a long name too, and Show less ends what it shows. Under 900px the page's name steps aside. */
 .header-result { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.header-result > .band, .header-result > .toolbar-result { padding: 0; border: 0; background: none; }
-.result-taller .header-result { align-self: flex-start; padding: 11px 0; }
-.result-taller .header-result > * { align-items: flex-start; }
-.result-taller .header-result > * > svg { margin-top: 6px; }
-.result-taller .header-result :is(.band-text, .toolbar-result-text) { margin-top: 5px; }
-.result-taller .header-result .band-dismiss { margin-top: 2px; }
-#header.result-taller::after { content: ""; position: absolute; inset: 0 0 auto 0; z-index: -1; height: var(--result-height); background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 8px 14px -10px rgb(0 0 0 / 0.3); }
+.header-result > .band, .header-result > .toolbar-result { padding: 0; border: 0; background: none; flex-wrap: nowrap; }
+.header-result > .band-two > :is(.band-text, .band-actions) { flex: 0 1 auto; order: 0; padding-left: 0; }
+.header-result :is(.band-done > .band-text, .toolbar-result-text) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.header-result:has(.problem-line) { gap: 0; }
+.header-result:has(.problem-line) :is(.band-done > .band-text, .toolbar-result-text) { -webkit-line-clamp: 1; }
+.header-result:has(.problem-line) .btn { height: 22px; }
+.result-whole { --card: color-mix(in oklab, var(--surface) 88%, white); align-self: flex-start; max-height: calc(100vh - 120px); overflow-y: auto; margin: 0 -12px;
+  padding: 0 12px 12px; background: var(--card); border: 1px solid var(--control-line); border-top: 0; border-radius: 0 0 8px 8px;
+  box-shadow: 0 14px 28px -10px rgb(0 0 0 / 0.5); }
+.result-whole::-webkit-scrollbar { width: 8px; }
+.result-whole::-webkit-scrollbar-thumb { background: var(--control-line); border-radius: 4px; }
+.result-whole > :is(.band, .toolbar-result) { align-items: flex-start; }
+.result-whole > :first-child { position: sticky; top: 0; z-index: 1; padding-top: 5px; background: var(--card); }
+.result-whole :is(.band-done > .band-text, .toolbar-result-text) { display: block; overflow: visible; overflow-wrap: anywhere; }
+#header #problems-show-all { flex: none; white-space: nowrap; }
+.result-whole #problems-show-all { align-self: flex-end; }
+.result-whole .band-dismiss { position: sticky; top: 5px; }
 .header-result > .toolbar-result .band-dismiss { margin-left: auto; }
-/* What went wrong (matrix.ts problemLines): a line each, Show all on the last; shown, every line whole. */
+/* What went wrong (matrix.ts problemLines): a line each, Show all on the last. A line in parts gives way only at its item's name,
+   never wider than the name itself, and what follows (its tool, what failed) keeps all but 4em of the line, so a long name is
+   cut first and a short one leaves no gap. Folded, each part keeps its spaces. Shown, every line whole, with room between them. */
 .problem-line { display: flex; gap: 6px; }
 .problem-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lines-whole .problem-text { white-space: normal; }
-.problem-line > .inline-link { flex: none; }
+.problem-text:has(> .problem-rest) { display: flex; }
+.problem-text > :is(.item-name, .problem-rest) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.problem-text > .item-name { flex: 0 1000 auto; }
+.problem-rest { max-width: calc(100% - 4em); }
+.band-lines:not(.lines-whole) .problem-text > * { white-space: pre; }
+.band-lines.lines-whole { gap: 4px; }
+.lines-whole .problem-text { display: block; white-space: normal; overflow-wrap: anywhere; }
 #header:has(.header-result) > .page-title { flex: none; }
 @container content (width < 900px) { #header:has(.header-result) > .page-title { display: none; } }
 .header-end { display: flex; gap: 8px; }
@@ -420,8 +440,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .band .text-action.text-danger:hover { color: var(--danger); }
 .band-lines { display: flex; flex-direction: column; gap: 2px; }
 .band-danger { background: var(--danger-tint); color: var(--danger); }
-[data-outcome="sync-once"] .band-text { white-space: pre-line; overflow: auto; overflow-wrap: anywhere; max-height: 35vh; }
-#header:has([data-outcome="sync-once"]) { height: auto; min-height: 48px; padding-block: 6px; }
+/* A result's reasons in a band off the header (matrix.ts outcomeBand), each a line of its own. */
+.band-reason { display: block; }
 .band-done, .band-done .band-text { color: var(--ink); }
 .band-actions { flex: none; display: inline-flex; align-items: center; gap: 6px; }
 .band-actions:empty { display: none; }

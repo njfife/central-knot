@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batches, notUndone, resultLines, resultParts, resultSentence, reverse, runPlan, type PlanApi, type PluginDone, type PluginOp } from '../src/pluginplan.ts';
+import { batches, notUndone, resultLines, resultParts, resultSentence, reverse, runPlan, shortOf, unreachedOps, type PlanApi, type PluginDone, type PluginOp, type ResultLine } from '../src/pluginplan.ts';
 import type { ActionReport, HarnessId } from '../src/types.ts';
 
 const op = (plugin: string, tool: HarnessId, action: PluginOp['action'] = 'install'): PluginOp => ({ source: 'anthropics/skills', marketName: 'anthropic-agent-skills', plugin, tool, action });
@@ -141,3 +141,14 @@ test('An update the automatic check made first is made once: the click’s own u
   assert.deepEqual(calls, ['update claude-cli', 'update claude-cli']);
 });
 
+
+test('What a run left undone is counted by marketplace and name, a plugin that failed in one tool and a stopped run’s unreached ones too', () => {
+  const line = (source: string, plugin: string, ok: boolean): ResultLine => ({ source, plugin, ok, text: '', short: '' });
+  // helper from two marketplaces is two plugins; editor installed in one tool and refused in another fell short.
+  assert.deepEqual(shortOf([line('one', 'helper', false), line('two', 'helper', false), line('one', 'editor', true), line('one', 'editor', false)]), { names: ['helper', 'helper', 'editor'], of: 3 });
+  // A run stopped after `kit` went through in Claude Code: kit's Codex step and `later` are unreached, so both fell short.
+  const ops = [op('kit', 'claude-cli'), op('kit', 'codex-cli'), op('later', 'claude-cli')], ran = [{ ...ops[0]!, report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [] } } as PluginDone];
+  assert.deepEqual(unreachedOps(ops, ran).map(each => `${each.plugin} ${each.tool}`), ['kit codex-cli', 'later claude-cli']);
+  assert.deepEqual(shortOf(resultLines(ran), unreachedOps(ops, ran)), { names: ['kit', 'later'], of: 2 });
+  assert.deepEqual(shortOf([line('one', 'done', true)]), { names: [], of: 1 });
+});

@@ -26,7 +26,7 @@ import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
-import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -869,8 +869,7 @@ export function outcomeBand(): HTMLElement | null {
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
-  // In the header its reasons are its problem lines (listResult); in a band, they follow it.
-  let rest = resultInHeader() ? outcome.text : [outcome.text, ...outcome.reasons ?? []].join(' ');
+  let rest = outcome.text;
   // Quoted text (a commit's subject, say) is shown as written: a name inside it isn't an item named.
   const quoted = (at: number) => { const open = rest.lastIndexOf('“', at); return open >= 0 && rest.indexOf('”', open) > at; };
   while (rest) {
@@ -880,10 +879,12 @@ export function outcomeBand(): HTMLElement | null {
     text.push(rest.slice(0, hits[0].at), h('strong.item-name', {}, hits[0].name));
     rest = rest.slice(hits[0].at + hits[0].name.length);
   }
+  // In the header its reasons are its problem lines (listResult); in a band, each is a line of its own under it.
+  const reasons = resultInHeader() ? [] : (outcome.reasons ?? []).flatMap(reason => [' ', h('span.band-reason', {}, typeof reason === 'string' ? reason : [h('strong.item-name', {}, reason[0]), reason[1]])]);
   // Two buttons take their own line under the words in a narrow window (style.css), so the sentence is never squeezed.
   return h(`div.band.band-done${outcome.next ? '.band-two' : ''}`, { role: 'status', 'data-outcome': outcome.kind ?? '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
-    outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
+    outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null, reasons),
     h('span.band-actions', {},
       outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: outcome.act.whyOff?.() ?? acting(), attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
         : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined, !!acting())
@@ -975,23 +976,37 @@ export function listResult(): HTMLElement[] {
   const kept = kinds.flatMap(kind => (lastResult(kind)?.results ?? []).filter(keptBack).map(problem => ({ kind, problem })));
   const result = kinds.map(lastResult).find(Boolean), done = outcomeBand(), several = new Set([...kept.map(each => each.kind), ...(done ? state.outcome?.kinds ?? [] : [])]).size > 1;
   const background = !table || result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed' && !state.dismissed.has(problemKey(entry)));
-  const lines = [...background.map(problem => ({ kind: undefined, problem })), ...kept].map(({ kind, problem }) => `${several && kind ? `${kindNouns[kind].title}: ` : ''}${problem.item}${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`)
-    .concat(done ? state.outcome?.reasons ?? [] : []);
+  // A tool's refusal is said in parts (problemLines): its kind where several, the item's name, then its tool and what failed.
+  const lines = [...background.map(problem => ({ kind: undefined, problem })), ...kept]
+    .map(({ kind, problem }): Child[] | string => [several && kind ? `${kindNouns[kind].title}: ` : '', h('strong.item-name', {}, problem.item), `${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`])
+    .concat((done ? state.outcome?.reasons ?? [] : []).map(reason => (typeof reason === 'string' ? reason : [h('strong.item-name', {}, reason[0]), reason[1]])));
   // With no result above them, their × closes them and the click's result they belong to.
   const close = () => { for (const entry of background) state.dismissed.add(problemKey(entry)); closeResult(); };
+  // With no problem line, Show all follows the sentence, for one the header's two lines cut.
+  if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0));
   return [done, lines.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, done ? state.outcome : result ?? background[0]), done ? null : closeButton(close, { id: 'problems-dismiss' })) : null]
     .filter((band): band is HTMLElement => !!band);
 }
 
 /**
- * What went wrong, under a result in the header: two lines, each on one line, Show all on the last when one is cut (renderer.ts)
- * or more remain; shown, every line whole until Show less, × or the next result (`of`, their result: app.ts state.shownWhole).
+ * What went wrong, under a result in the header (renderer.ts resultHere): its first line, on the header's second line, then
+ * Show all; shown whole (`of`, their result: app.ts state.shownWhole), every line whole. A line given in parts is what leads it,
+ * its item's name (`.item-name`), then what happened to it (the last part): folded, only the name gives way (style.css).
  */
 export function problemLines(lines: (Child | Child[])[], of: typeof state.shownWhole): HTMLElement {
-  const whole = of !== undefined && state.shownWhole === of, more = lines.length > 2, shown = whole ? lines : lines.slice(0, 2);
-  const toggle = h('button.inline-link', { type: 'button', id: 'problems-show-all', 'aria-expanded': String(whole), 'data-when-cut': whole || more ? undefined : '', onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
-    whole ? 'Show less' : `Show all${more ? ` ${lines.length}` : ''}`);
-  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, h('span.problem-text', {}, line), at === shown.length - 1 ? toggle : null)));
+  const whole = of !== undefined && state.shownWhole === of, shown = whole ? lines : lines.slice(0, 1);
+  const text = (line: Child | Child[]) => h('span.problem-text', {}, Array.isArray(line) ? [...line.slice(0, -1).map(part => (typeof part === 'string' ? h('span', {}, part) : part)), h('span.problem-rest', {}, line.at(-1))] : line);
+  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, text(line), at === shown.length - 1 ? wholeToggle(of, lines.length) : null)));
+}
+
+/**
+ * The one Show all of a result in the header, after the last thing it shows (the sentence, or a problem line): "Show all 3 reasons"
+ * where `count` lines wait, else drawn only when the header cuts what it shows (renderer.ts, data-when-cut); Show less on the card.
+ */
+export function wholeToggle(of: typeof state.shownWhole, count: number): HTMLElement {
+  const whole = of !== undefined && state.shownWhole === of, more = count > 1;
+  return h('button.inline-link', { type: 'button', id: 'problems-show-all', 'aria-expanded': String(whole), 'data-when-cut': whole || more ? undefined : '', onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
+    whole ? 'Show less' : `Show all${more ? ` ${count} reasons` : ''}`);
 }
 
 /** The kind Resume's empty pass goes through, whatever is on show: a held one whose own record can run, so a kind's stop isn't read as Resume's answer. */
@@ -1530,7 +1545,7 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
  * said as a problem. Its words are worked out on the table it was clicked on (`t`), wherever the page is once it has run; its
  * kind, name and key are its row's.
  */
-function mainClick(t: Table, row: ItemRow | PluginRow, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string, focus?: () => string): Click {
+function mainClick(t: Table, row: ItemRow | PluginRow, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string[], focus?: () => string): Click {
   const along = plugins.turned.map(item => alongWords(item, plugins.ops)).filter(Boolean).join(' ') || undefined, kind = kindOf(row), name = nameOf(row);
   const pluginsOnly = !changes.length, undone = pluginsOnly ? undoneWords(name, on, toolsPhrase(plugins.turned.map(item => item.tool), toolsFor(t, kind))) : undefined;
   return { kind, items: [name], rows: [rowKey(row)], changes, said, also, focus, pluginsOnly, plugins: plugins.ops.length || pluginsOnly ? { ops: plugins.ops, said: along } : undefined, undone };
@@ -1558,7 +1573,9 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
     if (takeBack(kind, row.key)) { rerender(); return; }
     // Drawn as a click on it asks, it is clicked from that state, and worked out in its turn; else from what each tool has now.
     const plugins = turnEvery(items, next);
-    if (wanted === undefined && !plugins.ops.length) { tell({ page: state.page, item: row.name, rows: [rowKey(row)], warn: true, band: true, text: `${row.name}: nothing changed. ${plugins.left ?? `It is ${next ? 'on' : 'off'} already.`}` }); rerender(); return; }
+    // Nothing it can turn: every tool's switch held (said first, a reason for each tool), or it is that way already.
+    const already = { page: state.page, item: row.name, rows: [rowKey(row)], warn: true, band: true, text: `${row.name}: nothing changed.` };
+    if (wanted === undefined && !plugins.ops.length) { tell(plugins.left ? notDoneFirst({ ...already, reasons: plugins.left }) : { ...already, text: `${already.text} It is ${next ? 'on' : 'off'} already.` }); rerender(); return; }
     // Its part in each tool is worked out in its turn, from the plugins as the clicks before it left them.
     const rowNow = () => plugged(t).rows.find(each => each.key === row.key);
     queueClick({ kind, key: row.key, on: next }, row.name, () => {
@@ -1883,15 +1900,16 @@ export const toTurnOff = (shown: ItemRow[]) => shown.filter(row => !leftToItsRow
 /**
  * Turn these off, over rows of any kinds: each kind's rows one click with each row's own Off (libraryrow.ts rowClicks.off), the
  * kinds in turn (app.ts applyByKind: a kind that refuses is skipped and named), with one Undo that puts them all back. Its words
- * are one sentence over the rows it changed, a row's kind named where a row of another kind has its name (words.ts rowNames).
+ * are one sentence over the rows that went through (what didn't is said before it: app.ts applyByKind), a row's kind named where a
+ * row of another kind has its name (words.ts rowNames).
  */
 export function turnTheseOff(rows: ItemRow[]) {
   const clicks = KINDS.map(kind => rows.filter(row => row.kind === kind)).filter(list => list.length).map((list): Click => ({
     // Its words are the whole click's, over every kind (applyByKind's `said`, below).
     kind: list[0]!.kind, items: list.map(nameOf), rows: list.map(rowKey), regroups: true, changes: list.map(row => rowClicks.off(row, itemOf(row))), said: '' }));
-  void applyByKind(clicks, (off, notIn) => {
-    const { one, many } = rowNouns(off.map(row => row.kind)), tools = [...new Set(off.flatMap(row => (state.home ? kindSource(state.home, row.kind).tools : [])))];
-    return `Turned off ${plural(off.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(rowNames(off))}${notIn.length ? `, but not yet in ${toolsPhrase(notIn, tools)}` : ''}. Central Knot keeps ${off.length === 1 ? 'it, and turning it on puts it' : 'them, and turning one on puts it'} back as it was.`;
+  void applyByKind(clicks, off => {
+    const { one, many } = rowNouns(off.map(row => row.kind));
+    return `Turned off ${plural(off.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(rowNames(off))}. Central Knot keeps ${off.length === 1 ? 'it, and turning it on puts it' : 'them, and turning one on puts it'} back as it was.`;
   });
 }
 
