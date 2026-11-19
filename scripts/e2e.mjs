@@ -7966,7 +7966,7 @@ async function headerResultFlow() {
     [(await a.text(sentence))?.startsWith('helper is off'), await lines(), /reasons/.test((await toggle())?.[0] ?? '')], [true, 0, false]);
   await undo();
   same('its Undo: no reason of the skills’ either', [await a.text(sentence), await lines()], ['Undone: helper is as before.', 0]);
-  // Refused in both tools, the skill's click changes nothing, so the run's Undo is the agent's alone.
+  // Refused in both tools, the skill is still Off in Central Knot: the run's Undo puts it back on with the agent.
   await dismiss();
   chmodSync(copilot, 0o555);
   await a.run(`[${JSON.stringify(switchOf(names[2]))}, ${JSON.stringify(helper)}].forEach(selector => document.querySelector(selector).click())`);
@@ -7974,7 +7974,7 @@ async function headerResultFlow() {
   same('a run of a skill refused in both tools and the agent: a line for each refusal', (await toggle())?.[0], 'Show all 2 reasons');
   await undo();
   chmodSync(copilot, 0o755);
-  same('its Undo goes back for the agent, and leaves no line of the run’s refusals', [await a.text(sentence), await lines()], ['Undone: helper is as before.', 0]);
+  same('its Undo puts both back, and leaves no line of the run’s refusals', [await a.text(sentence), await lines()], [`Undone: ${names[2]} and helper are as before.`, 0]);
 
   // A refused removal: its switch says where it is as its row does. Its result closed, then a read: the background's line for the
   // removal it keeps trying says that it is Automatic sync trying again, never the click's words come back.
@@ -7993,9 +7993,22 @@ async function headerResultFlow() {
     retries.every(line => /^Automatic sync still couldn’t remove Claude Code’s copy of .+\. Central Knot will try again\.$/.test(line)) && retries.includes(retry(names[5])), retries);
   await pictures('background-retry', [860, 600]);
   await pressOn('#problems-show-all');
-  // Back on: Claude Code's copies never left.
-  await clickRun([...names.slice(0, 3), names[5]]);
+  // A click that went through, its result gone by itself after its 8 seconds: the next read shows the background's lines again.
+  await a.click(helper);
+  await done();
+  same('the agent switched off meanwhile: its own result, and no background line under it', [(await a.text(sentence))?.startsWith('helper is off'), await lines()], [true, 0]);
+  await a.run(`document.activeElement?.blur()`);
+  await mouse(a, 'mouseMoved', await middle(row(names[6])), 0);
+  await wait(9000);
+  await a.click('#header-refresh');
+  await done();
+  check('its result gone by itself, the next read shows the background’s lines again', (await a.text('#header .problem-text'))?.startsWith('Automatic sync still couldn’t remove'), await a.text('#header'));
+  await a.click(helper);
+  await done();
+  // Back on (the Undo above put the third back already): Claude Code's copies never left.
+  await clickRun([names[0], names[1], names[5]]);
   chmodSync(claude, 0o755);
+  same('every skill of the run back on', await a.run(`${JSON.stringify(names.slice(0, 6).map(switchOf))}.map(selector => document.querySelector(selector).getAttribute('aria-checked'))`), Array(6).fill('true'));
   await dismiss();
 
   // One click with a long unbroken name, Claude Code's folder read-only, at 860×600: its first words say what wasn't done, its
