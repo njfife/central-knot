@@ -8064,6 +8064,51 @@ async function headerResultFlow() {
   await undo();
   chmodSync(claude, 0o755);
 
+  // Automatic sync off: the band between the toolbar and the list ("Automatic sync is off…") keeps its one line whatever waits, so
+  // a click moves no row. Claude Code's folder read-only, each Off leaves a change waiting (its copy there owed): with one, three
+  // and five long names waiting, and after Sync once, the second row and the list are where they were with none waiting; Sync once,
+  // Turn sync on and the count are in reach on that line; the band's tooltip names every change waiting.
+  await openKind(a, 'all');
+  await dismiss();
+  await a.click('#sync-switch');
+  const sidebarAs = async rail => { if (await a.run(`document.body.classList.contains('rail')`) !== rail) await a.click('#sidebar-toggle'); };
+  /**
+   * Pictures (with --shots) of the band as it is, the sidebar a rail or open at each size (a resize across 968px puts it back as
+   * the width has it): dark at 860×600, 1316×819 and 1728×1117, light at 1316×819, then back at that size.
+   */
+  const bandPictures = async (name, rail, [width, height]) => {
+    if (!shots) return;
+    const sized = async size => { await sizeTo(a, ...size); await sidebarAs(rail); };
+    for (const size of [[860, 600], [1316, 819], [1728, 1117]]) { await sized(size); await theme('dark'); await a.shot(`sync-off-${name}-${size[0]}-dark`); }
+    await theme('light'); await sized([1316, 819]); await a.shot(`sync-off-${name}-1316-light`); await sized([width, height]);
+  };
+  /** Whether the band's count ("5 changes waiting") shows whole on its line, whatever of the names after it is cut. */
+  const countShows = () => a.run(`(text => { const node = text.firstChild, range = document.createRange(); range.setStart(node, 0); range.setEnd(node, node.textContent.indexOf('waiting') + 7); return range.getBoundingClientRect().right <= text.getBoundingClientRect().right + 1; })(document.querySelector('.band-sync-off .band-text'))`);
+  const waiting = [names[0], names[2], names[3], names[4], names[5]];
+  for (const [width, height] of [[860, 600], [1316, 822]]) for (const rail of [false, true]) {
+    const at = `${width}×${height}, the sidebar ${rail ? 'a rail' : 'open'}`, pictured = name => (width === 860 ? bandPictures(`${name}${rail ? '-rail' : ''}`, rail, [width, height]) : null);
+    await sizeTo(a, width, height); await sidebarAs(rail);
+    const idle = await places(), moved = [], reach = [];
+    await pictured('idle');
+    chmodSync(claude, 0o555);
+    for (const run of [waiting.slice(0, 1), waiting.slice(1, 3), waiting.slice(3)]) {
+      await clickRun(run);
+      moved.push(await places());
+      reach.push([await inView('#sync-now'), await inView('#sync-turn-on'), await countShows()]);
+      if (moved.length !== 2) await pictured(`${moved.length === 1 ? 'one' : 'five'}-waiting`);
+    }
+    const tooltip = await a.run(`document.querySelector('.band-sync-off .band-text')?.title ?? ''`);
+    chmodSync(claude, 0o755);
+    await pressOn('#sync-now');
+    moved.push(await places());
+    same(`${at}: with one, three and five changes waiting, and after Sync once, the second row and the list are where they were with none waiting`, moved, moved.map(() => idle));
+    same(`${at}: Sync once, Turn sync on and the count in reach with one, three and five waiting, and the band’s tooltip names all five`, [reach, waiting.filter(name => !tooltip.includes(name))], [reach.map(() => [true, true, true]), []]);
+    await clickRun(waiting);
+    await dismiss();
+  }
+  await a.click('#sync-switch');
+  check('with Automatic sync on, the band is not drawn', !await a.exists('.band-sync-off'));
+
   // Sync once with Automatic sync off, two copies deleted by hand in Copilot CLI and Claude Code's folder read-only: what it did is
   // its sentence, which says first that not everything was synced, and each refusal is a reason of its own, in the header and in
   // the Overview's band.
