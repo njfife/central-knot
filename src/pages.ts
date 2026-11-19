@@ -3,7 +3,7 @@
 // tool managed (noToolsLead, noToolsState), and preview only's reason inside a sentence (previewReason). Every other page has a
 // module of its own (overview.ts, harnesspage.ts, historypage.ts, profilespage.ts, sourcespage.ts, repopage.ts, pluginspage.ts,
 // instructionspage.ts, settingspage.ts); which page draws is renderer.ts renderPage, and the page's state and actions are app.ts's.
-import { acting, announce, noToolManaged, noToolManagedSentence, homeToolNames, homeTools, loadHome, type PageKind, selectItem, shownPath, showFile, showPage, startHome, state } from './app.ts';
+import { acting, announce, filesSkillAvailable, noToolManaged, noToolManagedSentence, homeToolNames, homeTools, loadHome, type PageKind, selectItem, shownPath, showFile, showPage, startHome, state } from './app.ts';
 import { button, emptyState, fileBlocks, h, icon, section } from './dom.ts';
 import { toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill } from './types.ts';
@@ -138,6 +138,8 @@ export function libraryPage() {
   if (noToolManaged()) return nothingHere(libraryEmpty(kinds), 'library-empty');
   // Nothing of any kind: the empty words under the Library's bands (a kind's stop, its problems, Resume).
   if (!kinds.some(kind => rowCount(home, kind))) return emptyList(emptyWithActions(libraryEmpty(kinds), 'library-empty'));
+  // A Files view whose skill is gone (the last one deleted, say) is left here, not as a move: places.ts available asks the same.
+  if (state.libraryView === 'files' && !filesSkillAvailable(home, state.item)) Object.assign(state, { libraryView: 'list', item: undefined });
   if (state.libraryView !== 'files') return libraryTable(none);
   return skillsBrowser(key => {
     if (!home) return { where: [], contents: [] };
@@ -151,7 +153,7 @@ export function libraryPage() {
         h('section.section', {}, h('h3.eyebrow.eyebrow-file', {}, 'SKILL.md'), contents(key, copies)),
       ],
     };
-  }, selectItem, none);
+  }, selectItem);
 }
 
 export function copyButton(text: string, what: string, id: string, label?: string) {
