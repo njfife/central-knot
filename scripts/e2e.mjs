@@ -6933,28 +6933,34 @@ async function usageFlow() {
 }
 
 /**
- * Word search stands on SQLite's full-text search in the app's own Node (node:sqlite): FTS5, bm25() weighted by column, snippet(),
- * the porter unicode61 tokenizer and fts5vocab. Asked of the app's own binary run as Node, whose SQLite is the one main opens.
+ * Word search in the app as built (search.ts, searchdocs.ts): main indexes the Library with SQLite's own full-text search from
+ * each view it hands over, and answers the page beside its queue. On a made-up home, through the page's own call: the name
+ * weighted above the text (bm25()), an excerpt of the text (snippet()), another form of a word (porter), a word only the
+ * text has, mistyped, corrected from the index's vocabulary (fts5vocab), a plugin's skill, typed punctuation, and each answer
+ * tagged with the view its index was built from.
  */
 async function searchFlow() {
-  const probe = `const { DatabaseSync } = require('node:sqlite');
-    const db = new DatabaseSync(':memory:');
-    db.exec("CREATE VIRTUAL TABLE t USING fts5(name, body, tokenize = 'porter unicode61')");
-    const add = db.prepare('INSERT INTO t (rowid, name, body) VALUES (?, ?, ?)');
-    add.run(1, 'pull request review', 'Reads a diff and leaves comments.');
-    add.run(2, 'release notes', 'Writes notes after reviewing the merged pull requests of a week.');
-    const ranked = weights => db.prepare('SELECT rowid FROM t WHERE t MATCH ? ORDER BY bm25(t, ' + weights + ')').all('"review"').map(row => row.rowid);
-    db.exec("CREATE VIRTUAL TABLE v USING fts5vocab(t, 'row')");
-    console.log(JSON.stringify({ sqlite: db.prepare('SELECT sqlite_version() AS v').get().v,
-      nameFirst: ranked('10.0, 1.0'), bodyFirst: ranked('1.0, 10.0'),
-      snippet: db.prepare("SELECT snippet(t, 1, '[', ']', '…', 4) AS x FROM t WHERE t MATCH ?").get('body:"merged"').x,
-      stems: db.prepare("SELECT term FROM v WHERE term IN ('review', 'reviewing', 'leav', 'leaves')").all().map(row => row.term) }));`;
-  const ran = spawnSync(command, ['-e', probe], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8' });
-  let said = {};
-  try { said = JSON.parse(ran.stdout); } catch { check('the app’s binary, run as Node, answers the SQLite probe', false, { stdout: ran.stdout, stderr: ran.stderr }); }
-  console.log(`searchFlow: SQLite ${said.sqlite}`);
-  same('the app’s SQLite has FTS5 with bm25() weighted by column (a name match first at 10:1, a body match first at 1:10), snippet(), porter stems and fts5vocab',
-    [said.nameFirst, said.bodyFirst, said.snippet, said.stems], [[1, 2], [2, 1], '…the [merged] pull requests…', ['leav', 'review']]);
+  const home = join(scratch, 'search-home'), data = join(scratch, 'search-data'), skills = join(home, '.claude/skills');
+  skill(skills, 'web-performance', text('web-performance', 'Profile with Lighthouse and the network panel.'));
+  skill(skills, 'lighthouse-report', text('lighthouse-report', 'Scores, and what to fix first.'));
+  skill(skills, 'deploy-staging', text('deploy-staging', 'Push the image to the registry.'));
+  writeClaudeInstall(home, 'ck-test-market', 'sheet-tools', '1.0.0', { 'skills/tidy/SKILL.md': text('tidy', 'Removes duplicate rows and trims every cell.') });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const a = await launch(data);
+  // The index published for a new view: its read is the view's own.
+  const readId = await a.run(`(window.ckPublished = [], window.centralKnot.onSearchPublished((home, readId) => window.ckPublished.push(readId)), window.centralKnot.refresh().then(view => view.readId))`);
+  for (let tries = 0; tries < 100 && !(await a.run(`window.ckPublished.includes(${readId})`)); tries++) await wait(50);
+  const ask = typed => a.run(`window.centralKnot.search(${JSON.stringify(typed)})`);
+  const rows = async typed => (await ask(typed)).rows;
+  same('the answer is ready, for the open home and the view just handed over', await ask('lighthouse').then(({ ready, home: on, readId: read }) => [ready, on, read]), [true, home, readId]);
+  same('a name above a text (bm25), the text matched with its excerpt (snippet), another form of a word (porter), a mistyped word the text alone has (fts5vocab), a plugin’s skill',
+    [await rows('lighthouse'), await rows('deploying'), await rows('registyr'), await rows('duplicate rows')],
+    [[{ id: 'skills-lighthouse-report' }, { id: 'skills-web-performance', excerpt: 'Profile with Lighthouse and the network panel.' }], [{ id: 'skills-deploy-staging' }],
+      [{ id: 'skills-deploy-staging', excerpt: 'Push the image to the registry.' }], [{ id: 'skills-sheet-tools@ck-test-market/tidy', excerpt: 'Removes duplicate rows and trims every cell.' }]]);
+  same('typed quotes, hyphens and operators are only words', [await rows('"deploy-'), await rows('NEAR( AND *')], [[{ id: 'skills-deploy-staging' }], []]);
+  same('no page errors, word search', a.pageErrors, []);
+  await a.quit();
 }
 
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
