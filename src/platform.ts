@@ -1,7 +1,7 @@
 // Where this computer keeps things, for the main process's modules: where a tool's CLI may be (executableCandidates; the PATH
 // to run it with: searchPath, pathBeside), where its desktop app may be (appCandidates, and the other apps: otherAppCandidates),
-// and this Mac's Applications folders, running apps and Trash, which a test stands in for (macPlaces). Nothing here reads a
-// tool's files.
+// this Mac's Applications folders, running apps and Trash, which a test stands in for (macPlaces), and whether a Linux desktop
+// has a system tray (hasStatusNotifierWatcher). Nothing here reads a tool's files.
 import { execFile } from 'node:child_process';
 import { userInfo } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, sep } from 'node:path';
@@ -59,6 +59,17 @@ let searched: Promise<string> | undefined;
  */
 export const searchPath = (): Promise<string> =>
   (searched ??= shellPath().then(fromShell => [process.env.PATH, fromShell].filter(Boolean).join(':')));
+
+/**
+ * Whether this Linux desktop has a system tray: Electron's tray icon there is a StatusNotifierItem, which shows only where
+ * something holds org.kde.StatusNotifierWatcher on the session bus (KDE's panel does; GNOME only with its AppIndicator extension).
+ * Asked with dbus-send, found on PATH, where a test puts its stand-in. No answer (no bus, no dbus-send, none in time) is no tray.
+ */
+export function hasStatusNotifierWatcher(dbusSend = 'dbus-send', timeoutMs = 2000): Promise<boolean> {
+  const asked = ['/org/freedesktop/DBus', 'org.freedesktop.DBus.NameHasOwner', 'string:org.kde.StatusNotifierWatcher'];
+  return new Promise(done => execFile(dbusSend, ['--session', '--print-reply', '--dest=org.freedesktop.DBus', ...asked],
+    { timeout: timeoutMs, killSignal: 'SIGKILL', encoding: 'utf8' }, (error, stdout) => done(!error && /\bboolean true\b/.test(stdout))));
+}
 
 /**
  * Where a tool's desktop app may be, where the version of the tool it carries is written, and where that copy of the tool

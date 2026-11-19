@@ -136,12 +136,15 @@ function seedHome() {
 }
 
 // ---------- App ----------
-// On Linux the file manager the app opens is this stand-in: it notes what it was asked to open.
+// On Linux the file manager the app opens is this stand-in: it notes what it was asked to open. So is the session bus's
+// dbus-send, asked whether the desktop has a system tray (platform.ts hasStatusNotifierWatcher): it has, as KDE's does, unless
+// a launch sets NO_TRAY, as on GNOME without its AppIndicator extension.
 const fileManagerAsked = join(scratch, 'opened.txt');
 if (process.platform === 'linux') {
   mkdirSync(join(scratch, 'bin'));
   writeFileSync(join(scratch, 'bin/xdg-open'), `#!/bin/sh\necho "$*" >> '${fileManagerAsked}'\n`);
   chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
+  writeFileSync(join(scratch, 'bin/dbus-send'), `#!/bin/sh\n[ -n "$NO_TRAY" ] && echo '   boolean false' || echo '   boolean true'\n`, { mode: 0o755 });
 }
 let app;
 // Every app this run started, and a flow's stand-in running app (standInApp), is closed when the run ends, however it ends: a
@@ -1310,6 +1313,9 @@ async function practiceFlow() {
   const allFolders = () => Object.fromEntries(skillsOn.map(key => [key, folders(key)]));
   const allOn = allFolders(), gone = [null, null, null];
   await a.click('#nav-profiles');
+  const trayIcon = process.platform === 'darwin' ? 'menu bar icon' : 'system tray icon';
+  check(`with no profiles yet, the page says a switch is made here, from the status bar or from the ${trayIcon}`,
+    (await a.text('.empty-body'))?.includes(`from the status bar or from the ${trayIcon},`), await a.text('.empty-body'));
   await newProfile(a, 'Incident');
   same('an empty profile offers no switch: it would turn everything off', [await a.exists('#profile-switch'), await a.exists('#profile-from-now')], [false, true]);
   await a.click('#pf-skill\\:notes');
@@ -3066,6 +3072,28 @@ async function practiceFlow() {
   check('an agent edit spreads in the background with no window', spreadClosed);
   main?.close();
   await a.quit();
+  // On a Linux desktop with no system tray there would be no icon to open it again from or quit from: a start at sign-in
+  // (--hidden) shows the window, and closing the window quits.
+  if (process.platform !== 'linux') return;
+  const noTray = join(scratch, 'home-no-tray'), noTrayData = join(scratch, 'no-tray-data');
+  mkdirSync(noTray);
+  const b = await launch(noTrayData, ['--hidden'], noTray, { NO_TRAY: '1' });
+  // The page is told it started hidden (location.search: main.ts createWindow) only when its window was made hidden; a
+  // development run also asks the window itself, through main's debugger. (Electron paints a hidden window, so the page's
+  // visibilityState says visible either way.)
+  const bMain = b.main && await b.main();
+  same('on a Linux desktop with no system tray, a start at sign-in (--hidden) shows the window',
+    [await b.run('location.search'), await bMain?.run('electron.BrowserWindow.getAllWindows()[0].isVisible()') ?? true], ['', true]);
+  // Closed through the window's own close, as a person's click is (main's debugger). A packaged app has no debugger: there the
+  // page closes itself, which skips the window's close handler and quits from window-all-closed.
+  if (bMain) {
+    await bMain.run(`(setTimeout(() => electron.BrowserWindow.getAllWindows()[0].close(), 50), true)`);
+    bMain.close();
+  } else await b.run(`setTimeout(() => window.close(), 50), true`);
+  for (let tries = 0; tries < 40 && b.child.exitCode === null; tries++) await wait(250);
+  same('on a Linux desktop with no system tray, closing the window quits', b.child.exitCode, 0);
+  if (bMain) check('and the window’s own close handler saw no tray', readNow(join(noTrayData, 'central-knot.log')).includes('window close (no tray icon)'), readNow(join(noTrayData, 'central-knot.log')).slice(-400));
+  if (b.child.exitCode === null) await b.quit();
 }
 
 /**

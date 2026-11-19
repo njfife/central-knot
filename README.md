@@ -6,7 +6,7 @@ Central Knot is a desktop app that shows the skills, MCP servers, agents, instru
 
 Download the Mac disk image (Apple silicon), `Central-Knot-<version>-mac-arm64.dmg`, from the [GitHub releases](https://github.com/njfife/central-knot/releases). Open it, drag **Central Knot** onto the **Applications** folder beside it, then open Central Knot from Applications. It is signed with a Developer ID and notarized. Each release also has the same app as a zip.
 
-**On Linux** (x86_64 desktops) there is no release yet: `npm run package:linux` builds `Central-Knot-<version>-linux-x86_64.AppImage` from the source (see Packaging and release), which runs from a file manager or a terminal (on a system that restricts user namespaces, Ubuntu 24.04 and later, start it with `--no-sandbox`). It writes your real home as the Mac app does, but doesn't yet start at sign-in, update itself or add a launcher entry, and two more things are in **Not here yet**.
+**On Linux** (x86_64 desktops) there is no release yet: `npm run package:linux` builds `Central-Knot-<version>-linux-x86_64.AppImage` from the source (see Packaging and release), which runs from a file manager or a terminal (on a system that restricts user namespaces, Ubuntu 24.04 and later, start it with `--no-sandbox`). It writes your real home as the Mac app does, but doesn't yet start at sign-in, update itself or add a launcher entry, and one more thing is in **Not here yet**.
 
 A released build opens on **This Mac's home** (**This computer's home** on Linux): your real tools. Nothing is changed until you choose it. The sidebar's **Home** list also has **Another folder…**, for a backup or another account's home; Central Knot writes only inside that folder, and one that is or links into your real tool folders is read-only. The **Practice copy** (sample data in a throwaway folder, removed at Quit) is only in development builds: run `npm start` from the source to try things on sample files first.
 
@@ -66,7 +66,7 @@ Skills: each tool's own skills folder. OpenCode 1.x leaves out a skill with no `
 - **Automatic sync** (status bar switch, on by default): an item edited in one tool spreads to the others within seconds. A deletion is acted on after a 2 s settle. Competing edits: the latest edit wins, by the folders' or files' times (MCP entries, which have none: the first tool's, in the page's order), and the other is kept as a version. Each outcome shows a notice with Undo or Turn it on.
 - With Automatic sync off, edits and deletions are noted as waiting, and **Sync once** spreads them once.
 - A folder or file that can't be read or is half-written is held, never read as a deletion; a folder made again is written afresh. An MCP settings file that reads without a server's entry is that entry deleted by hand (see MCP servers). Every write checks the file first and never overwrites a save made meanwhile.
-- Closing the window keeps Central Knot syncing, and updating plugins (see Plugin marketplaces). On a Mac it then leaves the Dock and runs from its menu bar icon alone, until the window is opened again. The menu bar icon has Open, Settings, the profile, Automatic sync, Sync once (while Automatic sync is off), Start at sign-in and Quit.
+- Closing the window keeps Central Knot syncing, and updating plugins (see Plugin marketplaces). On a Mac it then leaves the Dock and runs from its menu bar icon alone, until the window is opened again; on Linux it runs from its system tray icon, and on a desktop with no system tray (GNOME without its AppIndicator extension) closing the window quits. The menu bar icon has Open, Settings, the profile, Automatic sync, Sync once (while Automatic sync is off), Start at sign-in and Quit.
 
 ### Instructions
 
@@ -171,7 +171,7 @@ Central Knot's state lives in one folder, `.central-knot/` inside the selected h
 
 ## Not here yet
 
-Windows real-home writes; Windows and Linux desktop app locations; on Linux, one build at a time (the standard and the alpha AppImage, each with its own settings folder, both write a home they both open), and a way to quit on a desktop with no system tray (GNOME without its AppIndicator extension), where a closed window keeps syncing until its process is stopped; installing a plugin into Cowork (the one Cowork session tried had only the Claude account's plugins, see Plugin marketplaces), and a plugin installed through a desktop app shown loading in a signed-in session. For OpenCode: its own (npm) plugins, Disable for one agent, agents kept in the older `agent` folder, and writing a draft of the base instructions. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
+Windows real-home writes; Windows and Linux desktop app locations; on Linux, one build at a time (the standard and the alpha AppImage, each with its own settings folder, both write a home they both open); installing a plugin into Cowork (the one Cowork session tried had only the Claude account's plugins, see Plugin marketplaces), and a plugin installed through a desktop app shown loading in a signed-in session. For OpenCode: its own (npm) plugins, Disable for one agent, agents kept in the older `agent` folder, and writing a draft of the base instructions. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
 
 ## For developers
 
@@ -243,6 +243,6 @@ It packs the marketplace exactly as the build does and writes the archive, then 
 
 ### Logo
 
-The logo files are in `assets/`: `logo.svg` (the sidebar mark, copied into `dist/` by `scripts/build.mjs`), `icon.icns` (the Mac app icon, used by `scripts/package-mac.mjs`), `icon.png` (the window icon on Windows and Linux) and `icon.svg` (the app icon drawing). A custom build takes its app icon and sidebar mark from `--app-icon` (above). The menu bar icon is the same logo in one colour: its drawing is `assets/tray.svg`, and the 32-pixel PNG made from it is kept as text in `src/trayicon.ts`; a custom build keeps the standard menu bar icon for now.
+The logo files are in `assets/`: `logo.svg` (the sidebar mark, copied into `dist/` by `scripts/build.mjs`), `icon.icns` (the Mac app icon, used by `scripts/package-mac.mjs`), `icon.png` (the window and tray icon on Windows and Linux) and `icon.svg` (the app icon drawing). A custom build takes its app icon and sidebar mark from `--app-icon` (above). The Mac's menu bar icon is the same logo in one colour: its drawing is `assets/tray.svg`, and the 32-pixel PNG made from it is kept as text in `src/trayicon.ts`; a custom build keeps the standard menu bar icon for now.
 
 The product boundary is in `AGENTS.md`. `docs/SPEC.md` is the requirements as written before the library, history now and not kept true. The per-tool evidence is in `docs/capability-data.md`. `LEDGER.md` records what was run and every check round up to 2026-11-13 (frozen history; a change since has its story in its pull request).
