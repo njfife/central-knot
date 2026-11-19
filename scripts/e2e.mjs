@@ -70,6 +70,11 @@ function skill(base, folder, content = text(folder)) {
   writeFileSync(join(directory, 'SKILL.md'), content);
   return directory;
 }
+/** Keeps `path`'s time at now, as a tool still saving a file or holding its lock does (the app takes a lock older than 10 s), until the call it returns. */
+function keepFresh(path) {
+  const timer = setInterval(() => { const now = new Date(); try { utimesSync(path, now, now); } catch { /* gone: the check that needed it says so */ } }, 100);
+  return () => clearInterval(timer);
+}
 function tree(directory, options = {}) {
   const out = {};
   const visit = current => {
@@ -5058,11 +5063,11 @@ async function syncEverythingFlow() {
   // the pass the switch starts leaves it inside the settle window however late that pass runs. Left still, a pass soon after
   // takes it in by itself, whose read keeps the notices no page has shown yet.
   const fresh = join(skill(claude, 'fresh', text('fresh', 'Just saved.')), 'SKILL.md');
-  const stillSaving = setInterval(() => utimesSync(fresh, new Date(), new Date()), 100);
+  const stopSaving = keepFresh(fresh);
   try {
     await a.click('#sync-everything-on');
     for (let tries = 0; tries < 40 && await ruleOn() !== 'true'; tries++) await wait(100);
-  } finally { clearInterval(stillSaving); }
+  } finally { stopSaving(); }
   const record = JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8'));
   same('turned on, it is kept in the home’s sync record, and the row says what still waits for a choice', [await ruleOn(), record.syncEverything, await ruleSays()], ['true', true, '1 found item has copies that differ and waits for your choice of copy.']);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
@@ -5350,7 +5355,8 @@ async function firstSetupFlow() {
   for (let n = 1; n <= 8; n++) saved(skill(third.claude, 'guide-' + n), 5);
   await d.click('#header-refresh');
   await sizeTo(d, ...SMALLEST);
-  mkdirSync(settings + '.lock');
+  // Claude Code's lock, held as a running Claude Code holds it for every step below.
+  mkdirSync(settings + '.lock'); const stopHolding = keepFresh(settings + '.lock');
   try {
     await d.click('#sync-now');
     const words = await d.text('[data-outcome] .band-text');
@@ -5377,7 +5383,7 @@ async function firstSetupFlow() {
     check('Sync once from the Overview with the removal still held: its sentence says so first, then the refusal on a line of its own',
       /^Not everything was synced\./.test(await d.text('.page > .bands [data-outcome] .band-text') ?? '') && lines.length === 1 && /^block locked \(Claude Code\): .*lock/.test(lines[0]), lines);
     if (shots) { await sizeTo(d, 860, 600); await d.shot('result-overview-sync-once-860'); await sizeTo(d, ...SMALLEST); }
-  } finally { rmSync(settings + '.lock', { recursive: true }); }
+  } finally { stopHolding(); rmSync(settings + '.lock', { recursive: true, force: true }); }
   if (d.inspect) {
     await d.click('#nav-overview');
     const menu = await mainHelpers(d.inspect);
@@ -6343,7 +6349,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   const lock = `${claudeJson}.lock`, header = () => a.text('#header .header-result'), sentence = () => a.text('#header [data-outcome] .band-text'), reasonsIn = async () => ((await header()) ?? '').split('locked').length - 1;
   /** A click on a control of this round's, which may not be there (the check after it then fails). */
   const press = async selector => { await a.run(`document.querySelector(${JSON.stringify(selector)})?.click()`); await done(); };
-  mkdirSync(lock); const holdLock = setInterval(() => { const now = new Date(); utimesSync(lock, now, now); }, 1000);
+  mkdirSync(lock); const stopHolding = keepFresh(lock);
   try {
   const firstRowTop = () => a.run(`Math.round(document.querySelector('#${table} .ov-row[data-key]').getBoundingClientRect().top)`), resultBottom = () => a.run(`Math.round(document.querySelector('#header .header-result').getBoundingClientRect().bottom)`);
   await a.click('#outcome-undo'); await done();
@@ -6356,7 +6362,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   await press('#problems-show-all');
   same('Show all: the reason whole, then Show less', [await lineCut(), await a.text('#problems-show-all'), await expanded()], [false, 'Show less', 'true']);
   await press('#outcome-dismiss');
-  } finally { clearInterval(holdLock); rmSync(lock, { recursive: true }); }
+  } finally { stopHolding(); rmSync(lock, { recursive: true, force: true }); }
   await sizeTo(a, 1280, 800);
 
   await a.click('#nav-plugins');
@@ -8429,12 +8435,65 @@ async function headerResultFlow() {
   await undo();
   chmodSync(claude, 0o755);
 
-  // Sync once with Automatic sync off, two copies deleted by hand in Copilot CLI and Claude Code's folder read-only: what it did is
-  // its sentence, which says first that not everything was synced, and each refusal is a reason of its own, in the header and in
-  // the Overview's band.
+  // Automatic sync off: the band between the toolbar and the list ("Automatic sync is off…") keeps its one line whatever waits, so
+  // these clicks move no row. Claude Code's folder read-only, each Off leaves a change waiting (its copy there owed): with one, three
+  // and five long names waiting, and after Sync once, the second row and the list are where they were with none waiting; Sync once,
+  // Turn sync on and the count are in reach on that line; the band's tooltip names every change waiting. The section after runs as
+  // it did before these checks: the window's size and sidebar put back, and Automatic sync left off (turned on and off again around
+  // file writes, a pass begun while it was on could take that section's deletions by hand).
   await openKind(a, 'all');
   await dismiss();
+  check('with Automatic sync on, the band is not drawn', !await a.exists('.band-sync-off'));
+  const sizeBefore = await a.run('[innerWidth, innerHeight]'), railBefore = await a.run(`document.body.classList.contains('rail')`);
   await a.click('#sync-switch');
+  const sidebarAs = async rail => { if (await a.run(`document.body.classList.contains('rail')`) !== rail) await a.click('#sidebar-toggle'); };
+  /**
+   * Pictures (with --shots) of the band as it is, the sidebar a rail or open at each size (a resize across 968px puts it back as
+   * the width has it): dark at 860×600, 1316×819 and 1728×1117, light at 1316×819, then back at that size.
+   */
+  const bandPictures = async (name, rail, [width, height]) => {
+    if (!shots) return;
+    const sized = async size => { await sizeTo(a, ...size); await sidebarAs(rail); };
+    for (const size of [[860, 600], [1316, 819], [1728, 1117]]) { await sized(size); await theme('dark'); await a.shot(`sync-off-${name}-${size[0]}-dark`); }
+    await theme('light'); await sized([1316, 819]); await a.shot(`sync-off-${name}-1316-light`); await sized([width, height]);
+  };
+  /** What the band says before its names ("Automatic sync is off. 3 changes waiting"), or its whole idle sentence. */
+  const bandLead = () => a.run(`document.querySelector('.band-sync-off .band-text')?.textContent.split(':')[0] ?? null`);
+  const leads = [...['1 change', '3 changes', '5 changes'].map(count => `Automatic sync is off. ${count} waiting`), 'Automatic sync is off. Edits and deletions in your tools will wait here.'];
+  /** Whether the band's count ("5 changes waiting") shows whole on its line, whatever of the names after it is cut. */
+  const countShows = () => a.run(`(text => { const node = text.firstChild, range = document.createRange(); range.setStart(node, 0); range.setEnd(node, node.textContent.indexOf('waiting') + 7); return range.getBoundingClientRect().right <= text.getBoundingClientRect().right + 1; })(document.querySelector('.band-sync-off .band-text'))`);
+  const waiting = [names[0], names[2], names[3], names[4], names[5]];
+  for (const [width, height] of [[860, 600], [1316, 822]]) for (const rail of [false, true]) {
+    const at = `${width}×${height}, the sidebar ${rail ? 'a rail' : 'open'}`, pictured = name => (width === 860 ? bandPictures(`${name}${rail ? '-rail' : ''}`, rail, [width, height]) : null);
+    await sizeTo(a, width, height); await sidebarAs(rail);
+    const idle = await places(), moved = [], reach = [], said = [];
+    await pictured('idle');
+    chmodSync(claude, 0o555);
+    for (const run of [waiting.slice(0, 1), waiting.slice(1, 3), waiting.slice(3)]) {
+      await clickRun(run);
+      said.push(await bandLead());
+      moved.push(await places());
+      reach.push([await inView('#sync-now'), await inView('#sync-turn-on'), await countShows()]);
+      if (moved.length !== 2) await pictured(`${moved.length === 1 ? 'one' : 'five'}-waiting`);
+    }
+    const tooltip = await a.run(`document.querySelector('.band-sync-off .band-text')?.title ?? ''`);
+    chmodSync(claude, 0o755);
+    await pressOn('#sync-now');
+    said.push(await bandLead());
+    moved.push(await places());
+    same(`${at}: the band says 1, 3 and 5 changes waiting, then, after Sync once, its idle sentence`, said, leads);
+    same(`${at}: with one, three and five changes waiting, and after Sync once, the second row and the list are where they were with none waiting`, moved, moved.map(() => idle));
+    same(`${at}: Sync once, Turn sync on and the count in reach with one, three and five waiting, and the band’s tooltip names all five`, [reach, waiting.filter(name => !tooltip.includes(name))], [reach.map(() => [true, true, true]), []]);
+    await clickRun(waiting);
+    await dismiss();
+  }
+  await sizeTo(a, ...sizeBefore); await sidebarAs(railBefore);
+
+  // Sync once with Automatic sync off (still, from the band's checks), two copies deleted by hand in Copilot CLI and Claude Code's
+  // folder read-only: what it did is its sentence, which says first that not everything was synced, and each refusal is a reason of
+  // its own, in the header and in the Overview's band.
+  await openKind(a, 'all');
+  await dismiss();
   for (const name of names.slice(3, 5)) rmSync(join(copilot, name), { recursive: true });
   chmodSync(claude, 0o555);
   await a.click('#header-refresh');
