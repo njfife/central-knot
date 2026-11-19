@@ -101,9 +101,9 @@ test('Claude Code finds imports as it does: none in code, inside a word or a bar
 test('Claude Code skips an import in an HTML comment, on one line or over several', async () => {
   const box = await sandbox();
   try {
-    await box.write('.claude/CLAUDE.md', '<!-- @old.md -->\n<!--\n@older.md\n-->\nKept: @kept.md <!-- @aside.md -->\n');
-    for (const name of ['old.md', 'older.md', 'kept.md', 'aside.md']) await box.write(`.claude/${name}`, `${name}\n`);
-    assert.deepEqual(await box.said('claude-cli'), ['.claude/kept.md · imported by CLAUDE.md, line 5 · kept.md\n']);
+    await box.write('.claude/CLAUDE.md', '<!-- @old.md -->\n@first.md\n<!--\n@older.md\n-->\nKept: @kept.md <!-- @aside.md -->\n');
+    for (const name of ['old.md', 'first.md', 'older.md', 'kept.md', 'aside.md']) await box.write(`.claude/${name}`, `${name}\n`);
+    assert.deepEqual(await box.said('claude-cli'), ['.claude/first.md · imported by CLAUDE.md, line 2 · first.md\n', '.claude/kept.md · imported by CLAUDE.md, line 6 · kept.md\n']);
   } finally { await box.cleanup(); }
 });
 
