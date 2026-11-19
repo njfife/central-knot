@@ -14,7 +14,8 @@ import { macPlaces } from '../src/platform.ts';
 import type { OtherBuild } from '../src/types.ts';
 import { ALPHA_BUILD } from '../src/updates.ts';
 import { STANDARD_BUILD } from '../src/values.ts';
-import { standInApp, standInMac } from './macstandins.ts';
+import { askedToQuit, standInApp, standInMac } from './macstandins.ts';
+import { within } from './within.ts';
 
 const ALPHA = 'Central Knot Alpha', STANDARD = 'Central Knot', ACME = 'Acme Knot', ACME_BUILD = 'com.centralknot.custom.acme';
 const trashWords = (name: string) => `${name} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, which of them are kept in step, and History stay: they’re saved in this home, not in an app. ${name}’s own settings folder stays too. If ${name} still starts at sign-in, turn it off in System Settings › General › Login Items.`;
@@ -227,12 +228,12 @@ test('The bundle is checked again as the last thing before the Trash: one swappe
   const [app] = await runs([{ bundleId: ALPHA_BUILD, path: found.installed, quits: false }]);
   const removing = removeBuild(context, found);
   // While Replace waits for it to quit, the bundle is replaced by another app's, and then the alpha quits.
-  await wait(400);
+  await within('Replace asking the alpha to quit', askedToQuit(app));
   rmSync(found.installed, { recursive: true });
   stand.bundle(stand.applications, ALPHA, 'com.example.unrelated');
   app.kill('SIGKILL');
   const removal = await removing;
-  assert.equal(removal.done, false, removal.said);
+  assert.deepEqual(removal, { said: `${ALPHA} has quit. ${found.installed} isn’t ${ALPHA}, so nothing was removed. It may have been replaced since Central Knot looked.`, done: false }, 'refused by the check after the wait');
   assert.ok(existsSync(join(found.installed, 'Contents/Info.plist')), 'the swapped-in app is where it was');
   assert.deepEqual(trashed(), []);
 }));

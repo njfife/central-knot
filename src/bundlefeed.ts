@@ -3,6 +3,7 @@
 // marketplace it carries, downloads the archive and puts it in use as the build's own release is (bundle.ts): checked
 // against the manifest, unpacked aside, swapped in. Anything short of that leaves the plugins in use as they are and says
 // why. Plain files over http or https, with no sign-in of the app's own: who can reach the address is the publisher's affair.
+import { once } from 'node:events';
 import { createWriteStream } from 'node:fs';
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -60,6 +61,9 @@ async function download(host: FeedHost, release: BundleRelease, file: string): P
   try {
     const response = await host.fetch(new URL(release.archive, host.feed).href, { signal: stalled.signal });
     if (!response.ok || !response.body) throw new Answered(response.status);
+    // The file is made before a byte is read, so however the copy ends, it is there for checkFeed's cleanup to remove.
+    const archive = createWriteStream(file);
+    await once(archive, 'open');
     await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), async function* (chunks: AsyncIterable<Buffer>) {
       for await (const chunk of chunks) {
         clearTimeout(quiet);
@@ -70,7 +74,7 @@ async function download(host: FeedHost, release: BundleRelease, file: string): P
         yield chunk;
       }
     // The same signal ends the copy itself, whatever the request does with it: a download gone quiet never holds a look open.
-    }, createWriteStream(file), { signal: stalled.signal });
+    }, archive, { signal: stalled.signal });
   } finally { clearTimeout(quiet); }
 }
 
