@@ -70,6 +70,11 @@ function skill(base, folder, content = text(folder)) {
   writeFileSync(join(directory, 'SKILL.md'), content);
   return directory;
 }
+/** Keeps `path`'s time at now, as a tool still saving a file or holding its lock does (the app takes a lock older than 10 s), until the call it returns. */
+function keepFresh(path) {
+  const timer = setInterval(() => { const now = new Date(); try { utimesSync(path, now, now); } catch { /* gone: the check that needed it says so */ } }, 100);
+  return () => clearInterval(timer);
+}
 function tree(directory, options = {}) {
   const out = {};
   const visit = current => {
@@ -5086,11 +5091,11 @@ async function syncEverythingFlow() {
   // the pass the switch starts leaves it inside the settle window however late that pass runs. Left still, a pass soon after
   // takes it in by itself, whose read keeps the notices no page has shown yet.
   const fresh = join(skill(claude, 'fresh', text('fresh', 'Just saved.')), 'SKILL.md');
-  const stillSaving = setInterval(() => utimesSync(fresh, new Date(), new Date()), 100);
+  const stopSaving = keepFresh(fresh);
   try {
     await a.click('#sync-everything-on');
     for (let tries = 0; tries < 40 && await ruleOn() !== 'true'; tries++) await wait(100);
-  } finally { clearInterval(stillSaving); }
+  } finally { stopSaving(); }
   const record = JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8'));
   same('turned on, it is kept in the home’s sync record, and the row says what still waits for a choice', [await ruleOn(), record.syncEverything, await ruleSays()], ['true', true, '1 found item has copies that differ and waits for your choice of copy.']);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
@@ -5378,7 +5383,8 @@ async function firstSetupFlow() {
   for (let n = 1; n <= 8; n++) saved(skill(third.claude, 'guide-' + n), 5);
   await d.click('#header-refresh');
   await sizeTo(d, ...SMALLEST);
-  mkdirSync(settings + '.lock');
+  // Claude Code's lock, held as a running Claude Code holds it for every step below.
+  mkdirSync(settings + '.lock'); const stopHolding = keepFresh(settings + '.lock');
   try {
     await d.click('#sync-now');
     const words = await d.text('[data-outcome] .band-text');
@@ -5405,7 +5411,7 @@ async function firstSetupFlow() {
     check('Sync once from the Overview with the removal still held: its sentence says so first, then the refusal on a line of its own',
       /^Not everything was synced\./.test(await d.text('.page > .bands [data-outcome] .band-text') ?? '') && lines.length === 1 && /^block locked \(Claude Code\): .*lock/.test(lines[0]), lines);
     if (shots) { await sizeTo(d, 860, 600); await d.shot('result-overview-sync-once-860'); await sizeTo(d, ...SMALLEST); }
-  } finally { rmSync(settings + '.lock', { recursive: true }); }
+  } finally { stopHolding(); rmSync(settings + '.lock', { recursive: true, force: true }); }
   if (d.inspect) {
     await d.click('#nav-overview');
     const menu = await mainHelpers(d.inspect);
@@ -6371,7 +6377,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   const lock = `${claudeJson}.lock`, header = () => a.text('#header .header-result'), sentence = () => a.text('#header [data-outcome] .band-text'), reasonsIn = async () => ((await header()) ?? '').split('locked').length - 1;
   /** A click on a control of this round's, which may not be there (the check after it then fails). */
   const press = async selector => { await a.run(`document.querySelector(${JSON.stringify(selector)})?.click()`); await done(); };
-  mkdirSync(lock); const holdLock = setInterval(() => { const now = new Date(); utimesSync(lock, now, now); }, 1000);
+  mkdirSync(lock); const stopHolding = keepFresh(lock);
   try {
   const firstRowTop = () => a.run(`Math.round(document.querySelector('#${table} .ov-row[data-key]').getBoundingClientRect().top)`), resultBottom = () => a.run(`Math.round(document.querySelector('#header .header-result').getBoundingClientRect().bottom)`);
   await a.click('#outcome-undo'); await done();
@@ -6384,7 +6390,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   await press('#problems-show-all');
   same('Show all: the reason whole, then Show less', [await lineCut(), await a.text('#problems-show-all'), await expanded()], [false, 'Show less', 'true']);
   await press('#outcome-dismiss');
-  } finally { clearInterval(holdLock); rmSync(lock, { recursive: true }); }
+  } finally { stopHolding(); rmSync(lock, { recursive: true, force: true }); }
   await sizeTo(a, 1280, 800);
 
   await a.click('#nav-plugins');
