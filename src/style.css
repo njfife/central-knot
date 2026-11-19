@@ -442,7 +442,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .sync-notice > .kind-mark + .notice-text { max-width: calc(100% - 42px); }
 .sync-notice > .kind-mark + .row-kind + .notice-text { max-width: calc(100% - 92px); }
 /* While first setup's walkthrough asks, each notice keeps to its first line until Show all (matrix.ts listNotices). */
-.notices-folded .notice-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notices-folded .notice-text { flex: 1 1 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .notices-folded .sync-notice-lines { grid-template-columns: minmax(0, 1fr); }
 .sync-notice .btn { flex: none; height: 26px; padding: 0 10px; font-size: 12px; }
 .sync-notice > .notice-dismiss { position: absolute; top: 2px; right: 0; }

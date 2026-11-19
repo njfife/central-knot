@@ -3811,7 +3811,7 @@ async function releasedStartupFlow() {
   check('Close ends the note on Settings', !(await c.exists('#settings-kept')));
   await c.click('#nav-overview');
   same('and on the Overview, and main’s next view no longer has it', [await c.exists('#overview-settings-kept'), (await c.run('window.centralKnot.refresh()')).settingsUnread], [false, undefined]);
-  await c.click('#nav-skills');
+  await c.click('#nav-library');
   check('the home waits for Resume, saying why, and still nothing is taken in', (await c.text('.bands') ?? '').includes(waits) && await c.exists('#resume') && !existsSync(later), await c.text('.bands'));
   await c.click('#resume');
   await c.run(`window.centralKnot.syncNow(${JSON.stringify(fresh)})`);
@@ -4493,7 +4493,7 @@ async function thisMacTakeOverFlow() {
   writeFileSync(join(reset.alphaData, 'sync-settings.json'), JSON.stringify({ syncOn: true }));
   writeFileSync(join(reset.data, 'app-settings.json'), '{"home": {"mode": "act');
   const e = await launch(reset.data, flag('--electron') ? ['--as-released'] : [], reset.home, { CK_TEST_APPS: reset.mac.root, CK_TEST_OWN_BUNDLE: join(reset.mac.applications, 'Central Knot.app') });
-  await e.click('#nav-skills');
+  await e.click('#nav-library');
   same('taken over after a settings file that can’t be read: the alpha’s choices carried, and the home waits for Resume with the edit not spread',
     [reset.owner(), reset.settings()[0], await e.exists('#resume'), readFileSync(reset.notes('.copilot'), 'utf8') === reset.edited], ['com.centralknot.firstlook', true, true, false]);
   await e.click('#resume');
@@ -7358,8 +7358,9 @@ async function libraryFlow() {
   await c.quit();
 
   // ---------- A click moves no row: the toolbar keeps its height whatever a click makes appear ----------
-  // A small home whose bar just fits at 860×600 until a click brings Put in order and a change left waiting. Each size twice: a
-  // plain Off, and one whose removal Claude Code refuses (a problem line, and the change left waiting).
+  // A small home at 860×600, at 1316×822, and at the narrowest window where its bar keeps to one line (the sidebar open): there,
+  // were their room not held, the Put in order and change-waiting a click brings would wrap the bar. Each place twice: a plain
+  // Off, and one whose removal Claude Code refuses (a problem line, and the change left waiting).
   const T = homeWith('library-toolbar');
   for (const name of ['alpha', 'beta', 'gamma']) skill(T.claude, name);
   const tb = await launch(T.data, [], T.real);
@@ -7369,8 +7370,7 @@ async function libraryFlow() {
   await done(tb);
   await openKind(tb, 'all');
   const placeOf = () => tb.run(`[Math.round(document.querySelector('[id^="table-library-"]').getBoundingClientRect().top), Math.round(document.querySelector('${row('skills', 'beta')}').getBoundingClientRect().top)]`);
-  for (const [width, height] of [[860, 600], [1316, 822]]) for (const refused of [false, true]) {
-    await sizeTo(tb, width, height);
+  const clickMovesNothing = async (where, refused) => {
     const before = await placeOf();
     if (refused) chmodSync(T.claude, 0o555);
     await tb.click(`#${rowPart('switch', 'skills', 'beta')}`);
@@ -7378,11 +7378,36 @@ async function libraryFlow() {
     const withResult = await placeOf();
     await tb.run(`document.querySelector('#outcome-dismiss')?.click()`);
     await tb.settle();
-    same(`at ${width}×${height}, a switch’s click${refused ? ' a tool refuses' : ''} moves neither the list’s top nor its row, with its result and without`, [withResult, await placeOf()], [before, before]);
+    same(`${where}, a switch’s click${refused ? ' a tool refuses' : ''} moves neither the list’s top nor its row, with its result and without`, [withResult, await placeOf()], [before, before]);
     chmodSync(T.claude, 0o755);
     await tb.click(`#${rowPart('switch', 'skills', 'beta')}`);
     await done(tb);
     await tb.click('#header-refresh');
+  };
+  for (const [width, height] of [[860, 600], [1316, 822]]) for (const refused of [false, true]) {
+    await sizeTo(tb, width, height);
+    await clickMovesNothing(`at ${width}×${height}`, refused);
+  }
+  // The sidebar open at every width (crossing 968 wide forgets its shape: renderer.ts RAIL_BELOW), so the content narrows
+  // steadily with the window.
+  const openAt = async width => {
+    await sizeTo(tb, width, 600);
+    if (await tb.run(`document.body.classList.contains('rail')`)) await tb.click('#sidebar-toggle');
+  };
+  const wraps = () => tb.run(`document.querySelector('#main .toolbar').classList.contains('bar-wrap')`);
+  let [wrapped, oneLine] = [860, 1316];
+  await openAt(wrapped);
+  const wrapsAt860 = await wraps();
+  await openAt(oneLine);
+  check('with the sidebar open, the bar wraps at 860 wide and keeps to one line at 1316', wrapsAt860 && !(await wraps()));
+  while (oneLine - wrapped > 1) {
+    const mid = (wrapped + oneLine) >> 1;
+    await openAt(mid);
+    if (await wraps()) wrapped = mid; else oneLine = mid;
+  }
+  for (const refused of [false, true]) {
+    await openAt(oneLine);
+    await clickMovesNothing(`at ${oneLine}×600, the narrowest the bar keeps to one line with the sidebar open`, refused);
   }
   same('no page errors, a click moves no row', tb.pageErrors, []);
   await tb.quit();
