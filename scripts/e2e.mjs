@@ -6932,6 +6932,31 @@ async function usageFlow() {
   rmSync(pipe);
 }
 
+/**
+ * Word search stands on SQLite's full-text search in the app's own Node (node:sqlite): FTS5, bm25() weighted by column, snippet(),
+ * the porter unicode61 tokenizer and fts5vocab. Asked of the app's own binary run as Node, whose SQLite is the one main opens.
+ */
+async function searchFlow() {
+  const probe = `const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(':memory:');
+    db.exec("CREATE VIRTUAL TABLE t USING fts5(name, body, tokenize = 'porter unicode61')");
+    const add = db.prepare('INSERT INTO t (rowid, name, body) VALUES (?, ?, ?)');
+    add.run(1, 'pull request review', 'Reads a diff and leaves comments.');
+    add.run(2, 'release notes', 'Writes notes after reviewing the merged pull requests of a week.');
+    const ranked = weights => db.prepare('SELECT rowid FROM t WHERE t MATCH ? ORDER BY bm25(t, ' + weights + ')').all('"review"').map(row => row.rowid);
+    db.exec("CREATE VIRTUAL TABLE v USING fts5vocab(t, 'row')");
+    console.log(JSON.stringify({ sqlite: db.prepare('SELECT sqlite_version() AS v').get().v,
+      nameFirst: ranked('10.0, 1.0'), bodyFirst: ranked('1.0, 10.0'),
+      snippet: db.prepare("SELECT snippet(t, 1, '[', ']', '…', 4) AS x FROM t WHERE t MATCH ?").get('body:"merged"').x,
+      stems: db.prepare("SELECT term FROM v WHERE term IN ('review', 'reviewing', 'leav', 'leaves')").all().map(row => row.term) }));`;
+  const ran = spawnSync(command, ['-e', probe], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8' });
+  let said = {};
+  try { said = JSON.parse(ran.stdout); } catch { check('the app’s binary, run as Node, answers the SQLite probe', false, { stdout: ran.stdout, stderr: ran.stderr }); }
+  console.log(`searchFlow: SQLite ${said.sqlite}`);
+  same('the app’s SQLite has FTS5 with bm25() weighted by column (a name match first at 10:1, a body match first at 1:10), snippet(), porter stems and fts5vocab',
+    [said.nameFirst, said.bodyFirst, said.snippet, said.stems], [[1, 2], [2, 1], '…the [merged] pull requests…', ['leav', 'review']]);
+}
+
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
@@ -6944,7 +6969,7 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group passes on its own.
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, overviewFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
