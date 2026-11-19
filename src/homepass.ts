@@ -127,5 +127,7 @@ export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stoppe
   const lines = completed.map(item => item.text);
   if (taken) lines.push(`Sync once ${tookInCount(taken, true)}.`);
   if (changed) lines.push(`Changed ${plural(changed, 'more item')}.`);
-  return { text: [...lines, ...problems].join('\n') || 'Nothing to do.', warn: problems.size > 0, history: folded.length > 0 };
+  // What it could not do is its reasons, each a problem line of its own (app.ts Outcome); its sentence says so first.
+  const text = [problems.size ? 'Not everything was synced.' : '', ...lines].filter(Boolean).join(' ') || 'Nothing to do.';
+  return { text, reasons: [...problems], warn: problems.size > 0, history: folded.length > 0 };
 }

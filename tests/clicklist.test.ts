@@ -423,14 +423,14 @@ test('A second click on a row whose click runs is not a take-back: it runs after
   assert.deepEqual([main.sent, app.outcome?.text], [['a off, seen on', 'a on, seen off'], '1 skill is on: a.']);
 });
 
-test('Three clicks where the second is refused: the first and third are done, and the result names the second in a problem line', async () => {
+test('Three clicks where the second is refused: the first and third are done, and the result says first that the second didn’t go through, its reason a problem line', async () => {
   onLibrary();
   for (const name of ['a', 'b', 'c']) flip(name, false);
   await settled();
   await main.pass(did('a'));
   await main.pass(refusedAsStale('b'));
   await main.pass(did('c'));
-  assert.deepEqual([main.sent.length, app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], [3, '2 skills are off: a and c.', ['b changed since the page was read. Nothing was changed; read again.'], true]);
+  assert.deepEqual([main.sent.length, app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], [3, '1 of 3 didn’t go through in every tool: b. 2 skills are off: a and c.', ['b changed since the page was read. Nothing was changed; read again.'], true]);
 });
 
 test('A click is worked out in its turn, after the home is read for the click before it', async () => {
@@ -481,14 +481,14 @@ test('Each row is said as the run left it: a row a later click turned back on is
   assert.equal(app.outcome?.text, '1 skill is off: b; 1 skill is on: a.');
 });
 
-test('A click that failed is said as failed, not counted among those done', async () => {
+test('A click that failed is said first as not gone through in every tool, and not counted among those done', async () => {
   onLibrary();
   for (const name of ['a', 'b', 'c']) flip(name, false);
   await settled();
   await main.pass(did('a'));
   await main.pass(failedWrite('b'));
   await main.pass(did('c'));
-  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], ['2 skills are off: a and c.', ['b is off, but still in Claude Code.'], true]);
+  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], ['1 of 3 didn’t go through in every tool: b. 2 skills are off: a and c.', ['b is off, but still in Claude Code.'], true]);
 });
 
 test('A run made on one tool’s page is said there only: on another tool’s page, the status bar says it, and no row there flashes', async () => {
@@ -598,7 +598,7 @@ test('Turn these off clicked on the Library, then History opened before it is do
   assert.deepEqual([app.outcome?.page, app.outcome?.act?.label], ['library', 'Undo']);
 });
 
-test('Turn these off where one skill’s Off is refused as stale: the result counts, names and flashes the one it turned off, and its Undo is about that one alone', async t => {
+test('Turn these off where one skill’s Off is refused as stale: the result says that one first, counts, names and flashes the one it turned off, and its Undo is about that one alone', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'spare' }], { on: true });
   turnTheseOff([itemRow('skills', 'notes'), itemRow('skills', 'spare')]);
@@ -606,7 +606,7 @@ test('Turn these off where one skill’s Off is refused as stale: the result cou
   app.home!.skills.library.notes!.on = false;
   await main.pass({ results: [...did('notes').results, ...refusedAsStale('spare').results], writes: 1, made: ['off-skills-notes'] });
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, flashRequests.has('skills-notes'), flashRequests.has('skills-spare')],
-    ['Turned off 1 skill with no use seen in the last 30 days: notes. Central Knot keeps it, and turning it on puts it back as it was.',
+    ['1 of 2 didn’t go through in every tool: spare. Turned off 1 skill with no use seen in the last 30 days: notes. Central Knot keeps it, and turning it on puts it back as it was.',
       ['spare changed since the page was read. Nothing was changed; read again.'], true, false]);
   // The result kept is about notes alone too: its names and rows, which a notice that moves its Undo reads (app.ts undoMoved).
   assert.deepEqual([app.outcome?.items, app.outcome?.rows], [['notes'], [{ kind: 'skills', key: 'notes', name: 'notes' }]]);
@@ -702,7 +702,7 @@ test('A skill and an agent both named review, and a server, switched on one page
   assert.deepEqual(['skills-review', 'agents-review', 'mcp-github'].map(id => flashRequests.has(id)), [true, true, true]);
 });
 
-test('Turn these off across kinds, from the No use seen chip: a skill only some tools have is turned off, an agent a plugin also brings is left to its row, a server whose record is damaged is skipped and named, and the agents after it go on; Undo puts back what went', async t => {
+test('Turn these off across kinds, from the No use seen chip: a skill only some tools have is turned off, an agent a plugin also brings is left to its row, a server whose record is damaged is skipped and named first, and the agents after it go on; Undo puts back what went', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'mcp', key: 'github' }, { kind: 'agents', key: 'planner' }, { kind: 'agents', key: 'reviewer', plugin: true }], { stopped: 'mcp', on: true });
   const notes = itemRow('skills', 'notes'), github = itemRow('mcp', 'github', { 'claude-cli': 'github-1', 'codex-cli': 'github-1' });
@@ -722,7 +722,7 @@ test('Turn these off across kinds, from the No use seen chip: a skill only some 
   await main.pass(offMade('agents', 'planner'));
   assert.deepEqual(main.sent, ['notes off, seen on', 'server github off', 'agent planner off']);
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn, app.outcome?.act?.label],
-    ['Turned off 2 items with no use seen in the last 30 days: notes and planner. Central Knot keeps them, and turning one on puts it back as it was.',
+    ['1 of 3 didn’t go through in every tool: github. Turned off 2 items with no use seen in the last 30 days: notes and planner. Central Knot keeps them, and turning one on puts it back as it was.',
       ['MCP servers: The MCP record is damaged. Nothing was written or deleted.'], true, 'Undo']);
   app.outcome!.act!.run();
   await settled();

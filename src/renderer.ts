@@ -1,10 +1,9 @@
 // The page's entry: the window's frame around the page (the sidebar, the header, the status bar and the Sync switch), which page
 // draws (renderPage: while another build holds this one, the held screen of otherbuildview.ts instead of every page, with the
-// sidebar's update control kept), and drawing again on a change. On a list page the last result is in the header (resultHere),
-// which grows for Sync once. For row clicks its room is fixed and a taller result lies over the toolbar as a panel
-// (style.css #header::after). A redraw keeps what is selected, the scroll places and the focus (render), and a press on a control
-// it replaces still counts (dom.ts keepClicksAcrossRedraws). The page's state and actions are app.ts's; each page is drawn by its
-// own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
+// sidebar's update control kept), and drawing again on a change. On a list page the last result is in the header's own two
+// lines, the whole of it only on Show all (resultHere says the rule). A redraw keeps what is selected, the scroll places and the
+// focus (render), and a press on a control it replaces still counts (dom.ts keepClicksAcrossRedraws). The page's state and
+// actions are app.ts's; each page is drawn by its own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
@@ -216,19 +215,32 @@ function renderStatus() {
   paintStatusMessage();
 }
 
-/** A list page's last result (matrix.ts resultInHeader), in the header. Sync once makes room for its lines (style.css). */
+/**
+ * A list page's last result (matrix.ts resultInHeader), and its one rule: it lives in the header's own 48px, two lines at most,
+ * so it never lies over anything by itself and nothing under it moves, whether it succeeded or not. With problem lines, its
+ * sentence then the first of them, each on one line; without, its sentence in two (style.css .header-result); either cut where
+ * it runs past them, with Show all (matrix.ts wholeToggle). Show all opens the whole of it as a card hanging from the header
+ * over the page (.result-whole), until Show less, ×, Escape, a newer result, or a click anywhere outside it (foldResult).
+ */
 function resultHere() {
   const parts = state.home && !heldBy(state.home) && resultInHeader() ? (state.page === 'plugins' ? pluginsResult() : listResult()) : [];
-  return parts.length ? [h('div.header-result', {}, parts)] : [];
+  const whole = parts.some(part => part.querySelector('#problems-show-all[aria-expanded="true"]'));
+  return parts.length ? [h(`div.header-result${whole ? '.result-whole' : ''}`, {}, parts)] : [];
 }
+/** Folds a result shown whole into the header's two lines. The redraw waits, so a click that folds it still does its own work. */
+function foldResult(): boolean {
+  if (state.shownWhole === undefined) return false;
+  state.shownWhole = undefined;
+  setTimeout(rerender);
+  return true;
+}
+document.addEventListener('click', event => { if (!(event.target as Element).closest('#header .header-result')) foldResult(); }, true);
 
-// Laid out, and at each resize: Show all where a problem line is cut; a result taller than the header gets its panel (style.css).
+// Laid out, and at each resize: a Show all drawn for a cut shows where the header cuts the sentence or a problem line.
+const cut = (text: Element) => text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight;
 afterLayout(() => {
-  const header = region('header'), result = header.querySelector<HTMLElement>('.header-result'), more = header.querySelector<HTMLElement>('[data-when-cut]');
-  if (more) { more.hidden = true; more.hidden = ![...header.querySelectorAll('.problem-text')].some(text => text.scrollWidth > text.clientWidth); }
-  header.classList.remove('result-taller');
-  header.classList.toggle('result-taller', !!result && result.offsetHeight > header.clientHeight - 8);
-  header.style.setProperty('--result-height', `${result?.offsetHeight ?? 0}px`);
+  const header = region('header'), more = header.querySelector<HTMLElement>('[data-when-cut]');
+  if (more) { more.hidden = true; more.hidden = ![...header.querySelectorAll('.problem-text, .band-done > .band-text, .toolbar-result-text')].some(cut); }
 });
 
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
@@ -289,7 +301,9 @@ document.addEventListener('keydown', event => {
     const find = document.getElementById('find') ?? document.getElementById('skills-find');
     if (find) { event.preventDefault(); find.focus(); }
   }
-  // Escape leaves the Files and contents view for the table, except in a text box, where it clears the box (matrix.ts).
+  // Escape folds a result shown whole; else it leaves the Files and contents view for the table, except in a text box, where it
+  // clears the box (matrix.ts).
+  if (event.key === 'Escape' && foldResult()) return;
   if (event.key === 'Escape' && !typing && state.page === 'library' && state.libraryView === 'files') backFromFiles();
 });
 

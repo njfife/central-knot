@@ -26,7 +26,7 @@ import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
 import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
-import { andList, fewNames, fileName, kindNames, kindNouns, noToolsSentence, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
+import { andList, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { endListNews, fadeRun, loadPlugins, resetMarket } from './pluginstate.ts';
@@ -592,8 +592,14 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], notIn: 
   const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])), regroups = clicks.some(click => click.regroups);
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups }, undos) : undefined;
   for (const { done } of parts) if (done.kept) kindPages[done.kept.kind].keep(done.kept.results, done.kept.notices);
+  // Where some changed, each row that didn't go through in every tool (its kind refused, its own change held, or a tool kept it
+  // back) is said first (words.ts notAllThrough); where none did, the refusals are the sentence.
+  const asked = parts.flatMap(({ click, done }) => click.rows.map((row, at) => ({ row: { ...row, name: click.items[at] ?? row.key }, done })));
+  const left = asked.filter(({ row, done }) => done.refused || !done.changed?.some(each => sameRow(each, row))
+    || done.kept?.results.some(entry => keptBack(entry) && entry.item.toLowerCase() === row.name.toLowerCase())).map(({ row }) => row);
+  const lead = left.length && changed.length ? notAllThrough(rowNames(left), asked.length) : '';
   tell({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
-    text: changed.length || !stops.length ? said(changed, went.flatMap(part => part.done.notIn ?? [])) : stops.join(' '),
+    text: [lead, changed.length || !stops.length ? said(changed, went.flatMap(part => part.done.notIn ?? [])) : stops.join(' ')].filter(Boolean).join(' '),
     reasons: [...(changed.length ? stops : []), ...went.flatMap(part => part.done.outcome.reasons ?? [])],
     act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything this did', run: undo } });
   for (const row of changed) flashRow(row);
@@ -667,9 +673,13 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   const along = did.flatMap(turn => (turn.done!.along ? [`${rowNames([named(turn)], among)[0]}: ${turn.done!.along.replace(/^./, first => first.toLowerCase())}`] : []));
   const undos = did.flatMap(turn => (turn.done!.undo ? [turn.done!.undo] : [])).reverse();
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: did.map(named) }, undos) : undefined;
+  // A row whose last click left something undone is said first (words.ts notAllThrough).
+  const each = ended.filter(turn => ended.findLast(other => sameRow(other.row, turn.row)) === turn), left = each.filter(turn => turn.done!.outcome.warn);
+  const lead = left.length ? notAllThrough(rowNames(left.map(named), among), each.length) : '';
   return { page: turns[0]!.page, items: rowNames(among), rows: turns.map(turn => turn.row), band: true, warn: ended.some(turn => turn.done!.outcome.warn),
     reasons: ended.flatMap(turn => (asked.includes(turn) ? [] : [turn.done!.outcome.text]).concat(turn.done!.outcome.reasons ?? [])),
-    text: [`${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along].join(' '), act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything these clicks did', run: undo } };
+    text: [lead, `${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along].filter(Boolean).join(' '),
+    act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything these clicks did', run: undo } };
 }
 
 /** Whether each History entry a click made still offers its own action, so the click's Undo can run them all. */
@@ -1111,8 +1121,8 @@ export interface Outcome {
   kinds?: PageKind[];
   /** Said again on the next page opened (a home just opened). */
   carry?: boolean;
-  /** A saved instruction goes on its card (instructionspage.ts); a Sync once result makes room for its lines. */
-  kind?: 'saved' | 'sync-once';
+  /** A saved instruction goes on its card (instructionspage.ts). */
+  kind?: 'saved';
   tool?: HarnessId;
   history?: boolean;
   /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be. */
@@ -1560,7 +1570,7 @@ export async function syncNow(home = state.home?.home) {
     const result = await api().syncNow(home).finally(() => { menuSyncHome = undefined; });
     if (!result) return;
     setHome(result.view);
-    tell({ page, kind: 'sync-once', band: true, history: result.history, text: result.text, warn: result.warn });
+    tell({ page, band: true, history: result.history, text: result.text, reasons: result.reasons, warn: result.warn });
   });
 }
 api().onSyncRequest(() => { if (acting()) menuSyncHome = state.home?.home; else void syncNow(); });

@@ -155,12 +155,14 @@ test('Sync once reports an unreadable owed removal and counts it as done only wh
     await writeFile(box.path('copilot-cli'), '{"mcpServers":{}}');
     const pass = async () => (await homePass(box.context, tools, true)).synced!;
     const first = await claudeLeftOwed(box, pass);
+    // What it couldn't do is a reason of its own, a problem line under the sentence, which says so first.
     const result = syncOnceReport([first]);
     assert.equal(result.warn, true);
-    assert.match(result.text, /Removed docs from Codex\./);
-    assert.match(result.text, /Couldn’t remove docs from Claude Code\..*could not be read\./);
+    assert.equal(result.text, 'Not everything was synced.');
+    assert.equal(result.reasons.length, 1);
+    assert.match(result.reasons[0]!, /^Removed docs from Codex\. Couldn’t remove docs from Claude Code\..*could not be read\.$/);
     assert.deepEqual(syncOnceReport([first, await pass()]), {
-      text: 'Removed docs from Codex and Claude Code.', warn: false, history: false,
+      text: 'Removed docs from Codex and Claude Code.', reasons: [], warn: false, history: false,
     });
   } finally { await box.cleanup(); }
 });

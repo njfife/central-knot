@@ -839,8 +839,7 @@ export function outcomeBand(): HTMLElement | null {
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
-  // In the header its reasons are its problem lines (listResult); in a band, they follow it.
-  let rest = resultInHeader() ? outcome.text : [outcome.text, ...outcome.reasons ?? []].join(' ');
+  let rest = outcome.text;
   // Quoted text (a commit's subject, say) is shown as written: a name inside it isn't an item named.
   const quoted = (at: number) => { const open = rest.lastIndexOf('“', at); return open >= 0 && rest.indexOf('”', open) > at; };
   while (rest) {
@@ -850,10 +849,12 @@ export function outcomeBand(): HTMLElement | null {
     text.push(rest.slice(0, hits[0].at), h('strong.item-name', {}, hits[0].name));
     rest = rest.slice(hits[0].at + hits[0].name.length);
   }
+  // In the header its reasons are its problem lines (listResult); in a band, each is a line of its own under it.
+  const reasons = resultInHeader() ? [] : (outcome.reasons ?? []).flatMap(reason => [' ', h('span.band-reason', {}, reason)]);
   // Two buttons take their own line under the words in a narrow window (style.css), so the sentence is never squeezed.
   return h(`div.band.band-done${outcome.next ? '.band-two' : ''}`, { role: 'status', 'data-outcome': outcome.kind ?? '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
-    outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
+    outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null, reasons),
     h('span.band-actions', {},
       outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: outcome.act.whyOff?.() ?? acting(), attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
         : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined, !!acting())
@@ -949,19 +950,29 @@ export function listResult(): HTMLElement[] {
     .concat(done ? state.outcome?.reasons ?? [] : []);
   // With no result above them, their × closes them and the click's result they belong to.
   const close = () => { for (const entry of background) state.dismissed.add(problemKey(entry)); closeResult(); };
+  // With no problem line, Show all follows the sentence, for one the header's two lines cut.
+  if (done && !lines.length) done.querySelector('.band-actions')!.prepend(wholeToggle(state.outcome, 0));
   return [done, lines.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, done ? state.outcome : result ?? background[0]), done ? null : closeButton(close, { id: 'problems-dismiss' })) : null]
     .filter((band): band is HTMLElement => !!band);
 }
 
 /**
- * What went wrong, under a result in the header: two lines, each on one line, Show all on the last when one is cut (renderer.ts)
- * or more remain; shown, every line whole until Show less, × or the next result (`of`, their result: app.ts state.shownWhole).
+ * What went wrong, under a result in the header (renderer.ts resultHere): its first line, on the header's second line, then
+ * Show all; shown whole (`of`, their result: app.ts state.shownWhole), every line whole.
  */
 export function problemLines(lines: (Child | Child[])[], of: typeof state.shownWhole): HTMLElement {
-  const whole = of !== undefined && state.shownWhole === of, more = lines.length > 2, shown = whole ? lines : lines.slice(0, 2);
-  const toggle = h('button.inline-link', { type: 'button', id: 'problems-show-all', 'aria-expanded': String(whole), 'data-when-cut': whole || more ? undefined : '', onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
-    whole ? 'Show less' : `Show all${more ? ` ${lines.length}` : ''}`);
-  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, h('span.problem-text', {}, line), at === shown.length - 1 ? toggle : null)));
+  const whole = of !== undefined && state.shownWhole === of, shown = whole ? lines : lines.slice(0, 1);
+  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, h('span.problem-text', {}, line), at === shown.length - 1 ? wholeToggle(of, lines.length) : null)));
+}
+
+/**
+ * The one Show all of a result in the header, after the last thing it shows (the sentence, or a problem line): "Show all 3" where
+ * `count` lines wait, else drawn only when the header cuts what it shows (renderer.ts, data-when-cut); Show less on the card.
+ */
+export function wholeToggle(of: typeof state.shownWhole, count: number): HTMLElement {
+  const whole = of !== undefined && state.shownWhole === of, more = count > 1;
+  return h('button.inline-link', { type: 'button', id: 'problems-show-all', 'aria-expanded': String(whole), 'data-when-cut': whole || more ? undefined : '', onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
+    whole ? 'Show less' : `Show all${more ? ` ${count}` : ''}`);
 }
 
 /** The kind Resume's empty pass goes through, whatever is on show: a held one whose own record can run, so a kind's stop isn't read as Resume's answer. */

@@ -15,11 +15,11 @@ import { pluginKey, resultParts, resultSentence, type PluginOp, type ResultLine 
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
-import { problemLines } from './matrix.ts';
+import { problemLines, wholeToggle } from './matrix.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
-import { andList, byToolOrder, orList, pageNames, toolName, toolNames as names } from './words.ts';
+import { andList, byToolOrder, notAllThrough, orList, pageNames, toolName, toolNames as names } from './words.ts';
 
 /** "9:20 AM" today, else "Nov 8". */
 const when = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clockTime(iso) : new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
@@ -363,8 +363,10 @@ const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclic
  * happened, with Undo and its × (runLine), then what went wrong (problemBand), with the one × when it stands alone.
  */
 export function pluginsResult(): HTMLElement[] {
-  const lines = lastLines(), run = runLine(lines);
-  return [run, problemBand(lines, !run)].filter((part): part is HTMLElement => !!part);
+  const lines = lastLines(), run = runLine(lines), problems = problemBand(lines, !run);
+  // With no problem line, Show all follows the sentence, for one the header's two lines cut (as matrix.ts listResult).
+  if (run && !problems) run.querySelector('.toolbar-result-text')!.after(wholeToggle(market.lastRun ?? app.outcome, 0));
+  return [run, problems].filter((part): part is HTMLElement => !!part);
 }
 
 /** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */
@@ -389,8 +391,10 @@ function runLine(lines: ResultLine[]): HTMLElement | null {
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));
     // What a switch's Undo can't put back is said with the result, so the promise beside Undo is the whole of it.
     const limits = !last.undo && last.turn?.limits.length ? ` ${last.turn.limits.join(' ')}` : '';
-    return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'),
-      h('span.toolbar-result-text', { title: `${resultSentence(lines, last.undo)}${limits}` }, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null), back, dismiss(closeRun, 'report-dismiss'));
+    // What didn't go through comes first (its reasons are the problem lines under it), so the header's cut never hides it.
+    const failed = [...new Set(lines.filter(line => !line.ok).map(line => line.plugin))], lead = failed.length ? `${notAllThrough(failed, new Set(lines.map(line => line.plugin)).size)} ` : '';
+    return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, failed.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
+      h('span.toolbar-result-text', { title: `${lead}${resultSentence(lines, last.undo)}${limits}` }, lead, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null), back, dismiss(closeRun, 'report-dismiss'));
   }
   // An Undo that undid nothing still offers its way back here, whether or not its failures are still shown.
   if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(closeRun, 'report-dismiss'));
