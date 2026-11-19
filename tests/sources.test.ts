@@ -16,6 +16,7 @@ import type { SourcePreview } from '../src/types.ts';
 import { bytes, everywhere, folderOf, historyActions, itemOf, put, sandbox, seen, skillText, type Box } from './skillclicks.ts';
 import { applySkills, restoreSkill } from '../src/skills.ts';
 import { deslopFiles, repository, skillMd, standInHosts } from './sourcerepo.ts';
+import { within } from './within.ts';
 
 const hosts = await standInHosts();
 test.after(() => hosts.cleanup());
@@ -1121,7 +1122,9 @@ test('Two checks at once, and Remove during a check: each check’s fetch waits 
     const { repo, id } = await oneSkill(box, 'notes');
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') }, '2026-11-02T10:00:00Z');
     let queue: Promise<unknown> = Promise.resolve();
-    const turn = <T>(work: () => Promise<T>) => { const next = queue.then(work); queue = next.catch(() => undefined); return next; };
+    // Told of each entry as it joins the queue.
+    let joined = () => {};
+    const turn = <T>(work: () => Promise<T>) => { joined(); const next = queue.then(work); queue = next.catch(() => undefined); return next; };
     const [first, second] = await Promise.all([checkSource(box.context, now(box), id, turn), checkSource(box.context, now(box), id, turn)]);
     // Whichever fetch ends first takes its turn first; the other finds its work done.
     assert.deepEqual([answered(first), answered(second)].sort((one, two) => two!.length - one!.length), [[{ name: 'notes', answer: 'update' }], []]);
@@ -1130,8 +1133,10 @@ test('Two checks at once, and Remove during a check: each check’s fetch waits 
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Third.') });
     let release!: () => void;
     queue = new Promise<void>(done => { release = done; });
+    // The check fetches outside the queue, then joins it behind the held entry; Remove joins after it.
+    const checkJoined = new Promise<void>(done => { joined = done; });
     const checking = checkSource(box.context, now(box), id, turn);
-    await new Promise(done => setTimeout(done, 300));
+    await within('the check joining the queue', checkJoined);
     const removed = turn(() => removeSource(box.context, box.tools, id));
     release();
     assert.equal((await checking).stopped, undefined, 'the check took its turn first');

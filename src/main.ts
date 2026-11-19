@@ -8,7 +8,7 @@
 // a click on an item page goes through the `changes` sanitizer, which must copy each field of types.ts Change. Not here: what a
 // change does (the engines: librarypass.ts and each kind, profiles.ts, sources.ts, gitrepo.ts, instructions.ts, plugins.ts) and
 // what a page shows (from renderer.ts).
-import { onlyAllowed, PRODUCT, record, strings } from './values.ts';
+import { jsonObject, onlyAllowed, PRODUCT, record, strings } from './values.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import { homedir, hostname, tmpdir } from 'node:os';
@@ -19,7 +19,7 @@ import { discover, findOtherApps, forgetVersions } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
-import { errorCode, forgetStale, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, writeDurably, type ShareContext } from './share.ts';
+import { errorCode, forgetStale, keepUnreadable, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
@@ -158,6 +158,7 @@ function context(): ShareContext {
   return {
     home: current!.home, mode: current!.mode, read, build: BUILD, buildName: own.name,
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
+    resumeFirst: resumeFirst?.home === current!.home ? resumeFirst.wait : undefined,
     allowActualWrites: writesRealHome(process.platform) && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
     historyDays: historyDays(), held: heldReason(),
@@ -198,11 +199,25 @@ function send(channel: 'sync:changed' | 'sync:request' | 'settings:changed' | 'n
 interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** Plugins are updated automatically (pluginupdates.ts). */ pluginUpdates?: boolean; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
-/** A file that isn't a JSON object (damaged, or hand-edited) counts as no settings yet: each one falls back to its default. */
+/** app-settings.json as read: {} where there is none (a first launch), its object, or undefined where it is there and can't be read as one (values.ts jsonObject). */
+const readSettingsFile = (path: string) => readFile(path, 'utf8').then(jsonObject, (error: unknown) => (errorCode(error) === 'ENOENT' ? {} : undefined));
+/**
+ * An app-settings.json that couldn't be read at this launch, until its note is closed (types.ts HomeView settingsUnread): where it
+ * is kept aside (`keptAs`), or, absent, that it is still in place, since it couldn't be moved (no save writes over it).
+ */
+let settingsUnread: { keptAs?: string } | undefined;
+/**
+ * No file is a first launch: every setting at its default. A file that is there and can't be read is kept beside it, never
+ * written over (share.ts keepUnreadable; where it can't be moved, every save fails until it can: saveAppSettings), and every
+ * setting starts at its default; the page says so, and the home opened in its place waits for Resume (startHome). A field of
+ * the wrong type falls back to its default alone, where it is read.
+ */
 async function loadAppSettings() {
-  try {
-    appSettings = record(JSON.parse(await readFile(appSettingsPath(), 'utf8'))) ?? {};
-  } catch { appSettings = {}; }
+  const path = appSettingsPath(), saved = await readSettingsFile(path);
+  appSettings = saved ?? {};
+  if (saved) return;
+  settingsUnread = { keptAs: await keepUnreadable(path).catch(() => undefined) };
+  log(`settings: ${path} couldn’t be read, so every setting starts at its default; the old file is ${settingsUnread.keptAs ? `kept as ${settingsUnread.keptAs}` : 'still in place: it couldn’t be moved'}`);
 }
 /**
  * Every writer (the Settings page, the menu bar menu, the app menu, the first-close dialog, a home switch) saves through this
@@ -218,6 +233,8 @@ function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
       const path = appSettingsPath();
       // Renaming needs only the folder's permission. Respect a read-only settings file too.
       try { await access(path, constants.W_OK); } catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
+      // One there that can't be read is kept aside first, never written over; where it can't be moved, the save fails.
+      if (!(await readSettingsFile(path))) { const keptAs = await keepUnreadable(path); if (settingsUnread) settingsUnread.keptAs = keptAs; }
       await writeDurably(path, `${JSON.stringify(next, null, 2)}\n`);
     }
     appSettings = next;
@@ -622,7 +639,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   const syncEverything = (await readRecord(current!.home)).record?.syncEverything;
   const readId = handoff.id + 1;
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, ...(tookOver ? { tookOver } : {}),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, ...(tookOver ? { tookOver } : {}), ...(settingsUnread ? { settingsUnread } : {}),
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything === true), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
@@ -1063,6 +1080,8 @@ const practiceAvailable = () => smoke || process.argv.includes('--practice-copy'
 /**
  * At launch: the home last opened, else this computer's home. A remembered folder that is gone falls back the same way.
  * Dev builds and tests fall back to the Practice copy instead, so a development run doesn't sync this machine's real tools unasked.
+ * Settings that couldn't be read (loadAppSettings) may have named another home: this computer's then waits for Resume (resumeFirst),
+ * so its sync passes and take-in, and plugin work of its own accord, wait until the person has read why.
  */
 async function startHome(): Promise<HomeView | null> {
   // A window made while a home is already open (reopened from the menu bar or the Dock) shows that home; nothing is read anew.
@@ -1070,8 +1089,13 @@ async function startHome(): Promise<HomeView | null> {
   const last = smoke ? undefined : appSettings.home;
   if (last?.mode === 'actual') return selectHome('actual');
   if (last?.mode === 'custom' && last.path) { try { await access(last.path); return await selectHome('custom', last.path); } catch { /* gone */ } }
-  return selectHome(practiceAvailable() ? 'fixture' : 'actual');
+  if (practiceAvailable()) return selectHome('fixture');
+  if (settingsUnread) resumeFirst = { home: homedir(), wait: { reason: 'Central Knot changes nothing in this home by itself until you resume, since its settings file couldn’t be read. Resuming keeps every recorded choice.' } };
+  return selectHome('actual');
 }
+
+/** The home opened in place of one an unreadable settings file may have named (startHome), and the wait for Resume held there until a Resume (share.ts ShareContext resumeFirst). */
+let resumeFirst: { home: string; wait: { reason?: string } } | undefined;
 
 const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
@@ -1290,6 +1314,7 @@ app.whenReady().then(async () => {
     if (!isHistoryDays(days)) throw new Error('Invalid history days.');
     return changeHistoryWindow(days);
   });
+  handleNow('settings:close-kept', async () => { settingsUnread = undefined; });
   handleNow('settings:open-log-folder', openLogFolder);
   handleNow('settings:read-log', readLog);
   handleNow('settings:plugin-updates', async on => {
