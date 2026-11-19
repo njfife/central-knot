@@ -29,12 +29,12 @@ import { readFile } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
 import { listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, lookFor, restore, runPass, sharedFileAt, takeInAnswers, unreadIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, lookFor, restore, runPass, sharedFileAt, takeInAnswers, unreadIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { mergeServer } from './merge.ts';
 import { cannotHold, editEntry, fromJson, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
-import { partsHolding, pluginHolds } from './plugins.ts';
+import { partsHolding, pluginHolds, type ThroughWhichPlugin } from './plugins.ts';
 import { mcpTools } from './presence.ts';
 import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
 import { errorCode, itemKey, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
@@ -56,8 +56,8 @@ interface ServerDisk extends Disk<McpEntry> {
   shapes: Map<string, NeutralServer>;
   /** The names of servers seen only in a form never taken in (Disk.unseen says why), by key: each a row. */
   unseenNames: Map<string, string>;
-  /** The plugin a tool has a server through, if it has one (only the same server: serversThroughPlugins). */
-  through: Awaited<ReturnType<typeof partsHolding>>;
+  /** The plugin a tool has a server through, if it has one (librarypass.ts Disk.viaPlugin; only the same server: serversThroughPlugins). */
+  viaPlugin: ThroughWhichPlugin;
   /** Each tool's own switch file for servers, read once (mcpswitch.ts). */
   switches: Map<HarnessId, SwitchFile>;
   switchedOff: Map<string, HarnessId[]>;
@@ -66,16 +66,16 @@ interface ServerDisk extends Disk<McpEntry> {
 }
 type ServerLook = Look<NeutralServer, McpEntry, ServerDisk>;
 
-/** Reads each managed tool's settings file. */
-async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<ServerDisk> {
+/** Reads each managed tool's settings file; `library`: the pass's record, which says what a plugin's server is linked to. */
+async function readDisk(context: ShareContext, managed: HarnessId[], library: KindLibrary): Promise<ServerDisk> {
   const disk: ServerDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], shapes: new Map(), unseenNames: new Map(), switchedOff: new Map(),
-    through: await serversThroughPlugins(context, managed, await recordedServers(context.home)), switches: await readMcpSwitches(context, managed), linked: await pluginHolds(context, managed),
+    viaPlugin: await serversThroughPlugins(context, managed, library.items), switches: await readMcpSwitches(context, managed), linked: await pluginHolds(context, managed),
     held: (item, tool) => {
       const linked = disk.linked(item, tool);
       if (linked) return linked;
       // A plugin installed there that brings the server is a way it has it: Central Knot's entry goes (library.ts THE RULE).
-      const given = disk.through(item, tool);
+      const given = disk.viaPlugin(item, tool);
       if (given) return { why: throughPlugin(tool, given, 'MCP server'), anotherWay: true };
       const why = cannotTake(disk, item, tool);
       return why ? { why } : undefined;
@@ -127,7 +127,7 @@ const cannotTake = (disk: ServerDisk, item: Wanted, tool: HarnessId) => {
  * The plugin a tool has a server through, if it has one (plugins.ts partsHolding): such a tool gets no entry of its own beside
  * the plugin's. A plugin's server is the same server when its shared part is the item's current version.
  */
-const serversThroughPlugins = (context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ServerDisk['through']> =>
+const serversThroughPlugins = (context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ThroughWhichPlugin> =>
   partsHolding(context, tools, 'mcp', items, (key, part) => {
     const fields = part.text === undefined ? undefined : record(JSON.parse(part.text));
     return fields && fromJson(part.name ?? key, 'claude-cli', '', fields).hash;
@@ -293,7 +293,7 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
   // A found server is asked about as taking it in would leave it: On everywhere, nothing applied yet.
   const asIf: Wanted = item ?? { key, name, on: true, except: [], applied: {} };
   for (const tool of look.managed) {
-    const given = item && disk.through(item, tool);
+    const given = item && disk.viaPlugin(item, tool);
     if (given && !slot[tool]) plugin[tool] = given;
     const copy = copiesNow?.[tool], hidden = copy?.is === 'unseen' ? copy.why : !copiesNow ? disk.unseen.get(`${tool}:${key}`) ?? disk.unseen.get(`${tool}:*`) : undefined;
     if (hidden) unseen[tool] = hidden;

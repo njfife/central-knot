@@ -85,7 +85,7 @@ test('A found server is taken in: every tool without it gets it, values as they 
 });
 
 /** Claude Code with the plugin issue-kit (from the marketplace team) installed, whose .mcp.json brings a server “issues” of these fields. */
-async function claudePluginWith(box: Box, fields: object) {
+async function claudePluginWith(box: Box, fields: unknown) {
   const copy = join(box.home, '.claude/plugins/cache/team/issue-kit/1.0.0');
   await mkdir(join(copy, '.claude-plugin'), { recursive: true });
   await writeFile(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'issue-kit', version: '1.0.0' }));
@@ -121,6 +121,70 @@ test('A found server taken in by Synchronize everything where Claude Code’s pl
     const row = await box.row('issues');
     assert.deepEqual([row?.on, await argsIn(box, 'claude-cli', 'issues'), row?.plugin], [true, ['-y', 'issues-mcp'], undefined]);
     assert.equal((await applyServers(box.context, all, [], { background: true })).writes, 0);
+  } finally { await box.cleanup(); }
+});
+
+test('A found server whose name Claude Code’s plugin holds as an entry that is no server (not an object): its row doesn’t say Claude Code has it through that plugin', async () => {
+  const box = await sandbox();
+  try {
+    await claudePluginWith(box, 'npx -y issues-mcp');
+    await writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'npx', args: ['-y', 'issues-mcp'], tools: ['*'] } } }));
+    const row = await box.row('issues');
+    assert.deepEqual([row?.on, row?.plugin, row?.cannot['claude-cli']], [false, undefined, undefined]);
+  } finally { await box.cleanup(); }
+});
+
+/** Copilot CLI's server “issues” and the plugin's in Claude Code are one server; Claude Code's own entry of it runs `args`. */
+async function ownBesidePlugin(box: Box, args: string[]) {
+  await claudePluginWith(box, { command: 'npx', args: ['-y', 'issues-mcp'] });
+  await writeFile(box.path('claude-cli'), `${JSON.stringify({ numStartups: 7, mcpServers: { issues: { type: 'stdio', command: 'npx', args } } }, null, 2)}\n`);
+  await writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'npx', args: ['-y', 'issues-mcp'], tools: ['*'] } } }));
+}
+const backgroundPass = (box: Box) => applyServers(box.context, all, [], { background: true });
+
+test('A found server taken in where Claude Code has it through a plugin and an entry of its own with that content: the take-in puts the entry on record as Central Knot’s (a stop here leaves it so), and the next pass removes it, so Claude Code has it through the plugin alone', async () => {
+  const box = await sandbox();
+  try {
+    await ownBesidePlugin(box, ['-y', 'issues-mcp']);
+    await setSyncEverything(box.context, true);
+    await backgroundPass(box);
+    const item = (await box.view()).library.issues;
+    assert.deepEqual([await argsIn(box, 'claude-cli', 'issues'), item.applied['claude-cli']], [['-y', 'issues-mcp'], item.hash]);
+    await backgroundPass(box);
+    assert.deepEqual([await argsIn(box, 'claude-cli', 'issues'), Object.keys((await box.row('issues'))?.plugin ?? {})], [undefined, ['claude-cli']]);
+    assert.equal((await backgroundPass(box)).writes, 0);
+  } finally { await box.cleanup(); }
+});
+
+/** As ownBesidePlugin with an entry of Claude Code's own that differs, and Copilot CLI's copy chosen, as the copy question sends it. */
+async function chosenBesidePlugin(box: Box) {
+  await ownBesidePlugin(box, ['-y', 'my-issues-mcp']);
+  await box.send({ key: 'issues', on: true, except: [], seenOn: false, use: 'copilot-cli', useHash: (await box.row('issues'))!.copies['copilot-cli']!.hash });
+  return (await readHistory(box.context)).find(event => event.kind === 'chosen')!;
+}
+
+test('Copilot CLI’s copy chosen where Claude Code has that server through a plugin and another entry of its own: Claude Code’s entry is kept as a version, as History says, and the next pass removes it', async () => {
+  const box = await sandbox();
+  try {
+    const chosen = await chosenBesidePlugin(box), item = (await box.view()).library.issues;
+    assert.equal(librarySentence(chosen, libraryWords.mcp, all, item)?.text, 'You chose Copilot CLI’s copy; Claude Code’s is kept as a version.');
+    assert.deepEqual(item.versions.map(version => [version.from.how, version.from.harness]), [['was-in', 'claude-cli'], ['chosen', 'copilot-cli']]);
+    assert.deepEqual([chosen.losers.map(loser => loser.tool), item.versions.some(version => version.hash === chosen.losers[0].hash)], [['claude-cli'], true]);
+    assert.deepEqual(await argsIn(box, 'claude-cli', 'issues'), ['-y', 'my-issues-mcp'], 'nothing is written there');
+    await backgroundPass(box);
+    assert.deepEqual([await argsIn(box, 'claude-cli', 'issues'), Object.keys((await box.row('issues'))?.plugin ?? {})], [undefined, ['claude-cli']]);
+    assert.equal((await backgroundPass(box)).writes, 0);
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot CLI’s copy chosen there, then its Undo before the next pass: Claude Code’s own entry stays where it was, as it was, and is its own again', async () => {
+  const box = await sandbox();
+  try {
+    const chosen = await chosenBesidePlugin(box), claude = (await box.files())['claude-cli'];
+    assert.equal(libraryAction(chosen, (await box.view()).library.issues, settled)?.label, 'Undo');
+    assert.equal((await restoreServer(box.context, all, chosen.id)).stopped, undefined);
+    assert.deepEqual([(await box.files())['claude-cli'], await commandIn(box, 'copilot-cli', 'issues'), await commandIn(box, 'codex-cli', 'issues')], [claude, 'npx', undefined]);
+    assert.equal((await backgroundPass(box)).writes, 0);
   } finally { await box.cleanup(); }
 });
 

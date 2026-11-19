@@ -1092,6 +1092,48 @@ inBox('A found agent taken in by Synchronize everything where Claude Code’s pl
   assert.equal((await pass(box)).writes, 0);
 });
 
+inBox('A found agent taken in where Claude Code has it through a plugin and a file of its own with that content: the take-in puts the file on record as Central Knot’s (a stop here leaves it so), and the next pass removes it, so Claude Code has it through the plugin alone', async box => {
+  await write(box, 'copilot-cli', claudeAgent());
+  await write(box, 'claude-cli', claudeAgent());
+  await claudePluginWith(box, claudeAgent());
+  await setSyncEverything(box.context, true);
+  await pass(box);
+  const item = (await itemOf(box))!;
+  assert.deepEqual([await readOf(box, 'claude-cli'), item.applied['claude-cli']], [claudeAgent(), item.hash]);
+  await pass(box);
+  assert.deepEqual([await readOf(box, 'claude-cli'), Object.keys((await seen(box)).fact?.plugin ?? {})], [undefined, ['claude-cli']]);
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Off in Claude Code, so its file there was removed when sync reached it. Central Knot keeps it.');
+  assert.equal((await pass(box)).writes, 0);
+});
+
+/** Copilot CLI's agent and the plugin's in Claude Code are one content; Claude Code's own file of it is another. Copilot CLI's is chosen. */
+async function chosenBesidePlugin(box: Box) {
+  await write(box, 'copilot-cli', claudeAgent());
+  await write(box, 'claude-cli', claudeAgent('You review code.\nMine.\n'));
+  await claudePluginWith(box, claudeAgent());
+  await choose(box, 'copilot-cli');
+}
+
+inBox('Copilot CLI’s copy chosen where Claude Code has that content through a plugin and another file of its own: Claude Code’s file is kept as a version, as History says, and the next pass removes it', async box => {
+  await chosenBesidePlugin(box);
+  const chosen = (await historyOf(box)).find(event => event.kind === 'chosen')!;
+  assert.equal(librarySentence(chosen, libraryWords.agents, tools)?.text, 'You chose Copilot CLI’s copy; Claude Code’s is kept as a version.');
+  assert.deepEqual(await versions(box), ['Be brief. (chosen from Copilot CLI) *', 'Mine. (was in Claude Code)']);
+  assert.deepEqual((await historyActions(box)).map(action => action.label), ['Undo', 'Use claude-cli’s']);
+  assert.equal(await readOf(box, 'claude-cli'), claudeAgent('You review code.\nMine.\n'), 'nothing is written there');
+  await pass(box);
+  assert.deepEqual([await readOf(box, 'claude-cli'), Object.keys((await seen(box)).fact?.plugin ?? {})], [undefined, ['claude-cli']]);
+  assert.equal((await pass(box)).writes, 0);
+});
+
+inBox('Copilot CLI’s copy chosen there, then its Undo before the next pass: Claude Code’s own file stays where it was, as it was, and is its own again', async box => {
+  await chosenBesidePlugin(box);
+  await (await historyActions(box)).find(action => action.label === 'Undo')!.run();
+  assert.deepEqual([await readOf(box, 'claude-cli'), await readOf(box, 'copilot-cli'), await readOf(box, 'codex-cli')], [claudeAgent('You review code.\nMine.\n'), claudeAgent(), undefined]);
+  assert.equal((await pass(box)).writes, 0);
+  assert.equal(await readOf(box, 'claude-cli'), claudeAgent('You review code.\nMine.\n'));
+});
+
 // ---------- Versions ----------
 
 inBox('Make current on an earlier version is a new version, applied like any other; every version is kept', async box => {

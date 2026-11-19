@@ -716,7 +716,7 @@ export type GivenByPlugin = ThroughPlugin & { text?: string };
 
 /**
  * Whether the library's item of a key (`items`, one kind's) is linked to the plugin a tool has it through (library.ts A PLUGIN):
- * the plugin's own item, the only one servers.ts and agents.ts count as through the plugin.
+ * the plugin's own item, which servers.ts and agents.ts count as through the plugin whatever its content (partsHolding).
  */
 export async function linkedToPlugin(home: string, items: Record<string, Pick<LibraryItem, 'source' | 'deleted'>>) {
   const entries = (await readPluginRecord(home)).record?.plugins ?? [];
@@ -748,18 +748,21 @@ export async function throughPlugins(home: { home: string; overrides?: Partial<R
   return found;
 }
 
+/** The question partsHolding answers: the plugin's part `tool` has the item through, if it has one. */
+export type ThroughWhichPlugin = (item: { key: string; hash?: string }, tool: HarnessId) => ThroughPlugin | undefined;
 /**
- * The part of an installed plugin a tool has an item through (agents.ts and servers.ts `through`), if it has one: the part of
- * the plugin the library's item is linked to (linkedToPlugin, as `items` holds it), or a part of the same content as the item's
- * current version (`hashOf`: the part hashed as the kind hashes a version; a found item has none). That version is the item's
- * as the caller holds it when it asks, not as the record was read: a pass asks with the version a take-in has just made
- * current, so a tool whose plugin brings that same content gets no copy beside it. For every kind (skills: skills.ts
- * pluginFor), a part holds the item turned off or not: the Through a plugin box is the item's switch in that tool, so an off
- * part must keep holding it.
+ * The part of an installed plugin a tool has an item through (librarypass.ts Disk.viaPlugin, of agents and servers), if it
+ * has one: the part of the plugin the library's item is linked to (linkedToPlugin, as `items`, the pass's record, holds it when
+ * asked), or a part of the same content as the item's current version (`hashOf`: the part hashed as the kind hashes a
+ * version; a found item has none). That version is the item's as the caller holds it when it asks, not as the record was
+ * read: a pass asks with the version a click's or a found item's take-in has just made current, so a tool whose plugin brings
+ * that same content gets no copy beside it. An edit the plan takes in from a tool is answered from the next pass: the plan
+ * asks before it takes it in. For every kind (skills: skills.ts pluginFor), a part holds the item turned off or not: the
+ * Through a plugin box is the item's switch in that tool, so an off part must keep holding it.
  */
-export async function partsHolding(home: Parameters<typeof throughPlugins>[0], tools: HarnessId[], kind: 'agent' | 'mcp', items: Record<string, Pick<LibraryItem, 'source' | 'deleted'>>, hashOf: (key: string, part: GivenByPlugin) => string | undefined) {
+export async function partsHolding(home: Parameters<typeof throughPlugins>[0], tools: HarnessId[], kind: 'agent' | 'mcp', items: Record<string, Pick<LibraryItem, 'source' | 'deleted'>>, hashOf: (key: string, part: GivenByPlugin) => string | undefined): Promise<ThroughWhichPlugin> {
   const linked = await linkedToPlugin(home.home, items), parts = await throughPlugins(home, tools, kind);
-  return (item: { key: string; hash?: string }, tool: HarnessId): ThroughPlugin | undefined => {
+  return (item, tool) => {
     const given = parts.get(tool)?.get(item.key);
     if (!given) return undefined;
     const { text: _text, ...part } = given;
