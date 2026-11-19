@@ -22,7 +22,7 @@ import { originWords, theVersion, wantedIn, type LibraryItem, type Plan, type Ta
 import { clockTimesApart, dayAndTime } from './model.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, TakenInNotice } from './types.ts';
-import { andList, kindNouns, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
+import { andList, fewNames, kindNouns, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
 
 // ---------- What a kind supplies ----------
 
@@ -262,9 +262,25 @@ export function foldVersions(versions: readonly Version[], unfolded: boolean): {
 
 // ---------- Words ----------
 
-/** Tools with a current copy outside their own folder, and their details’ descriptions of those copies. */
-const otherReaders = (row: LibraryRow, tools: readonly string[]) => tools.filter(tool => row.loads?.[tool as HarnessId] && !row.hashes?.[tool] && row.anotherWay?.[tool]);
+/** Tools that load a copy outside their own folder (not one their own switch has off), and their details’ descriptions of those copies. */
+const otherReaders = (row: LibraryRow, tools: readonly string[]) => tools.filter(tool => row.loads?.[tool as HarnessId] && !row.loads[tool as HarnessId]!.switchedOff && !row.hashes?.[tool] && row.anotherWay?.[tool]);
 export const otherReadLines = (row: LibraryRow, tools: readonly string[]) => otherReaders(row, tools).map(tool => row.anotherWay![tool]!);
+/**
+ * What a result says after an Off of items tools still read another way (otherReaders; its row says which way), one click's
+ * or a run's alike: a sentence for the items the same tools read ("Codex and Pi still read a and b another way."). `name`: the
+ * item as the result names it.
+ */
+export function stillReadWords(rows: readonly { name: string; row: LibraryRow }[], tools: readonly string[]): string[] {
+  const byReaders = new Map<string, { readers: string[]; names: string[] }>();
+  for (const { name, row } of rows) {
+    const readers = otherReaders(row, tools), key = readers.join();
+    if (readers.length) byReaders.set(key, { readers, names: [...(byReaders.get(key)?.names ?? []), name] });
+  }
+  return [...byReaders.values()].map(({ readers, names }) => `${sentence(named(readers, tools))} still ${readers.length === 1 ? 'reads' : 'read'} ${fewNames(names)} another way.`);
+}
+/** What a result says of found items whose copies differ, which wait for a choice of copy: one click's or a run's alike. */
+export const copiesDiffer = (names: readonly string[]) =>
+  `${fewNames([...names])} ${names.length === 1 ? 'has' : 'have'} differing copies. Choose which copy every tool uses${names.length === 1 ? '' : ' for each'}.`;
 
 /**
  * Where an item that is Off is: in Central Knot only; on in the tools that have it through a plugin still on there (`pluginOn`);
@@ -277,6 +293,14 @@ function offWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonl
   if (readers.length) return `in ${andList(['Central Knot', ...tools.filter(tool => readers.includes(tool) || own.includes(tool) || through.includes(tool)).map(toolName)])}`;
   return through.length ? `on in ${andList(through.map(toolName))} only, through its plugin`
     : own.length ? `in ${andList(['Central Knot', ...own.map(toolName)])}` : leftOut.length ? 'in no tool Central Knot manages' : 'in Central Knot only';
+}
+/**
+ * Where an item that is Off is, as its tag and its switch say it: still in the tools whose copy can't be seen for sure (stillIn),
+ * else in those whose removal the plan still owes ("until sync runs"), else offWhere.
+ */
+function offPlace(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[]) {
+  const unseen = stillIn(row, item, [], tools), owed = removalOwed(row, tools);
+  return unseen.length ? `still in ${andList(unseen.map(toolName))}` : owed.length ? `still in ${andList(owed.map(toolName))} until sync runs` : offWhere(row, item, tools, leftOut);
 }
 /** The tools that have an Off item on through its plugin (`pluginOn`), in the page's order of `tools` (its own tool first on a tool's page). */
 const onThrough = (row: LibraryRow, tools: readonly string[]) => tools.filter(tool => row.pluginOn?.includes(tool));
@@ -347,8 +371,11 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   return `${parts.filter(Boolean).join(' · ')}${ownSaid ? `.${ownSaid}` : ''}`;
 }
 
-/** What the switch of an item in Central Knot says: where it stands, and what a click does. (A found item has Add instead: addLabel.) */
-export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]): string {
+/**
+ * What the switch of an item in Central Knot says: where it stands, as its row's tag says it (offPlace; `leftOut` as offWhere's),
+ * and what a click does. (A found item has Add instead: addLabel.)
+ */
+export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = []): string {
   const name = row.name ?? row.key;
   if (placeOf(item) === 'on') {
     // The tools its tag says it is in, less those whose own switch has it off there.
@@ -357,7 +384,7 @@ export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tool
   }
   const own = ownCopies(row, item, tools);
   const kept = own.length === 1 ? 'has a copy of its own, which is' : 'have copies of their own, which are';
-  return `${name}: off, ${offWhere(row, item, tools, [])}. Click to put it in every tool${own.length ? `; ${named(own, tools)} ${kept} kept as versions first` : ''}.`;
+  return `${name}: off, ${offPlace(row, item, tools, leftOut)}. Click to put it in every tool${own.length ? `; ${named(own, tools)} ${kept} kept as versions first` : ''}.`;
 }
 
 /**
@@ -480,15 +507,15 @@ export function sentences(words: RowWords) {
   function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = []): { text: string; title: string } | undefined {
     const place = placeOf(item);
     const unseen = stillIn(row, item, [], tools);
-    if (place === 'off' && unseen.length) return { text: `still in ${andList(unseen.map(toolName))}`, title: unseen.map(tool => row.unseen![tool]).join(' ') };
     const own = ownCopies(row, item, tools), through = onThrough(row, tools);
     const none = through.length ? `${andList(through.map(toolName))} ${through.length === 1 ? 'has' : 'have'} it on through its plugin: its switch there, in the opened row, turns that off.`
       : own.length ? `${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there, left alone while the ${noun} is off.`
       : leftOut.length ? `No tool it manages has it until you turn it on; ${andList(leftOut.map(toolName))}, left out, ${leftOut.length === 1 ? 'keeps whatever it has' : 'keep whatever they have'}.`
       : 'No tool has it until you turn it on.';
     const owed = andList(removalOwed(row, tools).map(toolName));
-    if (place === 'off' && owed) return { text: `still in ${owed} until sync runs`, title: `Off. Central Knot keeps this ${noun}; its ${copy} leaves ${owed} when sync runs.` };
-    if (place === 'off') return { text: offWhere(row, item, tools, leftOut), title: `Central Knot keeps this ${noun} and its versions. ${otherReadLines(row, tools).join(' ') || none}` };
+    // Its tooltip says why it is where its text says (offPlace): a copy that can't be seen, a removal still owed, or where else it is.
+    if (place === 'off') return { text: offPlace(row, item, tools, leftOut), title: unseen.length ? unseen.map(tool => row.unseen![tool]).join(' ')
+      : owed ? `Off. Central Knot keeps this ${noun}; its ${copy} leaves ${owed} when sync runs.` : `Central Knot keeps this ${noun} and its versions. ${otherReadLines(row, tools).join(' ') || none}` };
     const found = `A tool has this ${noun}; Central Knot doesn’t yet. Add it to keep it in Central Knot${whereAdded(row, item, tools)}.`;
     if (place === 'found' && !canAdd(row)) return { text: 'can’t be taken in', title: 'Its line in the opened row says why.' };
     if (place === 'found') return { text: 'not in Central Knot', title: found };
@@ -510,7 +537,7 @@ export function sentences(words: RowWords) {
 
   /**
    * What the result says after each click. `notIn`: the harnesses where the click's write or removal didn't go through; `own`
-   * (Off's): those with a copy of their own, which Off leaves alone (ownCopies). `ways`: tools still reading it another way, in their row’s words.
+   * (Off's): those with a copy of their own, which Off leaves alone (ownCopies). `ways`: the tools still reading it another way (stillReadWords).
    */
   const said = {
     off(name: string, notIn: readonly string[], tools: readonly string[], leftOut: readonly string[] = [], own: readonly string[] = [], ways: readonly string[] = []): string {

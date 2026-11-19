@@ -79,7 +79,8 @@ function start() {
   endRun();
   resetMarket();
   Object.assign(main, { sent: [], restored: [], reads: { plugins: 0, home: 0 }, answers: [], duringHomeRead: undefined });
-  app.home = { home: '/home', sync: { managed: [], gate: { state: 'open' } } } as unknown as typeof app.home;
+  const none = { tools: [], items: [], notices: [], library: {} };
+  app.home = { home: '/home', sync: { managed: [], gate: { state: 'open' } }, skills: none, mcp: none, agents: none } as unknown as typeof app.home;
   Object.assign(app, { page: 'plugins', outcome: undefined, libraryKind: 'all' });
   market.read.data = view;
 }
@@ -532,6 +533,78 @@ test('A run where every row fell short names them once: the lead names them, the
   await settled();
   for (const name of ['a', 'b', 'c']) await main.pass(partly(name));
   assert.equal(app.outcome?.text, '3 of 3 didn’t go through in every tool: a, b and c. All 3 are off.');
+});
+
+/**
+ * A home whose skills, now Off, are `keys`: those in `linked` read by Codex and Pi through links into the shared folder, with no copy
+ * of Central Knot's (skills.ts anotherWay), and `draft`, found with copies that differ, waiting for a choice of copy.
+ */
+function linkedHome(keys: string[], linked: string[]) {
+  const tools = ['claude-cli', 'codex-cli', 'pi-cli'], readers = ['codex-cli', 'pi-cli'];
+  const reads = (key: string) => (linked.includes(key) ? { anotherWay: Object.fromEntries(readers.map(tool => [tool, 'It has it through a link in its skills folder, which is not Central Knot’s copy.'])),
+    loads: Object.fromEntries(readers.map(tool => [tool, { folder: key, name: key, skillFile: `/home/.agents/skills/${key}/SKILL.md`, switchedOff: false }])) } : {});
+  const draft = { key: 'draft', name: 'draft', copies: { 'claude-cli': { hash: 'x' }, 'codex-cli': { hash: 'y' } }, takeInAnswers: { click: { wait: 'copies-differ' }, rule: { wait: 'copies-differ' } } };
+  const empty = { tools, items: [], notices: [], problems: [], unread: [], library: {} };
+  app.home = { home: '/home', label: 'Practice', sync: { managed: tools, caughtUp: [], access: { allowed: true }, gate: { state: 'ready' } },
+    skills: { ...empty, items: [...keys.map(key => ({ key, name: key, copies: {}, ...reads(key) })), draft], library: Object.fromEntries(keys.map(key => [key, newItem(key, key)])) }, mcp: empty, agents: empty } as unknown as HomeView;
+}
+/** draft's Add in its turn: its copies differ, so the pass waits for a choice (librarypass.ts addClicked). */
+const waitsForChoice: PassResult = { results: [{ item: 'draft', outcome: 'held', differs: true, message: 'Copies differ. Choose which copy to use.' }], writes: 0 };
+
+test('A run of four Offs, two of them still read by Codex and Pi through links: after what went through, one sentence names the two and the tools that still read them', async () => {
+  onLibrary();
+  linkedHome(['a', 'b', 'c', 'd'], ['a', 'b']);
+  for (const name of ['a', 'b', 'c', 'd']) flip(name, false);
+  await settled();
+  for (const name of ['a', 'b', 'c', 'd']) await main.pass(did(name));
+  // It is no failure: no warning, and no reason.
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons], ['4 skills are off: a, b, c and d. Codex and Pi still read a and b another way.', false, []]);
+});
+
+test('A run where one row waits for a choice of copy: it is not counted On or Off, it is no reason, and a sentence says it waits', async () => {
+  onLibrary();
+  linkedHome(['a'], ['a']);
+  flip('a', false);
+  flip('draft', true);
+  await settled();
+  await main.pass(did('a'));
+  await main.pass(waitsForChoice);
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons],
+    ['1 skill is off: a. Codex and Pi still read a another way. draft has differing copies. Choose which copy every tool uses.', false, []]);
+});
+
+test('A new run lets go every kind’s earlier click reasons: after two refusals stood past their 8 seconds, an agent switched with no problem has no reason and no problem line, and the skills’ notices stay', async t => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    onLibrary();
+    homeWith(t, [{ kind: 'skills', key: 'a' }, { kind: 'skills', key: 'b' }, { kind: 'agents', key: 'helper' }]);
+    const notice: ItemNotice = { kind: 'deleted-by-hand', key: 'notes', item: 'notes', history: 'deletion', winner: 'claude-cli', losers: [], orderProved: true };
+    flip('a', false);
+    flip('b', false);
+    await settled();
+    await main.pass(failedWrite('a'));
+    await main.pass({ ...failedWrite('b'), notices: [notice] });
+    assert.equal(app.skillsResult?.results.filter(keptBack).length, 2);
+    mock.timers.tick(9000);
+    flip('helper', false, undefined, 'agents');
+    await settled();
+    await main.pass(offMade('agents', 'helper'));
+    assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.skillsResult?.results.filter(keptBack), app.skillsResult?.notices], ['helper is off.', [], [], [notice]]);
+  } finally { mock.timers.reset(); }
+});
+
+test('An Undo lets go every kind’s earlier click reasons: after a run whose skill was refused and whose agent went off, its Undo shows no skill’s problem line', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'a' }, { kind: 'agents', key: 'helper' }]);
+  flip('a', false);
+  flip('helper', false, undefined, 'agents');
+  await settled();
+  await main.pass(failedWrite('a'));
+  await main.pass(offMade('agents', 'helper'));
+  assert.equal(app.skillsResult?.results.filter(keptBack).length, 1);
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([main.restored, app.outcome?.text, app.skillsResult?.results.filter(keptBack)], [['off-agents-helper'], 'Undone: helper is as before.', []]);
 });
 
 test('A run made on one tool’s page is said there only: on another tool’s page, the status bar says it, and no row there flashes', async () => {

@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, asksWhichCopy, waitsForSync, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, switchLabel, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyOn, kindSource } from '../src/itemrow.ts';
@@ -237,6 +237,34 @@ test('The switch counts the tools an item is on in as its tag does: a tool that 
   const kept = item({ except: ['pi-cli'], applied: { 'opencode-cli': 'b' } });
   assert.equal(placeTag(triage, kept, five)?.text, 'in 1 of 5 tools · kept out of Pi');
   assert.equal(switchLabel(triage, kept, five), 'triage: on in 1 of 5 tools. Click to take it out of every tool; Central Knot keeps it.');
+});
+
+test('What a result says of Off skills tools still read another way, one click and a run alike: one sentence for the skills the same tools read, none for a tool whose own switch has it off', () => {
+  const five = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
+  // Read by `readers` through a link into the shared folder, with no copy of Central Knot's; `off`: those whose own switch has it off.
+  const linked = (key: string, readers: string[], off: string[] = []): { name: string; row: LibraryRow } => ({ name: key, row: { key, name: key, hashes: {},
+    anotherWay: Object.fromEntries(readers.map(tool => [tool, 'It has it through a link in its skills folder (to ~/.agents/skills), which is not Central Knot’s copy.'])),
+    loads: Object.fromEntries(readers.map(tool => [tool, { folder: key, name: key, skillFile: `/home/me/.agents/skills/${key}/SKILL.md`, switchedOff: off.includes(tool) }])) } });
+  const plain = (key: string) => ({ name: key, row: { key, name: key, hashes: {} } });
+  assert.deepEqual(stillReadWords([linked('a', ['codex-cli', 'pi-cli']), linked('b', ['codex-cli', 'pi-cli']), plain('c'), plain('d')], five), ['Codex and Pi still read a and b another way.']);
+  assert.deepEqual(stillReadWords(['a', 'b', 'c'].map(key => linked(key, five)), five), ['All 5 tools still read a, b and c another way.']);
+  assert.deepEqual(stillReadWords([linked('a', ['codex-cli', 'pi-cli']), linked('b', ['codex-cli'])], five), ['Codex and Pi still read a another way.', 'Codex still reads b another way.']);
+  // Pi's own switch has it off: Pi doesn't read it, whatever link it has, and so does the row's tag.
+  assert.deepEqual(stillReadWords([linked('a', ['codex-cli', 'pi-cli'], ['pi-cli'])], five), ['Codex still reads a another way.']);
+  assert.equal(sentences(libraryWords.skills).placeTag(linked('a', ['codex-cli', 'pi-cli'], ['pi-cli']).row, { ...newItem('a', 'a'), on: false }, five)?.text, 'in Central Knot and Codex');
+  assert.deepEqual([copiesDiffer(['draft']), copiesDiffer(['draft (agent)', 'review'])],
+    ['draft has differing copies. Choose which copy every tool uses.', 'draft (agent) and review have differing copies. Choose which copy every tool uses for each.']);
+});
+
+test('The switch of an Off item says where it is as its row does: a removal still owed first, then a copy that can’t be seen for sure', () => {
+  // Codex's removal was refused (its file couldn't be written): the plan still removes it there, so the row reads "still in Codex until sync runs".
+  const off = item({ on: false, applied: { 'codex-cli': 'b' } }), owed = row({ 'codex-cli': 'b' }, {}, off);
+  assert.deepEqual([placeTag(owed, off, tools)?.text, switchLabel(owed, off, tools)],
+    ['still in Codex until sync runs', 'reviewer: off, still in Codex until sync runs. Click to put it in every tool.']);
+  const twins = { 'claude-cli': 'Two folders whose names differ only by case are in Claude Code’s skills folder.' };
+  const unseen = row({ 'claude-cli': 'b' }, { unseen: twins }, item({ on: false, applied: { 'claude-cli': 'b' } }));
+  assert.deepEqual([placeTag(unseen, item({ on: false, applied: { 'claude-cli': 'b' } }), tools)?.text, switchLabel(unseen, item({ on: false, applied: { 'claude-cli': 'b' } }), tools)],
+    ['still in Claude Code', 'reviewer: off, still in Claude Code. Click to put it in every tool.']);
 });
 
 test('A click’s result says what happened, and never claims a harness where it didn’t', () => {

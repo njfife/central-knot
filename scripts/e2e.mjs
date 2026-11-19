@@ -4906,8 +4906,8 @@ async function sharedCopiesFlow() {
   for (let tries = 0; tries < 40 && !(await a.text('#header .band-text') ?? '').includes(`${name} is off`); tries++) await wait(100);
   same('Off leaves the installer’s link and shared copy in place', onDisk(), [`link:${link}`, true, false, false]);
   const reads = 'also reads a copy at …/.agents/skills, which is not Central Knot’s.';
-  check('turned off, the result names each tool that still reads it, and where, rather than that no tool has it',
-    (await a.text('#header') ?? '').includes(`${name} is off. Copilot CLI ${reads} Pi ${reads} Central Knot keeps it`), await a.text('#header'));
+  check('turned off, the result names the tools that still read it another way, as a run’s result does, rather than that no tool has it',
+    (await a.text('#header') ?? '').includes(`${name} is off. Copilot CLI and Pi still read ${name} another way. Central Knot keeps it`), await a.text('#header'));
   await a.click('#nav-harnesses');
   await a.click('#harness-pi-cli');
   await a.click('#harness-tab-skills');
@@ -5869,6 +5869,18 @@ esac
   check('the result says what the switch did, with Undo', /issue-tracker: installed in Claude Code; its items put in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
   await pictures('plugin-switch-list');
+  // Sync once from the menu bar with the switch's result up: its own result takes the header, as on the item lists, and × lets it
+  // go. The menu reaches the page through the main process, which only a development run opens to the checks.
+  if (a.inspect) {
+    const menu = await mainHelpers(a.inspect);
+    try { await menu.tellPage('sync:request'); } finally { menu.close(); }
+    for (let tries = 0; tries < 50 && !(await a.exists('#header [data-outcome]')); tries++) await wait(100);
+    await done();
+    check('Sync once from the menu on Plugin marketplaces: the header says what it did, ahead of the switch’s older result',
+      !!(await a.text('#header [data-outcome] .band-text')) && !(await a.exists('#plugins-result')), await a.text('#header'));
+    if (shots) { await sizeTo(a, 1316, 819); await a.shot('plugins-sync-once-1316'); await fullSize(a); }
+    await a.click('#outcome-dismiss');
+  } else console.log('No main-process inspector: skipping Sync once from the menu on Plugin marketplaces.');
   // The first link to one of its items, before Skills was ever drawn, opens Skills with that row open.
   await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 50 && !(await a.exists('.plugin-items-list [data-key="skill:triage"] button')); tries++) await wait(100);
@@ -7823,6 +7835,9 @@ async function headerResultFlow() {
   // A server's name with no break in it, longer than the opened card is wide at 860.
   const longServer = 'referenceplatformdocumentationserverforeveryengineeringteamacrossthewholecompanyanditspartners';
   for (const name of [...names, unbroken]) for (const folder of [claude, copilot]) skill(folder, name);
+  // Two skills in the shared folder, which Copilot CLI reads, and Claude Code reaches through a link in its own folder.
+  const linkedNames = ['shared-notes', 'shared-review'], shared = join(home, '.agents/skills');
+  for (const name of linkedNames) symlinkSync(skill(shared, name), join(claude, name));
   for (const file of [join(home, '.claude/agents/helper.md'), join(home, '.copilot/agents/helper.agent.md')]) { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, '---\nname: helper\ndescription: The helper agent.\n---\n\nYou help.\n'); }
   writeFileSync(join(home, '.claude.json'), `${JSON.stringify({ mcpServers: { [longServer]: { type: 'http', url: 'https://docs.example.test/mcp' } } })}\n`);
   writeClaudeInstall(home, 'local-market', 'kit', '1.0.0', { 'skills/zulu/SKILL.md': text('zulu', 'Plugin skill.') });
@@ -7831,7 +7846,7 @@ async function headerResultFlow() {
   const done = async () => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   await a.click('#nav-overview');
   await a.click('#setup-yes');
-  check('Yes takes the nine skills in', await until(() => Object.keys(JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 9));
+  check('Yes takes the eleven skills in', await until(() => Object.keys(JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 11));
   await done();
   await openKind(a, 'all');
   // What Yes took in is said in notices above the list: let go, so the list has its room.
@@ -7907,6 +7922,81 @@ async function headerResultFlow() {
   await openCard();
   await undo();
   asBefore('its Undo, from the card, puts the three back in both tools', before);
+
+  // A run of four Offs, two of them skills both tools still read another way (Claude Code through its link, Copilot CLI in the
+  // shared folder): after what went through, one sentence names the two and the tools that still read them, with no warning.
+  await dismiss();
+  const linkedRun = [...linkedNames, names[3], names[4]];
+  await a.run(`${JSON.stringify(linkedRun.map(switchOf))}.forEach(selector => document.querySelector(selector).click())`);
+  await done();
+  await mouse(a, 'mouseMoved', await middle('#header .header-result'), 0);
+  same('a run of four, two still read through links: what went through, then who still reads the two, no warning and no problem line',
+    [await a.text(sentence), await a.exists('#header .header-result .tone-warning'), await lines()],
+    [`4 skills are off: ${linkedRun.slice(0, 3).join(', ')} and ${linkedRun[3]}. Claude Code and Copilot CLI still read ${linkedNames.join(' and ')} another way.`, false, 0]);
+  if (shots) {
+    // His own window, 1316×819, with the sidebar open and as a rail, then 860×600; folded and opened, dark, and one light.
+    await sizeTo(a, 1316, 819); await a.shot('result-linked-run-1316-light');
+    await theme('dark');
+    for (const [width, height, rail] of [[1316, 819, false], [1316, 819, true], [860, 600, false]]) {
+      await sizeTo(a, width, height);
+      if (rail !== await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      const name = `result-linked-run-${width}${rail ? '-rail' : ''}`;
+      await mouse(a, 'mouseMoved', await middle('#header .header-result'), 0);
+      await a.shot(name);
+      await openCard(); await a.shot(`${name}-whole`); await pressOn('#problems-show-all');
+    }
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await theme('light'); await sizeTo(a, 860, 600);
+  }
+  await undo();
+  same('its Undo puts the four back on', await a.run(`${JSON.stringify(linkedRun.map(switchOf))}.map(selector => document.querySelector(selector).getAttribute('aria-checked'))`), ['true', 'true', 'true', 'true']);
+
+  // A result's reasons are its own run's. Two refusals left up past the 8 seconds between runs, then the agent switched with no
+  // problem: its result has no reason and no Show all of theirs; then a run of a refused skill and the agent, and its Undo, which
+  // leaves no line of the run's refusal.
+  await dismiss();
+  chmodSync(claude, 0o555);
+  const helper = `#${rowPart('switch', 'agents', 'helper')}`;
+  await clickRun(names.slice(0, 2));
+  same('two refused removals: a line each', (await toggle())?.[0], 'Show all 2 reasons');
+  await wait(9000);
+  await a.click(helper);
+  await done();
+  same('nine seconds on, the agent switched off: its own result, no reason and no Show all of the skills’',
+    [(await a.text(sentence))?.startsWith('helper is off'), await lines(), /reasons/.test((await toggle())?.[0] ?? '')], [true, 0, false]);
+  await undo();
+  same('its Undo: no reason of the skills’ either', [await a.text(sentence), await lines()], ['Undone: helper is as before.', 0]);
+  // Refused in both tools, the skill's click changes nothing, so the run's Undo is the agent's alone.
+  await dismiss();
+  chmodSync(copilot, 0o555);
+  await a.run(`[${JSON.stringify(switchOf(names[2]))}, ${JSON.stringify(helper)}].forEach(selector => document.querySelector(selector).click())`);
+  await done();
+  same('a run of a skill refused in both tools and the agent: a line for each refusal', (await toggle())?.[0], 'Show all 2 reasons');
+  await undo();
+  chmodSync(copilot, 0o755);
+  same('its Undo goes back for the agent, and leaves no line of the run’s refusals', [await a.text(sentence), await lines()], ['Undone: helper is as before.', 0]);
+
+  // A refused removal: its switch says where it is as its row does. Its result closed, then a read: the background's line for the
+  // removal it keeps trying says that it is Automatic sync trying again, never the click's words come back.
+  await dismiss();
+  await a.click(switchOf(names[5]));
+  await done();
+  const tag = await a.text(`${row(names[5])} .row-tag`);
+  same('a refused removal: the row says it is still in Claude Code, and its switch says the same', [tag, (await a.run(`document.querySelector(${JSON.stringify(switchOf(names[5]))}).getAttribute('aria-label')`))?.startsWith(`${names[5]}: off, ${tag}.`)],
+    ['still in Claude Code until sync runs', true]);
+  await dismiss();
+  await a.click('#header-refresh');
+  await done();
+  await openCard();
+  const retries = await a.all('#header .problem-text'), retry = name => `Automatic sync still couldn’t remove Claude Code’s copy of ${name}. Central Knot will try again.`;
+  check('closed, then read again: the background’s lines, each in its own words, this removal among them',
+    retries.every(line => /^Automatic sync still couldn’t remove Claude Code’s copy of .+\. Central Knot will try again\.$/.test(line)) && retries.includes(retry(names[5])), retries);
+  await pictures('background-retry', [860, 600]);
+  await pressOn('#problems-show-all');
+  // Back on: Claude Code's copies never left.
+  await clickRun([...names.slice(0, 3), names[5]]);
+  chmodSync(claude, 0o755);
+  await dismiss();
 
   // One click with a long unbroken name, Claude Code's folder read-only, at 860×600: its first words say what wasn't done, its
   // reason says what failed before the name is cut, and opened, every word can be read.
