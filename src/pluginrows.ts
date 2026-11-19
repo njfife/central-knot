@@ -27,8 +27,11 @@ export interface PluginRow {
   installs: Partial<Record<HarnessId, InstalledPlugin>>;
 }
 
-/** A page's plugin rows (those no row of the person's own already shows), and copies that couldn't be read. */
-export interface PageRows { rows: PluginRow[]; unread: InstalledPlugin[] }
+/**
+ * A page's plugin rows (those no row of the person's own already shows), those a row of the person's own shows (`folded`,
+ * by that row's key: word search reads their copies' texts), and copies that couldn't be read.
+ */
+export interface PageRows { rows: PluginRow[]; folded: Map<string, PluginRow[]>; unread: InstalledPlugin[] }
 
 /** Whether this tool's copy of the plugin has this item turned off, and how: the whole plugin, or the item's own switch (a skill's, an MCP server's, an agent's). */
 export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'item' | undefined {
@@ -74,9 +77,14 @@ export function pageRows(home: HomeView, page: Page): PageRows {
   // Every tool with the plugin, so a copy without this item (Codex and an agent, another version) says so in its cell.
   for (const row of byKey.values()) for (const install of home.pluginItems ?? []) if (install.plugin === row.plugin && install.marketName === row.marketName) row.installs[install.tool] = install;
   // One row, not two: an item that is already a row of the person's own stays that row's.
-  const rows = [...byKey.values()].filter(row => !facts.some(fact => onOwnRow(fact, row))).sort((first, second) => first.name.localeCompare(second.name));
+  const folded = new Map<string, PluginRow[]>();
+  const rows = [...byKey.values()].filter(row => {
+    const own = facts.find(fact => onOwnRow(fact, row));
+    if (own) folded.set(own.key, [...(folded.get(own.key) ?? []), row]);
+    return !own;
+  }).sort((first, second) => first.name.localeCompare(second.name));
   const unread = (home.pluginItems ?? []).filter(install => install.problem);
-  const made = { rows, unread };
+  const made = { rows, folded, unread };
   memo.set(home, { ...known, [page]: made });
   return made;
 }

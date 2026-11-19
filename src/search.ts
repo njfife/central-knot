@@ -1,12 +1,15 @@
 // Word search, in main: documents indexed in memory with SQLite's own full-text search (FTS5 through node:sqlite, as usage.ts
 // opens a database), and a typed text answered from that index, best first. Owns:
-// - how text becomes words (`words`), the same for documents and queries: camelCase apart, then cut where SQLite's
-//   unicode61 cuts (at every character that is not a letter or a digit), so `pr-review`, `mcp__server__tool`, a path and a
-//   URL's parts split and `k8s` stays one word; the index stems with Porter (`kubernetes`, `kubernets` → `kubernet`);
-// - the query's rule (`Index.ask`): a row one of whose names is the typed text whole comes first; then every word, the
-//   last as a prefix (the person is still typing it); if nothing, each word that finds nothing is replaced by the known words
-//   nearest it (`nearest`) and every word is asked again; if still nothing, any of the typed words. Every word is quoted, so
-//   nothing typed reaches MATCH as syntax. Ranked by bm25() with the name weighted most (`WEIGHTS`), ties by row id;
+// - how text becomes words. Both sides are first put in one Unicode form (NFC). A document keeps its text and gets each
+//   camelCase word's parts added (`indexed`: "TypeScript" stays, "Type Script" is added), then SQLite's unicode61 cuts it
+//   at every character that is not a letter or a digit and Porter stems it (`kubernetes`, `kubernets` → `kubernet`).
+//   `words` makes the same cut for what is typed (camelCase apart) and for the words kept for corrections, keeping marks:
+//   `pr-review`, `mcp__server__tool`, a path and a URL's parts split, and `k8s` stays one word;
+// - the query's rule (`Index.ask`): a text with no words asks nothing; a row one of whose names is the typed text whole comes
+//   first; then every word, the last as a prefix (the person is still typing it); if nothing, each word that finds nothing
+//   (the first LOOKED_UP of them) gets the known words nearest it (`nearest`) beside it and every word is asked again; if
+//   still nothing, any of the typed words. Every word is quoted, so nothing typed reaches MATCH as syntax. Ranked by bm25()
+//   with the name weighted most (`WEIGHTS`), ties by row id;
 // - the one index main keeps (`searchFollower`): built from a view's documents in slices that give way to main's other work,
 //   superseded by a newer view while it gathers or builds, tagged again (not rebuilt) when the content is the same, closed
 //   when replaced or superseded, when another home opens and at quit.
@@ -25,13 +28,26 @@ const WEIGHTS = [10, 4, 1];
 const EXCERPT_WORDS = 12;
 /** Documents indexed between two give-ways of main's event loop: 3,394 public plugin items held it 44 ms at most, unsliced 440 ms. */
 const SLICE = 100;
+/** How many of the typed words that find nothing are looked up for nearest words: a pasted paragraph asks no more. */
+const LOOKED_UP = 8;
 /** Ordered by id, so equal ranks fall in row id order, and the same documents always make the same index. */
 const byId = (first: SearchDoc, second: SearchDoc) => (first.id < second.id ? -1 : first.id > second.id ? 1 : 0);
 
-/** camelCase apart ("useState" → "use State", "HTMLParser" → "HTML Parser"), before SQLite's tokenizer cuts the rest. */
+/** camelCase apart ("useState" → "use State", "HTMLParser" → "HTML Parser"), and a word it would part. */
 const apart = (text: string) => text.replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2').replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1 $2');
-/** A text's words, as the index cuts them: camelCase apart, cut at what is not a letter or a digit, in lower case. */
-export const words = (text: string) => apart(text.normalize('NFC')).toLowerCase().split(/[^\p{L}\p{N}\p{M}]+/u).filter(Boolean);
+const CAMEL = /\p{Ll}\p{Lu}|\p{Lu}\p{Lu}\p{Ll}/u;
+/** Where unicode61 cuts: at what is not a letter or a digit (a mark stays with its letter). */
+const NOT_A_WORD = /[^\p{L}\p{N}\p{M}]+/u;
+/** Cut as unicode61 cuts, in lower case. */
+const cut = (text: string) => text.toLowerCase().split(NOT_A_WORD).filter(Boolean);
+/** A text as the index holds it: in one Unicode form, with each camelCase word's parts added at its end, so both are found. */
+function indexed(text: string): string {
+  const normal = text.normalize('NFC');
+  const parts = [...new Set(normal.split(NOT_A_WORD).filter(word => CAMEL.test(word)))].map(apart);
+  return parts.length ? `${normal}\n${parts.join(' ')}` : normal;
+}
+/** What is typed, as words: in the index's Unicode form, camelCase apart, cut as the index cuts. */
+export const words = (text: string) => cut(apart(text.normalize('NFC')));
 /** A word without its accents, as unicode61 folds it: what the nearest words are compared in. */
 const folded = (word: string) => word.normalize('NFD').replace(/\p{M}/gu, '');
 /** One word as MATCH reads it: quoted, so it is only ever a word; a prefix with `*`. */
@@ -41,48 +57,58 @@ const term = (word: string, prefix = false) => `"${word.replaceAll('"', '""')}"$
 export interface Index { ask(typed: string): SearchHit[]; close(): void }
 
 /**
- * Indexes `docs` in memory, giving way to main's other work every SLICE documents; none, and the database closed, once
- * `wanted` says a newer view replaced it. The vocabulary for nearest words is kept beside it: the names' words, the stems.
+ * Indexes `docs` in memory, giving way to main's other work every SLICE documents; none once `wanted` says a newer view
+ * replaced it. Its database is closed when it gives none, or throws.
  */
 export async function buildIndex(docs: SearchDoc[], wanted = () => true): Promise<Index | undefined> {
-  const sorted = [...docs].sort(byId);
   const db = new DatabaseSync(':memory:');
+  let index: Index | undefined;
+  try { index = await fill(db, docs, wanted); } finally { if (!index) db.close(); }
+  return index;
+}
+
+/** The index in `db`. The words for nearest words are kept beside it: those of names and descriptions, and the stems. */
+async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean): Promise<Index | undefined> {
+  const sorted = [...docs].sort(byId);
   db.exec("CREATE VIRTUAL TABLE docs USING fts5(names, description, text, tokenize = 'porter unicode61'); CREATE VIRTUAL TABLE stems USING fts5vocab(docs, 'row');");
   const add = db.prepare('INSERT INTO docs (rowid, names, description, text) VALUES (?, ?, ?, ?)');
-  const byName = new Map<string, number[]>(), nameWords = new Set<string>();
+  const byName = new Map<string, number[]>(), surface = new Set<string>();
   db.exec('BEGIN');
   for (const [at, doc] of sorted.entries()) {
     if (at && at % SLICE === 0) await new Promise(resolve => setImmediate(resolve));
-    if (!wanted()) { db.close(); return undefined; }
-    add.run(at + 1, apart(doc.names.join('\n')), apart(doc.description), apart(doc.text));
+    if (!wanted()) return undefined;
+    add.run(at + 1, indexed(doc.names.join('\n')), indexed(doc.description), indexed(doc.text));
     for (const name of new Set(doc.names.map(each => each.normalize('NFC').toLowerCase()))) byName.set(name, [...(byName.get(name) ?? []), at + 1]);
-    for (const word of words(doc.names.join(' '))) nameWords.add(folded(word));
+    for (const word of cut(indexed(`${doc.names.join(' ')} ${doc.description}`))) surface.add(folded(word));
   }
   db.exec('COMMIT');
   // Only the ids are kept of the documents (a row's rowid is its place here, from 1): their texts are in the index.
   const ids = sorted.map(doc => doc.id);
   const stems = (db.prepare('SELECT term FROM stems ORDER BY term').all() as { term: string }[]).map(row => row.term);
-  const names = [...nameWords].sort();
+  const known = [...surface].sort();
   const ranked = db.prepare(`SELECT rowid, CASE WHEN rowid IN (SELECT rowid FROM docs WHERE docs MATCH ?) THEN NULL
     ELSE snippet(docs, 2, '', '', '…', ${EXCERPT_WORDS}) END AS excerpt FROM docs WHERE docs MATCH ? ORDER BY bm25(docs, ${WEIGHTS.join(', ')}), rowid`);
   const any = db.prepare('SELECT 1 FROM docs WHERE docs MATCH ? LIMIT 1');
   /** The rows `expr` finds, best first; an excerpt for a row its names and description alone don't explain. */
   const find = (expr: string) => ranked.all(`{names description} : (${expr})`, expr) as { rowid: number; excerpt: string | null }[];
   /** A known word as MATCH asks it: whole, or as a prefix where Porter changes that stem again so that, whole, it finds nothing. */
-  const asked = (known: string) => (any.get(term(known)) ? term(known) : term(known, true));
+  const asked = (word: string) => (any.get(term(word)) ? term(word) : term(word, true));
   /** Each typed word as MATCH asks it (`asTyped`), or with its nearest known words beside it where it finds nothing alone. */
-  const withNearest = (said: string[], asTyped: string[]) => asTyped.map((own, at) => {
-    if (any.get(own)) return own;
-    const near = nearest(folded(said[at]), names, stems);
-    return near.length ? `(${[own, ...near.map(asked)].join(' OR ')})` : own;
-  });
+  function withNearest(said: string[], asTyped: string[]) {
+    const lookedUp = asTyped.map((own, at) => (any.get(own) ? undefined : at)).filter(at => at !== undefined).slice(0, LOOKED_UP);
+    return asTyped.map((own, at) => {
+      const near = lookedUp.includes(at) ? nearest(folded(said[at]), known, stems) : [];
+      return near.length ? `(${[own, ...near.map(asked)].join(' OR ')})` : own;
+    });
+  }
 
   return {
     ask(typed) {
       const said = words(typed);
+      if (!said.length) return [];
       // Every word as typed, the last a prefix: the person is still typing it.
       const asTyped = said.map((word, at) => term(word, at === said.length - 1));
-      const tries = said.length ? [() => asTyped.join(' AND '), () => withNearest(said, asTyped).join(' AND '), () => asTyped.join(' OR ')] : [];
+      const tries = [() => asTyped.join(' AND '), () => withNearest(said, asTyped).join(' AND '), () => asTyped.join(' OR ')];
       let found: { rowid: number; excerpt: string | null }[] = [];
       for (const expr of tries) if ((found = find(expr())).length) break;
       const exact = byName.get(typed.trim().normalize('NFC').toLowerCase()) ?? [];
@@ -94,17 +120,18 @@ export async function buildIndex(docs: SearchDoc[], wanted = () => true): Promis
 }
 
 /**
- * The known words nearest a word that finds nothing: a name's words first, else the index's stems. One letter off from four
- * letters, two from eight, a transposition counting one; a number, or a word under four letters, is never replaced. At most
- * three, nearest first, then alphabetical.
+ * The known words nearest a word that finds nothing: the words of names and descriptions as written first, else the index's
+ * stems. A file's text gives stems only, so a mistyped word only a text has is compared with its stem ("deploymnet" with
+ * `deploy`: too far). One letter off from four letters, two from eight, a transposition counting one; a number, or a word
+ * under four letters, is never replaced. At most three, nearest first, then alphabetical.
  */
-function nearest(word: string, names: string[], stems: string[]): string[] {
+function nearest(word: string, known: string[], stems: string[]): string[] {
   const allowed = word.length >= 8 ? 2 : word.length >= 4 ? 1 : 0;
   if (!allowed || /^\p{N}+$/u.test(word)) return [];
   const within = (known: string[]) => known.map(each => ({ each, off: distance(word, each, allowed) })).filter(({ off }) => off <= allowed)
     .sort((first, second) => first.off - second.off || (first.each < second.each ? -1 : 1)).slice(0, 3).map(({ each }) => each);
-  const named = within(names);
-  return named.length ? named : within(stems);
+  const written = within(known);
+  return written.length ? written : within(stems);
 }
 
 /** Letters to change, add, remove or swap with the next to make `from` into `to` (optimal string alignment); `most + 1` once past `most`. */

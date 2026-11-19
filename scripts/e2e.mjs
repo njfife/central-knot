@@ -6948,12 +6948,15 @@ async function searchFlow() {
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
   const a = await launch(data);
-  // The index published for a new view: its read is the view's own.
-  const readId = await a.run(`(window.ckPublished = [], window.centralKnot.onSearchPublished((home, readId) => window.ckPublished.push(readId)), window.centralKnot.refresh().then(view => view.readId))`);
-  for (let tries = 0; tries < 100 && !(await a.run(`window.ckPublished.includes(${readId})`)); tries++) await wait(50);
+  // The index published for a new view, told by the push: the answer's tag is taken from it, so a background view landing
+  // between cannot fail the check, and an answer with no push cannot pass it.
+  const viewRead = await a.run(`(window.ckPublished = [], window.centralKnot.onSearchPublished((home, readId) => window.ckPublished.push({ home, readId })), window.centralKnot.refresh().then(view => view.readId))`);
+  for (let tries = 0; tries < 100 && !(await a.run(`window.ckPublished.some(tag => tag.readId >= ${viewRead})`)); tries++) await wait(50);
   const ask = typed => a.run(`window.centralKnot.search(${JSON.stringify(typed)})`);
   const rows = async typed => (await ask(typed)).rows;
-  same('the answer is ready, for the open home and the view just handed over', await ask('lighthouse').then(({ ready, home: on, readId: read }) => [ready, on, read]), [true, home, readId]);
+  const answer = await ask('lighthouse'), pushed = await a.run('window.ckPublished');
+  same('the push came for the view just handed over, and the answer is ready, tagged with a home and read the push told, the open home',
+    [pushed.some(tag => tag.readId >= viewRead), answer.ready, pushed.some(tag => tag.home === answer.home && tag.readId === answer.readId), answer.home], [true, true, true, home]);
   same('a name above a text (bm25), the text matched with its excerpt (snippet), another form of a word (porter), a mistyped word the text alone has (fts5vocab), a plugin’s skill',
     [await rows('lighthouse'), await rows('deploying'), await rows('registyr'), await rows('duplicate rows')],
     [[{ id: 'skills-lighthouse-report' }, { id: 'skills-web-performance', excerpt: 'Profile with Lighthouse and the network panel.' }], [{ id: 'skills-deploy-staging' }],

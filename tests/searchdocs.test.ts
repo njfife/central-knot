@@ -1,11 +1,12 @@
 // The Library's documents for word search (src/searchdocs.ts), gathered from real views of a made-up home and asked through
 // the index that follows them (src/search.ts searchFollower), as main does at each view: a skill found in a tool, then kept
 // Off, is found by its text, through a version made current, a delete and a restore; a plugin's skill in one tool, then in two with texts that
-// differ, is one row; a namesake of the person's own and an agent of the same name keep rows of their own; an agent kept Off
-// by its prompt, a server by its command, and a skill only in the shared folder by its text.
+// differ, is one row with each copy's text, description and address, folded onto the person's own row too; a namesake of
+// the person's own and an agent of the same name keep rows of their own; an agent kept Off by its prompt, a server by its
+// command, and a skill a tool loads from the shared folder by its text, beside another tool's own copy too.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentsView, applyAgents } from '../src/agents.ts';
 import { rowClicks } from '../src/libraryrow.ts';
@@ -42,6 +43,15 @@ function searching(box: Box) {
   };
 }
 const write = async (path: string, text: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, text); };
+/** The plugin relay@m installed in Claude Code (1.0.0) or Copilot CLI (2.0.0): its skill courier, with this copy's description and text, and its server dispatch at `url`. */
+async function installRelay(box: Box, tool: 'claude-cli' | 'copilot-cli', copy: { description: string; body: string; url: string }) {
+  const folder = join(box.home, tool === 'claude-cli' ? '.claude/plugins/cache/m/relay/1.0.0' : '.copilot/installed-plugins/m/relay');
+  await write(join(folder, 'skills/courier/SKILL.md'), `---\nname: courier\ndescription: ${copy.description}\n---\n${copy.body}\n`);
+  await write(join(folder, '.mcp.json'), JSON.stringify({ mcpServers: { dispatch: { url: copy.url } } }));
+  if (tool === 'claude-cli') await write(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'relay@m': [{ scope: 'user', installPath: folder, version: '1.0.0' }] } }));
+  else await write(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'relay', marketplace: 'm', version: '2.0.0', cache_path: folder, enabled: true }] }));
+  return join(folder, 'skills/courier/SKILL.md');
+}
 
 test('an item kept Off is found by its text; another version made current, deleted, restored: each answer follows the current text', async () => {
   const box = await sandbox();
@@ -101,5 +111,33 @@ test('a plugin’s skill in one tool, then in two whose texts differ, is one row
     await put(box, 'claude-cli', { 'SKILL.md': skillText('My own greeting.', 'hello') }, [], 'hello');
     await write(join(box.home, '.claude/agents/hello.md'), '---\nname: hello\ndescription: Greets visitors.\n---\nWave at visitors.\n');
     assert.deepEqual((await search.found('hello')).map(row => row.id).sort(), ['agents-hello', 'skills-demo@m/hello', 'skills-hello']);
+  } finally { search.close(); await box.cleanup(); }
+});
+
+test('a plugin in two tools whose copies differ: each copy’s description, address and text is found on its one row, and on the person’s own row it folds onto', async () => {
+  const box = await sandbox(['claude-cli', 'copilot-cli']);
+  const search = searching(box);
+  try {
+    const claudeFile = await installRelay(box, 'claude-cli', { description: 'Carries parcels.', body: 'Weigh every parcel first.', url: 'https://northgate.example/rpc' });
+    await installRelay(box, 'copilot-cli', { description: 'Keeps a manifest.', body: 'Check the provenance first.', url: 'https://southgate.example/rpc' });
+    const ids = async (typed: string) => (await search.found(typed)).map(row => row.id);
+    assert.deepEqual([await ids('northgate'), await ids('southgate'), await ids('parcels'), await ids('manifest'), await ids('provenance')],
+      [['mcp-relay@m/dispatch'], ['mcp-relay@m/dispatch'], ['skills-relay@m/courier'], ['skills-relay@m/courier'], ['skills-relay@m/courier']], 'the second install’s address and description too');
+    // A copy of the person's own, the same as Claude Code's copy of the plugin's: the Library folds the plugin's row onto it.
+    await put(box, 'copilot-cli', { 'SKILL.md': await readFile(claudeFile, 'utf8') }, [], 'courier');
+    assert.deepEqual([await ids('weigh'), await ids('provenance')], [['skills-courier'], ['skills-courier']], 'the folded row keeps Copilot CLI’s copy of the plugin’s text');
+  } finally { search.close(); await box.cleanup(); }
+});
+
+test('a skill a tool loads from the shared folder is still found by its words beside another tool’s own copy that says otherwise', async () => {
+  const box = await sandbox(['claude-cli', 'copilot-cli']);
+  const search = searching(box);
+  try {
+    await write(join(box.home, '.agents/skills/shipment/SKILL.md'), skillText('Validate the consignment.', 'shipment'));
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Print the waybill.', 'shipment') }, [], 'shipment');
+    const ids = async (typed: string) => (await search.found(typed)).map(row => row.id);
+    assert.deepEqual([await ids('waybill'), await ids('consignment')], [['skills-shipment'], ['skills-shipment']], 'found, two copies');
+    await turnOn(box, box.context, 'shipment');
+    assert.deepEqual([await ids('waybill'), await ids('consignment')], [['skills-shipment'], ['skills-shipment']], 'in the library, Copilot CLI still loading the shared one');
   } finally { search.close(); await box.cleanup(); }
 });

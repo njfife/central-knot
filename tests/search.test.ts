@@ -3,6 +3,7 @@
 // the first three. Then what finds nothing, how text becomes words, the excerpt, and the one index main keeps.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
 import { buildIndex, searchFollower, words, type Published, type SearchDoc } from '../src/search.ts';
 import { library } from './searchfixture.ts';
 
@@ -72,6 +73,45 @@ test('words: camelCase apart, cut at what is not a letter or a digit, digits kep
   assert.deepEqual(words('useEffect HTMLParser'), ['use', 'effect', 'html', 'parser']);
   assert.deepEqual(words('k8s v2 C++ 404'), ['k8s', 'v2', 'c', '404']);
   assert.deepEqual(words('Résumé'), ['résumé']);
+});
+
+test('a compound typed as one lower-case word finds its camelCase, and a decomposed accent in a file meets its composed query', async () => {
+  const index = (await buildIndex([
+    { id: 'skills-typescript-lint', names: ['TypeScript-lint'], description: 'Cleans up a module.', text: 'List the diagnostics before changing anything.' },
+    { id: 'skills-schema-explainer', names: ['schema-explainer'], description: 'Explains a GraphQL schema.', text: 'Show which fields a client can select.' },
+    { id: 'skills-balance-sheet', names: ['balance-sheet'], description: 'Prepares a monthly statement.', text: 'Write the result to caféReport.md.'.normalize('NFD') },
+  ]))!;
+  try {
+    const found = (typed: string) => index.ask(typed).map(hit => hit.id);
+    assert.deepEqual([found('typescript'), found('TypeScript'), found('graphql'), found('report'), found('café')],
+      [['skills-typescript-lint'], ['skills-typescript-lint'], ['skills-schema-explainer'], ['skills-balance-sheet'], ['skills-balance-sheet']]);
+    assert.deepEqual(index.ask('diagnostics'), [{ id: 'skills-typescript-lint', excerpt: 'List the diagnostics before changing anything.' }], 'an excerpt is the text as written');
+  } finally { index.close(); }
+});
+
+test('a description’s mistyped word is corrected as a name’s is; one only a file’s text has is compared with its stem alone', async () => {
+  const index = (await buildIndex([{ id: 'skills-promotion-log', names: ['promotion-log'], description: 'Records approvals.', text: 'File the deployment report.' }]))!;
+  try {
+    const found = (typed: string) => index.ask(typed).map(hit => hit.id);
+    assert.deepEqual([found('aprovals'), found('deployment'), found('deploymnet')], [['skills-promotion-log'], ['skills-promotion-log'], []], 'deploymnet is three letters off the stem deploy');
+  } finally { index.close(); }
+});
+
+test('typed text is bounded: punctuation alone asks nothing, not even a name; only the first eight words that find nothing look for nearest words', async () => {
+  const index = (await buildIndex([{ id: 'skills-dashes', names: ['--'], description: '', text: '' }, { id: 'skills-deploy', names: ['deploy'], description: '', text: '' }]))!;
+  try {
+    assert.deepEqual([index.ask('--'), index.ask(Array(8).fill('deplyo').join(' ')).map(hit => hit.id), index.ask(Array(9).fill('deplyo').join(' '))], [[], ['skills-deploy'], []]);
+  } finally { index.close(); }
+});
+
+test('a build that throws closes its database', async () => {
+  const close = DatabaseSync.prototype.close;
+  let closed = 0;
+  DatabaseSync.prototype.close = function (this: DatabaseSync) { closed++; return close.call(this); };
+  try {
+    await assert.rejects(buildIndex(library, () => { throw new Error('Stopped for the test.'); }), /Stopped for the test/);
+    assert.equal(closed, 1);
+  } finally { DatabaseSync.prototype.close = close; }
 });
 
 test('a row that matched only in its text carries an excerpt around the match; one its name or description explains has none', async () => {
