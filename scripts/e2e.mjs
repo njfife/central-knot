@@ -3827,12 +3827,12 @@ async function updateFlow() {
     same('nor after the restart, where the note is its mark and the release notes link waits in Settings', [await a.exists('#status-profile'), await a.run(`getComputedStyle(document.getElementById('said-link')).display`), await crowding()], [true, 'none', []]);
     same('no page errors in the narrow window', a.pageErrors, []);
     await a.quit();
-    // A build with no release tag never offers updates, and Settings says why (on macOS; elsewhere nothing is shown).
+    // A build with no release tag never offers updates, and Settings says why (on macOS; on Windows nothing is shown).
     a = await launch(join(scratch, 'update-untagged'), ['--practice-copy'], HOME, { CK_UPDATE_RELEASES: fixture.releasesUrl });
     await a.click('#nav-settings');
     if (process.platform === 'darwin') check('an untagged or development build says it doesn’t update itself', /(development build|wasn’t made from a release)/.test(await a.text('#setting-updates') ?? ''), await a.text('#setting-updates'));
     else same('off macOS there is no Updates row', await a.exists('#setting-updates'), false);
-    // On a Mac its sidebar control is faint and opens Settings, which says why; elsewhere there is none (no releases there).
+    // On a Mac its sidebar control is faint and opens Settings, which says why; on Windows there is none (no releases there).
     same('and its sidebar control never offers an update', (await control())?.look, process.platform === 'darwin' ? 'off' : undefined);
     await a.quit();
   } finally { await fixture.close(); silent.close(); }

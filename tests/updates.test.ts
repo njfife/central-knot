@@ -156,9 +156,9 @@ test('on Linux a newer release is offered for its AppImage; one with Mac files a
   assert.equal(newerRelease([both], 'v0.7.0-alpha.2', 'darwin')?.download, 'https://github.com/njfife/central-knot/releases/download/v0.7.0-alpha.3/zip', 'the same release still gives a Mac its zip');
   assert.equal(newerRelease([release('v0.7.0-alpha.3')], 'v0.7.0-alpha.2', 'linux'), undefined, 'Mac files alone are no update on Linux');
   assert.equal(newerRelease([both], 'v0.7.0-alpha.3', 'linux'), undefined, 'the same version is no update');
-  // The line rule holds on Linux too: an alpha passes over the standard app's AppImage, and a preview over the alpha's.
-  assert.equal(newerRelease([release('v0.7.0-alpha.3', { assets: [appImage('v0.7.0-alpha.3')] })], 'v0.7.0-alpha.2', 'linux'), undefined);
-  assert.equal(newerRelease([release('v0.6.0-preview.4', { assets: [appImage('v0.6.0-preview.4', 'Central-Knot-Alpha')] })], 'v0.5.0-preview.9', 'linux'), undefined);
+  // Each line takes only its own app's AppImage: an alpha passes over the standard app's, and a preview over the alpha's.
+  assert.equal(newerRelease([release('v0.7.0-alpha.3', { assets: [appImage('v0.7.0-alpha.3')] })], 'v0.7.0-alpha.2', 'linux'), undefined, 'an alpha passes over the standard app’s AppImage');
+  assert.equal(newerRelease([release('v0.6.0-preview.4', { assets: [appImage('v0.6.0-preview.4', 'Central-Knot-Alpha')] })], 'v0.5.0-preview.9', 'linux'), undefined, 'a preview passes over the alpha’s AppImage');
 });
 
 test('on Linux a release build checks for updates and says it doesn’t install them itself yet', () => {
