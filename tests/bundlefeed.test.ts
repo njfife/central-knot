@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, truncate, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { activeBundle, bundledMarketplace, feedAddress, openBundle, readRelease } from '../src/bundle.ts';
 import { checkFeed, type FeedHost } from '../src/bundlefeed.ts';
 import { describeBuild, packRelease, publishRelease } from '../src/bundlepack.ts';
 import { parseCatalog } from '../src/plugins.ts';
+import { within } from './within.ts';
 
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
 const exists = (path: string) => stat(path).then(() => true, () => false);
@@ -120,6 +122,36 @@ test('a broken publish leaves the last good plugins in place and says why', asyn
     // The folder now holds another marketplace's releases.
     await writeFile(join(box.feed, 'release.json'), JSON.stringify({ ...published.release, marketplace: 'other-tools', sequence: 9 }));
     await stays(/another marketplace \(“other-tools”\)/);
+  } finally { await box.cleanup(); }
+});
+
+test('an archive refused for its length leaves no file behind, however late the disk makes the download’s file', async t => {
+  const box = await setup();
+  try {
+    // Plugins no other test here publishes: a look skips an archive an earlier one couldn't use (bundlefeed.ts unusable).
+    await market(box.source, { docs: '1.9.0' });
+    const published = await box.publish(2);
+    assert.ok('release' in published);
+    // The archive comes in one chunk, longer than its manifest says, so the copy stops at that chunk.
+    let reading = false;
+    const tooLong = new Uint8Array(published.release.size + 10);
+    const archive = () => new ReadableStream({ pull(stream) { reading = true; stream.enqueue(tooLong); stream.close(); } }, { highWaterMark: 0 });
+    const host: FeedHost = { ...box.host,
+      fetch: async (url, init) => (url.endsWith(published.release.archive) ? new Response(archive()) : box.host.fetch(url, init)) };
+    // A slow disk: a file asked for once the copy is already reading is made only after the look is over.
+    let lookOver!: () => void, made!: () => void;
+    const over = new Promise<void>(done => { lookOver = done; }), fileMade = new Promise<void>(done => { made = done; });
+    const open = fs.open;
+    t.mock.method(fs, 'open', (path: string, flags: fs.OpenMode, mode: fs.Mode, opened: (error: NodeJS.ErrnoException | null, fd: number) => void) => {
+      if (!basename(path).startsWith('download-')) return open(path, flags, mode, opened);
+      const make = () => open(path, flags, mode, (error, fd) => { made(); opened(error, fd); });
+      if (reading) void over.then(make); else make();
+    });
+    const check = await checkFeed(host);
+    lookOver();
+    await within('the download’s file made', fileMade);
+    assert.match(check.message, /couldn’t be downloaded: its archive is longer than its manifest says\./);
+    assert.deepEqual((await readdir(join(box.data, 'bundled'))).sort(), ['marketplace', 'release.json'], 'no download is left behind, with no later look to sweep it');
   } finally { await box.cleanup(); }
 });
 
