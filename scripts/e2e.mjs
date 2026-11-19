@@ -6989,7 +6989,9 @@ async function libraryFlow() {
   const theme = (a, value) => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
   const pictures = async (a, name) => {
     if (!shots) return;
-    for (const [width, height] of [[860, 600], [1280, 800]]) for (const look of ['light', 'dark']) { await sizeTo(a, width, height); await theme(a, look); await a.shot(`library-${name}-${width}${look === 'dark' ? '-dark' : ''}`); }
+    // An opened row is brought into view at each size, as the app does where it opens it there.
+    const inView = () => a.run(`document.querySelector('.ov-row[aria-expanded="true"]')?.scrollIntoView({ block: 'start' })`);
+    for (const [width, height] of [[860, 600], [1280, 800]]) for (const look of ['light', 'dark']) { await sizeTo(a, width, height); await inView(); await theme(a, look); await a.shot(`library-${name}-${width}${look === 'dark' ? '-dark' : ''}`); }
     await theme(a, 'light'); await fullSize(a);
   };
 
@@ -7284,6 +7286,36 @@ async function libraryFlow() {
   await fullSize(c);
   same('no page errors, a plugin’s page in', c.pageErrors, []);
   await c.quit();
+
+  // ---------- A click moves no row: the toolbar keeps its height whatever a click makes appear ----------
+  // A small home whose bar just fits at 860×600 until a click brings Put in order and a change left waiting. Each size twice: a
+  // plain Off, and one whose removal Claude Code refuses (a problem line, and the change left waiting).
+  const T = homeWith('library-toolbar');
+  for (const name of ['alpha', 'beta', 'gamma']) skill(T.claude, name);
+  const tb = await launch(T.data, [], T.real);
+  await tb.click('#nav-overview');
+  await tb.click('#setup-yes');
+  check('Yes takes the three in', await until(() => Object.keys(JSON.parse(readNow(join(T.home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 3));
+  await done(tb);
+  await openKind(tb, 'all');
+  const placeOf = () => tb.run(`[Math.round(document.querySelector('[id^="table-library-"]').getBoundingClientRect().top), Math.round(document.querySelector('${row('skills', 'beta')}').getBoundingClientRect().top)]`);
+  for (const [width, height] of [[860, 600], [1316, 822]]) for (const refused of [false, true]) {
+    await sizeTo(tb, width, height);
+    const before = await placeOf();
+    if (refused) chmodSync(T.claude, 0o555);
+    await tb.click(`#${rowPart('switch', 'skills', 'beta')}`);
+    await done(tb);
+    const withResult = await placeOf();
+    await tb.run(`document.querySelector('#outcome-dismiss')?.click()`);
+    await tb.settle();
+    same(`at ${width}×${height}, a switch’s click${refused ? ' a tool refuses' : ''} moves neither the list’s top nor its row, with its result and without`, [withResult, await placeOf()], [before, before]);
+    chmodSync(T.claude, 0o755);
+    await tb.click(`#${rowPart('switch', 'skills', 'beta')}`);
+    await done(tb);
+    await tb.click('#header-refresh');
+  }
+  same('no page errors, a click moves no row', tb.pageErrors, []);
+  await tb.quit();
 
   // ---------- Resume, and the empty states that say a kind's stop ----------
   // A home this app has no memory of, whose skills record is damaged: Resume goes through a kind that can run.

@@ -443,6 +443,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .sync-notice > .kind-mark + .row-kind + .notice-text { max-width: calc(100% - 92px); }
 /* While first setup's walkthrough asks, each notice keeps to its first line until Show all (matrix.ts listNotices). */
 .notices-folded .notice-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notices-folded .sync-notice-lines { grid-template-columns: minmax(0, 1fr); }
 .sync-notice .btn { flex: none; height: 26px; padding: 0 10px; font-size: 12px; }
 .sync-notice > .notice-dismiss { position: absolute; top: 2px; right: 0; }
 .notice-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; }
@@ -1983,8 +1984,8 @@ button.harness-card-main:focus-visible { outline: 0; }
    any chip folds; the button keeps "Update usage". */
 .bar-short .usage-words { display: none; }
 .bar-short #usage-when { display: none; }
-/* Put in order, beside Sort (matrix.ts rowsHeld). */
-.order-tidy { flex: none; white-space: nowrap; }
+/* The waiting count folds to its mark and number with the chips (matrix.ts toolbarState). */
+.bar-icons .apply-words { display: none; }
 .details-usage { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; color: var(--ink-soft); }
 .details-usage > svg { flex: none; align-self: center; }
 .ov-switch-row > .ov-managed { justify-content: flex-start; }

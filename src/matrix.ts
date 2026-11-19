@@ -1816,7 +1816,7 @@ function orderChoice(t: Table) {
   const options = [option('name', 'Name'), option('updated', 'Last updated'), option('used', 'Last used')];
   return [h('span.order', { title: 'The order of the rows under each heading' }, h('label.order-word', { for: 'item-order' }, 'Sort'),
     h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: 'Sort by', onchange: choose }, options), icon('chevrons-up-down', 14))),
-    rowsHeld(t) ? smallAction('Put in order', 'put-in-order', () => { unpin(); rerender(); }, '.order-tidy') : null];
+    roomHeld(rowsHeld(t), held => button({ variant: 'ghost', size: 'small', icon: 'list', label: 'Put in order', id: held ? 'put-in-order' : undefined, collapse: true, onclick: () => { unpin(); rerender(); } }))];
 }
 /**
  * The ids of a table's rows as drawn, heading by heading, given the rows pinned on it (none: each row under its own heading,
@@ -2029,10 +2029,21 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
 
 /** What waits, in the toolbar: the changes waiting for sync (libraryrow.ts waitsForSync, as the Overview's card counts them), or that sync is off. */
 function toolbarState(t: Table) {
-  const waiting = rowsIn(t).filter(waitsForSync).length;
-  if (waiting) return h('span.apply-state.apply-waiting', {}, icon('clock', 14, 'tone-warning'), `${waiting} ${waiting === 1 ? 'change' : 'changes'} waiting`);
-  if (state.home && !state.home.syncOn) return h('span.apply-state.apply-quiet', {}, icon('circle-minus', 14, 'tone-muted'), 'Nothing waiting · sync off');
-  return null;
+  const waiting = rowsIn(t).filter(waitsForSync).length, said = (n: number) => [`${n}`, h('span.apply-words', {}, ` ${n === 1 ? 'change' : 'changes'} waiting`)];
+  // One slot, as wide as the widest it can say (a count of two figures; with sync off, that nothing waits), so a change a click
+  // leaves waiting changes nothing of the bar's fit.
+  const quiet = state.home && !state.home.syncOn ? h(`span.apply-state.apply-quiet${waiting ? '.band-unshown' : ''}`, {}, icon('circle-minus', 14, 'tone-muted'), 'Nothing waiting · sync off') : null;
+  return h('span.band-stack', {}, h('span.apply-state.band-unshown', { 'aria-hidden': 'true' }, icon('clock', 14), ...said(99)), quiet,
+    waiting ? h('span.apply-state.apply-waiting', { title: `${waiting} ${waiting === 1 ? 'change' : 'changes'} waiting` }, icon('clock', 14, 'tone-warning'), ...said(waiting)) : null);
+}
+/**
+ * What a click can make appear in the toolbar (Put in order) has its room held from the start, drawn but unseen and out of reach
+ * until it is `shown`: so a click never changes how the bar fits (dom.ts fitBars), and no row moves for it.
+ */
+function roomHeld(shown: boolean, draw: (shown: boolean) => HTMLElement) {
+  const drawn = draw(shown);
+  if (!shown) { drawn.classList.add('band-unshown'); drawn.setAttribute('aria-hidden', 'true'); drawn.tabIndex = -1; }
+  return drawn;
 }
 
 // ---------- The Library's Files view ----------
