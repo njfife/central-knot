@@ -3666,13 +3666,24 @@ async function updateFlow() {
     // The sidebar's control checks from any page: the arrows spin while it checks, and the status bar says what it found.
     await openKind(a, 'skills');
     await watchLooks();
+    // Main's own "check ended" message can reach the page after the check's answer, as on a busy machine: where the checks reach
+    // main (a development run), it is held until the page has the answer, so the control's redraw for it comes last.
+    const main = a.main && await a.main(), contents = 'electron.BrowserWindow.getAllWindows()[0].webContents';
+    await main?.run(`(contents => { globalThis.ckEnded = []; contents.send = (channel, ...rest) => (channel === 'updates:changed' && rest[0]?.checking === false
+      ? globalThis.ckEnded.push(rest) : Object.getPrototypeOf(contents).send.call(contents, channel, ...rest)); return true; })(${contents})`);
     await press('update-control');
     const found = 'Updated to 0.5.0 preview 5, the newest release.';
     for (let i = 0; i < 40 && (await a.run(`document.getElementById('announcement').dataset.text`)) !== found; i++) await wait(100);
     same('clicked on another page, it checks and the status bar says what it found', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], [found, false]);
     check('the control showed the check, then went back to the quiet arrows', (await a.run('window.ckLooks')).includes('checking Checking…') && (await control()).look === 'check', await a.run('window.ckLooks'));
     same('its tooltip says it is up to date', (await control()).title, 'Up to date. Click to check now.');
-    // It takes the focus back once it can be pressed again, a redraw after the look changes.
+    // It takes the focus back once it can be pressed again, a redraw after the look changes, and keeps it through the redraw for
+    // main's message, sent now: the control drawn in its place has it.
+    await a.run(`(window.ckDrawn = document.getElementById('update-control'), true)`);
+    const late = await main?.run(`(contents => { delete contents.send; globalThis.ckEnded.forEach(rest => contents.send('updates:changed', ...rest)); return globalThis.ckEnded.length; })(${contents})`);
+    for (let i = 0; main && i < 100 && await a.run(`document.getElementById('update-control') === window.ckDrawn`); i++) await wait(100);
+    main?.close();
+    if (main) same('main’s message, held until the answer, came last and drew the control again', [late, await a.run(`document.getElementById('update-control') !== window.ckDrawn`)], [1, true]);
     for (let i = 0; i < 40 && await focused() !== 'update-control'; i++) await wait(100);
     same('and it takes the focus back', await focused(), 'update-control');
     await a.quit();

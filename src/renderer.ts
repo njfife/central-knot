@@ -6,7 +6,7 @@
 // actions are app.ts's; each page is drawn by its own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, acting, drawPage, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
+import { absentKinds, acting, drawPage, keepingFocus, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { afterLayout, button, fitBars, h, icon, keepClicksAcrossRedraws, keepSelection, runAfterLayout, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { heldKinds, type HomeKind } from './presence.ts';
@@ -255,9 +255,12 @@ afterLayout(() => {
 
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
 
+/** The whole window drawn again, the focus kept on the control that had it (app.ts keepingFocus). */
 function render() {
-  if (restoring) return;
-  const focused = document.activeElement?.id;
+  if (!restoring) keepingFocus(renderWindow);
+}
+
+function renderWindow() {
   const scrolled = remembered();
   const selected = keepSelection();
   const { rail } = applyLayout();
@@ -270,12 +273,10 @@ function render() {
   runAfterLayout();
   renderStatus();
   fitBars();
-  // What was selected (a field's own scroll with it), then the scroll places and the focus, each where it was (dom.ts keepSelection
-  // neither focuses nor scrolls the page).
+  // What was selected (a field's own scroll with it), then the scroll places, each where it was; keepingFocus puts the focus
+  // back after, without scrolling to it (dom.ts keepSelection neither focuses nor scrolls the page).
   selected();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
-  // Back on the control that had it, without scrolling to it: a redraw never pulls the page to a row scrolled away from.
-  if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
   if (state.home) document.body.dataset.ready = 'true';
 }
 
