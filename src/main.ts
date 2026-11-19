@@ -25,7 +25,7 @@ import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools, takesPlugins } from './presence.ts';
-import { forgetRefusals, installedPlugins, recordReadable } from './plugins.ts';
+import { forgetRefusals, installedPlugins, pluginRecordFiles, recordReadable } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
@@ -566,14 +566,14 @@ let pendingServerNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] =
 /** Why the last background pass's kinds stopped (homepass.ts passTells `stopped`), so only a new reason tells an open page at once. */
 let lastStopped = '';
 
-interface ServersAndAgentsResult { serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean;
-  /** The servers' and agents' found keys the pass left found (types.ts PassResult found), each with its kind's prefix. */ found: string[] }
+interface ServersAndAgentsResult { serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
 /**
- * `synced`: the original results by kind for Sync once.
+ * `synced`: the original results by kind for Sync once. `seen`: what a person would see of the home as the pass read it
+ * (homepass.ts pageSees), compared with what the page was last given (seenChanged).
  * `told`: what the page is told of the pass, every kind alike (homepass.ts passTells); `done`: every result of the pass, all
  * three kinds, for a caller that says what it did (a tool's Manage switch).
  */
-interface BackgroundPass { synced?: HomePass['synced']; skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; told?: ReturnType<typeof passTells>; done?: DestinationResult[] }
+interface BackgroundPass { synced?: HomePass['synced']; seen?: string; skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; told?: ReturnType<typeof passTells>; done?: DestinationResult[] }
 
 /** Each reason the move of plugin parts waited that the log has had this launch (pass). */
 const partsWaitsLogged = new Set<string>();
@@ -591,7 +591,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   // While plugin parts from before the library wait to be moved there, the plugins record's first read comes first (its install
   // alpha 1 waited for read from pluginUpdates, made before any pass), and the move may read a plugin (homepass.ts step 2).
   const pluginNow = await carriedMarket?.beforeParts().catch((error: unknown) => { logFailure('plugins record', error); return undefined; });
-  const { synced, profilesFailed, partsFailed, partsWait } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
+  const { synced, seen, profilesFailed, partsFailed, partsWait } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
   partsWaiting = partsWait;
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
   if (partsFailed !== undefined) logFailure('moving plugin parts', partsFailed);
@@ -599,9 +599,8 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   if (partsWait && !partsWaitsLogged.has(partsWait)) { partsWaitsLogged.add(partsWait); log(`plugin parts: waiting to be moved to the library: ${partsWait}`); }
   if (!synced) return {};
   const { skills, servers, agents } = synced;
-  return { synced, skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
+  return { synced, seen, skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
-    found: [...(servers?.found ?? []).map(key => `mcp:${key}`), ...(agents?.found ?? []).map(key => `agent:${key}`)],
     changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) } };
 }
 
@@ -632,7 +631,8 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   const passed = passes[passes.length - 1], { skills } = passed;
   passes.forEach(keepPass);
   lookAgainSoon(passed);
-  foundGained(passed);
+  // The page is given this view: what it sees is kept, silently, so the next pass tells it nothing it already has.
+  seenChanged(passed);
   const caughtUp = pendingResults.splice(0), notices = pendingNotices.splice(0);
   const profiles = await readProfiles(current!.home);
   // The home is read again after a pass that may have written (Sync on, or Sync once): a pass that stopped part-way reports
@@ -883,17 +883,16 @@ let poller: NodeJS.Timeout | undefined;
 let soon: NodeJS.Timeout | undefined;
 let followUp: NodeJS.Timeout | undefined;
 /**
- * The found items the last pass of the whole home left found, all kinds. One that is new there is news for an open page though
- * nothing was written (copies that differ, which the rule leaves). One that left by a click or by the rule's writes came with a read
- * of its own, so it tells the page nothing: a read per click would slow every Add. One whose copies were all deleted by hand
- * stays on an open page until its next read; its Add then says no tool has a copy.
+ * What a person would see of the open home as the page was last given it (homepass.ts pageSees): set by each view's own pass
+ * (syncAndView) and by each background pass that makes one; a background pass whose value differs tells the page, though it
+ * wrote nothing (a found item edited, gained or gone; a plugin installed, removed, switched or changed in place). A pass that
+ * makes no value (Sync off, a refusal, no record, a crash) leaves it; a home switch that fails puts it back (selectHome).
  */
-let lastFound = new Set<string>();
-function foundGained({ skills, serversAndAgents }: BackgroundPass): boolean {
-  if (!skills) return false;
-  const found = new Set([...(skills.found ?? []), ...(serversAndAgents?.found ?? [])]), gained = [...found].some(key => !lastFound.has(key));
-  lastFound = found;
-  return gained;
+let lastSeen: string | undefined;
+function seenChanged({ seen }: BackgroundPass): boolean {
+  if (seen === undefined || seen === lastSeen) return false;
+  lastSeen = seen;
+  return true;
 }
 const AFTER_SETTLE_MS = SETTLE_MS + 500;
 const settling = ({ skills, serversAndAgents }: BackgroundPass) => skills?.settling || serversAndAgents?.settling;
@@ -990,8 +989,8 @@ async function backgroundPass() {
   // The page reads again whether or not the pass wrote: with Sync off an edit or deletion is only noted (it shows as waiting,
   // not as Synced), and a tool's own switch turned in its settings changes no content, only that tool's mark.
   if ((fromEvent && !syncOn) || fromSettings) changed = true;
-  // A new found item left as it is (copies that differ, say) writes nothing: the page hears of it all the same.
-  if (foundGained(passed)) changed = true;
+  // What a person would see changed with nothing written (a found item edited by hand, say): the page hears of it all the same.
+  if (seenChanged(passed)) changed = true;
   lookAgainSoon(passed);
   // A kind's pass that could not finish says so on the page at once, instead of failing quietly; the same reason again waits for a read.
   const stopped = (told?.stopped ?? []).map(stop => `${stop.item}: ${stop.message}`).join('\n');
@@ -1023,6 +1022,12 @@ function stopWatching() {
   clearTimeout(soon); clearTimeout(followUp);
 }
 
+/** A folder not made yet: the folder above it is watched for its making, which starts the watch again and reads. */
+function watchFor(folder: string) {
+  const made = (_event: string, name: string | null) => { if (name === basename(folder)) { void startWatching(); nudge(); } };
+  try { watchers.push(watch(dirname(folder), { persistent: false }, made)); } catch { /* not there either: polling covers it */ }
+}
+
 /** Watches each tool's skills folders (an event only prompts a read, CON-04), with polling as the fallback (T-08: at most 30 s). */
 async function startWatching() {
   closeWatchers();
@@ -1034,11 +1039,19 @@ async function startWatching() {
   // MCP settings files and each tool's switch file (skillswitch.ts switchPath; a server's is one or the other): their folders are
   // watched without recursion, and only an event for one of those files prompts a read. Claude Code's MCP file holds no switch
   // (mcpswitch.ts) and Claude Code rewrites it while it runs, so its events are not settings events: the page isn't redrawn for them.
+  // Nor are those of each tool's own record of its plugins (plugins.ts pluginRecordFiles, those not already here): with Sync on
+  // the pass tells the page what changed there (seenChanged). Claude Code makes its plugins folder at its first install: until
+  // then the folder above it is watched for it, and its making starts the watch again.
   const shared = context(), noSwitch = mcpFile(shared, 'claude-cli');
-  const files = [...new Set([...mcpTools.map(id => mcpFile(shared, id)), ...harnessIds.map(id => switchPath(shared, id))])];
+  const settings = [...new Set([...mcpTools.map(id => mcpFile(shared, id)), ...harnessIds.map(id => switchPath(shared, id))])];
+  const records = pluginTools.flatMap(tool => pluginRecordFiles(shared, tool)).filter(file => !settings.includes(file));
+  const files = [...settings, ...records], quiet = [noSwitch, ...records];
   for (const folder of new Set(files.map(file => dirname(file)))) {
     const names = new Set(files.filter(file => dirname(file) === folder).map(file => basename(file)));
-    try { watchers.push(watch(folder, { persistent: false }, (_event, name) => { if (!name || names.has(name)) nudge(!name || join(folder, name) !== noSwitch); })); } catch { /* not there: polling covers it */ }
+    try { watchers.push(watch(folder, { persistent: false }, (_event, name) => { if (!name || names.has(name)) nudge(!name || !quiet.includes(join(folder, name))); })); } catch {
+      // Not there: polling covers it, and a plugin record's folder is watched for.
+      if (records.some(file => dirname(file) === folder)) watchFor(folder);
+    }
   }
   for (const root of roots) {
     try { watchers.push(watch(root, { recursive: true, persistent: false }, () => nudge())); } catch { /* not there: polling covers it */ }
@@ -1061,7 +1074,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   } else if (mode === 'actual') next = { mode, home: homedir(), label: machineNames(process.platform).home };
   else next = { mode, home: await ensurePracticeHome(), label: 'Practice copy' };
   // A switch that fails changes nothing: the home on screen stays the home open here, with its hand-off and watchers.
-  const previous = { current, handoff, lastPresent };
+  const previous = { current, handoff, lastPresent, lastSeen };
   current = next;
   forgetMissing();
   try {
@@ -1075,7 +1088,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
     void startWatching();
     lookAgainSoon(passes[passes.length - 1]);
     return shown;
-  } catch (error) { ({ current, handoff, lastPresent } = previous); throw error; }
+  } catch (error) { ({ current, handoff, lastPresent, lastSeen } = previous); throw error; }
 }
 
 /**

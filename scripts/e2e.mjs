@@ -6644,6 +6644,101 @@ async function pluginTextFlow() {
 }
 
 /**
+ * What changes outside the app reaches the page and the search index without a Refresh (homepass.ts pageSees, main.ts
+ * seenChanged; the watch on the tools' plugin records, main.ts startWatching). One home with Claude Code, its found skills kept
+ * found by a record whose Synchronize everything is off. With Automatic sync off, then on, each change waited for as a newer
+ * index for this home whose answers hold it and the row's going or coming: a plugin's first install (which makes Claude Code's
+ * plugins folder), a found skill edited, one deleted, the plugin taken out of Claude Code's record and put back, with what was
+ * typed in Find and the row opened kept. Then, with it on, how light it stays: no signal for .claude.json and the plugin record
+ * written again with the same content; none after a click's own view and a minute idle; while a skill changes every second,
+ * no more than the watch's debounce and the poll allow.
+ */
+async function staleFlow() {
+  const home = join(scratch, 'stale-home'), data = join(scratch, 'stale-data'), skills = join(home, '.claude/skills');
+  const notes = join(skills, 'notes/SKILL.md'), record = join(home, '.claude/plugins/installed_plugins.json'), servers = join(home, '.claude.json');
+  skill(skills, 'notes', text('notes', 'Write it down in the lantern log.'));
+  // Each body has a word of its own, which only that skill's text holds.
+  for (const [name, body] of [['review', 'Read the diff twice.'], ['spare', 'A tyre for the road.'], ['keep', 'Nothing changes here.'], ['busy', 'Round one.']]) skill(skills, name, text(name, body));
+  writeFileSync(servers, `${JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' } } }, null, 2)}\n`);
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  writeFileSync(join(data, 'sync-settings.json'), JSON.stringify({ syncOn: false }));
+  const a = await launch(data);
+  await a.click('#nav-overview');
+  await a.click('#setup-no');
+  await openKind(a, 'all');
+  await a.run(`(window.ckSignals = 0, window.ckPublished = [], window.centralKnot.onSyncChanged(() => window.ckSignals++), window.centralKnot.onSearchPublished((home, readId) => window.ckPublished.push({ home, readId })), true)`);
+  const ids = async typed => (await a.run(`window.centralKnot.search(${JSON.stringify(typed)})`)).rows.map(row => row.id);
+  const shown = id => a.exists(`.ov-row[data-key="${id}"]`);
+  const plugin = 'skills-sheet-tools@ck-test-market/tidy', install = () => writeClaudeInstall(home, 'ck-test-market', 'sheet-tools', '1.0.0', { 'skills/tidy/SKILL.md': text('tidy', 'Removes duplicate rows and trims every cell.') });
+  /** After a change made outside: how long until an index newer than the last one for this home answers as `holds` says; undefined, it never did. */
+  const arrives = async (change, holds) => {
+    const since = await a.run(`Math.max(0, ...window.ckPublished.filter(tag => tag.home === ${JSON.stringify(home)}).map(tag => tag.readId))`), from = Date.now();
+    change();
+    while (Date.now() - from < 30000) {
+      if (await a.run(`window.ckPublished.some(tag => tag.home === ${JSON.stringify(home)} && tag.readId > ${since})`) && await holds()) return Date.now() - from;
+      await wait(100);
+    }
+    return undefined;
+  };
+  const took = {};
+  const sequences = async (mode, edit, [deleted, word]) => {
+    const [was, now] = edit;
+    took[`${mode}: edited`] = await arrives(() => writeFileSync(notes, text('notes', `Write it down in the ${now} log.`)), async () => (await ids(now)).includes('skills-notes') && !(await ids(was)).includes('skills-notes'));
+    took[`${mode}: deleted`] = await arrives(() => rmSync(join(skills, deleted), { recursive: true }), async () => !(await shown(`skills-${deleted}`)) && !(await ids(word)).length);
+    const installs = readFileSync(record, 'utf8');
+    took[`${mode}: out of the record`] = await arrives(() => writeFileSync(record, JSON.stringify({ version: 2, plugins: {} })), async () => !(await shown(plugin)) && !(await ids('duplicate rows')).length);
+    // Put back while Find holds what was typed and a row is open: both are as they were once the view lands.
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'keep'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    if (await a.run(`document.querySelector('.ov-row[data-key="skills-keep"]').getAttribute('aria-expanded')`) !== 'true') await a.click(`.ov-row[data-key="skills-keep"]`);
+    const place = () => a.run(`[document.querySelector('#find').value, document.querySelector('.ov-row[data-key="skills-keep"]')?.getAttribute('aria-expanded'), Math.round(document.querySelector('.ov-row[data-key="skills-keep"]')?.getBoundingClientRect().top ?? -1)]`);
+    const before = await place();
+    took[`${mode}: put back`] = await arrives(() => writeFileSync(record, installs), async () => (await ids('duplicate rows')).includes(plugin));
+    same(`${mode}: what was typed in Find and the opened row stay where they were after the view`, await place(), before);
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    check(`${mode}: and the plugin’s row is back`, await shown(plugin));
+  };
+
+  // ---------- Automatic sync off: a watch event asks for a view ----------
+  took['off: first install'] = await arrives(install, async () => (await shown(plugin)) && (await ids('duplicate rows')).includes(plugin));
+  await sequences('off', ['lantern', 'compass'], ['review', 'diff']);
+  // ---------- Automatic sync on: a pass tells the page when what it read differs ----------
+  await a.click('#sync-switch');
+  same('Automatic sync is on', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
+  await sequences('on', ['compass', 'harbour'], ['spare', 'tyre']);
+  console.log(`staleFlow ms: ${JSON.stringify(took)}`);
+  for (const [name, ms] of Object.entries(took)) check(`${name}: reaches the page and the index without a Refresh`, ms !== undefined);
+
+  // ---------- It stays light ----------
+  const signals = () => a.run('window.ckSignals');
+  await wait(3000);
+  let from = await signals();
+  const same20 = [servers, record].map(path => [path, readFileSync(path, 'utf8')]);
+  for (let round = 0; round < 20; round++) { for (const [path, content] of same20) writeFileSync(path, content); await wait(500); }
+  await wait(4000);
+  const rewrites = await signals() - from;
+  // A click's own view sets what the page has: the poll's passes after it find nothing new.
+  await a.click(`#${rowPart('add', 'skills', 'notes')}`);
+  from = await signals();
+  await wait(60000);
+  const idle = await signals() - from;
+  from = await signals();
+  const busy = join(skills, 'busy/SKILL.md'), started = Date.now(), times = [];
+  for (let round = 0; round < 12; round++) { writeFileSync(busy, text('busy', `Round ${round}.`)); times.push(Date.now()); await wait(1000); }
+  await wait(4000);
+  // The debounce lets one pass through after each pause longer than it, and the poll one each 20 s; a pass that tells sends one.
+  const allowed = 1 + times.slice(1).filter((at, index) => at - times[index] > 1500).length + Math.ceil((Date.now() - started) / 20000);
+  const burst = await signals() - from;
+  console.log(`staleFlow signals: same-content rewrites ${rewrites}, a minute after a click ${idle}, a skill changed each second ${burst} (allowed ${allowed})`);
+  same('.claude.json and Claude Code’s plugin record written again 20 times in 10 s with the same content, with Automatic sync on, tell the page nothing', rewrites, 0);
+  same('after a click’s own view, a minute idle tells the page nothing', idle, 0);
+  check('a skill changed every second tells the page no more often than the debounce and the poll allow', burst <= allowed, { burst, allowed });
+  same('no page errors, the page follows what a pass read', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
  * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
  * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
  * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
@@ -7751,7 +7846,7 @@ async function libraryFlow() {
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
