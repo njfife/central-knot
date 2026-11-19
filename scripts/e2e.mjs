@@ -5048,13 +5048,14 @@ async function syncEverythingFlow() {
   const ruleSays = () => a.text('#setting-sync-everything-notice .setting-message-text');
   const ruleOn = () => a.run(`document.querySelector('#sync-everything-on')?.getAttribute('aria-checked')`);
   /**
-   * Quits once its page had no errors, then opens again on Settings: the poll starts with the app (main.ts POLL_MS, 20 s), so
-   * none has run until 20 s after `opened` (takenInSoon).
+   * Quits once its page had no errors, then opens again on Settings. The app starts its 20 s poll only once the page asks for
+   * the home (main.ts startHome, POLL_MS), so none has run until 20 s after `opened`, when the page started (takenInSoon).
    */
   const openAgainOnSettings = async page => {
     same(`no page errors, Synchronize everything, ${page}`, a.pageErrors, []);
     await a.quit();
-    opened = Date.now(); a = await launch(data, [], real);
+    a = await launch(data, [], real);
+    opened = await a.run('performance.timeOrigin');
     await a.click('#nav-settings');
     for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
   };
@@ -5078,10 +5079,10 @@ async function syncEverythingFlow() {
   const takenInSoon = async (name, content, saved, says) => {
     const copy = join(codex, name, 'SKILL.md');
     for (let tries = 0; tries < 300 && !readNow(copy); tries++) await wait(100);
-    const now = Date.now(), seconds = { afterLastSave: (now - saved) / 1000, afterOpening: (now - opened) / 1000 };
+    const now = Date.now(), seconds = { afterLastSave: (now - saved) / 1000, afterPageStart: Math.round(now - opened) / 1000 };
     same(says, readNow(copy), content);
-    check(`${says}: before a poll could have come (20 s after the app opened)`, seconds.afterOpening < 20, seconds);
-    console.log(`(${name} taken in ${seconds.afterLastSave} s after its last save, ${seconds.afterOpening} s after the app opened)`);
+    check(`${says}: before a poll could have come (20 s after the page started)`, seconds.afterPageStart < 20, seconds);
+    console.log(`(${name} taken in ${seconds.afterLastSave} s after its last save, ${seconds.afterPageStart} s after the page started)`);
   };
   const noAddAll = async page => {
     await a.click(`#nav-${page}`);
