@@ -87,6 +87,11 @@ test('a compound typed as one lower-case word finds its camelCase, and a decompo
       [['skills-typescript-lint'], ['skills-typescript-lint'], ['skills-schema-explainer'], ['skills-balance-sheet'], ['skills-balance-sheet']]);
     assert.deepEqual(index.ask('diagnostics'), [{ id: 'skills-typescript-lint', excerpt: 'List the diagnostics before changing anything.' }], 'an excerpt is the text as written');
   } finally { index.close(); }
+  // A camelCase word in the text: found by its part, and the excerpt is still only the file's words.
+  const checks = (await buildIndex([{ id: 'skills-lint-gate', names: ['lint-gate'], description: 'Guards a module.', text: 'Run checkTypes before changing anything.' }]))!;
+  try {
+    assert.deepEqual([checks.ask('changing'), checks.ask('types')], [[{ id: 'skills-lint-gate', excerpt: 'Run checkTypes before changing anything.' }], [{ id: 'skills-lint-gate', excerpt: 'Run checkTypes before changing anything.' }]]);
+  } finally { checks.close(); }
 });
 
 test('a description’s mistyped word is corrected as a name’s is; one only a file’s text has is compared with its stem alone', async () => {

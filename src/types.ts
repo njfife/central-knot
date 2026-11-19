@@ -852,8 +852,9 @@ export interface UsageReading { at: string; tools: ToolUsage[] }
 /** One row a search found: its row id (itemrow.ts rowId), and where it matched only in its text, a fragment of that text around the match. */
 export interface SearchHit { id: string; excerpt?: string }
 /**
- * A search's answer: not ready before any index is published; else from the index last published, for the home and the read
- * (HomeView readId) it names, which the page compares both with its own view's, and the rows found, best first.
+ * A search's answer: not ready while main holds no index (before the first, and from a switch of home until that home's
+ * first); else from the index last published, for the home and the read (HomeView readId) it names, which the page compares
+ * both with its own view's, and the rows found, best first.
  */
 export type SearchAnswer = { ready: false } | { ready: true; home: string; readId: number; rows: SearchHit[] };
 

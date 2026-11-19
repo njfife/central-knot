@@ -42,9 +42,12 @@ export async function libraryDocs(context: ShareContext, view: HomeView): Promis
     const text = parts?.find(part => samePart({ kind, name: part.name }, { kind, name }))?.text;
     return text && bodyOf(text);
   };
-  /** Each tool's copy of a plugin's item: its file, and its description or launch where `shown` (the row's description) doesn't say it. */
+  /**
+   * Each tool's copy of a plugin's item: its file, and its description or launch unless it is the one `shown` (the row's
+   * description: a copy's description, or "Command · " or "URL · " and a copy's launch), compared whole.
+   */
   const copyTexts = (row: PluginRow, shown: string) => Promise.all(Object.entries(row.copies).flatMap(([tool, copy]) =>
-    [pluginText(tool, row.plugin, row.marketName, row.kind, copy!.name), ...[copy!.description, copy!.runs].filter(said => said && !shown.includes(said))]));
+    [pluginText(tool, row.plugin, row.marketName, row.kind, copy!.name), ...[copy!.description, copy!.runs].filter(said => said && said !== shown && !shown.endsWith(` · ${said}`))]));
   const docs: SearchDoc[] = [];
   for (const page of Object.keys(partOfPage) as Page[]) {
     const { facts, library } = kindSource(view, page), { rows, folded } = pageRows(view, page);
@@ -70,11 +73,14 @@ async function ownTexts(context: ShareContext, page: Page, fact: LibraryFacts, i
   // Each folder a tool loads that is none of the row's copies (the shared folder, a link): its words may be none of these.
   const own = new Set(Object.values(fact.copies).map(copy => copy!.directory));
   const loaded = Object.values(fact.loads ?? {}).map(load => dirname(load!.skillFile)).filter(folder => !own.has(folder));
-  return Promise.all([...new Set([...(version ? [version.directory] : []), ...copies.map(copy => copy.directory), ...loaded])].map(skillText));
+  return (await Promise.all([...new Set([...(version ? [version.directory] : []), ...copies.map(copy => copy.directory), ...loaded])].map(skillText))).flat();
 }
 
-/** A skill's SKILL.md after its frontmatter, then the names of its other files (a nested .git and editors' leftovers aside, as share.ts readTree); none if it is gone. */
-async function skillText(folder: string): Promise<string | undefined> {
+/**
+ * A skill's two texts: its SKILL.md after its frontmatter, and the names of its other files (a nested .git and editors'
+ * leftovers aside, as share.ts readTree), so a body is compared with bodies; none if it is gone.
+ */
+async function skillText(folder: string): Promise<string[]> {
   const names: string[] = [];
   const visit = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -85,6 +91,6 @@ async function skillText(folder: string): Promise<string | undefined> {
   };
   try {
     const [skill] = await Promise.all([readFile(join(folder, 'SKILL.md'), 'utf8'), visit(folder)]);
-    return [bodyOf(skill), ...names.filter(name => name !== 'SKILL.md').sort()].join('\n');
-  } catch { return undefined; }
+    return [bodyOf(skill), names.filter(name => name !== 'SKILL.md').sort().join('\n')];
+  } catch { return []; }
 }
