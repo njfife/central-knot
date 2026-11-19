@@ -122,7 +122,7 @@ The app's updates from GitHub releases (a Mac copy installs one itself; a Linux 
 
 ## The app's shell and Settings
 The main process, the window's frame, Settings, and what every page shares.
-- `main.ts` the main process: window, menu bar, folder watching, the background pass, settings storage, every IPC channel (the Plugins page's handlers are `marketplaces.ts registerMarketplaces`) · `preload.ts` the page's calls into main (`types.ts DesktopApi`)
+- `main.ts` the main process: window, menu bar, the tray icon (`makeTray`: none on a Linux desktop without a system tray, where closing the window quits and a start at sign-in shows it), folder watching, the background pass, settings storage, every IPC channel (the Plugins page's handlers are `marketplaces.ts registerMarketplaces`) · `preload.ts` the page's calls into main (`types.ts DesktopApi`)
 - `homepass.ts` what one pass does, in order, at start and at every look (`homePass`): a profiles file from before moved, plugin parts from before moved (`partsmigrate.ts migrateParts`), then with Sync on skills, MCP servers and agents; what it tells the page, every kind alike (`passTells`); and what a person would see of the home as it read it, as one value (`pageSees`)
 - `signin.ts` Start at sign-in · `machine.ts` how this computer, its home and keys are named, and whether it writes a real home (`writesRealHome`) · `trayicon.ts` the Mac's menu bar icon (elsewhere the tray shows the colour app icon: `main.ts makeTray`) · `index.html` the window's frame
 - `places.ts` owns the window’s list and cursor, records the drawn place (`fullPlace`) as a visit after `app.ts noteMove` or a repair otherwise, and opens it on Back or Forward · `visits.ts` has the pure operations for a visit, repair and traversal.

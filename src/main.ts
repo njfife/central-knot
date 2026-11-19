@@ -1222,7 +1222,10 @@ function handleNow(channel: string, work: (...args: unknown[]) => Promise<unknow
   });
 }
 
-/** The main window. Closing it hides it and, on a Mac, takes Central Knot out of the Dock (PLT-04); if it is ever gone, Open from the menu bar makes a new one. */
+/**
+ * The main window. Closing it hides it and, on a Mac, takes Central Knot out of the Dock (PLT-04); if it is ever gone, Open from
+ * the menu bar or tray icon makes a new one. Where there is no tray (makeTray), closing it quits.
+ */
 let loading: Promise<void> = Promise.resolve();
 function createWindow(show: boolean) {
   // One window at a time: a second would get no answers (requests are only taken from the current window).
@@ -1332,8 +1335,9 @@ app.whenReady().then(async () => {
   // Where other builds are looked for, this waits for the first look to find none (lookForOthers).
   if (!heldReason()) await freed();
   await makeTray();
-  createWindow(!smoke && !startedHidden());
-  // Started at sign-in with no window: the menu bar icon only.
+  // Started at sign-in: no window, the menu bar or tray icon only. With no tray there is nothing to hide in, so the window shows
+  // (a Mac always has its tray).
+  createWindow(!smoke && (!startedHidden() || !tray));
   if (!smoke && startedHidden()) leaveDock();
   // A read waits for settings writes already under way, so the page never sees a value older than one it just saved.
   handleNow('settings:get', async () => settingsWrites.then(preferences));
