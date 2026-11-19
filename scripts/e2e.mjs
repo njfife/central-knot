@@ -8129,9 +8129,12 @@ async function headerResultFlow() {
   // Automatic sync off: the band between the toolbar and the list ("Automatic sync is off…") keeps its one line whatever waits, so
   // a click moves no row. Claude Code's folder read-only, each Off leaves a change waiting (its copy there owed): with one, three
   // and five long names waiting, and after Sync once, the second row and the list are where they were with none waiting; Sync once,
-  // Turn sync on and the count are in reach on that line; the band's tooltip names every change waiting.
+  // Turn sync on and the count are in reach on that line; the band's tooltip names every change waiting. Automatic sync stays off
+  // for the section after: turned on and off again around file writes, a pass begun while it was on could take that section's
+  // deletions by hand.
   await openKind(a, 'all');
   await dismiss();
+  check('with Automatic sync on, the band is not drawn', !await a.exists('.band-sync-off'));
   await a.click('#sync-switch');
   const sidebarAs = async rail => { if (await a.run(`document.body.classList.contains('rail')`) !== rail) await a.click('#sidebar-toggle'); };
   /**
@@ -8168,15 +8171,12 @@ async function headerResultFlow() {
     await clickRun(waiting);
     await dismiss();
   }
-  await a.click('#sync-switch');
-  check('with Automatic sync on, the band is not drawn', !await a.exists('.band-sync-off'));
 
-  // Sync once with Automatic sync off, two copies deleted by hand in Copilot CLI and Claude Code's folder read-only: what it did is
-  // its sentence, which says first that not everything was synced, and each refusal is a reason of its own, in the header and in
-  // the Overview's band.
+  // Sync once with Automatic sync off (still, from the band's checks), two copies deleted by hand in Copilot CLI and Claude Code's
+  // folder read-only: what it did is its sentence, which says first that not everything was synced, and each refusal is a reason of
+  // its own, in the header and in the Overview's band.
   await openKind(a, 'all');
   await dismiss();
-  await a.click('#sync-switch');
   for (const name of names.slice(3, 5)) rmSync(join(copilot, name), { recursive: true });
   chmodSync(claude, 0o555);
   await a.click('#header-refresh');
