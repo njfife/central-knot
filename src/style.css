@@ -264,13 +264,16 @@ ul { list-style: none; }
 .result-whole #problems-show-all { align-self: flex-end; }
 .result-whole .band-dismiss { position: sticky; top: 5px; }
 .header-result > .toolbar-result .band-dismiss { margin-left: auto; }
-/* What went wrong (matrix.ts problemLines): a line each, Show all on the last. A line in parts shortens its item first, so what
-   failed stays in view. Shown, every line whole, with room between them. */
+/* What went wrong (matrix.ts problemLines): a line each, Show all on the last. A line in parts gives way only at its item's name,
+   never wider than the name itself, and what follows (its tool, what failed) keeps all but 4em of the line, so a long name is
+   cut first and a short one leaves no gap. Folded, each part keeps its spaces. Shown, every line whole, with room between them. */
 .problem-line { display: flex; gap: 6px; }
 .problem-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.problem-text:has(> .problem-head) { display: flex; }
-:is(.problem-head, .problem-rest) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.problem-head { flex: 0 1000 auto; min-width: 4em; }
+.problem-text:has(> .problem-rest) { display: flex; }
+.problem-text > :is(.item-name, .problem-rest) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.problem-text > .item-name { flex: 0 1000 auto; }
+.problem-rest { max-width: calc(100% - 4em); }
+.band-lines:not(.lines-whole) .problem-text > * { white-space: pre; }
 .band-lines.lines-whole { gap: 4px; }
 .lines-whole .problem-text { display: block; white-space: normal; overflow-wrap: anywhere; }
 #header:has(.header-result) > .page-title { flex: none; }

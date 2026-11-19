@@ -377,7 +377,9 @@ function runLine(lines: ResultLine[]): HTMLElement | null {
   const back = undoButton();
   const open = current()?.entry;
   const parts = last ? resultParts(lines, last.undo, { short: true, here: open && market.nav.plugin ? { plugin: market.nav.plugin, source: open.source } : undefined }) : [];
-  if (last && parts.length && back) {
+  // A run that left something undone counts it first, Undo or not (its reasons are the problem lines under it), so the cut never hides it.
+  const short = last ? shortOf(lines, last.unreached) : { names: [], of: 0 }, failed = short.names;
+  if (last && (parts.length || failed.length) && (back || failed.length)) {
     const link = (part: { plugin: string; source: string }, at: number) =>
       h('button.result-link', { type: 'button', id: `result-plugin-${at}`, title: `Open ${part.plugin}`, onclick: () => browse({ source: part.source, plugin: part.plugin, tab: 'plugins' }) }, part.plugin);
     // On another plugin's page the result is only named, so it never reads as being about the plugin on screen; an
@@ -391,8 +393,7 @@ function runLine(lines: ResultLine[]): HTMLElement | null {
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));
     // What a switch's Undo can't put back is said with the result, so the promise beside Undo is the whole of it.
     const limits = !last.undo && last.turn?.limits.length ? ` ${last.turn.limits.join(' ')}` : '';
-    // What didn't go through comes first (its reasons are the problem lines under it), so the header's cut never hides it.
-    const short = shortOf(lines, last.unreached), failed = short.names, lead = failed.length ? `${notAllThrough(failed, short.of)} ` : '';
+    const lead = failed.length ? `${notAllThrough(failed, short.of)} ` : '';
     return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, failed.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
       h('span.toolbar-result-text', { title: `${lead}${resultSentence(lines, last.undo)}${limits}` }, lead, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null), back, dismiss(closeRun, 'report-dismiss'));
   }

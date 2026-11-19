@@ -482,14 +482,14 @@ test('Each row is said as the run left it: a row a later click turned back on is
   assert.equal(app.outcome?.text, '1 skill is off: b; 1 skill is on: a.');
 });
 
-test('A click that failed is said first as not gone through in every tool, and not counted among those done', async () => {
+test('A click that failed is said first as not gone through in every tool, and not counted among those done; its own sentence is no reason (its problem line says it)', async () => {
   onLibrary();
   for (const name of ['a', 'b', 'c']) flip(name, false);
   await settled();
   await main.pass(did('a'));
   await main.pass(failedWrite('b'));
   await main.pass(did('c'));
-  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], ['1 of 3 didn’t go through in every tool: b. 2 skills are off: a and c.', ['b is off, but still in Claude Code.'], true]);
+  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], ['1 of 3 didn’t go through in every tool: b. 2 skills are off: a and c.', [], true]);
 });
 
 // Off in Central Knot and in Codex, but Claude Code's folder couldn't be written: the click did part of its work.
@@ -512,6 +512,18 @@ test('A row clicked again after its click failed is said as its last click left 
   await settled();
   await main.pass(did('a', true));
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn, app.skillsResult?.results.filter(keptBack)], ['1 skill is on: a.', [], false, []]);
+});
+
+test('A row whose next click is refused whole still says what its click before left undone: in the lead, its problem line, and no "Nothing changed"', async () => {
+  onLibrary();
+  flip('a', false);
+  await settled();
+  await main.pass(partly('a'));
+  flip('a', true);
+  await settled();
+  await main.pass(refusedAsStale('a'));
+  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.skillsResult?.results.filter(keptBack).map(entry => entry.harness)],
+    ['1 of 1 didn’t go through in every tool: a. 1 is off.', ['a changed since the page was read. Nothing was changed; read again.'], ['claude-cli']]);
 });
 
 test('A run where every row fell short names them once: the lead names them, the sentence after it counts them', async () => {
@@ -677,7 +689,7 @@ test('An Undo started on the Library, then History opened before it is done: its
   assert.deepEqual([main.restored, app.outcome?.text, app.outcome?.page], [['off-skills-notes'], 'Undone: notes is as before.', 'library']);
 });
 
-test('Turn these off where every kind refuses: nothing is turned off, and the result says each kind by its name with its reason', async t => {
+test('Turn these off where every kind refuses: nothing is turned off; the result says first what didn’t go through, and each kind’s reason is a line led by its name', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'mcp', key: 'github' }], { on: true });
   turnTheseOff([itemRow('skills', 'notes'), itemRow('mcp', 'github')]);
@@ -685,7 +697,7 @@ test('Turn these off where every kind refuses: nothing is turned off, and the re
   await main.pass({ stopped: 'The skills record is damaged.', results: [], writes: 0 });
   await main.pass({ stopped: 'The MCP record is damaged.', results: [], writes: 0 });
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.act, flashRequests.size],
-    ['Skills: The skills record is damaged. MCP servers: The MCP record is damaged.', [], undefined, 0]);
+    ['2 of 2 didn’t go through in every tool: notes and github. Nothing changed.', ['Skills: The skills record is damaged.', 'MCP servers: The MCP record is damaged.'], undefined, 0]);
 });
 
 test('An Undo one of whose History entries is gone says not all of it could be undone, and puts back the rest', async t => {
@@ -779,7 +791,7 @@ test('Turn these off where every row it turned off is kept back by a tool: the l
   await settled();
   app.home!.skills.library.notes!.on = app.home!.skills.library.spare!.on = false;
   await main.pass({ results: [...partly('notes').results, ...partly('spare').results], writes: 2, made: ['off-skills-notes', 'off-skills-spare'] });
-  assert.equal(app.outcome?.text, '2 of 2 didn’t go through in every tool: notes and spare. All 2 are off.');
+  assert.equal(app.outcome?.text, '2 of 2 didn’t go through in every tool: notes and spare. Both are off.');
 });
 
 test('An Undo across kinds whose agent’s entry is stopped: the agents’ entries before it are left, the skill’s and the server’s still go back, and it says so, the stop led by its kind', async t => {

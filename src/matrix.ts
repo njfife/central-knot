@@ -24,7 +24,7 @@ import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
-import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -850,7 +850,7 @@ export function outcomeBand(): HTMLElement | null {
     rest = rest.slice(hits[0].at + hits[0].name.length);
   }
   // In the header its reasons are its problem lines (listResult); in a band, each is a line of its own under it.
-  const reasons = resultInHeader() ? [] : (outcome.reasons ?? []).flatMap(reason => [' ', h('span.band-reason', {}, reason)]);
+  const reasons = resultInHeader() ? [] : (outcome.reasons ?? []).flatMap(reason => [' ', h('span.band-reason', {}, typeof reason === 'string' ? reason : [h('strong.item-name', {}, reason[0]), reason[1]])]);
   // Two buttons take their own line under the words in a narrow window (style.css), so the sentence is never squeezed.
   return h(`div.band.band-done${outcome.next ? '.band-two' : ''}`, { role: 'status', 'data-outcome': outcome.kind ?? '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
@@ -946,10 +946,10 @@ export function listResult(): HTMLElement[] {
   const kept = kinds.flatMap(kind => (lastResult(kind)?.results ?? []).filter(keptBack).map(problem => ({ kind, problem })));
   const result = kinds.map(lastResult).find(Boolean), done = outcomeBand(), several = new Set([...kept.map(each => each.kind), ...(done ? state.outcome?.kinds ?? [] : [])]).size > 1;
   const background = !table || result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed' && !state.dismissed.has(problemKey(entry)));
-  // A tool's refusal is said in parts (problemLines): its kind where several, the item in bold and its tool, then what failed.
+  // A tool's refusal is said in parts (problemLines): its kind where several, the item's name, then its tool and what failed.
   const lines = [...background.map(problem => ({ kind: undefined, problem })), ...kept]
-    .map(({ kind, problem }): Child[] | string => [several && kind ? `${kindNouns[kind].title}: ` : '', h('strong.item-name', {}, problem.item), problem.harness ? ` (${names[problem.harness]})` : '', `: ${problem.message}`])
-    .concat(done ? state.outcome?.reasons ?? [] : []);
+    .map(({ kind, problem }): Child[] | string => [several && kind ? `${kindNouns[kind].title}: ` : '', h('strong.item-name', {}, problem.item), `${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`])
+    .concat((done ? state.outcome?.reasons ?? [] : []).map(reason => (typeof reason === 'string' ? reason : [h('strong.item-name', {}, reason[0]), reason[1]])));
   // With no result above them, their × closes them and the click's result they belong to.
   const close = () => { for (const entry of background) state.dismissed.add(problemKey(entry)); closeResult(); };
   // With no problem line, Show all follows the sentence, for one the header's two lines cut.
@@ -960,12 +960,12 @@ export function listResult(): HTMLElement[] {
 
 /**
  * What went wrong, under a result in the header (renderer.ts resultHere): its first line, on the header's second line, then
- * Show all; shown whole (`of`, their result: app.ts state.shownWhole), every line whole. A line given in parts is its item, then
- * what happened to it (the last part): folded, the item is what is shortened first (style.css .problem-head).
+ * Show all; shown whole (`of`, their result: app.ts state.shownWhole), every line whole. A line given in parts is what leads it,
+ * its item's name (`.item-name`), then what happened to it (the last part): folded, only the name gives way (style.css).
  */
 export function problemLines(lines: (Child | Child[])[], of: typeof state.shownWhole): HTMLElement {
   const whole = of !== undefined && state.shownWhole === of, shown = whole ? lines : lines.slice(0, 1);
-  const text = (line: Child | Child[]) => h('span.problem-text', {}, Array.isArray(line) ? [h('span.problem-head', {}, line.slice(0, -1)), h('span.problem-rest', {}, line.at(-1))] : line);
+  const text = (line: Child | Child[]) => h('span.problem-text', {}, Array.isArray(line) ? [...line.slice(0, -1).map(part => (typeof part === 'string' ? h('span', {}, part) : part)), h('span.problem-rest', {}, line.at(-1))] : line);
   return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, text(line), at === shown.length - 1 ? wholeToggle(of, lines.length) : null)));
 }
 
@@ -1417,7 +1417,7 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
  * said as a problem. Its words are worked out on the table it was clicked on (`t`), wherever the page is once it has run; its
  * kind, name and key are its row's.
  */
-function mainClick(t: Table, row: ItemRow | PluginRow, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string, focus?: () => string): Click {
+function mainClick(t: Table, row: ItemRow | PluginRow, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string[], focus?: () => string): Click {
   const along = plugins.turned.map(item => alongWords(item, plugins.ops)).filter(Boolean).join(' ') || undefined, kind = kindOf(row), name = nameOf(row);
   const pluginsOnly = !changes.length, undone = pluginsOnly ? undoneWords(name, on, toolsPhrase(plugins.turned.map(item => item.tool), toolsFor(t, kind))) : undefined;
   return { kind, items: [name], rows: [rowKey(row)], changes, said, also, focus, pluginsOnly, plugins: plugins.ops.length || pluginsOnly ? { ops: plugins.ops, said: along } : undefined, undone };
@@ -1444,7 +1444,9 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
     if (takeBack(kind, row.key)) { rerender(); return; }
     // Drawn as a click on it asks, it is clicked from that state, and worked out in its turn; else from what each tool has now.
     const plugins = turnEvery(items, next);
-    if (wanted === undefined && !plugins.ops.length) { tell({ page: state.page, item: row.name, rows: [rowKey(row)], warn: true, band: true, text: `${row.name}: nothing changed. ${plugins.left ?? `It is ${next ? 'on' : 'off'} already.`}` }); rerender(); return; }
+    // Nothing it can turn: every tool's switch held (said first, a reason for each tool), or it is that way already.
+    const already = { page: state.page, item: row.name, rows: [rowKey(row)], warn: true, band: true, text: `${row.name}: nothing changed.` };
+    if (wanted === undefined && !plugins.ops.length) { tell(plugins.left ? notDoneFirst({ ...already, reasons: plugins.left }) : { ...already, text: `${already.text} It is ${next ? 'on' : 'off'} already.` }); rerender(); return; }
     // Its part in each tool is worked out in its turn, from the plugins as the clicks before it left them.
     const rowNow = () => plugged(t).rows.find(each => each.key === row.key);
     queueClick({ kind, key: row.key, on: next }, row.name, () => {

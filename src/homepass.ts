@@ -20,7 +20,7 @@ import { migrateProfiles } from './profilemigrate.ts';
 import { applyServers, serverKind } from './servers.ts';
 import { syncsHere, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
-import type { DestinationResult, HarnessId, PassResult } from './types.ts';
+import type { DestinationResult, HarnessId, PassResult, Reason } from './types.ts';
 
 /**
  * What one pass did. `synced`: absent when step 3 did not run (Sync off, or this build doesn't sync the home); a kind's result
@@ -83,7 +83,7 @@ export function passTells(synced: NonNullable<HomePass['synced']>): { copies: De
  * when no copy result already describes the removal. What was done goes in the sentence, folded past three items; each
  * refusal in a tool is a reason of its own, never folded. */
 export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stopped?: string) {
-  const completed: { text: string; taken: boolean }[] = [], problems = new Set(passes.flatMap(pass => pass.crashes.map(crash => crash.message)));
+  const completed: { text: string; taken: boolean; refused: boolean }[] = [], refused: Reason[] = [], problems = new Set(passes.flatMap(pass => pass.crashes.map(crash => crash.message)));
   if (stopped) problems.add(stopped);
   const kinds = (['skills', 'mcp', 'agents'] as const).map(kind => {
     const key = kind === 'mcp' ? 'servers' : kind;
@@ -99,8 +99,8 @@ export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stoppe
     const say = sentences(libraryWords[kind]);
     for (const name of names) {
       const label = rowNames([{ kind, name }], among)[0]!;
-      // What it did with the item goes in the sentence; each refusal, in a tool, is a reason of its own.
-      const copies = results.get(name) ?? [], parts: string[] = [], refusals: string[] = [];
+      // What it did with the item goes in the sentence; each refusal, in a tool, is a reason of its own, in the Library's parts.
+      const copies = results.get(name) ?? [], parts: string[] = [], refusals: Reason[] = [];
       let taken = false;
       for (const outcome of ['removed', 'written'] as const) {
         const tools = [...new Set(copies.flatMap(copy => copy.harness && copy.outcome === outcome ? [copy.harness] : []))];
@@ -108,8 +108,7 @@ export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stoppe
       }
       for (const copy of new Map(copies.map(copy => [copy.harness, copy])).values()) {
         if (copy.outcome !== 'held' && copy.outcome !== 'failed') continue;
-        const action = copy.removal ? 'remove' : 'change', where = copy.removal ? 'from' : 'in';
-        refusals.push(`Couldn’t ${action} ${label}${copy.harness ? ` ${where} ${toolName(copy.harness)}` : ''}. ${copy.message}`);
+        refusals.push([label, `${copy.harness ? ` (${toolName(copy.harness)})` : ''}: ${copy.message}`]);
       }
       for (const notice of notices) {
         if (notice.kind === 'taken-in' && notice.items.includes(name)) { taken = true; parts.push(`Took in ${label}.`); }
@@ -117,18 +116,19 @@ export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stoppe
           parts.push(say.noticeWords({ ...notice, item: label }).text);
         }
       }
-      for (const refusal of refusals) problems.add(refusal);
-      if (parts.length) completed.push({ text: parts.join(' '), taken });
+      refused.push(...refusals);
+      if (parts.length) completed.push({ text: parts.join(' '), taken, refused: refusals.length > 0 });
     }
   }
   const last = passes.at(-1);
   if (last?.skills?.settling || last?.servers?.settling || last?.agents?.settling) problems.add('Some copies are still settling. Sync again after they finish saving.');
-  const folded = completed.length > 3 ? completed.splice(2) : [];
+  // What was done with an item a tool refused stays beside its refusal; the rest folds past three items.
+  const folded = completed.length > 3 ? completed.filter((item, at) => at >= 2 && !item.refused) : [];
   const taken = folded.filter(item => item.taken).length, changed = folded.length - taken;
-  const lines = completed.map(item => item.text);
+  const lines = completed.filter(item => !folded.includes(item)).map(item => item.text);
   if (taken) lines.push(`Sync once ${tookInCount(taken, true)}.`);
   if (changed) lines.push(`Changed ${plural(changed, 'more item')}.`);
   // What it could not do is its reasons, each a problem line of its own (app.ts Outcome); its sentence says so first.
-  const text = [problems.size ? 'Not everything was synced.' : '', ...lines].filter(Boolean).join(' ') || 'Nothing to do.';
-  return { text, reasons: [...problems], warn: problems.size > 0, history: folded.length > 0 };
+  const text = [problems.size || refused.length ? 'Not everything was synced.' : '', ...lines].filter(Boolean).join(' ') || 'Nothing to do.';
+  return { text, reasons: [...problems, ...refused], warn: problems.size + refused.length > 0, history: folded.length > 0 };
 }

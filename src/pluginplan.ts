@@ -258,6 +258,9 @@ export function shortOf(lines: ResultLine[], unreached: { source: string; plugin
   return { names: [...byKey([...lines.filter(line => !line.ok), ...unreached]).values()], of: byKey([...lines, ...unreached]).size };
 }
 
+/** The steps of a run that stopped before them: each operation, by plugin and tool, that left no report (LastRun unreached). */
+export const unreachedOps = (ops: PluginOp[], done: PluginDone[]) => ops.filter(op => !done.some(entry => opKey(entry) === opKey(op)));
+
 /** resultParts as plain text, for the screen reader and the tooltip. */
 export const resultSentence = (lines: ResultLine[], undo: boolean) => resultParts(lines, undo).map(part => (typeof part === 'string' ? part : part.plugin)).join('');
 

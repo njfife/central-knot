@@ -5288,8 +5288,8 @@ async function firstSetupFlow() {
     // What it could not do is its problem lines, each its own; its sentence says first that not everything was synced.
     if (/^Show all/.test(await d.text('#problems-show-all') ?? '')) await d.click('#problems-show-all');
     const reasons = await d.all('#header .problem-text');
-    check('a held removal: the sentence says first that not everything was synced, and the refusal is a line of its own naming the surviving tool and its lock, with a warning',
-      /^Not everything was synced\./.test(words) && reasons.filter(line => /locked/.test(line)).length === 1 && reasons.some(line => /^Couldn’t remove locked from Claude Code\..*lock/i.test(line))
+    check('a held removal: the sentence says first that not everything was synced, then Codex’s removal, and the refusal is a line of its own, its item, its tool and its lock, with a warning',
+      /^Not everything was synced\..* Removed locked from Codex\./.test(words) && reasons.filter(line => /locked/.test(line)).length === 1 && reasons.some(line => /^locked \(Claude Code\): .*lock/i.test(line))
       && await d.exists('[data-outcome] .tone-warning') && !!JSON.parse(readNow(settings)).mcpServers.locked, [words, reasons]);
     check('a large Sync once shows two successful items, counts the rest and offers their History',
       (words?.match(/Took in guide-/g) ?? []).length === 2 && /took in 6 more items/i.test(words)
@@ -5302,7 +5302,7 @@ async function firstSetupFlow() {
     await d.click('#overview-sync-now');
     const lines = await d.all('.page > .bands .band-reason', 'getComputedStyle(e).display + " " + e.textContent');
     check('Sync once from the Overview with the removal still held: its sentence says so first, then the refusal on a line of its own',
-      /^Not everything was synced\./.test(await d.text('.page > .bands [data-outcome] .band-text') ?? '') && lines.length === 1 && /^block .*remove locked from Claude Code/.test(lines[0]), lines);
+      /^Not everything was synced\./.test(await d.text('.page > .bands [data-outcome] .band-text') ?? '') && lines.length === 1 && /^block locked \(Claude Code\): .*lock/.test(lines[0]), lines);
     if (shots) { await sizeTo(d, 860, 600); await d.shot('result-overview-sync-once-860'); await sizeTo(d, ...SMALLEST); }
   } finally { rmSync(settings + '.lock', { recursive: true }); }
   if (d.inspect) {
@@ -6404,6 +6404,8 @@ fs.writeFileSync(record, JSON.stringify(now));
   same('three failing plugins and one installed: the sentence says first what didn’t go through, then one ×, the first reason and Show all 3 reasons',
     [/^3 of \d didn’t go through in every tool: plug-04, plug-05 and plug-08\./.test(await a.text('#plugins-result .toolbar-result-text') ?? ''), await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')],
     [true, 1, 1, 'Show all 3 reasons']);
+  // Folded, only the name gives way, and no more than its own width: what failed begins right after it.
+  same('folded, what failed begins right after the plugin’s name, with no gap', await a.run(`(text => { const name = text.querySelector('.item-name'), range = document.createRange(); range.selectNodeContents(name); const next = name.nextElementSibling; if (!next) return null; const end = range.getBoundingClientRect().right; range.selectNodeContents(next); return Math.round(range.getBoundingClientRect().left - end); })(document.querySelector('#header .problem-text'))`), 0);
   /** Pictures of the run's result (with --shots): light at 1280×800, dark at 860×600 and 1728×1080, then back light at 1280. */
   const resultShots = async name => {
     if (!shots) return;
@@ -6417,9 +6419,28 @@ fs.writeFileSync(record, JSON.stringify(now));
   await press('#problems-show-all');
   same('shown, each reason whole', await plugReasons(), ['whole', 'whole', 'whole']);
   await resultShots('plugins-whole');
+  // Escape with the card open folds it and does nothing else: the marketplace's search keeps its words.
+  const pluginFind = value => a.run(`(find => { find.value = ${JSON.stringify(value)}; find.dispatchEvent(new Event('input', { bubbles: true })); find.focus(); })(document.querySelector('#plugin-find'))`);
+  await pluginFind('plug');
+  // Typing draws the field again: the focus goes to the one there now, as a person's would stay in it.
+  await a.settle();
+  await a.run(`document.querySelector('#plugin-find').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await a.settle();
+  same('Escape in the marketplace’s search with the card open folds the card, and the search keeps its words', [await a.text('#problems-show-all'), await a.run(`document.querySelector('#plugin-find').value`)], ['Show all 3 reasons', 'plug']);
+  await pluginFind('');
   await press('#header .band-dismiss');
   same('× closes it all', await a.exists('#header .header-result'), false);
   rmSync(join(home, 'slow'));
+  // A run where nothing went through, with no Undo to offer, says so first too.
+  writeFileSync(join(home, 'fail-plug-11'), '');
+  await putAt(list, '[data-plugin="plug-11"]', 200);
+  await clickAt(await middleOf('#pswitch-0-plug-11'));
+  for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
+  await done();
+  rmSync(join(home, 'fail-plug-11'));
+  same('a run where nothing went through, with no Undo: its sentence counts it first, and its reason follows', [await a.text('#plugins-result .toolbar-result-text'), (await plugReasons()).length], ['1 of 1 didn’t go through in every tool: plug-11. ', 1]);
+  await press('#header .band-dismiss');
   // A plugin's page and back, then Refresh: the list in its order again, installed first.
   const inOrder = on => [...plugins.filter(name => on.includes(name)), ...plugins.filter(name => !on.includes(name))];
   const installedNow = [...installedFirst.filter(name => name !== 'plug-06'), 'plug-01', 'plug-10', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
@@ -7830,13 +7851,14 @@ async function headerResultFlow() {
   /** Whether Show less ends the last words the opened result shows, as it does on a problem card and on a success card alike. */
   const toggleAtEnd = () => a.run(`(toggle => { const last = Math.max(...[...document.querySelectorAll('#header .header-result :is(.band-text, .problem-text)')].map(node => node.getBoundingClientRect().bottom)); return !!toggle && Math.abs(toggle.getBoundingClientRect().bottom - last) <= 4; })(document.querySelector('#problems-show-all'))`);
   /** In the card, whether each reason starts with its item's name in bold and has room above it. */
-  const reasonsApart = () => a.run(`[...document.querySelectorAll('#header .lines-whole .problem-line')].every((line, at, all) => !!line.querySelector('.problem-text > .problem-head > .item-name') && (!at || line.getBoundingClientRect().top - all[at - 1].getBoundingClientRect().bottom >= 3))`);
+  const reasonsApart = () => a.run(`[...document.querySelectorAll('#header .lines-whole .problem-line')].every((line, at, all) => !!line.querySelector('.problem-text > .item-name') && (!at || line.getBoundingClientRect().top - all[at - 1].getBoundingClientRect().bottom >= 3))`);
   /** A point inside `selector` that nothing lies over (where it shows beside an open card), or null. */
   const freePoint = selector => a.run(`(node => { if (!node) return null; const box = node.getBoundingClientRect(); for (const fy of [0.9, 0.75, 0.5, 0.25]) for (const fx of [0.5, 0.25, 0.75, 0.1, 0.9]) { const x = Math.round(box.left + box.width * fx), y = Math.round(box.top + box.height * fy); if (node.contains(document.elementFromPoint(x, y))) return { x, y }; } return null; })(document.querySelector(${JSON.stringify(selector)}))`);
   const openCard = async () => { if ((await toggle())?.[1] !== 'true') await pressOn('#problems-show-all'); };
   const findSays = value => a.run(`(find => { find.value = ${JSON.stringify(value)}; find.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#find'))`);
-  /** Whether the first reason's line shows what failed whole ("…copy yet."), however long the name before it. */
-  const failedInView = () => a.run(`(text => { const rest = text?.querySelector('.problem-rest'), node = rest?.firstChild, at = node?.textContent.indexOf('copy yet.') ?? -1; if (at < 0) return false; const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 9); return range.getBoundingClientRect().right <= rest.getBoundingClientRect().right + 1; })(document.querySelector('#header .problem-text'))`);
+  /** Whether `words` show whole on the first reason's folded line (its tool, what failed), however long the name before them. */
+  const reasonShows = words => a.run(`((text, words) => { const walk = document.createTreeWalker(text, NodeFilter.SHOW_TEXT); for (let node = walk.nextNode(); node; node = walk.nextNode()) { const at = node.textContent.indexOf(words); if (at < 0) continue; const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + words.length); const right = range.getBoundingClientRect().right; return right <= node.parentElement.getBoundingClientRect().right + 1 && right <= text.getBoundingClientRect().right + 1; } return false; })(document.querySelector('#header .problem-text'), ${JSON.stringify(words)})`);
+  const failedInView = () => reasonShows('copy yet.');
   const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
   /** In dark, whether the opened card is raised over the page: its surface is not the header's own. */
   const raised = async () => { await theme('dark'); const [card, header] = await a.run(`[getComputedStyle(document.querySelector('#header .result-whole')).backgroundColor, getComputedStyle(document.querySelector('#header')).backgroundColor]`); await theme('light'); return card !== header; };
@@ -7871,6 +7893,7 @@ async function headerResultFlow() {
   const findAt = await freePoint('#find');
   if (findAt) { await mouse(a, 'mouseMoved', findAt, 0); await mouse(a, 'mousePressed', findAt, 1); await mouse(a, 'mouseReleased', findAt, 0); await done(); }
   same('with the card open, a press on Find where it shows folds the card, and Find has the focus', [!!findAt, await toggle(), await a.run(`document.activeElement?.id`)], [true, ['Show all', 'false'], 'find']);
+  await openCard();
   await undo();
   asBefore('its Undo, from the card, puts the three back in both tools', before);
 
@@ -7906,8 +7929,8 @@ async function headerResultFlow() {
     const was = await places(), at = `at ${size.join('×')}`;
     chmodSync(claude, 0o555);
     await clickRun(names.slice(0, 3));
-    same(`${at}, three refused removals: the first reason, saying what failed, then Show all 3 reasons, Undo clear of the window’s top, and nothing moved`,
-      [await lines(), await failedInView(), await toggle(), await a.run(`document.querySelector('#outcome-undo').getBoundingClientRect().top >= 5`), await places()], [1, true, ['Show all 3 reasons', 'false'], true, was]);
+    same(`${at}, three refused removals: the first reason, its tool and what failed in view, then Show all 3 reasons, Undo clear of the window’s top, and nothing moved`,
+      [await lines(), await reasonShows('(Claude Code)'), await failedInView(), await toggle(), await a.run(`document.querySelector('#outcome-undo').getBoundingClientRect().top >= 5`), await places()], [1, true, true, ['Show all 3 reasons', 'false'], true, was]);
     same(`${at}, beside it the kind switch, Find, the chip and Sort are in view`, await toolbarInView(), [true, true, true, true]);
     if (size[0] === 1316) await pictures('three-problems', size);
     await pressOn('#problems-show-all');
@@ -7956,8 +7979,9 @@ async function headerResultFlow() {
     await sortBy(sortOther);
     const sorted = await a.run(`document.querySelector('#item-order').value`) === sortOther;
     await sortBy(sortWas);
-    same(`${at}, beside a problem result the kind switch and the chip each take a press, Sort its choice, and the result stays`, [chosen, chip, sorted, await toggle()],
-      ['library-kind-skills', 'true', true, ['Show all 3 reasons', 'false']]);
+    await pressOn('#find');
+    same(`${at}, beside a problem result the kind switch, the chip and Find each take a press, Sort its choice, and the result stays`, [chosen, chip, sorted, await a.run(`document.activeElement?.id`), await toggle()],
+      ['library-kind-skills', 'true', true, 'find', ['Show all 3 reasons', 'false']]);
     await findSays('quarterly');
     await openCard();
     await a.run(`document.querySelector('#find').focus()`);
@@ -7997,7 +8021,7 @@ async function headerResultFlow() {
   for (const folder of [claude, copilot]) chmodSync(folder, 0o555);
   await clickRun(names);
   const many = Number((await toggle())?.[0].replace(/\D/g, '') || 0);
-  same('eight refused in both tools: a dozen reasons or more, behind a Show all that says what it counts', [many >= 12, (await toggle())?.[0]], [true, `Show all ${many} reasons`]);
+  same('eight refused in both tools: sixteen reasons, one for each tool’s refusal, behind a Show all that says what it counts', (await toggle())?.[0], 'Show all 16 reasons');
   await pictures('dozen-reasons', [860, 600]);
   await pressOn('#problems-show-all');
   const lastInView = () => a.run(`(text => { const box = text.getBoundingClientRect(); return text.contains(document.elementFromPoint(box.left + 4, box.top + box.height / 2)); })([...document.querySelectorAll('#header .problem-text')].at(-1))`);

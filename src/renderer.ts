@@ -242,8 +242,9 @@ const inCard = (event: Event) => !!(event.target as Element).closest('#header .h
 let pressedInCard = false;
 document.addEventListener('pointerdown', event => { pressedInCard = inCard(event); }, true);
 document.addEventListener('click', event => { if (!(event.detail && pressedInCard) && !inCard(event)) foldResult(); }, true);
-// Escape with the card open folds it and does nothing else (a find box keeps its words), before any other Escape is heard.
-window.addEventListener('keydown', event => { if (event.key === 'Escape' && foldResult()) event.stopPropagation(); }, true);
+// Escape with the card open folds it and does nothing else, before any other Escape is heard: a find box, or a search field's own
+// clearing, keeps its words.
+window.addEventListener('keydown', event => { if (event.key === 'Escape' && foldResult()) { event.stopPropagation(); event.preventDefault(); } }, true);
 
 // Laid out, and at each resize: a Show all drawn for a cut shows where the header cuts the sentence or a problem line.
 const cut = (text: Element) => text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight;

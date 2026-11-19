@@ -265,18 +265,19 @@ test('Sync once reports an unreadable owed removal and counts it as done only wh
     assert.equal(result.warn, true);
     assert.equal(result.text, 'Not everything was synced. Removed docs from Codex.');
     assert.equal(result.reasons.length, 1);
-    assert.match(result.reasons[0]!, /^Couldn’t remove docs from Claude Code\..*could not be read\.$/);
+    assert.deepEqual(result.reasons[0]?.[0], 'docs');
+    assert.match(result.reasons[0]![1]!, /^ \(Claude Code\): .*could not be read\.$/);
     assert.deepEqual(syncOnceReport([first, await pass()]), {
       text: 'Removed docs from Codex and Claude Code.', reasons: [], warn: false, history: false,
     });
   } finally { await box.cleanup(); }
 });
 
-test('Sync once: one item refused in two tools is two reasons, one for each refusal, and what it did is its sentence', () => {
+test('Sync once: one item refused in two tools is two reasons, each its item, then its tool and what failed, as the Library draws them; what it did is its sentence', () => {
   const refused = (harness: 'claude-cli' | 'copilot-cli') => ({ item: 'docs', harness, outcome: 'failed' as const, removal: true, message: 'Its file couldn’t be written.' });
   assert.deepEqual(syncOnceReport([{ crashes: [], servers: { writes: 1, results: [{ item: 'docs', harness: 'codex-cli', outcome: 'removed', message: '' }, refused('claude-cli'), refused('copilot-cli')] } }]), {
     text: 'Not everything was synced. Removed docs from Codex.', warn: true, history: false,
-    reasons: ['Couldn’t remove docs from Claude Code. Its file couldn’t be written.', 'Couldn’t remove docs from Copilot CLI. Its file couldn’t be written.'],
+    reasons: [['docs', ' (Claude Code): Its file couldn’t be written.'], ['docs', ' (Copilot CLI): Its file couldn’t be written.']],
   });
 });
 
