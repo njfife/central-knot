@@ -45,8 +45,9 @@ async function readInside(root: string, path: string, limit = READ_LIMIT): Promi
   } catch { return undefined; }
 }
 const textInside = async (root: string, path: string) => (await readInside(root, path))?.text;
-/** A skill, command or agent file is shown whole up to this size; past it, what is shown says so. */
-const PART_FILE_LIMIT = 4 * 1024 * 1024;
+/** A skill, command or agent file is shown whole up to this size; past it, what is shown says so (and a file a tool's own
+ *  instruction file brings in is not shown: instructionparts.ts). */
+export const PART_FILE_LIMIT = 4 * 1024 * 1024;
 /** A part's file as written, or with a last line saying it was cut when it is larger than PART_FILE_LIMIT. */
 async function partFile(root: string, path: string): Promise<string | undefined> {
   const read = await readInside(root, path, PART_FILE_LIMIT);

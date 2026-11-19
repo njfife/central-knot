@@ -996,7 +996,16 @@ export interface InstructionFile {
   /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
    *  and how that copy compares (see BaseHeld.state). */
   base?: BaseHeld;
+  /** The other files the tool reads with this one, in its order (instructionparts.ts): shown, never written. */
+  parts: InstructionPart[];
 }
+/** A file a tool reads beside its own instruction file: its text, or why the text is not shown (missing, only for some files…). */
+export type InstructionPart = {
+  /** An absolute path, or an OpenCode entry as written (a pattern, a relative path, a web address). */
+  path: string;
+  /** How the tool comes to read it: "imported by CLAUDE.md, line 12", "a rule", "named in opencode.jsonc". */
+  from: string;
+} & ({ text: string } | { notShown: string });
 /** How a tool's file holds the base. */
 export interface BaseHeld {
   /** The tool is on the base list and the base isn't blank (a blank base reaches no tool). */

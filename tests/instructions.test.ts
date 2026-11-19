@@ -27,7 +27,7 @@ test('Each tool’s own instruction file is read, with its readers; Codex binds 
     const files = await instructionsView(box.context, await box.snapshots());
     const claude = files.find(file => file.tool === 'claude-cli')!;
     assert.equal(claude.text, 'Be brief.\n@notes.md\n');
-    assert.ok(claude.notes.some(note => /@ import/.test(note)));
+    assert.deepEqual(claude.parts, [{ path: join(box.home, '.claude/notes.md'), from: 'imported by CLAUDE.md, line 2', notShown: 'missing' }]);
     assert.match(files.find(file => file.tool === 'codex-cli')!.path, /AGENTS\.override\.md$/);
     const copilot = files.find(file => file.tool === 'copilot-cli')!;
     assert.equal(copilot.exists, false);

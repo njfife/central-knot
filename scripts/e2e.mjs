@@ -6644,6 +6644,127 @@ async function pluginTextFlow() {
 }
 
 /**
+ * The other files each tool reads with its own instruction file (instructionparts.ts), on its card on Instructions and on its
+ * Instructions tab under Harnesses: listed in the tool's order, each opened and folded by a press, never edited and never
+ * written: a save of a tool's own file and the base change only the tools' own files. A made-up home: Claude Code with three
+ * imports (one nested) and two rules (one only for some files), Copilot CLI with two instructions files (one scoped), OpenCode
+ * with a file, a relative pattern and a web address in its list, and Codex, which reads nothing more at the home's level.
+ */
+async function ownPartsFlow() {
+  const home = join(scratch, 'parts-home'), data = join(scratch, 'parts-data'), real = join(scratch, 'parts-real');
+  const put = (path, body) => { mkdirSync(dirname(join(home, path)), { recursive: true }); writeFileSync(join(home, path), body); };
+  put('.claude/CLAUDE.md', '# How I work\n- Keep changes small.\n\nSee @notes/style.md and @~/shared/team.md for more.\n');
+  put('.claude/notes/style.md', `# Style\n${Array.from({ length: 18 }, (_, at) => `- Rule ${at + 1}.`).join('\n')}\n@deeper.md\n`);
+  put('.claude/notes/deeper.md', 'Deeper: two levels down.\n');
+  put('shared/team.md', '# Team\n- Review every pull request.\n');
+  put('.claude/rules/testing.md', 'Run the tests before saying it is done.\n');
+  put('.claude/rules/typescript.md', '---\npaths: ["src/**/*.ts"]\n---\nPrefer types to comments.\n');
+  put('.copilot/copilot-instructions.md', 'Be brief.\n');
+  put('.copilot/instructions/all.instructions.md', '---\napplyTo: "**"\n---\nAnswer in English.\n');
+  put('.copilot/instructions/ts.instructions.md', '---\napplyTo: "**/*.ts"\n---\nTypes first.\n');
+  put('.config/opencode/AGENTS.md', 'Be kind.\n');
+  put('.config/opencode/opencode.json', JSON.stringify({ instructions: ['~/shared/team.md', 'docs/*.md', 'https://example.com/house-rules.md'] }, null, 2));
+  put('.codex/AGENTS.md', 'Codex only.\n');
+  const brought = ['.claude/notes/style.md', '.claude/notes/deeper.md', 'shared/team.md', '.claude/rules/testing.md', '.claude/rules/typescript.md',
+    '.copilot/instructions/all.instructions.md', '.copilot/instructions/ts.instructions.md', '.config/opencode/opencode.json'];
+  const hashes = () => brought.map(path => createHash('sha256').update(readFileSync(join(home, path))).digest('hex'));
+  const before = hashes();
+  for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  const a = await launch(data, [], real, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  if (await a.exists('#setup-no')) await a.click('#setup-no');
+  await a.click('#nav-instructions');
+  for (let tries = 0; tries < 50 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);
+  const card = tool => `article[aria-label="${{ 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'opencode-cli': 'OpenCode', 'codex-cli': 'Codex' }[tool]} instructions"]`;
+  /** Each line under a tool's card: the file's whole path, then how the tool comes to read it and its size, or why it isn't shown. */
+  const lines = tool => a.all(`${card(tool)} .ins-part-line`, `[e.querySelector('.path-text').title, e.querySelector('.ins-part-says').textContent]`);
+  const at = path => join(home, path);
+  same('Claude Code’s card lists its imports as it reads them, each nested one after the file that imports it, then its rules, a scoped one last', await lines('claude-cli'), [
+    [at('.claude/notes/style.md'), 'imported by CLAUDE.md, line 4 · 20 lines'],
+    [at('.claude/notes/deeper.md'), 'imported by style.md, line 20 · 1 line'],
+    [at('shared/team.md'), 'imported by CLAUDE.md, line 4 · 2 lines'],
+    [at('.claude/rules/testing.md'), 'a rule · 1 line'],
+    [at('.claude/rules/typescript.md'), 'a rule · only for files matching src/**/*.ts']]);
+  same('Copilot CLI’s card lists its instructions files, the scoped one named with its scope', await lines('copilot-cli'), [
+    [at('.copilot/instructions/all.instructions.md'), 'an instructions file · 4 lines'],
+    [at('.copilot/instructions/ts.instructions.md'), 'an instructions file · only for files matching **/*.ts']]);
+  same('OpenCode’s card lists what its config names, in order: a file it reads, and the rest as written', await lines('opencode-cli'), [
+    [at('shared/team.md'), 'named in opencode.json · 2 lines'],
+    ['docs/*.md', 'named in opencode.json · a relative path: looked for from the folder a session starts in, as OpenCode resolves it'],
+    ['https://example.com/house-rules.md', 'named in opencode.json · a web address: OpenCode fetches it, Central Knot doesn’t']]);
+  check('Codex’s card has no other files: it reads none at the home’s level', !(await a.exists(`${card('codex-cli')} .ins-parts`)), await a.text(card('codex-cli')));
+  check('the parts come after the file’s own text', await a.run(`(() => { const card = document.querySelector(${JSON.stringify(card('claude-cli'))}); return !!(card.querySelector('.ins-body').compareDocumentPosition(card.querySelector('.ins-parts')) & Node.DOCUMENT_POSITION_FOLLOWING); })()`));
+  same('one line per part until it is opened', await a.all('.ins-parts pre', 'e.id'), []);
+  // A part opens in place, its first lines and a way to the rest, as a tool's own text does; a press folds it again.
+  const shown = () => a.run(`[document.querySelector('#ins-part-claude-cli-0')?.getAttribute('aria-expanded'), document.querySelector('#shown-part-claude-cli-0')?.textContent.split('\\n').length ?? 0, document.querySelector('#ins-part-more-claude-cli-0')?.textContent ?? '']`);
+  await a.click('#ins-part-claude-cli-0');
+  same('Show opens a part’s text in place, 14 lines and a way to the other 6', await shown(), ['true', 14, 'Show all 20 lines']);
+  await a.click('#ins-part-more-claude-cli-0');
+  same('and all of it', (await shown()).slice(0, 2), ['true', 20]);
+  await a.click('#shown-part-claude-cli-0');
+  check('a part’s text opens no editor: it is not changed here', !(await a.exists('textarea')), await a.all('textarea', 'e.id'));
+  same('a part with nothing to show has no Show', await a.exists('#ins-part-claude-cli-4'), false);
+  await sizeTo(a, 860, 600);
+  same('nothing cut off at 860×600 with a part open', await a.run(CUT_OFF), []);
+  await fitsAtMinimum(a, 'Instructions with a part open');
+  if (shots) {
+    const picture = async (name, [width, height], { theme = 'dark', rail = false, top } = {}) => {
+      await sizeTo(a, width, height);
+      if (await a.run(`document.body.classList.contains('rail')`) !== rail) await a.click('#sidebar-toggle');
+      await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+      await a.run(`document.querySelector(${JSON.stringify(top)})?.scrollIntoView({ block: 'start' })`);
+      await wait(300);
+      await a.shot(name);
+    };
+    for (const [size, name] of [[[860, 600], '860'], [[1316, 819], '1316'], [[1728, 1080], '1728']]) await picture(`parts-claude-open-${name}-dark`, size, { top: '#ins-parts-claude-cli' });
+    await picture('parts-claude-open-1316-rail-dark', [1316, 819], { rail: true, top: '#ins-parts-claude-cli' });
+    await picture('parts-claude-open-1316-light', [1316, 819], { theme: 'light', top: '#ins-parts-claude-cli' });
+    await a.click('#ins-part-claude-cli-0');
+    await picture('parts-claude-folded-1316-dark', [1316, 819], { top: card('claude-cli') });
+    await picture('parts-claude-folded-1316-rail-dark', [1316, 819], { rail: true, top: card('claude-cli') });
+    await picture('parts-claude-folded-860-light', [860, 600], { theme: 'light', top: card('claude-cli') });
+    for (const tool of ['copilot-cli', 'opencode-cli']) {
+      await picture(`parts-${tool}-1316-dark`, [1316, 819], { top: card(tool) });
+      await picture(`parts-${tool}-860-dark`, [860, 600], { top: card(tool) });
+    }
+    await picture('parts-opencode-cli-1728-light', [1728, 1080], { theme: 'light', top: card('opencode-cli') });
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+  } else await a.click('#ins-part-claude-cli-0');
+  await fullSize(a);
+  // A save of the tool's own file, then the base for every tool: each tool's own file changes, and no file another one brings in.
+  await a.click('#ins-edit-claude-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += '- Saved here.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-claude-cli');
+  await a.click('#ins-save-claude-cli');
+  for (let tries = 0; tries < 30 && !readNow(at('.claude/CLAUDE.md')).includes('- Saved here.'); tries++) await wait(100);
+  check('saving CLAUDE.md writes CLAUDE.md, and no file it brings in', readNow(at('.claude/CLAUDE.md')).includes('- Saved here.') && JSON.stringify(hashes()) === JSON.stringify(before), readNow(at('.claude/CLAUDE.md')));
+  await a.click('#base-write');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value = '- Shared by every tool.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-review');
+  await a.click('#base-save');
+  const own = ['.claude/CLAUDE.md', '.copilot/copilot-instructions.md', '.config/opencode/AGENTS.md', '.codex/AGENTS.md'];
+  for (let tries = 0; tries < 30 && !own.every(path => readNow(at(path)).includes('- Shared by every tool.')); tries++) await wait(100);
+  same('the base’s block goes to each tool’s own file', own.filter(path => readNow(at(path)).includes('- Shared by every tool.')), own);
+  same('and to no file another one brings in', hashes(), before);
+  // On a tool's Instructions tab under Harnesses, the same card lists the same files.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-instructions');
+  same('Claude Code’s Instructions tab under Harnesses lists the same files', (await a.all('.ins-part-line', `e.querySelector('.path-text').title`)).length, 5);
+  if (shots) {
+    await sizeTo(a, 1316, 819);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    await a.run(`document.querySelector('#ins-parts-claude-cli')?.scrollIntoView({ block: 'end' })`);
+    await wait(300);
+    await a.shot('parts-harness-tab-1316-dark');
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+  }
+  await fitsAtMinimum(a, 'Claude Code’s Instructions tab with its other files');
+  same('no page errors, the files a tool reads with its own', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
  * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
  * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
  * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
@@ -7750,7 +7871,7 @@ async function libraryFlow() {
 
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow, searchFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
