@@ -3233,7 +3233,7 @@ async function sourcesFlow() {
   const plugin = join(hosts, 'github.com/team/plugin.git');
   mkdirSync(plugin, { recursive: true });
   spawnSync('git', ['init', '--quiet', '--initial-branch=main', plugin]);
-  commit(plugin, { '.claude-plugin/plugin.json': '{"name":"plugin"}', 'skills/pdf/SKILL.md': '---\nname: pdf\ndescription: PDFs.\n---\nPDFs.\n', 'commands/go.md': 'Go.\n', 'commands/stop.md': 'Stop.\n', 'hooks/hooks.json': '{"hooks":{"PreToolUse":[]}}' });
+  commit(plugin, { '.claude-plugin/plugin.json': '{"name":"plugin"}', 'skills/pdf/SKILL.md': '---\nname: pdf\ndescription: PDFs.\n---\nPDFs.\n', 'commands/go.md': 'Go.\n', 'commands/stop.md': 'Stop.\n', 'hooks/hooks.json': '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"check-bash"}]}]}}' });
   const market = join(hosts, 'github.com/team/market.git');
   mkdirSync(market, { recursive: true });
   spawnSync('git', ['init', '--quiet', '--initial-branch=main', market]);
