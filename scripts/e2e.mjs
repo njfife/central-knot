@@ -20,6 +20,7 @@ import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { managedNow } from '../src/share.ts';
 import { writesRealHome } from '../src/machine.ts';
+import { STANDARD_BUILD } from '../src/values.ts';
 import { applySkills } from '../src/skills.ts';
 
 const args = process.argv.slice(2);
@@ -1120,6 +1121,28 @@ async function blockedCopyKeepsItsRow(a, practice) {
   for (const root of Object.keys(folders)) rmSync(join(practice, root, 'loose'), { recursive: true, force: true });
   await a.click('#header-refresh');
   check('the check’s own skill is gone again', !(await rowKeys(a, 'skills')).includes('loose'), await rowKeys(a, 'skills'));
+}
+
+/**
+ * The AppImage on Linux, as packaged (signin.ts): its first open put its launcher entry and icon in this run's throwaway home
+ * and turned start at sign-in on with its autostart file, each naming the AppImage ($APPIMAGE, which the AppImage's runtime sets
+ * to its file's real path). Settings' switch removes the autostart file and writes it again; the launcher entry stays.
+ */
+async function appImageSignIn(a, savedSettings) {
+  const file = realpathSync(command), named = folder => join(HOME, folder, `${STANDARD_BUILD}.desktop`);
+  const autostart = named('.config/autostart'), launcher = named('.local/share/applications');
+  const icon = join(HOME, '.local/share/icons/hicolor/512x512/apps', `${STANDARD_BUILD}.png`);
+  const exec = path => readNow(path).split('\n').find(line => line.startsWith('Exec='));
+  const state = () => a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`);
+  const firstOpen = [await state(), exec(autostart), exec(launcher), existsSync(icon) && readFileSync(icon).equals(readFileSync(join(root, 'assets/icon.png')))];
+  await a.click('#start-at-sign-in');
+  for (let tries = 0; tries < 30 && existsSync(autostart); tries++) await wait(100);
+  const off = [await state(), existsSync(autostart), existsSync(launcher), (await savedSettings()).startAtSignIn];
+  await a.click('#start-at-sign-in');
+  for (let tries = 0; tries < 30 && !existsSync(autostart); tries++) await wait(100);
+  same('the AppImage: its first open put its launcher entry and icon in the home and turned start at sign-in on, each naming the AppImage; the switch removes the autostart file and writes it again, and the launcher entry stays',
+    [firstOpen, off, [await state(), exec(autostart), (await savedSettings()).startAtSignIn]],
+    [[['true', false], `Exec="${file}" --hidden`, `Exec="${file}"`, true], [['false', false], false, true, false], [['true', false], `Exec="${file}" --hidden`, true]]);
 }
 
 async function practiceFlow() {
@@ -2951,15 +2974,18 @@ async function practiceFlow() {
   same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
     [(await savedSettings()).historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
     [7, ['aged-5'], true, false, true, false, 'What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 7 days. Change in Settings.', true]);
-  // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
-  // in its hint's place: on a Mac, one outside the Applications folder; on Linux, any (signin.ts whyNoSignIn). Main refuses a
-  // change too, and nothing about it is saved.
-  const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : process.platform === 'darwin' ? 'Move Central Knot to the Applications folder first.' : 'Not available on Linux yet.';
-  const refused = await a.run(`window.centralKnot.setStartAtSignIn(true).then(() => 'saved', error => String(error))`);
-  same('Start at sign-in that can’t be changed is off and disabled, says why, and main refuses a change', [
-    await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
-    await a.run(`document.getElementById(document.querySelector('#start-at-sign-in').getAttribute('aria-describedby'))?.textContent`),
-    refused.includes(signInReason), 'startAtSignIn' in (await savedSettings())], [['false', true], signInReason, true, false]);
+  // Start at sign-in: only an installed app can register a login item, so in a development run, and on a Mac outside the
+  // Applications folder, the row is off, can't be changed, and says why in its hint's place (signin.ts whyNoSignIn). Main refuses
+  // a change too, and nothing about it is saved. The AppImage on Linux can: appImageSignIn.
+  if (!flag('--electron') && process.platform === 'linux') await appImageSignIn(a, savedSettings);
+  else {
+    const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
+    const refused = await a.run(`window.centralKnot.setStartAtSignIn(true).then(() => 'saved', error => String(error))`);
+    same('Start at sign-in that can’t be changed is off and disabled, says why, and main refuses a change', [
+      await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
+      await a.run(`document.getElementById(document.querySelector('#start-at-sign-in').getAttribute('aria-describedby'))?.textContent`),
+      refused.includes(signInReason), 'startAtSignIn' in (await savedSettings())], [['false', true], signInReason, true, false]);
+  }
   // The installed-app checks below stand in main's platform and login items, which only works where they are Linux's own: elsewhere a
   // stood-in packaged app could reach the real system's login items.
   if (a.main && process.platform === 'linux') {
@@ -2997,21 +3023,31 @@ async function practiceFlow() {
     same('Start at sign-in on an installed Windows app (stand-in system): Settings and the menu change it and the row shows the system’s answer; a change the system ignored is said, its action keeps focus through a redraw, opens Startup apps, and the line clears once put right',
       [fromSettings, fromMenu, ignored, redrawn && focused, putRight, await main.run(`[ck.asked, ck.opened]`)],
       [['true', null, null], ['false', null, null], unchanged, true, ['true', null, null], [[true, false, true], ['ms-settings:startupapps']]]);
-    // As an installed app on Linux: coming back to the window reads it again.
+    // As an installed app on Linux not run from an AppImage: coming back to the window reads it again, and the tray's item agrees.
     await main.run(`(ck.as('linux'), ck.asked = [])`);
-    const saved = (await savedSettings()).startAtSignIn;
     await refocus(main);
-    const reread = await until('Not available on Linux yet.', () => a.text('#setting-sign-in-hint'));
-    const menuItem = await main.run(`(({ label, visible, enabled, checked }) => ({ label, visible, enabled, checked }))(ck.menus.at(-1).find(item => item.label?.startsWith('Start at sign-in')))`);
-    // The first close explains where the app went; on Linux it offers no start at sign-in.
+    const menuItem = () => main.run(`(({ label, enabled, checked }) => ({ label, enabled, checked }))(ck.menus.at(-1).find(item => item.label?.startsWith('Start at sign-in')))`);
+    const notAppImage = [await until('Only the AppImage can start at sign-in.', () => a.text('#setting-sign-in-hint')), await menuItem()];
+    // Run from an AppImage ($APPIMAGE stood in: a path in this run's scratch folder), the switch is the autostart file in this
+    // run's throwaway home, read back each time: off before any change (the choice saved above was for Windows), Settings and the
+    // tray write it and remove it, and the first close offers it (the stand-in dialog ticks the box). Never a login-item call.
+    const appImage = join(scratch, 'Central Knot.AppImage'), autostart = join(HOME, '.config/autostart', `${STANDARD_BUILD}.desktop`);
+    await main.run(`process.env.APPIMAGE = ${JSON.stringify(appImage)}`);
+    await refocus(main);
+    const offBefore = [await until(false, () => a.run(`document.querySelector('#start-at-sign-in').disabled`)), await row(), existsSync(autostart)];
+    await a.click('#start-at-sign-in');
+    const turnedOn = [await until(['true', null, null], row), readNow(autostart).split('\n').find(line => line.startsWith('Exec=')), await menuItem()];
+    await main.run(`ck.menus.at(-1).find(item => item.label === 'Start at sign-in').click({ checked: false })`);
+    const turnedOff = [await until(['false', null, null], row), existsSync(autostart)];
     await main.run(`electron.BrowserWindow.getAllWindows()[0].close()`);
-    for (let tries = 0; tries < 20 && !(await savedSettings()).closeExplained; tries++) await wait(100);
-    const dialogs = await main.run(`ck.dialogs.map(options => 'checkboxLabel' in options)`);
-    // The rest of the run has the real system back: platform, packaging, login items, menus, dialogs and links.
-    await main.run(`(ck.restore(), electron.BrowserWindow.getAllWindows()[0].show())`);
-    same('an installed app on Linux: the row (read again on focus), the menu (hidden) and the first-close dialog agree it isn’t available; no login-item call, nothing saved',
-      [reread, menuItem, dialogs, await main.run(`ck.asked`), (await savedSettings()).startAtSignIn === saved],
-      ['Not available on Linux yet.', { label: 'Start at sign-in (not on Linux yet)', visible: false, enabled: false, checked: false }, [false], [], true]);
+    for (let tries = 0; tries < 30 && !((await savedSettings()).closeExplained && existsSync(autostart)); tries++) await wait(100);
+    const dialogs = await main.run(`ck.dialogs.map(({ checkboxLabel, checkboxChecked }) => [checkboxLabel, checkboxChecked])`);
+    // The rest of the run has the real system back: platform, packaging, $APPIMAGE, login items, menus, dialogs and links.
+    await main.run(`(delete process.env.APPIMAGE, ck.restore(), electron.BrowserWindow.getAllWindows()[0].show())`);
+    same('an installed app on Linux: not from an AppImage, the row and the tray say only the AppImage can; from one, Settings, the tray and the first-close dialog write and remove its autostart file in the home, with no login-item call',
+      [notAppImage, offBefore, turnedOn, turnedOff, dialogs, existsSync(autostart), await main.run(`ck.asked`)],
+      [['Only the AppImage can start at sign-in.', { label: 'Start at sign-in (AppImage only)', enabled: false, checked: false }], [false, ['false', null, null], false],
+        [['true', null, null], `Exec="${appImage}" --hidden`, { label: 'Start at sign-in', enabled: true, checked: true }], [['false', null, null], false], [['Start Central Knot at sign-in', false]], true, []]);
     main.close();
   }
   await openKind(a, 'skills');
