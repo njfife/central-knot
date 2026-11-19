@@ -1,8 +1,9 @@
 // Where this computer keeps things, for the main process's modules: where a tool's CLI may be (executableCandidates; the PATH
 // to run it with: searchPath, pathBeside), where its desktop app may be (appCandidates, and the other apps: otherAppCandidates),
 // this Mac's Applications folders, running apps and Trash, which a test stands in for (macPlaces), and whether a Linux desktop
-// has a system tray (hasStatusNotifierWatcher). Nothing here reads a tool's files.
+// has a system tray (hasStatusNotifierWatcher; asked again, at sign-in, by trayWithin). Nothing here reads a tool's files.
 import { execFile } from 'node:child_process';
+import { setTimeout as wait } from 'node:timers/promises';
 import { userInfo } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, sep } from 'node:path';
 
@@ -69,6 +70,16 @@ export function hasStatusNotifierWatcher(dbusSend = 'dbus-send', timeoutMs = 200
   const asked = ['/org/freedesktop/DBus', 'org.freedesktop.DBus.NameHasOwner', 'string:org.kde.StatusNotifierWatcher'];
   return new Promise(done => execFile(dbusSend, ['--session', '--print-reply', '--dest=org.freedesktop.DBus', ...asked],
     { timeout: timeoutMs, killSignal: 'SIGKILL', encoding: 'utf8' }, (error, stdout) => done(!error && /\bboolean true\b/.test(stdout))));
+}
+/** How many times a start at sign-in asks for the system tray, and how far apart, before it decides there is none (main.ts makeTray). */
+export const TRAY_ASKS = 10, TRAY_PAUSE_MS = 1000;
+/** Whether this desktop has a system tray, asked up to `asks` times, `pauseMs` apart, until one ask says it has. */
+export async function trayWithin(asks: number, pauseMs = TRAY_PAUSE_MS, dbusSend?: string): Promise<boolean> {
+  for (let ask = 1; !(await hasStatusNotifierWatcher(dbusSend)); ask++) {
+    if (ask >= asks) return false;
+    await wait(pauseMs);
+  }
+  return true;
 }
 
 /**
