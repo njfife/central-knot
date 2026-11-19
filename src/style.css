@@ -367,7 +367,7 @@ ul { list-style: none; }
 .chip-on { background: var(--current); border-color: var(--control-line); color: var(--ink); font-weight: 500; }
 .chip-count { font-variant-numeric: tabular-nums; color: var(--ink-faint); font-size: 11.5px; }
 .chip-warn .chip-count { color: var(--warning); font-weight: 600; }
-/* The item pages' order (matrix.ts orderChoice): "Sort" and its select, as tall as a chip; the word steps aside in a crowded bar. */
+/* The item lists' order (matrix.ts orderChoice): "Sort" and its select, as tall as a chip; the word steps aside in a crowded bar. */
 .order { display: inline-flex; flex: none; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
 .select.select-bar select { height: 28px; font-size: 12.5px; }
 .bar-icons .order-word { display: none; }
@@ -382,10 +382,30 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .chip-icon { display: none; }
 .bar-icons .chip-label { display: none; }
 .bar-icons .chip-icon { display: block; }
+/* The chip that is on keeps its word: a bare mark doesn't say what the list is narrowed to. */
+.bar-icons .chip-on .chip-label { display: inline; }
+.bar-icons .chip-on .chip-icon { display: none; }
 .bar-icons .chip-warn .chip-icon { color: var(--warning); }
 .bar-icons .find { min-width: 88px; }
 .bar-wrap { flex-wrap: wrap; row-gap: 2px; }
 .bar-wrap .toolbar-end { border-left: 0; }
+/* The Library's kind switch (matrix.ts kindSwitch): first in the toolbar, one joined control whose words never fold; a wrapped
+   bar keeps it first, on the first line. */
+.kind-switch { display: inline-flex; flex: none; align-items: stretch; height: 28px; border: 1px solid var(--control-line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.kind-seg { display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; white-space: nowrap; border: 0; border-left: 1px solid var(--line); background: none; color: var(--ink-soft); font: inherit; font-size: 12.5px; cursor: pointer; }
+.kind-seg:first-child { border-left: 0; }
+.kind-seg:hover { background: var(--hover); color: var(--ink); }
+.kind-seg-on { background: var(--current); color: var(--ink); font-weight: 500; }
+.kind-seg-count { font-variant-numeric: tabular-nums; color: var(--ink-faint); font-size: 11.5px; }
+.bar-short .kind-seg { padding: 0 7px; }
+/* A Library row's mark of its kind, before its name; a tool's mark place left blank where that tool can't hold the row's kind. */
+.kind-mark { display: inline-grid; flex: none; place-items: center; color: var(--ink-soft); }
+/* A row's kind in words, beside a name two kinds share in the list (matrix.ts kindWord), at the description's weight. */
+.row-kind { flex: none; color: var(--ink-soft); font-size: 12px; }
+.row-kind::before { content: '· '; }
+/* A segment whose kind has an automatic change not seen yet, as the sidebar's dot (renderer.ts navRow). */
+.kind-seg-news { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+.tool-mark.mark-blank { visibility: hidden; }
 
 /* ---------- Bands and notices under the toolbar ---------- */
 .bands { display: flex; flex-direction: column; }
@@ -418,6 +438,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .sync-notice { position: relative; margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; padding-right: 26px; }
 /* A long sentence wraps beside its mark (14px and the 8px gap), never on a line of its own under it. */
 .sync-notice > .notice-text { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 22px); }
+/* On the Library's All, a notice's kind mark sits between its icon and its words: the words keep the rest of the line. */
+.sync-notice > .kind-mark + .notice-text { max-width: calc(100% - 42px); }
+.sync-notice > .kind-mark + .row-kind + .notice-text { max-width: calc(100% - 92px); }
+/* While first setup's walkthrough asks, each notice keeps to its first line until Show all (matrix.ts listNotices). */
+.notices-folded .notice-text { flex: 1 1 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notices-folded .sync-notice-lines { grid-template-columns: minmax(0, 1fr); }
 .sync-notice .btn { flex: none; height: 26px; padding: 0 10px; font-size: 12px; }
 .sync-notice > .notice-dismiss { position: absolute; top: 2px; right: 0; }
 .notice-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; }
@@ -429,6 +455,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Narrow content: a notice's actions take their own line under its sentence, so no button is squeezed or cut. */
 @container content (width < 880px) {
   .sync-notice > .notice-actions { flex-basis: 100%; padding-left: 22px; }
+  .sync-notice > .kind-mark ~ .notice-actions { padding-left: 42px; }
 }
 .change-removed { padding: 0 2px; border-radius: 2px; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 70%, transparent); }
 .change-added { border-radius: 2px; background: color-mix(in oklab, var(--success) 28%, transparent); }
@@ -439,7 +466,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .change-panel > .ins-diff { max-height: 240px; }
 .see-change { color: var(--accent-ink); }
 
-/* ---------- The table: skills, MCP servers and agents ---------- */
+/* ---------- The table: the Library's skills, MCP servers and agents, and a tool's tabs ---------- */
 /*
  * The name column takes the free width (and shows the description); the switch and each tool keep a steady width. On a wide
  * display an open row's details dock beside the table (.docked), so the item's actions sit with it.
@@ -1330,7 +1357,7 @@ span.ins-confirm { margin-top: 0; }
 .plugin-group-note .brand-mark { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .plugin-group-note code, .plugin-part-note code { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
 .plugin-part-note { font-size: 12px; color: var(--ink-soft); }
-/* A skill, command, agent or instruction file: the whole row opens its file, shown as the Skills page shows a skill's SKILL.md */
+/* A skill, command, agent or instruction file: the whole row opens its file, shown as the Library's Files view shows a skill's SKILL.md */
 .plugin-parts li.open { margin-bottom: 6px; }
 .plugin-file-toggle { all: unset; grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; padding: 3px 0; border-radius: 6px; cursor: pointer; }
 .plugin-file-toggle:hover { background: var(--hover); }
@@ -1909,7 +1936,7 @@ button.harness-card-main:focus-visible { outline: 0; }
 .repo-start .empty-aside { max-width: 72ch; margin: 0; padding: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 @container (max-width: 300px) { .repo-layout { grid-template-columns: minmax(0, 1fr); } .repo-layout dd { margin-bottom: 4px; } }
 
-/* ---------- A plugin's items on the Skills, MCP servers and Agents pages (matrix.ts pluginCell) ---------- */
+/* ---------- A plugin's items in the Library (matrix.ts pluginCell) ---------- */
 /* There through the plugin: filled with its glyph in the accent's tint, apart from a synced copy's green check. Its box is
    no button (sync never copies a plugin's own files), so hovering it changes nothing. */
 .cell-plugin { color: var(--accent-ink); }
@@ -1953,12 +1980,12 @@ button.harness-card-main:focus-visible { outline: 0; }
 .band-stack { display: grid; }
 .band-stack > * { grid-area: 1 / 1; }
 .band-unshown { visibility: hidden; }
-/* The usage controls at a toolbar's end (matrix.ts usageControls): short of room, "Collected" and "usage statistics" go first,
-   then the time; the button keeps its verb. */
+/* The usage controls at a toolbar's end (matrix.ts usageControls): short of room, the time and " statistics" go first, before
+   any chip folds; the button keeps "Update usage". */
 .bar-short .usage-words { display: none; }
-.bar-icons #usage-when { display: none; }
-/* Put in order, beside Sort (matrix.ts rowsHeld). */
-.order-tidy { flex: none; white-space: nowrap; }
+.bar-short #usage-when { display: none; }
+/* The waiting count folds to its mark and number with the chips (matrix.ts toolbarState). */
+.bar-icons .apply-words { display: none; }
 .details-usage { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; color: var(--ink-soft); }
 .details-usage > svg { flex: none; align-self: center; }
 .ov-switch-row > .ov-managed { justify-content: flex-start; }

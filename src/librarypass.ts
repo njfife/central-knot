@@ -27,7 +27,7 @@
 // Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved), so a mark says what a pass
 // will do, and a found row's answers from the take-in table (takeInAnswers); History entries' actions (restoreAll; restore for one),
 // decided on the copies as this look reads them now (itemsNow), each always one of the clicks above; and for the tool choice (toolchoice.ts), folders let go (forgetFolders) and what managing
-// a tool would do there, counted from the same look with it added (joinCounts). What a kind's page shows, and how the Git
+// a tool would do there, counted from the same look with it added (joinCounts). What the Library shows, and how the Git
 // repo reads it, stay with the kind (agents.ts agentsView and agentsForRepo, skills.ts skillsView and skillsForRepo, servers.ts
 // serversView and serversForRepo). History's sentences and actions for the library's entries are historyactions.ts's.
 //
@@ -148,7 +148,7 @@ export type FolderSeen = { path: string } & ({ away: true } | { ino: number; bir
 
 /**
  * What a kind must implement to be carried by the library. `Content` is what a version holds (an agent's shared part);
- * `Entry` one harness's copy as read; `D` the reading of every harness, when the kind's page needs more of it than Disk.
+ * `Entry` one harness's copy as read; `D` the reading of every harness, when the Library needs more of it than Disk.
  * Agents are the worked example (agents.ts agentKind).
  */
 export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<Entry>> {

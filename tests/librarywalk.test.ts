@@ -1,6 +1,6 @@
 // A seeded random walk over one skill ("notes") on real folders in a temp home with Claude Code, Copilot CLI, Codex and Pi,
 // with an agent on the library in the same home ("writer"; in Pi a loose file beside the skill's folder, in the same skills folder):
-// every click the Skills page and History offer
+// every click the Library and History offer
 // (tests/skillclicks.ts), edits, files added, modes changed and folders deleted by hand, copies made by hand, a copy in
 // ~/.agents/skills (which Copilot CLI and Codex read) coming and going, Take over of it, a tool's own switch set by hand and
 // cleared, Automatic sync off and on, History's days passing, a folder that can't be written during a click, a crash at

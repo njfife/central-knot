@@ -1,5 +1,5 @@
 // A seeded random walk over one agent on real files in a temp home with Claude Code, Copilot CLI, Codex and Pi (where the
-// agent is a skill, a loose file in its skills folder): every click the Agents page and History offer
+// agent is a skill, a loose file in its skills folder): every click the Library and History offer
 // (tests/agentclicks.ts), edits, copies and deletions made by hand, Automatic sync off and on, History's days passing, a
 // folder that can't be written during a click, a crash before a write or a removal, a harness uninstalled or left out, and
 // copies that can't be seen, and passes inside a settle window that is not zero. Walked twice: a plain agent, and one with

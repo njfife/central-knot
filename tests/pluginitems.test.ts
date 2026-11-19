@@ -104,7 +104,7 @@ test('a copy that can’t be read is said, and neither it nor broken records sto
 
 const fact = (key: string, copies: Partial<Record<HarnessId, true>>, extra: Partial<LibraryFacts> = {}): LibraryFacts => ({ key, name: key, description: '', copies: Object.fromEntries(Object.keys(copies).map(tool => [tool, { hash: 'h', directory: '', rootLabel: '', lines: 1, modified: '', summary: '', writable: true, folder: key }])), on: false, except: [], cannot: {}, edited: [], ...extra });
 const install = (tool: HarnessId, extra: Partial<InstalledPlugin> = {}): InstalledPlugin => ({ tool, plugin: 'issue-tracker', marketName: 'm', version: '2.0.0', listed: true, items: [{ kind: 'skill', name: 'triage', description: 'Sorts issues.' }, { kind: 'mcp', name: 'issues', description: '', runs: 'npx -y issues' }], ...extra });
-/** A home's view with these skills (as the Skills page's view gives them: types.ts LibraryFacts). */
+/** A home's view with these skills (as the Library's view gives them: types.ts LibraryFacts). */
 const homeOf = (skills: LibraryFacts[], pluginItems: InstalledPlugin[]) => ({
   skills: { tools: [], items: skills, library: {} },
   mcp: { items: [], library: {} }, agents: { items: [], library: {} }, pluginItems }) as unknown as HomeView;

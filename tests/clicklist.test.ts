@@ -48,7 +48,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh'
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
 const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, whyKindReadOnly, whyReadOnly,
-  loadHome, queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
+  loadHome, problemKey, queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
@@ -79,7 +79,7 @@ function start() {
   resetMarket();
   Object.assign(main, { sent: [], restored: [], reads: { plugins: 0, home: 0 }, answers: [], duringHomeRead: undefined });
   app.home = { home: '/home', sync: { managed: [], gate: { state: 'open' } } } as unknown as typeof app.home;
-  Object.assign(app, { page: 'plugins', outcome: undefined });
+  Object.assign(app, { page: 'plugins', outcome: undefined, libraryKind: 'all' });
   market.read.data = view;
 }
 
@@ -290,15 +290,15 @@ const refusedAsStale = (name: string): PassResult => ({ results: [{ item: name, 
 
 const failedWrite = (name: string): PassResult => ({ results: [{ item: name, harness: 'claude-cli', outcome: 'failed', message: 'Its folder couldn’t be written.' }], writes: 0 });
 
-function onSkills() {
+function onLibrary() {
   start();
   onNow.clear();
   flashRequests.clear();
-  Object.assign(app, { page: 'skills', harness: undefined });
+  Object.assign(app, { page: 'library', harness: undefined });
 }
 
 function backgroundWhileReading(t: TestContext, change: 'skills' | 'agents' | 'caught up' = 'skills') {
-  onSkills();
+  onLibrary();
   const tools = ['copilot-cli'];
   const kind = { tools, items: [], notices: [] };
   const home = { home: '/home', label: 'Practice', sync: { managed: tools, caughtUp: [], gate: { state: 'open' } },
@@ -308,7 +308,7 @@ function backgroundWhileReading(t: TestContext, change: 'skills' | 'agents' | 'c
     winner: 'copilot-cli', losers: [], orderProved: true };
   const reads = t.mock.method(api, 'refresh');
   const background: HomeView = change === 'caught up'
-    ? { ...home, sync: { ...home.sync, caughtUp: [{ item: 'bar', harness: 'copilot-cli', outcome: 'written', message: '' }] } }
+    ? { ...home, sync: { ...home.sync, caughtUp: [{ item: 'bar', harness: 'copilot-cli', outcome: 'written', message: '', of: 'skills' }] } }
     : { ...home, [change]: { ...home[change], notices: [notice] } };
   reads.mock.mockImplementationOnce(async () => background);
   reads.mock.mockImplementationOnce(async () => home, 1);
@@ -335,11 +335,12 @@ test('A deletion notice held during Delete takes the finished result’s place a
   await click;
   assert.equal(app.said.text, 'Sync changed notes.');
   assert.equal(app.outcome, undefined);
-  assert.deepEqual(app.undoMoved, { page: 'skills', label: 'Undo', items: ['bar'], notices: ['deletion'] });
+  assert.deepEqual(app.undoMoved, { page: 'library', label: 'Undo', items: ['bar'], notices: ['deletion'] });
 });
 
-test('An Agents notice leaves the Skills result and its Undo on screen', async t => {
+test('An Agents notice leaves a skill’s result and its Undo on screen where the Library shows skills only', async t => {
   backgroundWhileReading(t, 'agents');
+  app.libraryKind = 'skills';
   main.syncChanged();
   const click = applyClick({ kind: 'skills', items: ['bar'], rows: [{ kind: 'skills', key: 'bar' }], changes: [{ key: 'bar', on: true, except: [], deleted: true }], said: 'Deleted bar.' });
   await main.pass({ ...did('bar'), made: ['delete-bar'] });
@@ -384,7 +385,7 @@ for (const [change, status, notices] of [
 }
 
 test('Four switches clicked in a row: each row is drawn as clicked at once, main gets one at a time, and the header says the run once', async () => {
-  onSkills();
+  onLibrary();
   for (const name of ['a', 'b', 'c', 'd']) flip(name, false);
   assert.deepEqual(['a', 'b', 'c', 'd', 'e'].map(name => wantedOn('skills', name)), [false, false, false, false, undefined]);
   await settled();
@@ -400,7 +401,7 @@ test('Four switches clicked in a row: each row is drawn as clicked at once, main
 });
 
 test('A second click on a row whose click still waits takes it back: nothing is sent for it, and it is drawn as it was', async () => {
-  onSkills();
+  onLibrary();
   flip('a', false);
   flip('b', false);
   await settled();
@@ -411,7 +412,7 @@ test('A second click on a row whose click still waits takes it back: nothing is 
 });
 
 test('A second click on a row whose click runs is not a take-back: it runs after, from the state its row was drawn in, and is said as it left the row', async () => {
-  onSkills();
+  onLibrary();
   flip('a', false);
   await settled();
   assert.equal(takeBack('skills', 'a'), false);
@@ -423,7 +424,7 @@ test('A second click on a row whose click runs is not a take-back: it runs after
 });
 
 test('Three clicks where the second is refused: the first and third are done, and the result names the second in a problem line', async () => {
-  onSkills();
+  onLibrary();
   for (const name of ['a', 'b', 'c']) flip(name, false);
   await settled();
   await main.pass(did('a'));
@@ -433,7 +434,7 @@ test('Three clicks where the second is refused: the first and third are done, an
 });
 
 test('A click is worked out in its turn, after the home is read for the click before it', async () => {
-  onSkills();
+  onLibrary();
   const readsWhenMade: number[] = [];
   flip('a', false, () => readsWhenMade.push(main.reads.home));
   flip('b', false, () => readsWhenMade.push(main.reads.home));
@@ -444,7 +445,7 @@ test('A click is worked out in its turn, after the home is read for the click be
 });
 
 test('A click with nothing left to change in its turn (the click before it took its whole plugin with it) counts as asked: no problem line', async () => {
-  onSkills();
+  onLibrary();
   flip('a', false);
   queueClick({ kind: 'skills', key: 'b', on: false }, 'b', () => undefined, () => false);
   await settled();
@@ -453,7 +454,7 @@ test('A click with nothing left to change in its turn (the click before it took 
 });
 
 test('A click soon after the run’s last click ended joins the run; once its × ends it, the next click starts a new run', async () => {
-  onSkills();
+  onLibrary();
   flip('a', false);
   await settled();
   await main.pass(did('a'));
@@ -469,7 +470,7 @@ test('A click soon after the run’s last click ended joins the run; once its ×
 });
 
 test('Each row is said as the run left it: a row a later click turned back on is said on', async () => {
-  onSkills();
+  onLibrary();
   flip('a', false);
   flip('b', false);
   await settled();
@@ -481,7 +482,7 @@ test('Each row is said as the run left it: a row a later click turned back on is
 });
 
 test('A click that failed is said as failed, not counted among those done', async () => {
-  onSkills();
+  onLibrary();
   for (const name of ['a', 'b', 'c']) flip(name, false);
   await settled();
   await main.pass(did('a'));
@@ -491,7 +492,7 @@ test('A click that failed is said as failed, not counted among those done', asyn
 });
 
 test('A run made on one tool’s page is said there only: on another tool’s page, the status bar says it, and no row there flashes', async () => {
-  onSkills();
+  onLibrary();
   Object.assign(app, { page: 'harnesses', harness: 'claude-cli' });
   flip('a', false);
   await settled();
@@ -507,14 +508,14 @@ test('A run made on one tool’s page is said there only: on another tool’s pa
   assert.equal(app.outcome?.text, 'b is off.');
 });
 
-test('A skill and an agent both named review are clicked apart: the agent’s click on Codex’s Agents tab waits; on Skills, review’s switch takes nothing back', async () => {
-  onSkills();
+test('A skill and an agent both named review are clicked apart: the agent’s click on Codex’s Agents tab waits; on the Library, review’s switch takes nothing back', async () => {
+  onLibrary();
   Object.assign(app, { page: 'harnesses', harness: 'codex-cli', harnessTab: 'agents' });
   flip('a', false, undefined, 'agents');
   flip('review', false, undefined, 'agents');
   await settled();
-  // To Skills before the agent's click runs: the skill's switch is a click of its own, not a take-back of the agent's.
-  showPage('skills');
+  // To the Library before the agent's click runs: the skill's switch is a click of its own, not a take-back of the agent's.
+  showPage('library');
   assert.equal(takeBack('skills', 'review'), false);
   flip('review', false);
   assert.deepEqual([wantedOn('agents', 'review'), wantedOn('skills', 'review')], [false, false]);
@@ -522,7 +523,7 @@ test('A skill and an agent both named review are clicked apart: the agent’s cl
   await main.pass(did('review', false, 'agents'));
   await main.pass(did('review'));
   assert.deepEqual(main.sent, ['agent a off', 'agent review off', 'review off, seen on']);
-  // The skill's row flashes on Skills; the agent's click was made on another page, said in the status bar, and flashes no row.
+  // The skill's row flashes on the Library; the agent's click was made on another page, said in the status bar, and flashes no row.
   assert.deepEqual([app.outcome?.text, flashRequests.has('skills-review'), flashRequests.has('agents-review')], ['review is off.', true, false]);
   // Back on Codex's Agents tab, an agent's click said there flashes the agent's row, not a skill's of its name.
   closeResult();
@@ -534,7 +535,7 @@ test('A skill and an agent both named review are clicked apart: the agent’s cl
 });
 
 test('A click on Codex’s Agents tab that ends while Codex’s Skills tab is open is said in the status bar only: that header is the skills’', async () => {
-  onSkills();
+  onLibrary();
   app.home!.sync.managed = ['codex-cli'];
   Object.assign(app, { page: 'harnesses', harness: 'codex-cli', harnessTab: 'agents' });
   flip('release-notes', false, undefined, 'agents');
@@ -547,7 +548,7 @@ test('A click on Codex’s Agents tab that ends while Codex’s Skills tab is op
 });
 
 test('A plugin’s skill named like your own: its switch’s click, and its Undo, ask for the plugin’s row’s flash, never your own’s', async t => {
-  onSkills();
+  onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'release-notes' }]);
   const key = 'issue-tracker@team/release-notes', theirs = `skills-${key}`;
   queueClick({ kind: 'skills', key, on: false }, 'release-notes', () => ({ kind: 'skills', items: ['release-notes'], rows: [{ kind: 'skills', key }], changes: [{ key: 'release-notes', on: false, except: [] }], said: 'release-notes is off in Claude Code.' }), () => false);
@@ -585,27 +586,27 @@ const offMade = (kind: PageKind, name: string): PassResult => ({ ...did(name, fa
 /** A row of `kind` as the page draws it, On, in the tools named. */
 const itemRow = (kind: PageKind, name: string, copies: Record<string, string> = { 'claude-cli': `${name}-1` }) => ({ kind, key: name, name, description: '', copies, on: true, except: [] });
 
-test('Turn these off clicked on Skills, then Agents opened before it is done: its result and its Undo stay Skills’', async t => {
-  onSkills();
+test('Turn these off clicked on the Library, then History opened before it is done: its result and its Undo stay the Library’s', async t => {
+  onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
   turnTheseOff([itemRow('skills', 'notes')]);
   await settled();
-  showPage('agents');
+  showPage('history');
   app.home!.skills.library.notes!.on = false;
   await main.pass(offMade('skills', 'notes'));
-  // Its result names the page it was clicked on, so Agents' header shows neither it nor its Undo (matrix.ts outcomeShown).
-  assert.deepEqual([app.outcome?.page, app.outcome?.act?.label], ['skills', 'Undo']);
+  // Its result names the page it was clicked on, so History's header shows neither it nor its Undo (matrix.ts outcomeShown).
+  assert.deepEqual([app.outcome?.page, app.outcome?.act?.label], ['library', 'Undo']);
 });
 
 test('Turn these off where one skill’s Off is refused as stale: the result counts, names and flashes the one it turned off, and its Undo is about that one alone', async t => {
-  onSkills();
+  onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'spare' }], { on: true });
   turnTheseOff([itemRow('skills', 'notes'), itemRow('skills', 'spare')]);
   await settled();
   app.home!.skills.library.notes!.on = false;
   await main.pass({ results: [...did('notes').results, ...refusedAsStale('spare').results], writes: 1, made: ['off-skills-notes'] });
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, flashRequests.has('skills-notes'), flashRequests.has('skills-spare')],
-    ['Turned off 1 skill with no use seen in the last 30 days: notes. Central Knot keeps them, and turning one on puts it back as it was.',
+    ['Turned off 1 skill with no use seen in the last 30 days: notes. Central Knot keeps it, and turning it on puts it back as it was.',
       ['spare changed since the page was read. Nothing was changed; read again.'], true, false]);
   // The result kept is about notes alone too: its names and rows, which a notice that moves its Undo reads (app.ts undoMoved).
   assert.deepEqual([app.outcome?.items, app.outcome?.rows], [['notes'], [{ kind: 'skills', key: 'notes', name: 'notes' }]]);
@@ -616,7 +617,7 @@ test('Turn these off where one skill’s Off is refused as stale: the result cou
 });
 
 test('An Undo across kinds whose plugin switch can’t be turned back and whose agent’s entry is stopped names nothing as before', async t => {
-  onSkills();
+  onLibrary();
   homeWith(t, [{ kind: 'agents', key: 'review' }]);
   // A plugin's skill switched off in Claude Code; its Undo, turning it back on there, fails.
   let calls = 0;
@@ -632,21 +633,21 @@ test('An Undo across kinds whose plugin switch can’t be turned back and whose 
   assert.deepEqual([app.outcome?.text, app.outcome?.warn], ['Not all of it could be undone.', true]);
 });
 
-test('An Undo started on Skills, then Agents opened before it is done: its confirmation stays Skills’', async t => {
-  onSkills();
+test('An Undo started on the Library, then History opened before it is done: its confirmation stays the Library’s', async t => {
+  onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }]);
   flip('notes', false);
   await settled();
   await main.pass(offMade('skills', 'notes'));
   app.outcome!.act!.run();
-  showPage('agents');
+  showPage('history');
   await settled();
-  // Its result names the page it was started on (app.ts busy), so Agents' header doesn't show it (matrix.ts outcomeShown).
-  assert.deepEqual([main.restored, app.outcome?.text, app.outcome?.page], [['off-skills-notes'], 'Undone: notes is as before.', 'skills']);
+  // Its result names the page it was started on (app.ts busy), so History's header doesn't show it (matrix.ts outcomeShown).
+  assert.deepEqual([main.restored, app.outcome?.text, app.outcome?.page], [['off-skills-notes'], 'Undone: notes is as before.', 'library']);
 });
 
 test('Turn these off where every kind refuses: nothing is turned off, and the result says each kind by its name with its reason', async t => {
-  onSkills();
+  onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'mcp', key: 'github' }], { on: true });
   turnTheseOff([itemRow('skills', 'notes'), itemRow('mcp', 'github')]);
   await settled();
@@ -657,7 +658,7 @@ test('Turn these off where every kind refuses: nothing is turned off, and the re
 });
 
 test('An Undo one of whose History entries is gone says not all of it could be undone, and puts back the rest', async t => {
-  onSkills();
+  onLibrary();
   const history = homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'spare' }]);
   flip('notes', false);
   flip('spare', false);
@@ -674,9 +675,9 @@ test('An Undo one of whose History entries is gone says not all of it could be u
 });
 
 test('A skill and an agent both named review, and a server, switched on one page: one run, three counted, each review with its kind, each row flashed, and one Undo puts back all three, newest first', async t => {
-  onSkills();
+  onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'review' }, { kind: 'agents', key: 'review' }, { kind: 'mcp', key: 'github' }]);
-  // Three kinds clicked where the page is one place (the Library will be): one run, whatever each row's kind.
+  // Three kinds clicked on the Library, one place whatever its segment: one run, whatever each row's kind.
   flip('review', false);
   flip('review', false, undefined, 'agents');
   flip('github', false, undefined, 'mcp');
@@ -688,6 +689,8 @@ test('A skill and an agent both named review, and a server, switched on one page
   await main.pass(offMade('mcp', 'github'));
   assert.deepEqual(main.sent, ['review off, seen on', 'agent review off', 'server github off']);
   assert.equal(app.outcome?.text, '3 items are off: review (skill), review (agent) and github.');
+  // The names it says, which a moved Undo says too (undoMoved), each review with its kind.
+  assert.deepEqual(app.outcome?.items, ['review (skill)', 'review (agent)', 'github']);
   assert.deepEqual(['skills-review', 'agents-review', 'mcp-github'].map(id => flashRequests.has(id)), [true, true, true]);
   // Each kind's last result, which its problem lines are read from, holds its own clicks' results alone.
   assert.deepEqual((['skills', 'agents', 'mcp'] as const).map(kind => lastResult(kind)?.results.map(entry => entry.item)), [['review'], ['review'], ['github']]);
@@ -700,7 +703,7 @@ test('A skill and an agent both named review, and a server, switched on one page
 });
 
 test('Turn these off across kinds, from the No use seen chip: a skill only some tools have is turned off, an agent a plugin also brings is left to its row, a server whose record is damaged is skipped and named, and the agents after it go on; Undo puts back what went', async t => {
-  onSkills();
+  onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'mcp', key: 'github' }, { kind: 'agents', key: 'planner' }, { kind: 'agents', key: 'reviewer', plugin: true }], { stopped: 'mcp', on: true });
   const notes = itemRow('skills', 'notes'), github = itemRow('mcp', 'github', { 'claude-cli': 'github-1', 'codex-cli': 'github-1' });
   const planner = itemRow('agents', 'planner', { 'claude-cli': 'planner-1', 'codex-cli': 'planner-1' }), reviewer = itemRow('agents', 'reviewer');
@@ -728,7 +731,7 @@ test('Turn these off across kinds, from the No use seen chip: a skill only some 
 });
 
 test('An Undo across kinds whose agent’s entry is stopped: the agents’ entries before it are left, the skill’s and the server’s still go back, and it says so, the stop led by its kind', async t => {
-  onSkills();
+  onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'review' }, { kind: 'agents', key: 'review' }, { kind: 'agents', key: 'notes' }, { kind: 'mcp', key: 'github' }]);
   const stop = 'The agents record is damaged. Nothing was written or deleted.';
   t.mock.method(api, 'restore', async (id: string) => { main.restored.push(id); return id === 'off-agents-notes' ? { stopped: stop, results: [] } : { results: [] }; });
@@ -758,7 +761,7 @@ test('A notice’s ask to flash a row lapses after its time, and a fresh ask the
 test('A click 8 seconds after the run’s last click ended starts a new run, though a result with a problem line still shows', async () => {
   mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   try {
-    onSkills();
+    onLibrary();
     flip('a', false);
     await settled();
     await main.pass(refusedAsStale('a'));
@@ -772,7 +775,7 @@ test('A click 8 seconds after the run’s last click ended starts a new run, tho
 });
 
 test('× ends the run: its clicks still waiting go on as a run of their own, whose result names only them', async () => {
-  onSkills();
+  onLibrary();
   for (const name of ['a', 'b', 'c']) flip(name, false);
   await settled();
   await main.pass(did('a'));
@@ -785,10 +788,10 @@ test('× ends the run: its clicks still waiting go on as a run of their own, who
 });
 
 test('A run left for another page: its result is said in the status bar, never in the header of the page open', async () => {
-  onSkills();
+  onLibrary();
   flip('a', false);
   await settled();
-  showPage('mcp');
+  showPage('history');
   await main.pass(did('a'));
   assert.deepEqual([app.outcome, app.said.text], [undefined, 'a is off.']);
 });
@@ -796,7 +799,7 @@ test('A run left for another page: its result is said in the status bar, never i
 test('A result with no problem goes 8 seconds after the run’s last click has finished; one with a problem line stays', async () => {
   mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   try {
-    onSkills();
+    onLibrary();
     flip('a', false);
     flip('b', false);
     await settled();
@@ -820,7 +823,7 @@ test('A result with no problem goes 8 seconds after the run’s last click has f
 test('A result whose time runs out while a later click runs stays, and that click joins its run', async () => {
   mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   try {
-    onSkills();
+    onLibrary();
     flip('a', false);
     await settled();
     await main.pass(did('a'));
@@ -890,9 +893,14 @@ test('× on the run’s result closes its problem lines too', async () => {
   assert.deepEqual([lastLines(), market.problem], [[], undefined]);
 });
 
-test('× on an item page’s result closes what its click could not do too', () => {
+test('A background problem closed with its × is remembered by its kind too: a skill’s and an agent’s of one name and reason are two', () => {
+  const failed = { item: 'review', harness: 'claude-cli', outcome: 'failed', message: 'Could not write.' } as const;
+  assert.notEqual(problemKey({ ...failed, of: 'skills' }), problemKey({ ...failed, of: 'agents' }));
+});
+
+test('× on an item list’s result closes what its click could not do too', () => {
   start();
-  app.outcome = { page: 'mcp', text: 'docs is on in Claude Code.' } as typeof app.outcome;
+  app.outcome = { page: 'library', text: 'docs is on in Claude Code.' } as typeof app.outcome;
   app.mcpResult = { results: [{ item: 'docs', harness: 'codex-cli', outcome: 'failed', message: 'Could not write.' }], writes: 0 } as unknown as typeof app.mcpResult;
   closeResult();
   assert.deepEqual([app.outcome, app.mcpResult], [undefined, undefined]);

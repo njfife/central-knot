@@ -1,14 +1,19 @@
 // Back and Forward in this window: the destination drawn, its visits, and the existing page actions that reopen it.
 // app.ts placeNow is narrower: it names the table where an action's result belongs.
-import { absentKinds, filesSkillAvailable, harnessManaged, harnessTabShown, takeMove, machine, noToolManaged, rerender, showPage, showSkillsTable, state } from './app.ts';
+import { absentKinds, filesSkillAvailable, harnessManaged, harnessTabShown, leaveFiles, takeMove, machine, noToolManaged, rerender, showPage, state } from './app.ts';
 import { goHarness } from './harnesspage.ts';
 import { openFiles } from './matrix.ts';
 import { heldBy } from './otherbuildview.ts';
+import { heldKinds } from './presence.ts';
 import { browse, current, listedMarket, market } from './pluginstate.ts';
 import { emptyVisits, placeKey, recordPlace, travel, type Place } from './visits.ts';
 
+/**
+ * The place drawn: the page; under Harnesses the tool and its tab; on the plugins' page the marketplace, its tab and a plugin's
+ * page; on the Library a skill's Files view. The Library's kind switch is not part of a place: changing the segment is no visit.
+ */
 export function fullPlace(): Place {
-  const { page, harness, skillsView, item } = state;
+  const { page, harness, libraryView, item } = state;
   const tab = harnessTabShown();
   if (tab) return { page, tool: harness, tab };
   if (page === 'plugins') {
@@ -16,8 +21,7 @@ export function fullPlace(): Place {
     const entry = marketName ? undefined : current()?.entry;
     if (entry || marketName || !market.view) return { page, source: entry?.source ?? source, marketName, marketTab: plugin ? 'plugins' : tab, plugin };
   }
-  // When Library replaces Skills, change this 'skills' literal, available and goToPlace.
-  if (page === 'skills' && skillsView === 'files' && state.home?.skills.items.length && item) return { page, skill: item };
+  if (page === 'library' && libraryView === 'files' && state.home && item && filesSkillAvailable(state.home, item)) return { page, skill: item };
   return { page };
 }
 
@@ -35,7 +39,9 @@ export function recordDraw() {
 
 function available(p: Place): Place {
   const home = state.home!;
-  if (absentKinds().some(kind => kind === p.page) || (p.page === 'profiles' && noToolManaged())) return { page: 'overview' };
+  // A page no tool here holds (the Library with no kind held, the plugins' page with no tool that takes plugins), or Profiles with no tool managed.
+  const gone = p.page === 'library' ? !heldKinds(home).length : absentKinds().some(kind => kind === p.page);
+  if (gone || (p.page === 'profiles' && noToolManaged())) return { page: 'overview' };
   if (p.tool && !harnessManaged(home, p.tool)) return { page: p.page };
   if (p.skill && !filesSkillAvailable(home, p.skill)) return { page: p.page };
   if (p.page === 'plugins' && market.view) {
@@ -56,7 +62,7 @@ function goToPlace(p: Place) {
   if (p.page === 'harnesses') {
     if (p.tool !== state.harness || (p.tool && p.tab !== state.harnessTab)) goHarness(p.tool, p.tab);
   } else if (p.skill) openFiles(p.skill);
-  else if (state.skillsView === 'files') showSkillsTable();
+  else if (state.libraryView === 'files') leaveFiles();
 }
 
 function traverse(step: number) {

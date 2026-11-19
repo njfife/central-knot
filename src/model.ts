@@ -4,6 +4,7 @@
 // the notices a view set aside brought, carried into the next view (withSetAside), and grouping.
 // Pure: no DOM, no files. Tools' and kinds' names and lists in words are words.ts's.
 import type { HarnessId, HistoryDays, HomeView, OtherBuild, Snapshot, SyncNotice } from './types.ts';
+import { rowNames } from './words.ts';
 
 const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc' };
 export { toolName } from './words.ts';
@@ -29,13 +30,15 @@ export const QUIT_WAIT_MS = 20_000;
 export const noticeNames = (notice: SyncNotice) => (notice.kind === 'taken-in' ? notice.items : [notice.item]);
 /**
  * What the Caught up band names (matrix.ts caughtUpBand): the items of every kind the passes since the last read wrote where
- * they were missing (types.ts SyncView caughtUp), and the tools they were written to, leaving out an item a sync notice on any
- * kind's page already tells.
+ * they were missing (types.ts SyncView caughtUp), and the tools they were written to, leaving out an item a sync notice of its own
+ * kind already tells.
  */
 export function caughtUpNames(view: Pick<HomeView, 'sync' | 'skills' | 'mcp' | 'agents'>): { items: string[]; tools: HarnessId[] } {
-  const told = new Set([view.skills, view.mcp, view.agents].flatMap(kind => kind.notices.flatMap(noticeNames)));
-  const written = view.sync.caughtUp.filter(result => result.outcome === 'written' && !told.has(result.item));
-  return { items: [...new Set(written.map(result => result.item))], tools: [...new Set(written.flatMap(result => (result.harness ? [result.harness] : [])))] };
+  // By kind and name (DestinationResult of): a skill's notice doesn't tell an agent of its name, and the two are named apart.
+  const told = new Set((['skills', 'mcp', 'agents'] as const).flatMap(kind => view[kind].notices.flatMap(noticeNames).map(name => `${kind}:${name}`)));
+  const written = view.sync.caughtUp.flatMap(result => (result.outcome === 'written' && result.of && !told.has(`${result.of}:${result.item}`) ? [{ ...result, of: result.of }] : []));
+  const rows = [...new Map(written.map(result => [`${result.of}:${result.item}`, { kind: result.of, name: result.item }])).values()];
+  return { items: rowNames(rows), tools: [...new Set(written.flatMap(result => (result.harness ? [result.harness] : [])))] };
 }
 /**
  * A view the page set aside (it arrived while an action ran) gave main's pending notices and caught-up results to the page,

@@ -206,7 +206,7 @@ const pluginsPageSays = (install: InstalledPlugin) => {
   const view: PluginsView = { home: '/h', tools: [install.tool], clis: { [install.tool]: true }, canWrite: true, marketplaces: [entry] };
   return toolMark(view, entry, 'full', install.tool, owedTo({ on: true, except: [] }, install.tool, { has: 'whole', route: 'whole' }, [install.tool])).words;
 };
-/** What the Skills page says of a library item that is Off (Pi and OpenCode hold the plugin's items as the library's), given where a plugin still has it on. */
+/** What the Library says of a library item that is Off (Pi and OpenCode hold the plugin's items as the library's), given where a plugin still has it on. */
 const offRowSays = (name: string, pluginOn: HarnessId[]) => statusLine({ key: name, name, pluginOn }, { ...newItem(name, name), on: false }, ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']);
 
 test('a main switch turns a plugin’s skill off in every tool that has it, the whole plugin in Claude Code, which has no switch for one skill; On again turns it all back', () => {

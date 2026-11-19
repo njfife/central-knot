@@ -1,7 +1,7 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
 // state (`state`), the page shown (showPage), what is said after a click (tell, announce) and when a result goes by itself
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
-// item page sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
+// item list sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
 // (applyByKind) or in its turn in the page's list (queueClick), its result kept for the page (lastResult), a run's said once
 // (sayRun), an Undo's kind by kind (undoClick); History's actions (restoreEvent); the reads of
 // the home (loadHome, readAgain, readHomeOnce), usage collected when a home opens and on Update (collectUsage), and the Sync
@@ -26,7 +26,7 @@ import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
 import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
-import { andList, fewNames, fileName, kindNames, kindNouns, noToolsSentence, orList, rowNames, rowNouns, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
+import { andList, fewNames, fileName, kindNames, kindNouns, noToolsSentence, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { endListNews, fadeRun, loadPlugins, resetMarket } from './pluginstate.ts';
@@ -36,20 +36,20 @@ import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
-import { holdOrder, resultInHeader, noticeLinesOnPage } from './matrix.ts';
+import { holdOrder, kindsShown, resultInHeader, noticeLinesOnPage } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-/** Every page, in the sidebar's order. */
-export const pages = ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings'] as const;
+/** Every page, in the sidebar's order. The Library lists every kind of item (matrix.ts libraryTable), its segment `state.libraryKind`. */
+export const pages = ['overview', 'harnesses', 'library', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings'] as const;
 export type Page = typeof pages[number];
 
 /** This computer's names, and what its platform offers (machine.ts). */
 export const machine = machineNames(pagePlatform(navigator.userAgent));
 export const { home: realHomeName, machine: thisMachine, tray: trayPlace } = machine;
 
-/** The kinds of item the tables manage. */
+/** The kinds of item the tables manage: the Library's segments, and a tool's tabs of them under Harnesses. */
 export type PageKind = 'skills' | 'mcp' | 'agents';
 export const KINDS: PageKind[] = ['skills', 'mcp', 'agents'];
 export const isKind = (tab: string | undefined): tab is PageKind => (KINDS as (string | undefined)[]).includes(tab);
@@ -99,7 +99,7 @@ export const state = {
   /** The home last asked for, so Try again retries that one. */
   lastMode: undefined as HomeMode | undefined,
   find: '',
-  /** The skill shown in the Skills detail. */
+  /** The skill shown in the Library's Files view. */
   item: undefined as string | undefined,
   busy: undefined as string | undefined,
   /** What the last click on MCP servers did. */
@@ -111,8 +111,13 @@ export const state = {
   historyDays: undefined as HistoryDays | undefined,
   /** What the last click on skills did, shown until the next action or read. */
   skillsResult: undefined as PassResult | undefined,
-  /** The Skills page: the table, or one skill's files and contents beside the list. */
-  skillsView: 'table' as 'table' | 'files',
+  /** The Library: its list, or one skill's files and contents beside a list of the skills (its Files view). */
+  libraryView: 'list' as 'list' | 'files',
+  /**
+   * The Library's segment: every kind, or one (its kind switch, matrix.ts kindSwitch). All at launch; kept while the window is
+   * open, across pages and homes, never stored; one with no segment in the open home is shown as All (matrix.ts segmentKinds).
+   */
+  libraryKind: 'all' as PageKind | 'all',
   /** Counts moves to another page, so what belongs to one visit (an armed Delete) can tell it has ended. */
   visit: 0,
   /**
@@ -122,11 +127,11 @@ export const state = {
   said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void } },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
-  /** The result whose problem lines are shown whole (Show all: matrix.ts problemLines): an item page's outcome, kept result or first background problem; Plugins' run or problem. */
+  /** The result whose problem lines are shown whole (Show all: matrix.ts problemLines): an item list's outcome, kept result or first background problem; Plugins' run or problem. */
   shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | undefined,
   /** What the tools' session history shows was used (usage.ts), for this home: collected when it opens and on Update usage statistics (collectUsage). */
   usage: pageData<UsageReading>(),
-  /** Whether the usage band shows above an item page's list (matrix.ts usageBand): opened by Update usage statistics and by a reading that fails, closed by its close button and when a home opens. */
+  /** Whether the usage band shows above the Library's list (matrix.ts usageBand): opened by Update usage statistics and by a reading that fails, closed by its close button and when a home opens. */
   usageBand: false,
   /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
   instructions: pageData<InstructionFile[]>(),
@@ -301,7 +306,7 @@ export const focusWhenDone = (id: string) => { focusAfterBusy = id; };
  * toggle take the reason as `disabled`): Refresh, Automatic sync, Turn these off, Resume, an opened row's controls, History's
  * actions, Profiles, the sources page (words.ts pageNames), Instructions, the Git repo, a tool's Manage switch, first setup's
  * choices, Settings' Synchronize everything, the Plugins page's other actions and the other-build screen. A row's switch or Add
- * (the item pages and Plugins) joins the list instead; Settings' own switches, which write the app's settings, stay on.
+ * (the item lists and Plugins) joins the list instead; Settings' own switches, which write the app's settings, stay on.
  * showActing marks body[data-busy] for the end-to-end checks and says held news when acting ends, before the finished draw.
  */
 export const acting = (): string | undefined => state.busy || (clickList.running ? 'Waits until the switches clicked are done.' : undefined);
@@ -362,8 +367,9 @@ export async function busy(message: string, work: (page: Page) => Promise<void>)
  */
 function accept(view: HomeView): HomeView {
   state.home = undefined;
-  state.skillsResult = undefined;
-  state.item = undefined;
+  // The last results, and the rows pinned where they were, are the last home's.
+  Object.assign(state, { skillsResult: undefined, mcpResult: undefined, agentsResult: undefined, item: undefined });
+  unpin();
   // A harness page belongs to the home it was opened in.
   state.harness = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
@@ -428,7 +434,7 @@ export const askFlash = (id: string, until: number) => { if (!((flashRequests.ge
 // ---------- One switch per item ----------
 
 /**
- * One click on an item page: the changes it makes, the item names it concerns, and what the result says it did. A click is one
+ * One click on an item list: the changes it makes, the item names it concerns, and what the result says it did. A click is one
  * kind's: `kind` is the engine its changes are sent to, and each of `rows` is of it, both made from the same row(s) where it
  * names any (Turn these off makes one click per kind: matrix.ts turnTheseOff); `items` names its `rows`, in their order.
  */
@@ -466,18 +472,18 @@ export interface Click {
   undone?: string;
 }
 
-/** Each item page's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
+/** Each kind's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
 const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, home: string) => Promise<PassResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
   skills: { send: (...args) => api().applySkills(...args), keep: (results, notices) => { state.skillsResult = { results, writes: 0, notices }; } },
   mcp: { send: (...args) => api().applyServers(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
   agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
 };
-/** Each item page's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, listNotices). */
+/** Each kind's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, listNotices). */
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
 
 /**
  * Whether a click in this home is a Resume: the page shows it waiting for one (share.ts libraryGate `resume`). Sent with the
- * clicks that resume such a home, as Resume itself does: an item page's clicks (first setup's walkthrough's too), a tool's
+ * clicks that resume such a home, as Resume itself does: an item list's clicks (first setup's walkthrough's too), a tool's
  * Manage switch, Take over and Clear the switch. History's actions, a profile switch and Synchronize
  * everything's switch send nothing, and are refused there until Resume.
  */
@@ -571,16 +577,9 @@ function sayDone(done: Done, click: Click) {
 }
 
 /**
- * Why parts of one result were not done, each reason once; where the result spans several kinds, each led by the kinds it
- * stopped ("MCP servers: The MCP record is damaged. …"), as a bulk Off's and its Undo's are said.
- */
-const stopsSaid = (stops: [PageKind, string][], several: boolean) => [...groupBy(stops, ([, reason]) => reason)]
-  .map(([reason, of]) => (several ? `${sentence(andList(of.map(([kind]) => kindNouns[kind].many)))}: ${reason}` : reason));
-
-/**
  * One click over rows of several kinds (Turn these off: matrix.ts turnTheseOff): `clicks`, one per kind, carried out kind by
  * kind in turn under one busy, each through its kind's engine (carryOut). A kind's click refused whole (its own record stops its
- * writes, say) is skipped, and said as a problem line (stopsSaid); the others go on. Its result belongs to the page it was clicked
+ * writes, say) is skipped, and said as a problem line (words.ts saidByKind); the others go on. Its result belongs to the page it was clicked
  * on (busy). `said`: what was done, given the rows that changed (a row whose own change was refused, a stale one, is none: Done
  * changed) and the tools their words can't claim; with none changed, the refusals are its words. Its result names the rows that
  * changed, and only they flash; one Undo, only when every click that changed something has one, puts them back (undoClick).
@@ -589,11 +588,11 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], notIn: 
   const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
   for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
-  const stops = stopsSaid(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
+  const stops = saidByKind(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
   const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])), regroups = clicks.some(click => click.regroups);
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups }, undos) : undefined;
   for (const { done } of parts) if (done.kept) kindPages[done.kept.kind].keep(done.kept.results, done.kept.notices);
-  tell({ page, items: changed.map(row => row.name), rows: changed, band: true, warn: parts.some(part => part.done.outcome.warn),
+  tell({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
     text: changed.length || !stops.length ? said(changed, went.flatMap(part => part.done.notIn ?? [])) : stops.join(' '),
     reasons: [...(changed.length ? stops : []), ...went.flatMap(part => part.done.outcome.reasons ?? [])],
     act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything this did', run: undo } });
@@ -602,20 +601,21 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], notIn: 
 });
 
 /**
- * An item page's click in the page's list (clicklist.ts): its row's name, the page it was made on (its run's place says which
+ * An item list's click in the page's list (clicklist.ts): its row's name, the page it was made on (its run's place says which
  * table there: placeNow), whether its row is On now (`isOn`, read from the view), and once carried out, what it did.
  */
 interface ItemTurn extends Turn { row: NonNullable<Turn['row']>; name: string; page: Page; isOn: () => boolean | undefined; done?: Done }
 const isItemTurn = (turn: Turn): turn is ItemTurn => 'isOn' in turn;
 /**
  * Where the page is now, as a run names its place: the page, and on Harnesses the tool whose page is open and the kind its tab
- * shows (each tab has a header of its own). A row's click is made on the table on screen, so its place is this when it is made.
+ * shows (each tab has a header of its own). The Library is one place for every kind, whatever its kind switch shows: clicks on a
+ * skill, a server and an agent there are one run with one result and one Undo, and the segment changed mid-run changes nothing. A row's click is made on the table on screen, so its place is this when it is made.
  */
 export const placeNow = () => (state.page === 'harnesses' ? `harnesses ${state.harness ?? ''} ${harnessKindShown() ?? ''}` : state.page);
 const itemTurns = (run: Run) => clickList.turns.filter((turn): turn is ItemTurn => isItemTurn(turn) && turn.run === run);
 
 /**
- * A row's switch or Add on an item page (matrix.ts flip, pluginRowSwitch): its click joins the page's list and is carried out in
+ * A row's switch or Add on an item list (matrix.ts flip, pluginRowSwitch): its click joins the page's list and is carried out in
  * its turn, worked out then from the view as it is (`make`; none when nothing is left to change), so the page stays live
  * meanwhile. Its row is drawn in the state it asks for at once (clicklist.ts wantedOn). It joins the run on its table's place, or
  * starts one (clicklist.ts runAt); the run's clicks are said as one result (sayRun).
@@ -667,7 +667,7 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   const along = did.flatMap(turn => (turn.done!.along ? [`${rowNames([named(turn)], among)[0]}: ${turn.done!.along.replace(/^./, first => first.toLowerCase())}`] : []));
   const undos = did.flatMap(turn => (turn.done!.undo ? [turn.done!.undo] : [])).reverse();
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: did.map(named) }, undos) : undefined;
-  return { page: turns[0]!.page, items: turns.map(turn => turn.name), rows: turns.map(turn => turn.row), band: true, warn: ended.some(turn => turn.done!.outcome.warn),
+  return { page: turns[0]!.page, items: rowNames(among), rows: turns.map(turn => turn.row), band: true, warn: ended.some(turn => turn.done!.outcome.warn),
     reasons: ended.flatMap(turn => (asked.includes(turn) ? [] : [turn.done!.outcome.text]).concat(turn.done!.outcome.reasons ?? [])),
     text: [`${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along].join(' '), act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything these clicks did', run: undo } };
 }
@@ -687,7 +687,7 @@ interface Undoable { kind: PageKind; made: string[]; back: PluginOp[] }
 /**
  * Undo of one click, or of several as one (a run, Turn these off): their plugin items' switches first, then every History entry
  * they made, newest first, each by its own action (historyactions.ts). An entry History no longer holds, or one whose Undo is
- * stopped (its kind's record, say), is said once as a problem line (stopsSaid: led by its kind where the Undo spans several), and
+ * stopped (its kind's record, say), is said once as a problem line (words.ts saidByKind: led by its kind where the Undo spans several), and
  * the later entries of a stopped kind are left; the other kinds' still go back, and the result names them. Each kind's last result
  * becomes what its own entries' Undo did.
  */
@@ -712,7 +712,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   for (const [kind, kept] of results) kindPages[kind].keep(kept, []);
   const missing = [...groupBy(gone, ([, kind]) => kind)].map(([kind, of]): [PageKind, string] =>
     [kind, `${plural(of.length, 'History entry', 'History entries')} it was to put back ${of.length === 1 ? 'is' : 'are'} no longer in History.`]);
-  const reasons = [...stopsSaid([...stops, ...missing], several), ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
+  const reasons = [...saidByKind([...stops, ...missing], several), ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
   // What did go back, where some of it didn't: the rows of the kinds whose entries all went back as they were, and whose plugin
   // switches, if they had any to turn back, all went back too.
   const short = new Set([...stops.keys(), ...gone.map(([, kind]) => kind)]), names = (rows: NamedRow[]) => [...new Set(rowNames(rows, about.rows))];
@@ -730,7 +730,7 @@ const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [ran.st
 /** A click's reasons (Outcome) from its plugin switches' run: what it couldn't do, then `also`, what the click left as it is. */
 const switchReasons = (ran: Awaited<ReturnType<typeof runSwitches>> | undefined, also?: string) => [ran ? switchProblems(ran) : '', also ?? ''].filter(Boolean);
 /** The key under which a background pass's problem the person closed is remembered (state.dismissed). */
-export const problemKey = (entry: DestinationResult) => `problem:${entry.item}:${entry.harness ?? ''}:${entry.message}`;
+export const problemKey = (entry: DestinationResult) => `problem:${entry.of ?? ''}:${entry.item}:${entry.harness ?? ''}:${entry.message}`;
 
 /**
  * Runs plugin switch choices (pluginswitch.ts) with each tool's own switch. A plugin that failed to come on leaves no item
@@ -868,14 +868,14 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
   return Promise.resolve();
 }
 
-/** When the open page's kind is no longer in this home (its last tool went), the Overview opens instead. */
+/** When the open page's kind is no longer in this home (its last tool went; the Library's, every kind it lists), the Overview opens instead. */
 function leaveAbsentPage() {
-  const gone = absentKinds().find(kind => kind === state.page);
-  if (!gone) return;
+  const gone = state.page === 'library' ? (state.home && !heldKinds(state.home).length ? KINDS : []) : absentKinds().filter(kind => kind === state.page);
+  if (!gone.length) return;
   // What the status bar said (a Refresh's summary, say) stays, with the reason the page moved.
   const said = state.said.text;
   showPage('overview', { repair: true });
-  announce(`${said ? `${said} ` : ''}No tool here holds ${kindNames[gone]} now.`);
+  announce(`${said ? `${said} ` : ''}No tool here holds ${andList(gone.map(kind => kindNames[kind]))} now.`);
 }
 
 /** The tools Central Knot manages in the open home, as the main process decided them from the same read (presence.ts): every page but Harnesses names only these. */
@@ -903,7 +903,7 @@ export const homeToolNames = (): string[] => homeTools().map(toolName);
 /** The tools an action touched (ids), as a sentence names them in the open home: "all 3 tools" or their names. */
 export const touchedToolsPhrase = (touched: string[]): string => toolsPhrase(touched, homeTools());
 
-/** × on a result: it goes, and with it what its click could not do (the item pages' last click's problems). */
+/** × on a result: it goes, and with it what its click could not do (the item lists' last click's problems). */
 export function closeResult() { endRun(); state.outcome = undefined; state.skillsResult = state.mcpResult = state.agentsResult = undefined; rerender(); }
 
 /**
@@ -932,7 +932,7 @@ export function showPage(page: Page, { repair = false } = {}) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   if (page !== state.page || leavingHarness) leaveResults(page);
-  if (page !== state.page) { state.skillsView = 'table'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); }
+  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   state.page = page;
@@ -945,10 +945,10 @@ export function showPage(page: Page, { repair = false } = {}) {
 
 export const filesSkillAvailable = (home: HomeView, key?: string) => home.skills.items.some(skill => key === undefined || skill.key === key);
 
-/** Leaves the Skills page's Files and contents view for the table (its Table button, or Escape). */
-export function showSkillsTable() {
+/** Leaves the Library's Files view for its list (its Back button, or Escape: matrix.ts backFromFiles, which puts its scroll back). */
+export function leaveFiles() {
   noteMove();
-  state.skillsView = 'table';
+  state.libraryView = 'list';
   state.item = undefined;
   rerender();
 }
@@ -1028,7 +1028,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (past && libraryEntry(past)) { sayLibraryAction(page, past, result); return; }
   if (past?.kind === 'everything') { sayEverything(page, past, result, switchesOn); return; }
   // A Pull's change to an agent's Claude Code settings alone (gitrepo.ts undoSettingsChange): the one entry with an Undo of its own,
-  // an agent's (its row flashes on Agents).
+  // an agent's (its row flashes in the Library).
   const item = restored[0]?.item ?? past?.item ?? '', row = { kind: 'agents' as const, key: itemKey(item) };
   const done = !result.stopped && restored.length > 0;
   tell(done ? { page, item, rows: [row], history: true, text: `Undid the change to ${item}. The earlier version is back in ${everywhere}.` } : undefined, result.stopped ?? `Restored in ${plural(0, 'tool')}.`);
@@ -1102,11 +1102,13 @@ export interface Outcome {
   /** Something was left undone: a warning icon, not a tick. */
   warn?: boolean;
   note?: string;
-  /** The names it says, for its words alone (bold in its band, and where its Undo moved to: undoMoved): `rows` is whose it is. */
+  /** The names it says, for its words alone (bold in its band, and where its Undo moved to: undoMoved), each with its kind where another kind's has its name (words.ts rowNames): `rows` is whose it is. */
   item?: string;
   items?: string[];
   /** The rows it is about: an open copy question of one of them, or the Files view of another skill, hides it (matrix.ts outcomeShown). */
   rows?: RowKey[];
+  /** A run over several kinds (Turn these off: applyByKind): its kinds, so each problem line under it is led by its kind (matrix.ts listResult). */
+  kinds?: PageKind[];
   /** Said again on the next page opened (a home just opened). */
   carry?: boolean;
   /** A saved instruction goes on its card (instructionspage.ts); a Sync once result makes room for its lines. */
@@ -1570,7 +1572,7 @@ let refreshOwed = false;
 let setAside: HomeView | undefined;
 /** Whether the home waits to be read once the page's run of clicks is done: a background refresh asked for meanwhile, or a plugin's click (oweHomeRead). */
 export const homeReadOwed = () => refreshOwed;
-/** A plugin's click changed what the item pages show: the home is read once at the run's end (clicklist.ts), not after each click. */
+/** A plugin's click changed what the item lists show: the home is read once at the run's end (clicklist.ts), not after each click. */
 export const oweHomeRead = () => { refreshOwed = true; };
 /**
  * The home read again by a Plugins action before it ends (pluginstate.ts readAgain), or at a run of clicks' end (clicklist.ts):
@@ -1596,8 +1598,8 @@ api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings
 api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); if (state.page === 'sources') void loadSources(); });
 api().onSaid(text => announce(text));
 
-/** Each page's sync notices in a view: what changed on its own, with its History event. */
-const noticesByPage = (view: HomeView): [PageKind, SyncNotice[]][] => [['skills', view.skills.notices], ['mcp', view.mcp.notices], ['agents', view.agents.notices]];
+/** Each kind's sync notices in a view: what changed on its own, with its History event. */
+const noticesByKind = (view: HomeView): [PageKind, SyncNotice[]][] => [['skills', view.skills.notices], ['mcp', view.mcp.notices], ['agents', view.agents.notices]];
 
 /**
  * A sync notice its page hasn't shown yet (state.seenNotices) stays in the next read of the same home until it is shown or
@@ -1642,11 +1644,11 @@ async function backgroundRefresh() {
 }
 
 /** Fresh background notices already taken. An action finishes saying its own result before the status bar announces these. */
-const backgroundNews: { page: PageKind; notice: SyncNotice }[] = [];
+const backgroundNews: { kind: PageKind; notice: SyncNotice }[] = [];
 function takeBackgroundNews(view: HomeView) {
-  const known = new Set(state.home ? noticesByPage(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
-  for (const [page, notices] of noticesByPage(view)) {
-    for (const notice of notices) if (!known.has(notice.history)) backgroundNews.push({ page, notice });
+  const known = new Set(state.home ? noticesByKind(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
+  for (const [kind, notices] of noticesByKind(view)) {
+    for (const notice of notices) if (!known.has(notice.history)) backgroundNews.push({ kind, notice });
   }
 }
 
@@ -1664,8 +1666,9 @@ function sayBackgroundNews() {
     }
   }
   // Each item once, its kind named where another kind's news has its name (words.ts rowNames).
-  const items = [...new Set(rowNames(news.flatMap(({ page, notice }) => noticeNames(notice).map(name => ({ kind: page, name })))))];
-  announce(`Sync changed ${andList(items)}.`, news.some(({ page }) => page === state.page));
+  const items = [...new Set(rowNames(news.flatMap(({ kind, notice }) => noticeNames(notice).map(name => ({ kind, name })))))];
+  // Quiet where the table on screen shows all of the news (its kinds' notices) already.
+  announce(`Sync changed ${andList(items)}.`, news.every(({ kind }) => kindsShown().includes(kind)));
 }
 
 /** A background refresh asked for while the page acted or while another ran: run it now, once, if nothing is running. */

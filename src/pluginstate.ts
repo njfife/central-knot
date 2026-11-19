@@ -4,7 +4,7 @@
 // turnPlugin (main records first, marketplaces.ts turn); Update, Update all, a skill's switch and their Undo go through
 // applyPluginOps. Both set market.lastRun, which the window's header says with one Undo (pluginspage.ts pluginsResult).
 // Which clicks wait their turn and which lock, in one place:
-// - A switch or a tool's box joins the page's one list of clicks (clicklist.ts, which the item pages' switches join too) as a
+// - A switch or a tool's box joins the page's one list of clicks (clicklist.ts, which the item lists' switches join too) as a
 //   PluginClick, sent to main one click at a time, in the order clicked (runClick); its run is decided there as an item's is
 //   (clicklist.ts runAt), the run's clicks are the list's (market.clicks), and each row says its own click's state (pluginparts.ts
 //   clickNote). That plugin's switch and boxes stay off from its click until
@@ -363,10 +363,10 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), !market.problem && undoOps().length > 0);
 });
 
-/** What each tool now has changed: the page and the item pages read again, once for the action (app.ts readHomeOnce). */
+/** What each tool now has changed: the page and the item lists read again, once for the action (app.ts readHomeOnce). */
 async function readAgain(): Promise<void> {
   showView(await api().plugins().catch(() => null));
-  // The item pages show what plugins bring, each with its switch in each tool, and a plugin's items in Pi and OpenCode: every
+  // The item lists show what plugins bring, each with its switch in each tool, and a plugin's items in Pi and OpenCode: every
   // plugin change is seen there (and where it came from) at once.
   await readHomeOnce();
   readShown();
@@ -387,7 +387,7 @@ export const pluginBusy = (source: string, plugin: string) => !!app.busy || (cli
 
 /**
  * The latest list's rows are its news, true until the plugins change or are read again: they go at a new run, at any other
- * plugin action (act), at an item page's switch for a plugin's item (app.ts runSwitches), at the person's Refresh (app.ts
+ * plugin action (act), at an item list's switch for a plugin's item (app.ts runSwitches), at the person's Refresh (app.ts
  * readAgain) and with another home (resetMarket). A running list keeps them.
  */
 export function endListNews(): void { if (!clickList.running) drop(isPluginClick); }

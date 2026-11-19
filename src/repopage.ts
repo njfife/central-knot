@@ -4,7 +4,7 @@
 import { acting, announce, busy, rerender, setHome, setSync, showPage, state } from './app.ts';
 import { button, closeButton, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { outcomeBand } from './matrix.ts';
+import { openKind, outcomeBand } from './matrix.ts';
 import { dayAndTime, plural } from './model.ts';
 import { andList, toolName } from './words.ts';
 import type { ConnectedRepoView, RepoChange, RepoCommit, RepoResult, RepoView } from './types.ts';
@@ -504,5 +504,5 @@ export function repoPage(): HTMLElement {
       h('div.repo-start', {}, connectForm(view.access.allowed),
         h('div.repo-start-side', {}, h('h2.eyebrow', {}, 'What goes where'), layout(),
           h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.'),
-          h('p.empty-aside', {}, 'Only what’s Managed goes to the repo. ', h('button.inline-link', { type: 'button', id: 'repo-see-skills', onclick: () => showPage('skills') }, 'See what’s Managed'), '.'))))));
+          h('p.empty-aside', {}, 'Only what’s Managed goes to the repo. ', h('button.inline-link', { type: 'button', id: 'repo-see-library', onclick: () => openKind('all') }, 'See what’s Managed'), '.'))))));
 }

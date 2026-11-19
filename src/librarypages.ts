@@ -1,4 +1,4 @@
-// The kinds on Central Knot's library (library.ts) as the item pages show them, and what each supplies to its page besides
+// The kinds on Central Knot's library (library.ts) as the item lists show them, and what each supplies to its page besides
 // its words (libraryrow.ts libraryWords, pure, so the tests read them too): how Read gets one of its versions, whether it has
 // a Files view, what else its opened row shows of its own (an agent: what Pi gets of it), and what a tool's line adds
 // (a skill: clear that tool's own switch, take over a copy outside Central Knot's). The table is keyed by the page's name

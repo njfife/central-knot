@@ -6,7 +6,7 @@
 // is kept. Nothing is stored, and opening it reads nothing more than the home's view. The figures come from that view, the usage
 // reading on show and its sum (matrix.ts usageOnShow, usageSums: usagerow.ts usageSummary), Harnesses' counts (harnesspage.ts
 // tally, pluginstatus.ts pluginsInstalled) and the update state (updateview.ts updateLine). While a home's first reading runs (matrix.ts
-// firstReadingRuns) every place a reading fills is drawn at its final size, so nothing moves when it lands. A kind's page opens
+// firstReadingRuns) every place a reading fills is drawn at its final size, so nothing moves when it lands. The Library opens
 // through matrix.ts openKind. Not here: the empty states every page shares (pages.ts noToolsLead, notRead, previewReason) and
 // first setup's question (firstsetup.ts setupLead).
 import { absentKinds, collectUsage, homeTools, loadHome, noToolManaged, practiceNoteOpen, realHomeName, rerender, setPracticeNote } from './app.ts';
@@ -17,10 +17,10 @@ import { setupLead } from './firstsetup.ts';
 import { goHarness, tally } from './harnesspage.ts';
 import { anyOn, kindSource } from './itemrow.ts';
 import { asksWhichCopy, waitsForSync } from './libraryrow.ts';
-import { firstReadingRuns, openKind, outcomeBand, problemsBesideStop, usageOnShow, usageSums } from './matrix.ts';
+import { firstReadingRuns, kindGlyph, openKind, outcomeBand, problemsBesideStop, usageOnShow, usageSums } from './matrix.ts';
 import { dayAndTime, dayWords, plural } from './model.ts';
 import { noToolsLead, notRead, previewReason } from './pages.ts';
-import { fromPluginsCount, pluginItemCount, rowCount } from './pluginrows.ts';
+import { fromPluginsCount, rowCount } from './pluginrows.ts';
 import { pluginsInstalled, type PluginsInstalled } from './pluginstatus.ts';
 import { heldKinds } from './presence.ts';
 import type { HarnessId, HomeView } from './types.ts';
@@ -30,7 +30,6 @@ import { settingsReset } from './settingspage.ts';
 import { USAGE_DAYS, type KindUsage, type ToolHistory } from './usagerow.ts';
 import { andList, kindNames, kindNouns, orList, toolList, toolNames } from './words.ts';
 
-const glyphs = { skills: 'wand-sparkles', mcp: 'plug', agents: 'bot' } as const;
 /** One line of the page: its mark, then words and links that wrap under themselves. */
 const line = (id: string, glyph: Parameters<typeof icon>[0], tone: string, ...rest: (Node | string | null)[]) => h('p.overview-line', { id }, icon(glyph, 14, tone), ...rest);
 const link = (label: string, id: string, onclick: () => void, disabled?: string) => button({ disabled, variant: 'link', size: 'micro', label, id, onclick });
@@ -171,12 +170,12 @@ function syncState(kind: PageKind, home: HomeView): HTMLElement | null {
  */
 function kindCard(kind: PageKind, home: HomeView) {
   const { title, short: noun } = kindNouns[kind], facts = kindSource(home, kind).facts;
-  const total = facts.length + pluginItemCount(home, kind), on = facts.filter(fact => fact.on).length, fromPlugins = fromPluginsCount(home, kind);
+  const total = rowCount(home, kind), on = facts.filter(fact => fact.on).length, fromPlugins = fromPluginsCount(home, kind);
   const counts = total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} on` : 'none on'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`;
   return h('div.kind-card', {},
     h('div.kind-card-about', {},
       h('button.kind-card-main', { type: 'button', id: `overview-${kind}`, onclick: () => openKind(kind) },
-        h('span.kind-card-head', {}, icon(glyphs[kind], 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
+        h('span.kind-card-head', {}, icon(kindGlyph[kind], 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
       h('div.kind-card-summary', {}, h('span', {}, counts), syncState(kind, home))),
     cardUsage(kind, total, usageSums()?.kinds[kind]));
 }
@@ -186,7 +185,7 @@ function kindCard(kind: PageKind, home: HomeView) {
 /**
  * The usage reading's strip, as high in each state: its three sentences share one place, the others kept but not shown
  * (style.css .band-stack). Collecting (by itself when a home opens, or on Update); collected, when, with Update usage statistics;
- * or the history couldn't be read, with Try again, in a box. Both buttons collect without opening the item pages' band.
+ * or the history couldn't be read, with Try again, in a box. Both buttons collect without opening the item lists' band.
  */
 function usageStrip() {
   const read = usageOnShow(), now = state.usage.state === 'reading' ? 0 : state.usage.state === 'failed' || !read ? 2 : 1;

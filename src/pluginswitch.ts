@@ -1,4 +1,4 @@
-// The Skills, MCP servers and Agents pages' switches for an item a tool has through an installed plugin, a tool's line in the
+// The Library's switches for an item a tool has through an installed plugin, a tool's line in the
 // opened row (click) and the row's own switch in every tool (turnEvery): the item's own switch where the tool has one (a skill
 // in Copilot CLI or Codex, ENB-06; an MCP server in Claude Code, Copilot CLI or Codex and an agent in Claude Code,
 // partswitch.ts), else the whole plugin's there. A click applies at once: it is worked out as

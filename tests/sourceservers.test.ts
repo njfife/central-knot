@@ -54,7 +54,7 @@ const answered = (result: SourceResult) => (result.sourced ?? []).map(({ kind, n
 /** A source's lines, as kind, name, state and why. */
 const linesOf = (found: { names: { kind: string; name?: string; key: string; state: string; why?: string }[] }) =>
   found.names.map(name => `${name.kind} ${name.name ?? name.key}: ${name.state}${name.why ? ` (${name.why})` : ''}`);
-/** A server as the MCP servers page reads it: its row's facts and its item. */
+/** A server as the Library reads it: its row's facts and its item. */
 async function server(box: Box, key: string) {
   const view = await serversView(box.context, box.tools);
   return { fact: view.items.find(entry => entry.key === key), item: view.library[key] };

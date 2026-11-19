@@ -1,5 +1,5 @@
 // Harnesses: one place per tool. The list sums up what each one has, with its Manage switch (managecard.ts); a managed
-// harness's own page manages its items with the same tables and switches as the Skills, MCP servers and Agents pages, with that
+// harness's own page manages its items with the same tables and switches as the Library, with that
 // tool first, plus its instruction file and its plugins. A tool left out has its card and switch here, and no other page shows
 // it as a tool (History's entries, and the Overview's line under its tools table, still name it). Nothing here has its own
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
@@ -15,7 +15,7 @@ import { agentsKeptIn, hasCowork, takesPlugins } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
-import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyKind, showFiltered } from './matrix.ts';
+import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyList, showFiltered } from './matrix.ts';
 import { kindSource } from './itemrow.ts';
 import { aboutInstructions, instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, loadPlugins, market } from './pluginstate.ts';
@@ -274,7 +274,7 @@ function kindTab(home: HomeView, kind: PageKind, tool: HarnessId) {
   if (rowCount(home, kind)) return itemsTable(kind, tool);
   // Nothing of this kind anywhere: the kind's own empty state, under the table's bands, so a file that could not be read still says why.
   const empty = kindEmpty(kind);
-  return emptyKind(kind, tool, emptyState(empty.glyph, empty.title, empty.body));
+  return emptyList(emptyState(empty.glyph, empty.title, empty.body), { kind, tool });
 }
 
 /** This tool's instruction file, with the same card, bands and editor as the Instructions page. */

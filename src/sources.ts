@@ -18,8 +18,8 @@
 //   waits) and Remove; and whether Look hands a marketplace to the Plugins page (handOff: its button, words.ts toPluginsLabel, is
 //   the Plugins page's own add, marketplaces.ts add, which the page calls; no source is made, and nothing is kept here);
 // - the check once a day (checkDue: the rhythm is here, main.ts only calls it on its schedule's turn, with Automatic sync on);
-// - what the table says, as the pages show it: the Sources page's view (sourcesView) and each linked or removed item's row on
-//   its kind's page (sourceFacts), both from the same answers the pass carries out, with the tools read now.
+// - what the table says, as the pages show it: the Sources page's view (sourcesView) and each linked or removed item's row in
+//   the Library (sourceFacts), both from the same answers the pass carries out, with the tools read now.
 // Kept elsewhere: the page (sourcespage.ts); the words of a source's History entries (historyactions.ts) and of its versions
 // (library.ts originWords); the Git repo's refusal of a source (gitrepo.ts connectRepo, through sourcestore.ts sourceAt), as
 // a source refuses that repo here (theGitRepo, at Look and at Add).
@@ -411,7 +411,7 @@ export async function sourcesView(context: ShareContext, tools: HarnessId[]): Pr
 }
 
 /**
- * Each item of one kind linked to a source the home records, as its row on its kind's page says it (types.ts LibraryFacts
+ * Each item of one kind linked to a source the home records, as its row in the Library says it (types.ts LibraryFacts
  * fromSource): the source's link, and whether that source's last read has a version that waits (the table's `wait`, from the
  * same answers as the Sources page), or else whether it is changed here (library.ts changedHere), so the source's next change
  * will meet it; each item linked to a plugin, with the plugin's link alone (no read of a plugin is kept, and none waits:

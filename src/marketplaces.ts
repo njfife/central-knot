@@ -56,7 +56,7 @@ export interface MarketplaceHost {
   changed?(source: string, plugin: string, tools: HarnessId[]): void;
   /** A bundled build's own marketplace (bundle.ts): the folder it is unpacked in, and how the page shows it. Always listed, first. */
   bundled?(): { source: string; view: BundledView } | undefined;
-  /** What a run on a plugin's items told its kind's page (pluginlibrary.ts runItems), to show there once, as a pass's notices are. */
+  /** What a run on a plugin's items told the Library (pluginlibrary.ts runItems), to show there once, as a pass's notices are. */
   notices?(kind: ItemKind, notices: SyncNotice[]): void;
   /** The installs the version before waited to make in a tool new here, in the open home (pluginupdates.ts waitedBefore): read once, by the plugins record's first read. */
   waitedBefore?(): Promise<WaitedBefore[]>;

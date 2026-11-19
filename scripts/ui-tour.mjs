@@ -5,11 +5,11 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, about 1,700 pictures over about forty minutes on the Mac. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), plugin-text (a plugin's instruction files and the hooks that can add text to sessions), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, library (the Library on All and each kind at five sizes), skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, plugin-clicks (switch clicks waiting their turn), plugin-boxes (a tool's box on a plugin's page with three working tools: ticked, kept out, refused), plugin-text (a plugin's instruction files and the hooks that can add text to sessions), profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
-// tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo,
+// tool's Manage switch, each state of the Harnesses list it changes, and the Library’s skills and Overview with tools left out), repo,
 // remove-build (one install at a time: the held screen while another build of Central Knot is on this Mac, as made-up
 // bundles), sources (a Git link read on a click, made-up repositories standing in for GitHub), source-agents (agents from a
 // link, beside a skill), source-servers (MCP servers from a link, reaching Claude Code as every tool), source-plugins
@@ -27,7 +27,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
-import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, refocus, byId, rowPart, standIn } from './cdp.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, openKind, refocus, byId, rowPart, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { packagedApp } from './package-app.mjs';
 
@@ -189,7 +189,7 @@ const turnOnRow = async (kind, key) => {
 if (only ? only.includes('light') : !full) {
   begin('light');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  for (const name of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']) {
+  for (const name of ['overview', 'harnesses', 'library', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']) {
     if (!(await a.has(`#nav-${name}`))) throw new Error(`The sidebar has no ${name} page.`);
     await a.click(`#nav-${name}`);
     if (!(await waitFor(a, `document.querySelector('#nav-${name}')?.getAttribute('aria-current') === 'page'`))) throw new Error(`The ${name} page did not open.`);
@@ -203,16 +203,109 @@ if (wanted('shell')) {
   begin('shell');
   await shot(a, 'first-launch-dark', 'The app as it first opens (dark appearance): the Overview, on the Practice copy, a throwaway set of sample skills, MCP servers and agents.');
   await a.theme('light'); await shot(a, 'first-launch-light', 'The same, in the light appearance.'); await a.theme('dark');
-  await a.click('#nav-skills'); await shot(a, 'skills-page', 'Clicked "Skills" in the sidebar: the skills table.');
+  await openKind(a, 'skills'); await shot(a, 'skills-page', 'Clicked "Skills" in the sidebar: the skills table.');
   await a.click('#nav-harnesses'); await shot(a, 'harnesses-page', 'Clicked "Harnesses": each tool found, with what it has.');
   await a.click('#nav-history'); await shot(a, 'history-empty', 'Clicked "History" before anything happened.');
   await a.click('#nav-overview');
   if (await a.has('#intro-dismiss')) { await a.click('#intro-dismiss'); await shot(a, 'intro-dismissed', 'Dismissed the practice-copy note on the Overview.'); }
   if (await a.has('#sidebar-toggle')) { await a.click('#sidebar-toggle'); await shot(a, 'sidebar-collapsed', 'Clicked the sidebar toggle (top left) to collapse the sidebar.'); await a.click('#sidebar-toggle'); }
   // The tour's "real home" is an empty throwaway folder: with no tool found there (Linux), the sidebar has no Skills.
-  await a.click('#home-actual'); if (await a.has('#nav-skills')) await a.click('#nav-skills');
+  await a.click('#home-actual'); if (await a.has('#nav-library')) await openKind(a, 'skills');
   await shot(a, 'this-macs-home', 'Clicked "This Mac\'s home" ("This computer\'s home" off macOS) at the bottom left. (In this tour the "real home" is an empty throwaway folder: only tools installed on this machine are found there.)');
   await a.click('#home-fixture'); await a.click('#nav-overview'); await shot(a, 'back-to-practice', 'Clicked "Practice copy" to go back, then "Overview".');
+}
+
+// ---------- The Library ----------
+// One page for every kind (STEP-LIB2.md): All and each kind at five sizes, dark and light; at 860×600 the toolbar with Find
+// filled, the sidebar a rail and open; a row opened and docked beside the list.
+if (wanted('library')) {
+  begin('library');
+  for (const kind of ['all', 'skills', 'mcp', 'agents']) {
+    await openKind(a, kind);
+    for (const [width, height] of [[860, 600], [1280, 800], [1316, 822], [1728, 1080], [2560, 1440]]) {
+      await a.size(width, height);
+      for (const theme of ['dark', 'light']) { await a.theme(theme); await shot(a, `${kind}-${width}-${theme}`, `The Library on ${kind === 'all' ? 'All' : kind}, ${width}×${height}, ${theme}.`); }
+    }
+  }
+  await a.theme('dark');
+  await openKind(a, 'all');
+  await a.size(860, 600);
+  await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'notes'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await shot(a, 'toolbar-860', 'Typed "notes" in Find on All at 860×600: the kind switch keeps its words and counts what Find leaves.');
+  await a.click('#sidebar-toggle');
+  await shot(a, 'toolbar-860-sidebar-switched', 'Clicked the sidebar toggle: the same toolbar with the sidebar the other way (a rail, or open).');
+  await a.click('#sidebar-toggle');
+  await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.size(1728, 1080);
+  await a.click(`#${rowPart('open', 'skills', 'notes')}`);
+  await shot(a, 'docked-1728', 'Opened notes on All at 1728×1080: its details docked beside the list, the list’s kind marks and tool columns beside it.');
+  await a.click(`#${rowPart('open', 'skills', 'notes')}`);
+  // Made-up homes, each opened as a folder: his counts, then the empty states and a kind not all read.
+  const settings = join(scratch, 'data/app-settings.json'), toolsOf = folder => { for (const name of ['.claude', '.claude.json', '.codex', '.copilot']) cpSync(join(root, 'fixtures/home', name), join(folder, name), { recursive: true }); };
+  const openFolder = async folder => { a.quit(); await wait(500); writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: folder } })); a = await launch(); };
+  const md = (name, kind) => `---\nname: ${name}\ndescription: The ${name} ${kind}, one of many.\n---\n\nBody.\n`;
+  const put = (path, text) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, text); };
+  // About 150 skills, 9 servers and 47 agents (his counts), a skill and an agent named review, a plugin, and copies that differ.
+  const big = join(scratch, 'library-big');
+  toolsOf(big);
+  for (let n = 1; n <= 146; n++) put(join(big, `.claude/skills/skill-${String(n).padStart(3, '0')}/SKILL.md`), md(`skill-${String(n).padStart(3, '0')}`, 'skill'));
+  for (let n = 1; n <= 44; n++) put(join(big, `.claude/agents/agent-${String(n).padStart(2, '0')}.md`), md(`agent-${String(n).padStart(2, '0')}`, 'agent'));
+  put(join(big, '.claude/agents/review.md'), md('review', 'agent'));
+  const settingsFile = JSON.parse(readFileSync(join(big, '.claude.json'), 'utf8'));
+  for (let n = 1; n <= 8; n++) settingsFile.mcpServers[`server-${n}`] = { type: 'http', url: `https://server-${n}.example.test/mcp` };
+  writeFileSync(join(big, '.claude.json'), JSON.stringify(settingsFile, null, 2));
+  writeClaudeInstall(big, 'ck-test-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': md('triage', 'skill') });
+  await openFolder(big);
+  await a.click('#nav-overview');
+  if (await a.has('#setup-yes')) { await a.click('#setup-yes'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); }
+  // Ten skills and three agents taken in 40 days ago, and Claude Code's sessions, so the No use seen chip has something to hold.
+  a.quit(); await wait(500);
+  const past = new Date(Date.now() - 40 * DAY).toISOString();
+  for (const [kind, keys] of [['skills', Array.from({ length: 10 }, (_, n) => `skill-${String(n + 1).padStart(3, '0')}`)], ['agents', ['agent-01', 'agent-02', 'agent-03']]]) {
+    const file = join(big, `.central-knot/${kind}.json`), kept = JSON.parse(readFileSync(file, 'utf8'));
+    for (const key of keys) if (kept.items[key]) kept.items[key].versions = kept.items[key].versions.map(version => ({ ...version, at: past }));
+    writeFileSync(file, JSON.stringify(kept, null, 2));
+  }
+  put(join(big, '.claude/projects/-work/s1.jsonl'), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'notes' } }] }, timestamp: new Date(Date.now() - DAY).toISOString() })}\n`);
+  await openFolder(big);
+  await openKind(a, 'all');
+  await a.size(1316, 822);
+  await waitFor(a, `!!document.querySelector('#chip-unused')`, 20000);
+  for (const theme of ['dark', 'light']) { await a.theme(theme); await shot(a, `his-counts-1316-${theme}`, `His counts at 1316×822 (${theme}): about 150 skills, 9 servers and 47 agents on All, the three chips offered (Copies differ, From plugins, No use seen), the usage button keeping "Update usage".`); }
+  await a.theme('dark');
+  await a.click('#chip-unused');
+  await shot(a, 'his-counts-chip-on-1316', 'No use seen on at 1316×822: the chip that is on keeps its word, the kind switch counts what it leaves.');
+  await a.click('#chip-unused');
+  await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'agents', 'review')}"]')?.scrollIntoView({ block: 'center' })`);
+  await shot(a, 'his-counts-same-name-1316', 'The skill review and the agent review on All at 1316×822: each says its kind beside its name.');
+  // One skill and nothing else: a segment with none of its kind, and Find leaving nothing.
+  const one = join(scratch, 'library-one');
+  put(join(one, '.claude/skills/solo/SKILL.md'), md('solo', 'skill'));
+  await openFolder(one);
+  await a.size(1280, 800);
+  await openKind(a, 'mcp');
+  await shot(a, 'empty-of-kind', 'A home with one skill, MCP servers chosen: its own empty state, "No MCP servers here yet", under the kind switch.');
+  await openKind(a, 'all');
+  await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'zzz'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await shot(a, 'empty-find', 'Find "zzz" on All: "Nothing matches".');
+  await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  // Its MCP record damaged: "?" on MCP servers and All, the stop led by its kind on All and said alone on its own segment.
+  put(join(one, '.central-knot/mcp.json'), '{');
+  await a.click('#header-refresh');
+  await shot(a, 'not-all-read-all', 'The MCP record damaged: "?" after MCP servers’ and All’s counts, the stop led by its kind above the list.');
+  await openKind(a, 'mcp');
+  await shot(a, 'not-all-read-own-segment', 'MCP servers chosen with its record damaged: its stop above, and "No MCP servers read here".');
+  // Nothing of any kind, then with its MCP record damaged too.
+  const none = join(scratch, 'library-none');
+  mkdirSync(join(none, '.claude'), { recursive: true });
+  await openFolder(none);
+  await openKind(a, 'all');
+  await shot(a, 'empty-nothing', 'A home whose tools hold nothing: "Nothing in the Library yet".');
+  put(join(none, '.central-knot/mcp.json'), '{');
+  await a.click('#header-refresh');
+  await shot(a, 'empty-nothing-not-read', 'The same home with its MCP record damaged: the stop above the empty words, which name MCP servers.');
+  await a.size(1280, 800);
+  await fresh();
 }
 
 // ---------- Skills ----------
@@ -221,7 +314,7 @@ if (wanted('skills')) {
   begin('skills');
   const folderIn = (tool, key) => join(practice, { claude: '.claude/skills', copilot: '.copilot/skills', codex: '.codex/skills' }[tool], key);
   const putSkill = (tool, key, body) => { mkdirSync(folderIn(tool, key), { recursive: true }); writeFileSync(join(folderIn(tool, key), 'SKILL.md'), `---\nname: ${key}\ndescription: ${body}\n---\n\n${body}\n`); };
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   await atEverySize('found', 'Clicked "Skills". Every skill is found: a tool has it and Central Knot doesn’t yet, so each row has Add where an On row has its switch; review’s copies differ', true);
   await shot(a, 'found-hover', 'The pointer on notes’s Add: its tooltip says a click adds it to Central Knot and puts it in every tool.', await middleOf(`#${rowPart('add', 'skills', 'notes')}`));
   await openRow('skills', 'notes');
@@ -312,7 +405,7 @@ if (wanted('skills')) {
   await openRow('skills', 'standup');
   await a.click(`#${rowPart('files', 'skills', 'standup')}`); await a.settle();
   await atEverySize('files-view', 'Clicked "Files and contents" in standup’s details: the list of skills beside standup’s switch; stacked, its SKILL.md comes first, then each tool’s line and where each copy is ("← Skills" goes back)', true);
-  await a.click('#skills-table');
+  await a.click('#files-back');
   // For History's switch actions (the owner asked what its "Turn on" means): the first skill that is on is kept out of Codex in
   // its opened row, and the second turned off, so History offers "Turn it on in Codex" and "Turn it on".
   const [outOfCodex, turnedOff] = await a.run(`[...document.querySelectorAll('[id^="${rowPart('switch', 'skills', '')}"][aria-checked="true"]')].map(each => each.id.slice(${rowPart('switch', 'skills', '').length}))`);
@@ -321,14 +414,14 @@ if (wanted('skills')) {
   // History.
   await a.click('#nav-history'); await a.settle();
   await atEverySize('history', 'Clicked "History": each skill’s entries in words, each with its own Undo, Turn it on, Turn it on in Codex, Restore or Use … copy where one can still be done, all in the actions column', true);
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   if (existsSync(claudeSettings)) writeFileSync(claudeSettings, settingsBefore);
 }
 
 // ---------- Sync, notices and History ----------
 if (wanted('sync')) {
   begin('sync');
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   await turnOnRow('skills', 'standup');
   edit(join(practice, '.codex/skills/standup/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex.\n'));
   await waitFor(a, `document.body.innerText.includes('Codex')&&!!document.querySelector('.sync-notice')`);
@@ -336,7 +429,7 @@ if (wanted('sync')) {
   await a.click('#nav-history'); await shot(a, 'history-with-edit', 'Clicked "History".');
   const undo = await a.run(`document.querySelector('.history-row button[id^="history-"]')?.id ?? ''`);
   if (undo) { await a.click(`#${undo}`); await shot(a, 'history-undone', 'Clicked "Undo" on that edit.'); }
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   await a.click('#sync-switch'); await shot(a, 'sync-off', 'Turned the Sync switch (status bar, bottom) off.');
   edit(join(practice, '.claude/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited with Sync off.\n'));
   await wait(4000); await a.settle(); await shot(a, 'sync-off-pending', 'With Sync off, a line was added to notes in Claude Code. A few seconds later.');
@@ -357,7 +450,7 @@ if (wanted('mcp')) {
   const settings = { claude: join(practice, '.claude.json'), copilot: join(practice, '.copilot/mcp-config.json'), codex: join(practice, '.codex/config.toml'), copilotSwitches: join(practice, '.copilot/settings.json') };
   // A server that belongs to an app (ChatGPT desktop's own): seen, never taken in.
   edit(settings.codex, text => `${text}\n[mcp_servers.node_repl]\ncommand = "/Applications/ChatGPT.app/Contents/Resources/node"\nargs = ["repl"]\n`);
-  await a.click('#nav-mcp'); await refresh();
+  await openKind(a, 'mcp'); await refresh();
   await atEverySize('found', 'Clicked "MCP servers". Every server is found: docs in Claude Code, files in Copilot CLI and Codex, each with Add; node_repl belongs to ChatGPT desktop, so its Add is unavailable and its tag says it can’t be taken in', true);
   await openRow('mcp', 'node_repl');
   await atEverySize('cannot-take-in', 'Opened node_repl: "Not in Central Knot · it can’t be taken in now (see below)", and Codex’s line says why: ChatGPT desktop keeps this server for itself', false, '.details');
@@ -437,7 +530,7 @@ if (wanted('agents')) {
   /** Marks a file as saved `seconds` from now, so "latest" can tell edits made in the same second apart. */
   const savedIn = (path, seconds) => { const when = new Date(Date.now() + seconds * 1000); utimesSync(path, when, when); };
 
-  await a.click('#nav-agents');
+  await openKind(a, 'agents');
   await atEverySize('agents-found', 'Clicked "Agents". Both agents are found: a tool has them and Central Knot doesn’t yet, so each row has Add where an On row has its switch; the section line says what Add does');
   await shot(a, 'agents-found-hover', 'The pointer on code-reviewer’s Add: the row lights up; Add’s tooltip says a click adds it to Central Knot and puts it in every tool.', await middleOf(`#${rowPart('add', 'agents', 'code-reviewer')}`));
   await focusOn(`#${rowPart('add', 'agents', 'code-reviewer')}`);
@@ -560,7 +653,7 @@ if (wanted('agents')) {
 
   // Many agents: On, Off and Found together.
   for (let count = 1; count <= 14; count++) claudeFile(`helper-${String(count).padStart(2, '0')}`, `Helps with task ${count}. Reads the request, plans it, and reports what changed.`, `Do task ${count} carefully.\n`);
-  await a.click('#nav-agents'); await refresh();
+  await openKind(a, 'agents'); await refresh();
   await waitFor(a, `!!document.querySelector('#${rowPart('add', 'agents', 'helper-14')}')`, 20000);
   for (let count = 1; count <= 8; count++) { const helper = `helper-${String(count).padStart(2, '0')}`; await a.click(`#${rowPart('add', 'agents', helper)}`); await switchOn('agents', helper); }
   for (const count of [2, 5, 7]) { await a.click(`#${rowPart('switch', 'agents', `helper-0${count}`)}`); await a.settle(); }
@@ -632,7 +725,7 @@ if (wanted('agents')) {
   await waitFor(a, `!!document.querySelector('#repo-state') && !/Checking/.test(document.querySelector('#repo-state').textContent)`, 20000); await a.settle();
   await a.click('#repo-pull');
   await waitFor(a, `document.body.dataset.busy !== 'true' && !/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`, 30000); await a.settle();
-  await a.click('#nav-agents'); await a.settle();
+  await openKind(a, 'agents'); await a.settle();
   await openRow('agents', 'retro');
   await atEverySize('agents-pulled', 'Connected a Git repo with a retro agent, while Claude Code had a different retro of its own, and clicked Pull: retro is on, pulled from the Git repo; Claude Code’s copy is kept as a version, noted against the pulled one', false, '.versions');
   await closeRow('agents', 'retro');
@@ -648,15 +741,15 @@ if (wanted('agents')) {
   await a.run(`[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('triage'))?.querySelector('.history-actions button')?.click()`);
   await a.settle();
   await shot(a, 'agents-restore-name-taken', 'Clicked Restore: the old triage is back in Central Knot and every tool; the new copy found in Claude Code is kept as a version first.');
-  await a.click('#nav-agents'); await a.settle(); await openRow('agents', 'triage'); await show('.versions');
+  await openKind(a, 'agents'); await a.settle(); await openRow('agents', 'triage'); await show('.versions');
   await shot(a, 'agents-restore-name-taken-open', 'Opened triage after Restore: its versions, the new copy from Claude Code among them, each with Make current.');
 
   // No agents at all: a fresh Practice copy with its agents' files removed.
   await fresh();
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
   for (const folder of Object.values(agentsFolder)) rmSync(join(practice, folder), { recursive: true, force: true });
-  await a.click('#nav-agents'); await refresh();
-  await atEverySize('agents-none', 'A Practice copy whose tools have no agents: the Agents page says so and what to do');
+  await openKind(a, 'agents'); await refresh();
+  await atEverySize('agents-none', 'A Practice copy whose tools have no agents: the Library’s agents says so and what to do');
 }
 
 // ---------- An agent in Pi, as a skill ----------
@@ -669,7 +762,7 @@ if (wanted('agents-pi')) {
   // Pi joins the Practice copy, with a skill of its own named like the release-notes agent.
   mkdirSync(join(practice, '.pi/agent/skills/release-notes'), { recursive: true });
   writeFileSync(join(practice, '.pi/agent/skills/release-notes/SKILL.md'), '---\nname: release-notes\ndescription: Pi’s own skill for release notes.\n---\n\nWrite the release notes.\n');
-  await a.click('#nav-agents'); await refresh();
+  await openKind(a, 'agents'); await refresh();
   for (const key of ['code-reviewer', 'release-notes']) { await turnOnRow('agents', key); await switchOn('agents', key); }
   await openRow('agents', 'code-reviewer');
   await atEverySize('agents-pi-open', 'Pi in the home, code-reviewer added: Pi has the current version (a skill, code-reviewer.md in its skills folder) with its own switch, and a note under the tools says once what Pi gets: no isolated context, tool restrictions or model selection, invoked as a skill; deleting the file in Pi turns the agent off everywhere', true, `#${rowPart('as-skill', 'agents', 'code-reviewer')}`);
@@ -865,7 +958,7 @@ if (wanted('profiles')) {
   await a.click('#nav-profiles');
   await atEverySize('empty', 'Clicked "Profiles" in the sidebar before any profile exists', true);
   for (const [page, keys] of [['skills', ['notes', 'standup', 'release-notes']], ['mcp', ['docs', 'files']], ['agents', ['code-reviewer', 'release-notes']]]) {
-    await a.click(`#nav-${page}`); await a.settle();
+    await openKind(a, page); await a.settle();
     for (const key of keys) { await turnOnRow(page, key); await switchOn(page, key); }
   }
   await a.click('#nav-profiles');
@@ -888,11 +981,11 @@ if (wanted('profiles')) {
   // A scripted click counts as a keyboard choice (focus returns to the status item, ringed); a mouse click leaves no ring.
   await a.run(`document.activeElement?.blur()`);
   await atEverySize('development-in-use', 'Chose "Development" in that menu: Development is in use; the column says what is on now');
-  await a.click('#nav-skills'); await a.settle();
-  await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: each skill is On or Off in Central Knot, as Development has it; nothing marks a profile.');
+  await openKind(a, 'skills'); await a.settle();
+  await shot(a, 'skills-with-profile', 'The Library’s skills while Development is in use: each skill is On or Off in Central Knot, as Development has it; nothing marks a profile.');
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
   await a.click('#nav-profiles'); await openProfile('Development');
-  await atEverySize('after-hand-click', 'On the Skills page, turned standup off by hand, then came back: no profile is in use now (the status bar says No profile), and Development says what switching to it would turn back on', true);
+  await atEverySize('after-hand-click', 'On the Library’s skills, turned standup off by hand, then came back: no profile is in use now (the status bar says No profile), and Development says what switching to it would turn back on', true);
   await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
   await a.click('#profile-new'); await name('On call');
   await a.click('#profile-from-now');
@@ -972,7 +1065,7 @@ if (wanted('first-setup')) {
   await a.click('#setup-no');
   await atEverySize('after-no', 'Clicked No, I’ll add items myself: the band says nothing changed, what is on stays on and keeps syncing, found items wait on their page for Add, and Settings can switch it on later; the question is gone, and the lead says to open a card and turn on what you want', true);
   // A home from before this step, with an item already On, whose rule was never answered: the record without its answer.
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   await turnOnRow('skills', 'notes'); await switchOn('skills', 'notes');
   edit(join(practice, '.central-knot/sync.json'), text => { const record = JSON.parse(text); delete record.syncEverything; return JSON.stringify(record, null, 2); });
   await refresh();
@@ -1017,7 +1110,7 @@ if (wanted('first-setup')) {
 if (wanted('sync-everything')) {
   begin('sync-everything');
   await fresh();
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   await atEverySize('skills-found-off', 'Opened Skills on the Practice copy, Synchronize everything off as it is until chosen: the Found heading says Add takes each in', false, '[data-section="found"]');
   await a.click('#nav-settings');
   await waitFor(a, `!!document.querySelector('#setting-sync-everything')`);
@@ -1033,14 +1126,14 @@ if (wanted('sync-everything')) {
   await atEverySize('settings-on', 'Clicked its switch: Synchronize everything is on; under the row, what the pass right after took in, a line per kind with History, and what still waits for a choice of copy', true, '#setting-sync-everything');
   await a.click('#nav-overview');
   await atEverySize('overview-on', 'Opened Overview: its question is gone, now Synchronize everything is on; what still needs you is the one found item whose copies differ, with Choose copies, and the cards count what it took in');
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   await atEverySize('skills-on', 'Opened Skills: one notice names the skills it took in and the tools it found them in; the Found heading says Synchronize everything leaves these, the opened row saying why, and counts what waits for a choice', true);
   await openRow('skills', 'review');
   await atEverySize('skills-on-review', 'Opened review, left found: its copies differ, so it asks which copy every tool uses, as Add would; the row and its question are one block, its bar the warning colour', false, '.ov-row.open', 'start');
   await closeRow('skills', 'review');
-  await a.click('#nav-mcp');
+  await openKind(a, 'mcp');
   await atEverySize('mcp-on', 'Opened MCP servers: its notice names the servers it took in and where, and that History can undo each; Claude Code has them too', true);
-  await a.click('#nav-agents');
+  await openKind(a, 'agents');
   await atEverySize('agents-on', 'Opened Agents: its notice names the agents it took in and where they were found');
   await a.click('#nav-history');
   await waitFor(a, `!!document.querySelector('.history-row')`, 15000);
@@ -1049,7 +1142,7 @@ if (wanted('sync-everything')) {
   const notesRow = `[...document.querySelectorAll('.history-row[data-kind="on"]')].find(row => row.querySelector('.history-what strong')?.textContent === 'notes' && row.querySelector('.history-kind')?.textContent === 'Skill')`;
   await a.run(`${notesRow}.querySelector('.history-actions button').click()`); await a.settle();
   await atEverySize('history-undone', 'Clicked Undo on notes’s entry: the status bar says it is out of Central Knot again, each tool it was found in keeping its own copy', true);
-  await a.click('#nav-skills'); await refresh();
+  await openKind(a, 'skills'); await refresh();
   await openRow('skills', 'notes');
   await atEverySize('skills-undone-found', 'Opened Skills after a pass: notes is found again and stays so; its line says it was deleted from Central Knot, so it will not be added by itself again, and that Add, or Restore in History, brings it back; the Found heading grows with its note', true, '.details');
   await closeRow('skills', 'notes');
@@ -1312,7 +1405,7 @@ if (wanted('plugin-items')) {
   cpSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), join(practice, '.pi/agent/skills/triage/SKILL.md'));
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
   const toPlugins = async () => { await a.run(`document.querySelector('.ov-section-plugins')?.scrollIntoView({ block: 'center' })`); await wait(150); };
-  await a.click('#nav-skills'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.ov-section-plugins')`, 15000);
+  await openKind(a, 'skills'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.ov-section-plugins')`, 15000);
   await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “Only through a plugin” (the From plugins chip counts every row from a plugin, triage too), each marked “from <plugin>”, with its switch and a mark in each tool that has it (pdf-reader off in Copilot CLI and Codex, issue-tracker’s whole plugin off in Codex); triage is one row with the copy in Pi.');
   await a.theme('light'); await shot(a, 'skills-light', 'The same, light.'); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
@@ -1360,7 +1453,7 @@ if (wanted('plugin-items')) {
       if (await a.has('#outcome-undo-plugin')) { await a.click('#outcome-undo-plugin'); await a.settle(); await shot(a, 'switch-undone', 'Clicked Undo: issue-tracker is off in Codex again, as it was; the confirmation fades by itself.'); }
     }
   }
-  await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="${rowPart('', 'mcp', 'issue-tracker@')}"]')`);
+  await openKind(a, 'mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="${rowPart('', 'mcp', 'issue-tracker@')}"]')`);
   await shot(a, 'mcp', 'MCP servers: issue-tracker’s issues server, installed in Codex with the plugin turned off.');
   await a.theme('light'); await shot(a, 'mcp-light', 'The same, light.'); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
@@ -1385,7 +1478,7 @@ if (wanted('plugin-items')) {
     await shot(a, 'mcp-main-switch', 'Clicked the issues row’s own switch: it is on in Codex, the one tool that has it, with its plugin turned on there for it alone; with Undo.');
     await a.click('#outcome-undo-plugin'); await a.settle();
   }
-  await a.click('#nav-agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code, under “From plugins · installed with their plugin · switched here like any other”.');
+  await openKind(a, 'agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code, under “From plugins · installed with their plugin · switched here like any other”.');
   if (await a.has(`${byId(rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer'))}`)) {
     await a.click(`${byId(rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer'))}`);
     await shot(a, 'agent-open', 'Opened release-reviewer: it opens with where it is on (“On in Claude Code · from the plugin release-helper”), where it is handled, and Claude Code’s line with its switch for this one agent.');
@@ -1496,7 +1589,7 @@ async function ensureMarket() {
 async function everyPage(tag) {
   const at = `at ${a.viewport.width}×${a.viewport.height}`;
   await a.click('#nav-overview'); await shot(a, `${tag}-overview`, `The Overview ${at}.`);
-  await a.click('#nav-skills'); await shot(a, `${tag}-skills`, `Skills ${at}.`);
+  await openKind(a, 'skills'); await shot(a, `${tag}-skills`, `Skills ${at}.`);
   // notes, when there: a skill whose copies agree, so its details offer Files and contents.
   const first = await a.run(`(document.querySelector('#${rowPart('open', 'skills', 'notes')}') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
   if (first) {
@@ -1511,7 +1604,7 @@ async function everyPage(tag) {
       else if (await a.has('.details-paths[open]')) { await a.run(`document.querySelector('.details-paths').scrollIntoView({ block: 'nearest' })`); await shot(a, `${tag}-skills-files-where`, `"Where each copy is" is open from the start ${at}: the skill's details in their column at the right, the status first and Delete everywhere… last.`); }
       const toggle = await a.run(`document.querySelector('[id^="detail-switch-"]')?.id ?? ''`);
       if (toggle) { await a.click(`#${toggle}`); await shot(a, `${tag}-skills-files-switched`, `Turned its switch in the Files view: it applies at once; the result and Undo are in the header ${at}.`); if (await a.has('#outcome-undo')) await a.click('#outcome-undo'); }
-      await a.click('#skills-table');
+      await a.click('#files-back');
     }
     if (await a.has('.ov-row.open')) await a.click(`#${first}`);
   }
@@ -1522,14 +1615,14 @@ async function everyPage(tag) {
   }
   const on = await a.run(`document.querySelector('.ov-row[data-key] .switch[aria-checked="true"]:not([disabled])')?.id ?? ''`);
   if (on) { await a.click(`#${on}`); await shot(a, `${tag}-skills-switched-off`, `Turned one skill off: its result and Undo ${at}.`); if (await a.has('#outcome-undo')) await a.click('#outcome-undo'); }
-  await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}: nothing is synced there yet, and a server whose copies differ is marked “Copies differ”.`);
+  await openKind(a, 'mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}: nothing is synced there yet, and a server whose copies differ is marked “Copies differ”.`);
   const server = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
   if (server) {
     if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${server}`);
     if (await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`)) await shot(a, `${tag}-mcp-details`, `Opened the first MCP server's details ${at} (docked beside the table from 1200px of content).`);
     if (await a.has('.ov-row.open')) await a.click(`#${server}`);
   }
-  await a.click('#nav-agents'); await shot(a, `${tag}-agents`, `Agents ${at}.`);
+  await openKind(a, 'agents'); await shot(a, `${tag}-agents`, `Agents ${at}.`);
   const agent = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
   if (agent) {
     // An earlier step may have left the row open: a click would close it, so it is clicked only while closed.
@@ -1558,7 +1651,7 @@ async function everyPage(tag) {
 
 /** An edit to Copilot CLI's MCP settings made outside the app, files being in Central Knot, so the MCP page shows its notice and actions. */
 async function editMcpOutside() {
-  await a.click('#nav-mcp');
+  await openKind(a, 'mcp');
   if (await a.has(`#${rowPart('add', 'mcp', 'files')}`)) { await a.click(`#${rowPart('add', 'mcp', 'files')}`); await a.settle(); }
   edit(join(practice, '.copilot/mcp-config.json'), text => (text.includes('"npx-edited"') ? text.replace('"npx-edited"', '"npx"') : text.replace('"command": "npx"', '"command": "npx-edited"')));
   await waitFor(a, `!!document.querySelector('.sync-notice')`, 10000);
@@ -1574,7 +1667,7 @@ if (wanted('sizes')) {
     mkdirSync(join(practice, tool, 'skills/draft'), { recursive: true });
     writeFileSync(join(practice, tool, 'skills/draft/SKILL.md'), `---\nname: draft\ndescription: Turn notes into a first draft.\n---\n\n${body}\n`);
   }
-  await a.click('#nav-skills'); await a.click('#header-refresh');
+  await openKind(a, 'skills'); await a.click('#header-refresh');
   await editMcpOutside();
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
     await a.size(width, height);
@@ -1591,14 +1684,14 @@ if (wanted('sizes')) {
     if (width === 1280) {
       await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       await a.click('#nav-overview'); await shot(a, '1280-overview-1x', 'The Overview at 1280×800 at 100% zoom (one screen pixel per pixel), where the tools\' small marks, Pi\'s among them, are drawn at 12px.');
-      await a.click('#nav-skills'); await shot(a, '1280-skills-1x', 'Skills at 100% zoom: each row’s tool marks at its right end, and the key under the table.');
+      await openKind(a, 'skills'); await shot(a, '1280-skills-1x', 'Skills at 100% zoom: each row’s tool marks at its right end, and the key under the table.');
       await a.size(width, height);
     }
     // At the minimum the sidebar folds to its rail; the person can open it, leaving the content about 650px.
     if (width === 860) {
       await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle');
       // A message in the status bar at the minimum: the facts keep their words, and the message shortens.
-      await a.click('#nav-skills');
+      await openKind(a, 'skills');
       // A switch whose result band is dismissed leaves its result in the status bar.
       const box = await a.run(`document.querySelector('.ov-row[data-key] .switch:not([disabled])')?.id ?? ''`);
       if (box) {
@@ -1653,7 +1746,7 @@ if (wanted('sizes')) {
 // so this holds on any machine. The app starts again with that folder remembered, as choosing one opens a system dialog.
 /** The views where a tool can appear as an option, each shot once; `tag` says which home. */
 async function toolViews(tag, home) {
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   const head = await a.run(`document.querySelector('.tool-head-button')?.id ?? ''`);
   if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-menu`, `${home}: Skills, with the first tool's menu open (it offers each other tool).`); await a.click(`#${head}`); }
   await ensureMarket(); await shot(a, `${tag}-plugins`, `${home}: Plugins, one box per tool.`);
@@ -1681,7 +1774,7 @@ if (wanted('shared-copies')) {
     a.quit(); await wait(500);
     writeFileSync(settings, JSON.stringify({ ...JSON.parse(existsSync(settings) ? readFileSync(settings, 'utf8') : '{}'), home: { mode: 'custom', path } }));
     a = await launch();
-    await a.click('#nav-skills');
+    await openKind(a, 'skills');
   };
   await openFolder(folder);
   const sizes = [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]];
@@ -1761,7 +1854,7 @@ if (wanted('missing')) {
   await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: the two tools\' cards side by side.');
   await a.size(1280, 800);
   await a.size(860, 560);
-  await a.click('#nav-skills'); await shot(a, 'after-860-skills', 'The same folder\'s Skills at 860×560.');
+  await openKind(a, 'skills'); await shot(a, 'after-860-skills', 'The same folder\'s Skills at 860×560.');
   await a.size(1280, 800);
   // A folder whose only tool is Pi, which takes no plugins: the Plugins page says so instead of drawing an empty table.
   const piOnly = join(scratch, 'pi-only');
@@ -1844,7 +1937,7 @@ if (wanted('updates')) {
   await size(1280, 800);
   await a.click('#nav-settings'); await a.click('#check-updates'); await waitFor(a, `/Up to date/.test(document.getElementById('setting-updates').textContent)`, 10000);
   await shot(a, 'settings-up-to-date', 'Clicked "Check now": up to date.');
-  await a.click('#nav-skills'); await a.click('#update-control'); await waitFor(a, `/newest release/.test(document.getElementById('announcement').textContent)`, 10000);
+  await openKind(a, 'skills'); await a.click('#update-control'); await waitFor(a, `/newest release/.test(document.getElementById('announcement').textContent)`, 10000);
   await shot(a, 'sidebar-up-to-date', 'On Skills, clicked "Check for updates" in the sidebar: the status bar says what it found; the control is the quiet arrows again.');
   await a.click('#nav-settings');
   // A failed check, and a failed download.
@@ -1957,7 +2050,7 @@ if (wanted('settings')) {
   await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says (with the neutral info glyph) that older History no longer shows and goes the next time Central Knot records a change in this home, not that it was removed. The Open log folder note from the step before is gone: one finished note at a time.');
   await keepFor(a, 30);
   // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   await turnOnRow('skills', 'standup');
   await a.click('#nav-settings');
   mkdirSync(join(practice, '.central-knot'), { recursive: true });
@@ -2026,7 +2119,7 @@ if (wanted('settings')) {
   // page reads it again, as it does when someone comes back from System Settings.
   if (a.main && process.platform === 'linux') {
     // Opened afresh, so the earlier rows' notes are gone.
-    await a.click('#nav-skills'); await a.click('#nav-settings');
+    await openKind(a, 'skills'); await a.click('#nav-settings');
     const main = await a.main();
     await standIn(main, 'win32');
     const system = async (platform, login) => { await main.run(`(ck.as(${JSON.stringify(platform)}), ck.login = ${JSON.stringify(login)})`); await refocus(main); await a.settle(); };
@@ -2062,7 +2155,7 @@ if (wanted('settings')) {
     await reloadAs(agent);
     main.close();
   }
-  await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
+  await openKind(a, 'skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
   await size(1280, 800);
 }
 
@@ -2180,7 +2273,7 @@ if (wanted('scroll')) {
     if (!head) return box.id || box.className;
     return (box.id || box.className) + '; column header ' + Math.round(head.getBoundingClientRect().top - box.getBoundingClientRect().top) + 'px below the scroller top';
   })()`);
-  for (const page of ['plugins', 'overview', 'skills', 'mcp', 'agents', 'settings']) {
+  for (const page of ['plugins', 'overview', 'library', 'settings']) {
     if (!(await a.has(`#nav-${page}`))) continue;
     await a.click(`#nav-${page}`);
     // On an item page the first row is opened first, so the scroll goes past an opened row: it goes up with the list.
@@ -2273,7 +2366,7 @@ if (wanted('manage')) {
   begin('manage');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
   // notes and standup On in every tool first, so Codex has copies of Central Knot's to keep, or lose, while it is left out.
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   for (const key of ['notes', 'standup']) { await turnOnRow('skills', key); await switchOn('skills', key); }
   await a.click('#nav-harnesses'); await waitFor(a, `!/…/.test(document.querySelector('.harness-cards')?.textContent ?? '…')`);
   await atEverySize('all-managed', 'Harnesses with every tool managed: each card has its Manage switch on, and the line under it says what turning it off leaves as it is', true);
@@ -2282,8 +2375,8 @@ if (wanted('manage')) {
   await atEverySize('codex-left-out', 'Clicked Codex’s switch: the band says Codex is left out and its copies stay; its card has no counts, and its line says no item in Codex would change on turning it on, and two found items would show under Found', true);
   // While Codex is left out: its copy of notes is edited by hand, and standup is turned off in Central Knot.
   edit(join(practice, '.codex/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex while it was left out.\n'));
-  await a.click('#nav-skills'); await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
-  await atEverySize('skills-one-left-out', 'Turned standup off on the Skills page with Codex left out: no Codex mark on any row; standup’s row and the band say no tool Central Knot manages has it');
+  await openKind(a, 'skills'); await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
+  await atEverySize('skills-one-left-out', 'Turned standup off on the Library’s skills with Codex left out: no Codex mark on any row; standup’s row and the band say no tool Central Knot manages has it');
   await a.click('#nav-overview');
   await atEverySize('overview-one-left-out', 'The Overview with Codex left out: Your tools has a row for Claude Code and Copilot CLI only, and the line under it says Codex is left out and that its switch is on Harnesses (under the fold at 860×560)');
   await a.click('#nav-harnesses'); await refresh();
@@ -2326,7 +2419,7 @@ if (wanted('repo')) {
   put('agents/reviewer.md', '---\nname: reviewer\ndescription: Reviews a change before it ships.\n---\n\nRead the diff twice.\n');
   run(author, 'add', '-A'); run(author, 'commit', '--quiet', '-m', 'Incident kit'); run(author, 'push', '--quiet', 'origin', 'HEAD:main');
 
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   for (const key of await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].filter(row => row.querySelector(':is(.add-item, .switch:not([aria-checked="true"])):not([disabled])') && !row.querySelector('[id^="decide-"]')).map(row => row.dataset.key.slice(${rowPart('', 'skills', '').length}))`)) await turnOnRow('skills', key);
   await a.click('#nav-repo');
   await shot(a, 'repo-start-dark', 'Clicked "Git repo" in the sidebar: nothing connected yet. The page says what goes where and that nothing changes until Pull or Push.');
@@ -2546,7 +2639,7 @@ if (wanted('sources')) {
   await a.size(860, 560); await focusOn('#source-add'); await shot(a, 'look-focus-860', 'Tabbed to Add 1 skill at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
   await a.click('#source-add'); await busyDone(); await a.settle();
   await atEverySize('source-row', 'Clicked Add 1 skill: the band says deslop is in Central Knot, Off, with Open Skills; the source’s row: its link, branch, folder, commit and when it was read, the line saying what Check now can do in your tools, Check now and Remove…, and deslop, at the root of skill-deslop, In Central Knot, Off', true, '.source-row');
-  await a.click('#nav-skills'); await openRow('skills', 'deslop');
+  await openKind(a, 'skills'); await openRow('skills', 'deslop');
   await atEverySize('skill-off', 'On Skills, deslop’s row is Off, in no tool, as any Off item reads; opened, it says it is from github.com/stephenturner/skill-deslop (main), a source, with a link to Sources, and its one version says the same', true, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   await turnOnRow('skills', 'deslop'); await switchOn('skills', 'deslop');
   await atEverySize('skill-on', 'Clicked its switch: deslop is On, and each tool’s line says it has the current version; the opened row still says where it is from', false, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
@@ -2554,13 +2647,13 @@ if (wanted('sources')) {
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await atEverySize('updated', 'Changed deslop at the source and clicked Check now: the band says deslop was updated from its source, now in all 3 tools, with Undo the update, Open Skills, and that each change can be seen or undone in History', true, '.source-row');
-  await a.click('#nav-skills'); await openRow('skills', 'deslop');
+  await openKind(a, 'skills'); await openRow('skills', 'deslop');
   await atEverySize('updated-skill', 'On Skills, deslop’s opened row: two versions, the current one from the source, the earlier one too, each saying where it came from', false, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   await a.click('#nav-history');
   await shot(a, 'updated-history', 'History: Updated from github.com/stephenturner/skill-deslop (main); that became the current version, in all 3 tools, with Undo (1280×800)');
   // Edited in Claude Code (Automatic sync takes it in), then changed at the source: the source's version waits.
   const deslopInClaude = join(practice, '.claude/skills/deslop/SKILL.md');
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   writeFileSync(deslopInClaude, readFileSync(deslopInClaude, 'utf8').replace('Keep the author’s voice.', 'Keep the author’s voice, and their jokes.'));
   await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
   deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice and their dialect.') }, 'Keep the dialect');
@@ -2568,7 +2661,7 @@ if (wanted('sources')) {
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await atEverySize('waiting', 'deslop was edited in Claude Code, then changed at the source; clicked Check now: the band says deslop changed at the source and yours stays current, since it was changed here or a tool’s copy can’t be read just now, and that on its row Merge puts the source’s changes into yours if they don’t clash, Replace takes the source’s, and Keep mine keeps yours; deslop’s line on the source’s row, under a warning mark, says yours stays current until you merge, replace or keep it, for the same reasons, what Merge, Replace and Keep mine do, and ends with Merge, Replace and Keep mine', true, '.source-row');
   await a.size(860, 560); await show('.source-row'); await focusOn('.source-row button[id^="source-merge-"]'); await shot(a, 'waiting-merge-focus-860', 'Tabbed to Merge on deslop’s line at 860×560: its focus ring, with Replace beside it'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
-  await a.click('#nav-skills'); await openRow('skills', 'deslop');
+  await openKind(a, 'skills'); await openRow('skills', 'deslop');
   await atEverySize('waiting-skill', 'On Skills, deslop’s row says “update at its source” after its name, under a warning mark; opened, each tool has the current version (the edit made in Claude Code), and the line at the end says the source has a newer version, yours stays current since it was changed here or a tool’s copy of it can’t be read just now, and on Sources Merge puts its changes into yours if they don’t clash, and Replace takes it as it is, either keeping yours as a version, and Keep mine keeps yours current and the source’s as a version, so it no longer waits', true, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   await a.click('#nav-sources');
   // Both changed the same line of SKILL.md: Merge names it and changes nothing.
@@ -2582,14 +2675,14 @@ if (wanted('sources')) {
   await atEverySize('replaced', 'Clicked Replace on deslop’s line: the band says deslop has the source’s version, now in all 3 tools, and the one it had is kept as a version, with Undo the replace, Open Skills, and that each change can be seen or undone in History; deslop’s line says In Central Knot, On, with no Replace', false, '.source-row');
   // A line added in Claude Code, and the source's description changed: lines apart, so Merge puts them together.
   writeFileSync(deslopInClaude, `${readFileSync(deslopInClaude, 'utf8')}\nSay what you changed, in one line.\n`);
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
   deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice and their dialect.').replace('Find and remove the patterns', 'Find and take out the patterns') }, 'Reword the description');
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await a.click('.source-row button[id^="source-merge-"]'); await busyDone(); await a.settle();
   await atEverySize('merged', 'A line was added to deslop in Claude Code, and the source reworded its description; clicked Check now, then Merge on deslop’s line: the band says deslop now has your changes and the source’s, merged, in all 3 tools, and the version it had is kept, with Undo the merge, Open Skills, and that each change can be seen or undone in History; deslop’s line says In Central Knot, On, with no Merge or Replace', true, '.source-row');
-  await a.click('#nav-skills'); await openRow('skills', 'deslop');
+  await openKind(a, 'skills'); await openRow('skills', 'deslop');
   await atEverySize('merged-skill', 'On Skills, deslop’s opened row: each tool has the merged version; its newest versions say merged with the source’s version, and from the source; the line at the end says you changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on Sources; no tag after its name, since nothing waits', false, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   await a.click('#nav-history');
   await shot(a, 'merged-history', 'History: Merged github.com/stephenturner/skill-deslop (main)’s version into yours; that became the current version, in all 3 tools; the version it had and the source’s are kept, with Undo (1280×800)');
@@ -2602,7 +2695,7 @@ if (wanted('sources')) {
   await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so the source turned no skill, agent or MCP server off (nothing there can be read), and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can this source turns no skill off; deslop’s line, no longer at this source, with Turn it on, stays as it was', false, '.source-row');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Mend the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await a.click('#nav-skills'); await openRow('skills', 'deslop');
+  await openKind(a, 'skills'); await openRow('skills', 'deslop');
   await atEverySize('dropped-skill', 'On Skills, deslop is Off, out of every tool, kept in Central Knot with its versions, and “removed at its source” after its name, under a warning mark; its opened row’s line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and that should the source have it again, it follows the source if unchanged here and stays as you have it if you changed it; its versions still say where each came from', false, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   await a.click('#nav-history');
   await shot(a, 'dropped-history', 'History: github.com/stephenturner/skill-deslop (main) no longer has it, so it is off and removed from all 3 tools, and no longer from that source, with Turn it on; and unslop brought in, Off, with Turn it on (1280×800)');
@@ -2613,7 +2706,7 @@ if (wanted('sources')) {
   await lookAt('https://github.com/nobody/missing');
   await atEverySize('cannot-read', 'Looked at a link with no repository there (or none this computer can read): why, in plain words, and Cancel', false, '#source-preview');
   await a.click('#source-cancel');
-  await a.click('#nav-skills'); await turnOnRow('skills', 'notes'); await switchOn('skills', 'notes');
+  await openKind(a, 'skills'); await turnOnRow('skills', 'notes'); await switchOn('skills', 'notes');
   await a.click('#nav-sources');
   await lookAt('team/kit');
   await atEverySize('already-has', 'notes is On in Central Knot (the Practice copy’s own), and looked at team/kit: release comes in, Off; notes is not brought in, since Central Knot already has a different notes, and the line says how to take this one instead (deleting yours also takes it out of every tool it is on in); each skill sits in the folder of its name; the agent writer, in the folder agents, comes in Off', true, '#source-preview');
@@ -2656,7 +2749,7 @@ if (wanted('source-agents')) {
   await atEverySize('look', 'Looked at team/review-kit: one skill, notes, in the folder notes, and two agents, reviewer in the folder agents and release-notes-writer-for-the-whole-team in .claude/agents, each line saying its kind, where it sits and its file; each comes in Off; Add 1 skill and 2 agents', true, '#source-preview');
   await a.click('#source-add'); await busyDone(); await a.settle();
   await atEverySize('source-row', 'Clicked Add 1 skill and 2 agents: the band says notes, reviewer and release-notes-writer-for-the-whole-team are in Central Knot, Off, to turn on in Skills and Agents, with Open Skills; the source’s row lists the skill and both agents, In Central Knot, Off', true, '.source-row');
-  await a.click('#nav-agents'); await openRow('agents', 'reviewer');
+  await openKind(a, 'agents'); await openRow('agents', 'reviewer');
   await atEverySize('agent-row-source', 'On Agents, reviewer is Off, in Central Knot only; opened, its version says it came from github.com/team/review-kit, and the line at the end says it is from that source, and that what changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here', true, `.ov-row[data-key="${rowPart('', 'agents', 'reviewer')}"]`, 'start');
   await turnOnRow('agents', 'reviewer'); await switchOn('agents', 'reviewer');
   const inClaude = join(practice, '.claude/agents/reviewer.md');
@@ -2670,7 +2763,7 @@ if (wanted('source-agents')) {
   commit({ 'agents/reviewer.md': null }, 'Drop reviewer');
   await checkNow();
   await atEverySize('agent-removed', 'reviewer was taken out of the source; clicked Check now: the band leads, under a warning mark, with reviewer no longer at the source, turned off and taken out of the tools, Central Knot keeping it, with Turn reviewer on; the source’s row has reviewer’s line, an agent not in its last read: no longer at this source, Off, and no longer from it, with Turn it on', true, '.source-row');
-  await a.click('#nav-agents'); await openRow('agents', 'reviewer');
+  await openKind(a, 'agents'); await openRow('agents', 'reviewer');
   await atEverySize('agent-removed-agents', 'On Agents, reviewer is Off, out of every tool, with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and what happens should the source have it again', true, `.ov-row[data-key="${rowPart('', 'agents', 'reviewer')}"]`, 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
@@ -2701,13 +2794,13 @@ if (wanted('source-servers')) {
   await a.click('#source-look'); await busyDone(); await a.settle();
   await atEverySize('look', 'Looked at team/service-kit: one agent, reviewer, in the folder agents, and four MCP servers from its .mcp.json at the root: relay and search-index come in Off; team-plugin-helper is not brought in, since it names a plugin’s own folder or settings, which only Claude Code fills in, for a plugin; half-written can’t be read, since it has no command to run; Add 1 agent and 2 MCP servers', true, '#source-preview');
   await a.click('#source-add'); await busyDone(); await a.settle();
-  await a.click('#nav-mcp'); await openRow('mcp', 'relay');
+  await openKind(a, 'mcp'); await openRow('mcp', 'relay');
   await atEverySize('server-row-source', 'On MCP servers, relay is Off, in Central Knot only; opened, its version says it came from github.com/team/service-kit, and the line at the end says it is from that source, and that what changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here', true, `.ov-row[data-key="${rowPart('', 'mcp', 'relay')}"]`, 'start');
   await turnOnRow('mcp', 'relay'); await switchOn('mcp', 'relay');
   commit({ '.mcp.json': servers({ relay: relay('debug'), 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Log more');
   await checkNow();
   await atEverySize('server-updated', 'relay was turned On, in Claude Code too, then its RELAY_LOG changed at the source (and half-written was taken out there); clicked Check now: the band says relay was updated from its source, now in all 3 tools, with Open MCP servers and Undo the update', true, '.source-row');
-  await a.click('#nav-mcp'); await openRow('mcp', 'relay');
+  await openKind(a, 'mcp'); await openRow('mcp', 'relay');
   await atEverySize('server-updated-row', 'On MCP servers, relay’s row: on in every tool, Claude Code’s with the update too', false, `.ov-row[data-key="${rowPart('', 'mcp', 'relay')}"]`, 'start');
   const inCopilot = join(practice, '.copilot/mcp-config.json');
   edit(inCopilot, text => { const parsed = JSON.parse(text); parsed.mcpServers.relay.env.RELAY_REGION = 'east'; return JSON.stringify(parsed, null, 2); });
@@ -2719,7 +2812,7 @@ if (wanted('source-servers')) {
   commit({ '.mcp.json': servers({ 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Drop relay');
   await checkNow();
   await atEverySize('server-removed', 'relay was taken out of the source; clicked Check now: the band leads, under a warning mark, with relay no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn relay on; the source’s row has relay’s line: no longer at this source, Off, no longer from it, with Turn it on', true, '.source-row');
-  await a.click('#nav-mcp'); await openRow('mcp', 'relay');
+  await openKind(a, 'mcp'); await openRow('mcp', 'relay');
   await atEverySize('server-removed-mcp', 'On MCP servers, relay is Off with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, and what happens should the source have it again', true, `.ov-row[data-key="${rowPart('', 'mcp', 'relay')}"]`, 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
@@ -2805,13 +2898,13 @@ if (wanted('plugin-library')) {
   rmSync(join(market, 'plugins/issue-tracker/skills/triage'), { recursive: true, force: true });
   await refresh(); await waitFor(a, `!!document.querySelector('#pupdate-0-issue-tracker')`, 15000);
   await a.click('#pupdate-0-issue-tracker'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
-  await a.click('#nav-skills'); await waitFor(a, `!!document.querySelector('.sync-notice[data-kind="dropped"]')`, 15000);
+  await openKind(a, 'skills'); await waitFor(a, `!!document.querySelector('.sync-notice[data-kind="dropped"]')`, 15000);
   await atEverySize('dropped-notice', 'Update read issue-tracker, which no longer has triage: on Skills the notice says triage: the plugin issue-tracker no longer has it, so it is off, Central Knot keeps it, with Turn it on (as your own) and History', true, '.sync-notice[data-kind="dropped"]');
   await a.click('#nav-plugins');
   writeFileSync(join(market, 'plugins/issue-tracker/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp', '--v2'] } } }));
   await refresh(); await waitFor(a, `/An update is ready/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
   await atEverySize('items-page', 'issue-tracker turned on in a home with Pi and no tool’s command-line tool: Your tools has Pi’s line, “1 of its 1 items is on” (triage, dropped, is no longer the plugin’s), and Claude Code’s, Copilot CLI’s and Codex’s boxes off, each line saying “No … command-line tool here”; the plugin then dropped triage (Update turned it off) and changed issues: Its items lists MCP server issues, “An update is ready: Update brings it in”, and skill triage, “Removed by the plugin’s update, so it is off. Turning it on keeps it as yours”, with Update at the top', true, '.plugin-items-section');
-  await a.click('#nav-mcp'); await openRow('mcp', 'issues');
+  await openKind(a, 'mcp'); await openRow('mcp', 'issues');
   // document-tools on too, with a third skill, charts; pdf-reader then edited in Pi (let go as his own) and spreadsheet deleted from Central Knot.
   mkdirSync(join(market, 'plugins/document-tools/skills/charts'), { recursive: true });
   writeFileSync(join(market, 'plugins/document-tools/skills/charts/SKILL.md'), '---\nname: charts\ndescription: Draws a chart from a table.\n---\nDraw it.\n');
@@ -2819,19 +2912,19 @@ if (wanted('plugin-library')) {
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#pswitch-page-0-document-tools')`, 15000);
   await a.click('#pswitch-page-0-document-tools'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   edit(join(practice, '.pi/agent/skills/pdf-reader/SKILL.md'), text => `${text}\nMy own way of reading PDFs.\n`);
-  await refresh(); await a.click('#nav-skills'); await waitFor(a, `!!document.querySelector('.sync-notice[data-kind="let-go"]')`, 15000);
+  await refresh(); await openKind(a, 'skills'); await waitFor(a, `!!document.querySelector('.sync-notice[data-kind="let-go"]')`, 15000);
   await openRow('skills', 'pdf-reader');
   await atEverySize('let-go-row', 'pdf-reader was edited in Pi: on Skills the notice says it is your own now, no longer following the plugin document-tools, that it stays in the tools that have it and its row lets it into the others; its row says Pi only, with no “from the plugin”, and its versions keep the plugin’s', true, `.ov-row[data-key="${rowPart('', 'skills', 'pdf-reader')}"]`, 'start');
   await openRow('skills', 'spreadsheet'); await a.click(`#${rowPart('delete', 'skills', 'spreadsheet')}`); await a.click(`#${rowPart('delete-confirm', 'skills', 'spreadsheet')}`); await a.settle();
   await a.click('#nav-plugins'); await refresh(); await waitFor(a, `/you deleted it/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
   await atEverySize('own-and-deleted', 'document-tools’ page: Its items lists skill charts (plain: on in Pi), skill pdf-reader “Not brought in: you have your own”, and skill spreadsheet, deleted from Central Knot, “Deleted here: tick to bring it back”', true, '.plugin-items-section');
   // charts deleted too: nothing of document-tools is linked any more, and its page still says why each isn't brought in.
-  await a.click('#nav-skills'); await openRow('skills', 'charts'); await a.click(`#${rowPart('delete', 'skills', 'charts')}`); await a.click(`#${rowPart('delete-confirm', 'skills', 'charts')}`); await a.settle();
+  await openKind(a, 'skills'); await openRow('skills', 'charts'); await a.click(`#${rowPart('delete', 'skills', 'charts')}`); await a.click(`#${rowPart('delete-confirm', 'skills', 'charts')}`); await a.settle();
   await a.click('#nav-plugins'); await refresh(); await waitFor(a, `(document.querySelector('.plugin-items-section')?.textContent.match(/Not brought in/g) ?? []).length === 3`, 15000);
   await show('.plugin-items-section');
   await shot(a, 'none-linked-1280', 'charts deleted too, so no item of document-tools is linked any more: its page still lists all three under Its items (charts and spreadsheet “Deleted here: tick to bring it back”, pdf-reader your own), and Pi’s box is empty, with why under it: a tick brings back the two you deleted (1280×800)');
   await atEverySize('not-in-pi', 'The same page’s Your tools: Claude Code, Copilot CLI and Codex have no CLI here, so their boxes are off and each line says “No … command-line tool here”; Pi’s box is empty, and under it one sentence per reason none of document-tools’ items is on in Pi: charts and spreadsheet were deleted here (tick to bring them back), and pdf-reader is a skill of your own by that name (delete yours on its row to take the plugin’s)', true, '.plugin-panel', 'start');
-  await a.click('#nav-mcp'); await openRow('mcp', 'issues');
+  await openKind(a, 'mcp'); await openRow('mcp', 'issues');
   await atEverySize('item-row', 'On MCP servers, issues is on in Pi with “from the plugin issue-tracker” after its name; opened, Claude Code’s, Copilot CLI’s and Codex’s lines say it comes only with the plugin, which isn’t installed there, and the line at the end says it is from the plugin issue-tracker, follows it in the tools that take no plugins, and that a change made here makes it yours, with a link to Plugins', true, `.ov-row[data-key="${rowPart('', 'mcp', 'issues')}"]`, 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
@@ -2867,7 +2960,7 @@ if (wanted('parts-migration')) {
   await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`, 20000);
   await a.click('#popen-0-document-tools'); await waitFor(a, `/Its items/.test(document.querySelector('.plugin-page')?.textContent ?? '')`, 15000);
   await atEverySize('migrated-page', 'One look after the upgrade: document-tools’ parts are its items. Its items lists skill pdf-reader, edited in Pi, “Not brought in: you have your own”, and skill spreadsheet, left out of Pi, kept out there; Pi’s line counts its items on', true, '.plugin-items-section', 'start');
-  await a.click('#nav-skills'); await openRow('skills', 'triage');
+  await openKind(a, 'skills'); await openRow('skills', 'triage');
   await atEverySize('migrated-row', 'On Skills, triage, a part in Pi before, is an item “from the plugin issue-tracker”, on in Pi, opened: its tools’ lines and the line saying it follows the plugin', true, `.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`, 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
@@ -2884,7 +2977,7 @@ if (wanted('sort')) {
     for (const path of folders.flatMap(folder => [join(folder, 'SKILL.md'), folder])) utimesSync(path, new Date(), then);
   }
   await refresh();
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   for (const key of ['notes', 'release-notes', 'standup']) { await turnOnRow('skills', key); await switchOn('skills', key); }
   edit(join(practice, '.claude/skills/standup/SKILL.md'), text => `${text}\nEdited in Claude Code.\n`);
   await refresh();
@@ -2901,8 +2994,8 @@ if (wanted('sort')) {
   await a.click(`#${rowPart('files', 'skills', 'notes')}`);
   await shot(a, 'skills-files-1440', 'Clicked Files and contents: the list beside the skill keeps the table’s headings and its order under each, without the times');
   await a.size(1280, 800);
-  await a.click('#nav-mcp'); await shot(a, 'mcp', 'MCP servers, sorted the same way (one choice for the three pages): every server is found, and an MCP entry has no time of its own, so none says when and they go by name');
-  await a.click('#nav-agents'); await shot(a, 'agents', 'Agents, sorted the same way: every agent is found, each saying when its newest copy changed');
+  await openKind(a, 'mcp'); await shot(a, 'mcp', 'MCP servers, sorted the same way (one choice for the three pages): every server is found, and an MCP entry has no time of its own, so none says when and they go by name');
+  await openKind(a, 'agents'); await shot(a, 'agents', 'Agents, sorted the same way: every agent is found, each saying when its newest copy changed');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
@@ -2925,7 +3018,7 @@ if (wanted('usage')) {
     for (const path of folders.flatMap(folder => [join(folder, 'SKILL.md'), folder])) utimesSync(path, new Date(), new Date(Date.now() - 40 * DAY));
   }
   await refresh();
-  await a.click('#nav-skills');
+  await openKind(a, 'skills');
   for (const key of ['notes', 'release-notes', 'standup', 'review']) { await turnOnRow('skills', key); await switchOn('skills', key); }
   await shot(a, 'opened-home', 'Skills as the home opened: usage was collected by itself at launch, before this history was written, so beside Update usage statistics it says when and that there are no sessions yet, with no band, and no Used column');
   // Readings held back, so the page can be seen while one runs (a development run only: it reaches main).
@@ -2967,10 +3060,10 @@ if (wanted('usage')) {
   await atEverySize('held', 'Sort by Last used, release-notes used just now, Update: no row moved when the reading landed (release-notes says used just now where it was), and Put in order, beside Sort, is offered', true);
   await a.click('#put-in-order');
   await shot(a, 'put-in-order', 'Clicked Put in order: release-notes goes first under On, and the link goes');
-  await a.click('#nav-agents');
+  await openKind(a, 'agents');
   await shot(a, 'agents', 'Agents after the same reading: each agent’s figure, or a faint can’t say where no tool that has it on can tell (release-notes, only in Codex, which keeps no sessions here); no chip, as none is in it');
   if (requests) {
-    await a.click('#nav-skills');
+    await openKind(a, 'skills');
     await requests.fail('usage:read');
     await a.click('#collect-usage');
     await waitFor(a, `/couldn’t be collected/.test(document.querySelector('#usage-line .band-text > :not(.band-unshown)')?.textContent ?? '')`);

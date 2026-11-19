@@ -3,9 +3,10 @@
 // (everything.ts setSyncEverything; absent in the view until it is answered: types.ts SyncView syncEverything), and the
 // walkthrough's place lives in this window until it is left. Whether the question is asked, what Yes would do, and which items
 // wait for a choice are setupcounts.ts's, pure. The question, and the way back into the walkthrough, have one place: the top of
-// the Overview (setupLead, first of what needs you: overview.ts needsYou). The walkthrough is a band at the top of the item page of the item it
-// is at (walkthroughBand, drawn by matrix.ts listNotices), holding that item's copy question as its row shows it (matrix.ts
-// copyQuestion, which listNotices hands it, so this module needs nothing of matrix.ts), the latest copy preselected (library.ts latestCopy, in the take-in answer). Settings' Synchronize everything row
+// the Overview (setupLead, first of what needs you: overview.ts needsYou). The walkthrough is one band at the top of the Library
+// (walkthroughBand, drawn by matrix.ts listNotices), bound to the item it is at by kind and key, holding that item's copy question
+// as its row shows it (matrix.ts copyQuestion, which listNotices hands it), the latest copy preselected (library.ts latestCopy, in
+// the take-in answer); each step shows that item's row (matrix.ts showRow). Settings' Synchronize everything row
 // counts as the question does and leads in too (settingspage.ts). What Yes does in the engine, and its one Undo in History, are
 // everything.ts's.
 import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, setHome, showPage, state, syncNow, tell, whyReadOnly, type PageKind } from './app.ts';
@@ -15,7 +16,8 @@ import { plural, tookInCount } from './model.ts';
 import { oneUndoCovers } from './historyactions.ts';
 import { asksNow, KINDS, setupKinds, latestDone, waitingForChoice, walkId, walkPlace, wayBackIn, whatYesDoes, type Waiting } from './setupcounts.ts';
 import type { Change, HomeView, PassResult } from './types.ts';
-import { andList, kindNouns, toolName } from './words.ts';
+import { showRow } from './matrix.ts';
+import { andList, kindNouns, rowNames, toolName } from './words.ts';
 
 
 // ---------- The question ----------
@@ -60,7 +62,7 @@ function question(home: HomeView) {
       button({ variant: 'outline', label: 'No, I’ll add items myself', id: 'setup-no', disabled: acting(), attrs: { title: no, 'aria-describedby': 'setup-no-says' }, onclick: () => void answer(false) })));
 }
 
-/** A home that waits for Resume: Resume comes first (any click resumes, as on the item pages), and the question after it. */
+/** A home that waits for Resume: Resume comes first (any click resumes, as on the item lists), and the question after it. */
 const resumeFirst = (reason: string) => h('p.overview-line', { id: 'setup-resume' }, icon('circle-alert', 14, 'tone-warning'), `${reason} `,
   button({ variant: 'link', size: 'micro', label: 'Resume', id: 'setup-resume-button', disabled: acting(), onclick: () => void applyClick({ kind: 'skills', changes: [], items: [], rows: [], said: 'Resumed: sync carries on from the record as it is.' }) }),
   ' Then Central Knot asks whether to synchronize everything.');
@@ -92,8 +94,10 @@ const walking = () => !!state.home && walk.home === state.home.home;
 
 /** Where it is in the open home (setupcounts.ts walkPlace). */
 const place = (home: HomeView) => walkPlace(waitingForChoice(home), walk.passed);
+/** The item the walkthrough asks about now, if it is open: its row doesn't ask again (matrix.ts details). */
+export const walkingAt = () => (state.home && walking() ? place(state.home).at : undefined);
 
-/** Opens the walkthrough at its first item, on that item's page (Yes, Settings' count, the Overview's line). */
+/** Opens the walkthrough at its first item, its row shown in the Library (Yes, Settings' count, the Overview's line). */
 export function openWalkthrough() {
   const home = state.home;
   if (!home) return;
@@ -101,17 +105,17 @@ export function openWalkthrough() {
   if (!place(home).at) { Object.assign(walk, { home: undefined }); tell({ page: state.page, text: 'No found item waits for a choice of copy now.' }); rerender(); return; }
   goOn();
 }
-/** To the page of the item it is at. */
-const goOn = () => { const at = state.home && place(state.home).at; if (at) showPage(at.kind); };
+/** To the item it is at: its row in the Library, open and in view; once none is left, the band says what still waits. */
+const goOn = () => { const at = state.home && place(state.home).at; if (at) showRow(at.kind, at.key); else rerender(); };
 /** Left at any moment: what is left stays found, each with its row's question. */
 const leave = () => { Object.assign(walk, { home: undefined, passed: [] }); rerender(); };
 /** Passes each of these that no longer waits (its copy chosen); one refused meanwhile (a copy changed since) is asked again. */
 const passChosen = (items: Waiting[]) => {
   const still = new Set(waitingForChoice(state.home!).map(walkId));
   walk.passed.push(...items.map(walkId).filter(id => !still.has(id)));
-  rerender();
+  goOn();
 };
-const skip = (item: Waiting) => { walk.passed.push(walkId(item)); rerender(); };
+const skip = (item: Waiting) => { walk.passed.push(walkId(item)); goOn(); };
 
 /**
  * "Use the latest for the rest": for each item left with a latest copy, the click its question's main button sends (`use`, as
@@ -132,12 +136,12 @@ const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', asy
 });
 
 /**
- * The walkthrough's band on an item page: where it is, the item's copy question as its row asks it (`question`: matrix.ts
+ * The walkthrough's band above a table of `kinds`: where it is, the item's copy question as its row asks it (`question`: matrix.ts
  * copyQuestion, which runs `then` once a choice's click is done; the latest copy's button the main one, "No dates to go by" where
- * there is none), Skip (which changes no copy), Use the latest for the rest, and leave. On another kind's page, the way to the
- * page of the item it is at; once none is left, what still waits and where.
+ * there is none), Skip (which changes no copy), Use the latest for the rest, and leave. Above a table that doesn't list the
+ * item's kind (a segment of another kind, a tool's tab), the way to its row; once none is left, what still waits.
  */
-export function walkthroughBand(kind: PageKind, question: (key: string, then: () => void) => HTMLElement | null): HTMLElement | null {
+export function walkthroughBand(kinds: PageKind[], question: (kind: PageKind, key: string, then: () => void) => HTMLElement | null): HTMLElement | null {
   const home = state.home;
   if (!home || !walking()) return null;
   const { at, left, number, of } = place(home);
@@ -145,8 +149,8 @@ export function walkthroughBand(kind: PageKind, question: (key: string, then: ()
   const head = (where: string) => h('span.walk-head', {}, icon('diff', 14, 'tone-warning'), h('strong', {}, 'Choosing copies'), h('span.walk-place', {}, ` · ${where}`));
   const band = (asking: boolean, ...children: (HTMLElement | string | null)[]) => h(`div.band.band-walk${asking ? '.walk-asking' : ''}`, { role: 'region', 'aria-label': 'Choosing copies', id: 'walkthrough' }, ...children);
   if (!at) return band(false, head('done'), h('span.band-text', {}, stillWaiting(home)), close);
-  if (at.kind !== kind) return band(false, head(`${number} of ${of}`), h('span.band-text', {}, `Next: ${at.name}, on ${kindNouns[at.kind].title}.`),
-    button({ variant: 'outline', size: 'small', label: `Go on to ${kindNouns[at.kind].title}`, id: 'walk-go-on', onclick: goOn }), close);
+  if (!kinds.includes(at.kind)) return band(false, head(`${number} of ${of}`), h('span.band-text', {}, `Next: ${at.name} (${kindNouns[at.kind].one}).`),
+    button({ variant: 'outline', size: 'small', label: 'Go on', name: `Go on to ${at.name} in the Library`, id: 'walk-go-on', onclick: goOn }), close);
   const dated = left.filter(item => item.latest).length;
   const latestTitle = `For each of the ${plural(left.length, 'item')} left, use the copy changed last${dated < left.length ? `; ${left.length - dated} with no dates to go by ${left.length - dated === 1 ? 'is' : 'are'} skipped` : ''}. Each has its own Undo in History.`;
   const note = `${at.latest ? '' : 'No dates to go by: choose one, or skip it. '}Skip changes no copy.`;
@@ -155,13 +159,12 @@ export function walkthroughBand(kind: PageKind, question: (key: string, then: ()
       button({ variant: 'outline', size: 'small', label: 'Use the latest for the rest', id: 'walk-use-latest', disabled: !dated || acting(), attrs: { title: latestTitle }, onclick: () => void useLatest(left) }),
       button({ variant: 'outline', size: 'small', label: 'Skip', id: 'walk-skip', disabled: acting(), attrs: { title: `Leave ${at.name} found, its copies as they are`, 'aria-describedby': 'walk-note' }, onclick: () => skip(at) }),
       close)),
-    question(at.key, () => passChosen([at])));
+    question(at.kind, at.key, () => passChosen([at])));
 }
 
-/** Once none is left: how many skipped items still wait for a choice, and on which pages, or that none does. */
+/** Once none is left: which skipped items still wait for a choice (by name, with its kind where two kinds share it), or that none does. */
 function stillWaiting(home: HomeView): string {
   const waiting = waitingForChoice(home);
   if (!waiting.length) return walk.passed.length ? 'Every item has a copy chosen.' : 'No found item waits for a choice of copy now.';
-  const pages = KINDS.filter(kind => waiting.some(item => item.kind === kind)).map(kind => `${andList(waiting.filter(item => item.kind === kind).map(item => item.name))} on ${kindNouns[kind].title}`);
-  return `${plural(waiting.length, 'skipped item')} still ${waiting.length === 1 ? 'waits' : 'wait'} for a choice, ${waiting.length === 1 ? 'its' : 'their'} copies as they are: ${andList(pages)}. Each row still asks.`;
+  return `${plural(waiting.length, 'skipped item')} still ${waiting.length === 1 ? 'waits' : 'wait'} for a choice, ${waiting.length === 1 ? 'its' : 'their'} copies as they are: ${andList(rowNames(waiting))}. Each row in the Library still asks.`;
 }

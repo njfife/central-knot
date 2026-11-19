@@ -5,7 +5,7 @@
 // runs the pass of the whole home (pass, through homepass.ts homePass), builds the view every page reads (syncThenView:
 // types.ts HomeView), and registers every IPC channel the page calls through preload.ts
 // (the Plugins page's are marketplaces.ts's, registered with this module's handle). Each handler hands its request to an engine;
-// a click on an item page goes through the `changes` sanitizer, which must copy each field of types.ts Change. Not here: what a
+// a click on an item list goes through the `changes` sanitizer, which must copy each field of types.ts Change. Not here: what a
 // change does (the engines: librarypass.ts and each kind, profiles.ts, sources.ts, gitrepo.ts, instructions.ts, plugins.ts) and
 // what a page shows (from renderer.ts).
 import { jsonObject, onlyAllowed, PRODUCT, record, strings } from './values.ts';
@@ -606,7 +606,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
  * finds the same failure again adds nothing; and each kind's notices, for its own page.
  */
 function keepPass({ told, skills, serversAndAgents }: BackgroundPass) {
-  const same = (one: DestinationResult, other: DestinationResult) => one.item === other.item && one.harness === other.harness && one.outcome === other.outcome && one.message === other.message;
+  const same = (one: DestinationResult, other: DestinationResult) => one.of === other.of && one.item === other.item && one.harness === other.harness && one.outcome === other.outcome && one.message === other.message;
   for (const result of [...(told?.stopped ?? []), ...(told?.copies ?? [])]) if (!pendingResults.some(known => same(known, result))) pendingResults.push(result);
   pendingNotices.push(...(skills?.notices ?? []));
   pendingServerNotices.push(...(serversAndAgents?.serverNotices ?? []));
@@ -648,7 +648,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
     mcp: await serversView(shared, managed, pendingServerNotices.splice(0)),
     agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
   };
-  // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
+  // What plugins installed whole bring, read with the home so the Library shows it without Plugins.
   // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
   // Whose own record of its plugins can't be read, as the Plugins page finds it (marketplaces.ts look): what it has isn't known.

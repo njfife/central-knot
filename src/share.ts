@@ -18,7 +18,7 @@
 // Who enters the gate for library writes. A click that writes the library, the home's sync record or a tool's own switch for a
 // library item by its own hand (a profile switch and its Undo, a Manage switch, Synchronize everything's switch, a skill's Take
 // over, Clear the switch and its Undo, a source's Add and Check now: sources.ts) enters it once its own refusals are past. A
-// pass enters it before it reads its clicks (librarypass.ts runPass), so an item page's click that the pass then refuses has
+// pass enters it before it reads its clicks (librarypass.ts runPass), so an item list's click that the pass then refuses has
 // still made the record of a home with none, or resumed one that waited. What checks before such a write starts (Pull, Push,
 // Synchronize everything's Undo and Restore, the Undo of a Pull's change to Claude Code's settings, the profiles migration)
 // only asks it; what writes a file of Central Knot's own alone asks it for that (`ownFile`: profiles.json, a source's Look and
