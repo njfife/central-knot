@@ -14,6 +14,7 @@ import { leftOutSentence, lineCount, linesOf, toolList, toolName } from './words
 import { harnessIds } from './harnesses.ts';
 import { isPresent } from './presence.ts';
 import { onlyAllowed } from './values.ts';
+import { sessionSettings } from './pluginitems.ts';
 import { instructionParts } from './instructionparts.ts';
 import type { BaseApply, BaseHeld, BaseList, BaseResult, BaseUndo, BaseView, HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
 
@@ -160,7 +161,8 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
     const text = await readText(path);
     files.push({ tool: snapshot.harness, path, exists: text !== undefined, text: text ?? '', hash: hashOf(text), readers, notes, nextStep: 'Start a new session to use the change.',
       versions: describe(await shelf(context.home, snapshot.harness), text ?? ''), base: baseIfInvolved(baseState(text ?? '', readersOfFile(snapshot.harness, sameFile), base)), sameFile,
-      ...(withParts ? { parts: await instructionParts(context, snapshot.harness, snapshot.root, path, text ?? '') } : {}) });
+      ...(withParts ? { parts: await instructionParts(context, snapshot.harness, snapshot.root, path, text ?? '') } : {}),
+      ...await sessionSettings(snapshot.harness, snapshot.root) });
   }
   // A part that is another tool's own file says so: that tool's card edits it and the base writes it.
   for (const file of files) for (const part of file.parts ?? []) {

@@ -2839,7 +2839,7 @@ if (wanted('source-plugins')) {
     'agents/on-call-triage-coordinator.md': '---\nname: on-call-triage-coordinator\ndescription: Triages a page and pulls in the right people.\n---\n\nTriage.\n',
     '.mcp.json': JSON.stringify({ mcpServers: { 'pagerduty-incident-bridge': { command: 'npx', args: ['-y', '@acme/pagerduty-mcp'] }, 'runbook-search': { command: '${CLAUDE_PLUGIN_ROOT}/bin/runbook-search' } } }),
     'commands/declare-incident.md': 'Declare.\n', 'commands/page-secondary.md': 'Page.\n', 'commands/status-update.md': 'Update.\n', 'commands/close-incident.md': 'Close.\n',
-    'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [] } }), '.lsp.json': JSON.stringify({ yaml: { command: 'yaml-language-server' } }), 'bin/runbook-search': '#!/bin/sh\n',
+    'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'cat "${CLAUDE_PLUGIN_ROOT}/RUNBOOK.md"' }] }] } }), '.lsp.json': JSON.stringify({ yaml: { command: 'yaml-language-server' } }), 'bin/runbook-search': '#!/bin/sh\n',
   });
   const names = ['release-notes-writer', 'dependency-upgrade-planner', 'flaky-test-hunter', 'api-changelog-auditor', 'terraform-plan-reviewer', 'k8s-manifest-linter', 'oncall-handoff-summarizer', 'sql-migration-checker', 'feature-flag-cleaner', 'accessibility-auditor', 'docs-link-checker', 'security-advisory-reader'];
   const market = repo('acme/engineering-plugins');
