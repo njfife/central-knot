@@ -7034,6 +7034,10 @@ async function libraryFlow() {
   const total = (await counts(a)).all;
   same('the sidebar’s total is the kind switch’s All, and each segment counts the rows of its kind listed',
     [await a.text('#nav-library .nav-count'), await counts(a)], [total, Object.fromEntries([['all', total], ...Object.entries(await listed(a)).map(([kind, count]) => [kind, String(count)])])]);
+  // A first view can list release-reviewer twice, its plugin's row beside the person's, until a view says Claude Code has it
+  // through that plugin (a short-lived duplicate at launch, seen in about one run in nine): the counts wait for that view.
+  const twice = () => a.exists('.ov-plugin-row[data-key*="release-reviewer"]');
+  check('release-reviewer is one row, the person’s (read again while it isn’t)', await until(async () => { if (await twice()) await a.click('#header-refresh'); return !(await twice()); }));
   // Find looks through every kind at once; a segment it leaves at 0 stays.
   await find(a, 'review');
   same('Find across kinds: each segment counts what it leaves, MCP servers at 0 still there', [await listed(a), await counts(a)], [{ skills: 1, mcp: 0, agents: 2 }, { all: '3', skills: '1', mcp: '0', agents: '2' }]);
