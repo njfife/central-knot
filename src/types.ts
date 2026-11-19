@@ -1003,7 +1003,21 @@ export interface InstructionFile {
   /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
    *  and how that copy compares (see BaseHeld.state). */
   base?: BaseHeld;
+  /** The other files the tool reads with this one, in its order (instructionparts.ts), read for the page's view only (absent
+   *  elsewhere): shown there. One is written only where it is some tool's own file: from that tool's card and by the base. */
+  parts?: InstructionPart[];
 }
+/** A file a tool reads beside its own instruction file: its text, why it is not shown, or why the tool can't read it. */
+export type InstructionPart = {
+  /** An absolute path, or an OpenCode entry as written (a pattern, a relative path, a web address). */
+  path: string;
+  /** How the tool comes to read it: "imported by CLAUDE.md, line 12", "a rule", "named in opencode.jsonc". */
+  from: string;
+  /** The files it is read for, when only some (a rule's `paths`, an instructions file's `applyTo`); absent: every session. */
+  only?: string;
+  /** Set when the file is another tool's own instruction file, which that tool's card edits and the base writes. */
+  ownedBy?: HarnessId;
+} & ({ text: string } | { notShown: string } | { problem: string });
 /** How a tool's file holds the base. */
 export interface BaseHeld {
   /** The tool is on the base list and the base isn't blank (a blank base reaches no tool). */
