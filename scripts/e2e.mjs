@@ -8070,12 +8070,13 @@ async function libraryFlow() {
   const pressed = a => a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id.replace('library-kind-', '') ?? null`);
   const opened = a => a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key');
   /**
-   * Once the list `id` has stopped moving (still for six frames, 3 s at most). A row opened with details past the list's bottom glides
-   * the list to it (matrix.ts openRow); a scroll place written while it glides still has the glide's later steps added to it, some
-   * after the place was read.
+   * Whether the list `id` came to rest (still for six frames) within 3 s; it is found by its id each frame, as a redraw replaces it. A
+   * row opened with details past the list's bottom glides the list to it (matrix.ts openRow); a scroll place written while it glides
+   * still has the glide's later steps added to it, some after the place was read. A check that writes a scroll place checks this
+   * first, so a list that never rests fails under its own name.
    */
-  const stillList = (a, id) => a.run(`new Promise(done => { const list = document.getElementById(${JSON.stringify(id)}), end = Date.now() + 3000; let last = list.scrollTop, still = 0;
-    const look = () => { still = list.scrollTop === last ? still + 1 : 0; last = list.scrollTop; if (still === 6 || Date.now() > end) done(); else requestAnimationFrame(look); }; requestAnimationFrame(look); })`);
+  const stillList = (a, id) => a.run(`new Promise(done => { const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop, end = Date.now() + 3000; let last = at(), still = 0;
+    const look = () => { still = at() === last ? still + 1 : 0; last = at(); if (still === 6) done(true); else if (Date.now() > end) done(false); else requestAnimationFrame(look); }; requestAnimationFrame(look); })`);
   /** The mouse's Back button, pressed and let go over the page (places.ts listenForTravel). */
   const mouseBack = async a => {
     for (const [type, buttons] of [['mousePressed', 8], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button: 'back', buttons, clickCount: 1 });
@@ -8458,7 +8459,7 @@ async function libraryFlow() {
   await c.click('#chip-attention');
   await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const top = () => c.run(`Math.round(document.querySelector('#table-library-all').scrollTop)`);
-  await stillList(c, 'table-library-all');
+  check('the Library’s list comes to rest once review’s row has opened', await stillList(c, 'table-library-all'));
   await c.run(`document.querySelector('#table-library-all').scrollTop = 80`);
   const before = await top();
   await c.click(`#${rowPart('diff', 'skills', 'review')}`);
@@ -8480,7 +8481,7 @@ async function libraryFlow() {
   await c.click('#chip-attention');
   await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const tabTop = () => c.run(`Math.round(document.querySelector('#table-skills-claude-cli')?.scrollTop ?? -1)`);
-  await stillList(c, 'table-skills-claude-cli');
+  check('Claude Code’s Skills list comes to rest once review’s row has opened', await stillList(c, 'table-skills-claude-cli'));
   await c.run(`document.querySelector('#table-skills-claude-cli').scrollTop = 30`);
   const tabBefore = await tabTop();
   await c.click(`#${rowPart('diff', 'skills', 'review')}`);
