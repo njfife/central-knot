@@ -21,8 +21,7 @@ const homeOf = (skills: LibraryFacts[], pluginItems: InstalledPlugin[] = [], age
 };
 /** Each skill row's key with the choices of `from` that show it, in the order given. */
 const shownBy = (home: HomeView, choices: From[]) => {
-  const { rows, folded } = pageRows(home, 'skills');
-  const each = [...home.skills.items.map(row => ({ key: row.key, origins: originOf(row, folded.get(row.key)) })), ...rows.map(row => ({ key: row.key, origins: originOf(row) }))];
+  const each = [...home.skills.items, ...pageRows(home, 'skills').rows].map(row => ({ key: row.key, origins: originOf(row) }));
   return Object.fromEntries(choices.map(from => [from, each.filter(row => fromShows(from, row.origins)).map(row => row.key)]));
 };
 const pdf = pluginFrom('pdf', 'team-tools'), review = pluginFrom('review', 'market-one'), otherReview = pluginFrom('review', 'market-two');
@@ -58,7 +57,7 @@ test('A skill folded onto two plugins is counted once under Any plugin and once 
   // Pi’s item is linked to pdf (no whole install there); Claude Code gets it through review: one row, two plugins.
   const home = homeOf([fact('notes', ['pi-cli'], { fromSource: { link: 'plugin:pdf@team-tools' }, plugin: { 'claude-cli': { plugin: 'review', marketplace: 'market-one' } } })],
     [install('claude-cli', 'review', 'market-one', [skillIn('notes')])]);
-  assert.deepEqual(originOf(home.skills.items[0]!, pageRows(home, 'skills').folded.get('notes')), { yours: false, plugins: [pdf, review] });
+  assert.deepEqual(originOf(home.skills.items[0]!), { yours: false, plugins: [pdf, review] });
   assert.deepEqual(shownBy(home, ['plugins', pdf, review, 'yours']), { plugins: ['notes'], [pdf]: ['notes'], [review]: ['notes'], yours: [] });
 });
 

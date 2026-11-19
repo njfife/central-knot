@@ -9010,7 +9010,7 @@ async function fromFlow() {
     '.claude/plugins/known_marketplaces.json': JSON.stringify({ 'market-one': { source: { source: 'directory', path: marketOne }, installLocation: marketOne }, 'market-two': { source: { source: 'directory', path: marketTwo }, installLocation: marketTwo } }) });
   writeFileSync(join(H.data, 'marketplaces.json'), JSON.stringify([marketOne, marketTwo]));
   // The person's own: two skills that speak of the ledger, an agent called shared; Claude Code's sessions, so it can tell use.
-  for (const name of ['notes', 'tidy']) { const folder = skill(H.claude, name, md(name, 'skill', 'Keep the ledger tidy.')); utimesSync(join(folder, 'SKILL.md'), old, old); }
+  for (const name of ['notes', 'tidy']) { const folder = skill(H.claude, name, md(name, 'skill', 'Keep the ledger tidy.')); for (const path of [join(folder, 'SKILL.md'), folder]) utimesSync(path, old, old); }
   put(H.home, { '.claude/agents/shared.md': md('shared', 'agent', 'A helper.'), '.claude/projects/-work/s1.jsonl': `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'lint' } }] }, timestamp: new Date(Date.now() - 2 * DAY).toISOString() })}\n` });
   const ledger = repo('team/ledger-skills', { 'skills/shared/SKILL.md': md('shared', 'skill', 'Check the ledger.'), 'skills/ledger-check/SKILL.md': md('ledger-check', 'skill', 'Balance the ledger.') });
   let a = await launch(H.data, [], H.real, served);
@@ -9027,8 +9027,12 @@ async function fromFlow() {
   };
   await addSource(ledger);
 
-  // ---------- (b) The source's shared, which both reviews bring too ----------
-  await openKind(a, 'all');
+  // ---------- (b) The source's shared, which both reviews bring too, from Show in the Library ----------
+  await openKind(a, 'agents');
+  await a.click('#nav-sources');
+  await a.click(`#source-library-${await a.run(`document.querySelector('.source-row').dataset.source`)}`);
+  same('Show in the Library: All, From the source, its two skills, Off', [await a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id`), await fromIs(a), (await listed(a)).sort()],
+    ['library-kind-all', `source:${ledger}`, [id('skills', 'ledger-check'), id('skills', 'shared')]]);
   const menu = await a.run(`[...document.querySelector('#item-from').children].map(each => each.tagName === 'OPTGROUP' ? [each.label, [...each.children].map(option => option.textContent)] : each.textContent)`);
   same('From offers Anywhere, Your own, each review told apart by its marketplace, and the source by its short label', menu,
     ['Anywhere', 'Your own', ['Plugins', ['Any plugin', 'review (market-one)', 'review (market-two)']], ['Library sources', ['Any source', 'github.com/team/ledger-skills']]]);
@@ -9038,14 +9042,17 @@ async function fromFlow() {
   same('review from market-two: its agent audit, and the same shared once', (await listed(a)).sort(), [id('agents', 'review@market-two/audit'), id('skills', 'shared')]);
   await chooseFrom(a, 'plugins');
   same('Any plugin counts shared once', [(await listed(a)).filter(key => key.endsWith('-shared')), await a.text('#library-kind-all .kind-seg-count')], [[id('skills', 'shared')], '3']);
+  // A row's switch holds it where it is (a pin); another From lets that go, so it doesn't stay listed under Your own.
   await chooseFrom(a, `source:${ledger}`);
-  same('the source: its two skills, Off', (await listed(a)).sort(), [id('skills', 'ledger-check'), id('skills', 'shared')]);
+  await a.click(`#${rowPart('switch', 'skills', 'ledger-check')}`);
+  await done(a);
   await chooseFrom(a, 'yours');
-  same('Your own: the two skills and the agent shared, none of a plugin or the source', (await listed(a)).sort(), [id('agents', 'shared'), id('skills', 'notes'), id('skills', 'tidy')]);
+  same('Your own: the two skills and the agent shared, not the source’s row just clicked', (await listed(a)).sort(), [id('agents', 'shared'), id('skills', 'notes'), id('skills', 'tidy')]);
 
   // ---------- (c) A word in files: Any plugin, then the source; Turn these off and Undo ----------
   await chooseFrom(a, 'anywhere');
-  for (const key of ['shared', 'ledger-check']) { await a.click(`#${rowPart('switch', 'skills', key)}`); await done(a); }
+  await a.click(`#${rowPart('switch', 'skills', 'shared')}`);
+  await done(a);
   const onNow = key => JSON.parse(readNow(join(H.home, '.central-knot/skills.json')) || '{"items":{}}').items[key]?.on;
   await find(a, 'ledger');
   await chooseFrom(a, 'plugins');
@@ -9065,6 +9072,8 @@ async function fromFlow() {
   await a.click('#outcome-undo');
   await done(a);
   check('Undo turns it back on', await until(() => onNow('ledger-check')), ['shared', 'ledger-check', 'notes', 'tidy'].map(onNow));
+  await find(a, '');
+  same('Find cleared, the chip still counts within From: the source’s two, not notes and tidy', await a.text('#chip-unused .chip-count'), '2');
   await a.click('#chip-unused');
 
   // ---------- (a) review from market-one, from its row on Plugin marketplaces; another kind; one Back ----------
@@ -9083,7 +9092,7 @@ async function fromFlow() {
   same('one Back returns to market-one’s plugins', [await a.run(`document.querySelector('.page-title')?.textContent`), await a.text('.market-item.selected .market-item-name')], ['Plugin marketplaces', 'market-one']);
 
   // ---------- (d) A source of every kind, added while an old Find is set ----------
-  const mixed = repo('team/mixed-kit', { 'skills/kit-skill/SKILL.md': md('kit-skill', 'skill', 'A skill.'), 'agents/kit-agent.md': md('kit-agent', 'agent', 'An agent.'),
+  const mixed = repo('platform-engineering-group/shared-agent-skills-for-the-whole-company', { 'skills/kit-skill/SKILL.md': md('kit-skill', 'skill', 'A skill.'), 'agents/kit-agent.md': md('kit-agent', 'agent', 'An agent.'),
     '.mcp.json': JSON.stringify({ mcpServers: { 'kit-server': { type: 'http', url: 'https://kit.example.test/mcp' } } }) });
   await openKind(a, 'all');
   await find(a, 'ledger');
@@ -9092,12 +9101,31 @@ async function fromFlow() {
   await a.click('#source-open-library');
   same('it lands on All, From the source, Find let go: its skill, agent and server', [await fromIs(a), await a.run(`document.querySelector('#find').value`), (await listed(a)).sort()],
     [`source:${mixed}`, '', [id('agents', 'kit-agent'), id('mcp', 'kit-server'), id('skills', 'kit-skill')]]);
+  // The source's long link, shortened to its repository's name, shows whole on From, the bar wrapping first where it must.
+  // Find keeps room for two short words (style.css: 140 px), the bar wrapping first, with Automatic sync on and (below) off.
+  const fromWhole = () => a.run(`(select => { const font = getComputedStyle(select), words = select.options[select.selectedIndex].text, measure = document.createElement('canvas').getContext('2d');
+    measure.font = font.font; return [words, measure.measureText(words).width + parseFloat(font.paddingLeft) + parseFloat(font.paddingRight) <= select.clientWidth + 1, document.querySelector('.ov-page .find').clientWidth >= 138, document.querySelector('.ov-page .toolbar').hasAttribute('data-overflows')]; })(document.querySelector('#item-from'))`);
+  const sizes = [[860, 600, 'rail'], [860, 600, 'open'], [1316, 819, 'open'], [1316, 819, 'rail']];
+  const sizedTo = async (width, height, sidebar) => { await sizeTo(a, width, height); if (await a.run(`document.body.classList.contains('rail')`) !== (sidebar === 'rail')) await a.click('#sidebar-toggle'); return `at ${width}×${height}, the sidebar ${sidebar === 'rail' ? 'a rail' : 'open'}`; };
+  for (const [width, height, sidebar] of sizes) {
+    const at = await sizedTo(width, height, sidebar);
+    same(`${at}, From shows the source’s name whole, Find keeps room for two short words, and the bar fits`, await fromWhole(), ['shared-agent-skills-for-the-whole-company', true, true, false]);
+  }
+  // The chips' words fold first, then the captions of From and Sort (dom.ts fitBars): narrowing the window, there is a width
+  // where only the first have, and none where only the second have.
+  const folds = [];
+  for (let width = 1600; width >= 860; width -= 16) { await sizeTo(a, width, 819); folds.push(await a.run(`[[...document.querySelectorAll('.chip-label')].every(label => !label.offsetWidth), !document.querySelector('.from-word').offsetWidth, !document.querySelector('.order-word').offsetWidth]`)); }
+  same('narrowing the window, the chips’ words fold before the captions of From and Sort, never after', [folds.some(([chips, from, sort]) => chips && !from && !sort), folds.some(([chips, from, sort]) => (from || sort) && !chips)], [true, false]);
+  await fullSize(a);
+  await chooseFrom(a, 'anywhere');
+  check('on Anywhere, From is as wide as its word, not as the long name in its menu', await a.run(`document.querySelector('#item-from').clientWidth`) < 150, await a.run(`document.querySelector('#item-from').clientWidth`));
+  await chooseFrom(a, `source:${mixed}`);
   await a.click(`#${rowPart('open', 'skills', 'kit-skill')}`);
   await a.click(`#${rowPart('files', 'skills', 'kit-skill')}`);
   await a.click('#files-back');
   same('Files and back: still From the source, its three rows', [await fromIs(a), (await listed(a)).length], [`source:${mixed}`, 3]);
   await a.click('#nav-sources');
-  const mixedId = await a.run(`[...document.querySelectorAll('.source-row')].find(each => each.textContent.includes('mixed-kit'))?.dataset.source`);
+  const mixedId = await a.run(`[...document.querySelectorAll('.source-row')].find(each => each.textContent.includes('shared-agent-skills'))?.dataset.source`);
   await a.click(`#source-remove-${mixedId}`);
   await a.click(`#source-remove-confirm-${mixedId}`);
   await done(a);
@@ -9106,6 +9134,17 @@ async function fromFlow() {
   same('the source removed, From lets it go: Anywhere, its three still listed', [await fromIs(a), await missing()], ['anywhere', []]);
   await chooseFrom(a, 'yours');
   same('they are the person’s own now', await missing(), []);
+  // Automatic sync off, with a change waiting: the toolbar holds the waiting count too, and Find still keeps its room.
+  await a.click('#sync-switch');
+  writeFileSync(join(H.claude, 'notes/SKILL.md'), md('notes', 'skill', 'Keep the ledger tidy, and dated.'));
+  await a.click('#header-refresh');
+  check('sync off, a change waits', await until(() => a.exists('.apply-waiting')));
+  await chooseFrom(a, 'anywhere');
+  for (const [width, height, sidebar] of sizes) {
+    const at = await sizedTo(width, height, sidebar);
+    same(`sync off, ${at}: Find keeps room for two short words, and the bar fits`, await a.run(`[document.querySelector('.ov-page .find').clientWidth >= 138, document.querySelector('.ov-page .toolbar').hasAttribute('data-overflows')]`), [true, false]);
+  }
+  await fullSize(a);
   same('no page errors, the From menu', a.pageErrors, []);
   await a.quit();
 
@@ -9137,6 +9176,12 @@ esac
   check('its page links to its items in the Library', await until(() => a.exists('#plugin-library')));
   await a.click('#plugin-library');
   same('the link finds the agent, Off', [await fromIs(a), await listed(a)], ['plugin:release-helper@ck-test-market', [id('agents', 'release-reviewer')]]);
+  // The link to the one item, with From on Your own, which hides it: From is let go, and its row opens.
+  await chooseFrom(a, 'yours');
+  await a.click('#nav-plugins');
+  await until(() => a.exists('.plugin-items-list [data-key="agent:release-reviewer"] button'));
+  await a.click('.plugin-items-list [data-key="agent:release-reviewer"] button');
+  same('the link to release-reviewer lets From go and opens its row', [await fromIs(a), await a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key')], ['anywhere', [id('agents', 'release-reviewer')]]);
   await a.click(`#${rowPart('switch', 'agents', 'release-reviewer')}`); await done(a);
   check('turned On, it is in Pi again', await until(() => existsSync(reviewer)));
   writeFileSync(reviewer, `${readFileSync(reviewer, 'utf8')}\nMine.\n`);
@@ -9147,6 +9192,97 @@ esac
   same('Your own finds it', await listed(a), [id('agents', 'release-reviewer')]);
   same('no page errors, the From menu in a home with Pi', a.pageErrors, []);
   await a.quit();
+  if (shots) await fromPictures({ md, put, repo, served, until, done });
+}
+
+/**
+ * fromFlow's pictures (with --shots), each at 860×600 (the sidebar a rail), 1316×819 (his window: the sidebar open, and a rail)
+ * and 1728×1080 with a row docked, light and dark, on a home of about his counts (85 skills, 7 MCP servers, 4 agents), with four
+ * sources and twenty plugins, long names among them: the menu on Anywhere, on a long source's name and on a plugin, then each way
+ * in. The toolbar's fit at each (dom.ts fitBars: its steps, whether it overflows, its height, From's width) is printed.
+ */
+async function fromPictures({ md, put, repo, served, until, done }) {
+  const G = homeWith('from-big'), old = new Date(Date.now() - 40 * DAY), aged = folder => { for (const path of [join(folder, 'SKILL.md'), folder]) utimesSync(path, old, old); };
+  for (let n = 1; n <= 84; n++) { const name = n === 7 ? 'quarterly-platform-engineering-changelog-summary-writer' : `skill-${String(n).padStart(3, '0')}`; aged(skill(G.claude, name, md(name, 'skill', 'Body.'))); }
+  skill(G.claude, 'clash', md('clash', 'skill', 'One way.')); skill(G.copilot, 'clash', md('clash', 'skill', 'Another way.'));
+  for (const name of ['reviewer', 'scribe', 'planner', 'release-notes-writer-for-the-whole-team']) put(G.home, { [`.claude/agents/${name}.md`]: md(name, 'agent', 'Help.') });
+  put(G.home, { '.claude.json': JSON.stringify({ mcpServers: Object.fromEntries(['docs', 'github', 'linear', 'sentry', 'grafana', 'postgres', 'filesystem'].map(name => [name, { type: 'http', url: `https://${name}.example.test/mcp` }])) }),
+    '.claude/projects/-work/s1.jsonl': `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'skill-001' } }] }, timestamp: new Date(Date.now() - DAY).toISOString() })}\n` });
+  const plugins = ['enterprise-observability-dashboards', 'document-tools', 'issue-tracker', 'release-helper', 'kubernetes-rollout-guardian', 'pdf', 'sheets', 'slack-notifier', 'security-review-checklists',
+    'terraform-plan-explainer', 'changelog', 'commit-message-writer', 'design-system-components-and-tokens', 'incident-response-runbooks', 'linear', 'notion-sync', 'postgres-query-helper', 'web-accessibility-auditor', 'review'];
+  const markets = { 'market-one': plugins, 'market-two': ['review'] }, known = {};
+  for (const [name, list] of Object.entries(markets)) {
+    const dir = join(scratch, `from-big-${name}`);
+    put(dir, { '.claude-plugin/marketplace.json': JSON.stringify({ name, owner: { name: 'Team' }, plugins: list.map(plugin => ({ name: plugin, source: `./plugins/${plugin}`, description: `The ${plugin} plugin.` })) }) });
+    for (const plugin of list) { const files = { [`skills/${plugin}-tip/SKILL.md`]: md(`${plugin}-tip`, 'skill', 'A tip.') }; put(join(dir, 'plugins', plugin), files); writeClaudeInstall(G.home, name, plugin, '1.0.0', files); }
+    known[name] = { source: { source: 'directory', path: dir }, installLocation: dir };
+  }
+  put(G.home, { '.claude/plugins/known_marketplaces.json': JSON.stringify(known) });
+  writeFileSync(join(G.data, 'marketplaces.json'), JSON.stringify(Object.values(known).map(entry => entry.installLocation)));
+  const links = [repo('team/ledger-skills-big', { 'skills/ledger-audit/SKILL.md': md('ledger-audit', 'skill', 'Audit.') }),
+    repo('platform-engineering-group/shared-agent-skills-for-everyone', { 'skills/handover/SKILL.md': md('handover', 'skill', 'Hand over.'), 'agents/onboarding-buddy.md': md('onboarding-buddy', 'agent', 'Welcome.') }),
+    repo('me/skills', { 'skills/standup/SKILL.md': md('standup', 'skill', 'Stand up.') }),
+    repo('someone-else-entirely/release-and-deployment-practices', { 'skills/ship-it/SKILL.md': md('ship-it', 'skill', 'Ship.'), '.mcp.json': JSON.stringify({ mcpServers: { 'deploy-status': { type: 'http', url: 'https://deploy.example.test/mcp' } } }) })];
+  const g = await launch(G.data, [], G.real, served);
+  await g.click('#nav-overview'); await g.click('#setup-yes'); await done(g);
+  const addSource = async link => {
+    await g.click('#nav-sources');
+    await g.run(`(input => { input.value = ${JSON.stringify(link)}; input.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#source-link'))`);
+    await g.click('#source-look'); await until(() => g.exists('#source-add'));
+    await g.click('#source-add'); await until(() => g.exists('.band-done'));
+  };
+  for (const link of links.slice(0, 3)) await addSource(link);
+  const theme = value => g.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const sidebar = async want => { if (await g.run(`document.body.classList.contains('rail')`) !== (want === 'rail')) await g.click('#sidebar-toggle'); };
+  const toolbar = () => g.run(`(bar => bar && ({ steps: [...bar.classList].filter(name => name.startsWith('bar-')), overflows: bar.hasAttribute('data-overflows'), height: Math.round(bar.getBoundingClientRect().height), find: bar.querySelector('.find').clientWidth,
+    from: (select => select && { shown: select.options[select.selectedIndex]?.text, width: Math.round(select.getBoundingClientRect().width), cut: select.scrollWidth > select.clientWidth + 1 })(document.querySelector('#item-from')) }))(document.querySelector('.ov-page > .toolbar, .dock-main > .toolbar'))`);
+  const sizes = [['860', 860, 600, 'rail'], ['860-open', 860, 600, 'open'], ['1316-open', 1316, 819, 'open'], ['1316-rail', 1316, 819, 'rail'], ['1728-docked', 1728, 1080, 'open']];
+  const pictures = async (name, which = ['860', '1316-open', '1316-rail', '1728-docked']) => {
+    for (const [label, width, height, side] of sizes.filter(([each]) => which.includes(each))) {
+      await sizeTo(g, width, height); await sidebar(side);
+      const dock = label.endsWith('docked') && (await g.all('.ov-row[data-key] .ov-open button', 'e.id'))[0];
+      if (dock) await g.click(byId(dock));
+      console.log(`from toolbar, ${name} at ${label}: ${JSON.stringify(await toolbar())}`);
+      for (const look of ['light', 'dark']) { await theme(look); await g.shot(`from-${name}-${label}${look === 'dark' ? '-dark' : ''}`); }
+      if (dock) await g.click(byId(dock));
+    }
+    await theme('light'); await fullSize(g);
+  };
+  await openKind(g, 'all');
+  await until(() => g.exists('#chip-unused'));
+  await pictures('anywhere');
+  await chooseFrom(g, `source:${links[1]}`);
+  await pictures('long-source');
+  await chooseFrom(g, 'plugin:review@market-one');
+  await pictures('plugin');
+  // Automatic sync off, with a change waiting: the toolbar holds the waiting count too.
+  await chooseFrom(g, 'anywhere');
+  await g.click('#sync-switch');
+  writeFileSync(join(G.claude, 'skill-001/SKILL.md'), md('skill-001', 'skill', 'Body, changed.'));
+  await g.click('#header-refresh'); await until(() => g.exists('.apply-waiting'));
+  await pictures('sync-off', ['860', '860-open', '1316-open', '1316-rail']);
+  await g.click('#sync-switch'); await done(g);
+  // The ways in, at his window and the smallest.
+  const landings = ['860', '1316-open'];
+  await g.click('#nav-plugins'); await until(() => g.exists('.plugin-row-library'));
+  await pictures('plugins-list', landings);
+  await g.click(`#${await g.run(`document.querySelector('[data-plugin="enterprise-observability-dashboards"] .plugin-row-library').id`)}`);
+  await pictures('landing-plugin-row', landings);
+  await g.click('#nav-plugins'); await g.click(`#${await g.run(`document.querySelector('[data-plugin="design-system-components-and-tokens"] .plugin-row-open').id`)}`);
+  await until(() => g.exists('#plugin-library'));
+  await pictures('plugin-page', landings);
+  await g.click('#plugin-library');
+  await pictures('landing-plugin-page', landings);
+  await g.click('#nav-sources');
+  await pictures('sources-list', landings);
+  await g.click(`#${await g.run(`[...document.querySelectorAll('.source-row')].find(row => row.textContent.includes('shared-agent-skills')).querySelector('[id^="source-library-"]').id`)}`);
+  await pictures('landing-source-row', landings);
+  await addSource(links[3]);
+  await pictures('add-band', landings);
+  await g.click('#source-open-library');
+  await pictures('landing-add-band', landings);
+  same('no page errors, the From menu’s pictures', g.pageErrors, []);
+  await g.quit();
 }
 
 const groups = [

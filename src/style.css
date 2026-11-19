@@ -377,7 +377,11 @@ ul { list-style: none; }
 .toolbar-end:empty { border-left: 0; }
 .find { position: relative; flex: 1 1 352px; min-width: 80px; height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 4px 0 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--lift); }
 .find:focus-within { outline: 2px solid var(--focus); outline-offset: -2px; }
-.ov-page .find { flex: 0 1 240px; min-width: 120px; }
+/* An item list's Find keeps room for about 15 letters, two short words ("release notes"), in any step of a crowded bar: the
+   bar wraps first. More would put his 1316-wide window's bar, sidebar open, on two lines with nothing chosen. */
+.ov-page .toolbar .find { flex: 0 1 240px; min-width: 140px; }
+/* Wrapped, it starts from that floor and takes the room left on its line, so the rest packs onto as few lines as it can. */
+.ov-page .toolbar.bar-wrap .find { flex: 1 1 140px; }
 .find-glyph { color: var(--ink-soft); }
 .find-input { flex: 1; min-width: 0; border: 0; padding: 0 0 0 4px; background: transparent; color: var(--ink); font: 400 13px/20px var(--sans); outline: none !important; user-select: text; cursor: text; }
 .find-input::placeholder { color: var(--ink-soft); }
@@ -392,8 +396,8 @@ ul { list-style: none; }
 .order, .from { display: inline-flex; flex: none; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
 .select.select-bar select { height: 28px; font-size: 12.5px; }
 .bar-captionless :is(.order-word, .from-word) { display: none; }
-/* From, closed, is as wide as its chosen entry, never as its longest; past 280px its words end in "…", the whole in its title. */
-.from-select select { field-sizing: content; max-width: 280px; text-overflow: ellipsis; white-space: nowrap; }
+/* From, closed, is as wide as its chosen entry, never as its longest; past 360px its words end in "…", the whole in its title. */
+.select.from-select select { field-sizing: content; max-width: 360px; text-overflow: ellipsis; white-space: nowrap; }
 .apply-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
 .apply-waiting { color: var(--warning); }
 button.apply-state.text-action { border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }

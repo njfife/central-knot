@@ -476,10 +476,8 @@ const fromMenu = (): FromEntry[][] => {
 };
 /** Whether a choice of From is in the menu now: a plugin's while it has rows here, a source's while the home records it. */
 const fromOffered = (from: From) => fromMenu().flat().some(entry => entry.value === from);
-/** Where a drawn row came from (origins.ts originOf): a row of the person's own with the plugins' items folded onto it (pluginrows.ts pageRows). */
-const originAt = (row: ItemRow | PluginRow) => (isPluginRow(row) || !state.home ? originOf(row) : originOf(row, pageRows(state.home, row.kind).folded.get(row.key)));
-/** Whether the table's From shows a row. */
-const fromHolds = (t: Table, row: ItemRow | PluginRow) => fromShows(t.view.from, originAt(row));
+/** Whether the table's From shows a row, by where it came from (origins.ts originOf). */
+const fromHolds = (t: Table, row: ItemRow | PluginRow) => fromShows(t.view.from, originOf(row));
 
 /** The From menu, between the chips and Sort, on the Library and a tool's tabs: kept in the table's view, applied with the chip (picked); closed, as wide as its choice (style.css .from-select). */
 function fromChoice(t: Table) {

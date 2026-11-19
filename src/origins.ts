@@ -3,8 +3,8 @@
 // from several places: the person's own (found, or kept from no recorded source and linked to no plugin, even where a tool also
 // gets it through a plugin); a Library source, by the link the row's view resolves (types.ts LibraryFacts fromSource; never the
 // item's stored source id, which a removed source leaves behind), marked removed once that source dropped it; and plugins, each
-// by its link (sourcelink.ts pluginLink): a plugin's own row, a plugin's item folded onto a row (pluginrows.ts pageRows
-// `folded`), a tool that gets the item through a plugin (LibraryFacts plugin), an item linked to a plugin in Pi or OpenCode.
+// by its link (sourcelink.ts pluginLink): a plugin's own row, a tool that gets the item through a plugin (LibraryFacts plugin),
+// an item linked to a plugin in Pi or OpenCode. Those two are what folds a plugin's item onto a row (pluginrows.ts onOwnRow).
 // Never from version history: an item edited away from its plugin, which the pass let go, is the person's own.
 import type { PageKind } from './app.ts';
 import { kindSource } from './itemrow.ts';
@@ -23,21 +23,17 @@ export interface Origins {
   plugins: string[];
 }
 
-/** Where a row came from: a plugin's own row is that plugin's; a row of the person's own (the view's, or itemrow.ts ItemRow) is as the header says, `folded` the plugins' items folded onto it. */
-export function originOf(row: Pick<LibraryFacts, 'fromSource' | 'plugin'> | PluginRow, folded: readonly PluginRow[] = []): Origins {
+/** Where a row came from: a plugin's own row is that plugin's; a row of the person's own (the view's, or itemrow.ts ItemRow) is as the header says. */
+export function originOf(row: Pick<LibraryFacts, 'fromSource' | 'plugin'> | PluginRow): Origins {
   if ('marketName' in row) return { yours: false, plugins: [pluginLink(row.plugin, row.marketName)] };
   const link = row.fromSource?.link, linkedToPlugin = !!link && pluginOf(link) !== undefined;
-  const plugins = new Set([...(linkedToPlugin ? [link] : []), ...Object.values(row.plugin ?? {}).map(given => pluginLink(given.plugin, given.marketplace)),
-    ...folded.map(each => pluginLink(each.plugin, each.marketName))]);
+  const plugins = new Set([...(linkedToPlugin ? [link] : []), ...Object.values(row.plugin ?? {}).map(given => pluginLink(given.plugin, given.marketplace))]);
   const source = link && !linkedToPlugin ? { link, ...(row.fromSource!.removed ? { removed: true as const } : {}) } : undefined;
   return { yours: !link, ...(source ? { source } : {}), plugins: [...plugins] };
 }
 
 /** Each row of a kind in a home with where it came from: the person's own rows (the kind's view), then a plugin's own (pageRows). */
-export function originsIn(home: HomeView, kind: PageKind): Origins[] {
-  const { rows, folded } = pageRows(home, kind);
-  return [...kindSource(home, kind).facts.map(fact => originOf(fact, folded.get(fact.key))), ...rows.map(row => originOf(row))];
-}
+export const originsIn = (home: HomeView, kind: PageKind): Origins[] => [...kindSource(home, kind).facts, ...pageRows(home, kind).rows].map(originOf);
 
 /** How many rows of a kind came from some plugin, each once: the Overview's card says it ("3 from plugins"). */
 export const fromAnyPlugin = (home: HomeView, kind: PageKind) => originsIn(home, kind).filter(origins => origins.plugins.length > 0).length;
