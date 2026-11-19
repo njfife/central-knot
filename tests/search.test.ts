@@ -127,6 +127,32 @@ test('a row that matched only in its text carries an excerpt around the match; o
   } finally { index.close(); }
 });
 
+test('of two camelCase words, the excerpt quotes the one that holds every word that matched', async () => {
+  const text = 'Call getReleaseDate to learn when it ships. Check the licence of every dependency. When all is done, run prepareReleaseNotes and attach the file.';
+  const index = (await buildIndex([{ id: 'skills-ship-it', names: ['ship-it'], description: 'Gets a package out.', text }]))!;
+  try {
+    assert.deepEqual(index.ask('release notes'), [{ id: 'skills-ship-it', excerpt: '…is done, run prepareReleaseNotes and attach the file.' }]);
+  } finally { index.close(); }
+});
+
+test('an excerpt starts a few words before the match, so a row cut at its end still shows the word that matched', async () => {
+  const index = (await buildIndex([{ id: 'skills-release-checklist', names: ['release-checklist'], description: 'Steps to take before a release.', text: 'Bump the version, tag it, and write the changelog.' }]))!;
+  try {
+    assert.deepEqual(index.ask('changelog'), [{ id: 'skills-release-checklist', excerpt: '…and write the changelog.' }]);
+  } finally { index.close(); }
+});
+
+test('a match in a camelCase word quotes that word and the words around it, not an earlier passage where fewer words matched', async () => {
+  // "notes" is also found in "note" (a prefix, stemmed), earlier: "release" is found in prepareReleaseNotes alone, which holds both.
+  const text = 'Approve each package before it ships. Check the licence of every dependency and note who approved it. When all is done, run prepareReleaseNotes and attach the file.';
+  // And "release" alone, earlier: the word quoted is the camelCase one that holds both.
+  const other = 'Approve each package before it ships. Check the licence of every dependency and keep the record with the release. When all is done, run prepareReleaseNotes and attach the file.';
+  const index = (await buildIndex([{ id: 'skills-ship-it', names: ['ship-it'], description: 'Gets a package out.', text }, { id: 'skills-ship-it-too', names: ['ship-it-too'], description: 'Gets a package out.', text: other }]))!;
+  try {
+    assert.deepEqual(index.ask('release notes').sort((one, two) => (one.id < two.id ? -1 : 1)), [{ id: 'skills-ship-it', excerpt: '…is done, run prepareReleaseNotes and attach the file.' }, { id: 'skills-ship-it-too', excerpt: '…is done, run prepareReleaseNotes and attach the file.' }]);
+  } finally { index.close(); }
+});
+
 test('a broken word is corrected only within its allowance: one letter from four letters, two from eight, never a number', async () => {
   const docs: SearchDoc[] = [{ id: 'skills-deploy', names: ['deploy'], description: '', text: '' }, { id: 'skills-rollout', names: ['rollout'], description: '', text: 'version 2024' },
     { id: 'skills-twiml', names: ['twiml'], description: '', text: 'Its verbs.' }, { id: 'skills-logging', names: ['logging'], description: '', text: 'Verbose output.' }];
