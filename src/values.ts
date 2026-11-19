@@ -23,6 +23,12 @@ export const strings = (value: unknown): string[] | undefined => (typeof value =
 /** A plain object (not null, not an array), or undefined. */
 export const record = (value: unknown): Record<string, unknown> | undefined => (typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
 
+/**
+ * A file's text read as a JSON object (main.ts loadAppSettings); undefined where it is not one: empty, cut short, not JSON, a
+ * list. Its fields are kept as they are, a field of the wrong type too: each reader checks its own.
+ */
+export const jsonObject = (text: string): Record<string, unknown> | undefined => { try { return record(JSON.parse(text)); } catch { return undefined; } };
+
 /** "owner/repo" for a GitHub repository written as owner/repo or its https URL (with or without .git); else undefined. */
 export function githubRepo(source: string): string | undefined {
   const trimmed = source.trim();

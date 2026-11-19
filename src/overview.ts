@@ -26,6 +26,7 @@ import { heldKinds } from './presence.ts';
 import type { HarnessId, HomeView } from './types.ts';
 import { updateLine } from './updateview.ts';
 import { asksNow } from './setupcounts.ts';
+import { settingsReset } from './settingspage.ts';
 import { USAGE_DAYS, type KindUsage, type ToolHistory } from './usagerow.ts';
 import { andList, kindNames, kindNouns, orList, toolList, toolNames } from './words.ts';
 
@@ -97,7 +98,8 @@ function readOnlyLine(home: HomeView): HTMLElement | null {
 }
 
 /**
- * What needs the person, before any figure, in this order: first setup (after the problems when a kind is stopped; its question, Resume, or the way into choosing copies:
+ * What needs the person, before any figure, in this order: that Central Knot's settings file couldn't be read at launch, with the
+ * way to Settings, which says where the old file is (settingspage.ts settingsReset); first setup (after the problems when a kind is stopped; its question, Resume, or the way into choosing copies:
  * firstsetup.ts setupLead); an update to install (updateview.ts updateLine); why the home can't be written (readOnlyLine); each
  * kind's problems, each said once (but the stop said above: matrix.ts problemsBesideStop); found items whose copies differ, a line
  * per kind with the page's "Copies differ" count, where first setup doesn't speak of them; Automatic sync off.
@@ -117,7 +119,8 @@ function needsYou(home: HomeView): HTMLElement | null {
     link('Sync once', 'overview-sync-now', () => void syncNow(), acting()), '.');
   const setup = empty ? null : setupLead(home);
   const setupAfterStop = asksNow(home) === 'question' && kinds.some(kind => home[kind].gate.state === 'stopped');
-  const lines = [setupAfterStop ? null : setup, updateLine(), readOnlyLine(home), ...problems, setupAfterStop ? setup : null, ...differ, syncOff].filter((each): each is HTMLElement => !!each);
+  const reset = home.settingsUnread ? line('overview-settings-kept', 'circle-alert', 'tone-warning', `${settingsReset} `, link('Open Settings', 'overview-settings-kept-open', () => showPage('settings'))) : null;
+  const lines = [reset, setupAfterStop ? null : setup, updateLine(), readOnlyLine(home), ...problems, setupAfterStop ? setup : null, ...differ, syncOff].filter((each): each is HTMLElement => !!each);
   return lines.length ? h('div.overview-needs', { id: 'overview-needs' }, lines) : null;
 }
 
