@@ -154,13 +154,15 @@ export function inOrder<Row extends Pick<ItemRow, 'kind' | 'key' | 'versions'>>(
  * there, and its time in the list's order then (timeIn), so it keeps its place among its neighbours too (Add gives a found
  * item a time). A click never moves a row: it stays where it was, drawn in its new state, while the person works down the list.
  * Nor does a usage reading that lands: on a list that goes by last used, every row is pinned where it is first (matrix.ts holdOrder).
+ * On the Library while its Find has text, every row drawn is pinned, with no time, in the order drawn: the order the rows were
+ * pinned in is their order there (matrix.ts holdFound, foundOrder).
  */
 export interface Pin<Group> { group: Group; time?: number }
 /**
  * The rows pinned on one list, by the id its rows have there: an item list's row id (rowId), a plugin's name on Plugins. `list`:
- * which list, as its page names it: where it is, its Sort and its chip (never Find). Every page that orders rows by their state
- * reads it: the item tables (matrix.ts itemsTable), the Skills Files view's list (matrix.ts skillsBrowser) and the Plugins list
- * (pluginstate.ts shownPlugins). The one kept, and when it is let go: app.ts pinnedRows.
+ * which list, as its page names it: where it is, its Sort and its chip, and the Library's Find text (matrix.ts listNow). Every
+ * page that orders rows by their state reads it: the item tables (matrix.ts itemsTable), the Skills Files view's list (matrix.ts
+ * skillsBrowser) and the Plugins list (pluginstate.ts shownPlugins). The one kept, and when it is let go: app.ts pinnedRows.
  */
 export interface Pinned<Group = string | number> { list: string; rows: Map<string, Pin<Group>> }
 export const noPins = <Group = string | number>(): Pinned<Group> => ({ list: '', rows: new Map() });
