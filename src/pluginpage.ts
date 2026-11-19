@@ -9,7 +9,7 @@ import { afterLayout, button, fileBlocks, h, icon, toggle as switchToggle, withT
 import { brandMark } from './brand.ts';
 import { groupBy } from './model.ts';
 import { canAddText, outcomes } from './pluginoutcomes.ts';
-import { clickNote, componentsOf, dotted, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
+import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
 import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
@@ -386,12 +386,14 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   const descriptions = [plugin.description, ...parts.map(part => part.description)];
   // "In each tool" only where some tool does something with some part: not for a plugin holding only an instruction file, say.
   const inEachTool = components && nativeTools(view, entry, plugin.name).some(tool => outcomes(tool, components).length) ? components : undefined;
+  const library = libraryLink(entry, plugin, 'plugin-library', 'page');
   return h('article.plugin-page', { 'aria-label': title },
     h('header.plugin-head', {},
       h('h2', {}, title, noLongerOffered(entry, plugin) ? h('span.plugin-chip.plugin-chip-gone', {}, 'No longer offered') : null),
       plugin.displayName ? h('code.plugin-id', {}, plugin.name) : null,
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
-      facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),
+      facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null,
+      library ? h('p.plugin-meta', {}, library) : null),
     installPanel(view, entry, plugin, marketIndex, versionToCompare(plugin, detail), components),
     itemsSection(view, entry, plugin),
     // What it holds and how each tool takes it, beside the README on a wide page (style.css), one above the other otherwise.

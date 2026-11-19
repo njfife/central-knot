@@ -813,6 +813,11 @@ async function fullSize(a) {
   await a.run(`window.dispatchEvent(new Event('resize'))`);
   await a.settle();
 }
+/** Chooses `value` in the item list's From menu (matrix.ts fromChoice) as its menu chooses: a press opens a system menu on the Mac. */
+async function chooseFrom(a, value) {
+  await a.run(`(select => { select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-from'))`);
+  await a.settle();
+}
 
 /**
  * One mouse event at the point `at`, as a real mouse sends it: `buttons` 1 while the left button is held, and no button named on a
@@ -7098,7 +7103,7 @@ async function staleFlow() {
 /**
  * The Overview says only what is so (overview.ts). "All in sync" only where nothing of the kind differs, waits or couldn't be read;
  * a copy deleted by hand with Automatic sync off is a change that waits. "?" where a tool's file of a kind, or its own record of its
- * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's "From plugins" chip.
+ * plugins, couldn't be read. One count of plugins on the Overview's table, a tool's Plugins tab and a kind's from plugins, as the Library's From lists them.
  * The lead never says nothing was found above a card that counts something, and why a home can't be written is said with no tool
  * managed too. Made-up homes: Claude Code and Codex stand-ins, and a plugin from a marketplace no tool lists.
  */
@@ -7126,11 +7131,12 @@ async function overviewFlow() {
   const cardSays = async kind => (await a.text(`.kind-card:has(#overview-${kind}) .kind-card-state`))?.trim() ?? null;
   const claudeRow = () => a.all('.tools-table tr[data-tool="claude-cli"] td', 'e.textContent.trim()');
   same('with every copy in step, each card says All in sync', [await cardSays('skills'), await cardSays('mcp')], ['All in sync', 'All in sync']);
-  // One count of plugins: kit is Claude Code's one plugin on the table and on its Plugins tab; the Skills card's "from plugins" is the chip's.
+  // One count of plugins: kit is Claude Code's one plugin on the table and on its Plugins tab; the Skills card's "from plugins" is From's.
   same('the table counts kit, Claude Code’s one plugin', (await claudeRow())[3], '1');
-  check('the Skills card counts from plugins what its page’s From plugins chip holds: checks, and review, which kit brings too', /· 2 from plugins/.test(await a.text('.kind-card:has(#overview-skills) .kind-card-summary') ?? ''), await a.text('.kind-card:has(#overview-skills) .kind-card-summary'));
+  check('the Skills card counts from plugins what the Library’s From: Any plugin lists: checks, and review, which kit brings too', /· 2 from plugins/.test(await a.text('.kind-card:has(#overview-skills) .kind-card-summary') ?? ''), await a.text('.kind-card:has(#overview-skills) .kind-card-summary'));
   await a.click('#overview-skills');
-  same('the Library’s skills list’s From plugins chip holds 2', await a.run(`document.querySelector('.chip[data-tip="From plugins"] .chip-count')?.textContent`), '2');
+  await chooseFrom(a, 'plugins');
+  same('the Library’s skills under From: Any plugin are those 2', (await a.all('.ov-row[data-key]', 'e.dataset.key')).length, 2);
   await a.click('#nav-overview');
   await a.click('#overview-tool-claude-cli');
   await a.click('#harness-tab-plugins');
@@ -7436,7 +7442,7 @@ async function usageFlow() {
     await main.restore('usage:read');
     main.close();
   }
-  // A plugin's own row (From plugins) says its figure as any row does, by the same match: Claude Code calls it review-kit:checks.
+  // A plugin's own row (Only through a plugin) says its figure as any row does, by the same match: Claude Code calls it review-kit:checks.
   writeClaudeInstall(home, 'ck-usage', 'review-kit', '1.0.0', { 'skills/checks/SKILL.md': '---\nname: checks\ndescription: Checks a change.\n---\n\nSteps.\n' });
   lines(join(home, '.claude/projects/-work/s3.jsonl'), [skillCall('review-kit:checks', 4)]);
   const kit = 'review-kit@ck-usage/checks';
@@ -7445,7 +7451,7 @@ async function usageFlow() {
   await a.click('#collect-usage');
   for (let tries = 0; tries < 50 && !(await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used')?.textContent`)); tries++) await wait(100);
   await a.click(byId(rowPart('open', 'skills', kit)));
-  same('a From plugins row says its figure, and its opened row Claude Code’s, by the same match', [await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used')?.textContent`), (await a.text(`${byId(rowPart('usage', 'skills', kit, 'claude-cli'))}`))?.trim()],
+  same('a plugin’s own row says its figure, and its opened row Claude Code’s, by the same match', [await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used')?.textContent`), (await a.text(`${byId(rowPart('usage', 'skills', kit, 'claude-cli'))}`))?.trim()],
     ['used 4 days ago · 1 session', 'Used in 1 session in the last 30 days, last used 4 days ago.']);
   await a.shot('usage-plugin-row');
   // Sort by Last used, kept from this launch to the next: the reading that comes by itself as the home opens moves no row.
@@ -7908,7 +7914,7 @@ async function searchFlow() {
   same('a wrong letter in each word: the row they were meant for', await keys(), [id('skills', 'kubernetes-rollout')]);
   await pictures('wrong-letter');
   await findText('zzzq');
-  same('nothing found: Nothing matches, and the From plugins chip counts what Find leaves', [await b.text('.empty-title'), await b.text('#chip-plugins .chip-count')], ['Nothing matches', '0']);
+  same('nothing found: Nothing matches, and the kind switch counts what Find leaves', [await b.text('.empty-title'), (await counts()).all], ['Nothing matches', '0']);
   await pictures('nothing');
   await press('#find-clear');
   same('Clear Find: Find empty, the headings back', [await b.run(`document.querySelector('#find').value`), (await sections()).includes('on')], ['', true]);
@@ -7975,7 +7981,9 @@ async function searchFlow() {
   const pluginCourier = id('skills', 'relay@m/courier');
   await findText('provenance');
   check('a plugin’s skill found by Copilot CLI’s text: its own row alone, the person’s courier apart', await until(async () => JSON.stringify(await keys()) === JSON.stringify([pluginCourier])), await keys());
-  same('the From plugins chip counts it', await b.text('#chip-plugins .chip-count'), '1');
+  await chooseFrom(b, 'plugins');
+  same('under From: Any plugin, it is the one row, counted once', [await keys(), (await counts()).all], [[pluginCourier], '1']);
+  await chooseFrom(b, 'anywhere');
   rmSync(copilotRelay, { recursive: true, force: true });
   writeFileSync(join(S.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }));
   await b.click('#header-refresh');
@@ -7984,7 +7992,7 @@ async function searchFlow() {
   const couriers = await keys();
   same('the person’s own courier and the plugin’s, each its own row', [couriers.includes(id('skills', 'courier')), couriers.includes(pluginCourier)], [true, true]);
   // More pictures (with --shots), each at 1316×819 light and 860×600 dark: a long query; two words found in different rows (a found
-  // row whose copies differ and a plugin's own); a chip on with Find, with and without rows; a match in a description alone; an
+  // row whose copies differ and a plugin's own); From: Any plugin with Find, with and without rows; a match in a description alone; an
   // excerpt from the middle of a long file, and from a camelCase word; at 860 with the sidebar open, a row opened; the list
   // just after Find is cleared, the chosen Sort back.
   if (shots) {
@@ -8001,12 +8009,12 @@ async function searchFlow() {
       await findText(typed);
       await glimpse(name);
     }
-    await b.click('#chip-plugins');
+    await chooseFrom(b, 'plugins');
     await findText('parcel');
-    await glimpse('chip-with-rows');
+    await glimpse('from-with-rows');
     await findText('changelog');
-    await glimpse('chip-without-rows');
-    await b.click('#chip-plugins');
+    await glimpse('from-without-rows');
+    await chooseFrom(b, 'anywhere');
     // At 860 with the sidebar open, a row found by its text opened: its excerpt on its row and in its details.
     await sizeTo(b, 860, 600);
     await b.click('#sidebar-toggle');
@@ -8676,7 +8684,7 @@ async function headerResultFlow() {
   const asBefore = (name, before) => { const now = files(); same(name, [...new Set([...Object.keys(before), ...Object.keys(now)])].filter(path => before[path] !== now[path]), []); };
   /** The result's Undo, pressed once the run is over and it can be (a click still running holds it off), then the page settled. */
   const undo = async () => { await until(() => a.run(`(undo => !!undo && !undo.disabled)(document.querySelector('#outcome-undo'))`)); await pressOn('#outcome-undo'); };
-  const toolbarInView = async () => { const seen = []; for (const control of ['#library-kind-skills', '#find', '#chip-plugins', '#item-order']) seen.push(await inView(control)); return seen; };
+  const toolbarInView = async () => { const seen = []; for (const control of ['#library-kind-skills', '#find', '#item-from', '#item-order']) seen.push(await inView(control)); return seen; };
   /** The words of an opened result that can't be read: a text running past its box sideways (its first words, to name it). */
   const hidden = () => a.run(`[...document.querySelectorAll('#header .result-whole :is(.band-text, .problem-text, .problem-text > *, .toolbar-result-text)')].filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent.slice(0, 40))`);
   /** Whether Show less ends the last words the opened result shows, as it does on a problem card and on a success card alike. */
@@ -8800,19 +8808,19 @@ async function headerResultFlow() {
     await clickRun(names.slice(0, 3));
     await pressOn('#library-kind-skills');
     const chosen = await kindNow();
-    await pressOn('#chip-plugins');
-    const chip = await a.run(`document.querySelector('#chip-plugins').getAttribute('aria-pressed')`);
-    await pressOn('#chip-plugins');
-    // Sort opens a menu of the system's on the Mac, which a press would leave open over the checks: in view (above), and chosen
-    // as its menu chooses, then put back.
+    // From and Sort open a menu of the system's on the Mac, which a press would leave open over the checks: in view (above), and
+    // chosen as their menus choose, then put back.
+    await chooseFrom(a, 'plugins');
+    const fromChosen = await a.run(`document.querySelector('#item-from').value`);
+    await chooseFrom(a, 'anywhere');
     const sortBy = async value => { await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })()`); await a.settle(); };
     const [sortWas, sortOther] = await a.run(`(select => [select.value, [...select.options].find(option => !option.selected).value])(document.querySelector('#item-order'))`);
     await sortBy(sortOther);
     const sorted = await a.run(`document.querySelector('#item-order').value`) === sortOther;
     await sortBy(sortWas);
     await pressOn('#find');
-    same(`${at}, beside a problem result the kind switch, the chip and Find each take a press, Sort its choice, and the result stays`, [chosen, chip, sorted, await a.run(`document.activeElement?.id`), await toggle()],
-      ['library-kind-skills', 'true', true, 'find', ['Show all 3 reasons', 'false']]);
+    same(`${at}, beside a problem result the kind switch and Find each take a press, From and Sort their choice, and the result stays`, [chosen, fromChosen, sorted, await a.run(`document.activeElement?.id`), await toggle()],
+      ['library-kind-skills', 'plugins', true, 'find', ['Show all 3 reasons', 'false']]);
     await findSays('quarterly');
     await openCard();
     await a.run(`document.querySelector('#find').focus()`);
@@ -8963,8 +8971,186 @@ async function headerResultFlow() {
   await a.quit();
 }
 
+/**
+ * The Library's From menu (matrix.ts fromChoice; where a row came from: origins.ts) and the ways in to it, on made-up homes,
+ * each step one past the obvious: (a) two marketplaces each with a plugin called review: one's "Its items in the Library" on
+ * Plugin marketplaces, the kind changed, one Back; (b) a source's skill that both reviews also bring: found once under each,
+ * an agent of its name apart; (c) a word in files found under Any plugin, then the source, and Turn these off: only the
+ * source's row the chip holds and Turn these off takes goes Off (not one a plugin also brings), and Undo puts it back; (d) a source of every kind added while an old Find is set:
+ * the band's Open in the Library, Files and back, the source removed and its items still listed; (e) a plugin whose one item
+ * is an agent linked to it in Pi, Off: its page's link finds it; edited in Pi, the pass lets it go and Your own finds it.
+ */
+async function fromFlow() {
+  const git = (cwd, ...rest) => spawnSync('git', ['-C', cwd, '-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', '-c', 'commit.gpgsign=false', ...rest], { encoding: 'utf8', env: { ...process.env, GIT_COMMITTER_DATE: old.toISOString(), GIT_AUTHOR_DATE: old.toISOString() } });
+  if (spawnSync('git', ['--version']).status !== 0) { console.log('from: skipped, no git on this machine'); return; }
+  const old = new Date(Date.now() - 40 * DAY), until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+  const md = (name, kind, body) => `---\nname: ${name}\ndescription: The ${name} ${kind}.\n---\n\n${body}\n`;
+  const put = (root, files) => { for (const [path, text] of Object.entries(files)) { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), text); } };
+  /** A Git repository at a GitHub address, served from here (git's insteadOf), its one commit 40 days old. */
+  const hosts = join(scratch, 'from-hosts'), repo = (path, files) => { const dir = join(hosts, 'github.com', `${path}.git`); mkdirSync(dir, { recursive: true }); spawnSync('git', ['init', '--quiet', '--initial-branch=main', dir]); put(dir, files); git(dir, 'add', '--all'); git(dir, 'commit', '--quiet', '-m', 'Add'); return `https://github.com/${path}`; };
+  const served = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' };
+  const row = (kind, key) => `.ov-row[data-key="${rowPart('', kind, key)}"]`;
+  const listed = a => a.all('.ov-row[data-key]', 'e.dataset.key');
+  const fromIs = a => a.run(`document.querySelector('#item-from')?.value ?? null`);
+  const find = async (a, text) => { await a.run(`(i => { i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#find'))`); await a.settle(); };
+  const done = async a => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const mouseBack = async a => { for (const [type, buttons] of [['mousePressed', 8], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button: 'back', buttons, clickCount: 1 }); await a.settle(); };
+  const id = (kind, key) => rowPart('', kind, key);
+
+  // ---------- One home: two marketplaces with a plugin called review each, a source, the person's own ----------
+  const H = homeWith('from-home');
+  const market = (name, files) => { const dir = join(scratch, `from-${name}`); put(dir, { '.claude-plugin/marketplace.json': JSON.stringify({ name, owner: { name: 'Team' }, plugins: [{ name: 'review', source: './plugins/review', description: `Review, from ${name}.` }] }), ...Object.fromEntries(Object.entries(files).map(([path, text]) => [`plugins/review/${path}`, text])) }); return dir; };
+  const one = { 'skills/shared/SKILL.md': md('shared', 'skill', 'Check the ledger.'), 'skills/lint/SKILL.md': md('lint', 'skill', 'Lint the ledger.') };
+  const two = { 'skills/shared/SKILL.md': md('shared', 'skill', 'Check the ledger.'), 'agents/audit.md': md('audit', 'agent', 'Audit it.') };
+  const marketOne = market('market-one', one), marketTwo = market('market-two', two);
+  // review from market-one in Claude Code, review from market-two in Copilot CLI.
+  writeClaudeInstall(H.home, 'market-one', 'review', '1.0.0', one);
+  put(join(H.home, '.copilot/installed-plugins/market-two/review'), two);
+  put(H.home, { '.copilot/config.json': JSON.stringify({ installedPlugins: [{ name: 'review', marketplace: 'market-two', version: '1.0.0', cache_path: join(H.home, '.copilot/installed-plugins/market-two/review'), enabled: true }] }),
+    '.claude/plugins/known_marketplaces.json': JSON.stringify({ 'market-one': { source: { source: 'directory', path: marketOne }, installLocation: marketOne }, 'market-two': { source: { source: 'directory', path: marketTwo }, installLocation: marketTwo } }) });
+  writeFileSync(join(H.data, 'marketplaces.json'), JSON.stringify([marketOne, marketTwo]));
+  // The person's own: two skills that speak of the ledger, an agent called shared; Claude Code's sessions, so it can tell use.
+  for (const name of ['notes', 'tidy']) { const folder = skill(H.claude, name, md(name, 'skill', 'Keep the ledger tidy.')); utimesSync(join(folder, 'SKILL.md'), old, old); }
+  put(H.home, { '.claude/agents/shared.md': md('shared', 'agent', 'A helper.'), '.claude/projects/-work/s1.jsonl': `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'lint' } }] }, timestamp: new Date(Date.now() - 2 * DAY).toISOString() })}\n` });
+  const ledger = repo('team/ledger-skills', { 'skills/shared/SKILL.md': md('shared', 'skill', 'Check the ledger.'), 'skills/ledger-check/SKILL.md': md('ledger-check', 'skill', 'Balance the ledger.') });
+  let a = await launch(H.data, [], H.real, served);
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  await done(a);
+  const addSource = async link => {
+    await a.click('#nav-sources');
+    await a.run(`(input => { input.value = ${JSON.stringify(link)}; input.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#source-link'))`);
+    await a.click('#source-look');
+    await until(() => a.exists('#source-add'));
+    await a.click('#source-add');
+    await until(() => a.exists('.band-done'));
+  };
+  await addSource(ledger);
+
+  // ---------- (b) The source's shared, which both reviews bring too ----------
+  await openKind(a, 'all');
+  const menu = await a.run(`[...document.querySelector('#item-from').children].map(each => each.tagName === 'OPTGROUP' ? [each.label, [...each.children].map(option => option.textContent)] : each.textContent)`);
+  same('From offers Anywhere, Your own, each review told apart by its marketplace, and the source by its short label', menu,
+    ['Anywhere', 'Your own', ['Plugins', ['Any plugin', 'review (market-one)', 'review (market-two)']], ['Library sources', ['Any source', 'github.com/team/ledger-skills']]]);
+  await chooseFrom(a, 'plugin:review@market-one');
+  same('review from market-one: its lint, and the source’s shared once, folded with Claude Code’s copy; the agent shared apart', (await listed(a)).sort(), [id('skills', 'review@market-one/lint'), id('skills', 'shared')]);
+  await chooseFrom(a, 'plugin:review@market-two');
+  same('review from market-two: its agent audit, and the same shared once', (await listed(a)).sort(), [id('agents', 'review@market-two/audit'), id('skills', 'shared')]);
+  await chooseFrom(a, 'plugins');
+  same('Any plugin counts shared once', [(await listed(a)).filter(key => key.endsWith('-shared')), await a.text('#library-kind-all .kind-seg-count')], [[id('skills', 'shared')], '3']);
+  await chooseFrom(a, `source:${ledger}`);
+  same('the source: its two skills, Off', (await listed(a)).sort(), [id('skills', 'ledger-check'), id('skills', 'shared')]);
+  await chooseFrom(a, 'yours');
+  same('Your own: the two skills and the agent shared, none of a plugin or the source', (await listed(a)).sort(), [id('agents', 'shared'), id('skills', 'notes'), id('skills', 'tidy')]);
+
+  // ---------- (c) A word in files: Any plugin, then the source; Turn these off and Undo ----------
+  await chooseFrom(a, 'anywhere');
+  for (const key of ['shared', 'ledger-check']) { await a.click(`#${rowPart('switch', 'skills', key)}`); await done(a); }
+  const onNow = key => JSON.parse(readNow(join(H.home, '.central-knot/skills.json')) || '{"items":{}}').items[key]?.on;
+  await find(a, 'ledger');
+  await chooseFrom(a, 'plugins');
+  await until(async () => (await listed(a)).length > 0);
+  // shared, now On, is still had through the plugins in both tools (Central Knot writes no copy where a plugin gives it): one row.
+  same('the word under Any plugin: lint and shared, once', (await listed(a)).sort(), [id('skills', 'review@market-one/lint'), id('skills', 'shared')]);
+  await chooseFrom(a, `source:${ledger}`);
+  same('then the source: its two', (await listed(a)).sort(), [id('skills', 'ledger-check'), id('skills', 'shared')]);
+  check('usage is read and the No use seen chip shows', await until(() => a.exists('#chip-unused')));
+  await a.click('#chip-unused');
+  same('the chip counts within Find and From', await a.text('#chip-unused .chip-count'), '2');
+  await a.click('#turn-unused-off');
+  await done(a);
+  // shared, which the plugins also bring, is left to its own row (usagerow.ts leftToItsRow); notes and tidy, which Find and the
+  // chip hold too, are no source's.
+  same('Turn these off turns only ledger-check Off', ['shared', 'ledger-check', 'notes', 'tidy'].map(onNow), [true, false, true, true]);
+  await a.click('#outcome-undo');
+  await done(a);
+  check('Undo turns it back on', await until(() => onNow('ledger-check')), ['shared', 'ledger-check', 'notes', 'tidy'].map(onNow));
+  await a.click('#chip-unused');
+
+  // ---------- (a) review from market-one, from its row on Plugin marketplaces; another kind; one Back ----------
+  await a.click('#nav-plugins');
+  await until(() => a.exists('.market-item'));
+  await a.run(`[...document.querySelectorAll('.market-item')].find(item => item.textContent.includes('market-one'))?.click()`);
+  await until(() => a.exists('.plugin-row-library'));
+  const link = await a.run(`document.querySelector('[data-plugin="review"] .plugin-row-library')?.id`);
+  await a.click(`#${link}`);
+  same('Its items in the Library: the Library on All, From that review, Find and the chip let go, no row open',
+    [await a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id`), await fromIs(a), await a.run(`document.querySelector('#find').value`), await a.exists('.chip-on'), await a.exists('.ov-row[aria-expanded="true"]')],
+    ['library-kind-all', 'plugin:review@market-one', '', false, false]);
+  await a.click('#library-kind-skills');
+  same('another kind keeps From', [await fromIs(a), (await listed(a)).sort()], ['plugin:review@market-one', [id('skills', 'review@market-one/lint'), id('skills', 'shared')]]);
+  await mouseBack(a);
+  same('one Back returns to market-one’s plugins', [await a.run(`document.querySelector('.page-title')?.textContent`), await a.text('.market-item.selected .market-item-name')], ['Plugin marketplaces', 'market-one']);
+
+  // ---------- (d) A source of every kind, added while an old Find is set ----------
+  const mixed = repo('team/mixed-kit', { 'skills/kit-skill/SKILL.md': md('kit-skill', 'skill', 'A skill.'), 'agents/kit-agent.md': md('kit-agent', 'agent', 'An agent.'),
+    '.mcp.json': JSON.stringify({ mcpServers: { 'kit-server': { type: 'http', url: 'https://kit.example.test/mcp' } } }) });
+  await openKind(a, 'all');
+  await find(a, 'ledger');
+  await addSource(mixed);
+  same('Add’s band offers Open in the Library', await a.text('#source-open-library'), 'Open in the Library');
+  await a.click('#source-open-library');
+  same('it lands on All, From the source, Find let go: its skill, agent and server', [await fromIs(a), await a.run(`document.querySelector('#find').value`), (await listed(a)).sort()],
+    [`source:${mixed}`, '', [id('agents', 'kit-agent'), id('mcp', 'kit-server'), id('skills', 'kit-skill')]]);
+  await a.click(`#${rowPart('open', 'skills', 'kit-skill')}`);
+  await a.click(`#${rowPart('files', 'skills', 'kit-skill')}`);
+  await a.click('#files-back');
+  same('Files and back: still From the source, its three rows', [await fromIs(a), (await listed(a)).length], [`source:${mixed}`, 3]);
+  await a.click('#nav-sources');
+  const mixedId = await a.run(`[...document.querySelectorAll('.source-row')].find(each => each.textContent.includes('mixed-kit'))?.dataset.source`);
+  await a.click(`#source-remove-${mixedId}`);
+  await a.click(`#source-remove-confirm-${mixedId}`);
+  await done(a);
+  await a.click('#nav-library');
+  const kit = [id('agents', 'kit-agent'), id('mcp', 'kit-server'), id('skills', 'kit-skill')], missing = async () => { const now = await listed(a); return kit.filter(key => !now.includes(key)); };
+  same('the source removed, From lets it go: Anywhere, its three still listed', [await fromIs(a), await missing()], ['anywhere', []]);
+  await chooseFrom(a, 'yours');
+  same('they are the person’s own now', await missing(), []);
+  same('no page errors, the From menu', a.pageErrors, []);
+  await a.quit();
+
+  // ---------- (e) A plugin whose one item is an agent linked to it in Pi, Off ----------
+  const P = join(scratch, 'from-pi'), pData = join(scratch, 'from-pi-data'), pTools = join(scratch, 'from-pi-tools'), pMarket = join(scratch, 'from-pi-market');
+  writeMarket(pMarket, 'ck-test-market');
+  for (const folder of [join(P, '.claude'), join(P, '.pi/agent'), join(pTools, '.local/bin'), pData]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(pTools, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
+case "$*" in
+  "plugin marketplace add ${pMarket}") mkdir -p "$HOME/.claude/plugins" && printf '{"ck-test-market":{"source":{"source":"git","url":"${pMarket}"}}}' > "$HOME/.claude/plugins/known_marketplaces.json" ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  writeFileSync(join(pData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: P }, closeExplained: true }));
+  a = await launch(pData, [], pTools);
+  same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(pMarket)}).then(result => result.problem ?? 'added')`), 'added');
+  await a.click('#nav-plugins');
+  await until(() => a.exists('#popen-0-release-helper'));
+  check('a plugin only listed has no link to the Library', !(await a.exists('#plibrary-0-release-helper')) && !(await a.exists('.plugin-row-library')));
+  await a.click('#popen-0-release-helper');
+  await until(() => a.exists('#pbox-0-release-helper-pi-cli'));
+  const reviewer = join(P, '.pi/agent/skills/release-reviewer.md');
+  await a.click('#pbox-0-release-helper-pi-cli'); await done(a);
+  check('its box puts its agent in Pi alone', await until(() => existsSync(reviewer)));
+  await a.click('#pbox-0-release-helper-pi-cli'); await done(a);
+  const agentNow = () => JSON.parse(readNow(join(P, '.central-knot/agents.json')) || '{"items":{}}').items['release-reviewer'];
+  same('unticked, its agent is Off, out of Pi, and still linked to it', [existsSync(reviewer), agentNow()?.on, !!agentNow()?.source], [false, false, true]);
+  check('its page links to its items in the Library', await until(() => a.exists('#plugin-library')));
+  await a.click('#plugin-library');
+  same('the link finds the agent, Off', [await fromIs(a), await listed(a)], ['plugin:release-helper@ck-test-market', [id('agents', 'release-reviewer')]]);
+  await a.click(`#${rowPart('switch', 'agents', 'release-reviewer')}`); await done(a);
+  check('turned On, it is in Pi again', await until(() => existsSync(reviewer)));
+  writeFileSync(reviewer, `${readFileSync(reviewer, 'utf8')}\nMine.\n`);
+  await a.click('#header-refresh'); await done(a);
+  check('edited in Pi, the pass lets it go from its plugin', await until(() => !agentNow()?.source), agentNow());
+  same('From lets the plugin go, it having no row here now', await fromIs(a), 'anywhere');
+  await chooseFrom(a, 'yours');
+  same('Your own finds it', await listed(a), [id('agents', 'release-reviewer')]);
+  same('no page errors, the From menu in a home with Pi', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
-  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow],
+  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, fromFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],

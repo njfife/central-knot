@@ -231,8 +231,11 @@ export function emptyState(glyph: IconName, title: string, body: string | undefi
 export const eyebrow = (text: string, count?: number) => h('h3.eyebrow', {}, text, count === undefined ? null : h('span.eyebrow-count', {}, String(count)));
 export const section = (title: string, ...body: (Child | Child[])[]) => h('section.section', {}, eyebrow(title), ...body);
 
-/** What a crowded bar gives up, in order, until it fits: some padding, then button labels, then its single line. */
-const FIT_STEPS = ['bar-short', 'bar-icons', 'bar-wrap'];
+/**
+ * What a crowded bar gives up, in order, until it fits: some padding, then the labels of its buttons and chips, then the
+ * captions beside its menus (an item list's From and Sort), then its single line.
+ */
+const FIT_STEPS = ['bar-short', 'bar-icons', 'bar-captionless', 'bar-wrap'];
 
 /**
  * Whether anything in a bar reaches past its content box, into its padding or beyond, or a part of the bar holds more

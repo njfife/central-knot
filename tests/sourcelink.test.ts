@@ -2,7 +2,7 @@
 // repository's own branches and tags, and how a page names it. No network: the repository's names are given.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { linkLabel, readLink, splitRef } from '../src/sourcelink.ts';
+import { linkLabel, readLink, shortLabels, splitRef } from '../src/sourcelink.ts';
 
 test('The owner’s example and the other forms a link takes: owner/repo, a repository’s address, a branch or folder on GitHub or GitLab, ssh', () => {
   assert.deepEqual(readLink('https://github.com/stephenturner/skill-deslop/tree/main'), { repository: 'https://github.com/stephenturner/skill-deslop.git', rest: ['main'] });
@@ -47,4 +47,13 @@ test('A page names a link short: host and repository, then what it named after /
   assert.equal(linkLabel('stephenturner/skill-deslop'), 'github.com/stephenturner/skill-deslop');
   assert.equal(linkLabel('https://gitlab.example.com/team/tools/skills/-/tree/main/review'), 'gitlab.example.com/team/tools/skills (main/review)');
   assert.equal(linkLabel('git@gitlab.example.com:team/skills.git'), 'gitlab.example.com/team/skills');
+});
+
+test('In a list of sources, a long label is shortened to its repository and folder, unless two would be alike; a short one stays whole', () => {
+  const deslop = 'https://github.com/stephenturner/skill-deslop/tree/main', team = 'https://gitlab.example.com/team/tools/skills/-/tree/main/review';
+  const mine = 'https://github.com/me/skills', theirs = 'https://github.com/someone-else-entirely/skills/tree/dev/review';
+  assert.deepEqual(Object.fromEntries(shortLabels([deslop, mine])), { [deslop]: 'skill-deslop (main)', [mine]: 'github.com/me/skills' });
+  // Both would be skills (review): each keeps its whole label.
+  assert.deepEqual(Object.fromEntries(shortLabels([deslop, team, theirs])),
+    { [deslop]: 'skill-deslop (main)', [team]: 'gitlab.example.com/team/tools/skills (main/review)', [theirs]: 'github.com/someone-else-entirely/skills (dev/review)' });
 });
