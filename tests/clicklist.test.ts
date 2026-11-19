@@ -54,6 +54,7 @@ const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/cli
 const { pin, rowId } = await import('../src/itemrow.ts');
 const { toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { newItem } = await import('../src/library.ts');
+const { keptBack } = await import('../src/clickplan.ts');
 const { clickWords } = await import('../src/pluginparts.ts');
 
 /** Lets the page's awaits run on to the next call to main (not by a timer: the fade's test holds them). */
@@ -491,6 +492,36 @@ test('A click that failed is said first as not gone through in every tool, and n
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn], ['1 of 3 didn’t go through in every tool: b. 2 skills are off: a and c.', ['b is off, but still in Claude Code.'], true]);
 });
 
+// Off in Central Knot and in Codex, but Claude Code's folder couldn't be written: the click did part of its work.
+const partly = (name: string): PassResult => { onNow.set(rowId('skills', name), false); return { results: [{ item: name, harness: 'codex-cli', outcome: 'removed', message: '' }, { item: name, harness: 'claude-cli', outcome: 'failed', message: 'Its folder couldn’t be written.' }], writes: 1 }; };
+
+test('One click that left something undone says so first, before its name can take the header’s room', async () => {
+  onLibrary();
+  flip('a', false);
+  await settled();
+  await main.pass(failedWrite('a'));
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn], ['Didn’t go through in every tool: a is off, but still in Claude Code.', true]);
+});
+
+test('A row clicked again after its click failed is said as its last click left it: no lead, no reason and no problem line left from before', async () => {
+  onLibrary();
+  flip('a', false);
+  await settled();
+  await main.pass(failedWrite('a'));
+  flip('a', true);
+  await settled();
+  await main.pass(did('a', true));
+  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn, app.skillsResult?.results.filter(keptBack)], ['1 skill is on: a.', [], false, []]);
+});
+
+test('A run where every row fell short names them once: the lead names them, the sentence after it counts them', async () => {
+  onLibrary();
+  for (const name of ['a', 'b', 'c']) flip(name, false);
+  await settled();
+  for (const name of ['a', 'b', 'c']) await main.pass(partly(name));
+  assert.equal(app.outcome?.text, '3 of 3 didn’t go through in every tool: a, b and c. All 3 are off.');
+});
+
 test('A run made on one tool’s page is said there only: on another tool’s page, the status bar says it, and no row there flashes', async () => {
   onLibrary();
   Object.assign(app, { page: 'harnesses', harness: 'claude-cli' });
@@ -730,6 +761,27 @@ test('Turn these off across kinds, from the No use seen chip: a skill only some 
   assert.deepEqual([main.restored, app.outcome?.text], [['off-agents-planner', 'off-skills-notes'], 'Undone: notes and planner are as before.']);
 });
 
+test('Turn these off with a skill and an agent of one name, the skill kept back by a tool: the lead names it by its kind, and the sentence after it names only what went through', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'review' }, { kind: 'agents', key: 'review' }], { on: true });
+  turnTheseOff([itemRow('skills', 'review'), itemRow('agents', 'review')]);
+  await settled();
+  app.home!.skills.library.review!.on = app.home!.agents.library.review!.on = false;
+  await main.pass({ ...partly('review'), made: ['off-skills-review'] });
+  await main.pass(offMade('agents', 'review'));
+  assert.equal(app.outcome?.text, '1 of 2 didn’t go through in every tool: review (skill). Turned off 1 agent with no use seen in the last 30 days: review. Central Knot keeps it, and turning it on puts it back as it was.');
+});
+
+test('Turn these off where every row it turned off is kept back by a tool: the lead names them, the sentence after it counts them', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'spare' }], { on: true });
+  turnTheseOff([itemRow('skills', 'notes'), itemRow('skills', 'spare')]);
+  await settled();
+  app.home!.skills.library.notes!.on = app.home!.skills.library.spare!.on = false;
+  await main.pass({ results: [...partly('notes').results, ...partly('spare').results], writes: 2, made: ['off-skills-notes', 'off-skills-spare'] });
+  assert.equal(app.outcome?.text, '2 of 2 didn’t go through in every tool: notes and spare. All 2 are off.');
+});
+
 test('An Undo across kinds whose agent’s entry is stopped: the agents’ entries before it are left, the skill’s and the server’s still go back, and it says so, the stop led by its kind', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'review' }, { kind: 'agents', key: 'review' }, { kind: 'agents', key: 'notes' }, { kind: 'mcp', key: 'github' }]);
@@ -766,7 +818,7 @@ test('A click 8 seconds after the run’s last click ended starts a new run, tho
     await settled();
     await main.pass(refusedAsStale('a'));
     mock.timers.tick(8000);
-    assert.equal(app.outcome?.text, 'a changed since the page was read. Nothing was changed; read again.');
+    assert.equal(app.outcome?.text, 'Didn’t go through in every tool: a changed since the page was read. Nothing was changed; read again.');
     flip('b', false);
     await settled();
     await main.pass(did('b'));
@@ -816,7 +868,7 @@ test('A result with no problem goes 8 seconds after the run’s last click has f
     await settled();
     await main.pass(refusedAsStale('c'));
     mock.timers.tick(60_000);
-    assert.equal(app.outcome?.text, 'c changed since the page was read. Nothing was changed; read again.');
+    assert.equal(app.outcome?.text, 'Didn’t go through in every tool: c changed since the page was read. Nothing was changed; read again.');
   } finally { mock.timers.reset(); }
 });
 

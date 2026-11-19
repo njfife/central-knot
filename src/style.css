@@ -242,9 +242,9 @@ ul { list-style: none; }
 .page-title { flex: 1; min-width: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A list page's last result (renderer.ts resultHere says its rule), between the page's name and Refresh, in the header's 48px: its
    sentence in two lines, or in one over its first problem line, its buttons shorter there so Undo keeps clear of the window's top.
-   Shown whole (.result-whole), a card hanging from the header over the page, as tall as it needs and at most the window less
-   120px; past that it scrolls, its scrollbar always shown, the sentence with Undo and × held at its top. Under 900px the page's
-   name steps aside. */
+   Shown whole (.result-whole), a card raised over the page (a lighter surface in dark), as tall as it needs and at most the window
+   less 120px; past that it scrolls, its scrollbar always shown, the sentence with Undo and × held at its top; every word wraps,
+   a long name too, and Show less ends what it shows. Under 900px the page's name steps aside. */
 .header-result { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .header-result > .band, .header-result > .toolbar-result { padding: 0; border: 0; background: none; flex-wrap: nowrap; }
 .header-result > .band-two > :is(.band-text, .band-actions) { flex: 0 1 auto; order: 0; padding-left: 0; }
@@ -252,20 +252,27 @@ ul { list-style: none; }
 .header-result:has(.problem-line) { gap: 0; }
 .header-result:has(.problem-line) :is(.band-done > .band-text, .toolbar-result-text) { -webkit-line-clamp: 1; }
 .header-result:has(.problem-line) .btn { height: 22px; }
-.result-whole { align-self: flex-start; max-height: calc(100vh - 120px); overflow-y: auto; margin: 0 -12px; padding: 0 12px 12px; background: var(--surface);
-  border: 1px solid var(--line); border-top: 0; border-radius: 0 0 8px 8px; box-shadow: 0 12px 24px -12px rgb(0 0 0 / 0.35); }
+.result-whole { --card: color-mix(in oklab, var(--surface) 88%, white); align-self: flex-start; max-height: calc(100vh - 120px); overflow-y: auto; margin: 0 -12px;
+  padding: 0 12px 12px; background: var(--card); border: 1px solid var(--control-line); border-top: 0; border-radius: 0 0 8px 8px;
+  box-shadow: 0 14px 28px -10px rgb(0 0 0 / 0.5); }
 .result-whole::-webkit-scrollbar { width: 8px; }
 .result-whole::-webkit-scrollbar-thumb { background: var(--control-line); border-radius: 4px; }
 .result-whole > :is(.band, .toolbar-result) { align-items: flex-start; }
-.result-whole > :first-child { position: sticky; top: 0; z-index: 1; padding-top: 5px; background: var(--surface); }
-.result-whole :is(.band-done > .band-text, .toolbar-result-text) { display: block; }
+.result-whole > :first-child { position: sticky; top: 0; z-index: 1; padding-top: 5px; background: var(--card); }
+.result-whole :is(.band-done > .band-text, .toolbar-result-text) { display: block; overflow: visible; overflow-wrap: anywhere; }
+#header #problems-show-all { flex: none; white-space: nowrap; }
+.result-whole #problems-show-all { align-self: flex-end; }
 .result-whole .band-dismiss { position: sticky; top: 5px; }
 .header-result > .toolbar-result .band-dismiss { margin-left: auto; }
-/* What went wrong (matrix.ts problemLines): a line each, Show all on the last; shown, every line whole. */
+/* What went wrong (matrix.ts problemLines): a line each, Show all on the last. A line in parts shortens its item first, so what
+   failed stays in view. Shown, every line whole, with room between them. */
 .problem-line { display: flex; gap: 6px; }
 .problem-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lines-whole .problem-text { white-space: normal; }
-.problem-line > .inline-link { flex: none; }
+.problem-text:has(> .problem-head) { display: flex; }
+:is(.problem-head, .problem-rest) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.problem-head { flex: 0 1000 auto; min-width: 4em; }
+.band-lines.lines-whole { gap: 4px; }
+.lines-whole .problem-text { display: block; white-space: normal; overflow-wrap: anywhere; }
 #header:has(.header-result) > .page-title { flex: none; }
 @container content (width < 900px) { #header:has(.header-result) > .page-title { display: none; } }
 .header-end { display: flex; gap: 8px; }

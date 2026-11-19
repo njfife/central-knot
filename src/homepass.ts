@@ -80,7 +80,8 @@ export function passTells(synced: NonNullable<HomePass['synced']>): { copies: De
 
 /** The result of one explicit request. Keep each kind apart and name the tools from the writes themselves.
  * For each tool its last result decides whether a refusal still stands. A deleted-by-hand notice says what turned Off
- * when no copy result already describes the removal. Fold only completed items; keep every outstanding problem. */
+ * when no copy result already describes the removal. What was done goes in the sentence, folded past three items; each
+ * refusal in a tool is a reason of its own, never folded. */
 export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stopped?: string) {
   const completed: { text: string; taken: boolean }[] = [], problems = new Set(passes.flatMap(pass => pass.crashes.map(crash => crash.message)));
   if (stopped) problems.add(stopped);
@@ -98,26 +99,26 @@ export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stoppe
     const say = sentences(libraryWords[kind]);
     for (const name of names) {
       const label = rowNames([{ kind, name }], among)[0]!;
-      const copies = results.get(name) ?? [], parts: string[] = [];
-      let taken = false, refused = false;
+      // What it did with the item goes in the sentence; each refusal, in a tool, is a reason of its own.
+      const copies = results.get(name) ?? [], parts: string[] = [], refusals: string[] = [];
+      let taken = false;
       for (const outcome of ['removed', 'written'] as const) {
         const tools = [...new Set(copies.flatMap(copy => copy.harness && copy.outcome === outcome ? [copy.harness] : []))];
         if (tools.length) parts.push(outcome === 'removed' ? `Removed ${label} from ${toolList(tools)}.` : `Copied ${label} to ${toolList(tools)}.`);
       }
       for (const copy of new Map(copies.map(copy => [copy.harness, copy])).values()) {
         if (copy.outcome !== 'held' && copy.outcome !== 'failed') continue;
-        refused = true;
         const action = copy.removal ? 'remove' : 'change', where = copy.removal ? 'from' : 'in';
-        parts.push(`Couldn’t ${action} ${label}${copy.harness ? ` ${where} ${toolName(copy.harness)}` : ''}. ${copy.message}`);
+        refusals.push(`Couldn’t ${action} ${label}${copy.harness ? ` ${where} ${toolName(copy.harness)}` : ''}. ${copy.message}`);
       }
       for (const notice of notices) {
         if (notice.kind === 'taken-in' && notice.items.includes(name)) { taken = true; parts.push(`Took in ${label}.`); }
-        else if (notice.kind !== 'taken-in' && notice.item === name && (!parts.length || notice.kind !== 'deleted-by-hand')) {
+        else if (notice.kind !== 'taken-in' && notice.item === name && ((!parts.length && !refusals.length) || notice.kind !== 'deleted-by-hand')) {
           parts.push(say.noticeWords({ ...notice, item: label }).text);
         }
       }
-      if (refused) problems.add(parts.join(' '));
-      else if (parts.length) completed.push({ text: parts.join(' '), taken });
+      for (const refusal of refusals) problems.add(refusal);
+      if (parts.length) completed.push({ text: parts.join(' '), taken });
     }
   }
   const last = passes.at(-1);

@@ -946,33 +946,37 @@ export function listResult(): HTMLElement[] {
   const kept = kinds.flatMap(kind => (lastResult(kind)?.results ?? []).filter(keptBack).map(problem => ({ kind, problem })));
   const result = kinds.map(lastResult).find(Boolean), done = outcomeBand(), several = new Set([...kept.map(each => each.kind), ...(done ? state.outcome?.kinds ?? [] : [])]).size > 1;
   const background = !table || result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed' && !state.dismissed.has(problemKey(entry)));
-  const lines = [...background.map(problem => ({ kind: undefined, problem })), ...kept].map(({ kind, problem }) => `${several && kind ? `${kindNouns[kind].title}: ` : ''}${problem.item}${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`)
+  // A tool's refusal is said in parts (problemLines): its kind where several, the item in bold and its tool, then what failed.
+  const lines = [...background.map(problem => ({ kind: undefined, problem })), ...kept]
+    .map(({ kind, problem }): Child[] | string => [several && kind ? `${kindNouns[kind].title}: ` : '', h('strong.item-name', {}, problem.item), problem.harness ? ` (${names[problem.harness]})` : '', `: ${problem.message}`])
     .concat(done ? state.outcome?.reasons ?? [] : []);
   // With no result above them, their × closes them and the click's result they belong to.
   const close = () => { for (const entry of background) state.dismissed.add(problemKey(entry)); closeResult(); };
   // With no problem line, Show all follows the sentence, for one the header's two lines cut.
-  if (done && !lines.length) done.querySelector('.band-actions')!.prepend(wholeToggle(state.outcome, 0));
+  if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0));
   return [done, lines.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, done ? state.outcome : result ?? background[0]), done ? null : closeButton(close, { id: 'problems-dismiss' })) : null]
     .filter((band): band is HTMLElement => !!band);
 }
 
 /**
  * What went wrong, under a result in the header (renderer.ts resultHere): its first line, on the header's second line, then
- * Show all; shown whole (`of`, their result: app.ts state.shownWhole), every line whole.
+ * Show all; shown whole (`of`, their result: app.ts state.shownWhole), every line whole. A line given in parts is its item, then
+ * what happened to it (the last part): folded, the item is what is shortened first (style.css .problem-head).
  */
 export function problemLines(lines: (Child | Child[])[], of: typeof state.shownWhole): HTMLElement {
   const whole = of !== undefined && state.shownWhole === of, shown = whole ? lines : lines.slice(0, 1);
-  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, h('span.problem-text', {}, line), at === shown.length - 1 ? wholeToggle(of, lines.length) : null)));
+  const text = (line: Child | Child[]) => h('span.problem-text', {}, Array.isArray(line) ? [h('span.problem-head', {}, line.slice(0, -1)), h('span.problem-rest', {}, line.at(-1))] : line);
+  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, text(line), at === shown.length - 1 ? wholeToggle(of, lines.length) : null)));
 }
 
 /**
- * The one Show all of a result in the header, after the last thing it shows (the sentence, or a problem line): "Show all 3" where
- * `count` lines wait, else drawn only when the header cuts what it shows (renderer.ts, data-when-cut); Show less on the card.
+ * The one Show all of a result in the header, after the last thing it shows (the sentence, or a problem line): "Show all 3 reasons"
+ * where `count` lines wait, else drawn only when the header cuts what it shows (renderer.ts, data-when-cut); Show less on the card.
  */
 export function wholeToggle(of: typeof state.shownWhole, count: number): HTMLElement {
   const whole = of !== undefined && state.shownWhole === of, more = count > 1;
   return h('button.inline-link', { type: 'button', id: 'problems-show-all', 'aria-expanded': String(whole), 'data-when-cut': whole || more ? undefined : '', onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
-    whole ? 'Show less' : `Show all${more ? ` ${count}` : ''}`);
+    whole ? 'Show less' : `Show all${more ? ` ${count} reasons` : ''}`);
 }
 
 /** The kind Resume's empty pass goes through, whatever is on show: a held one whose own record can run, so a kind's stop isn't read as Resume's answer. */
@@ -1765,15 +1769,16 @@ export const toTurnOff = (shown: ItemRow[]) => shown.filter(row => !leftToItsRow
 /**
  * Turn these off, over rows of any kinds: each kind's rows one click with each row's own Off (libraryrow.ts rowClicks.off), the
  * kinds in turn (app.ts applyByKind: a kind that refuses is skipped and named), with one Undo that puts them all back. Its words
- * are one sentence over the rows it changed, a row's kind named where a row of another kind has its name (words.ts rowNames).
+ * are one sentence over the rows that went through (what didn't is said before it: app.ts applyByKind), a row's kind named where a
+ * row of another kind has its name (words.ts rowNames).
  */
 export function turnTheseOff(rows: ItemRow[]) {
   const clicks = KINDS.map(kind => rows.filter(row => row.kind === kind)).filter(list => list.length).map((list): Click => ({
     // Its words are the whole click's, over every kind (applyByKind's `said`, below).
     kind: list[0]!.kind, items: list.map(nameOf), rows: list.map(rowKey), regroups: true, changes: list.map(row => rowClicks.off(row, itemOf(row))), said: '' }));
-  void applyByKind(clicks, (off, notIn) => {
-    const { one, many } = rowNouns(off.map(row => row.kind)), tools = [...new Set(off.flatMap(row => (state.home ? kindSource(state.home, row.kind).tools : [])))];
-    return `Turned off ${plural(off.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(rowNames(off))}${notIn.length ? `, but not yet in ${toolsPhrase(notIn, tools)}` : ''}. Central Knot keeps ${off.length === 1 ? 'it, and turning it on puts it' : 'them, and turning one on puts it'} back as it was.`;
+  void applyByKind(clicks, off => {
+    const { one, many } = rowNouns(off.map(row => row.kind));
+    return `Turned off ${plural(off.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(rowNames(off))}. Central Knot keeps ${off.length === 1 ? 'it, and turning it on puts it' : 'them, and turning one on puts it'} back as it was.`;
   });
 }
 

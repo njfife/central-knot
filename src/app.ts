@@ -26,7 +26,7 @@ import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
 import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
-import { andList, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
+import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { endListNews, fadeRun, loadPlugins, resetMarket } from './pluginstate.ts';
@@ -127,7 +127,11 @@ export const state = {
   said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void } },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
-  /** The result whose problem lines are shown whole (Show all: matrix.ts problemLines): an item list's outcome, kept result or first background problem; Plugins' run or problem. */
+  /**
+   * The result shown whole, as a card hanging from the header (Show all: matrix.ts wholeToggle): an item list's outcome, kept
+   * result or first background problem; Plugins' run or problem. Folded by renderer.ts foldResult, and let go when that result
+   * is no longer drawn (renderer.ts resultHere); a newer result is another object, so it shows folded.
+   */
   shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | undefined,
   /** What the tools' session history shows was used (usage.ts), for this home: collected when it opens and on Update usage statistics (collectUsage). */
   usage: pageData<UsageReading>(),
@@ -218,6 +222,8 @@ export function tell(outcome: Outcome | undefined, otherwise = ''): void {
 
 /** A result as the status bar and screen readers say it: its sentence, then its reasons. */
 const spoken = (outcome: Outcome) => [outcome.text, ...outcome.reasons ?? []].join(' ');
+/** One click's own result: where it left something undone it says so first, before its name can take the header's room. */
+const notDoneFirst = (outcome: Outcome): Outcome => (outcome.warn ? { ...outcome, text: `Didn’t go through in every tool: ${outcome.text}` } : outcome);
 
 /**
  * How long a result stays once the page stops acting, when it goes by itself: in a list page's header (matrix.ts resultInHeader),
@@ -231,8 +237,8 @@ function fadeLater(): void {
   clearTimeout(fading);
   if (!acting()) fading = setTimeout(fadeNow, FADE_MS);
 }
-/** The pointer or the focus is in the header's result: it stays while they are, and its time starts again once they leave. */
-const heldInHeader = () => !!document.querySelector('.header-result:hover, .header-result:focus-within');
+/** The pointer or the focus is in the header's result, or it is open as a card: it stays while so, and its time starts again after. */
+const heldInHeader = () => !!document.querySelector('.header-result:hover, .header-result:focus-within, .result-whole');
 function fadeNow(): void {
   if (acting()) return;
   if (heldInHeader()) { fading = setTimeout(() => (heldInHeader() ? fadeNow() : fadeLater()), 250); return; }
@@ -539,7 +545,7 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const changed = click.rows.map((row, at) => ({ ...row, name: click.items[at] ?? row.key })).filter(row => !held.has(row.name.toLowerCase()));
   const said = typeof click.said === 'string' ? click.said : click.said(notClaimed, wrote);
   const choose = differs ? ' Its copies differ: choose which copy every tool uses.' : '';
-  const along = plugged && !switchProblems(plugged) ? click.plugins?.said : undefined;
+  const along = plugged && !switchProblems(plugged).length ? click.plugins?.said : undefined;
   const text = done || !refusal ? [said, along].filter(Boolean).join(' ') + choose : refusal.message;
   const back = plugged?.back ?? [];
   const undo = !click.undoing && done && ((made.length && await allUndoable(made)) || back.length) ? { kind: click.kind, made, back } : undefined;
@@ -571,7 +577,7 @@ export const applyClick = (click: Click) => busy(click.undoing ? 'Undoing…' : 
 /** What a click applied at once did, said in the header (renderer.ts resultHere) or its band, its rows flashed, the focus on its control. */
 function sayDone(done: Done, click: Click) {
   if (done.kept) kindPages[done.kept.kind].keep(done.kept.results, done.kept.notices);
-  tell(done.outcome);
+  tell(click.undoing ? done.outcome : notDoneFirst(done.outcome));
   focusAfterBusy = done.focus;
   for (const row of click.rows) flashRow(row);
 }
@@ -580,11 +586,11 @@ function sayDone(done: Done, click: Click) {
  * One click over rows of several kinds (Turn these off: matrix.ts turnTheseOff): `clicks`, one per kind, carried out kind by
  * kind in turn under one busy, each through its kind's engine (carryOut). A kind's click refused whole (its own record stops its
  * writes, say) is skipped, and said as a problem line (words.ts saidByKind); the others go on. Its result belongs to the page it was clicked
- * on (busy). `said`: what was done, given the rows that changed (a row whose own change was refused, a stale one, is none: Done
- * changed) and the tools their words can't claim; with none changed, the refusals are its words. Its result names the rows that
- * changed, and only they flash; one Undo, only when every click that changed something has one, puts them back (undoClick).
+ * on (busy). `said`: what was done, given the rows that went through in every tool (a row whose own change was refused, a stale
+ * one, is no row changed: Done changed). Its result names the rows that changed, and only they flash; one Undo, only when every
+ * click that changed something has one, puts them back (undoClick).
  */
-export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], notIn: HarnessId[]) => string) => busy('Applying…', async page => {
+export const applyByKind = (clicks: Click[], said: (changed: NamedRow[]) => string) => busy('Applying…', async page => {
   const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
   for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
@@ -593,13 +599,15 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], notIn: 
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups }, undos) : undefined;
   for (const { done } of parts) if (done.kept) kindPages[done.kept.kind].keep(done.kept.results, done.kept.notices);
   // Where some changed, each row that didn't go through in every tool (its kind refused, its own change held, or a tool kept it
-  // back) is said first (words.ts notAllThrough); where none did, the refusals are the sentence.
+  // back) is said first (words.ts notAllThrough), by its kind where another row asked has its name; `said` then names the rows that
+  // went through, or the lead's rows are counted. Where none changed, the refusals are the sentence.
   const asked = parts.flatMap(({ click, done }) => click.rows.map((row, at) => ({ row: { ...row, name: click.items[at] ?? row.key }, done })));
   const left = asked.filter(({ row, done }) => done.refused || !done.changed?.some(each => sameRow(each, row))
     || done.kept?.results.some(entry => keptBack(entry) && entry.item.toLowerCase() === row.name.toLowerCase())).map(({ row }) => row);
-  const lead = left.length && changed.length ? notAllThrough(rowNames(left), asked.length) : '';
+  const whole = changed.filter(row => !left.some(each => sameRow(each, row)));
+  const lead = left.length && changed.length ? notAllThrough(rowNames(left, asked.map(({ row }) => row)), asked.length) : '';
   tell({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
-    text: [lead, changed.length || !stops.length ? said(changed, went.flatMap(part => part.done.notIn ?? [])) : stops.join(' ')].filter(Boolean).join(' '),
+    text: [lead, !changed.length && stops.length ? stops.join(' ') : whole.length || !changed.length ? said(whole) : `${countedAs(changed.length, asked.length, false)}.`].filter(Boolean).join(' '),
     reasons: [...(changed.length ? stops : []), ...went.flatMap(part => part.done.outcome.reasons ?? [])],
     act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything this did', run: undo } });
   for (const row of changed) flashRow(row);
@@ -619,6 +627,8 @@ const isItemTurn = (turn: Turn): turn is ItemTurn => 'isOn' in turn;
  */
 export const placeNow = () => (state.page === 'harnesses' ? `harnesses ${state.harness ?? ''} ${harnessKindShown() ?? ''}` : state.page);
 const itemTurns = (run: Run) => clickList.turns.filter((turn): turn is ItemTurn => isItemTurn(turn) && turn.run === run);
+/** Each row's last ended click of a run, which says that row: a click after one that failed is said as it left the row. */
+const lastOfEach = (turns: ItemTurn[]) => turns.filter(turn => turn.done && turns.findLast(other => other.done && sameRow(other.row, turn.row)) === turn);
 
 /**
  * A row's switch or Add on an item list (matrix.ts flip, pluginRowSwitch): its click joins the page's list and is carried out in
@@ -645,11 +655,11 @@ export function queueClick(row: ItemTurn['row'], name: string, make: () => Click
  */
 function sayRun(turn: ItemTurn) {
   const done = turn.done!, turns = itemTurns(turn.run);
-  const outcome = turns.length === 1 ? done.outcome : runOutcome(turns);
+  const outcome = turns.length === 1 ? notDoneFirst(done.outcome) : runOutcome(turns);
   if (placeNow() !== turn.run.place) { announce(spoken(outcome)); return; }
-  // Each kind's results are its own: its problem lines come from the run's clicks of that kind.
+  // Each kind's results are its own: its problem lines come from the last click of each of the run's rows of that kind.
   const kind = done.kept?.kind;
-  if (done.kept) kindPages[done.kept.kind].keep(turns.flatMap(each => (each.done?.kept && each.done.kept.kind === kind ? each.done.kept.results : [])), done.kept.notices);
+  if (done.kept) kindPages[done.kept.kind].keep(lastOfEach(turns).flatMap(each => (each.done!.kept && each.done!.kept.kind === kind ? each.done!.kept.results : [])), done.kept.notices);
   tell(outcome);
   flashRow(turn.row);
   if (done.focus && document.activeElement === document.body) document.getElementById(done.focus)?.focus({ preventScroll: true });
@@ -665,19 +675,20 @@ function sayRun(turn: ItemTurn) {
 function runOutcome(turns: ItemTurn[]): Outcome {
   const ended = turns.filter(turn => turn.done), did = ended.filter(turn => turn.done!.did), toGo = turns.length - ended.length;
   const asked = ended.filter(turn => turn.done!.did || !turn.done!.outcome.warn), nouns = rowNouns(turns.map(turn => turn.row.kind));
-  const rows = asked.filter(turn => asked.findLast(other => sameRow(other.row, turn.row)) === turn);
+  // Each row as its last click left it: a row whose last click left something undone is said first (words.ts notAllThrough);
+  // the rows that went through are named after it, or, where none did, the lead's rows are counted (words.ts countedAs).
+  const each = lastOfEach(turns), left = each.filter(turn => turn.done!.outcome.warn), rows = each.filter(turn => asked.includes(turn));
   // A kind is named where a row of another kind in the run has the same name.
   const named = (turn: ItemTurn): NamedRow => ({ kind: turn.row.kind, key: turn.row.key, name: turn.name }), among = turns.map(named);
-  const said = [false, true].map(on => rowNames(rows.filter(turn => (turn.isOn() ?? turn.row.on) === on).map(named), among))
-    .map((names, on) => (names.length ? `${plural(names.length, nouns.one, nouns.many)} ${names.length === 1 ? 'is' : 'are'} ${on ? 'on' : 'off'}: ${fewNames(names)}` : '')).filter(Boolean).join('; ');
+  const whole = rows.filter(turn => !left.includes(turn)), byState = (list: ItemTurn[]) => [false, true].map(on => list.filter(turn => (turn.isOn() ?? turn.row.on) === on));
+  const said = (whole.length ? byState(whole).map((group, on) => (group.length ? `${plural(group.length, nouns.one, nouns.many)} ${group.length === 1 ? 'is' : 'are'} ${on ? 'on' : 'off'}: ${fewNames(rowNames(group.map(named), among))}` : ''))
+    : byState(rows).map((group, on) => (group.length ? countedAs(group.length, each.length, !!on) : ''))).filter(Boolean).join('; ');
   const along = did.flatMap(turn => (turn.done!.along ? [`${rowNames([named(turn)], among)[0]}: ${turn.done!.along.replace(/^./, first => first.toLowerCase())}`] : []));
   const undos = did.flatMap(turn => (turn.done!.undo ? [turn.done!.undo] : [])).reverse();
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: did.map(named) }, undos) : undefined;
-  // A row whose last click left something undone is said first (words.ts notAllThrough).
-  const each = ended.filter(turn => ended.findLast(other => sameRow(other.row, turn.row)) === turn), left = each.filter(turn => turn.done!.outcome.warn);
   const lead = left.length ? notAllThrough(rowNames(left.map(named), among), each.length) : '';
-  return { page: turns[0]!.page, items: rowNames(among), rows: turns.map(turn => turn.row), band: true, warn: ended.some(turn => turn.done!.outcome.warn),
-    reasons: ended.flatMap(turn => (asked.includes(turn) ? [] : [turn.done!.outcome.text]).concat(turn.done!.outcome.reasons ?? [])),
+  return { page: turns[0]!.page, items: rowNames(among), rows: turns.map(turn => turn.row), band: true, warn: left.length > 0,
+    reasons: each.flatMap(turn => (asked.includes(turn) ? [] : [turn.done!.outcome.text]).concat(turn.done!.outcome.reasons ?? [])),
     text: [lead, `${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along].filter(Boolean).join(' '),
     act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything these clicks did', run: undo } };
 }
@@ -726,7 +737,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   // What did go back, where some of it didn't: the rows of the kinds whose entries all went back as they were, and whose plugin
   // switches, if they had any to turn back, all went back too.
   const short = new Set([...stops.keys(), ...gone.map(([, kind]) => kind)]), names = (rows: NamedRow[]) => [...new Set(rowNames(rows, about.rows))];
-  const switchesShort = new Set(unswitched && switchProblems(unswitched) ? parts.filter(part => part.back.length).map(part => part.kind) : []);
+  const switchesShort = new Set(unswitched && switchProblems(unswitched).length ? parts.filter(part => part.back.length).map(part => part.kind) : []);
   const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
   tell({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
@@ -735,10 +746,10 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   if (about.regroups) unpin();
 });
 
-/** What a run of plugin switches couldn't do, in words ("issue-tracker: couldn’t turn it on in Codex."), or ''. */
-const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [ran.stopped, ...ran.failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)].filter(Boolean).join(' ');
-/** A click's reasons (Outcome) from its plugin switches' run: what it couldn't do, then `also`, what the click left as it is. */
-const switchReasons = (ran: Awaited<ReturnType<typeof runSwitches>> | undefined, also?: string) => [ran ? switchProblems(ran) : '', also ?? ''].filter(Boolean);
+/** What a run of plugin switches couldn't do, each in its own words ("issue-tracker: couldn’t turn it on in Codex."). */
+const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [...(ran.stopped ? [ran.stopped] : []), ...ran.failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)];
+/** A click's reasons (Outcome) from its plugin switches' run, one for each failure: what it couldn't do, then `also`, what the click left as it is. */
+const switchReasons = (ran: Awaited<ReturnType<typeof runSwitches>> | undefined, also?: string) => [...(ran ? switchProblems(ran) : []), ...(also ? [also] : [])];
 /** The key under which a background pass's problem the person closed is remembered (state.dismissed). */
 export const problemKey = (entry: DestinationResult) => `problem:${entry.of ?? ''}:${entry.item}:${entry.harness ?? ''}:${entry.message}`;
 

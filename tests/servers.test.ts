@@ -260,16 +260,24 @@ test('Sync once reports an unreadable owed removal and counts it as done only wh
     await writeFile(box.path('copilot-cli'), '{"mcpServers":{}}');
     const pass = async () => (await homePass(box.context, tools, true)).synced!;
     const first = await claudeLeftOwed(box, pass);
-    // What it couldn't do is a reason of its own, a problem line under the sentence, which says so first.
+    // What it did is its sentence, which says first that not everything was synced; what it couldn't do is a reason of its own.
     const result = syncOnceReport([first]);
     assert.equal(result.warn, true);
-    assert.equal(result.text, 'Not everything was synced.');
+    assert.equal(result.text, 'Not everything was synced. Removed docs from Codex.');
     assert.equal(result.reasons.length, 1);
-    assert.match(result.reasons[0]!, /^Removed docs from Codex\. Couldn’t remove docs from Claude Code\..*could not be read\.$/);
+    assert.match(result.reasons[0]!, /^Couldn’t remove docs from Claude Code\..*could not be read\.$/);
     assert.deepEqual(syncOnceReport([first, await pass()]), {
       text: 'Removed docs from Codex and Claude Code.', reasons: [], warn: false, history: false,
     });
   } finally { await box.cleanup(); }
+});
+
+test('Sync once: one item refused in two tools is two reasons, one for each refusal, and what it did is its sentence', () => {
+  const refused = (harness: 'claude-cli' | 'copilot-cli') => ({ item: 'docs', harness, outcome: 'failed' as const, removal: true, message: 'Its file couldn’t be written.' });
+  assert.deepEqual(syncOnceReport([{ crashes: [], servers: { writes: 1, results: [{ item: 'docs', harness: 'codex-cli', outcome: 'removed', message: '' }, refused('claude-cli'), refused('copilot-cli')] } }]), {
+    text: 'Not everything was synced. Removed docs from Codex.', warn: true, history: false,
+    reasons: ['Couldn’t remove docs from Claude Code. Its file couldn’t be written.', 'Couldn’t remove docs from Copilot CLI. Its file couldn’t be written.'],
+  });
 });
 
 test('A home alpha 2 left with Claude Code’s steps owed: the first pass takes a server turned Off out of Claude Code, and one deleted, by its tombstone', async () => {

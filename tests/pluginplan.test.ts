@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batches, notUndone, resultLines, resultParts, resultSentence, reverse, runPlan, type PlanApi, type PluginDone, type PluginOp } from '../src/pluginplan.ts';
+import { batches, notUndone, resultLines, resultParts, resultSentence, reverse, runPlan, shortOf, type PlanApi, type PluginDone, type PluginOp, type ResultLine } from '../src/pluginplan.ts';
 import type { ActionReport, HarnessId } from '../src/types.ts';
 
 const op = (plugin: string, tool: HarnessId, action: PluginOp['action'] = 'install'): PluginOp => ({ source: 'anthropics/skills', marketName: 'anthropic-agent-skills', plugin, tool, action });
@@ -141,3 +141,11 @@ test('An update the automatic check made first is made once: the click’s own u
   assert.deepEqual(calls, ['update claude-cli', 'update claude-cli']);
 });
 
+
+test('What a run left undone is counted by marketplace and name, a plugin that failed in one tool and a stopped run’s unreached ones too', () => {
+  const line = (source: string, plugin: string, ok: boolean): ResultLine => ({ source, plugin, ok, text: '', short: '' });
+  // helper from two marketplaces is two plugins; editor installed in one tool and refused in another fell short.
+  assert.deepEqual(shortOf([line('one', 'helper', false), line('two', 'helper', false), line('one', 'editor', true), line('one', 'editor', false)]), { names: ['helper', 'helper', 'editor'], of: 3 });
+  assert.deepEqual(shortOf([line('one', 'done', true)], [{ source: 'one', plugin: 'later' }]), { names: ['later'], of: 2 });
+  assert.deepEqual(shortOf([line('one', 'done', true)]), { names: [], of: 1 });
+});

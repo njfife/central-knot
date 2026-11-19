@@ -5217,10 +5217,10 @@ async function firstSetupFlow() {
     await d.shot('sync-once-folded-minimum');
     // What it could not do is its problem lines, each its own; its sentence says first that not everything was synced.
     if (/^Show all/.test(await d.text('#problems-show-all') ?? '')) await d.click('#problems-show-all');
-    const reasons = (await d.all('#header .problem-text')).join('\n');
-    check('a held removal: the sentence says first that not everything was synced, and a line names the surviving tool and its lock alongside the removal, with a warning',
-      /^Not everything was synced\./.test(words) && /locked from Codex/.test(reasons) && /remove locked from Claude Code.*lock/i.test(reasons) && await d.exists('[data-outcome] .tone-warning')
-      && !!JSON.parse(readNow(settings)).mcpServers.locked, [words, reasons]);
+    const reasons = await d.all('#header .problem-text');
+    check('a held removal: the sentence says first that not everything was synced, and the refusal is a line of its own naming the surviving tool and its lock, with a warning',
+      /^Not everything was synced\./.test(words) && reasons.filter(line => /locked/.test(line)).length === 1 && reasons.some(line => /^Couldn’t remove locked from Claude Code\..*lock/i.test(line))
+      && await d.exists('[data-outcome] .tone-warning') && !!JSON.parse(readNow(settings)).mcpServers.locked, [words, reasons]);
     check('a large Sync once shows two successful items, counts the rest and offers their History',
       (words?.match(/Took in guide-/g) ?? []).length === 2 && /took in 6 more items/i.test(words)
       && await d.exists('#outcome-history'), words);
@@ -6207,9 +6207,9 @@ fs.writeFileSync(record, JSON.stringify(now));
   same('an Undo Claude Code can’t take: the reason once, and the result ends above the first row', [await reasonsIn(), (await resultBottom()) < (await firstRowTop())], [1, true]);
   await putAt(table, row('srv-02'), 200);
   await clickAt(await middleOf(`#${rowPart('switch', 'mcp', 'srv-02')}`)); await done();
-  const lineCut = () => a.run(`[...document.querySelectorAll('#header .problem-text')].some(text => text.scrollWidth > text.clientWidth)`);
+  const lineCut = () => a.run(`[...document.querySelectorAll('#header .problem-text, #header .problem-text > *')].some(text => text.scrollWidth > text.clientWidth)`);
   const expanded = () => a.run(`document.querySelector('#problems-show-all')?.getAttribute('aria-expanded')`);
-  same('a click no tool took: the sentence says so, with no reason; the reason once, cut to its line, with Show all', [await sentence(), await reasonsIn(), await lineCut(), await a.text('#problems-show-all'), await expanded()], ['srv-02 is not on in any tool yet.', 1, true, 'Show all', 'false']);
+  same('a click no tool took: the sentence says so first, with no reason; the reason once, cut to its line, with Show all', [await sentence(), await reasonsIn(), await lineCut(), await a.text('#problems-show-all'), await expanded()], ['Didn’t go through in every tool: srv-02 is not on in any tool yet.', 1, true, 'Show all', 'false']);
   await press('#problems-show-all');
   same('Show all: the reason whole, then Show less', [await lineCut(), await a.text('#problems-show-all'), await expanded()], [false, 'Show less', 'true']);
   await press('#outcome-dismiss');
@@ -6320,7 +6320,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   same('at the top of the list, a failure that goes from the header moves no row, nor does the click after it', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => afterClose.at[name]), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])],
     [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name]), ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
   // Three failing plugins (plug-04, -05, -08) and one that installs (plug-10), in one list (each takes a second): one ×, the first
-  // reason and Show all 3; shown, each reason whole; × closes it all.
+  // reason and Show all 3 reasons; shown, each reason whole; × closes it all.
   const failNow = ['plug-04', 'plug-05', 'plug-08'];
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
   await putAt(list, '[data-plugin="plug-04"]', 20);
@@ -6329,15 +6329,24 @@ fs.writeFileSync(record, JSON.stringify(now));
   for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
   await done();
   for (const name of failNow) rmSync(join(home, `fail-${name}`));
-  const plugReasons = () => a.run(`[...document.querySelectorAll('#header .problem-text')].map(text => text.scrollWidth > text.clientWidth ? 'cut' : 'whole')`);
+  const plugReasons = () => a.run(`[...document.querySelectorAll('#header .problem-text')].map(text => [text, ...text.children].some(part => part.scrollWidth > part.clientWidth) ? 'cut' : 'whole')`);
   // (The run holds plug-06's click before them too, within its time: 3 of 5.)
-  same('three failing plugins and one installed: the sentence says first what didn’t go through, then one ×, the first reason and Show all 3',
+  same('three failing plugins and one installed: the sentence says first what didn’t go through, then one ×, the first reason and Show all 3 reasons',
     [/^3 of \d didn’t go through in every tool: plug-04, plug-05 and plug-08\./.test(await a.text('#plugins-result .toolbar-result-text') ?? ''), await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')],
-    [true, 1, 1, 'Show all 3']);
-  await a.shot('result-plugins-1280');
+    [true, 1, 1, 'Show all 3 reasons']);
+  /** Pictures of the run's result (with --shots): light at 1280×800, dark at 860×600 and 1728×1080, then back light at 1280. */
+  const resultShots = async name => {
+    if (!shots) return;
+    await a.shot(`result-${name}-1280`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    for (const [width, height] of [[860, 600], [1728, 1080]]) { await sizeTo(a, width, height); await a.shot(`result-${name}-${width}-dark`); }
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await sizeTo(a, 1280, 800);
+  };
+  await resultShots('plugins');
   await press('#problems-show-all');
   same('shown, each reason whole', await plugReasons(), ['whole', 'whole', 'whole']);
-  await a.shot('result-plugins-whole-1280');
+  await resultShots('plugins-whole');
   await press('#header .band-dismiss');
   same('× closes it all', await a.exists('#header .header-result'), false);
   rmSync(join(home, 'slow'));
@@ -7360,7 +7369,7 @@ async function libraryFlow() {
     await a.click(`#library-kind-${kind}`);
     const folded = await a.text('#problems-show-all');
     await a.click('#problems-show-all');
-    same(`and with ${kind === 'skills' ? 'Skills' : 'Agents'} chosen, the same lines behind the same count`, [folded, await refused(), await a.all('#header .problem-text')], [`Show all ${whole.length}`, ['Agents', 'Skills'], whole]);
+    same(`and with ${kind === 'skills' ? 'Skills' : 'Agents'} chosen, the same lines behind the same count`, [folded, await refused(), await a.all('#header .problem-text')], [`Show all ${whole.length} reasons`, ['Agents', 'Skills'], whole]);
   }
   await a.click('#library-kind-all');
   for (const folder of copilotFolders) chmodSync(folder, 0o755);
@@ -7706,17 +7715,21 @@ async function headerResultFlow() {
   for (const [tool, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.']]) writeFileSync(join(home, '.local/bin', tool), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`, { mode: 0o755 });
   for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  // Eight long names with hyphens, and one long name with none, which only a break inside it can wrap.
   const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'].map(word => `${word}-quarterly-platform-engineering-incident-summary-writer`);
-  for (const name of names) for (const folder of [claude, copilot]) skill(folder, name);
+  const unbroken = 'indiaquarterlyplatformengineeringincidentsummarywriterfortheteam';
+  // A server's name with no break in it, longer than the opened card is wide at 860.
+  const longServer = 'referenceplatformdocumentationserverforeveryengineeringteamacrossthewholecompanyanditspartners';
+  for (const name of [...names, unbroken]) for (const folder of [claude, copilot]) skill(folder, name);
   for (const file of [join(home, '.claude/agents/helper.md'), join(home, '.copilot/agents/helper.agent.md')]) { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, '---\nname: helper\ndescription: The helper agent.\n---\n\nYou help.\n'); }
-  writeFileSync(join(home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' } } })}\n`);
+  writeFileSync(join(home, '.claude.json'), `${JSON.stringify({ mcpServers: { [longServer]: { type: 'http', url: 'https://docs.example.test/mcp' } } })}\n`);
   writeClaudeInstall(home, 'local-market', 'kit', '1.0.0', { 'skills/zulu/SKILL.md': text('zulu', 'Plugin skill.') });
   const a = await launch(data, [], real);
   const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
   const done = async () => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   await a.click('#nav-overview');
   await a.click('#setup-yes');
-  check('Yes takes the eight skills in', await until(() => Object.keys(JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 8));
+  check('Yes takes the nine skills in', await until(() => Object.keys(JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 9));
   await done();
   await openKind(a, 'all');
   // What Yes took in is said in notices above the list: let go, so the list has its room.
@@ -7742,7 +7755,21 @@ async function headerResultFlow() {
   /** The result's Undo, pressed once the run is over and it can be (a click still running holds it off), then the page settled. */
   const undo = async () => { await until(() => a.run(`(undo => !!undo && !undo.disabled)(document.querySelector('#outcome-undo'))`)); await pressOn('#outcome-undo'); };
   const toolbarInView = async () => { const seen = []; for (const control of ['#library-kind-skills', '#find', '#chip-plugins', '#item-order']) seen.push(await inView(control)); return seen; };
+  /** The words of an opened result that can't be read: a text running past its box sideways (its first words, to name it). */
+  const hidden = () => a.run(`[...document.querySelectorAll('#header .result-whole :is(.band-text, .problem-text, .problem-text > *, .toolbar-result-text)')].filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent.slice(0, 40))`);
+  /** Whether Show less ends the last words the opened result shows, as it does on a problem card and on a success card alike. */
+  const toggleAtEnd = () => a.run(`(toggle => { const last = Math.max(...[...document.querySelectorAll('#header .header-result :is(.band-text, .problem-text)')].map(node => node.getBoundingClientRect().bottom)); return !!toggle && Math.abs(toggle.getBoundingClientRect().bottom - last) <= 4; })(document.querySelector('#problems-show-all'))`);
+  /** In the card, whether each reason starts with its item's name in bold and has room above it. */
+  const reasonsApart = () => a.run(`[...document.querySelectorAll('#header .lines-whole .problem-line')].every((line, at, all) => !!line.querySelector('.problem-text > .problem-head > .item-name') && (!at || line.getBoundingClientRect().top - all[at - 1].getBoundingClientRect().bottom >= 3))`);
+  /** A point inside `selector` that nothing lies over (where it shows beside an open card), or null. */
+  const freePoint = selector => a.run(`(node => { if (!node) return null; const box = node.getBoundingClientRect(); for (const fy of [0.9, 0.75, 0.5, 0.25]) for (const fx of [0.5, 0.25, 0.75, 0.1, 0.9]) { const x = Math.round(box.left + box.width * fx), y = Math.round(box.top + box.height * fy); if (node.contains(document.elementFromPoint(x, y))) return { x, y }; } return null; })(document.querySelector(${JSON.stringify(selector)}))`);
+  const openCard = async () => { if ((await toggle())?.[1] !== 'true') await pressOn('#problems-show-all'); };
+  const findSays = value => a.run(`(find => { find.value = ${JSON.stringify(value)}; find.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#find'))`);
+  /** Whether the first reason's line shows what failed whole ("…copy yet."), however long the name before it. */
+  const failedInView = () => a.run(`(text => { const rest = text?.querySelector('.problem-rest'), node = rest?.firstChild, at = node?.textContent.indexOf('copy yet.') ?? -1; if (at < 0) return false; const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 9); return range.getBoundingClientRect().right <= rest.getBoundingClientRect().right + 1; })(document.querySelector('#header .problem-text'))`);
   const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  /** In dark, whether the opened card is raised over the page: its surface is not the header's own. */
+  const raised = async () => { await theme('dark'); const [card, header] = await a.run(`[getComputedStyle(document.querySelector('#header .result-whole')).backgroundColor, getComputedStyle(document.querySelector('#header')).backgroundColor]`); await theme('light'); return card !== header; };
   /** Pictures (with --shots): light at the size it is at, dark at 860×600, 1316×822 and 1728×1080, then back at that size. */
   const pictures = async (name, [width, height]) => {
     if (!shots) return;
@@ -7762,10 +7789,44 @@ async function headerResultFlow() {
     [2, ['Show all', 'false'], true, [true, true, true, true], quiet]);
   await pictures('long-success', [860, 600]);
   await pressOn('#problems-show-all');
-  same('Show all: the sentence whole, as a card over the page, and nothing under it moved', [await linesOf(sentence) > 2, await toggle(), await places()], [true, ['Show less', 'true'], quiet]);
+  same('Show all: the sentence whole, as a card over the page, Show less at its end, nothing of it hidden, and nothing under it moved',
+    [await linesOf(sentence) > 2, await toggle(), await toggleAtEnd(), await hidden(), await places()], [true, ['Show less', 'true'], true, [], quiet]);
   await pictures('long-success-whole', [860, 600]);
+  // Opened, it stays whatever the pointer and the focus do, past the 8 seconds in which a folded success goes.
+  await mouse(a, 'mouseMoved', await middle(row(names[6])), 0);
+  await a.run(`document.activeElement?.blur()`);
+  await wait(9000);
+  same('an opened success stays past its 8 seconds, the pointer and the focus elsewhere', await toggle(), ['Show less', 'true']);
+  // A press on Find where it shows below the open card folds the card, and Find has the focus.
+  const findAt = await freePoint('#find');
+  if (findAt) { await mouse(a, 'mouseMoved', findAt, 0); await mouse(a, 'mousePressed', findAt, 1); await mouse(a, 'mouseReleased', findAt, 0); await done(); }
+  same('with the card open, a press on Find where it shows folds the card, and Find has the focus', [!!findAt, await toggle(), await a.run(`document.activeElement?.id`)], [true, ['Show all', 'false'], 'find']);
   await undo();
   asBefore('its Undo, from the card, puts the three back in both tools', before);
+
+  // One click with a long unbroken name, Claude Code's folder read-only, at 860×600: its first words say what wasn't done, its
+  // reason says what failed before the name is cut, and opened, every word can be read.
+  await dismiss();
+  chmodSync(claude, 0o555);
+  await a.click(switchOf(unbroken));
+  await done();
+  same('one click a tool refused, its name long and unbroken: the sentence says first that it didn’t go through, the reason what failed',
+    [(await a.text(sentence))?.startsWith('Didn’t go through in every tool: '), await failedInView()], [true, true]);
+  await pictures('one-click-long-name', [860, 600]);
+  await pressOn('#problems-show-all');
+  same('opened, every word of it can be read: the long name wraps', await hidden(), []);
+  await pictures('one-click-long-name-whole', [860, 600]);
+  await undo();
+  chmodSync(claude, 0o755);
+  // The long unbroken server name, its removal refused in Copilot CLI: opened, it wraps in the sentence and in the reason.
+  await dismiss();
+  chmodSync(join(home, '.copilot'), 0o555);
+  await a.click(`#${rowPart('switch', 'mcp', longServer)}`);
+  await done();
+  await openCard();
+  same('a long unbroken server name a tool refused: opened, it wraps in the sentence and in the reason, nothing of it hidden', [await lines(), await hidden()], [1, []]);
+  await undo();
+  chmodSync(join(home, '.copilot'), 0o755);
 
   // Three switches in a run with Claude Code's folder read-only: a problem line each. At each size the second row, the list and
   // the header stay where they were through the result, the card opened and folded, and the result let go.
@@ -7775,32 +7836,36 @@ async function headerResultFlow() {
     const was = await places(), at = `at ${size.join('×')}`;
     chmodSync(claude, 0o555);
     await clickRun(names.slice(0, 3));
-    same(`${at}, three refused removals: the first problem line, then Show all 3, Undo clear of the window’s top, and nothing moved`,
-      [await lines(), await toggle(), await a.run(`document.querySelector('#outcome-undo').getBoundingClientRect().top >= 5`), await places()], [1, ['Show all 3', 'false'], true, was]);
+    same(`${at}, three refused removals: the first reason, saying what failed, then Show all 3 reasons, Undo clear of the window’s top, and nothing moved`,
+      [await lines(), await failedInView(), await toggle(), await a.run(`document.querySelector('#outcome-undo').getBoundingClientRect().top >= 5`), await places()], [1, true, ['Show all 3 reasons', 'false'], true, was]);
     same(`${at}, beside it the kind switch, Find, the chip and Sort are in view`, await toolbarInView(), [true, true, true, true]);
     if (size[0] === 1316) await pictures('three-problems', size);
     await pressOn('#problems-show-all');
-    same(`${at}, Show all: every line whole as a card inside the window, Undo and × in view, and nothing moved`,
-      [await lines(), await toggle(), await inView('#outcome-undo'), await inView('#outcome-dismiss'), await a.run(`document.querySelector('#header .header-result').getBoundingClientRect().bottom <= innerHeight`), await places()],
-      [3, ['Show less', 'true'], true, true, true, was]);
-    if (size[0] === 1316) await pictures('three-problems-whole', size);
-    await mouse(a, 'mouseMoved', await middle(row(names[6])), 0);
-    await wait(800);
-    same(`${at}, the pointer leaving the card leaves it open`, await toggle(), ['Show less', 'true']);
+    same(`${at}, Show all: every reason whole as a card inside the window, each led by its name, Show less at the end, Undo and × in view, and nothing moved`,
+      [await lines(), await toggle(), await reasonsApart(), await toggleAtEnd(), await hidden(), await inView('#outcome-undo'), await inView('#outcome-dismiss'), await a.run(`document.querySelector('#header .header-result').getBoundingClientRect().bottom <= innerHeight`), await places()],
+      [3, ['Show less', 'true'], true, true, [], true, true, true, was]);
+    if (size[0] === 1316) { same('in dark, the opened card lies raised over the page', await raised(), true); await pictures('three-problems-whole', size); }
     await key('Escape', 27);
-    same(`${at}, Escape folds it into the header’s two lines, the result still there, and nothing moved`, [await toggle(), await places()], [['Show all 3', 'false'], was]);
+    same(`${at}, Escape folds it into the header’s two lines, the result still there, and nothing moved`, [await toggle(), await places()], [['Show all 3 reasons', 'false'], was]);
     await pressOn('#problems-show-all');
     // × lets the click's result go; a background pass that tries the removal again says its own failure after it.
     await pressOn('#outcome-dismiss');
     same(`${at}, × on the card lets the click’s result go, and nothing moved`, [await a.exists('#header [data-outcome]'), await places()], [false, was]);
+    if (size[0] === 1316) {
+      // The card let go with its result, the next Escape, with no click between, is the page's own again: it clears Find.
+      await findSays('quarterly');
+      await a.run(`document.querySelector('#find').focus()`);
+      await key('Escape', 27);
+      same(`${at}, after ×, the next Escape is the page’s: it clears Find`, await a.run(`document.querySelector('#find').value`), '');
+    }
     // Back on: Claude Code's copies never left.
     await clickRun(names.slice(0, 3));
     chmodSync(claude, 0o755);
   }
 
-  // With the card open, a press on a control in view folds the card and does that control's work, once: a row's switch, pressed
-  // at once so its click joins the run (a click joins within 8 seconds of the last: clicklist.ts runAt), and a segment of the kind
-  // switch where one is in view. Beside the folded result the toolbar takes each press.
+  // Beside the folded result the toolbar takes each press. With the card open, a press on a control in view folds the card and
+  // does that control's work, once (a segment of the kind switch where one is in view, a row's switch; Find, where it shows,
+  // above); Escape folds it and does nothing else; a press that begins in the card and is let go outside it is no press outside.
   await a.run(`window.segmentClicks = 0; document.addEventListener('click', event => { if (event.target.closest?.('.kind-seg')) window.segmentClicks++; }, true)`);
   const kindNow = () => a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id`);
   for (const size of [[860, 600], [1316, 822]]) {
@@ -7809,10 +7874,6 @@ async function headerResultFlow() {
     const at = `at ${size.join('×')}`, filesBefore = files();
     chmodSync(claude, 0o555);
     await clickRun(names.slice(0, 3));
-    await pressOn('#problems-show-all');
-    await pressOn(switchOf(names[6]));
-    same(`${at}, with the card open, a press on a row’s switch folds it and turns that row off, once, in the same run`,
-      [await toggle(), await a.run(`document.querySelector(${JSON.stringify(switchOf(names[6]))}).getAttribute('aria-checked')`)], [['Show all 4', 'false'], 'false']);
     await pressOn('#library-kind-skills');
     const chosen = await kindNow();
     await pressOn('#chip-plugins');
@@ -7825,22 +7886,37 @@ async function headerResultFlow() {
     await sortBy(sortOther);
     const sorted = await a.run(`document.querySelector('#item-order').value`) === sortOther;
     await sortBy(sortWas);
-    await pressOn('#find');
-    same(`${at}, beside a problem result the kind switch, the chip and Find each take a press, Sort its choice, and the result stays`, [chosen, chip, sorted, await a.run(`document.activeElement?.id`), await toggle()],
-      ['library-kind-skills', 'true', true, 'find', ['Show all 4', 'false']]);
+    same(`${at}, beside a problem result the kind switch and the chip each take a press, Sort its choice, and the result stays`, [chosen, chip, sorted, await toggle()],
+      ['library-kind-skills', 'true', true, ['Show all 3 reasons', 'false']]);
+    await findSays('quarterly');
+    await openCard();
+    await a.run(`document.querySelector('#find').focus()`);
+    await key('Escape', 27);
+    same(`${at}, Escape in Find with the card open folds the card, and Find keeps its words`, [await toggle(), await a.run(`document.querySelector('#find').value`)], [['Show all 3 reasons', 'false'], 'quarterly']);
+    await findSays('');
     // Skills chosen, so All, the switch's first segment, is the one to press beside the open card (it covers the switch's middle).
-    await pressOn('#problems-show-all');
+    await openCard();
     const segment = await a.run(`[...document.querySelectorAll('.kind-seg[aria-pressed="false"]')].map(seg => seg.id).find(id => { const seg = document.getElementById(id), box = seg.getBoundingClientRect(); return seg.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)); }) ?? null`);
     check(`${at}, a segment of the kind switch is in view beside the open card`, !!segment || size[0] === 860, await a.all('.kind-seg', 'e.id'));
     if (segment) {
       const clicks = await a.run('window.segmentClicks');
       await pressOn(`#${segment}`);
-      same(`${at}, with the card open, a press on the kind switch folds the card and chooses that kind, once`, [await toggle(), await kindNow(), await a.run('window.segmentClicks') - clicks], [['Show all 4', 'false'], segment, 1]);
-    }
+      same(`${at}, with the card open, a press on the kind switch folds the card and chooses that kind, once`, [await toggle(), await kindNow(), await a.run('window.segmentClicks') - clicks], [['Show all 3 reasons', 'false'], segment, 1]);
+    } else await pressOn('#problems-show-all');
     await pressOn('#library-kind-all');
-    await undo();
+    await openCard();
+    await a.run(`document.querySelector(${JSON.stringify(row(names[6]))}).scrollIntoView({ block: 'end' })`);
+    const from = await middle('#header .problem-text'), to = await middle(switchOf(names[6]));
+    await mouse(a, 'mouseMoved', from, 0); await mouse(a, 'mousePressed', from, 1); await mouse(a, 'mouseMoved', to, 1); await mouse(a, 'mouseReleased', to, 0);
+    await done();
+    same(`${at}, a reason pressed in the open card and let go on a row’s switch: the card stays, and the row is untouched`,
+      [await toggle(), await a.run(`document.querySelector(${JSON.stringify(switchOf(names[6]))}).getAttribute('aria-checked')`)], [['Show less', 'true'], 'true']);
+    await pressOn(switchOf(names[6]));
+    same(`${at}, with the card open, a press on a row’s switch folds it and turns that row off, once`, [(await toggle())?.[1], await a.run(`document.querySelector(${JSON.stringify(switchOf(names[6]))}).getAttribute('aria-checked')`)], ['false', 'false']);
+    // Back on by their switches (whichever run golf's click joined), Claude Code's copies never having left.
+    await clickRun([...names.slice(0, 3), names[6]]);
     chmodSync(claude, 0o755);
-    asBefore(`${at}, the run’s Undo puts every copy back as it was`, filesBefore);
+    asBefore(`${at}, switched back on, every copy is as it was`, filesBefore);
   }
 
   // More reasons than the window holds at 860×600: eight refused in both tools. Opened, the card ends in the window with Undo and ×
@@ -7851,11 +7927,12 @@ async function headerResultFlow() {
   for (const folder of [claude, copilot]) chmodSync(folder, 0o555);
   await clickRun(names);
   const many = Number((await toggle())?.[0].replace(/\D/g, '') || 0);
-  check('eight refused in both tools: a dozen problem lines or more, behind Show all', many >= 12, await toggle());
+  same('eight refused in both tools: a dozen reasons or more, behind a Show all that says what it counts', [many >= 12, (await toggle())?.[0]], [true, `Show all ${many} reasons`]);
   await pictures('dozen-reasons', [860, 600]);
   await pressOn('#problems-show-all');
   const lastInView = () => a.run(`(text => { const box = text.getBoundingClientRect(); return text.contains(document.elementFromPoint(box.left + 4, box.top + box.height / 2)); })([...document.querySelectorAll('#header .problem-text')].at(-1))`);
-  const scrollbar = () => a.run(`[document.querySelector('#header .header-result'), ...document.querySelectorAll('#header .header-result *')].some(node => node.scrollHeight > node.clientHeight + 1 && ['auto', 'scroll'].includes(getComputedStyle(node).overflowY) && node.offsetWidth > node.clientWidth)`);
+  // A scrollbar takes room of its own: the width the box gives up beyond its borders.
+  const scrollbar = () => a.run(`[document.querySelector('#header .header-result'), ...document.querySelectorAll('#header .header-result *')].some(node => { const style = getComputedStyle(node); return node.scrollHeight > node.clientHeight + 1 && ['auto', 'scroll'].includes(style.overflowY) && node.offsetWidth - node.clientWidth - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth) > 0; })`);
   same('opened, the card ends in the window, Undo and × in view, its lines scroll with a scrollbar to say so, the last out of view',
     [await lines(), await a.run(`document.querySelector('#header .header-result').getBoundingClientRect().bottom <= innerHeight`), await inView('#outcome-undo'), await inView('#outcome-dismiss'), await scrollbar(), await lastInView()],
     [many, true, true, true, true, false]);
@@ -7880,6 +7957,29 @@ async function headerResultFlow() {
   await pressOn('#problems-show-all');
   await pictures('tool-tab-whole', [860, 600]);
   await undo();
+  chmodSync(claude, 0o755);
+
+  // Sync once with Automatic sync off, two copies deleted by hand in Copilot CLI and Claude Code's folder read-only: what it did is
+  // its sentence, which says first that not everything was synced, and each refusal is a reason of its own, in the header and in
+  // the Overview's band.
+  await openKind(a, 'all');
+  await dismiss();
+  await a.click('#sync-switch');
+  for (const name of names.slice(3, 5)) rmSync(join(copilot, name), { recursive: true });
+  chmodSync(claude, 0o555);
+  await a.click('#header-refresh');
+  check('the two deletions wait for Sync once', await until(() => a.exists('#sync-now')), await a.text('.bands'));
+  await pressOn('#sync-now');
+  same('Sync once from the Library: “Not everything was synced.” first, and a reason for each refusal', [(await a.text(sentence))?.startsWith('Not everything was synced.'), (await toggle())?.[0]], [true, 'Show all 2 reasons']);
+  await pictures('sync-once', [860, 600]);
+  await pressOn('#problems-show-all');
+  await pictures('sync-once-whole', [860, 600]);
+  await a.click('#nav-overview');
+  await a.click('#overview-sync-now');
+  await done();
+  same('Sync once from the Overview: its band says “Not everything was synced.” first, then each refusal on a line of its own',
+    [(await a.text('.page > .bands [data-outcome] .band-text'))?.startsWith('Not everything was synced.'), (await a.all('.page > .bands .band-reason')).length], [true, 2]);
+  await pictures('overview-two-reasons', [860, 600]);
   chmodSync(claude, 0o755);
   same('no page errors, the header’s result', a.pageErrors, []);
   await a.quit();

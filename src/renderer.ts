@@ -220,27 +220,36 @@ function renderStatus() {
  * so it never lies over anything by itself and nothing under it moves, whether it succeeded or not. With problem lines, its
  * sentence then the first of them, each on one line; without, its sentence in two (style.css .header-result); either cut where
  * it runs past them, with Show all (matrix.ts wholeToggle). Show all opens the whole of it as a card hanging from the header
- * over the page (.result-whole), until Show less, ×, Escape, a newer result, or a click anywhere outside it (foldResult).
+ * over the page (.result-whole), which closes like a menu: on Show less, ×, Escape, or a press that begins outside it
+ * (foldResult). A newer result shows folded; a result no longer drawn lets its card go, so none opens again by itself.
  */
 function resultHere() {
   const parts = state.home && !heldBy(state.home) && resultInHeader() ? (state.page === 'plugins' ? pluginsResult() : listResult()) : [];
   const whole = parts.some(part => part.querySelector('#problems-show-all[aria-expanded="true"]'));
+  if (!whole) state.shownWhole = undefined;
   return parts.length ? [h(`div.header-result${whole ? '.result-whole' : ''}`, {}, parts)] : [];
 }
-/** Folds a result shown whole into the header's two lines. The redraw waits, so a click that folds it still does its own work. */
+/** Folds the card on screen into the header's two lines, answering whether there was one. The redraw waits, so a click that folds it still does its own work. */
 function foldResult(): boolean {
-  if (state.shownWhole === undefined) return false;
+  if (!document.querySelector('#header .result-whole')) return false;
   state.shownWhole = undefined;
   setTimeout(rerender);
   return true;
 }
-document.addEventListener('click', event => { if (!(event.target as Element).closest('#header .header-result')) foldResult(); }, true);
+// A press that began in the card and is let go outside it (a selection dragged out) is no press outside: the card stays. A
+// click from the keyboard (detail 0) has no press.
+const inCard = (event: Event) => !!(event.target as Element).closest('#header .header-result');
+let pressedInCard = false;
+document.addEventListener('pointerdown', event => { pressedInCard = inCard(event); }, true);
+document.addEventListener('click', event => { if (!(event.detail && pressedInCard) && !inCard(event)) foldResult(); }, true);
+// Escape with the card open folds it and does nothing else (a find box keeps its words), before any other Escape is heard.
+window.addEventListener('keydown', event => { if (event.key === 'Escape' && foldResult()) event.stopPropagation(); }, true);
 
 // Laid out, and at each resize: a Show all drawn for a cut shows where the header cuts the sentence or a problem line.
 const cut = (text: Element) => text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight;
 afterLayout(() => {
   const header = region('header'), more = header.querySelector<HTMLElement>('[data-when-cut]');
-  if (more) { more.hidden = true; more.hidden = ![...header.querySelectorAll('.problem-text, .band-done > .band-text, .toolbar-result-text')].some(cut); }
+  if (more) { more.hidden = true; more.hidden = ![...header.querySelectorAll('.problem-text, .problem-text > *, .band-done > .band-text, .toolbar-result-text')].some(cut); }
 });
 
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
@@ -301,9 +310,8 @@ document.addEventListener('keydown', event => {
     const find = document.getElementById('find') ?? document.getElementById('skills-find');
     if (find) { event.preventDefault(); find.focus(); }
   }
-  // Escape folds a result shown whole; else it leaves the Files and contents view for the table, except in a text box, where it
-  // clears the box (matrix.ts).
-  if (event.key === 'Escape' && foldResult()) return;
+  // Escape leaves the Files and contents view for the table, except in a text box, where it clears the box (matrix.ts); with a
+  // result's card open it only folds it (foldResult, above).
   if (event.key === 'Escape' && !typing && state.page === 'library' && state.libraryView === 'files') backFromFiles();
 });
 

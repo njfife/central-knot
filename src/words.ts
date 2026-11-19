@@ -40,6 +40,8 @@ export const fewNames = (items: string[]) => (items.length > 4 ? `${items.slice(
  * in every tool, so the header's cut never hides it (renderer.ts resultHere): how many of `of`, and which.
  */
 export const notAllThrough = (short: string[], of: number) => `${short.length} of ${of} didn’t go through in every tool: ${fewNames(short)}.`;
+/** Rows a lead has just named, said after it by count alone ("All 3 are off"), so a result names each row once. */
+export const countedAs = (count: number, of: number, on: boolean) => `${count === of && count > 1 ? 'All ' : ''}${count} ${count === 1 ? 'is' : 'are'} ${on ? 'on' : 'off'}`;
 
 /** The text with its first letter capitalised, to start a sentence. */
 export const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
