@@ -63,7 +63,8 @@ async function download(host: FeedHost, release: BundleRelease, file: string): P
     if (!response.ok || !response.body) throw new Answered(response.status);
     // The file is made before a byte is read, so however the copy ends, it is there for checkFeed's cleanup to remove.
     const archive = createWriteStream(file);
-    await once(archive, 'open');
+    // A file that can't be made lets the answer go, as a copy that fails does.
+    try { await once(archive, 'open'); } catch (error) { void response.body.cancel().catch(() => undefined); throw error; }
     await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), async function* (chunks: AsyncIterable<Buffer>) {
       for await (const chunk of chunks) {
         clearTimeout(quiet);
