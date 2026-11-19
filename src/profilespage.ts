@@ -1,8 +1,8 @@
-// Profiles: named sets of library items, switched in one click (here, from the status bar, or from the menu bar). The list
-// shows each profile and which are in use; the open profile shows every library item (skills, MCP servers, agents) with a box
-// (in the profile or not), whether it is On now, and what a switch would turn On and Off. Ticking only edits the profile; the
-// library changes on Switch. Every rule shown here is profileplan.ts's (switchPlan, inUse), as profiles.ts carries it out.
-import { acting, deleteProfileDef, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
+// Profiles: named sets of library items, switched in one click (here, from the status bar, or from the menu bar or tray icon).
+// The list shows each profile and which are in use; the open profile shows every library item (skills, MCP servers, agents) with
+// a box (in the profile or not), whether it is On now, and what a switch would turn On and Off. Ticking only edits the profile;
+// the library changes on Switch. Every rule shown here is profileplan.ts's (switchPlan, inUse), as profiles.ts carries it out.
+import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { outcomeBand, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
 import { changes, homeItems, inUse, inUseName, namedItems, switchable, switchPlan, turnsWords, type LiveItem, type Turns } from './profileplan.ts';
@@ -219,7 +219,7 @@ export function profilesPage(): HTMLElement {
   const home = state.home;
   if (!home) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
   const view = home.profiles, readOnly = whyReadOnly(home);
-  // What couldn't be done since the last read, told here too: sync's failures, or a menu bar switch that couldn't start.
+  // What couldn't be done since the last read, told here too: sync's failures, or a switch from the menu bar or tray icon that couldn't start.
   const problems = home.sync.caughtUp.filter(result => result.outcome === 'failed' || result.outcome === 'held');
   const bands = [outcomeBand(),
     view.problem ? h('div.band.band-danger', { role: 'alert' }, icon('circle-alert', 14), h('span.band-text', { title: view.problem }, view.problem)) : null,
@@ -227,7 +227,7 @@ export function profilesPage(): HTMLElement {
     readOnly ? h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, `${readOnly} Profiles can be looked at, not changed.`)) : null].filter(Boolean);
   if (!view.profiles.length) {
     return h('div.page.profiles-page', {}, bands.length ? h('div.bands', {}, bands) : null, emptyState('sliders-horizontal', 'Switch between sets of skills, MCP servers and agents',
-      'Make a profile for each kind of work, such as Incident or Development, and tick what it needs. Switching to it, here, from the status bar or from the menu bar icon, turns those on and everything else off: Central Knot keeps each item, and Undo switches back.',
+      `Make a profile for each kind of work, such as Incident or Development, and tick what it needs. Switching to it, here, from the status bar or from the ${machine.trayIcon}, turns those on and everything else off: Central Knot keeps each item, and Undo switches back.`,
       button({ variant: 'primary', icon: 'plus', label: 'New profile', id: 'profile-new', disabled: !canEditProfiles(), onclick: newProfile })));
   }
   const open = openProfile();
