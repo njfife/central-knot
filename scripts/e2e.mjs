@@ -44,6 +44,8 @@ function check(name, ok, detail) {
 const same = (name, actual, expected) => check(name, JSON.stringify(actual) === JSON.stringify(expected), { actual, expected });
 // A file a poll reads; empty for the moment the app's checked write has it moved aside.
 const readNow = path => { try { return readFileSync(path, 'utf8'); } catch { return ''; } };
+/** A JSON file's value, or undefined where it is missing or isn't JSON. */
+const jsonOrNothing = path => { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return undefined; } };
 /** A settings file with its MCP entries in name order: an entry Central Knot puts back goes at the end, so its place is Central Knot's; every other part is compared as it is. */
 const entriesSorted = text => {
   if (!text.trimStart().startsWith('{')) { const [head, ...tables] = text.split(/^(?=\[)/m); return [head.trim(), ...tables.map(table => table.trim()).sort()]; }
@@ -3750,7 +3752,8 @@ async function updateFlow() {
  * A released build starts on this computer's home and offers no Practice copy, and its main process refuses one. Where the
  * real home is written (machine.ts writesRealHome), its first open of a fresh home asks first setup's question, and Yes takes
  * a skill found in Codex into OpenCode's folder under ~/.config (Codex and OpenCode are the home's only tools: OpenCode reads
- * Claude Code's skills folder, so a skill there gets no copy of its own).
+ * Claude Code's skills folder, so a skill there gets no copy of its own). Then its settings file damaged: it is kept aside,
+ * the Overview and Settings say so until Close, and the home waits for Resume before anything is written there.
  */
 async function releasedStartupFlow() {
   // A development build (--electron) starts as a released one with --as-released; a packaged build needs no switch.
@@ -3775,6 +3778,59 @@ async function releasedStartupFlow() {
   same('Yes takes the skill found in Codex into OpenCode, byte for byte', readNow(join(fresh, '.config/opencode/skills/handoff/SKILL.md')), handoff);
   same('no page errors, a released build’s first open', b.pageErrors, []);
   await b.quit();
+  // Its settings file damaged since (cut short); a skill found in Codex since, which Synchronize everything would take in; and a
+  // record of plugin parts from an earlier version, whose first read would start the plugins record.
+  const data = join(scratch, 'first-open-data'), damaged = '{"home": {"mode": "actual"}, "appearance": "da', later = join(fresh, '.config/opencode/skills/later/SKILL.md');
+  const pluginsRecord = join(fresh, '.central-knot/plugins.json');
+  writeFileSync(join(data, 'app-settings.json'), damaged);
+  writeFileSync(join(fresh, '.central-knot/plugin-parts.json'), JSON.stringify({ installs: [] }));
+  // Saved hours ago, so it is past the settle window (librarypass.ts SETTLE_MS) and the first pass would take it in.
+  const found = skill(join(fresh, '.codex/skills'), 'later'), hoursAgo = new Date(Date.now() - 5 * 3_600_000);
+  for (const path of [join(found, 'SKILL.md'), found]) utimesSync(path, hoursAgo, hoursAgo);
+  const c = await launch(data, asReleased, fresh, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const kept = readdirSync(data).filter(name => /^app-settings\.unreadable-\d+\.json$/.test(name));
+  same('a settings file that can’t be read is kept beside the new one, byte for byte, never written over',
+    [kept.map(name => readFileSync(join(data, name), 'utf8')), !!jsonOrNothing(join(data, 'app-settings.json'))], [[damaged], true]);
+  const waits = 'Central Knot changes nothing in this home by itself until you resume, since its settings file couldn’t be read. Resuming keeps every recorded choice.';
+  same('before Resume nothing changes here by itself: the sync passes take in no skill, no plugins record is started, and the plugin updates’ check stops',
+    [existsSync(later), existsSync(pluginsRecord), (await c.run('window.centralKnot.checkPluginUpdates()')).checked?.stopped], [false, false, waits]);
+  const said = 'Central Knot couldn’t read its settings file, so it started with the defaults.';
+  same('the Overview says so first, with the way to Settings', [await c.text('#overview-needs > :first-child'), await c.text('#overview-settings-kept-open')], [`${said} Open Settings`, 'Open Settings']);
+  await fitsAtMinimum(c, 'the Overview saying the settings file couldn’t be read');
+  check('and still says it at every size', await c.exists('#overview-settings-kept'));
+  await c.click('#overview-settings-kept-open');
+  same('Settings says it at its top, naming the file kept', [await c.text('#settings-scroll > :first-child .intro-text')], [`${said} The old file is kept as ${kept[0]}.`]);
+  await fitsAtMinimum(c, 'Settings saying the settings file couldn’t be read');
+  check('and still says it at every size', await c.exists('#settings-kept'));
+  await c.click('#settings-kept-close');
+  check('Close ends the note on Settings', !(await c.exists('#settings-kept')));
+  await c.click('#nav-overview');
+  same('and on the Overview, and main’s next view no longer has it', [await c.exists('#overview-settings-kept'), (await c.run('window.centralKnot.refresh()')).settingsUnread], [false, undefined]);
+  await c.click('#nav-skills');
+  check('the home waits for Resume, saying why, and still nothing is taken in', (await c.text('.bands') ?? '').includes(waits) && await c.exists('#resume') && !existsSync(later), await c.text('.bands'));
+  await c.click('#resume');
+  await c.run(`window.centralKnot.syncNow(${JSON.stringify(fresh)})`);
+  same('Resume carries on: the skill found since is taken into OpenCode, and the plugins record is started', [existsSync(later), existsSync(pluginsRecord)], [true, true]);
+  // A save over a settings file damaged while the app runs: kept aside first, never written over; one that can't be moved stops
+  // the save. The move is made to fail through the development main process's inspector.
+  if (c.main) {
+    const main = await c.main(), settingsFile = join(data, 'app-settings.json'), garbage = '{"appearance": "li';
+    writeFileSync(settingsFile, garbage);
+    try {
+      const refused = await main.run(`(async () => {
+        const fs = process.mainModule.require('node:fs/promises'), rename = fs.rename;
+        fs.rename = async (from, to) => { if (from === ${JSON.stringify(settingsFile)}) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }); return rename(from, to); };
+        try { return await electron.BrowserWindow.getAllWindows()[0].webContents.executeJavaScript("window.centralKnot.setAppearance('dark').then(() => '', error => error.message)"); }
+        finally { fs.rename = rename; }
+      })()`);
+      same('a save over a settings file that can’t be read and can’t be kept aside is refused, and the file stays as it was', [refused.includes('EACCES'), readNow(settingsFile)], [true, garbage]);
+      await c.run(`window.centralKnot.setAppearance('dark')`);
+      check('the next save keeps it aside first, byte for byte, then saves', readdirSync(data).filter(name => /^app-settings\.unreadable-/.test(name)).some(name => readNow(join(data, name)) === garbage)
+        && jsonOrNothing(settingsFile)?.appearance === 'dark');
+    } finally { main.close(); }
+  }
+  same('no page errors, a settings file that couldn’t be read', c.pageErrors, []);
+  await c.quit();
 }
 
 /**
@@ -4384,7 +4440,8 @@ async function freedOtherWaysFlow() {
  * machine.ts writesRealHome; off a Mac, the alpha's stand-ins stand in for a Mac's). The first look carries the alpha's
  * choices: its Automatic sync off is in force before the first pass, so with an edit waiting no tool file changes, the status
  * bar says so once, and nothing else names the alpha; History's days are the longer of the two; and a build that still
- * remembers the home writes at its first pass with the alpha's days already in force.
+ * remembers the home writes at its first pass with the alpha's days already in force, unless the home was opened in place of
+ * one a settings file that can't be read may have named: then it waits for Resume.
  */
 async function thisMacTakeOverFlow() {
   if (!canWriteRealHome) return;
@@ -4424,6 +4481,19 @@ async function thisMacTakeOverFlow() {
     [again.owner(), readFileSync(again.notes('.copilot'), 'utf8') === again.edited, again.aged(), again.settings()], ['com.centralknot.firstlook', true, true, [true, 90]]);
   same('no page errors, reinstalled', c.pageErrors, []);
   await c.quit();
+  // The same, opened in place of the home a settings file that can't be read may have named: the take-over carries the alpha's
+  // choices and remembers the record, and the home still waits for Resume before the edit spreads.
+  const reset = await asThisMac('this-mac-reset', {});
+  writeFileSync(join(reset.alphaData, 'sync-settings.json'), JSON.stringify({ syncOn: true }));
+  writeFileSync(join(reset.data, 'app-settings.json'), '{"home": {"mode": "act');
+  const e = await launch(reset.data, flag('--electron') ? ['--as-released'] : [], reset.home, { CK_TEST_APPS: reset.mac.root, CK_TEST_OWN_BUNDLE: join(reset.mac.applications, 'Central Knot.app') });
+  await e.click('#nav-skills');
+  same('taken over after a settings file that can’t be read: the alpha’s choices carried, and the home waits for Resume with the edit not spread',
+    [reset.owner(), reset.settings()[0], await e.exists('#resume'), readFileSync(reset.notes('.copilot'), 'utf8') === reset.edited], ['com.centralknot.firstlook', true, true, false]);
+  await e.click('#resume');
+  check('and Resume spreads it', readFileSync(reset.notes('.copilot'), 'utf8') === reset.edited);
+  same('no page errors, taken over after a settings file that can’t be read', e.pageErrors, []);
+  await e.quit();
   // A record that can't be written, on this Mac's home: History's days are kept first, and the other choices only once the record
   // is taken over, so this build's Automatic sync stays its own.
   const locked = await asThisMac('this-mac-read-only', {}), store = join(locked.home, '.central-knot');
