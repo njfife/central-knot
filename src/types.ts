@@ -593,8 +593,8 @@ export interface HistoryEvent {
 // ---------- Marketplaces and plugins ----------
 export interface Components {
   skills: number; commands: number; agents: number; hooks: boolean; mcp: number; mcpRootVariable: boolean; bin: boolean;
-  /** Some hook listens to an event whose hooks can add text to sessions (pluginoutcomes.ts canAddText). */
-  sessionTextHooks: boolean;
+  /** The tools in which one of its hooks can add text to sessions (pluginoutcomes.ts addsText). */
+  sessionTextHooks: HarnessId[];
   /** The skills' folder names, to show how a tool will name them. */
   skillNames?: string[];
 }
@@ -701,6 +701,8 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
   /** MCP servers whose switch can't be written here, each with why. */ serversHeld?: Record<string, string>;
   /** Loaded live from a folder marketplace, nothing copied (Copilot CLI): turned off, such a plugin is no longer installed. */ live?: boolean;
   items: PluginItem[];
+  /** Its hooks as that tool's installed copy declares them; absent when it has none or `problem`. */ hooks?: DeclaredHook[];
+  /** Each hooks file of that copy that couldn't be read as JSON (PluginContents hooksUnread). */ hooksUnread?: string[];
   /** Why what it brings couldn't be read; then `items` is empty. */ problem?: string;
   /** Its marketplace is on the Plugins page (it is added in a tool), so the plugin's page can be opened there. */ listed: boolean;
   /** Where that tool has its marketplace from, as it records it. */ source?: string }
@@ -776,7 +778,20 @@ export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<H
  */
 export interface NamedPart { name: string; description: string; text: string; path: string }
 /** One hook event a plugin listens to, such as PreToolUse, with each command its hooks run then, as written (never run here). */
-export interface PluginHook { event: string; runs: string[] }
+/**
+ * One hook as a file declares it (catalogdetail.ts readHooks), for a plugin's copy and the person's own settings alike. Nothing
+ * here is run. `declaredIn`: the hooks or settings file, or for one written inline in a plugin's manifest or marketplace entry, the
+ * plugin's folder (a plugin's installed revision is its InstalledPlugin version). `matcher` as written; `at`: its place among its
+ * event's hooks in that declaration. `launch`, where it starts a program here (macOS and Linux): a command line handed to a shell,
+ * or a program started directly with its arguments kept apart (Claude Code's `args`, Copilot CLI's `exec`); none for a hook that
+ * starts nothing (a prompt or agent hook, one for PowerShell alone). `timeout` in seconds, `cwd` and `env` as declared: only
+ * Copilot CLI reads `cwd` and `env`.
+ */
+export interface DeclaredHook {
+  declaredIn: string; event: string; matcher?: string; at: number;
+  launch?: { shell: string } | { program: string; args: string[] };
+  timeout?: number; cwd?: string; env?: Record<string, string>;
+}
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
 export interface PluginContents {
   skills: NamedPart[];
@@ -786,8 +801,10 @@ export interface PluginContents {
   instructions: NamedPart[];
   /** It holds instruction files and nothing else that could be a part, so installing it makes no tool read anything of it (catalogdetail.ts holdsOnlyInstructions). */
   onlyInstructions: boolean;
-  /** The hook events it listens to, by name. */
-  hooks: PluginHook[];
+  /** Its hooks, each as it is declared. */
+  hooks: DeclaredHook[];
+  /** Each hooks file it has that couldn't be read as JSON: what those declare isn't known (catalogdetail.ts pluginHooks). */
+  hooksUnread?: string[];
   /** Each MCP server with what it runs or connects to, and its entry as the plugin writes it, as JSON. */
   mcpServers: { name: string; runs: string; entry: string }[];
   /** Some server refers to ${CLAUDE_PLUGIN_ROOT}, which only Claude Code fills in. */
@@ -1000,6 +1017,12 @@ export interface InstructionFile {
   versions: InstructionVersion[];
   /** Other tools reading this same physical file (linked dotfiles): one destination for the base. */
   sameFile: HarnessId[];
+  /** The person's own hooks, as the tool's own settings declare them (pluginitems.ts sessionSettings). */
+  ownHooks?: DeclaredHook[];
+  /** Each of those settings files that is there but couldn't be read or doesn't parse: its hooks aren't known. */
+  ownHooksUnread?: string[];
+  /** Pi's packages and OpenCode's plugins, each as its settings list it (pluginitems.ts sessionSettings): code that can add to its sessions. */
+  extensions?: string[];
   /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
    *  and how that copy compares (see BaseHeld.state). */
   base?: BaseHeld;
