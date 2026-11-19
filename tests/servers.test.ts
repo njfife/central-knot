@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { setSyncEverything } from '../src/everything.ts';
 import { readHistory } from '../src/history.ts';
 import { libraryAction, librarySentence } from '../src/historyactions.ts';
 import { asItIs, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
@@ -80,6 +81,46 @@ test('A found server is taken in: every tool without it gets it, values as they 
     assert.deepEqual(await box.files(), after);
     const entry = (await readHistory(box.context)).find(event => event.key === 'mcp:docs')!;
     assert.deepEqual([entry.kind, entry.cause, entry.winner?.tool], ['on', 'found', 'claude-cli']);
+  } finally { await box.cleanup(); }
+});
+
+/** Claude Code with the plugin issue-kit (from the marketplace team) installed, whose .mcp.json brings a server “issues” of these fields. */
+async function claudePluginWith(box: Box, fields: object) {
+  const copy = join(box.home, '.claude/plugins/cache/team/issue-kit/1.0.0');
+  await mkdir(join(copy, '.claude-plugin'), { recursive: true });
+  await writeFile(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'issue-kit', version: '1.0.0' }));
+  await writeFile(join(copy, '.mcp.json'), JSON.stringify({ mcpServers: { issues: fields } }));
+  await mkdir(join(box.home, '.claude/plugins'), { recursive: true });
+  await writeFile(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'issue-kit@team': [{ scope: 'user', installPath: copy, version: '1.0.0' }] } }));
+}
+/** Copilot CLI's own server “issues”, Claude Code's settings with none, and the background pass with Synchronize everything on. */
+async function takenInBesidePlugin(box: Box) {
+  await writeFile(box.path('claude-cli'), '{\n  "numStartups": 7\n}\n');
+  await writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'npx', args: ['-y', 'issues-mcp'], tools: ['*'] } } }));
+  await setSyncEverything(box.context, true);
+  await applyServers(box.context, all, [], { background: true });
+}
+
+test('A found server taken in by Synchronize everything where Claude Code has the same server through a plugin: no entry of it goes in Claude Code’s settings, and its row says Claude Code has it through the plugin', async () => {
+  const box = await sandbox();
+  try {
+    await claudePluginWith(box, { command: 'npx', args: ['-y', 'issues-mcp'] });
+    await takenInBesidePlugin(box);
+    const row = await box.row('issues');
+    assert.deepEqual([row?.on, await readFile(box.path('claude-cli'), 'utf8'), await commandIn(box, 'codex-cli', 'issues')], [true, '{\n  "numStartups": 7\n}\n', 'npx']);
+    assert.deepEqual(row?.plugin, { 'claude-cli': { plugin: 'issue-kit', marketplace: 'team', version: '1.0.0', name: 'issues' } });
+    assert.equal((await applyServers(box.context, all, [], { background: true })).writes, 0);
+  } finally { await box.cleanup(); }
+});
+
+test('A found server taken in by Synchronize everything where Claude Code’s plugin brings another server of that name: Claude Code gets the server’s entry beside the plugin’s, as a tool without it does', async () => {
+  const box = await sandbox();
+  try {
+    await claudePluginWith(box, { command: 'npx', args: ['-y', 'other-issues-mcp'] });
+    await takenInBesidePlugin(box);
+    const row = await box.row('issues');
+    assert.deepEqual([row?.on, await argsIn(box, 'claude-cli', 'issues'), row?.plugin], [true, ['-y', 'issues-mcp'], undefined]);
+    assert.equal((await applyServers(box.context, all, [], { background: true })).writes, 0);
   } finally { await box.cleanup(); }
 });
 

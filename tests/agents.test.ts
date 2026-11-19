@@ -17,6 +17,7 @@ import { rowClicks, harnessIs, placeOf, libraryWords, sentences } from '../src/l
 import { librarySentence } from '../src/historyactions.ts';
 import { listed, originWords } from '../src/library.ts';
 import { readHistory } from '../src/history.ts';
+import { setSyncEverything } from '../src/everything.ts';
 import { homePass, passTells } from '../src/homepass.ts';
 import { forgetMissing } from '../src/librarypass.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
@@ -1060,6 +1061,35 @@ inBox('Found copies that differ: the switch asks; the chosen copy is taken in, a
   // made current has its own Undo.
   assert.equal((await historyOf(box)).find(event => event.kind === 'chosen')!.undoneBy, undefined);
   assert.deepEqual((await historyActions(box)).map(action => `${action.event.kind}: ${action.label}`), ['current: Undo']);
+});
+
+/** Claude Code with the plugin review-kit (from the marketplace team) installed, which brings an agent “reviewer” written as `text`. */
+async function claudePluginWith(box: Box, text: string) {
+  const copy = join(box.home, '.claude/plugins/cache/team/review-kit/1.0.0');
+  await mkdir(join(copy, '.claude-plugin'), { recursive: true });
+  await mkdir(join(copy, 'agents'), { recursive: true });
+  await writeFile(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'review-kit', version: '1.0.0' }));
+  await writeFile(join(copy, 'agents/reviewer.md'), text);
+  await writeFile(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'review-kit@team': [{ scope: 'user', installPath: copy, version: '1.0.0' }] } }));
+}
+
+inBox('A found agent taken in by Synchronize everything where Claude Code has the same agent through a plugin: no file of it goes in Claude Code’s agents folder, and its row says Claude Code has it through the plugin', async box => {
+  await write(box, 'copilot-cli', claudeAgent());
+  await claudePluginWith(box, claudeAgent());
+  await setSyncEverything(box.context, true);
+  await pass(box);
+  assert.deepEqual([placeOf(await itemOf(box)), await readOf(box, 'claude-cli'), await readOf(box, 'codex-cli') !== undefined], ['on', undefined, true]);
+  assert.deepEqual((await seen(box)).fact?.plugin, { 'claude-cli': { plugin: 'review-kit', marketplace: 'team', version: '1.0.0', name: 'reviewer' } });
+  assert.equal((await pass(box)).writes, 0);
+});
+
+inBox('A found agent taken in by Synchronize everything where Claude Code’s plugin brings another agent of that name: Claude Code gets the agent’s file beside the plugin’s, as a tool without it does', async box => {
+  await write(box, 'copilot-cli', claudeAgent());
+  await claudePluginWith(box, claudeAgent('You review code.\nBe thorough.\n'));
+  await setSyncEverything(box.context, true);
+  await pass(box);
+  assert.deepEqual([placeOf(await itemOf(box)), await readOf(box, 'claude-cli'), (await seen(box)).fact?.plugin], ['on', claudeAgent(), undefined]);
+  assert.equal((await pass(box)).writes, 0);
 });
 
 // ---------- Versions ----------

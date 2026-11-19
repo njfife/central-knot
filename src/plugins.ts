@@ -677,9 +677,9 @@ export async function linkedToPlugin(home: string, items: Record<string, Pick<Li
 /**
  * What each of `tools` has through its installed plugins, of one kind: by tool, then by the item's key on its page
  * (share.ts itemKey of its name). A name alone doesn't make two items one: the caller counts an item as the plugin's when the
- * library's item is linked to that plugin (linkedToPlugin) or its content is the same (each kind's own test). A name two plugins
- * hold goes by the first listed. Read once where `home` carries `reads` (one pass or one view), since every kind's
- * rows in the Library ask.
+ * library's item is linked to that plugin (linkedToPlugin) or its content is the same (partsHolding; skills.ts pluginFor). A
+ * name two plugins hold goes by the first listed. Read once where `home` carries `reads` (one pass or one view), since every
+ * kind's rows in the Library ask.
  */
 export async function throughPlugins(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[], kind: PartKind): Promise<Map<HarnessId, Map<string, GivenByPlugin>>> {
   const context: PluginContext = { home: home.home, dataDir: '', binaries: {}, overrides: home.overrides, reads: home.reads ?? new Map() };
@@ -699,17 +699,22 @@ export async function throughPlugins(home: { home: string; overrides?: Partial<R
 }
 
 /**
- * What each of `tools` has through its installed plugins that holds the library's item of a key there (agents.ts and servers.ts
- * `through`): the part of the plugin the item is linked to (linkedToPlugin), or a part of the same content (`same`, the kind's own
- * test against the item's current version). For every kind (skills: skills.ts pluginFor), a part holds the item turned off or not:
- * the Through a plugin box is the item's switch in that tool, so an off part must keep holding it.
+ * The part of an installed plugin a tool has an item through (agents.ts and servers.ts `through`), if it has one: the part of
+ * the plugin the library's item is linked to (linkedToPlugin, as `items` holds it), or a part of the same content as the item's
+ * current version (`hashOf`: the part hashed as the kind hashes a version; a found item has none). That version is the item's
+ * as the caller holds it when it asks, not as the record was read: a pass asks with the version a take-in has just made
+ * current, so a tool whose plugin brings that same content gets no copy beside it. For every kind (skills: skills.ts
+ * pluginFor), a part holds the item turned off or not: the Through a plugin box is the item's switch in that tool, so an off
+ * part must keep holding it.
  */
-export async function partsHolding(home: Parameters<typeof throughPlugins>[0], tools: HarnessId[], kind: 'agent' | 'mcp', items: Record<string, Pick<LibraryItem, 'source' | 'deleted'>>, same: (key: string, part: GivenByPlugin) => boolean) {
-  const linked = await linkedToPlugin(home.home, items), found = new Map<HarnessId, Map<string, ThroughPlugin>>();
-  for (const [tool, given] of await throughPlugins(home, tools, kind)) {
-    found.set(tool, new Map([...given].flatMap(([key, { text, ...part }]) => (linked(key, part) || same(key, { ...part, text }) ? [[key, part] as const] : []))));
-  }
-  return found;
+export async function partsHolding(home: Parameters<typeof throughPlugins>[0], tools: HarnessId[], kind: 'agent' | 'mcp', items: Record<string, Pick<LibraryItem, 'source' | 'deleted'>>, hashOf: (key: string, part: GivenByPlugin) => string | undefined) {
+  const linked = await linkedToPlugin(home.home, items), parts = await throughPlugins(home, tools, kind);
+  return (item: { key: string; hash?: string }, tool: HarnessId): ThroughPlugin | undefined => {
+    const given = parts.get(tool)?.get(item.key);
+    if (!given) return undefined;
+    const { text: _text, ...part } = given;
+    return linked(item.key, part) || (item.hash !== undefined && hashOf(item.key, given) === item.hash) ? part : undefined;
+  };
 }
 
 /** An item a plugin's switch holds in a tool with the plugin's own installer, as Disk.held answers (library.ts THE RULE's held notes). */
