@@ -175,6 +175,12 @@ export interface DesktopApi {
   closePluginUpdates(what: 'updated' | 'failed'): Promise<PluginUpdatesView>;
   /** Automatic plugin updates changed (a check began or ended). `news`: it updated something, or else an update failed. */
   onPluginUpdatesChanged(callback: (view: PluginUpdatesView, news?: 'updated' | 'failed') => void): void;
+  /** Turns the reading of what marketplace plugins hold on or off (plugintext.ts). */
+  setPluginText(on: boolean): Promise<AppPreferences>;
+  /** How much of what marketplace plugins hold has been read. */
+  pluginText(): Promise<PluginTextView>;
+  /** The reading moved on: a plugin read, a run begun or ended. */
+  onPluginTextChanged(callback: (view: PluginTextView) => void): void;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
   /** Updates (updates.ts): what this build is, whether it can update itself, and the last check or update. */
@@ -606,6 +612,8 @@ export interface CatalogPlugin {
   remote?: { url: string; path: string; ref?: string; sha?: string };
   /** Its entry in marketplace.json as written, for the paths it lists (main process only; not sent to the page). */
   entry?: Record<string, unknown>;
+  /** What it holds, kept only when its catalog was read with `keepContents` (plugins.ts parseCatalog, for plugintext.ts; main process only). */
+  contents?: PluginContents;
   /** No longer in the catalog, listed only because a tool still has it, or the home records it while its marketplace can't be read. */
   gone?: boolean;
 }
@@ -1040,8 +1048,16 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
  * where it can, why the system has it off. `place`: where the system keeps it, wherever it can be changed here.
  */
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
-/** Central Knot's own settings, shown on its Settings page. `pluginUpdates`: plugins are updated automatically (pluginupdates.ts). */
-export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
+/**
+ * Central Knot's own settings, shown on its Settings page. `pluginUpdates`: plugins are updated automatically (pluginupdates.ts).
+ * `pluginText`: what marketplace plugins hold is read (plugintext.ts).
+ */
+export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean; pluginText: boolean; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
+/**
+ * How much of what the listed marketplaces' plugins hold is read (plugintext.ts): `read` of the `of` plugins that can be read have
+ * their text; `elsewhere` of them are kept in other repositories (what the first reading downloads); `reading` while a run goes on.
+ */
+export interface PluginTextView { read: number; of: number; elsewhere: number; reading: boolean }
 /** One line of what automatic plugin updates did: when, which plugin of which marketplace, and the words. `warn`: it needs reading (a step failed, or has a note). */
 export interface PluginUpdateLine { at: number; source: string; plugin: string; text: string; warn?: true; /** A failed update that is tried again by itself. */ again?: true }
 /**

@@ -147,7 +147,7 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   // OpenCode's CLI is looked for only inside the throwaway home, and on a Mac every app in the stand-in for /Applications
   // (CK_TEST_APPS, empty here): a machine that has them installed (the Mac these run on does) would otherwise bring them into
   // every flow that opens "This Mac's home".
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -6395,6 +6395,56 @@ esac
  * The lead never says nothing was found above a card that counts something, and why a home can't be written is said with no tool
  * managed too. Made-up homes: Claude Code and Codex stand-ins, and a plugin from a marketplace no tool lists.
  */
+/**
+ * What plugins hold, read in the background (plugintext.ts), on screen: a marketplace Central Knot lists, whose one plugin kept
+ * elsewhere is on GitHub, sent by Git's url.insteadOf to a port where nothing answers (no network is used). The four kept in the
+ * marketplace are read and kept, Settings says how much and what the first reading costs; turned off, what was read stays.
+ */
+async function pluginTextFlow() {
+  const home = join(scratch, 'text-home'), data = join(scratch, 'text-data'), real = join(scratch, 'text-real'), market = join(scratch, 'text-market');
+  writeMarket(market, 'ck-text-market');
+  for (const folder of [data, real, join(home, '.claude')]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(home, '.claude/settings.json'), '{}');
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  writeFileSync(join(data, 'marketplaces.json'), JSON.stringify([market]));
+  writeFileSync(join(scratch, 'text-gitconfig'), '[url "http://127.0.0.1:9/"]\n\tinsteadOf = https://github.com/\n');
+  const a = await launch(data, [], real, { CK_PLUGIN_TEXT: 'on', GIT_CONFIG_GLOBAL: join(scratch, 'text-gitconfig') });
+  const kept = () => { try { return JSON.parse(readFileSync(join(data, 'plugins/plugin-text.json'), 'utf8')).plugins; } catch { return []; } };
+  const switched = () => a.run(`document.querySelector('#plugin-text-on')?.getAttribute('aria-checked')`);
+  const said = async () => [await a.text('#setting-plugin-text-notice'), await a.text('#setting-plugin-text-hint')];
+  // With --shots: the row at the two smaller sizes, dark and light.
+  const pictures = async name => {
+    if (!shots) return;
+    for (const [width, height] of [[860, 600], [1280, 800]]) for (const value of ['dark', 'light']) {
+      await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false });
+      await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+      await a.run(`document.querySelector('#setting-plugin-text')?.scrollIntoView({ block: 'center' })`);
+      await wait(300);
+      await a.shot(`plugin-text-${name}-${width}-${value}`);
+    }
+    await a.send('Emulation.clearDeviceMetricsOverride');
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+  };
+  for (let tries = 0; tries < 50 && !(await a.exists('#nav-settings')); tries++) await wait(100);
+  if (await a.exists('#setup-no')) await a.click('#setup-no');
+  await a.click('#nav-settings');
+  for (let tries = 0; tries < 150 && !/^Read 4 of 5 plugins\.$/.test((await said())[0]?.trim() ?? ''); tries++) await wait(100);
+  check('Settings has the switch, on, how much is read, and what the first reading downloads', await switched() === 'true' && /^Read 4 of 5 plugins\.$/.test((await said())[0]?.trim() ?? '')
+    && /Nothing is installed or run\. Under 1 MB the first time for 1 plugin kept in another repository; after that only what changed\.$/.test((await said())[1] ?? ''), await said());
+  same('the four kept in the marketplace are kept as text; nothing of the one Git could not reach', kept().map(entry => entry.plugin).sort(), ['document-tools', 'issue-tracker', 'release-helper', 'starter-skills']);
+  check('a skill is kept by its name and description', kept().find(entry => entry.plugin === 'document-tools')?.items.some(item => item.kind === 'skill' && item.name === 'pdf-reader' && item.description), kept().find(entry => entry.plugin === 'document-tools'));
+  await pictures('read');
+  await a.click('#plugin-text-on');
+  for (let tries = 0; tries < 50 && await switched() !== 'false'; tries++) await wait(100);
+  check('turned off, the choice is saved and what was read stays', await switched() === 'false' && JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginText === false
+    && /^Read 4 of 5 plugins\.$/.test((await said())[0]?.trim() ?? '') && kept().length === 4, await said());
+  await pictures('off');
+  await a.click('#plugin-text-on');
+  for (let tries = 0; tries < 50 && await switched() !== 'true'; tries++) await wait(100);
+  check('turned on again, it is saved on', await switched() === 'true' && JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginText === true);
+  await a.quit();
+}
+
 async function overviewFlow() {
   const home = join(scratch, 'overview-home'), data = join(scratch, 'overview-data'), real = join(scratch, 'overview-real');
   const standIns = folder => { mkdirSync(join(folder, '.local/bin'), { recursive: true });
@@ -6944,7 +6994,7 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 // group passes on its own.
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, overviewFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];

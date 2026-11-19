@@ -60,6 +60,8 @@ export interface MarketplaceHost {
   notices?(kind: ItemKind, notices: SyncNotice[]): void;
   /** The installs the version before waited to make in a tool new here, in the open home (pluginupdates.ts waitedBefore): read once, by the plugins record's first read. */
   waitedBefore?(): Promise<WaitedBefore[]>;
+  /** Every marketplace was listed again (a view of them all; `fresh`: each Git catalog was fetched first), for the plugin text (plugintext.ts listed). */
+  listed?(sources: string[], fresh: boolean): void;
 }
 /** The engine calls that touch Git or a tool, replaceable in tests. */
 export interface MarketplaceEngine {
@@ -399,14 +401,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   const view = async (fresh = false, readId?: number): Promise<PluginsView> => (await look(fresh, readId)).view;
 
   /**
-   * The view, and how the plugins record was read for it (`known`). `only`: just that marketplace (a click on one of its
-   * plugins), with no suggestions.
+   * The marketplaces listed for these tools, each once however it is spelled (sameSource), with where each is listed from; with
+   * the record of parts from before the library, which lists the marketplaces its plugins waiting to be moved come from.
    */
-  async function look(fresh = false, readId?: number, only?: string): Promise<{ view: PluginsView; known: RecordRead }> {
-    const ctx: engine.PluginContext = { ...(await context({ clis: true })), reads: new Map() };
-    const read = await host.read(readId);
-    const tools = columns(read.tools);
-    const writing = await host.writeAccess();
+  async function listedSources(ctx: engine.PluginContext, tools: HarnessId[]) {
     const known: { source: string; origins: MarketplaceView['origins'] }[] = [];
     const note = (source: string, origin: MarketplaceView['origins'][number]) => {
       const entry = known.find(item => engine.sameSource(item.source, source));
@@ -423,11 +421,31 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const share = host.share?.();
     const parts = share ? await readPartsRecord(share.home) : 'absent', onRecord = typeof parts === 'object' ? parts.map(({ install }) => install) : [];
     for (const install of onRecord) if (!known.some(item => engine.sameSource(item.source, install.source))) note(install.source, 'central-knot');
+    return { known, parts, onRecord };
+  }
+
+  /** The marketplaces listed in the open home, as the page lists them, for the plugin text (plugintext.ts): no CLI is run and nothing is fetched. */
+  async function listings(readId?: number): Promise<string[] | undefined> {
+    if (!host.home()) return undefined;
+    return (await listedSources(await context(), columns((await host.read(readId)).tools))).known.map(item => item.source);
+  }
+
+  /**
+   * The view, and how the plugins record was read for it (`known`). `only`: just that marketplace (a click on one of its
+   * plugins), with no suggestions.
+   */
+  async function look(fresh = false, readId?: number, only?: string): Promise<{ view: PluginsView; known: RecordRead }> {
+    const ctx: engine.PluginContext = { ...(await context({ clis: true })), reads: new Map() };
+    const read = await host.read(readId);
+    const tools = columns(read.tools);
+    const writing = await host.writeAccess();
+    const { known, parts, onRecord } = await listedSources(ctx, tools);
     const recordRead = await recordFor(ctx, tools, writing.allowed, parts);
     const marketplaces: MarketplaceView[] = [];
     // All at once: one unreachable source doesn't hold up the others.
     const listed = only ? known.filter(item => engine.sameSource(item.source, only)) : known;
     marketplaces.push(...await Promise.all(listed.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh, recordRead.record?.plugins ?? []))));
+    if (!only) host.listed?.(known.map(item => item.source), fresh);
     for (const market of marketplaces) {
       const waiting = [...new Set(onRecord.filter(install => engine.sameSource(install.source, market.source)).map(install => install.plugin))];
       if (waiting.length) market.waiting = waiting;
@@ -446,6 +464,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const shown: PluginsView = { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, via, versions, suggested,
       ...(recordRead.problem ? { switchProblem: recordRead.problem } : {}), ...(partsWait ? { partsWait } : {}) };
     // The record of parts from before the library unreadable: no plugin is read as items, and Pi and OpenCode read as unknown.
+    const share = host.share?.();
     if (share && recordRead.record && recordRead.partsKnown) await withItems(ctx, share, read.tools, marketplaces, recordRead.record.plugins);
     for (const entry of marketplaces) entry.switches = Object.fromEntries(entry.plugins.map(plugin => [plugin.name, switchOf(shown, entry, plugin, recordRead)]));
     return { view: shown, known: recordRead };
@@ -888,7 +907,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { report, view: await view() };
   }
 
-  return { view, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, items, pendingUpdates, noteJoined, toolManaged, turn, undoTurn, addCarried, addCarriedTo, beforeParts };
+  return { view, listings, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, items, pendingUpdates, noteJoined, toolManaged, turn, undoTurn, addCarried, addCarriedTo, beforeParts };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;

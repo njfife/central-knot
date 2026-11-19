@@ -58,7 +58,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => p
 /** What a page threw, in any app this run started. */
 const pageErrors = [];
 async function launch(more = {}) {
-  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_TEST_APPS: MAC.root, ...more };
+  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', CK_TEST_APPS: MAC.root, ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs

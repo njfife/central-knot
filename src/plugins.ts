@@ -56,51 +56,60 @@ function once<T>(context: PluginContext, key: string, read: () => Promise<T>): P
 /** Git hosts whose repository paths ignore case (github.com/Owner/Repo is github.com/owner/repo). */
 const CASELESS_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
 
-/** One spelling for one repository, so the same marketplace is recognised however it was typed (MKT-07). */
-export function sameSource(first: string, second: string): boolean {
-  const norm = (value: string) => {
-    let text = value.trim();
-    // A folder may be named through a link (macOS: /var is /private/var), and tools record whichever spelling they saw.
-    if (isFolder(text)) { try { return realpathSync(text); } catch { return resolve(text); } }
-    const repo = githubRepo(text);
-    if (repo) return `github.com/${repo.toLowerCase()}`;
-    const scp = text.match(/^([\w.-]+)@([\w.-]+):(.+)$/);
-    if (scp) text = `ssh://${scp[1]}@${scp[2]}/${scp[3]}`;
-    try {
-      const url = new URL(text);
-      const host = url.hostname.toLowerCase();
-      const path = url.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '');
-      // Only hosts known to ignore case in repository paths fold it; on any other server /Team/tools and /team/tools may be two repositories.
-      return `${host}${url.port ? `:${url.port}` : ''}/${CASELESS_HOSTS.has(host) ? path.toLowerCase() : path}`;
-    } catch { return text; }
-  };
-  return norm(first) === norm(second);
+/** One spelling for one repository or folder, so the same marketplace is recognised however it was typed (MKT-07). */
+export function sourceKey(value: string): string {
+  let text = value.trim();
+  // A folder may be named through a link (macOS: /var is /private/var), and tools record whichever spelling they saw.
+  if (isFolder(text)) { try { return realpathSync(text); } catch { return resolve(text); } }
+  const repo = githubRepo(text);
+  if (repo) return `github.com/${repo.toLowerCase()}`;
+  const scp = text.match(/^([\w.-]+)@([\w.-]+):(.+)$/);
+  if (scp) text = `ssh://${scp[1]}@${scp[2]}/${scp[3]}`;
+  try {
+    const url = new URL(text);
+    const host = url.hostname.toLowerCase();
+    const path = url.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '');
+    // Only hosts known to ignore case in repository paths fold it; on any other server /Team/tools and /team/tools may be two repositories.
+    return `${host}${url.port ? `:${url.port}` : ''}/${CASELESS_HOSTS.has(host) ? path.toLowerCase() : path}`;
+  } catch { return text; }
 }
+/** Whether two spellings name one repository or folder (sourceKey). */
+export function sameSource(first: string, second: string): boolean { return sourceKey(first) === sourceKey(second); }
 
 /** The URL CK itself fetches; native commands get the text exactly as the person typed it. */
 const fetchUrl = (source: string) => { const repo = githubRepo(source); return repo ? `https://github.com/${repo}.git` : source.trim(); };
 
 export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15' });
 
-function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number }): Promise<{ code: number | 'timeout' | 'missing'; output: string }> {
+/**
+ * What a run may also be given: `signal` stops it (killed, as at its timeout); `input` is written to its input; `maxBytes` is
+ * the most output kept per stream (4 MB unless said); `env`, variables added to its environment.
+ */
+export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv }
+/** A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` its output byte for byte. */
+type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer };
+
+function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number } & RunOptions): Promise<RunResult> {
+  const maxBytes = options.maxBytes ?? 4 * 1024 * 1024;
   return new Promise(done => {
-    execFile(file, args, { env: options.env, cwd: options.cwd, timeout: options.timeoutMs, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024, encoding: 'utf8', windowsHide: true }, (error, stdout, stderr) => {
-      const output = `${stdout ?? ''}${stderr ?? ''}`.replace(/\r/g, '').trim();
-      if (!error) { done({ code: 0, output }); return; }
+    const child = execFile(file, args, { env: options.env, cwd: options.cwd, timeout: options.timeoutMs, killSignal: 'SIGKILL', maxBuffer: maxBytes, encoding: 'buffer', windowsHide: true, signal: options.signal }, (error, out, err) => {
+      const stdout = Buffer.from(out ?? ''), output = `${stdout.toString('utf8')}${Buffer.from(err ?? '').toString('utf8')}`.replace(/\r/g, '').trim();
+      if (!error) { done({ code: 0, output, stdout }); return; }
       const failure = error as NodeJS.ErrnoException & { killed?: boolean; code?: number | string };
-      if (failure.code === 'ENOENT') done({ code: 'missing', output });
+      if (failure.code === 'ENOENT') done({ code: 'missing', output, stdout });
       // Node stops a command whose output passes maxBuffer; it ran, it just said too much.
-      else if (failure.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than 4 MB)` });
-      else if (failure.killed) done({ code: 'timeout', output });
-      else done({ code: typeof failure.code === 'number' ? failure.code : 1, output });
+      else if (failure.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout });
+      else if (failure.killed || failure.code === 'ABORT_ERR') done({ code: 'timeout', output, stdout });
+      else done({ code: typeof failure.code === 'number' ? failure.code : 1, output, stdout });
     });
+    if (options.input !== undefined) child.stdin?.end(options.input);
   });
 }
 
 /** Git run with hooks and prompts off: an SSH host, key or credential that would ask fails at once instead (MKT-05). */
-const git = (args: string[], timeoutMs: number) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs });
-/** The same Git, for other features (the git repo of the Managed set): hooks and prompts off, this computer's own sign-in. */
-export const runGit = (args: string[], timeoutMs = 60_000) => git(args, timeoutMs);
+const git = (args: string[], timeoutMs: number, options: RunOptions = {}) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { timeoutMs, ...options, env: { ...gitEnv(), ...options.env } });
+/** The same Git, for other features (the git repo of the Managed set, the plugin text: plugintext.ts): hooks and prompts off, this computer's own sign-in. */
+export const runGit = (args: string[], timeoutMs = 60_000, options: RunOptions = {}) => git(args, timeoutMs, options);
 
 /** What a Git source said when asked for access: ok, or one MKT-05 class with words a person can act on. */
 export type AccessResult = { state: 'ok' } | { state: 'sign-in' | 'no-access' | 'unknown-host' | 'passphrase' | 'network' | 'git-missing' | 'unclassified'; message: string };
@@ -152,7 +161,7 @@ export function whyPushFailed(code: number | 'timeout' | 'missing', output: stri
 // ---------- Catalog ----------
 
 /** Where Central Knot keeps its copy of a Git marketplace, by its URL. */
-export const catalogFolder = (context: PluginContext, source: string) => join(context.dataDir, 'catalogs', createHash('sha256').update(fetchUrl(source)).digest('hex').slice(0, 24));
+export const catalogFolder = (context: Pick<PluginContext, 'dataDir'>, source: string) => join(context.dataDir, 'catalogs', createHash('sha256').update(fetchUrl(source)).digest('hex').slice(0, 24));
 
 /** Leftover stage folders of `target` (a clone stopped when the app quit), removed before a new clone of it. */
 async function dropStages(target: string): Promise<void> {
@@ -267,7 +276,7 @@ function copilotRefusal(name: string, where: unknown): string | undefined {
  * One marketplace.json entry as a plugin the page can show, or undefined when its name isn't one the tools accept. A
  * plugin stored in the marketplace (a string `source`) gets its folder and counts; one kept elsewhere gets where it lives.
  */
-async function catalogEntry(item: Record<string, unknown>, root: string, pluginRoot: string, counts: boolean, codex: boolean): Promise<CatalogPlugin | undefined> {
+async function catalogEntry(item: Record<string, unknown>, root: string, pluginRoot: string, counts: boolean, codex: boolean, keepContents: boolean): Promise<CatalogPlugin | undefined> {
   if (typeof item.name !== 'string' || !SAFE_NAME.test(item.name)) return undefined;
   const author = text(item.author) || text(record(item.author)?.name);
   const words = [...(strings(item.keywords) ?? []), ...(strings(item.tags) ?? [])];
@@ -292,6 +301,7 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
       const codexOwn = codex ? await codexManifest(folder) : undefined;
       const contents = counts ? await pluginContents(folder, item, root, { atMarketplaceRoot: !!plugin.isMarketplaceRoot, codex: codexOwn }) : undefined;
       if (contents) plugin.components = componentsFrom(contents);
+      if (contents && keepContents) plugin.contents = contents;
       // Its plugin.json's version wins over the entry's, as Claude Code reads them (the counts' read already applied that).
       const fromFiles = contents ? contents.version : text((codexOwn ?? await pluginManifest(folder, root))?.version);
       if (fromFiles) plugin.version = fromFiles;
@@ -303,7 +313,7 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
 /** At most this many plugins' files are read at once while a catalog is read. */
 const READS_AT_ONCE = 8;
 /** `work` for every item, at most `limit` at a time, results in the items' order. */
-async function eachLimited<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+export async function eachLimited<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
   const worker = async () => { while (next < items.length) { const at = next++; results[at] = await work(items[at]!); } };
@@ -315,9 +325,10 @@ async function eachLimited<T, R>(items: T[], limit: number, work: (item: T) => P
  * Reads the marketplace.json in `root` (a folder, or Central Knot's copy of a Git marketplace) into a catalog: its name,
  * owner and description, and its plugins sorted by name. A file that is missing, outside `root`, unreadable or misnamed
  * gives a catalog with no plugins and a `problem` to show. Nothing is fetched or run. `counts: false` skips reading each
- * plugin's files for the counts its row shows; installing and reading one plugin's page don't need them.
+ * plugin's files for the counts its row shows; installing and reading one plugin's page don't need them. `keepContents`
+ * keeps that read on each plugin kept in the marketplace (`contents`: the plugin text's, plugintext.ts).
  */
-export async function parseCatalog(root: string, source: string, kind: Catalog['kind'], { counts = true } = {}): Promise<Catalog> {
+export async function parseCatalog(root: string, source: string, kind: Catalog['kind'], { counts = true, keepContents = false } = {}): Promise<Catalog> {
   const fetchedAt = new Date().toISOString();
   const failed = (problem: string): Catalog => ({ name: '', source, kind, fetchedAt, plugins: [], problem });
   const read = await readManifest(root);
@@ -329,7 +340,7 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
   if (!SAFE_NAME.test(name)) return failed(`Its name (“${name.slice(0, 60)}”) isn’t one the tools accept.`);
   const metadata = record(manifest.metadata);
   const entries = (Array.isArray(manifest.plugins) ? manifest.plugins : []).map(record).filter((item): item is Record<string, unknown> => !!item);
-  const plugins = (await eachLimited(entries, READS_AT_ONCE, item => catalogEntry(item, root, text(metadata?.pluginRoot), counts, read.codexOnly))).filter((plugin): plugin is CatalogPlugin => !!plugin);
+  const plugins = (await eachLimited(entries, READS_AT_ONCE, item => catalogEntry(item, root, text(metadata?.pluginRoot), counts, read.codexOnly, keepContents))).filter((plugin): plugin is CatalogPlugin => !!plugin);
   const copilotRefuses = read.codexOnly ? undefined : entries.map(item => copilotRefusal(text(item.name), item.source)).find(Boolean);
   const codexOnly = read.codexOnly ? `Only Codex reads this marketplace: it has Codex’s ${CODEX_MANIFEST}, not ${MANIFEST}.` : undefined;
   return { name, source, kind, fetchedAt, root, owner: text(record(manifest.owner)?.name) || undefined, description: text(manifest.description) || text(metadata?.description) || undefined,

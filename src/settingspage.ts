@@ -11,7 +11,7 @@ import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import { openWalkthrough } from './firstsetup.ts';
 import { whatYesDoes, takenOutEarlier } from './setupcounts.ts';
 import { plural } from './model.ts';
-import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, LogTail, SignInPlace } from './types.ts';
+import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, LogTail, PluginTextView, SignInPlace } from './types.ts';
 import { libraryWords, sentences } from './libraryrow.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, settingUpdateButton, unsavedWork, updates } from './updateview.ts';
@@ -31,7 +31,7 @@ interface RowMessage { text: string; detail?: string; tone: 'note' | 'info' | 'f
 /** What each row's last action said, by row id. */
 const messages = new Map<string, RowMessage>();
 /** What each row shows of the settings, so a message can say which value it is about. */
-const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance, history: settings => settings.historyDays, 'plugin-updates': settings => settings.pluginUpdates };
+const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance, history: settings => settings.historyDays, 'plugin-updates': settings => settings.pluginUpdates, 'plugin-text': settings => settings.pluginText };
 const shownIn = (row: string, settings: AppPreferences | undefined) => settings && shownBy[row] ? JSON.stringify(shownBy[row](settings)) : undefined;
 /** A message about a value its row no longer shows was settled by a newer read (put right in the system, changed from a menu). */
 const settled = (row: string, message: RowMessage | undefined) => message?.about !== undefined && message.about !== shownIn(row, current);
@@ -425,6 +425,41 @@ function pluginUpdatesRow(): HTMLElement {
     notice);
 }
 
+/** How much of what plugins hold is read (plugintext.ts), as main last said; undefined until asked. */
+let textRead: PluginTextView | undefined;
+/**
+ * A new count from main: its words change in place, so a click on the page is never lost to a redraw; the page is drawn again
+ * only when the line comes or goes.
+ */
+function showTextRead(view: PluginTextView) {
+  textRead = view;
+  const hint = document.getElementById('setting-plugin-text-hint'), line = document.querySelector('#setting-plugin-text-notice .setting-message-text');
+  if (hint && line && view.of) { hint.textContent = textHint(view); line.textContent = textCoverage(view); }
+  else if (state.page === 'settings') rerender();
+}
+window.centralKnot.onPluginTextChanged(showTextRead);
+
+/** Turns the reading of what plugins hold on or off; turned off, what was read is kept. */
+async function choosePluginText(on: boolean): Promise<void> {
+  const kept = current ? `What plugins hold is still ${current.pluginText ? 'read' : 'not read'}.` : '';
+  if (await save('plugin-text', () => window.centralKnot.setPluginText(on), kept)) announce(on ? 'Central Knot reads what plugins hold from now on.' : 'Central Knot no longer reads what plugins hold. What it read is kept.', true);
+}
+/** The first reading's size: about 0.1 MB a plugin kept in another repository (measured 2026-11-19: 26 to 29 MB on the wire for 277). */
+const firstSize = (plugins: number) => { const mb = plugins * 0.1; return mb < 1 ? 'Under 1 MB' : `About ${mb < 10 ? Math.round(mb) : Math.round(mb / 5) * 5} MB`; };
+const textHint = (view: PluginTextView | undefined) => `Central Knot reads the names and descriptions of the skills, agents and servers in your marketplaces’ plugins and keeps them on this computer. Nothing is installed or run.${
+  view?.elsewhere ? ` ${firstSize(view.elsewhere)} the first time for ${plural(view.elsewhere, 'plugin')} kept in ${view.elsewhere === 1 ? 'another repository' : 'other repositories'}; after that only what changed.` : ''}`;
+const textCoverage = (view: PluginTextView) => `${view.reading && view.read < view.of ? 'Reading:' : 'Read'} ${view.read} of ${plural(view.of, 'plugin')}.`;
+
+/** Plugins: whether what they hold is read, what that costs, and how much is read. */
+function pluginTextRow(): HTMLElement {
+  if (!textRead) void window.centralKnot.pluginText().then(showTextRead);
+  const notice: RowMessage | undefined = textRead?.of ? { text: textCoverage(textRead), tone: 'info' } : undefined;
+  return settingRow('plugin-text', 'Read what plugins hold', textHint(textRead),
+    toggle({ on: !!current?.pluginText, label: 'Read what plugins hold', onchange: chosen => void choosePluginText(chosen), disabled: !current, id: 'plugin-text-on',
+      attrs: { 'aria-describedby': notice ? 'setting-plugin-text-hint setting-plugin-text-notice' : 'setting-plugin-text-hint', title: null } }),
+    notice);
+}
+
 /** A custom build's own lines about itself (what it is, and that it doesn't update itself), where the standard app has Updates. */
 function buildRow(): HTMLElement | null {
   const lines = current?.build;
@@ -485,7 +520,7 @@ export function settingsPage(): HTMLElement {
           }, icon(choice.glyph, 20), h('span', {}, choice.label))))),
       updatesRow(), buildRow()),
     state.home ? settingsSection('home', 'This home', syncEverythingRow()) : null,
-    settingsSection('plugins', 'Plugins', pluginUpdatesRow()),
+    settingsSection('plugins', 'Plugins', pluginUpdatesRow(), pluginTextRow()),
     settingsSection('history', 'History',
       settingRow('history', 'Keep history for', 'Changes and deleted items stay in History, ready to restore, for this long.',
         // Unchangeable until main has said, so a shorter choice is never mistaken for a longer one, and while a change is under way.

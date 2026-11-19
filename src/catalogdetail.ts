@@ -203,6 +203,9 @@ export const pluginManifest = (folder: string, root = folder) => jsonInside(root
  */
 export const codexManifest = async (folder: string) => (await jsonInside(folder, join(folder, '.codex-plugin/plugin.json'))) ?? (await pluginManifest(folder)) ?? {};
 
+/** The files a manifest or entry names for a section: a path, or a list of paths (an inline section names none). */
+const namedFiles = (named: unknown) => (typeof named === 'string' ? [named] : Array.isArray(named) ? strings(named) ?? [] : []);
+
 /**
  * One plugin section (hooks, MCP servers, LSP servers): its default file in the plugin folder, merged with what the
  * plugin's entry names, which may be inline, a path to a JSON file, or a list of paths. A file or inline value may hold
@@ -220,8 +223,7 @@ async function section(root: string, folder: string, named: unknown, key: string
     if (value && key in value && !record(value[key])) { unread = true; return {}; }
     return unwrap(value);
   };
-  const paths = typeof named === 'string' ? [named] : Array.isArray(named) ? strings(named) ?? [] : [];
-  const parts = [await fromFile(defaultFile), ...(await Promise.all(paths.map(fromFile))), unwrap(record(named))];
+  const parts = [await fromFile(defaultFile), ...(await Promise.all(namedFiles(named).map(fromFile))), unwrap(record(named))];
   return { values: Object.assign({}, ...parts), unread };
 }
 
@@ -238,6 +240,12 @@ async function manifestOf(folder: string, entry: Record<string, unknown>, root: 
 /** The files and folders lists name, each once, resolved in `folder`: paths, lists of paths, or (commands) a map of name to { source }. */
 const listedPaths = (folder: string, ...lists: unknown[]) =>
   [...new Set(lists.flatMap(list => strings(list) ?? Object.values(record(list) ?? {}).map(item => text(record(item)?.source)).filter(Boolean)).map(path => resolve(folder, path)))];
+/** What the manifest and entry list for `key` (commands, agents), or with no list in either, the kind's own folder. */
+const listedOr = (folder: string, { own, added }: { own: Record<string, unknown>; added: Record<string, unknown> }, key: string) =>
+  (own[key] === undefined && added[key] === undefined ? [join(folder, key)] : listedPaths(folder, own[key], added[key]));
+/** Each MCP server with what it runs or connects to, and its entry as JSON, by name. */
+const serverList = (servers: Record<string, unknown>) =>
+  Object.entries(servers).map(([name, server]) => ({ name, runs: serverRuns(server), entry: JSON.stringify(server) })).sort((first, second) => first.name.localeCompare(second.name));
 
 /** A plugin's skills, read by each tool's rule (see pluginContents). */
 async function skillsOf(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs, unread?: string[]): Promise<NamedPart[]> {
@@ -283,19 +291,18 @@ export async function skillNamesIn(folder: string, entry: Record<string, unknown
  * read at their fixed places (INSTRUCTION_FILES), in every copy alike.
  */
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs = {}): Promise<PluginContents> {
-  const { own, added } = await manifestOf(folder, entry, root, readAs);
+  const manifests = await manifestOf(folder, entry, root, readAs), { own, added } = manifests;
   const declared: Record<string, unknown> = { ...own, ...added, version: text(own.version) || added.version };
-  const listedOr = (key: string, fallback: string) => (own[key] === undefined && added[key] === undefined ? [fallback] : listedPaths(folder, own[key], added[key]));
   const hooks = (await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json')).values;
   const servers = (await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json')).values;
   const lsp = (await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json')).values;
   const read: Omit<PluginContents, 'onlyInstructions'> = {
     skills: await skillsOf(folder, entry, root, readAs),
-    commands: await markdownIn(root, folder, listedOr('commands', join(folder, 'commands'))),
-    agents: await markdownIn(root, folder, listedOr('agents', join(folder, 'agents'))),
+    commands: await markdownIn(root, folder, listedOr(folder, manifests, 'commands')),
+    agents: await markdownIn(root, folder, listedOr(folder, manifests, 'agents')),
     instructions: await instructionsIn(root, folder),
     hooks: hooksOf(hooks),
-    mcpServers: Object.entries(servers).map(([name, server]) => ({ name, runs: serverRuns(server), entry: JSON.stringify(server) })).sort((first, second) => first.name.localeCompare(second.name)),
+    mcpServers: serverList(servers),
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),
     lspServers: Object.keys(lsp).sort(),
     bin: (await listInside(root, folder)).includes('bin'),
@@ -303,6 +310,24 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
   };
   return { ...read, onlyInstructions: await holdsOnlyInstructions(root, folder, declared, read) };
 }
+
+/**
+ * What the plugin text keeps of a plugin (plugintext.ts): its skills, agents and MCP servers, read as pluginContents reads them
+ * for Claude Code, and the files its servers come from (.mcp.json and any its manifest or entry names). A copy holding only
+ * some of the plugin's files is read twice: first with an empty stand-in for each file `searchedFile` accepts, to learn which
+ * files to fetch (the skills' and agents' files, and these server files), then with those files in place.
+ */
+export async function searchedParts(folder: string, entry: Record<string, unknown>, root: string): Promise<Pick<PluginContents, 'skills' | 'agents' | 'mcpServers'> & { serverFiles: string[] }> {
+  const manifests = await manifestOf(folder, entry, root, {}), declared: Record<string, unknown> = { ...manifests.own, ...manifests.added };
+  return {
+    skills: await skillsOf(folder, entry, root, {}),
+    agents: await markdownIn(root, folder, listedOr(folder, manifests, 'agents')),
+    mcpServers: serverList((await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json')).values),
+    serverFiles: [join(folder, '.mcp.json'), ...namedFiles(declared.mcpServers).map(path => resolve(folder, path))],
+  };
+}
+/** The only files searchedParts reads: a skill's SKILL.md, an agent's .md, a manifest's or server file's .json. */
+export const searchedFile = (path: string) => /\.(md|json)$/.test(path);
 
 /** What may sit at a plugin's root beside its instruction files without being a part: a manifest's folder, a README, a licence. */
 const BESIDE_INSTRUCTIONS = /^(\.claude-plugin|\.codex-plugin|readme(\.\w+)?|licen[cs]e(\.\w+)?)$/i;
@@ -362,9 +387,8 @@ export interface PluginFiles {
 }
 /** A plugin's parts as Claude Code reads them (the same readers as pluginContents), with the files to copy. */
 export async function pluginFiles(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginFiles> {
-  const { own, added } = await manifestOf(folder, entry, root, {});
-  const declared: Record<string, unknown> = { ...own, ...added };
-  const listedOr = (key: string, fallback: string) => (own[key] === undefined && added[key] === undefined ? [fallback] : listedPaths(folder, own[key], added[key]));
+  const manifests = await manifestOf(folder, entry, root, {});
+  const declared: Record<string, unknown> = { ...manifests.own, ...manifests.added };
   // An unreadable plugin.json may declare other folders for any kind: every kind's contents count as unknown then.
   const manifest = join(folder, '.claude-plugin/plugin.json');
   const manifestUnread = !(await pluginManifest(folder, root)) && await present(manifest);
@@ -372,7 +396,7 @@ export async function pluginFiles(folder: string, entry: Record<string, unknown>
   const unread = { skills: manifestUnread ? ['*'] : [] as string[], agents: manifestUnread ? ['*'] : [] as string[], servers: servers.unread || manifestUnread, manifest: manifestUnread };
   const skills = (await skillsOf(folder, entry, root, {}, unread.skills)).map(part => join(folder, part.path));
   const agents: PluginFiles['agents'] = [];
-  for (const part of await markdownIn(root, folder, listedOr('agents', join(folder, 'agents')), unread.agents)) {
+  for (const part of await markdownIn(root, folder, listedOr(folder, manifests, 'agents'), unread.agents)) {
     // Read again with its size known: a part copied as an item is never a cut copy.
     const file = join(folder, part.path);
     const read = await readInside(root, file, PART_FILE_LIMIT);
