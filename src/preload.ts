@@ -43,6 +43,7 @@ const api: DesktopApi = {
   onSyncChanged: callback => { ipcRenderer.on('sync:changed', () => callback()); },
   onSaid: callback => { ipcRenderer.on('said', (_event, text) => callback(String(text))); },
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  closeSettingsKept: () => ipcRenderer.invoke('settings:close-kept'),
   setAppearance: appearance => ipcRenderer.invoke('settings:appearance', appearance),
   setStartAtSignIn: on => ipcRenderer.invoke('settings:sign-in', on),
   openSignInSettings: () => ipcRenderer.invoke('settings:open-sign-in'),

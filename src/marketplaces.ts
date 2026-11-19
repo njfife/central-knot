@@ -17,7 +17,7 @@ import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ItemKind } from './library.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice } from './types.ts';
 import { harnessIds } from './harnesses.ts';
-import { writeDurably, type ShareContext } from './share.ts';
+import { syncGate, writeDurably, type ShareContext } from './share.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
 import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, recordUnread, toolNow, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { readLink } from './sourcelink.ts';
@@ -335,7 +335,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const share = host.share?.(), parts = share ? await readPartsRecord(share.home) : 'absent';
     if (parts === 'absent') return undefined;
     const ctx = await context();
-    await recordFor(ctx, columns((await host.read()).tools), (await host.writeAccess()).allowed, parts);
+    await recordFor(ctx, columns((await host.read()).tools), (await host.writeAccess()).allowed && !(await waitsForResume()), parts);
     return async entry => {
       const { catalog } = await catalogFor(ctx, entry.source, { counts: false, local: true });
       const listed = catalog?.root ? catalog.plugins.find(each => each.name === entry.plugin) : undefined;
@@ -555,6 +555,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return shown;
   }
 
+  /** Why plugin work of its own accord (the automatic updates, the record's first read before a pass, a carried marketplace) waits: the home waits for Resume, as its sync passes do. */
+  const waitsForResume = async () => { const share = host.share?.(), gate = share && await syncGate(share); return gate?.state === 'needs-resume' ? gate.reason : undefined; };
   // Writes act only on the home on screen, only where writing is allowed there, and in no tool whose Manage switch is off.
   const guard = async (home: unknown, tools: readonly HarnessId[] = []) => {
     if (home !== host.home()?.home) return 'The home on screen is not the one open. Nothing was changed. Read it again.';
@@ -633,7 +635,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * offers today (`unreadSources`: the same, as added; `offline`: every Git marketplace did, so the next try can come sooner).
    */
   async function pendingUpdates(home: unknown): Promise<{ stopped?: string; ops: (PluginOp & { offered?: string; newHere?: true })[]; unread: string[]; unreadSources: string[]; offline?: true; newTools?: HarnessId[] }> {
-    const stopped = await guard(home);
+    const stopped = await guard(home) ?? await waitsForResume();
     if (stopped) return { stopped, ops: [], unread: [], unreadSources: [] };
     const shown = await view(true);
     const ops: (PluginOp & { offered?: string; newHere?: true })[] = [];
@@ -878,7 +880,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    */
   async function addCarried(present: HarnessId[], turn: <T>(work: () => Promise<T>) => Promise<T>): Promise<ListedReport[]> {
     const carried = host.bundled?.(), open = host.home();
-    if (!carried || !open?.actual || !(await host.writeAccess()).allowed) return [];
+    if (!carried || !open?.actual || !(await host.writeAccess()).allowed || await waitsForResume()) return [];
     const marketName = (await catalogFor(await context(), carried.source, { counts: false })).catalog?.name;
     if (!marketName) return [];
     const done = (await readAdded(marketName))[open.home] ?? [];

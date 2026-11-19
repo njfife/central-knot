@@ -8,7 +8,8 @@
 //   syncGate (whether the record can be read and saved, is the one this build remembers, or waits for Resume). A write of the library
 //   asks libraryGate, never the two apart; the views read them apart, to say why on the page;
 // - checked writes: a tool's file written or removed only while it holds what was read (writeFileChecked, removeFileChecked,
-//   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably);
+//   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably), or kept beside
+//   themselves where they can't be read (keepUnreadable); and a wait for Resume held in memory (ShareContext resumeFirst);
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
 //   place (stagingFolder, placeCopy).
 // Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
@@ -62,6 +63,11 @@ export interface ShareContext {
   allowActualWrites?: boolean;
   /** Why nothing at all may be written now: another build of Central Knot is on this Mac, one install at a time (main.ts heldReason). Unset: not held. */
   held?: string;
+  /**
+   * A wait for Resume this build holds in memory for the home, whatever its record or this build's memory of it would say (main.ts
+   * startHome): while it has a reason, syncGate says the home waits, after its stops; a Resume let in ends it (libraryGate).
+   */
+  resumeFirst?: { reason?: string };
   overrides?: Partial<Record<HarnessId, string>>;
   /** Reads shared within one pass or one view (what each tool has through its plugins): set only on a context made for that one use. */
   reads?: Map<string, Promise<unknown>>;
@@ -257,6 +263,17 @@ export async function readRecord(home: string): Promise<{ record?: SyncRecord; p
   } catch { return { problem: 'The sync record is damaged.' }; }
 }
 
+/**
+ * Keeps one of Central Knot's own files that is there and can't be read (History, its settings) beside it as
+ * `<name>.unreadable-<time>.json`, so the next write never writes over it: it may be recoverable by hand. Answers where it is
+ * kept; fails where it can't be moved (a folder that can't be written), and the file stays where it is.
+ */
+export async function keepUnreadable(path: string): Promise<string> {
+  const kept = path.replace(/\.json$/, `.unreadable-${Date.now()}.json`);
+  await rename(path, kept);
+  return kept;
+}
+
 export async function writeDurably(path: string, text: string) {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -448,6 +465,7 @@ export async function libraryGate(context: ShareContext, asked: Entering = {}): 
   let { record } = await readRecord(context.home);
   if (!record && asked.start) { record = newRecord(context); await saveRecord(context.home, record); await remember(context, record.generation); }
   else if (record && gate.state === 'needs-resume' && asked.resume) await remember(context, record.generation);
+  if (asked.resume && context.resumeFirst) context.resumeFirst.reason = undefined;
   return { record };
 }
 
@@ -465,9 +483,11 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   try { await access(folder, constants.W_OK | constants.X_OK); }
   catch (error) { return { state: 'stopped', reason: plainError(error) }; }
   const remembered = (await readSettings(context.settingsPath)).homes?.[context.home]?.generation;
-  if (!record) return remembered ? { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` } : { state: 'first-setup' };
+  if (!record && remembered) return { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` };
+  if (record && remembered && remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
+  if (context.resumeFirst?.reason) return { state: 'needs-resume', reason: context.resumeFirst.reason };
+  if (!record) return { state: 'first-setup' };
   if (!remembered) return { state: 'needs-resume', reason: 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.' };
-  if (remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
   return { state: 'ready' };
 }
 
