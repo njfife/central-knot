@@ -61,8 +61,8 @@ const RETRY_MS = 10 * 60_000;
  * chosen; a git command's output (the blobs read) is kept up to MOST_READ; each git command stops at GIT_MS.
  */
 const MOST_ENTRIES = 20_000, MOST_FILES = 2_000, MOST_READ = 32 * 1024 * 1024, GIT_MS = 60_000;
-/** What a server says it can do, in Git's packet trace (each line named for the program that received it): with protocol v2 its fetch line, with v0 the first ref's line. */
-const CAPABILITIES = /\S+< (?:fetch=|[0-9a-f]{40,64} \S+\\0)(.*)$/m;
+/** What a server says it can do, in a packet Git received (its trace names the program that received it): v2's `fetch=` values, or v0's list after the first ref's NUL. */
+const CAPABILITIES = /^.*packet:\s+\S+< (?:fetch=(.*)|[0-9a-f]{40,64} \S+\\0(.*))$/m;
 /** The files a plugin's own lists are in: fetched first, with the links, since they name the rest. */
 const MANIFESTS = ['.claude-plugin/plugin.json', '.mcp.json'];
 
@@ -87,15 +87,19 @@ const itemsOf = (parts: Pick<PluginContents, 'skills' | 'agents' | 'mcpServers'>
 interface Wanted { key: string; source: string; marketName: string; plugin: string; items?: PluginTextItem[]; remote?: Remote; entry?: Record<string, unknown>; from?: string }
 /** The marketplaces listed in the open home (marketplaces.ts listings), and whether every list they come from could be read. */
 export interface Listed { sources: string[]; complete: boolean }
-/** The listed marketplaces and those whose catalog was read (by sourceKey), each plugin of those that can be read (by textKey), and whether the listing was read whole. */
-interface Listing { listed: Set<string>; read: Set<string>; wanted: Map<string, Wanted>; complete: boolean }
+/**
+ * The listed marketplaces (`markets`) and those whose catalog was read (by sourceKey), the Git ones with no copy here yet (`absent`),
+ * each plugin of those read that can be read (by textKey), and whether the listing was read whole.
+ */
+interface Listing { markets: Set<string>; read: Set<string>; absent: string[]; wanted: Map<string, Wanted>; complete: boolean }
 
 /** The listed marketplaces' catalogs, as their copies on disk say: a Git marketplace not fetched yet is not read. */
 async function readListing(dataDir: string, { sources, complete }: Listed): Promise<Listing> {
-  const listing: Listing = { listed: new Set(sources.map(sourceKey)), read: new Set(), wanted: new Map(), complete };
+  const listing: Listing = { markets: new Set(sources.map(sourceKey)), read: new Set(), absent: [], wanted: new Map(), complete };
   for (const source of sources) {
-    const folder = isFolder(source);
-    const catalog = await parseCatalog(folder ? source : catalogFolder({ dataDir }, source), source, folder ? 'folder' : 'git', { keepContents: true }).catch(() => undefined);
+    const folder = isFolder(source), root = folder ? source : catalogFolder({ dataDir }, source);
+    if (!existsSync(root)) listing.absent.push(source);
+    const catalog = await parseCatalog(root, source, folder ? 'folder' : 'git', { keepContents: true }).catch(() => undefined);
     if (!catalog || catalog.problem) continue;
     listing.read.add(sourceKey(source));
     for (const plugin of catalog.plugins) {
@@ -136,13 +140,13 @@ function blobsFrom(out: Buffer): Map<string, Buffer> {
 
 /**
  * Whether a repository's server filters what it sends, asked before anything is fetched from it (one that declines a filtered
- * fetch sends the whole commit instead): its capabilities, through `ls-remote` with Git's packet trace on. True only when it
- * said so; else why not, and nothing is fetched (an answer that could not be had waits like any failure).
+ * fetch sends the whole commit instead): its capabilities, through `ls-remote` with Git's packet trace on. True only when the
+ * probe ended well and received the capability `filter` itself; else why not, and nothing is fetched (that waits like any failure).
  */
 async function filters(url: string, signal: AbortSignal): Promise<true | string> {
   const asked = await runGit(['ls-remote', '--', url, 'HEAD'], GIT_MS, { signal, env: { GIT_TRACE_PACKET: '1' } });
-  const said = CAPABILITIES.exec(asked.output)?.[1];
-  if (said !== undefined) return /\bfilter\b/.test(said) || 'its server declines a filtered fetch, and a whole copy is never taken.';
+  const said = asked.code === 0 ? CAPABILITIES.exec(asked.output) : null;
+  if (said) return (said[1] ?? said[2]!).trim().split(/\s+/).includes('filter') || 'its server declines a filtered fetch, and a whole copy is never taken.';
   return asked.code === 0 ? 'its server did not say what it can send.' : whyGitFailed(asked.code, asked.output.split('\n').filter(line => !line.includes('packet:')).join('\n'), 'repository');
 }
 
@@ -151,7 +155,6 @@ async function listFolder(git: InRepo, commit: string, want: Wanted, folder: str
   const path = want.remote!.path.replace(/\/+$/, ''), prefix = path ? `${path}/` : '';
   const listed = await git(['ls-tree', '-r', '-z', commit, ...(path ? ['--', path] : [])]);
   const entries = listed.stdout.toString('utf8').split('\0').filter(Boolean);
-  if (listed.code !== 0 || !entries.length) return `${want.plugin}: its folder is not in the repository at that commit.`;
   if (entries.length > MOST_ENTRIES) return `${want.plugin}: more than ${MOST_ENTRIES} files.`;
   const laid: Laid = { want, folder, blobs: new Map(), links: new Set() };
   for (const line of entries) {
@@ -160,15 +163,17 @@ async function listFolder(git: InRepo, commit: string, want: Wanted, folder: str
     laid.blobs.set(name.slice(prefix.length), id!);
     if (mode === '120000') laid.links.add(name.slice(prefix.length));
   }
-  return laid;
+  // Nothing under it (absent, or a file of that name): no folder there.
+  return listed.code === 0 && laid.blobs.size ? laid : `${want.plugin}: its folder is not in the repository at that commit.`;
 }
 
 /**
- * The folder laid out for the reader's first pass: an empty stand-in for each file it may name (searchedFile), the manifests
- * with their text (`first`), and its links, made last, so that no file is written through one.
+ * The folder laid out for the reader's first pass: an empty stand-in for each file it may name (searchedFile), every file fetched
+ * already with its text (`first`: the manifests, and what a linked manifest leads to), and its links, made last, so that no
+ * file is written through one.
  */
 async function layOut(laid: Laid, first: Map<string, Buffer>) {
-  for (const [name, id] of laid.blobs) if (!laid.links.has(name) && (searchedFile(name) || MANIFESTS.includes(name))) await put(join(laid.folder, name), first.get(id) ?? '');
+  for (const [name, id] of laid.blobs) if (!laid.links.has(name) && (searchedFile(name) || first.has(id))) await put(join(laid.folder, name), first.get(id) ?? '');
   for (const name of laid.links) await mkdir(dirname(join(laid.folder, name)), { recursive: true }).then(() => symlink(first.get(laid.blobs.get(name)!)?.toString('utf8') ?? '', join(laid.folder, name))).catch(() => undefined);
   await mkdir(laid.folder, { recursive: true });
 }
@@ -192,8 +197,8 @@ async function chooseFiles(laid: Laid, first: Map<string, Buffer>): Promise<Map<
   if (files.length > MOST_FILES) return `${laid.want.plugin}: more than ${MOST_FILES} files to read.`;
   const chosen = new Map<string, string>();
   for (const file of files) {
-    const name = inTree(laid, first, file);
-    if (name && !MANIFESTS.includes(name)) chosen.set(name, laid.blobs.get(name)!);
+    const name = inTree(laid, first, file), id = name && laid.blobs.get(name);
+    if (id && !first.has(id)) chosen.set(name, id);
   }
   return chosen;
 }
@@ -249,6 +254,9 @@ async function fetchRepository(fetch: Fetch, stage: string, signal: AbortSignal)
     }
     // The manifests and the links first: they name the rest.
     const first = await blobs(laid.flatMap(one => [...one.blobs].filter(([name]) => one.links.has(name) || MANIFESTS.includes(name)).map(([, id]) => id)));
+    // A manifest that is a link: what it leads to as well, so that the files it names are chosen.
+    const led = laid.flatMap(one => MANIFESTS.filter(name => one.links.has(name)).map(name => one.blobs.get(inTree(one, first, name) ?? '')).filter(id => id && !first.has(id)) as string[]);
+    for (const [id, bytes] of await blobs(led)) first.set(id, bytes);
     const chosen = new Map<Laid, Map<string, string>>();
     for (const one of laid) {
       await layOut(one, first);
@@ -273,10 +281,11 @@ const put = async (path: string, bytes: Buffer | string) => { await mkdir(dirnam
 
 // ---------- The kept file ----------
 
-const isItem = (value: unknown) => { const item = record(value); return !!item && ['skill', 'agent', 'mcp'].includes(String(item.kind)) && [item.name, item.description, item.start].every(field => typeof field === 'string'); };
+const isItem = (value: unknown) => { const item = record(value); return !!item && ['skill', 'agent', 'mcp'].includes(item.kind as string) && [item.name, item.description, item.start].every(field => typeof field === 'string'); };
 const isPluginText = (value: unknown) => {
   const entry = record(value);
-  return !!entry && [entry.source, entry.marketName, entry.plugin, entry.readAt].every(field => typeof field === 'string') && Array.isArray(entry.items) && entry.items.every(isItem);
+  return !!entry && [entry.source, entry.marketName, entry.plugin, entry.readAt].every(field => typeof field === 'string') && !Number.isNaN(Date.parse(entry.readAt as string))
+    && Array.isArray(entry.items) && entry.items.every(isItem);
 };
 /** The kept file, by textKey. One damaged or of another format is thrown away (said in the log); an entry not of the kept shape is dropped. Either is read again. */
 async function load(file: string, log: (line: string) => void): Promise<Map<string, PluginText>> {
@@ -325,14 +334,15 @@ export interface PluginTextHost {
 export function pluginTextJob(host: PluginTextHost): PluginTextJob {
   const file = join(host.dataDir, 'plugin-text.json'), stage = join(host.dataDir, 'text-fetch'), clock = host.now ?? Date.now;
   let kept = new Map<string, PluginText>(), loaded = false;
-  /** The listing as last told, or asked for when a home opened: its catalogs as read (`read`), and once they are (`done`). A newer telling replaces it. */
-  let told: { listed: Listed; read: Promise<Listing>; done?: Listing } | undefined;
+  /** The listing as last told (`said`), or asked for when a home opened: its catalogs as read (`read`), and once they are (`done`). A newer telling replaces it. */
+  let told: { said: Listed; read: Promise<Listing>; done?: Listing } | undefined;
   let running: Promise<void> | undefined, again = false, cancel = new AbortController(), shown: PluginTextView = { read: 0, of: 0, elsewhere: 0, reading: false };
   /** Repositories that failed, by fetch key: when each may be tried again. */
   const waits = new Map<string, { tries: number; until: number }>();
-  const now = () => new Date(clock()).toISOString();
-  const telling = (listed: Listed) => {
-    const next: NonNullable<typeof told> = { listed, read: readListing(host.dataDir, listed) };
+  /** The time, as kept in `readAt`. */
+  const stamp = () => new Date(clock()).toISOString();
+  const telling = (said: Listed) => {
+    const next: NonNullable<typeof told> = { said, read: readListing(host.dataDir, said) };
     next.read.then(done => { next.done = done; }, () => undefined);
     return next;
   };
@@ -341,8 +351,8 @@ export function pluginTextJob(host: PluginTextHost): PluginTextJob {
     for (let asked = told; asked; asked = told) { const read = await asked.read; if (asked === told) return read; }
     return undefined;
   }
-  /** A listed marketplace whose catalog was not read last time now has a copy here (the Plugins page fetched it first). */
-  const catalogArrived = () => !!told?.done && told.listed.sources.some(source => !told!.done!.read.has(sourceKey(source)) && !isFolder(source) && existsSync(catalogFolder({ dataDir: host.dataDir }, source)));
+  /** A listed Git marketplace with no copy here at the last read now has one (the Plugins page fetched it first). */
+  const catalogArrived = () => !!told?.done?.absent.some(source => existsSync(catalogFolder({ dataDir: host.dataDir }, source)));
   /**
    * Writes the file whole when something was kept or dropped since it was last written (`dirty`): after each batch of AT_ONCE
    * finished fetches, and at the end of each run. Writes take turns; each writes what is kept at its turn, or nothing; one that
@@ -355,24 +365,25 @@ export function pluginTextJob(host: PluginTextHost): PluginTextJob {
     try { await writeDurably(file, JSON.stringify({ format: FORMAT, plugins: [...kept.values()] })); }
     catch (error) { dirty = true; host.log(`plugin text: not saved: ${error instanceof Error ? error.message : String(error)}`); }
   }));
-  const tell = (busy: boolean) => {
+  /** Pushes the count (view) to Settings. */
+  const show = (busy: boolean) => {
     const wanted = [...(told?.done?.wanted.values() ?? [])], read = wanted.filter(want => { const have = kept.get(want.key); return !!have && (!want.remote || have.from === want.from); });
     shown = { read: read.length, of: wanted.length, elsewhere: wanted.filter(want => want.remote).length, reading: busy };
     host.changed(shown);
   };
 
   /** Drops what is gone and puts in each plugin kept in its marketplace (both make the file `dirty`); gives the fetches outstanding. */
-  function settle(listed: Listing): Fetch[] {
+  function settle(now: Listing): Fetch[] {
     for (const [key, entry] of kept) {
       // A marketplace not in a listing read whole loses its plugins; one whose catalog was read loses those it no longer has. A failed read proves nothing.
       const market = sourceKey(entry.source);
-      if ((listed.complete && !listed.listed.has(market)) || (listed.read.has(market) && !listed.wanted.has(key))) { kept.delete(key); dirty = true; }
+      if ((now.complete && !now.markets.has(market)) || (now.read.has(market) && !now.wanted.has(key))) { kept.delete(key); dirty = true; }
     }
     const fetches = new Map<string, Fetch>();
-    for (const want of listed.wanted.values()) {
+    for (const want of now.wanted.values()) {
       const have = kept.get(want.key);
       if (want.items) {
-        if (have?.from !== undefined || JSON.stringify(have?.items) !== JSON.stringify(want.items)) { kept.set(want.key, { source: want.source, marketName: want.marketName, plugin: want.plugin, readAt: now(), items: want.items }); dirty = true; }
+        if (have?.from !== undefined || JSON.stringify(have?.items) !== JSON.stringify(want.items)) { kept.set(want.key, { source: want.source, marketName: want.marketName, plugin: want.plugin, readAt: stamp(), items: want.items }); dirty = true; }
         continue;
       }
       const key = fetchKey(want.remote!);
@@ -394,21 +405,21 @@ export function pluginTextJob(host: PluginTextHost): PluginTextJob {
       host.log(`plugin text: ${fetch.url} at ${fetch.at}: ${problems.join(' ')} Tried again in ${Math.round(wait / 60_000)} minutes.`);
     } else waits.delete(fetch.key);
     if ('problem' in got) return;
-    const listed = await listing();
-    if (signal.aborted || !listed) return;
+    const now = await listing();
+    if (signal.aborted || !now) return;
     for (const want of fetch.plugins) {
       const items = got.items.get(want.key);
-      if (items && listed.wanted.get(want.key)?.from === want.from) { kept.set(want.key, { source: want.source, marketName: want.marketName, plugin: want.plugin, from: want.from, commit: got.commit, readAt: now(), items }); dirty = true; }
+      if (items && now.wanted.get(want.key)?.from === want.from) { kept.set(want.key, { source: want.source, marketName: want.marketName, plugin: want.plugin, from: want.from, commit: got.commit, readAt: stamp(), items }); dirty = true; }
     }
-    tell(true);
+    show(true);
   }
 
   /** The outstanding fetches, AT_ONCE at a time, each begun only while one of its plugins is still wanted at the same `from`; saved after each AT_ONCE. */
   async function fetchEach(fetches: Fetch[], signal: AbortSignal) {
     let finished = 0;
     await eachLimited(fetches, AT_ONCE, async fetch => {
-      const listed = await listing();
-      if (signal.aborted || !fetch.plugins.some(want => listed?.wanted.get(want.key)?.from === want.from)) return;
+      const now = await listing();
+      if (signal.aborted || !fetch.plugins.some(want => now?.wanted.get(want.key)?.from === want.from)) return;
       await keep(fetch, await fetchRepository(fetch, stage, signal), signal);
       if (++finished % AT_ONCE === 0) await save();
     });
@@ -420,10 +431,10 @@ export function pluginTextJob(host: PluginTextHost): PluginTextJob {
       do {
         again = false;
         if (!told) { const asked = await host.listings(); if (signal.aborted || !asked) return; told ??= telling(asked); }
-        const listed = await listing();
-        if (!listed || signal.aborted) return;
-        const fetches = settle(listed);
-        tell(true);
+        const now = await listing();
+        if (!now || signal.aborted) return;
+        const fetches = settle(now);
+        show(true);
         if (host.on()) await fetchEach(fetches, signal);
         await save();
       } while (again && !signal.aborted);
@@ -441,25 +452,28 @@ export function pluginTextJob(host: PluginTextHost): PluginTextJob {
       return Math.max(stale, waits.get(fetchKey(want.remote!))?.until ?? 0);
     });
     const next = Math.min(...due);
-    if (host.on() && next < Infinity) later = setTimeout(start, Math.max(1000, next - clock())).unref();
+    // Never sooner than a second, nor later than a day (a date far ahead, from a clock set back, then counts no further).
+    if (host.on() && next < Infinity) later = setTimeout(start, Math.min(DAY_MS, Math.max(1000, next - clock()))).unref();
   }
   function start() {
     if (running) { again = true; return; }
     const signal = (cancel = new AbortController()).signal;
     running = run(signal).catch(error => host.log(`plugin text: stopped: ${error instanceof Error ? error.message : String(error)}`))
-      .finally(() => { running = undefined; tell(false); if (again) start(); else if (!signal.aborted) plan(); });
+      .finally(() => { running = undefined; show(false); if (again) start(); else if (!signal.aborted) plan(); });
   }
 
   return {
     restart() { told = undefined; if (running) { again = true; cancel.abort(); } else start(); },
-    listed(listed, fresh) {
-      if (fresh) waits.clear();
-      const same = told?.listed.complete === listed.complete && told.listed.sources.length === listed.sources.length && listed.sources.every(source => told!.listed.sources.some(other => sameSource(source, other)));
-      if (!fresh && same && !catalogArrived()) return;
-      told = telling(listed);
+    listed(next, fresh) {
+      // Refresh: every wait is due now; how often each repository failed is kept, so the next wait still doubles.
+      if (fresh) for (const wait of waits.values()) wait.until = 0;
+      const was = told?.said, same = was?.complete === next.complete && was.sources.length === next.sources.length && next.sources.every(source => was.sources.some(other => sameSource(source, other)));
+      // The same listing, already read, with no catalog arrived since: nothing new. Told while it is still being read, it is read again.
+      if (!fresh && same && told?.done && !catalogArrived()) return;
+      told = telling(next);
       start();
     },
-    stop() { again = false; cancel.abort(); clearTimeout(later); return (running ?? Promise.resolve()).then(() => saving); },
+    stop() { again = false; cancel.abort(); clearTimeout(later); return (running ?? Promise.resolve()).then(() => save()); },
     view: () => shown,
     texts: () => [...kept.values()],
   };

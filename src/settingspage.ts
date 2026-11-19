@@ -447,8 +447,8 @@ async function choosePluginText(on: boolean): Promise<void> {
 }
 /** The first download, estimated: about 0.1 MB a plugin kept outside its marketplace (measured 2026-11-19: 26 to 29 MB on the wire for 277). */
 const firstSize = (plugins: number) => { const mb = plugins * 0.1; return mb < 1 ? 'under 1 MB' : `about ${mb < 10 ? Math.round(mb) : Math.round(mb / 5) * 5} MB`; };
-const textHint = (view: PluginTextView | undefined) => `Central Knot reads the names, descriptions and first lines of the skills, agents and MCP servers in your marketplaces’ plugins and keeps them here. Nothing is installed or run.${
-  view?.elsewhere ? ` ${view.elsewhere === 1 ? 'The one kept outside its marketplace is' : `The ${view.elsewhere} kept outside their marketplace are`} downloaded the first time (${firstSize(view.elsewhere)}), then only what changed.` : ''}`;
+const textHint = (view: PluginTextView | undefined) => `Central Knot keeps the names, descriptions and first lines of skills, agents and MCP servers in your marketplaces’ plugins on this computer. Nothing is installed or run.${
+  view?.elsewhere ? ` ${view.elsewhere === 1 ? 'The one plugin outside its marketplace is' : `The ${view.elsewhere} outside their marketplace are`} downloaded once (${firstSize(view.elsewhere)}), then only changes, or daily if on a branch.` : ''}`;
 /** The count: while it reads, when it is done (and how many couldn't be read), and while it is off. */
 const textCoverage = (view: PluginTextView, on: boolean) => {
   const counted = `${view.read} of ${plural(view.of, 'plugin')}`, left = view.of - view.read;

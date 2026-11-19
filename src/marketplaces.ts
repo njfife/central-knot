@@ -421,14 +421,18 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const ownList = await readOwnList();
     for (const source of ownList ?? []) note(source, 'central-knot');
     // A source that could read as an option is never passed on to a tool or to Git.
-    for (const tool of tools.filter(candidate => takesPlugins(candidate))) for (const entry of await engine.registeredMarketplaces(ctx, tool)) if (!entry.source.startsWith('-')) note(entry.source, tool);
+    let unread = false;
+    for (const tool of tools.filter(candidate => takesPlugins(candidate))) {
+      const registered = await engine.registrations(ctx, tool);
+      unread ||= registered.unread;
+      for (const entry of registered.entries) if (!entry.source.startsWith('-')) note(entry.source, tool);
+    }
     // A marketplace a plugin waiting to be moved comes from stays listed (after the tools', so "Added in Codex" still shows), and
     // so does its copy, which the move reads (Remove is not offered for it: pluginspage.ts).
     const share = host.share?.();
     const parts = share ? await readPartsRecord(share.home) : 'absent', onRecord = typeof parts === 'object' ? parts.map(({ install }) => install) : [];
     for (const install of onRecord) if (!known.some(item => engine.sameSource(item.source, install.source))) note(install.source, 'central-knot');
-    const readable = await Promise.all(tools.filter(takesPlugins).map(tool => engine.recordReadable(ctx, tool)));
-    return { known, parts, onRecord, complete: !!ownList && parts !== 'unreadable' && readable.every(Boolean) };
+    return { known, parts, onRecord, complete: !!ownList && parts !== 'unreadable' && !unread };
   }
 
   /** The marketplaces listed in the open home, as the page lists them, for the plugin text (plugintext.ts): no CLI is run and nothing is fetched. */

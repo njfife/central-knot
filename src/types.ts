@@ -1072,7 +1072,8 @@ export interface SignIn { on: boolean; available: boolean; reason?: { key: SignI
 export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean; pluginText: boolean; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
 /**
  * How much of what the listed marketplaces' plugins hold is read (plugintext.ts): `read` of the `of` plugins that can be read have
- * their text; `elsewhere` of them are kept in other repositories (what the first reading downloads); `reading` while a run goes on.
+ * text read at the pin now listed (one whose pin moved and whose new read hasn't landed is not counted); `elsewhere` of them are
+ * kept in other repositories (what the first reading downloads); `reading` while a run goes on.
  */
 export interface PluginTextView { read: number; of: number; elsewhere: number; reading: boolean }
 /** One line of what automatic plugin updates did: when, which plugin of which marketplace, and the words. `warn`: it needs reading (a step failed, or has a note). */

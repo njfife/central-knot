@@ -104,8 +104,18 @@ function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; c
     const child = spawn(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
     const kill = () => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } };
     const stop = () => { stopped = true; kill(); };
-    // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said first is kept.
-    const take = (chunks: Buffer[]) => { let size = 0; return (chunk: Buffer) => { if ((size += chunk.length) > maxBytes) { cut = true; kill(); } else chunks.push(chunk); }; };
+    // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said up to maxBytes is kept.
+    const take = (chunks: Buffer[]) => {
+      let size = 0;
+      return (chunk: Buffer) => {
+        const room = maxBytes - size;
+        size += chunk.length;
+        if (chunk.length <= room) { chunks.push(chunk); return; }
+        if (room > 0) chunks.push(chunk.subarray(0, room));
+        cut = true;
+        kill();
+      };
+    };
     const end = (code: RunResult['code']) => {
       if (ended) return;
       ended = true;
@@ -119,7 +129,8 @@ function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; c
     child.stderr.on('data', take(err));
     child.on('error', error => end(errorCode(error) === 'ENOENT' ? 'missing' : 1));
     child.on('close', code => end(code ?? 1));
-    const timer = setTimeout(stop, options.timeoutMs);
+    // A timeout of zero (or less) is none, as it was for execFile.
+    const timer = options.timeoutMs > 0 ? setTimeout(stop, options.timeoutMs) : undefined;
     if (options.signal?.aborted) stop(); else options.signal?.addEventListener('abort', stop, { once: true });
     // A command that ends without reading all its input (stopped, say) is no error here.
     child.stdin.on('error', () => undefined);
@@ -376,11 +387,16 @@ const configRootOf = (context: PluginContext, tool: HarnessId) => configRoot(har
 async function readJson(path: string): Promise<Record<string, unknown> | undefined> {
   try { return parseObject(withoutBom(await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); } catch { return undefined; }
 }
-const recordJson = (context: PluginContext, path: string) => once(context, `json:${path}`, () => readJson(path));
-type CodexTables = Record<'marketplaces' | 'plugins', Record<string, Record<string, TomlValue>>> & { skills: CodexSkillSwitch[]; skillsInline: boolean };
+/** A JSON file's object, read once per context; `unread` when the file is there and doesn't read as one (a missing file is read, and holds none). */
+const jsonFile = (context: PluginContext, path: string) => once(context, `json:${path}`, async () => {
+  try { const value = parseObject(withoutBom(await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); return { value, unread: !value }; }
+  catch (error) { return { value: undefined, unread: errorCode(error) !== 'ENOENT' }; }
+});
+const recordJson = async (context: PluginContext, path: string) => (await jsonFile(context, path)).value;
+type CodexTables = Record<'marketplaces' | 'plugins', Record<string, Record<string, TomlValue>>> & { skills: CodexSkillSwitch[]; skillsInline: boolean; /** config.toml is there and couldn't be read. */ unread: boolean };
 /** Codex's `[marketplaces.NAME]` and `[plugins."ID"]` tables from its config.toml, by name, and its skill switches. Empty when it can't be read. */
 const codexTables = (context: PluginContext, root: string) => once(context, `codex:${root}`, async (): Promise<CodexTables> => {
-  const found: CodexTables = { marketplaces: Object.create(null), plugins: Object.create(null), skills: [], skillsInline: false };
+  const found: CodexTables = { marketplaces: Object.create(null), plugins: Object.create(null), skills: [], skillsInline: false, unread: false };
   try {
     const tables = readTomlTables(await readFile(join(root, 'config.toml'), 'utf8'));
     for (const table of tables) {
@@ -388,7 +404,7 @@ const codexTables = (context: PluginContext, root: string) => once(context, `cod
       if ((kind === 'marketplaces' || kind === 'plugins') && name && !deeper.length && !table.array) found[kind][name] = Object.fromEntries(table.entries.map(entry => [entry.key, entry.value]));
     }
     ({ switches: found.skills, inline: found.skillsInline } = codexSkillSwitches(tables));
-  } catch { /* missing, or not TOML this reader can follow: nothing registered */ }
+  } catch (error) { found.unread = errorCode(error) !== 'ENOENT'; /* missing, or not TOML this reader can follow: nothing registered */ }
   return found;
 });
 
@@ -398,21 +414,23 @@ const codexTables = (context: PluginContext, root: string) => once(context, `cod
  * settings.json; Codex keeps `[marketplaces.NAME]` tables in config.toml.
  */
 export async function registeredMarketplaces(context: PluginContext, tool: PluginTool): Promise<{ name: string; source: string }[]> {
+  return (await registrations(context, tool)).entries;
+}
+/** A tool's marketplaces as registeredMarketplaces reads them, and whether a file they are read from is there and couldn't be read: one read for both. */
+export async function registrations(context: PluginContext, tool: PluginTool): Promise<{ entries: { name: string; source: string }[]; unread: boolean }> {
   const root = configRootOf(context, tool);
-  switch (tool) {
-    case 'codex-cli': return Object.entries((await codexTables(context, root)).marketplaces).map(([name, entry]) => ({ name, source: text(entry.source) })).filter(entry => entry.source);
-    case 'claude-cli': case 'copilot-cli': {
-      const lists = [record((await recordJson(context, join(root, 'settings.json')))?.extraKnownMarketplaces)];
-      if (tool === 'claude-cli') lists.unshift(await recordJson(context, join(root, 'plugins/known_marketplaces.json')));
-      const found = new Map<string, string>();
-      for (const [name, entry] of lists.flatMap(list => Object.entries(list ?? {}))) {
-        const source = record(record(entry)?.source);
-        const where = text(source?.url) || text(source?.path) || text(source?.repo);
-        if (where && !found.has(name)) found.set(name, where);
-      }
-      return [...found].map(([name, source]) => ({ name, source }));
-    }
+  if (tool === 'codex-cli') {
+    const tables = await codexTables(context, root);
+    return { entries: Object.entries(tables.marketplaces).map(([name, entry]) => ({ name, source: text(entry.source) })).filter(entry => entry.source), unread: tables.unread };
   }
+  const known = tool === 'claude-cli' ? await jsonFile(context, join(root, 'plugins/known_marketplaces.json')) : undefined, settings = await jsonFile(context, join(root, 'settings.json'));
+  const found = new Map<string, string>();
+  for (const [name, entry] of [known?.value, record(settings.value?.extraKnownMarketplaces)].flatMap(list => Object.entries(list ?? {}))) {
+    const source = record(record(entry)?.source);
+    const where = text(source?.url) || text(source?.path) || text(source?.repo);
+    if (where && !found.has(name)) found.set(name, where);
+  }
+  return { entries: [...found].map(([name, source]) => ({ name, source })), unread: settings.unread || !!known?.unread };
 }
 
 const hasFiles = async (path: string) => { try { return (await readdir(path)).length > 0; } catch { return false; } };
