@@ -240,7 +240,72 @@ if (wanted('library')) {
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
   await shot(a, 'docked-1728', 'Opened notes on All at 1728×1080: its details docked beside the list, the list’s kind marks and tool columns beside it.');
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
+  // Made-up homes, each opened as a folder: his counts, then the empty states and a kind not all read.
+  const settings = join(scratch, 'data/app-settings.json'), toolsOf = folder => { for (const name of ['.claude', '.claude.json', '.codex', '.copilot']) cpSync(join(root, 'fixtures/home', name), join(folder, name), { recursive: true }); };
+  const openFolder = async folder => { a.quit(); await wait(500); writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: folder } })); a = await launch(); };
+  const md = (name, kind) => `---\nname: ${name}\ndescription: The ${name} ${kind}, one of many.\n---\n\nBody.\n`;
+  const put = (path, text) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, text); };
+  // About 150 skills, 9 servers and 47 agents (his counts), a skill and an agent named review, a plugin, and copies that differ.
+  const big = join(scratch, 'library-big');
+  toolsOf(big);
+  for (let n = 1; n <= 146; n++) put(join(big, `.claude/skills/skill-${String(n).padStart(3, '0')}/SKILL.md`), md(`skill-${String(n).padStart(3, '0')}`, 'skill'));
+  for (let n = 1; n <= 44; n++) put(join(big, `.claude/agents/agent-${String(n).padStart(2, '0')}.md`), md(`agent-${String(n).padStart(2, '0')}`, 'agent'));
+  put(join(big, '.claude/agents/review.md'), md('review', 'agent'));
+  const settingsFile = JSON.parse(readFileSync(join(big, '.claude.json'), 'utf8'));
+  for (let n = 1; n <= 8; n++) settingsFile.mcpServers[`server-${n}`] = { type: 'http', url: `https://server-${n}.example.test/mcp` };
+  writeFileSync(join(big, '.claude.json'), JSON.stringify(settingsFile, null, 2));
+  writeClaudeInstall(big, 'ck-test-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': md('triage', 'skill') });
+  await openFolder(big);
+  await a.click('#nav-overview');
+  if (await a.has('#setup-yes')) { await a.click('#setup-yes'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); }
+  // Ten skills and three agents taken in 40 days ago, and Claude Code's sessions, so the No use seen chip has something to hold.
+  a.quit(); await wait(500);
+  const past = new Date(Date.now() - 40 * DAY).toISOString();
+  for (const [kind, keys] of [['skills', Array.from({ length: 10 }, (_, n) => `skill-${String(n + 1).padStart(3, '0')}`)], ['agents', ['agent-01', 'agent-02', 'agent-03']]]) {
+    const file = join(big, `.central-knot/${kind}.json`), kept = JSON.parse(readFileSync(file, 'utf8'));
+    for (const key of keys) if (kept.items[key]) kept.items[key].versions = kept.items[key].versions.map(version => ({ ...version, at: past }));
+    writeFileSync(file, JSON.stringify(kept, null, 2));
+  }
+  put(join(big, '.claude/projects/-work/s1.jsonl'), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'notes' } }] }, timestamp: new Date(Date.now() - DAY).toISOString() })}\n`);
+  await openFolder(big);
+  await openKind(a, 'all');
+  await a.size(1316, 822);
+  await waitFor(a, `!!document.querySelector('#chip-unused')`, 20000);
+  for (const theme of ['dark', 'light']) { await a.theme(theme); await shot(a, `his-counts-1316-${theme}`, `His counts at 1316×822 (${theme}): about 150 skills, 9 servers and 47 agents on All, the three chips offered (Copies differ, From plugins, No use seen), the usage button keeping "Update usage".`); }
+  await a.theme('dark');
+  await a.click('#chip-unused');
+  await shot(a, 'his-counts-chip-on-1316', 'No use seen on at 1316×822: the chip that is on keeps its word, the kind switch counts what it leaves.');
+  await a.click('#chip-unused');
+  await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'agents', 'review')}"]')?.scrollIntoView({ block: 'center' })`);
+  await shot(a, 'his-counts-same-name-1316', 'The skill review and the agent review on All at 1316×822: each says its kind beside its name.');
+  // One skill and nothing else: a segment with none of its kind, and Find leaving nothing.
+  const one = join(scratch, 'library-one');
+  put(join(one, '.claude/skills/solo/SKILL.md'), md('solo', 'skill'));
+  await openFolder(one);
   await a.size(1280, 800);
+  await openKind(a, 'mcp');
+  await shot(a, 'empty-of-kind', 'A home with one skill, MCP servers chosen: its own empty state, "No MCP servers here yet", under the kind switch.');
+  await openKind(a, 'all');
+  await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'zzz'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await shot(a, 'empty-find', 'Find "zzz" on All: "Nothing matches".');
+  await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  // Its MCP record damaged: "?" on MCP servers and All, the stop led by its kind on All and said alone on its own segment.
+  put(join(one, '.central-knot/mcp.json'), '{');
+  await a.click('#header-refresh');
+  await shot(a, 'not-all-read-all', 'The MCP record damaged: "?" after MCP servers’ and All’s counts, the stop led by its kind above the list.');
+  await openKind(a, 'mcp');
+  await shot(a, 'not-all-read-own-segment', 'MCP servers chosen with its record damaged: its stop above, and "No MCP servers read here".');
+  // Nothing of any kind, then with its MCP record damaged too.
+  const none = join(scratch, 'library-none');
+  mkdirSync(join(none, '.claude'), { recursive: true });
+  await openFolder(none);
+  await openKind(a, 'all');
+  await shot(a, 'empty-nothing', 'A home whose tools hold nothing: "Nothing in the Library yet".');
+  put(join(none, '.central-knot/mcp.json'), '{');
+  await a.click('#header-refresh');
+  await shot(a, 'empty-nothing-not-read', 'The same home with its MCP record damaged: the stop above the empty words, which name MCP servers.');
+  await a.size(1280, 800);
+  await fresh();
 }
 
 // ---------- Skills ----------

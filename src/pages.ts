@@ -135,11 +135,11 @@ export function libraryPage() {
   if (!home) return notRead();
   const kinds = heldKinds(home);
   const none = (kind: PageKind) => emptyWithActions(kindEmpty(kind), `${kind}-empty`);
+  // A Files view whose skill is gone (the last one deleted, say) is left here, not as a move: places.ts available asks the same.
+  if (state.libraryView === 'files' && !filesSkillAvailable(home, state.item)) Object.assign(state, { libraryView: 'list', item: undefined });
   if (noToolManaged()) return nothingHere(libraryEmpty(kinds), 'library-empty');
   // Nothing of any kind: the empty words under the Library's bands (a kind's stop, its problems, Resume).
   if (!kinds.some(kind => rowCount(home, kind))) return emptyList(emptyWithActions(libraryEmpty(kinds), 'library-empty'));
-  // A Files view whose skill is gone (the last one deleted, say) is left here, not as a move: places.ts available asks the same.
-  if (state.libraryView === 'files' && !filesSkillAvailable(home, state.item)) Object.assign(state, { libraryView: 'list', item: undefined });
   if (state.libraryView !== 'files') return libraryTable(none);
   return skillsBrowser(key => {
     if (!home) return { where: [], contents: [] };

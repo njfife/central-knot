@@ -6985,8 +6985,13 @@ async function libraryFlow() {
   const find = (a, text) => a.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const pressed = a => a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id.replace('library-kind-', '') ?? null`);
   const opened = a => a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key');
-  /** Pictures (with --shots) at 860×600 and 1280×800, then back to the full size. */
-  const pictures = async (a, name) => { if (!shots) return; for (const [width, height] of [[860, 600], [1280, 800]]) { await sizeTo(a, width, height); await a.shot(`library-${name}-${width}`); } await fullSize(a); };
+  /** Pictures (with --shots) at 860×600 and 1280×800, light and dark, then back to the full size and light. */
+  const theme = (a, value) => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const pictures = async (a, name) => {
+    if (!shots) return;
+    for (const [width, height] of [[860, 600], [1280, 800]]) for (const look of ['light', 'dark']) { await sizeTo(a, width, height); await theme(a, look); await a.shot(`library-${name}-${width}${look === 'dark' ? '-dark' : ''}`); }
+    await theme(a, 'light'); await fullSize(a);
+  };
 
   // ---------- One home of every kind ----------
   const A = homeWith('library-home'), market = join(scratch, 'market-library');
@@ -7072,7 +7077,8 @@ async function libraryFlow() {
   if (main) { check('the skill’s write lands first', await until(() => !existsSync(join(A.claude, 'review')))); same('once the first write has landed, the three rows are where they were', await tops(), was); }
   await a.run(`document.getElementById('library-kind-skills').click()`);
   await done(a);
-  if (main) await main.restore('agents:apply');
+  // Its debugger let go too: a main process with one still attached doesn't quit.
+  if (main) { await main.restore('agents:apply'); main.close(); }
   same('three rows clicked in a row keep their places, and the segment changed mid-run makes no second run: one result, three counted, each review with its kind',
     [now, await pressed(a), await a.text('#header [data-outcome] .band-text')], [was, 'skills', '3 items are off: review (skill), review (agent) and docs.']);
   await a.click('#library-kind-all');
@@ -7196,6 +7202,9 @@ async function libraryFlow() {
   same('the walkthrough opens the skill review’s row on the Library, Find let go since it hid the row',
     [await b.text('.page-title'), await b.run(`document.querySelector('#find').value`), await b.text('#walkthrough .walk-place'), await opened(b)], ['Library', '', ' · 1 of 2', [rowPart('', 'skills', 'review')]]);
   check('the notice of what Yes took in reaches the Library', await until(() => b.exists('.sync-notice')), await b.text('.bands'));
+  same('the walkthrough asks of the skill review by its kind, its opened row doesn’t ask again, and the notice keeps to a line while it asks',
+    [await b.text('#walkthrough .compare-title'), await b.exists(`${row('skills', 'review')} + .details .compare-choices`), await b.exists('.sync-notices.notices-folded')],
+    ['Which copy of the skill review should both tools use?', false, true]);
   await pictures(b, 'walkthrough-1-of-2');
   // At 860×600, the walkthrough's band and the long notice of what Yes took in both end above the status bar.
   await sizeTo(b, 860, 600);

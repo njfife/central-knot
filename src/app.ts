@@ -868,14 +868,14 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
   return Promise.resolve();
 }
 
-/** When the open page's kind is no longer in this home (its last tool went), the Overview opens instead. */
+/** When the open page's kind is no longer in this home (its last tool went; the Library's, every kind it lists), the Overview opens instead. */
 function leaveAbsentPage() {
-  const gone = absentKinds().find(kind => kind === state.page);
-  if (!gone) return;
+  const gone = state.page === 'library' ? (KINDS.every(kind => absentKinds().includes(kind)) ? KINDS : []) : absentKinds().filter(kind => kind === state.page);
+  if (!gone.length) return;
   // What the status bar said (a Refresh's summary, say) stays, with the reason the page moved.
   const said = state.said.text;
   showPage('overview', { repair: true });
-  announce(`${said ? `${said} ` : ''}No tool here holds ${kindNames[gone]} now.`);
+  announce(`${said ? `${said} ` : ''}No tool here holds ${andList(gone.map(kind => kindNames[kind]))} now.`);
 }
 
 /** The tools Central Knot manages in the open home, as the main process decided them from the same read (presence.ts): every page but Harnesses names only these. */
