@@ -522,7 +522,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .unmanaged .ov-name-text { font-weight: 400; }
 /* A description shortens beside its name, whole in its tooltip; a table whose narrowest row has room for only a few
    characters leaves every description out (matrix.ts settleDescriptions), so rows never differ. A name shortens for it only
-   when it takes more than half its row (.name-cut, below). */
+   when it takes more than half its name cell (.name-cut, below). */
 .ov-name-about { flex: 1 1 0; min-width: 0; color: var(--ink-soft); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .no-about .ov-name-about { display: none; }
 .row-tag ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
@@ -534,7 +534,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name-fit { flex-wrap: wrap; align-content: flex-start; height: 40px; padding-left: 36px; position: relative; }
 .ov-name-fit .row-open { position: absolute; left: 10px; margin: 0; top: 11px; }
 .ov-name-main { flex: 0 1 auto; min-width: 0; height: 40px; display: flex; align-items: center; gap: 8px; }
-/* A name longer than half its row is cut there, before every row's description steps aside (matrix.ts settleDescriptions). */
+/* While descriptions show, a name longer than half its name cell is cut there, so one long name doesn't take every
+   description away (matrix.ts settleDescriptions, which takes the cut off again once every description is left out). */
 .ov-name-fit.name-cut > .ov-name-main { max-width: 50%; }
 .ov-name-fit > .row-tag, .ov-name-fit > .ov-name-about { line-height: 40px; }
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
@@ -590,9 +591,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 /* Wide content (renderer.ts state.wide): the open row's details dock beside the table, which keeps the rest of the width. */
 .ov-page.docked { display: grid; grid-template-columns: minmax(0, 1fr) clamp(400px, 30cqw, 560px); grid-template-rows: minmax(0, 1fr); }
-/* An item's dock holds its versions, one line each: it takes half the width, the table the rest, so a row's line (an MCP
-   server's command or URL beside its name and tag) is shortened only when even that has no room for it. */
-.ov-page.docked.dock-wide { grid-template-columns: minmax(0, 1fr) clamp(440px, 50cqw, 1200px); }
+/* An item's dock holds its versions, one line each while Versions is 520px wide or more (narrower, a version's source goes
+   under its time: .versions). It takes half the width and the table the rest, so a row's line (an MCP server's command or URL
+   beside its name and tag) is shortened only when even that has no room for it; where half would leave the table less than
+   --list-keeps, the dock narrows instead, down to 400px. The table keeps 700px, and 800px sorted by Last updated (one more
+   column, .ov-dated): scripts/e2e.mjs dockedListFlow finds a 30-letter name whole there beside five tools' marks and the Used
+   column, under a toolbar on two lines, in every Sort at 1200 and 1260px of content. */
+.ov-page.docked.dock-wide { --list-keeps: 700px; grid-template-columns: minmax(0, 1fr) clamp(400px, min(50cqw, 100cqw - var(--list-keeps)), 1200px); }
+.ov-page.docked.dock-wide:has(.ov-dated) { --list-keeps: 800px; }
 .dock-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .dock { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--surface); }
 .dock-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 61px; padding: 12px 16px; border-bottom: 1px solid var(--line); }

@@ -4206,6 +4206,71 @@ async function pluginRowsFitFlow() {
 }
 
 /**
+ * A list beside an opened row (docked from 1200 px of content: renderer.ts DOCK_FROM) shows each name whole and its toolbar on
+ * two lines at most, from the owner's own window as a rail (1260 px of content) up: on the Library in each Sort, and on a tool's
+ * tab. Names as long as his (30 letters), five tools' marks, the Used column and two toolbar chips leave a row as little room as his.
+ */
+async function dockedListFlow() {
+  const home = join(scratch, 'home-docked'), claude = join(home, '.claude/skills');
+  // His names, eleven of them for two-figure counts on the kind switch, as his are.
+  const names = ['finishing-a-development-branch', 'verification-before-completion', 'subagent-driven-development', 'evaluate-dilutive-filings', 'dispatching-parallel-agents',
+    'test-driven-development', 'using-git-worktrees', 'brainstorming', 'diagnosing-bugs', 'diagnosing-superpowers', 'research'];
+  for (const name of names) skill(claude, name);
+  toolClis(home);
+  for (const name of ['pi', 'opencode']) { writeFileSync(join(home, '.local/bin', name), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.0.0" && exit 0\nexit 9\n'); chmodSync(join(home, '.local/bin', name), 0o755); }
+  // The toolbar's chips: copies that differ, and a plugin's items. Claude Code keeps sessions, so the Used column is drawn.
+  skill(claude, 'clash', text('clash', 'One way.'));
+  skill(join(home, '.copilot/skills'), 'clash', text('clash', 'Another way.'));
+  writeClaudeInstall(home, 'local-market', 'kit', '1.0.0', { 'skills/zulu/SKILL.md': text('zulu') });
+  mkdirSync(join(home, '.claude/projects/-work'), { recursive: true });
+  writeFileSync(join(home, '.claude/projects/-work/s1.jsonl'), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'research' } }] }, timestamp: new Date().toISOString() })}\n`);
+  const a = await launch(join(scratch, 'docked-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  for (let tries = 0; tries < 100 && !(await a.exists('#walk-skip')); tries++) await wait(100);
+  await a.click('#walk-skip');
+  const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
+  // The docked list's content width, its toolbar's lines (its parts' middles a line apart), how many of the names it shows and
+  // which of them are cut, and how many of the kind switch's words show whole.
+  const dockedList = () => a.run(`(() => {
+    const bar = document.querySelector('.dock-main .toolbar');
+    if (!bar) return 'not docked';
+    const middles = [...bar.children].filter(part => part.offsetWidth).map(part => { const box = part.getBoundingClientRect(); return (box.top + box.bottom) / 2; }).sort((x, y) => x - y);
+    const whole = text => text.offsetWidth && text.scrollWidth <= text.clientWidth;
+    const shown = [...document.querySelectorAll('.dock-main .ov-row[data-key] .ov-name-text')].filter(text => ${JSON.stringify(names)}.includes(text.textContent));
+    return { content: document.getElementById('main').clientWidth, toolbarLines: middles.filter((middle, index) => !index || middle - middles[index - 1] > 8).length,
+      names: shown.length, namesCut: shown.filter(text => !whole(text)).map(text => text.textContent), kindWords: [...document.querySelectorAll('.dock-main .kind-seg-label')].filter(whole).length };
+  })()`);
+  const fits = async (where, content, kindWords) => {
+    const [width, height, sidebar] = { 1200: [1256, 787, false], 1260: [1316, 787, false], 1520: [1728, 980, true], 1672: [1728, 980, false], 2560: [2616, 1408, false] }[content];
+    await sizeTo(a, width, height); await sidebarOpen(sidebar);
+    const list = await dockedList();
+    check(`on ${where} at ${content} px of content with a row docked, the ${names.length} names show whole and the toolbar is on two lines at most${kindWords ? ', the kind switch’s four words whole' : ''}`,
+      list.content === content && list.names === names.length && !list.namesCut.length && list.toolbarLines <= 2 && list.kindWords === kindWords, list);
+  };
+  for (const selector of ['#nav-library', '#library-kind-all', `#${rowPart('open', 'skills', 'research')}`]) await a.click(selector);
+  // Each Sort the menu offers, from the dock's narrowest (1200 px of content): Last updated adds a column (style.css .ov-dated).
+  for (const [order, label, widths] of [['name', 'Name', [1200, 1260, 1520, 1672, 2560]], ['updated', 'Last updated', [1200, 1260, 1520]], ['used', 'Last used', [1200, 1260]]]) {
+    await a.run(`(() => { const sort = document.querySelector('#item-order'); sort.value = '${order}'; sort.dispatchEvent(new Event('change')); })()`);
+    await a.settle();
+    for (const content of widths) await fits(`the Library by ${label}`, content, 4);
+  }
+  for (const selector of ['#nav-harnesses', '#harness-claude-cli', '#harness-tab-skills', `#${rowPart('open', 'skills', 'research')}`]) await a.click(selector);
+  await fits('Claude Code’s Skills tab', 1260, 0);
+  // Across the dock's breakpoint (the sidebar opened at 1316: 1108 px of content), the opened row stays open where it was in its table.
+  await a.run(`document.querySelector('.ov-row.open').scrollIntoView({ block: 'center' })`);
+  const place = () => a.run(`(() => { const row = document.querySelector('.ov-row.open'), table = row?.closest('.scroll');
+    return row ? [document.querySelector('.dock-main') ? 'docked' : 'under its row', table.scrollTop, Math.round(row.getBoundingClientRect().top - table.getBoundingClientRect().top)] : 'no row open'; })()`);
+  const [, top, offset] = await place();
+  await sidebarOpen(true);
+  const under = await place();
+  await sidebarOpen(false);
+  same('across the dock’s breakpoint and back, the opened row stays open, where it was in its table', [under, await place()], [['under its row', top, offset], ['docked', top, offset]]);
+  same('no page errors, the docked list', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
  * Marketplaces offered without being looked for: each plugin tool's own default, where that tool is here. Nothing is
  * fetched to offer one, so this flow never reaches the network (it never clicks Add).
  */
@@ -7673,7 +7738,7 @@ async function libraryFlow() {
 }
 
 const groups = [
-  [practiceFlow, suggestedFlow, pluginRowsFitFlow, realHomeFlow, libraryFlow],
+  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, pluginUpdatesFlow, pluginTextFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow],
   [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],

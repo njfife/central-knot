@@ -776,8 +776,8 @@ function fromSourceLine(skill: ItemRow, from: NonNullable<ItemRow['fromSource']>
 
 /**
  * An item's name cell. The name gives way last: as the column narrows, the description shortens (and in every row at
- * once steps aside, settleDescriptions, after any name longer than half its row is cut), a tag after the name wraps out
- * of sight, and only then does the name shorten (style.css .ov-name-fit). Its full text is always in the tooltip. Nothing in it is a control: the row's switch and chevron
+ * once steps aside, settleDescriptions: a name longer than half its cell is cut only while descriptions show), a tag after
+ * the name wraps out of sight, and only then does the name shorten (style.css .ov-name-fit). Its full text is always in the tooltip. Nothing in it is a control: the row's switch and chevron
  * are its only ones, so Copies differ is said here, not clicked.
  */
 function nameCell(t: Table, skill: ItemRow, attention: boolean) {
@@ -2094,7 +2094,8 @@ const ABOUT_MIN = 90;
  * A table's descriptions are all shown or all left out, so rows never differ: when the narrowest one has room for fewer
  * than about twelve characters, every row leaves its description out (.no-about); its name's tooltip still has it.
  * A description pushed onto the cell's hidden second line, after a tag or pill that took the room, has none. A name that
- * takes more than half its row is cut first (.name-cut), so one long name doesn't take every description away.
+ * takes more than half its name cell is cut first (.name-cut), so one long name doesn't take every description away; once
+ * every description is left out, the cut is taken off again and the name has its whole cell.
  * Run after layout (dom.ts afterLayout).
  */
 function settleDescriptions(): void {
@@ -2107,6 +2108,7 @@ function settleDescriptions(): void {
       if (cell.querySelector<HTMLElement>('.ov-name-main')!.offsetWidth > cell.clientWidth / 2) cell.classList.add('name-cut');
     }
     table.classList.toggle('no-about', abouts.some(short));
+    if (table.classList.contains('no-about')) for (const cut of table.querySelectorAll('.name-cut')) cut.classList.remove('name-cut');
   }
 }
 afterLayout(settleDescriptions);
