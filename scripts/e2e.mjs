@@ -5968,8 +5968,11 @@ esac
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
   await pictures('plugin-switch-list');
   // Sync once from the menu bar with the switch's result up: its own result takes the header, as on the item lists, and × lets it
-  // go. The menu reaches the page through the main process, which only a development run opens to the checks.
+  // go. The menu offers it only while Automatic sync is off (main.ts), so it is turned off first, as a person would have it, and
+  // back on after. The menu reaches the page through the main process, which only a development run opens to the checks.
   if (a.inspect) {
+    await a.click('#sync-switch');
+    same('Automatic sync is off, so the menu offers Sync once', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
     const menu = await mainHelpers(a.inspect);
     try { await menu.tellPage('sync:request'); } finally { menu.close(); }
     for (let tries = 0; tries < 50 && !(await a.exists('#header [data-outcome]')); tries++) await wait(100);
@@ -5978,6 +5981,8 @@ esac
       !!(await a.text('#header [data-outcome] .band-text')) && !(await a.exists('#plugins-result')), await a.text('#header'));
     if (shots) { await sizeTo(a, 1316, 819); await a.shot('plugins-sync-once-1316'); await fullSize(a); }
     await a.click('#outcome-dismiss');
+    await a.click('#sync-switch');
+    same('Automatic sync on again', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
   } else console.log('No main-process inspector: skipping Sync once from the menu on Plugin marketplaces.');
   // The first link to one of its items, before Skills was ever drawn, opens Skills with that row open.
   await a.click('#popen-0-issue-tracker');

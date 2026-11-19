@@ -491,7 +491,7 @@ const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, h
 /** Each kind's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, listNotices). */
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
 /**
- * What a new result (a click's, a run's, an Undo's, a Library action's) keeps for the kinds' problem lines: `own`, its own
+ * What a new result (a click's, a run's, an Undo's, a Library action's, Sync once's) keeps for the kinds' problem lines: `own`, its own
  * results by kind, and nothing older of any kind, so the header says this result's alone. A kind keeps its notices (matrix.ts
  * toldNotices) unless `own` brings that kind's anew.
  */
@@ -701,8 +701,9 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   // A kind is named where a row of another kind in the run has the same name.
   const named = (turn: ItemTurn): NamedRow => ({ kind: turn.row.kind, key: turn.row.key, name: turn.name }), among = turns.map(named);
   const through = rows.filter(turn => !left.some(other => sameRow(other.row, turn.row))), byState = (list: ItemTurn[]) => [false, true].map(on => list.filter(turn => (turn.isOn() ?? turn.row.on) === on));
-  // What stayed after the rows that went Off, as the view after them has it: the tools still reading them another way.
-  const stayed = [...groupBy(byState(through)[0]!, turn => turn.row.kind)].flatMap(([kind, list]) => stillReadWords(list.flatMap(turn => {
+  // What stayed of every row the run left Off (gone through or not; a row waiting for a choice is neither), as the view after it
+  // has it: the tools still reading them another way.
+  const stayed = [...groupBy(byState(once(each).filter(turn => !waits(turn)))[0]!, turn => turn.row.kind)].flatMap(([kind, list]) => stillReadWords(list.flatMap(turn => {
     const row = rowByKey(kind, turn.row.key);
     return row ? [{ name: rowNames([named(turn)], among)[0]!, row }] : [];
   }), kindSource(state.home!, kind).tools));
@@ -1607,6 +1608,8 @@ export async function syncNow(home = state.home?.home) {
     const result = await api().syncNow(home).finally(() => { menuSyncHome = undefined; });
     if (!result) return;
     setHome(result.view);
+    // A new result: no click's reasons from before stay under it.
+    keepOwn([]);
     tell({ page, band: true, history: result.history, text: result.text, reasons: result.reasons, warn: result.warn });
   });
 }

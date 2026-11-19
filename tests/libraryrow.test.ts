@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyOn, kindSource } from '../src/itemrow.ts';
@@ -254,6 +254,22 @@ test('What a result says of Off skills tools still read another way, one click a
   assert.equal(sentences(libraryWords.skills).placeTag(linked('a', ['codex-cli', 'pi-cli'], ['pi-cli']).row, { ...newItem('a', 'a'), on: false }, five)?.text, 'in Central Knot and Codex');
   assert.deepEqual([copiesDiffer(['draft']), copiesDiffer(['draft (agent)', 'review'])],
     ['draft has differing copies. Choose which copy every tool uses.', 'draft (agent) and review have differing copies. Choose which copy every tool uses for each.']);
+  // Who still reads what, and what waits, is the point of these sentences: every name is said, never "and 2 more".
+  const names = ['a', 'b', 'c', 'd', 'e'];
+  assert.deepEqual([stillReadWords(names.map(key => linked(key, ['codex-cli', 'pi-cli'])), five), copiesDiffer(names)],
+    [['Codex and Pi still read a, b, c, d and e another way.'], 'a, b, c, d and e have differing copies. Choose which copy every tool uses for each.']);
+});
+
+test('An Off skill whose only copy left is one a tool has switched off in its own settings: the tool has it and doesn’t read it, and nothing says no tool has it', () => {
+  // notes is in Codex through a link into the shared folder, and Codex's own switch has it off: Codex doesn't load it.
+  const notes: LibraryRow = { key: 'notes', name: 'notes', hashes: {}, anotherWay: { 'codex-cli': 'Codex has it through a link in its skills folder (to ~/.agents/skills/notes), which is not Central Knot’s copy.' },
+    loads: { 'codex-cli': { folder: 'notes', name: 'notes', skillFile: '/home/me/.agents/skills/notes/SKILL.md', switchedOff: true } } };
+  const off = { ...newItem('notes', 'notes'), on: false }, skills = sentences(libraryWords.skills);
+  assert.deepEqual(skills.placeTag(notes, off, tools), { text: 'in Central Knot · switched off in Codex', title: 'Central Knot keeps this skill and its versions. Codex has a copy switched off in its own settings.' });
+  assert.equal(switchLabel(notes, off, tools), 'notes: off, in Central Knot · switched off in Codex. Click to put it in every tool.');
+  assert.deepEqual([stillReadWords([{ name: 'notes', row: notes }], tools), switchedOffWords(notes, tools)], [[], ['Codex has a copy switched off in its own settings.']]);
+  assert.equal(skills.said.off('notes', [], tools, [], [], switchedOffWords(notes, tools)),
+    'notes is off. Codex has a copy switched off in its own settings. Central Knot keeps it, and turning it on puts each folder back as it was.');
 });
 
 test('The switch of an Off item says where it is as its row does: a removal still owed first, then a copy that can’t be seen for sure', () => {
@@ -265,6 +281,9 @@ test('The switch of an Off item says where it is as its row does: a removal stil
   const unseen = row({ 'claude-cli': 'b' }, { unseen: twins }, item({ on: false, applied: { 'claude-cli': 'b' } }));
   assert.deepEqual([placeTag(unseen, item({ on: false, applied: { 'claude-cli': 'b' } }), tools)?.text, switchLabel(unseen, item({ on: false, applied: { 'claude-cli': 'b' } }), tools)],
     ['still in Claude Code', 'reviewer: off, still in Claude Code. Click to put it in every tool.']);
+  // The opened row's status line says the same place.
+  assert.deepEqual([statusLine(owed, off, tools), statusLine(unseen, item({ on: false, applied: { 'claude-cli': 'b' } }), tools)].map(line => line.split('. ')[0]),
+    ['Off · still in Codex until sync runs', 'Off · still in Claude Code']);
 });
 
 test('A click’s result says what happened, and never claims a harness where it didn’t', () => {
