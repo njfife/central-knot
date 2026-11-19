@@ -17,6 +17,7 @@ import { rowClicks, harnessIs, placeOf, libraryWords, sentences } from '../src/l
 import { librarySentence } from '../src/historyactions.ts';
 import { listed, originWords } from '../src/library.ts';
 import { readHistory } from '../src/history.ts';
+import { setSyncEverything } from '../src/everything.ts';
 import { homePass, passTells } from '../src/homepass.ts';
 import { forgetMissing } from '../src/librarypass.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
@@ -1060,6 +1061,77 @@ inBox('Found copies that differ: the switch asks; the chosen copy is taken in, a
   // made current has its own Undo.
   assert.equal((await historyOf(box)).find(event => event.kind === 'chosen')!.undoneBy, undefined);
   assert.deepEqual((await historyActions(box)).map(action => `${action.event.kind}: ${action.label}`), ['current: Undo']);
+});
+
+/** Claude Code with the plugin review-kit (from the marketplace team) installed, which brings an agent “reviewer” written as `text`. */
+async function claudePluginWith(box: Box, text: string) {
+  const copy = join(box.home, '.claude/plugins/cache/team/review-kit/1.0.0');
+  await mkdir(join(copy, '.claude-plugin'), { recursive: true });
+  await mkdir(join(copy, 'agents'), { recursive: true });
+  await writeFile(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'review-kit', version: '1.0.0' }));
+  await writeFile(join(copy, 'agents/reviewer.md'), text);
+  await writeFile(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'review-kit@team': [{ scope: 'user', installPath: copy, version: '1.0.0' }] } }));
+}
+
+inBox('A found agent taken in by Synchronize everything where Claude Code has the same agent through a plugin: no file of it goes in Claude Code’s agents folder, and its row says Claude Code has it through the plugin', async box => {
+  await write(box, 'copilot-cli', claudeAgent());
+  await claudePluginWith(box, claudeAgent());
+  await setSyncEverything(box.context, true);
+  await pass(box);
+  assert.deepEqual([placeOf(await itemOf(box)), await readOf(box, 'claude-cli'), await readOf(box, 'codex-cli') !== undefined], ['on', undefined, true]);
+  assert.deepEqual((await seen(box)).fact?.plugin, { 'claude-cli': { plugin: 'review-kit', marketplace: 'team', version: '1.0.0', name: 'reviewer' } });
+  assert.equal((await pass(box)).writes, 0);
+});
+
+inBox('A found agent taken in by Synchronize everything where Claude Code’s plugin brings another agent of that name: Claude Code gets the agent’s file beside the plugin’s, as a tool without it does', async box => {
+  await write(box, 'copilot-cli', claudeAgent());
+  await claudePluginWith(box, claudeAgent('You review code.\nBe thorough.\n'));
+  await setSyncEverything(box.context, true);
+  await pass(box);
+  assert.deepEqual([placeOf(await itemOf(box)), await readOf(box, 'claude-cli'), (await seen(box)).fact?.plugin], ['on', claudeAgent(), undefined]);
+  assert.equal((await pass(box)).writes, 0);
+});
+
+inBox('A found agent taken in where Claude Code has it through a plugin and a file of its own with that content: the take-in puts the file on record as Central Knot’s (a stop here leaves it so), and the next pass removes it, so Claude Code has it through the plugin alone', async box => {
+  await write(box, 'copilot-cli', claudeAgent());
+  await write(box, 'claude-cli', claudeAgent());
+  await claudePluginWith(box, claudeAgent());
+  await setSyncEverything(box.context, true);
+  await pass(box);
+  const item = (await itemOf(box))!;
+  assert.deepEqual([await readOf(box, 'claude-cli'), item.applied['claude-cli']], [claudeAgent(), item.hash]);
+  await pass(box);
+  assert.deepEqual([await readOf(box, 'claude-cli'), Object.keys((await seen(box)).fact?.plugin ?? {})], [undefined, ['claude-cli']]);
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Off in Claude Code, so its file there was removed when sync reached it. Central Knot keeps it.');
+  assert.equal((await pass(box)).writes, 0);
+});
+
+/** Copilot CLI's agent and the plugin's in Claude Code are one content; Claude Code's own file of it is another. Copilot CLI's is chosen. */
+async function chosenBesidePlugin(box: Box) {
+  await write(box, 'copilot-cli', claudeAgent());
+  await write(box, 'claude-cli', claudeAgent('You review code.\nMine.\n'));
+  await claudePluginWith(box, claudeAgent());
+  await choose(box, 'copilot-cli');
+}
+
+inBox('Copilot CLI’s copy chosen where Claude Code has that content through a plugin and another file of its own: Claude Code’s file is kept as a version, as History says, and the next pass removes it', async box => {
+  await chosenBesidePlugin(box);
+  const chosen = (await historyOf(box)).find(event => event.kind === 'chosen')!;
+  assert.equal(librarySentence(chosen, libraryWords.agents, tools)?.text, 'You chose Copilot CLI’s copy; Claude Code’s is kept as a version.');
+  assert.deepEqual(await versions(box), ['Be brief. (chosen from Copilot CLI) *', 'Mine. (was in Claude Code)']);
+  assert.deepEqual((await historyActions(box)).map(action => action.label), ['Undo', 'Use claude-cli’s']);
+  assert.equal(await readOf(box, 'claude-cli'), claudeAgent('You review code.\nMine.\n'), 'nothing is written there');
+  await pass(box);
+  assert.deepEqual([await readOf(box, 'claude-cli'), Object.keys((await seen(box)).fact?.plugin ?? {})], [undefined, ['claude-cli']]);
+  assert.equal((await pass(box)).writes, 0);
+});
+
+inBox('Copilot CLI’s copy chosen there, then its Undo before the next pass: Claude Code’s own file stays where it was, as it was, and is its own again', async box => {
+  await chosenBesidePlugin(box);
+  await (await historyActions(box)).find(action => action.label === 'Undo')!.run();
+  assert.deepEqual([await readOf(box, 'claude-cli'), await readOf(box, 'copilot-cli'), await readOf(box, 'codex-cli')], [claudeAgent('You review code.\nMine.\n'), claudeAgent(), undefined]);
+  assert.equal((await pass(box)).writes, 0);
+  assert.equal(await readOf(box, 'claude-cli'), claudeAgent('You review code.\nMine.\n'));
 });
 
 // ---------- Versions ----------
