@@ -5127,10 +5127,47 @@ async function syncEverythingFlow() {
   // A folder home outside the HOME the app is given (that one counts as real, which Linux never writes).
   const real = join(scratch, 'everything-real');
   mkdirSync(real, { recursive: true });
-  const a = await launch(data, [], real);
+  let a = await launch(data, [], real), opened;
   const foundNote = () => a.text('.ov-section[data-section="found"] .ov-section-after');
   const ruleSays = () => a.text('#setting-sync-everything-notice .setting-message-text');
   const ruleOn = () => a.run(`document.querySelector('#sync-everything-on')?.getAttribute('aria-checked')`);
+  /**
+   * Quits once its page had no errors, then opens again on Settings. The app starts its 20 s poll only once the page asks for
+   * the home (main.ts startHome, POLL_MS), so none has run until 20 s after `opened`, when the page started (takenInSoon).
+   */
+  const openAgainOnSettings = async page => {
+    same(`no page errors, Synchronize everything, ${page}`, a.pageErrors, []);
+    await a.quit();
+    a = await launch(data, [], real);
+    opened = await a.run('performance.timeOrigin');
+    await a.click('#nav-settings');
+    for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
+  };
+  /**
+   * Switches the rule on with `file` still being saved (its time kept at now) until the page shows the answer, so the switch's
+   * pass leaves it inside the settle window however late that pass runs. Returns when saving stopped.
+   */
+  const switchOnWhileSaving = async file => {
+    const stopSaving = keepFresh(file);
+    try {
+      await a.click('#sync-everything-on');
+      for (let tries = 0; tries < 40 && await ruleOn() !== 'true'; tries++) await wait(100);
+    } finally { stopSaving(); }
+    return Date.now();
+  };
+  /**
+   * Waits for Codex's copy of `name` longer than a poll can take (30 s), then checks it came before any poll could have: so by
+   * the look again that a pass leaving it settling arms (main.ts lookAgainSoon), or, on a slow runner, by a pass that started
+   * late enough to find it settled.
+   */
+  const takenInSoon = async (name, content, saved, says) => {
+    const copy = join(codex, name, 'SKILL.md');
+    for (let tries = 0; tries < 300 && !readNow(copy); tries++) await wait(100);
+    const now = Date.now(), seconds = { afterLastSave: (now - saved) / 1000, afterPageStart: Math.round(now - opened) / 1000 };
+    same(says, readNow(copy), content);
+    check(`${says}: before a poll could have come (20 s after the page started)`, seconds.afterPageStart < 20, seconds);
+    console.log(`(${name} taken in ${seconds.afterLastSave} s after its last save, ${seconds.afterPageStart} s after the page started)`);
+  };
   const noAddAll = async page => {
     await a.click(`#nav-${page}`);
     check(`no Add all on ${page}: switching Synchronize everything on is the one way to add everything`, !(await a.exists('#apply, #manage-all')) && !(await a.all('button', 'e.textContent.trim()')).some(label => /^Add all/i.test(label)));
@@ -5143,22 +5180,16 @@ async function syncEverythingFlow() {
     [await ruleOn(), await ruleSays()], ['false', 'Turning it on adds the 2 items found in your tools now. 1 found item has copies that differ and waits for your choice of copy.']);
   await fitsAtMinimum(a, 'Settings with Synchronize everything off');
   await a.shot('everything-off');
-  // Still being saved, as a tool writes a new skill, until the page shows the switch's answer: its time is kept at now, so
-  // the pass the switch starts leaves it inside the settle window however late that pass runs. Left still, a pass soon after
-  // takes it in by itself, whose read keeps the notices no page has shown yet.
-  const fresh = join(skill(claude, 'fresh', text('fresh', 'Just saved.')), 'SKILL.md');
-  const stopSaving = keepFresh(fresh);
-  try {
-    await a.click('#sync-everything-on');
-    for (let tries = 0; tries < 40 && await ruleOn() !== 'true'; tries++) await wait(100);
-  } finally { stopSaving(); }
+  await openAgainOnSettings('before switching on');
+  // Still being saved, as a tool writes a new skill, as the switch's pass runs: left inside the settle window. Left still, a
+  // pass soon after takes it in by itself (takenInSoon), whose read keeps the notices no page has shown yet.
+  const freshSaved = await switchOnWhileSaving(join(skill(claude, 'fresh', text('fresh', 'Just saved.')), 'SKILL.md'));
   const record = JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8'));
   same('turned on, it is kept in the home’s sync record, and the row says what still waits for a choice', [await ruleOn(), record.syncEverything, await ruleSays()], ['true', true, '1 found item has copies that differ and waits for your choice of copy.']);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
   same('and Settings says what it took in, a line per kind, each with History', await a.all('.setting-added .setting-message', 'e.textContent'),
     ['Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.History', 'Synchronize everything took in 1 MCP server, found in Codex: files. History can undo it.History']);
-  for (let tries = 0; tries < 80 && !readNow(join(codex, 'fresh/SKILL.md')); tries++) await wait(100);
-  same('a skill saved just before is taken in soon after, with no click, once it has settled', readNow(join(codex, 'fresh/SKILL.md')), text('fresh', 'Just saved.'));
+  await takenInSoon('fresh', text('fresh', 'Just saved.'), freshSaved, 'a skill saved just before is taken in soon after, with no click, once it has settled');
   // The read after that pass reaches the page: the sidebar's dot names both skills' notices, neither shown yet.
   const unseenOnLibrary = () => a.run(`document.querySelector('#nav-library .nav-unseen')?.title ?? ''`);
   for (let tries = 0; tries < 300 && !/fresh/.test(await unseenOnLibrary()); tries++) await wait(100);
@@ -5209,14 +5240,13 @@ async function syncEverythingFlow() {
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
   same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 1 found item was taken out of Central Knot earlier and isn’t added by itself again: Add on its row, or Restore in History, brings it back. 2 found items have copies that differ and wait for your choice of copy.']);
-  // Saved just before it is switched on again, with nothing else for that pass to write: the pass leaves it inside the settle
-  // window, and nothing but the look again soon after (no watch event follows) takes it in before the 20 s poll.
-  skill(claude, 'later', text('later', 'Saved just before.'));
-  await wait(1700);
-  await a.click('#sync-everything-on');
-  for (let tries = 0; tries < 60 && !readNow(join(codex, 'later/SKILL.md')); tries++) await wait(100);
-  same('a copy the pass left inside the settle window is taken in a moment later, by itself', readNow(join(codex, 'later/SKILL.md')), text('later', 'Saved just before.'));
-  same('no page errors, Synchronize everything', a.pageErrors, []);
+  await openAgainOnSettings('switched on and off');
+  // Saved just before the rule is switched on again, with nothing else for that pass to write, and still being saved as it
+  // runs: that pass leaves it, and a pass soon after takes it in (takenInSoon).
+  const laterSaved = await switchOnWhileSaving(join(skill(claude, 'later', text('later', 'Saved just before.')), 'SKILL.md'));
+  check('the switch’s own pass leaves a copy still being saved inside the settle window', !existsSync(join(codex, 'later')));
+  await takenInSoon('later', text('later', 'Saved just before.'), laterSaved, 'a copy the pass left inside the settle window is taken in a moment later, by itself');
+  same('no page errors, Synchronize everything, switched on again', a.pageErrors, []);
   await a.quit();
 }
 
