@@ -56,6 +56,7 @@ import { joinedWords, pageNames, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
+import { pluginTextJob, type PluginTextJob } from './plugintext.ts';
 import type { PluginDone } from './pluginplan.ts';
 import { CARRIED_FOLDER, STANDARD_BUILD, aboutBuild, openBundle, readCustomBuildSync, releaseDate, releaseLabel, type ActiveBundle } from './bundle.ts';
 
@@ -189,14 +190,14 @@ async function pluginUpdatesSwitched(on: boolean) {
 }
 
 /** Sends the page a message, when there is a window to send it to. */
-function send(channel: 'sync:changed' | 'sync:request' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'said' | 'window:shown' | 'search:published', ...args: unknown[]) {
+function send(channel: 'sync:changed' | 'sync:request' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'plugin-text:changed' | 'said' | 'window:shown' | 'search:published', ...args: unknown[]) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
 
 /** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
-interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** Plugins are updated automatically (pluginupdates.ts). */ pluginUpdates?: boolean; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate }
+interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** Plugins are updated automatically (pluginupdates.ts). */ pluginUpdates?: boolean; /** What marketplace plugins hold is read (plugintext.ts); on unless turned off. */ pluginText?: boolean; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
 /** app-settings.json as read: {} where there is none (a first launch), its object, or undefined where it is there and can't be read as one (values.ts jsonObject). */
@@ -276,7 +277,8 @@ async function changeHistoryWindow(days: HistoryDays): Promise<HistoryWindowSave
 }
 /** Whether plugins are updated automatically: as chosen in Settings, else the default. */
 const pluginUpdatesOn = () => (typeof appSettings.pluginUpdates === 'boolean' ? appSettings.pluginUpdates : PLUGIN_UPDATES_DEFAULT);
-const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(), pluginUpdates: pluginUpdatesOn(),
+const pluginTextOn = () => appSettings.pluginText !== false;
+const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(), pluginUpdates: pluginUpdatesOn(), pluginText: pluginTextOn(),
   ...(custom ? { build: aboutBuild(custom, app.getVersion(), bundle && { name: custom.marketplace?.displayName ?? bundle.release.marketplace, date: releaseDate(bundle.release) }) } : {}) });
 /**
  * Opens the folder of Central Knot's own log in Finder or Explorer, the log selected; before anything was logged, just the
@@ -362,6 +364,8 @@ let unseenPlugins: 'updated' | 'failed' | undefined;
 /** A plugin update's tool command under way: Quit waits for it (see before-quit), so what follows it is never cut off. */
 let pluginStep: Promise<unknown> | undefined;
 let pluginUpdates: ReturnType<typeof autoUpdates> | undefined;
+/** The reading of what marketplace plugins hold (plugintext.ts): begun when a home opens, stopped at quit. */
+let pluginText: PluginTextJob | undefined;
 /** Whether plugin checks run by themselves in this launch (an end-to-end run holds them still). */
 let pluginChecksRun = false;
 function showWindow() {
@@ -1064,6 +1068,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
     const { view: shown, passes } = await syncAndView();
     // Saving the settings rebuilds the menus with the new home.
     await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
+    pluginText?.restart();
     // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched; a window its
     // first pass started is looked at again, as after any pass.
     stopWatching();
@@ -1259,17 +1264,19 @@ app.on('activate', () => { log('opened again'); showWindow(); });
 // A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer.
 // A plugin being updated by itself is let finish (a few seconds; fifteen at most): the tool's command runs on whatever the app
 // does, and what follows it here (turning a turned-off plugin off again, the note saved) must not be lost. No further step
-// starts, so the check ends with that one. A check that is only reading the marketplaces holds nothing up.
-let heldForPlugin = false;
+// starts, so the check ends with that one. A check that is only reading the marketplaces holds nothing up. The reading of what
+// plugins hold stops at once, git with it, and what it had finished is saved first (plugintext.ts stop).
+let heldForWork = false;
 app.on('before-quit', event => {
   quitting = true;
   drafting?.abort();
-  if (!pluginStep || heldForPlugin) return;
-  heldForPlugin = true;
+  const saving = pluginText?.stop();
+  if (heldForWork || (!pluginStep && !saving)) return;
+  heldForWork = true;
   event.preventDefault();
-  log('quit waits for a plugin update under way');
-  const check = pluginUpdates?.underWay() ?? pluginStep;
-  void Promise.race([check.catch(() => undefined), new Promise(done => setTimeout(done, 15_000))]).then(() => app.quit());
+  if (pluginStep) log('quit waits for a plugin update under way');
+  const check = pluginStep && (pluginUpdates?.underWay() ?? pluginStep).catch(() => undefined);
+  void Promise.race([Promise.all([check, saving]), new Promise(done => setTimeout(done, 15_000))]).then(() => app.quit());
 });
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
@@ -1327,6 +1334,14 @@ app.whenReady().then(async () => {
     await pluginUpdatesSwitched(on);
     return preferences();
   });
+  handleNow('settings:plugin-text', async on => {
+    if (typeof on !== 'boolean') throw new Error('Invalid plugin text setting.');
+    await saveAppSettings({ pluginText: on });
+    log(`plugin text: turned ${on ? 'on' : 'off'}`);
+    if (on) pluginText?.restart(); else pluginText?.stop();
+    return preferences();
+  });
+  handleNow('plugin-text:view', async () => pluginText?.view() ?? { read: 0, of: 0, elsewhere: 0, reading: false });
   // Updates (PLT-02): checks run outside the queue; the restart waits in it, so it never lands in the middle of a write.
   // A custom build never asks for, or takes, the standard app's releases (ORG-07): it has no updater until it has a location of its own.
   updater = smoke || custom ? undefined : startUpdater({
@@ -1371,6 +1386,7 @@ app.whenReady().then(async () => {
     // A change to a plugin that worked (an update, an uninstall) settles what failed there by itself before.
     changed: (source, plugin, tools) => void pluginUpdates?.settled(source, plugin, tools).catch(error => logFailure('plugin updates', error)),
     waitedBefore: async () => pluginUpdates?.waitedBefore() ?? [],
+    listed: (listing, fresh) => pluginText?.listed(listing, fresh),
     notices: (kind, told) => { (kind === 'skill' ? pendingNotices : kind === 'mcp' ? pendingServerNotices : pendingAgentNotices).push(...told); },
     bundled: () => (bundle && custom ? { source: bundle.folder, view: {
       app: custom.name, displayName: custom.marketplace?.displayName, logo: custom.marketplace?.logo && `${CARRIED_FOLDER}/${custom.marketplace.logo}`,
@@ -1378,6 +1394,12 @@ app.whenReady().then(async () => {
       ...(custom.feed ? { feed: feedSeen ? { checked: new Date(feedSeen.checked).toISOString(), outcome: feedSeen.outcome, message: feedSeen.message } : {} } : {}),
     } } : undefined),
   });
+  // What marketplace plugins hold, read by itself in the background from when a home opens (plugintext.ts). Test-only, read only
+  // when set: CK_PLUGIN_TEXT=never for none (the end-to-end run's other flows, which a fetch from GitHub would walk into).
+  if (!smoke && process.env.CK_PLUGIN_TEXT !== 'never') {
+    pluginText = pluginTextJob({ dataDir: join(app.getPath('userData'), 'plugins'), on: pluginTextOn, log, listings: () => markets.listings(handoff.id), changed: view => send('plugin-text:changed', view) });
+    if (current) pluginText.restart();
+  }
   // Sources read again by themselves once a day, on the plugin updates' schedule turn below (sources.ts checkDue holds the
   // rhythm, and pauses with Automatic sync); each check is Check now's, its pass taking its turn in the queue.
   let checkingSources = false;

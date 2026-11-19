@@ -1,6 +1,6 @@
 // Marketplaces and plugins for the CLIs: read a catalog without running anything from it, show what each tool would get,
 // and install or uninstall through each tool's own commands, confirmed by reading the record that tool keeps (PLG-03).
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -56,51 +56,92 @@ function once<T>(context: PluginContext, key: string, read: () => Promise<T>): P
 /** Git hosts whose repository paths ignore case (github.com/Owner/Repo is github.com/owner/repo). */
 const CASELESS_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
 
-/** One spelling for one repository, so the same marketplace is recognised however it was typed (MKT-07). */
-export function sameSource(first: string, second: string): boolean {
-  const norm = (value: string) => {
-    let text = value.trim();
-    // A folder may be named through a link (macOS: /var is /private/var), and tools record whichever spelling they saw.
-    if (isFolder(text)) { try { return realpathSync(text); } catch { return resolve(text); } }
-    const repo = githubRepo(text);
-    if (repo) return `github.com/${repo.toLowerCase()}`;
-    const scp = text.match(/^([\w.-]+)@([\w.-]+):(.+)$/);
-    if (scp) text = `ssh://${scp[1]}@${scp[2]}/${scp[3]}`;
-    try {
-      const url = new URL(text);
-      const host = url.hostname.toLowerCase();
-      const path = url.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '');
-      // Only hosts known to ignore case in repository paths fold it; on any other server /Team/tools and /team/tools may be two repositories.
-      return `${host}${url.port ? `:${url.port}` : ''}/${CASELESS_HOSTS.has(host) ? path.toLowerCase() : path}`;
-    } catch { return text; }
-  };
-  return norm(first) === norm(second);
+/** One spelling for one repository or folder, so the same marketplace is recognised however it was typed (MKT-07). */
+export function sourceKey(value: string): string {
+  let text = value.trim();
+  // A folder may be named through a link (macOS: /var is /private/var), and tools record whichever spelling they saw.
+  if (isFolder(text)) { try { return realpathSync(text); } catch { return resolve(text); } }
+  const repo = githubRepo(text);
+  if (repo) return `github.com/${repo.toLowerCase()}`;
+  const scp = text.match(/^([\w.-]+)@([\w.-]+):(.+)$/);
+  if (scp) text = `ssh://${scp[1]}@${scp[2]}/${scp[3]}`;
+  try {
+    const url = new URL(text);
+    const host = url.hostname.toLowerCase();
+    const path = url.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '');
+    // Only hosts known to ignore case in repository paths fold it; on any other server /Team/tools and /team/tools may be two repositories.
+    return `${host}${url.port ? `:${url.port}` : ''}/${CASELESS_HOSTS.has(host) ? path.toLowerCase() : path}`;
+  } catch { return text; }
 }
+/** Whether two spellings name one repository or folder (sourceKey). */
+export function sameSource(first: string, second: string): boolean { return sourceKey(first) === sourceKey(second); }
 
 /** The URL CK itself fetches; native commands get the text exactly as the person typed it. */
 const fetchUrl = (source: string) => { const repo = githubRepo(source); return repo ? `https://github.com/${repo}.git` : source.trim(); };
 
 export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15' });
 
-function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number }): Promise<{ code: number | 'timeout' | 'missing'; output: string }> {
+/**
+ * What a run may also be given: `signal` stops it, as its timeout does; `input` is written to its input; `maxBytes` is the most
+ * output kept per stream (4 MB unless said); `env`, variables added to its environment.
+ */
+export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv }
+/**
+ * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` its output byte for
+ * byte. A run stopped by its `signal` reads as one that timed out (`'timeout'`).
+ */
+type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer };
+
+/**
+ * Runs a command, stopped at its timeout or its `signal`. `group` (git's runs, off Windows): it runs in a process group of its
+ * own, and stopping it stops the whole group, the helpers it started (git's remote-http) with it.
+ */
+function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
+  const maxBytes = options.maxBytes ?? 4 * 1024 * 1024, group = !!options.group && process.platform !== 'win32';
   return new Promise(done => {
-    execFile(file, args, { env: options.env, cwd: options.cwd, timeout: options.timeoutMs, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024, encoding: 'utf8', windowsHide: true }, (error, stdout, stderr) => {
-      const output = `${stdout ?? ''}${stderr ?? ''}`.replace(/\r/g, '').trim();
-      if (!error) { done({ code: 0, output }); return; }
-      const failure = error as NodeJS.ErrnoException & { killed?: boolean; code?: number | string };
-      if (failure.code === 'ENOENT') done({ code: 'missing', output });
-      // Node stops a command whose output passes maxBuffer; it ran, it just said too much.
-      else if (failure.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than 4 MB)` });
-      else if (failure.killed) done({ code: 'timeout', output });
-      else done({ code: typeof failure.code === 'number' ? failure.code : 1, output });
-    });
+    const out: Buffer[] = [], err: Buffer[] = [];
+    let stopped = false, cut = false, ended = false;
+    const child = spawn(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
+    const kill = () => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } };
+    const stop = () => { stopped = true; kill(); };
+    // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said up to maxBytes is kept.
+    const take = (chunks: Buffer[]) => {
+      let size = 0;
+      return (chunk: Buffer) => {
+        const room = maxBytes - size;
+        size += chunk.length;
+        if (chunk.length <= room) { chunks.push(chunk); return; }
+        if (room > 0) chunks.push(chunk.subarray(0, room));
+        cut = true;
+        kill();
+      };
+    };
+    const end = (code: RunResult['code']) => {
+      if (ended) return;
+      ended = true;
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', stop);
+      const stdout = Buffer.concat(out), output = `${stdout.toString('utf8')}${Buffer.concat(err).toString('utf8')}`.replace(/\r/g, '').trim();
+      if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout });
+      else done({ code: stopped && code !== 0 ? 'timeout' : code, output, stdout });
+    };
+    child.stdout.on('data', take(out));
+    child.stderr.on('data', take(err));
+    child.on('error', error => end(errorCode(error) === 'ENOENT' ? 'missing' : 1));
+    child.on('close', code => end(code ?? 1));
+    // A timeout of zero (or less) is none, as it was for execFile.
+    const timer = options.timeoutMs > 0 ? setTimeout(stop, options.timeoutMs) : undefined;
+    if (options.signal?.aborted) stop(); else options.signal?.addEventListener('abort', stop, { once: true });
+    // A command that ends without reading all its input (stopped, say) is no error here.
+    child.stdin.on('error', () => undefined);
+    if (options.input !== undefined) child.stdin.end(options.input);
   });
 }
 
 /** Git run with hooks and prompts off: an SSH host, key or credential that would ask fails at once instead (MKT-05). */
-const git = (args: string[], timeoutMs: number) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs });
-/** The same Git, for other features (the git repo of the Managed set): hooks and prompts off, this computer's own sign-in. */
-export const runGit = (args: string[], timeoutMs = 60_000) => git(args, timeoutMs);
+const git = (args: string[], timeoutMs: number, options: RunOptions = {}) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { timeoutMs, ...options, group: true, env: { ...gitEnv(), ...options.env } });
+/** The same Git, for other features (the git repo of the Managed set, the plugin text: plugintext.ts): hooks and prompts off, this computer's own sign-in. */
+export const runGit = (args: string[], timeoutMs = 60_000, options: RunOptions = {}) => git(args, timeoutMs, options);
 
 /** What a Git source said when asked for access: ok, or one MKT-05 class with words a person can act on. */
 export type AccessResult = { state: 'ok' } | { state: 'sign-in' | 'no-access' | 'unknown-host' | 'passphrase' | 'network' | 'git-missing' | 'unclassified'; message: string };
@@ -152,7 +193,7 @@ export function whyPushFailed(code: number | 'timeout' | 'missing', output: stri
 // ---------- Catalog ----------
 
 /** Where Central Knot keeps its copy of a Git marketplace, by its URL. */
-export const catalogFolder = (context: PluginContext, source: string) => join(context.dataDir, 'catalogs', createHash('sha256').update(fetchUrl(source)).digest('hex').slice(0, 24));
+export const catalogFolder = (context: Pick<PluginContext, 'dataDir'>, source: string) => join(context.dataDir, 'catalogs', createHash('sha256').update(fetchUrl(source)).digest('hex').slice(0, 24));
 
 /** Leftover stage folders of `target` (a clone stopped when the app quit), removed before a new clone of it. */
 async function dropStages(target: string): Promise<void> {
@@ -267,7 +308,7 @@ function copilotRefusal(name: string, where: unknown): string | undefined {
  * One marketplace.json entry as a plugin the page can show, or undefined when its name isn't one the tools accept. A
  * plugin stored in the marketplace (a string `source`) gets its folder and counts; one kept elsewhere gets where it lives.
  */
-async function catalogEntry(item: Record<string, unknown>, root: string, pluginRoot: string, counts: boolean, codex: boolean): Promise<CatalogPlugin | undefined> {
+async function catalogEntry(item: Record<string, unknown>, root: string, pluginRoot: string, counts: boolean, codex: boolean, keepContents: boolean): Promise<CatalogPlugin | undefined> {
   if (typeof item.name !== 'string' || !SAFE_NAME.test(item.name)) return undefined;
   const author = text(item.author) || text(record(item.author)?.name);
   const words = [...(strings(item.keywords) ?? []), ...(strings(item.tags) ?? [])];
@@ -292,6 +333,7 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
       const codexOwn = codex ? await codexManifest(folder) : undefined;
       const contents = counts ? await pluginContents(folder, item, root, { atMarketplaceRoot: !!plugin.isMarketplaceRoot, codex: codexOwn }) : undefined;
       if (contents) plugin.components = componentsFrom(contents);
+      if (contents && keepContents) plugin.contents = contents;
       // Its plugin.json's version wins over the entry's, as Claude Code reads them (the counts' read already applied that).
       const fromFiles = contents ? contents.version : text((codexOwn ?? await pluginManifest(folder, root))?.version);
       if (fromFiles) plugin.version = fromFiles;
@@ -303,7 +345,7 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
 /** At most this many plugins' files are read at once while a catalog is read. */
 const READS_AT_ONCE = 8;
 /** `work` for every item, at most `limit` at a time, results in the items' order. */
-async function eachLimited<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+export async function eachLimited<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
   const worker = async () => { while (next < items.length) { const at = next++; results[at] = await work(items[at]!); } };
@@ -315,9 +357,10 @@ async function eachLimited<T, R>(items: T[], limit: number, work: (item: T) => P
  * Reads the marketplace.json in `root` (a folder, or Central Knot's copy of a Git marketplace) into a catalog: its name,
  * owner and description, and its plugins sorted by name. A file that is missing, outside `root`, unreadable or misnamed
  * gives a catalog with no plugins and a `problem` to show. Nothing is fetched or run. `counts: false` skips reading each
- * plugin's files for the counts its row shows; installing and reading one plugin's page don't need them.
+ * plugin's files for the counts its row shows; installing and reading one plugin's page don't need them. `keepContents`
+ * keeps that read on each plugin kept in the marketplace (`contents`: the plugin text's, plugintext.ts).
  */
-export async function parseCatalog(root: string, source: string, kind: Catalog['kind'], { counts = true } = {}): Promise<Catalog> {
+export async function parseCatalog(root: string, source: string, kind: Catalog['kind'], { counts = true, keepContents = false } = {}): Promise<Catalog> {
   const fetchedAt = new Date().toISOString();
   const failed = (problem: string): Catalog => ({ name: '', source, kind, fetchedAt, plugins: [], problem });
   const read = await readManifest(root);
@@ -329,7 +372,7 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
   if (!SAFE_NAME.test(name)) return failed(`Its name (“${name.slice(0, 60)}”) isn’t one the tools accept.`);
   const metadata = record(manifest.metadata);
   const entries = (Array.isArray(manifest.plugins) ? manifest.plugins : []).map(record).filter((item): item is Record<string, unknown> => !!item);
-  const plugins = (await eachLimited(entries, READS_AT_ONCE, item => catalogEntry(item, root, text(metadata?.pluginRoot), counts, read.codexOnly))).filter((plugin): plugin is CatalogPlugin => !!plugin);
+  const plugins = (await eachLimited(entries, READS_AT_ONCE, item => catalogEntry(item, root, text(metadata?.pluginRoot), counts, read.codexOnly, keepContents))).filter((plugin): plugin is CatalogPlugin => !!plugin);
   const copilotRefuses = read.codexOnly ? undefined : entries.map(item => copilotRefusal(text(item.name), item.source)).find(Boolean);
   const codexOnly = read.codexOnly ? `Only Codex reads this marketplace: it has Codex’s ${CODEX_MANIFEST}, not ${MANIFEST}.` : undefined;
   return { name, source, kind, fetchedAt, root, owner: text(record(manifest.owner)?.name) || undefined, description: text(manifest.description) || text(metadata?.description) || undefined,
@@ -344,11 +387,16 @@ const configRootOf = (context: PluginContext, tool: HarnessId) => configRoot(har
 async function readJson(path: string): Promise<Record<string, unknown> | undefined> {
   try { return parseObject(withoutBom(await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); } catch { return undefined; }
 }
-const recordJson = (context: PluginContext, path: string) => once(context, `json:${path}`, () => readJson(path));
-type CodexTables = Record<'marketplaces' | 'plugins', Record<string, Record<string, TomlValue>>> & { skills: CodexSkillSwitch[]; skillsInline: boolean };
+/** A JSON file's object, read once per context; `unread` when the file is there and doesn't read as one (a missing file is read, and holds none). */
+const jsonFile = (context: PluginContext, path: string) => once(context, `json:${path}`, async () => {
+  try { const value = parseObject(withoutBom(await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); return { value, unread: !value }; }
+  catch (error) { return { value: undefined, unread: errorCode(error) !== 'ENOENT' }; }
+});
+const recordJson = async (context: PluginContext, path: string) => (await jsonFile(context, path)).value;
+type CodexTables = Record<'marketplaces' | 'plugins', Record<string, Record<string, TomlValue>>> & { skills: CodexSkillSwitch[]; skillsInline: boolean; /** config.toml is there and couldn't be read. */ unread: boolean };
 /** Codex's `[marketplaces.NAME]` and `[plugins."ID"]` tables from its config.toml, by name, and its skill switches. Empty when it can't be read. */
 const codexTables = (context: PluginContext, root: string) => once(context, `codex:${root}`, async (): Promise<CodexTables> => {
-  const found: CodexTables = { marketplaces: Object.create(null), plugins: Object.create(null), skills: [], skillsInline: false };
+  const found: CodexTables = { marketplaces: Object.create(null), plugins: Object.create(null), skills: [], skillsInline: false, unread: false };
   try {
     const tables = readTomlTables(await readFile(join(root, 'config.toml'), 'utf8'));
     for (const table of tables) {
@@ -356,7 +404,7 @@ const codexTables = (context: PluginContext, root: string) => once(context, `cod
       if ((kind === 'marketplaces' || kind === 'plugins') && name && !deeper.length && !table.array) found[kind][name] = Object.fromEntries(table.entries.map(entry => [entry.key, entry.value]));
     }
     ({ switches: found.skills, inline: found.skillsInline } = codexSkillSwitches(tables));
-  } catch { /* missing, or not TOML this reader can follow: nothing registered */ }
+  } catch (error) { found.unread = errorCode(error) !== 'ENOENT'; /* missing, or not TOML this reader can follow: nothing registered */ }
   return found;
 });
 
@@ -366,21 +414,23 @@ const codexTables = (context: PluginContext, root: string) => once(context, `cod
  * settings.json; Codex keeps `[marketplaces.NAME]` tables in config.toml.
  */
 export async function registeredMarketplaces(context: PluginContext, tool: PluginTool): Promise<{ name: string; source: string }[]> {
+  return (await registrations(context, tool)).entries;
+}
+/** A tool's marketplaces as registeredMarketplaces reads them, and whether a file they are read from is there and couldn't be read: one read for both. */
+export async function registrations(context: PluginContext, tool: PluginTool): Promise<{ entries: { name: string; source: string }[]; unread: boolean }> {
   const root = configRootOf(context, tool);
-  switch (tool) {
-    case 'codex-cli': return Object.entries((await codexTables(context, root)).marketplaces).map(([name, entry]) => ({ name, source: text(entry.source) })).filter(entry => entry.source);
-    case 'claude-cli': case 'copilot-cli': {
-      const lists = [record((await recordJson(context, join(root, 'settings.json')))?.extraKnownMarketplaces)];
-      if (tool === 'claude-cli') lists.unshift(await recordJson(context, join(root, 'plugins/known_marketplaces.json')));
-      const found = new Map<string, string>();
-      for (const [name, entry] of lists.flatMap(list => Object.entries(list ?? {}))) {
-        const source = record(record(entry)?.source);
-        const where = text(source?.url) || text(source?.path) || text(source?.repo);
-        if (where && !found.has(name)) found.set(name, where);
-      }
-      return [...found].map(([name, source]) => ({ name, source }));
-    }
+  if (tool === 'codex-cli') {
+    const tables = await codexTables(context, root);
+    return { entries: Object.entries(tables.marketplaces).map(([name, entry]) => ({ name, source: text(entry.source) })).filter(entry => entry.source), unread: tables.unread };
   }
+  const known = tool === 'claude-cli' ? await jsonFile(context, join(root, 'plugins/known_marketplaces.json')) : undefined, settings = await jsonFile(context, join(root, 'settings.json'));
+  const found = new Map<string, string>();
+  for (const [name, entry] of [known?.value, record(settings.value?.extraKnownMarketplaces)].flatMap(list => Object.entries(list ?? {}))) {
+    const source = record(record(entry)?.source);
+    const where = text(source?.url) || text(source?.path) || text(source?.repo);
+    if (where && !found.has(name)) found.set(name, where);
+  }
+  return { entries: [...found].map(([name, source]) => ({ name, source })), unread: settings.unread || !!known?.unread };
 }
 
 const hasFiles = async (path: string) => { try { return (await readdir(path)).length > 0; } catch { return false; } };
