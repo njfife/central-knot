@@ -249,6 +249,18 @@ export function resultParts(lines: ResultLine[], undo: boolean, { short = false,
 }
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
+/**
+ * The plugins a run left undone, counted by marketplace and name, of all it was asked for: a failed line (one that went through
+ * in another tool too) and, for a run that stopped, each plugin it never reached (LastRun unreached). What its result says first.
+ */
+export function shortOf(lines: ResultLine[], unreached: { source: string; plugin: string }[] = []) {
+  const byKey = (list: { source: string; plugin: string }[]) => new Map(list.map(line => [pluginKey(line.source, line.plugin), line.plugin]));
+  return { names: [...byKey([...lines.filter(line => !line.ok), ...unreached]).values()], of: byKey([...lines, ...unreached]).size };
+}
+
+/** The steps of a run that stopped before them: each operation, by plugin and tool, that left no report (LastRun unreached). */
+export const unreachedOps = (ops: PluginOp[], done: PluginDone[]) => ops.filter(op => !done.some(entry => opKey(entry) === opKey(op)));
+
 /** resultParts as plain text, for the screen reader and the tooltip. */
 export const resultSentence = (lines: ResultLine[], undo: boolean) => resultParts(lines, undo).map(part => (typeof part === 'string' ? part : part.plugin)).join('');
 
@@ -260,6 +272,8 @@ export const notUndone = (ops: PluginOp[], done: PluginDone[]): PluginOp[] => op
 
 /** The Plugins page's last run (a click, a plugin's switch or an Undo): each tool's report, whether it was an Undo, in which home, and for an Undo the reversals that didn't succeed. */
 export interface LastRun { done: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[]; /** Read again since (Refresh): what the tools have now may differ from what this run says it did. */ reread?: boolean;
+  /** The plugins a run that stopped never reached (pluginstate.ts applyPluginOps). */
+  unreached?: { source: string; plugin: string }[];
   /**
    * Set when a plugin's switch made the run (marketplaces.ts turn): the plugin's entry before it (null: none), its Undo as main
    * gave it (`back`), and what that Undo can't put back (pluginstatus.ts undoLimits).

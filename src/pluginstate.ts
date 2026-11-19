@@ -19,7 +19,7 @@ import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts'
 import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
-import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDone, type PluginOp, type ResultLine } from './pluginplan.ts';
+import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, categoriesOf, copiesToCompare, marketTitle, matches, pluginPlace, undoLimits } from './pluginstatus.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginTurn, PluginTurnResult, PluginsView } from './types.ts';
@@ -353,9 +353,10 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     result = await runPlan(ops, planApi, home, step => { market.working = { source: step.source, plugin: step.plugin, tools: step.tools }; rerender(); });
   } finally {
     market.working = undefined;
-    market.lastRun = { done: result.done, undo, home, ...(undo ? { rest: notUndone(ops, result.done) } : {}) };
-    // A run that stopped after some steps names the plugins it didn't reach; the header says what did run.
-    const unrun = [...new Set(ops.filter(op => !result.done.some(entry => entry.source === op.source && entry.plugin === op.plugin)).map(op => op.plugin))];
+    // A run that stopped after some steps names the plugins it didn't reach; the header says what did run, and counts them first.
+    const unreached = result.stopped ? unreachedOps(ops, result.done) : [];
+    market.lastRun = { done: result.done, undo, home, unreached, ...(undo ? { rest: notUndone(ops, result.done) } : {}) };
+    const unrun = [...new Set(unreached.map(op => op.plugin))];
     market.problem = result.stopped && result.done.length && unrun.length ? `Stopped before ${andList(unrun)}: ${result.stopped}` : result.stopped;
     await readAgain();
   }
