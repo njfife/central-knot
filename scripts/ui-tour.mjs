@@ -1080,9 +1080,7 @@ if (wanted('first-setup')) {
   await a.click(`#${rowPart('walk-use', 'skills', 'deploy', 'codex-cli')}`);
   await atEverySize('walkthrough-second', 'Clicked Use this copy on Codex’s copy: the band says deploy is in Central Knot with Codex’s copy, with its own Undo; the walkthrough went on to 2 of 4, review, Copilot CLI’s copy the main button', false, '#walkthrough', 'start');
   await a.click('#walk-skip'); await a.click('#walk-skip');
-  await shot(a, 'walkthrough-next-kind', 'Clicked Skip twice (review and triage): 4 of 4 is on MCP servers, so the band says so, with Go on');
-  await a.click('#walk-go-on');
-  await atEverySize('walkthrough-no-dates', 'Clicked Go on to MCP servers: 4 of 4, docs, whose entries have no time of their own, so no copy is the main button and the line beside Skip says there are no dates to go by and that Skip changes no copy; Use the latest for the rest is unavailable', true, '#walkthrough', 'start');
+  await atEverySize('walkthrough-no-dates', 'Clicked Skip twice (review and triage): 4 of 4 is docs, an MCP server, asked in place on All; its entries have no time of their own, so no copy is the main button and the line beside Skip says there are no dates to go by and that Skip changes no copy; Use the latest for the rest is unavailable', true, '#walkthrough', 'start');
   await a.click('#walk-skip');
   await atEverySize('walkthrough-done', 'Clicked Skip on docs, the last: the band says the walkthrough is done and that 3 skipped items still wait for a choice, their copies as they are, review and triage on Skills and docs on MCP servers', false, '#walkthrough', 'start');
   await a.click('#nav-overview');
@@ -3050,8 +3048,8 @@ if (wanted('usage')) {
   await closeRow('skills', 'release-notes');
   await a.click('.chip[data-tip="No use seen in 30 days"]');
   await atEverySize('chip', 'Clicked the chip No use seen in 30 days: the rows it holds, and its band: how many and what Turn these off does lead, Turn these off at its end; each tool’s history and what it left out follow, fainter', true);
-  // Sort by Last used, release-notes (On, with no use until now) used just now, Update: the rows stay where they were, and Put in order is offered beside Sort.
-  await a.click('.chip[data-tip="All"]');
+  // The chip clicked again lets go of it, then Sort by Last used, release-notes (On, with no use until now) used just now, Update: the rows stay where they were, and Put in order is offered beside Sort.
+  await a.click('.chip[data-tip="No use seen in 30 days"]');
   await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = 'used'; select.dispatchEvent(new Event('change')); })()`);
   lines(join(practice, '.claude/projects/-work/s3.jsonl'), [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'release-notes' } }] }, timestamp: ago(0) }]);
   await a.click('#collect-usage');
