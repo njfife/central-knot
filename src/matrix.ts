@@ -927,12 +927,13 @@ export const resultInHeader = () => state.page === 'library' || state.page === '
 /**
  * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar. While a
  * table is on screen (useTableShown), its open copy choice hides an older result. On a list page it is drawn in the header only
- * (listResult); the pages that draw it in a band are the others. `inCard`: in the notices' card where its notice was (noticeLines),
- * unmarked so the status bar says it too (app.ts paintStatusMessage), and with no ×.
+ * (listResult); the pages that draw it in a band are the others. `cardResult`: a result said in the notices' card where the notice
+ * acted on was (noticeLines), whatever the page shows; unmarked so the status bar says it too (app.ts paintStatusMessage), with no
+ * ×, its actions only while it is the last result.
  */
-export function outcomeBand(inCard = false): HTMLElement | null {
-  const outcome = state.outcome;
-  if (!outcome || !outcomeShown(outcome, useTableShown()) || saidInStatusBar(outcome)) return null;
+export function outcomeBand(cardResult?: Outcome): HTMLElement | null {
+  const outcome = cardResult ?? state.outcome;
+  if (!outcome || (!cardResult && !outcomeShown(outcome, useTableShown())) || saidInStatusBar(outcome)) return null;
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
@@ -949,15 +950,15 @@ export function outcomeBand(inCard = false): HTMLElement | null {
   // In the header its reasons are its problem lines (listResult); in a band, each is a line of its own under it.
   const reasons = resultInHeader() ? [] : (outcome.reasons ?? []).flatMap(reason => [' ', h('span.band-reason', {}, typeof reason === 'string' ? reason : [h('strong.item-name', {}, reason[0]), reason[1]])]);
   // Two buttons take their own line under the words in a narrow window (style.css), so the sentence is never squeezed.
-  return h(`div.band.band-done${outcome.next ? '.band-two' : ''}`, { role: 'status', 'data-outcome': inCard ? undefined : outcome.kind ?? '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
+  return h(`div.band.band-done${outcome.next ? '.band-two' : ''}`, { role: 'status', 'data-outcome': cardResult ? undefined : outcome.kind ?? '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
     outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null, reasons),
-    h('span.band-actions', {},
+    outcome === state.outcome && h('span.band-actions', {},
       outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: outcome.act.whyOff?.() ?? acting(), attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
         : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined, !!acting())
-        : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
+        : outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
-    inCard ? null : closeButton(closeResult, { id: 'outcome-dismiss' }));
+    cardResult ? null : closeButton(closeResult, { id: 'outcome-dismiss' }));
 }
 
 /**
@@ -1202,11 +1203,14 @@ function toldNotices(kind: PageKind, cardOpen: boolean): Told[] {
 }
 
 /**
- * Seen, the one rule: a notice is seen once its sentence is drawn in the header's lines, cut or not, or in the opened card (syncNotice
- * marks it), and one dismissed, undone or folded into History by a newer one is no longer unseen. Asked by the sidebar's dot and the
- * kind switch's (unseenNotices), the Notices control's mark, app.ts keepUnshown and the "Sync changed" message (app.ts paintStatusMessage).
+ * Seen, the one rule: a notice is seen once its sentence is drawn in the header's lines, cut or not, or in the opened card, while the
+ * window has the focus, so he can see it (markSeen; renderer.ts draws again when it gets the focus), and one dismissed, undone or
+ * folded into History by a newer one is no longer unseen. Asked by the sidebar's dot and the kind switch's (unseenNotices), the
+ * Notices control's mark, app.ts keepUnshown and the "Sync changed" message (app.ts paintStatusMessage).
  */
 export const noticeUnseen = (id: string) => !state.dismissed.has(id) && !state.seenNotices.has(id) && ![...foldedNotices.values()].some(folded => folded.has(id));
+/** A notice drawn: seen now, and when (the arrival's clock: noticeLine), if the window has the focus; a hidden window has none. */
+const markSeen = (id: string) => { if (document.hasFocus() && !state.seenNotices.has(id)) state.seenNotices.set(id, Date.now()); };
 /** A kind's automatic changes not yet seen (noticeUnseen). */
 export const unseenNotices = (kind: PageKind) => (state.home?.[kind].notices ?? []).filter(notice => noticeUnseen(notice.history));
 /** Whether the header keeps a notice for the open home, not dismissed or undone (app.ts readFound: no "Nothing changed" beside it). */
@@ -1247,6 +1251,7 @@ export const noticeKindsShown = (): PageKind[] => noticesTable()?.kinds ?? [];
 export function headerNotices(resultShown: boolean): { lines?: HTMLElement; card: boolean; control: HTMLElement } | undefined {
   const t = noticesTable();
   const card = t && (state.shownWhole as NoticesCard | undefined)?.noticesOf === cardOf(t) ? state.shownWhole as NoticesCard : undefined;
+  if (!card) actedOn = undefined;
   const list = t ? visibleNotices(t, card) : [];
   if (!t || !list.length) return undefined;
   // The names two kinds share, which a notice's words name its kind beside (kindWord).
@@ -1257,11 +1262,11 @@ export function headerNotices(resultShown: boolean): { lines?: HTMLElement; card
 }
 /**
  * The newest notice in the header's lines, a click on it opening the card (`open`). It comes on a stronger fill that settles into
- * the line's own (style.css .header-notice), its time counted from when it was first shown (firstShown): a redraw carries it on,
- * and one shown before, here or in the card, is at rest.
+ * the line's own (style.css .header-notice), its time counted from when it was seen (markSeen): a redraw carries it on, and one seen
+ * 2.4 s before or more, here or in the card, is at rest.
  */
 function noticeLine(t: Table, notice: Told, open: () => void) {
-  const since = Date.now() - (firstShown.get(notice.history) ?? Date.now());
+  const since = Date.now() - (state.seenNotices.get(notice.history) ?? Date.now());
   const line = h('div.header-notice', { title: 'Show every notice', onclick: open }, syncNotice(t, notice, false));
   line.style.animationDelay = `-${since}ms`;
   return line;
@@ -1298,31 +1303,38 @@ function noticesCard(t: Table, list: Told[], card: NoticesCard) {
 }
 
 /**
- * The notice whose Undo or Turn it on was last clicked in the open card (`card`), and its place's height then. The place keeps that
- * height until the card closes or another notice is acted on, so nothing under the pointer moves (noticeLines).
+ * A notice whose Undo or Turn it on was clicked in the open card: its place's height then, and, once another is acted on, the result
+ * it was saying (`said`): its words alone from then on, the last result's actions being the last place's.
  */
-let actedOn: { card: NoticesCard; notice: Told; height: number } | undefined;
+type Acted = { notice: Told; height: number; said?: Outcome };
+/** The notices acted on in the open card (`card`), in the order clicked: each keeps its place until the card closes (noticeLines). */
+let actedOn: { card: NoticesCard; places: Acted[] } | undefined;
 /** An Undo or Turn it on in the card: its notice's place is kept (actedOn), then History's action runs (app.ts restoreEvent). */
 function actOn(event: Event, notice: Told) {
+  const card = state.shownWhole as NoticesCard;
   const height = (event.currentTarget as Element).closest('.sync-notice')?.getBoundingClientRect().height ?? 0;
-  actedOn = { card: state.shownWhole as NoticesCard, notice, height };
+  const places = (actedOn?.card === card ? actedOn.places : []).filter(place => place.notice.history !== notice.history);
+  const last = places.at(-1);
+  if (last) last.said ??= state.outcome;
+  actedOn = { card, places: [...places, { notice, height }] };
   void restoreEvent(notice.history);
 }
 /**
- * The card's notices, each whole, but in the place of the one acted on (actedOn): once its action has told what it did, that result
- * with its actions (outcomeBand), a refusal too, whose notice is still listed; until then its notice, or the place left empty once
- * its notice has gone. app.ts busy lets the result on show go as an action starts: one on show is this action's or a later one's.
+ * The card's notices, each whole, each acted on (actedOn) keeping its place, at least as tall as it was: a done one's result there
+ * (outcomeBand); a refused one, still listed, saying why in its own words with its actions for another try (syncNotice); one still
+ * acting, its notice, or the place empty once its notice has gone. app.ts busy lets the result on show go as an action starts:
+ * one on show is the last action's or a later one's.
  */
 function noticeLines(t: Table, list: Told[], card: NoticesCard) {
-  const place = actedOn?.card === card ? actedOn : undefined;
-  if (!place) return list.map(notice => syncNotice(t, notice, true));
-  const said = outcomeBand(true), listed = list.some(notice => notice.history === place.notice.history);
-  const shown = listed ? list : [...list, place.notice].sort(cardOrder(card));
-  return shown.map(notice => {
-    if (notice.history !== place.notice.history || (listed && !said)) return syncNotice(t, notice, true);
-    const line = h('div.notice-done', {}, said);
-    line.style.minHeight = `${place.height}px`;
-    return line;
+  const places = actedOn?.card === card ? actedOn.places : [], last = places.at(-1);
+  const listed = (notice: Told) => list.some(each => each.history === notice.history);
+  const gone = places.map(place => place.notice).filter(notice => !listed(notice));
+  return [...list, ...gone].sort(cardOrder(card)).map(notice => {
+    const place = places.find(each => each.notice.history === notice.history), said = place && (place === last ? state.outcome : place.said);
+    if (!place) return syncNotice(t, notice, true);
+    const drawn = listed(notice) ? syncNotice(t, notice, true, said) : h('div.notice-done', {}, said && outcomeBand(said));
+    drawn.style.minHeight = `${place.height}px`;
+    return drawn;
   });
 }
 
@@ -1362,19 +1374,23 @@ const noticeLead = (whole: boolean, glyph: IconName, tone: string) => (whole ? i
 /** In the header's lines, where the card has a notice's actions: the chevron of the card the line opens. */
 const opensCard = () => icon('chevron-down', 14, 'notice-opens');
 
-/** A notice's sentence with its ×, drawn and so seen; `whole` (the card) adds its actions, its name's link to its row and See change's panel. */
-function syncNotice(t: Table, notice: Told, whole: boolean) {
+/**
+ * A notice's sentence with its ×, drawn and so seen; `whole` (the card) adds its actions, its name's link to its row and See change's
+ * panel. `refused`: its action's refusal, said by its mark and words in its sentence's place, its actions there for another try.
+ */
+function syncNotice(t: Table, notice: Told, whole: boolean, refused?: Outcome) {
   if (notice.kind === 'taken-in') return takenInNotice(t, notice, whole);
   // Undo is the one action here that writes files: a small outlined button, apart from the quieter links. It says "Undo", as
   // every strip's result does; its tooltip says where.
   const act = (event: Event) => actOn(event, notice);
   const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: 'Undo', id: `notice-undo-${notice.history}`, onclick: act }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
   const offNow = notice.once ?? (!!state.home && !state.home.syncOn);
-  const [glyph, tone, text, action] = libraryNotice(libraryPages[notice.of], notice, undo, act);
+  const look = libraryNotice(libraryPages[notice.of], notice, undo, act), action = look[3];
+  const [glyph, tone, text] = refused ? ['triangle-alert', 'tone-warning', refused.text] as const : look;
   // The item's name opens its row here, so "what changed" is one click from the change itself.
   const told = rowsOf(notice.of).find(skill => skill.name === notice.item || skill.key === notice.item.toLowerCase());
   const noticeKey = notice.history;
-  state.seenNotices.add(notice.history);
+  markSeen(notice.history);
   // The rows a notice just told about show a brief highlight: on a draw in the next 3 s.
   if (told && !firstShown.has(noticeKey)) askFlash(idOf(told), Date.now() + 3000);
   // In the card the item's name opens its row: one click from "what changed" to the item, with no separate Details link.
@@ -1386,7 +1402,7 @@ function syncNotice(t: Table, notice: Told, whole: boolean) {
   const off = !!state.home && !state.home.syncOn;
   const history = !off ? smallAction('History', `notice-history-${notice.history}`, () => showPage('history')) : null;
   return h('p.sync-notice', { 'data-kind': notice.kind }, noticeLead(whole, glyph, tone), noticeKind(t, notice),
-    h('span.notice-text', {}, offNow && notice.kind !== 'deleted-by-hand' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history)}`)),
+    h('span.notice-text', {}, !refused && offNow && notice.kind !== 'deleted-by-hand' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history)}`)),
     whole ? h('span.notice-actions', {},
       notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.of) : null,
       action, history, off ? smallAction('Turn sync on', `notice-sync-on-${notice.history}`, () => void setSync(true)) : null) : opensCard(),
@@ -1400,7 +1416,7 @@ function syncNotice(t: Table, notice: Told, whole: boolean) {
  */
 function takenInNotice(t: Table, notice: TakenInNotice & Pick<Told, 'of' | 'once'>, whole: boolean) {
   const off = !!state.home && !state.home.syncOn, once = notice.once ?? off;
-  state.seenNotices.add(notice.history);
+  markSeen(notice.history);
   return h('p.sync-notice', { 'data-kind': notice.kind }, noticeLead(whole, 'plus', 'tone-success'), noticeKind(t, notice),
     h('span.notice-text', {}, once ? 'Synced once: ' : '', libraryPages[notice.of].say.takenInWords(notice), h('span.notice-age', {}, ` · ${age(notice.history)}`)),
     whole ? h('span.notice-actions', {}, smallAction('History', `notice-history-${notice.history}`, () => showPage('history'))) : opensCard(),

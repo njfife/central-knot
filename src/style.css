@@ -295,7 +295,9 @@ ul { list-style: none; }
 .btn.notices-control[aria-expanded="true"] { background: var(--current); }
 .notices-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--press); font-size: 11.5px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 .btn.primary > .notices-count { background: rgb(255 255 255 / 22%); }
-.btn.primary > .notices-unseen { background: currentColor; }
+/* Notices' unseen dot sits in its corner's padding, so the button is as wide with it as without. */
+.notices-control { position: relative; }
+.btn.primary > .notices-unseen { position: absolute; top: 4px; right: 4px; background: currentColor; }
 /* Their card: the result's card (.result-whole), as tall as its notices up to the window less 120px, past which they scroll under
    its top line (their count, Dismiss all, its ×); See change's panel opens in that one scroll, pushing the next notice down. */
 .notices-card { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 16px; }

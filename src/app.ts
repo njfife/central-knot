@@ -153,8 +153,8 @@ export const state = {
   drafting: undefined as HarnessId | undefined,
   /** Sync notices the person has dismissed, by History event or item, and a background pass's problems (matrix.ts listResult). */
   dismissed: new Set<string>(),
-  /** Sync notices drawn in the header's lines or its open card: seen (matrix.ts noticeUnseen). */
-  seenNotices: new Set<string>(),
+  /** Sync notices seen, and when: drawn in the header's lines or its open card while the window had the focus (matrix.ts markSeen). */
+  seenNotices: new Map<string, number>(),
   /** Whether the content is wide enough to dock an open row's details beside its table; set by the renderer's layout. */
   wide: false,
   /** The harness whose page is open on Harnesses; none shows every harness. */
@@ -1103,7 +1103,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
  */
 function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult) {
   const entry = libraryEntry(past)!, rows = [entry];
-  if (result.stopped) { tell({ page, item: past.item, rows, text: result.stopped, warn: true, history: true }); return; }
+  if (result.stopped) { tell({ page, item: past.item, rows, text: `${past.item}: ${result.stopped}`, warn: true, history: true, refused: true }); return; }
   const view = state.home?.[entry.kind];
   const made = state.history.data?.find(event => event.id === past.undoneBy);
   const item = view?.library[entry.key];
@@ -1122,7 +1122,7 @@ function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult) {
  * (restoreEvent, from restorePlan before the click); a switch made in Settings since is not its doing.
  */
 function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, switchedOn: boolean) {
-  if (result.stopped) { tell({ page, item: past.item, text: result.stopped, warn: true, history: true }); return; }
+  if (result.stopped) { tell({ page, item: past.item, text: result.stopped, warn: true, history: true, refused: true }); return; }
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
   const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
@@ -1177,6 +1177,8 @@ export interface Outcome {
   kind?: 'saved';
   tool?: HarnessId;
   history?: boolean;
+  /** Nothing was done, its reason the text: History is offered as itself, not as where its Undo is (matrix.ts outcomeBand). */
+  refused?: boolean;
   /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be. */
   band?: boolean;
   /** The band goes after a few seconds: an Undo's confirmation. */
