@@ -5448,7 +5448,13 @@ async function sharedDeletionChecks(a, home) {
   const agents = join(home, '.agents/skills'), roots = ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills'];
   const listed = () => roots.map(root => readdirSync(join(home, root)).sort().map(name => (lstatSync(join(home, root, name)).isSymbolicLink() ? `${name} → ${readlinkSync(join(home, root, name))}` : name)).join(', '));
   const twoPasses = async () => { await a.click('#header-refresh'); await wait(2200); await a.click('#header-refresh'); };
-  const noticeOf = name => a.run(`[...document.querySelectorAll('.sync-notice')].filter(notice => notice.textContent.includes(${JSON.stringify(`${name} was deleted`)})).map(notice => notice.querySelector('.notice-text')?.textContent.replace(/ · .*$/, '').trim())`);
+  /** What the notices' card says of a skill, each notice's words (matrix.ts noticesCard), the card closed again. */
+  const noticeOf = async name => {
+    await openNotices(a);
+    const said = await a.run(`[...document.querySelectorAll('#notices-card .sync-notice')].filter(notice => notice.textContent.includes(${JSON.stringify(name)})).map(notice => notice.querySelector('.notice-text')?.textContent.replace(/ · .*$/, '').trim())`);
+    await closeNotices(a);
+    return said;
+  };
   for (const name of ['gone-one', 'link-one']) {
     skill(agents, name, text(name, 'Read in the shared folder.'));
     symlinkSync(`../../.agents/skills/${name}`, join(home, '.claude/skills', name));
@@ -5464,7 +5470,7 @@ async function sharedDeletionChecks(a, home) {
   renameSync(agents, `${agents}-away`);
   await twoPasses();
   const said = (await a.text('.bands') ?? '').split('The shared skills folder').length - 1;
-  same('the shared folder renamed away: nothing written, nothing off, said once', [listed(), await switchOn(a, 'skills', 'gone-one'), await switchOn(a, 'skills', 'link-one'), said, await a.exists('.sync-notice')], [before, true, true, 1, false]);
+  same('the shared folder renamed away: nothing written, nothing off, said once', [listed(), await switchOn(a, 'skills', 'gone-one'), await switchOn(a, 'skills', 'link-one'), said, await noticeOf('-one')], [before, true, true, 1, []]);
   renameSync(`${agents}-away`, agents);
   await twoPasses();
   same('and back, all as before', [listed(), await switchOn(a, 'skills', 'gone-one'), (await a.text('.bands') ?? '').includes('The shared skills folder')], [before, true, false]);
@@ -5472,12 +5478,13 @@ async function sharedDeletionChecks(a, home) {
   await twoPasses();
   same('the shared copy deleted: two passes later every tool’s folder is as it was, the link that leads nowhere too, and the skill is off', [listed(), await switchOn(a, 'skills', 'gone-one')], [before, false]);
   same('one notice, naming the shared folder', await noticeOf('gone-one'), ['gone-one was deleted in the shared folder, so it is off. Central Knot keeps it.']);
-  if (shots) { await sizeTo(a, 1316, 819); await a.shot('shared-deleted-notice'); await fullSize(a); }
+  if (shots) { await sizeTo(a, 1316, 819); await a.shot('shared-deleted-notice'); await openNotices(a); await a.shot('shared-deleted-notice-card'); await closeNotices(a); await fullSize(a); }
   await a.click('#nav-history');
   same('one History entry, naming the shared folder', await a.run(`[...document.querySelectorAll('.history-row[data-kind="off"]')].filter(row => row.textContent.includes('gone-one')).map(row => row.querySelector('.history-about')?.textContent)`),
     ['Its copy was deleted in the shared folder, so it was turned off. Central Knot keeps it.']);
   await openKind(a, 'skills');
-  await a.run(`[...document.querySelectorAll('.sync-notice')].find(notice => notice.textContent.includes('gone-one was deleted'))?.querySelector('[id^="notice-restore-"]')?.click()`);
+  await openNotices(a);
+  await a.run(`[...document.querySelectorAll('#notices-card .sync-notice')].find(notice => notice.textContent.includes('gone-one was deleted'))?.querySelector('[id^="notice-restore-"]')?.click()`);
   for (let tries = 0; tries < 40 && !(await switchOn(a, 'skills', 'gone-one')); tries++) await wait(100);
   same('its Turn it on gives each tool its own copy, Claude Code’s in place of the link, and writes nothing in the shared folder',
     [...roots.slice(0, 4).map(root => lstatSync(join(home, root, 'gone-one'), { throwIfNoEntry: false })?.isDirectory() ?? false), existsSync(join(agents, 'gone-one'))], [true, true, true, true, false]);
