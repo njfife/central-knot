@@ -274,7 +274,7 @@ export async function keepUnreadable(path: string): Promise<string> {
   return kept;
 }
 
-export async function writeDurably(path: string, text: string) {
+export async function writeDurably(path: string, text: string | Uint8Array) {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${randomUUID()}.tmp`;
   const handle = await open(temporary, 'wx', 0o600);

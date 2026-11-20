@@ -17,7 +17,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, wri
 import { access, constants, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps, forgetVersions } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
-import { appCandidates, executableCandidates, hasStatusNotifierWatcher, macPlaces, searchPath } from './platform.ts';
+import { appCandidates, executableCandidates, macPlaces, searchPath, TRAY_ASKS, trayWithin } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
 import { errorCode, forgetStale, keepUnreadable, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
@@ -49,7 +49,7 @@ import { homePass, passTells, syncOnceReport, type HomePass } from './homepass.t
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
 import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
-import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
+import { keepEntries, linuxPlaces, placeAutostart, readAutostart, signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
 import { machineNames, writesRealHome } from './machine.ts';
 import { joinedWords, pageNames, toolList } from './words.ts';
@@ -88,6 +88,8 @@ if (own.bundleId !== STANDARD_BUILD) {
   // Named by its bundle id, which no other app's folder is (a build named after a company could otherwise land in that company's own app's folder).
   if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), own.bundleId));
 }
+// Linux: the windows' app id is the launcher entry's name (signin.ts linuxPlaces), so a Wayland taskbar shows its icon and name.
+if (process.platform === 'linux') app.setDesktopName(`${own.bundleId}.desktop`);
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
 // Test-only, read only when set: an update's restart is opened by macOS afresh, with no arguments and the login's own HOME, so
 // a test build carries its throwaway home, data folder and debug port in its environment (Info.plist LSEnvironment) instead
@@ -259,7 +261,7 @@ function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
     }
     appSettings = next;
     // The login item follows the saved choice before anyone hears of it, so what they read back is the system's answer to it.
-    if ('startAtSignIn' in change) applySignIn();
+    if ('startAtSignIn' in change) await applySignIn();
     refreshTray();
     send('settings:changed');
   });
@@ -338,17 +340,30 @@ function showPage(page: string) {
   send('navigate', page);
 }
 
-const signInFacts = () => ({ platform: process.platform, packaged: app.isPackaged, exe: app.getPath('exe'), smoke });
+const signInFacts = () => ({ platform: process.platform, packaged: app.isPackaged, exe: app.getPath('exe'), smoke, appImage: process.env.APPIMAGE });
+/** Linux: this app's own desktop files and where they go in the home it runs in (signin.ts); only read where whyNoSignIn has no reason, so from an AppImage. */
+const linux = () => ({ places: linuxPlaces(app.getPath('home'), process.env, own.bundleId), app: { name: own.name, id: own.bundleId, appImage: process.env.APPIMAGE! } });
 /** Whether Central Knot starts at sign-in, as the system has it now, and why not where it can't (see signin.ts). */
-const signIn = () => signInState(signInFacts(), () => app.getLoginItemSettings({ args: signInArgs }));
+const signIn = () => signInState(signInFacts(), () => (process.platform === 'linux' ? readAutostart(linux().places) : app.getLoginItemSettings({ args: signInArgs })));
 /**
- * Registers or removes the login item as last chosen. Only a save calls it (the first launch's too), never a start: one the
- * person turned off in the system stays off. A system that refuses (a Windows policy, say) is logged; whoever asked then reads
- * the system's answer, which says it didn't change.
+ * Registers or removes the login item as last chosen (on Linux, writes or removes the autostart file). Only a save calls it (the
+ * first launch's too), never a start: one the person turned off in the system stays off. A system that refuses (a Windows
+ * policy, a file Central Knot didn't write in its place on Linux) is logged; whoever asked then reads the system's answer.
  */
-function applySignIn() {
+async function applySignIn() {
   if (whyNoSignIn(signInFacts())) return;
-  try { app.setLoginItemSettings({ openAtLogin: appSettings.startAtSignIn !== false, args: signInArgs }); } catch (error) { logFailure('start at sign-in', error); }
+  const on = appSettings.startAtSignIn !== false;
+  try {
+    if (process.platform !== 'linux') app.setLoginItemSettings({ openAtLogin: on, args: signInArgs });
+    else if (!(await placeAutostart(linux().places, linux().app, on))) log(`start at sign-in: ${linux().places.autostart} wasn’t written by Central Knot, so it is left as it is`);
+  } catch (error) { logFailure('start at sign-in', error); }
+}
+/** Linux, from an AppImage: its launcher entry and icon, in place and pointing at the AppImage where it is now (signin.ts keepEntries). */
+async function keepLauncher() {
+  if (process.platform !== 'linux' || whyNoSignIn(signInFacts())) return;
+  try {
+    for (const line of await keepEntries(linux().places, linux().app, readFileSync(join(__dirname, '../assets/icon.png')))) log(`desktop: ${line}`);
+  } catch (error) { logFailure('launcher entry', error); }
 }
 /** On by default (PLT-03): registered at the first launch of an installed app, then left alone. */
 async function firstSignIn() {
@@ -501,8 +516,7 @@ function trayMenu() {
     { label: statusLine(), enabled: unseen || !!unseenPlugins, click: showNews },
     ...syncItems(),
     { type: 'separator' },
-    // Linux has no start at sign-in yet, so its tray never offers one.
-    { ...signInItem(), visible: process.platform !== 'linux' },
+    signInItem(),
     { type: 'separator' },
     { label: syncOn && homeWritable && lastManagedCount > 0 ? 'Quit Central Knot (stops syncing)' : 'Quit Central Knot', click: () => { quitting = true; app.quit(); } },
   ]);
@@ -570,10 +584,16 @@ function appMenu() {
 
 /** The app's colour icon: the window's and the tray's off a Mac (macOS takes the app's icon from its bundle). */
 const appIcon = join(__dirname, '../assets/icon.png');
+/**
+ * The menu bar or tray icon. A Linux desktop has a tray only while something holds its session bus's StatusNotifierWatcher
+ * (platform.ts). At sign-in the panel that holds it may still be starting, so a start at sign-in (--hidden) asks again, about once
+ * a second for about ten seconds (trayWithin), before it decides there is none and its window shows; any other start asks once
+ * and isn't held up. A Mac never asks.
+ */
 async function makeTray() {
   if (smoke || tray) return;
   // A Linux desktop with no system tray would show no icon, and Quit is only in its menu: with no tray, closing the window quits.
-  if (process.platform === 'linux' && !(await hasStatusNotifierWatcher())) { log('no system tray on this desktop: closing the window quits'); return; }
+  if (process.platform === 'linux' && !(await trayWithin(startedHidden() ? TRAY_ASKS : 1))) { log('no system tray on this desktop: closing the window quits'); return; }
   // On a Mac a template image, which macOS draws in the menu bar's own colours; elsewhere the colour icon, seen on a dark panel too.
   const mac = process.platform === 'darwin';
   const image = mac ? nativeImage.createFromBuffer(Buffer.from(trayIconPng, 'base64'), { scaleFactor: 2 })
@@ -819,8 +839,9 @@ async function lookForOthers(): Promise<string | undefined> {
   if (before) await freed();
   return said;
 }
-/** What waits for a build that isn't held: its login item at its first open (firstSignIn) and a bundled build's feed. At launch, else once the look finds none. */
+/** What waits for a build that isn't held: on Linux its launcher entry, its login item at its first open (firstSignIn) and a bundled build's feed. At launch, else once the look finds none. */
 async function freed() {
+  await keepLauncher();
   await firstSignIn();
   if (custom?.feed) { clearTimeout(feedTimer); feedTimer = setTimeout(() => void lookAtFeed(), FEED_FIRST_MS); }
 }

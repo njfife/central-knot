@@ -25,7 +25,7 @@ import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
 import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
-import { libraryWords } from './libraryrow.ts';
+import { asksWhichCopy, copiesDiffer, libraryWords, stillReadWords } from './libraryrow.ts';
 import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
@@ -36,7 +36,7 @@ import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
-import { findInHome, holdOrder, kindsShown, resultInHeader, noticeLinesOnPage } from './matrix.ts';
+import { findInHome, holdOrder, kindsShown, resultInHeader, noticeLinesOnPage, rowByKey } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -490,6 +490,17 @@ const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, h
 };
 /** Each kind's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, listNotices). */
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
+/**
+ * What a new result (a click's, a run's, an Undo's, a Library action's, Sync once's) keeps for the kinds' problem lines: `own`, its own
+ * results by kind, and nothing older of any kind, so the header says this result's alone. A kind keeps its notices (matrix.ts
+ * toldNotices) unless `own` brings that kind's anew.
+ */
+function keepOwn(own: Done['kept'][]) {
+  for (const kind of KINDS) {
+    const mine = own.filter(each => each?.kind === kind);
+    kindPages[kind].keep(mine.flatMap(each => each!.results), mine.length ? mine.at(-1)!.notices : lastResult(kind)?.notices);
+  }
+}
 
 /**
  * Whether a click in this home is a Resume: the page shows it waiting for one (share.ts libraryGate `resume`). Sent with the
@@ -546,7 +557,7 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const notClaimed = [...notIn, ...(plugged?.failedIn ?? [])], held = new Set(ours.filter(heldWhole).map(entry => entry.item.toLowerCase()));
   const changed = click.rows.map((row, at) => ({ ...row, name: click.items[at] ?? row.key })).filter(row => !held.has(row.name.toLowerCase()));
   const said = typeof click.said === 'string' ? click.said : click.said(notClaimed, wrote);
-  const choose = differs ? ' Its copies differ: choose which copy every tool uses.' : '';
+  const choose = differs ? ` ${copiesDiffer(click.items)}` : '';
   const along = plugged && !switchProblems(plugged).length ? click.plugins?.said : undefined;
   const text = done || !refusal ? [said, along].filter(Boolean).join(' ') + choose : refusal.message;
   const back = plugged?.back ?? [];
@@ -578,7 +589,7 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
 export const applyClick = (click: Click) => busy(click.undoing ? 'Undoing…' : 'Applying…', async page => sayDone(await carryOut(click, page), click));
 /** What a click applied at once did, said in the header (renderer.ts resultHere) or its band, its rows flashed, the focus on its control. */
 function sayDone(done: Done, click: Click) {
-  if (done.kept) kindPages[done.kept.kind].keep(done.kept.results, done.kept.notices);
+  keepOwn([done.kept]);
   tell(click.undoing ? done.outcome : notDoneFirst(done.outcome));
   focusAfterBusy = done.focus;
   for (const row of click.rows) flashRow(row);
@@ -599,7 +610,7 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[]) => stri
   const stops = saidByKind(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
   const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])), regroups = clicks.some(click => click.regroups);
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups }, undos) : undefined;
-  for (const { done } of parts) if (done.kept) kindPages[done.kept.kind].keep(done.kept.results, done.kept.notices);
+  keepOwn(parts.map(({ done }) => done.kept));
   // Each row that didn't go through in every tool (its kind refused, its own change held, or a tool kept it back) is said first
   // (words.ts notAllThrough), by its kind where another row asked has its name; `said` then names the rows that went through, or
   // the lead's rows are counted, or nothing changed. Each kind's refusal is a reason of its own.
@@ -664,9 +675,8 @@ function sayRun(turn: ItemTurn) {
   const done = turn.done!, turns = itemTurns(turn.run);
   const outcome = turns.length === 1 ? notDoneFirst(done.outcome) : runOutcome(turns);
   if (placeNow() !== turn.run.place) { announce(spoken(outcome)); return; }
-  // Each kind's results are its own: its problem lines come from the last click of each of the run's rows of that kind.
-  const kind = done.kept?.kind;
-  if (done.kept) kindPages[done.kept.kind].keep(stillSaid(turns).flatMap(each => (each.done!.kept && each.done!.kept.kind === kind ? each.done!.kept.results : [])), done.kept.notices);
+  // Its problem lines are its own: the last click of each of the run's rows.
+  keepOwn(stillSaid(turns).map(each => each.done!.kept));
   tell(outcome);
   flashRow(turn.row);
   if (done.focus && document.activeElement === document.body) document.getElementById(done.focus)?.focus({ preventScroll: true });
@@ -683,11 +693,20 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   const ended = turns.filter(turn => turn.done), did = ended.filter(turn => turn.done!.did), toGo = turns.length - ended.length;
   const asked = ended.filter(turn => turn.done!.did || !turn.done!.outcome.warn), nouns = rowNouns(turns.map(turn => turn.row.kind));
   // Each row as its clicks left it (stillSaid): a row they left something undone in is said first (words.ts notAllThrough); the
-  // rows that went through are named after it, or, where none did, the lead's rows are counted (words.ts countedAs).
-  const each = stillSaid(turns), left = each.filter(turn => turn.done!.outcome.warn), rows = once(each.filter(turn => asked.includes(turn)));
+  // rows that went through are named after it, or, where none did, the lead's rows are counted (words.ts countedAs). A found row
+  // that waits for a choice of copy, as the view after it has it, is neither On nor Off: it is said after them.
+  const each = stillSaid(turns), left = each.filter(turn => turn.done!.outcome.warn), answered = once(each.filter(turn => asked.includes(turn)));
+  const waits = (turn: ItemTurn) => { const now = rowByKey(turn.row.kind, turn.row.key); return !!now && asksWhichCopy(now) && !left.some(other => sameRow(other.row, turn.row)); };
+  const rows = answered.filter(turn => !waits(turn)), waiting = answered.filter(waits);
   // A kind is named where a row of another kind in the run has the same name.
   const named = (turn: ItemTurn): NamedRow => ({ kind: turn.row.kind, key: turn.row.key, name: turn.name }), among = turns.map(named);
   const through = rows.filter(turn => !left.some(other => sameRow(other.row, turn.row))), byState = (list: ItemTurn[]) => [false, true].map(on => list.filter(turn => (turn.isOn() ?? turn.row.on) === on));
+  // What stayed of every row the run left Off (gone through or not; a row waiting for a choice is neither), as the view after it
+  // has it: the tools still reading them another way.
+  const stayed = [...groupBy(byState(once(each).filter(turn => !waits(turn)))[0]!, turn => turn.row.kind)].flatMap(([kind, list]) => stillReadWords(list.flatMap(turn => {
+    const row = rowByKey(kind, turn.row.key);
+    return row ? [{ name: rowNames([named(turn)], among)[0]!, row }] : [];
+  }), kindSource(state.home!, kind).tools));
   const namedAs = (group: ItemTurn[], on: boolean) => `${plural(group.length, nouns.one, nouns.many)} ${group.length === 1 ? 'is' : 'are'} ${on ? 'on' : 'off'}: ${fewNames(rowNames(group.map(named), among))}`;
   const said = byState(through.length ? through : rows).map((group, on) => (!group.length ? '' : through.length ? namedAs(group, !!on) : countedAs(group.length, once(each).length, !!on))).filter(Boolean).join('; ');
   const along = did.flatMap(turn => (turn.done!.along ? [`${rowNames([named(turn)], among)[0]}: ${turn.done!.along.replace(/^./, first => first.toLowerCase())}`] : []));
@@ -697,7 +716,7 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   // A click refused whole gives its refusal as a reason; a click that failed is said by its problem lines, never "Nothing changed".
   return { page: turns[0]!.page, items: rowNames(among), rows: turns.map(turn => turn.row), band: true, warn: left.length > 0,
     reasons: each.flatMap((turn): Reason[] => [...(turn.done!.refused ? [turn.done!.refused] : []), ...turn.done!.outcome.reasons ?? []]),
-    text: [lead, `${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along].filter(Boolean).join(' '),
+    text: [lead, `${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along, ...stayed, waiting.length ? copiesDiffer(rowNames(waiting.map(named), among)) : ''].filter(Boolean).join(' '),
     act: undo && { label: 'Undo', id: 'outcome-undo', inHistory: undos.every(each => !each.back.length), title: 'Put back everything these clicks did', run: undo } };
 }
 
@@ -738,7 +757,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   setHome(await api().refresh());
   focusAfterBusy = about.focus?.();
   await putHistory();
-  for (const [kind, kept] of results) kindPages[kind].keep(kept, []);
+  keepOwn([...results].map(([kind, kept]) => ({ kind, results: kept, notices: [] })));
   const missing = [...groupBy(gone, ([, kind]) => kind)].map(([kind, of]): [PageKind, string] =>
     [kind, `${plural(of.length, 'History entry', 'History entries')} it was to put back ${of.length === 1 ? 'is' : 'are'} no longer in History.`]);
   const reasons = [...saidByKind([...stops, ...missing], several), ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
@@ -1042,7 +1061,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const past = state.history.data?.find(event => event.id === eventId);
   // An Undo of a profile switch lists what it couldn't change in its own band, so the page's problems band gets only a stop.
   // Synchronize everything's covers every kind: its band says what it couldn't do (sayEverything), no page's problems band.
-  if ((past?.kind !== 'profile' && past?.kind !== 'everything') || result.stopped) kindPages[(past && libraryEntry(past)?.kind) || 'agents'].keep(result.results, result.notices);
+  if ((past?.kind !== 'profile' && past?.kind !== 'everything') || result.stopped) keepOwn([{ kind: (past && libraryEntry(past)?.kind) || 'agents', results: result.results, notices: result.notices }]);
   if (past?.kind === 'profile') {
     // Each item it turned back has its own History entry, with its own action: the band offers no Undo of the Undo.
     if (result.stopped || !result.switched) tell(undefined, result.stopped); else turnedOutcome(page, 'Undone', result.switched, result.results);
@@ -1108,7 +1127,7 @@ export const skillAction = (action: 'clear-switch' | 'take-over', key: string, t
     const home = state.home!;
     const result = await (action === 'take-over' ? api().takeOverSkill(key, tool, clickResumes(home), home.home) : api().clearSkillSwitch(key, tool, clickResumes(home), home.home));
     setHome(await api().refresh());
-    kindPages.skills.keep(result.results, result.notices);
+    keepOwn([{ kind: 'skills', results: result.results, notices: result.notices }]);
     const row = { kind: 'skills' as const, key };
     if (result.stopped) { tell({ page, item: name, rows: [row], text: result.stopped, warn: true, band: true }); return; }
     // Letting a tool load it again has an Undo (its History entry's: the switch set again); a take-over has none, and says so.
@@ -1589,6 +1608,8 @@ export async function syncNow(home = state.home?.home) {
     const result = await api().syncNow(home).finally(() => { menuSyncHome = undefined; });
     if (!result) return;
     setHome(result.view);
+    // A new result: no click's reasons from before stay under it.
+    keepOwn([]);
     tell({ page, band: true, history: result.history, text: result.text, reasons: result.reasons, warn: result.warn });
   });
 }

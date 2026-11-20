@@ -22,6 +22,12 @@ export const byToolOrder = (first: HarnessId, second: HarnessId) => TOOL_ORDER.i
 /** A tool's display name from an id that may come from a file or a report (an unknown id is shown as it is). */
 export const toolName = (tool: string) => (toolNames as Record<string, string>)[tool] ?? tool;
 
+/**
+ * A program and its arguments as one line: each argument as written, one with a space in it (or an empty one) in double quotes so it
+ * reads as one. An MCP server's command (catalogdetail.ts) and a hook's (sessionhooks.ts hookLine) are both shown so.
+ */
+export const commandLine = (command: string, args: string[] = []) => [command, ...args.map(arg => (arg === '' || /\s/.test(arg) ? JSON.stringify(arg) : arg))].join(' ');
+
 /** The last part of a path, on any OS: `CLAUDE.md` from `…/.claude/CLAUDE.md`. */
 export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
