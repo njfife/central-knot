@@ -8886,6 +8886,9 @@ async function libraryFlow() {
   if (main) { check('the skill’s write lands first, and the page shows it: its row flashes', await until(async () => (await a.run('window.flashedRows')).includes(ids[0]))); same('once the first write has landed, the three rows are where they were', await tops(), was); }
   await a.run(`document.getElementById('library-kind-skills').click()`);
   await done(a);
+  // The result goes by itself 8 s after it lands unless the pointer or the focus is in it (app.ts heldInHeader): the focus waits
+  // on its Undo, as a keyboard's would, through the steps to the Undo below, which a loaded runner can take longer than 8 s over.
+  check('the run’s result offers its Undo, which takes the focus', await a.run(`(undo => { undo?.focus(); return !!undo && document.activeElement === undo; })(document.querySelector('#outcome-undo'))`));
   // Its debugger let go too: a main process with one still attached doesn't quit.
   if (main) { await main.restore('agents:apply'); main.close(); }
   same('three rows clicked in a row keep their places, and the segment changed mid-run makes no second run: one result, three counted, each review with its kind',
