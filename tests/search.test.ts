@@ -1,6 +1,7 @@
 // Word search (src/search.ts) as worked examples. First the query set, the measure the weights were tuned on and then frozen:
 // a made-up Library (tests/searchfixture.ts) and thirty-one things a person might type, each with the row that must be among
-// the first three. Then what finds nothing, how text becomes words, the excerpt, and the one index main keeps.
+// the first three. Then what finds nothing, how text becomes words, the excerpt (asked apart from the ranking, for the rows
+// named), and the one index main keeps, whose answer excerpts only what the page draws at once.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
@@ -85,12 +86,13 @@ test('a compound typed as one lower-case word finds its camelCase, and a decompo
     const found = (typed: string) => index.ask(typed).map(hit => hit.id);
     assert.deepEqual([found('typescript'), found('TypeScript'), found('graphql'), found('report'), found('café')],
       [['skills-typescript-lint'], ['skills-typescript-lint'], ['skills-schema-explainer'], ['skills-balance-sheet'], ['skills-balance-sheet']]);
-    assert.deepEqual(index.ask('diagnostics'), [{ id: 'skills-typescript-lint', excerpt: 'List the diagnostics before changing anything.' }], 'an excerpt is the text as written');
+    assert.deepEqual(index.excerpts('diagnostics', ['skills-typescript-lint']), new Map([['skills-typescript-lint', 'List the diagnostics before changing anything.']]), 'an excerpt is the text as written');
   } finally { index.close(); }
   // A camelCase word in the text: found by its part, and the excerpt is still only the file's words.
   const checks = (await buildIndex([{ id: 'skills-lint-gate', names: ['lint-gate'], description: 'Guards a module.', text: 'Run checkTypes before changing anything.' }]))!;
   try {
-    assert.deepEqual([checks.ask('changing'), checks.ask('types')], [[{ id: 'skills-lint-gate', excerpt: 'Run checkTypes before changing anything.' }], [{ id: 'skills-lint-gate', excerpt: 'Run checkTypes before changing anything.' }]]);
+    const excerpt = (typed: string) => [checks.ask(typed), checks.excerpts(typed, ['skills-lint-gate']).get('skills-lint-gate')];
+    assert.deepEqual([excerpt('changing'), excerpt('types')], [[[{ id: 'skills-lint-gate' }], 'Run checkTypes before changing anything.'], [[{ id: 'skills-lint-gate' }], 'Run checkTypes before changing anything.']]);
   } finally { checks.close(); }
 });
 
@@ -119,11 +121,13 @@ test('a build that throws closes its database', async () => {
   } finally { DatabaseSync.prototype.close = close; }
 });
 
-test('a row that matched only in its text carries an excerpt around the match; one its name or description explains has none', async () => {
+test('the ranking is ids alone; an excerpt around the match is asked apart, for the rows named, and only one found in its text alone has one', async () => {
   const index = (await buildIndex(library))!;
   try {
-    assert.deepEqual(index.ask('lighthouse'), [{ id: 'skills-web-performance', excerpt: 'Profile with Lighthouse and the network panel. Look for render-blocking scripts…' }]);
-    assert.deepEqual(index.ask('terraform plan')[0], { id: 'skills-terraform-plan' });
+    assert.deepEqual(index.ask('lighthouse'), [{ id: 'skills-web-performance' }]);
+    assert.deepEqual(index.excerpts('lighthouse', ['skills-web-performance', 'skills-terraform-plan']), new Map([['skills-web-performance', 'Profile with Lighthouse and the network panel. Look for render-blocking scripts…']]));
+    assert.deepEqual([index.ask('terraform plan')[0], index.excerpts('terraform plan', ['skills-terraform-plan'])], [{ id: 'skills-terraform-plan' }, new Map()], 'its name explains it');
+    assert.deepEqual(index.excerpts('lighthouse', []), new Map(), 'none asked, none made');
   } finally { index.close(); }
 });
 
@@ -131,14 +135,14 @@ test('of two camelCase words, the excerpt quotes the one that holds every word t
   const text = 'Call getReleaseDate to learn when it ships. Check the licence of every dependency. When all is done, run prepareReleaseNotes and attach the file.';
   const index = (await buildIndex([{ id: 'skills-ship-it', names: ['ship-it'], description: 'Gets a package out.', text }]))!;
   try {
-    assert.deepEqual(index.ask('release notes'), [{ id: 'skills-ship-it', excerpt: '…is done, run prepareReleaseNotes and attach the file.' }]);
+    assert.deepEqual(index.excerpts('release notes', ['skills-ship-it']), new Map([['skills-ship-it', '…is done, run prepareReleaseNotes and attach the file.']]));
   } finally { index.close(); }
 });
 
 test('an excerpt starts a few words before the match, so a row cut at its end still shows the word that matched', async () => {
   const index = (await buildIndex([{ id: 'skills-release-checklist', names: ['release-checklist'], description: 'Steps to take before a release.', text: 'Bump the version, tag it, and write the changelog.' }]))!;
   try {
-    assert.deepEqual(index.ask('changelog'), [{ id: 'skills-release-checklist', excerpt: '…and write the changelog.' }]);
+    assert.deepEqual(index.excerpts('changelog', ['skills-release-checklist']), new Map([['skills-release-checklist', '…and write the changelog.']]));
   } finally { index.close(); }
 });
 
@@ -149,7 +153,7 @@ test('a match in a camelCase word quotes that word and the words around it, not 
   const other = 'Approve each package before it ships. Check the licence of every dependency and keep the record with the release. When all is done, run prepareReleaseNotes and attach the file.';
   const index = (await buildIndex([{ id: 'skills-ship-it', names: ['ship-it'], description: 'Gets a package out.', text }, { id: 'skills-ship-it-too', names: ['ship-it-too'], description: 'Gets a package out.', text: other }]))!;
   try {
-    assert.deepEqual(index.ask('release notes').sort((one, two) => (one.id < two.id ? -1 : 1)), [{ id: 'skills-ship-it', excerpt: '…is done, run prepareReleaseNotes and attach the file.' }, { id: 'skills-ship-it-too', excerpt: '…is done, run prepareReleaseNotes and attach the file.' }]);
+    assert.deepEqual(index.excerpts('release notes', ['skills-ship-it', 'skills-ship-it-too']), new Map([['skills-ship-it', '…is done, run prepareReleaseNotes and attach the file.'], ['skills-ship-it-too', '…is done, run prepareReleaseNotes and attach the file.']]));
   } finally { index.close(); }
 });
 
@@ -215,5 +219,25 @@ test('a newer view supersedes one still gathering; another home closes the old i
   open();
   await other;
   assert.deepEqual(search.ask('home'), { ready: true, home: '/practice', readId: 4, rows: [{ id: 'skills-other', excerpt: 'Another home.' }] });
+  search.close();
+});
+
+test('an answer excerpts what the page draws at once: every row of the Library’s own, and of the catalog’s the first shown of every kind and of each kind; the rest are ranked, for the counts', async () => {
+  const { search } = follower();
+  const item = (kind: 'skill' | 'agent', at: number): SearchDoc => ({ id: `catalog:${kind}-${at}`, names: [`${kind}-${at}`], description: '', text: `Ships the parcel ${at}.`,
+    catalog: { kind, name: `${kind}-${at}`, description: '', plugin: 'devkit', marketName: 'acme-tools', source: 'acme/tools' } });
+  // Thirty skills rank above three agents (their text says parcel twice); the person's own two rows below them all.
+  const docs = [...Array.from({ length: 30 }, (_, at) => ({ ...item('skill', at), text: `Ships the parcel ${at}, parcel and all.` })), ...[0, 1, 2].map(at => item('agent', at)),
+    doc('skills-own', 'One parcel.'), doc('agents-own', 'A parcel too.')];
+  await search.follow('/home', 1, async () => docs);
+  const excerpted = (shown?: number) => { const answer = search.ask('parcel', shown); return answer.ready ? answer.rows.filter(row => row.excerpt).map(row => row.id) : []; };
+  const all = search.ask('parcel');
+  assert.equal(all.ready && all.rows.length, 35, 'every row is ranked');
+  assert.deepEqual(excerpted(), ['skills-own', 'agents-own'], 'none of the catalog’s unless asked');
+  const ten = excerpted(10);
+  assert.deepEqual([ten.filter(id => id.startsWith('catalog:skill')).length, ten.filter(id => id.startsWith('catalog:agent')).length, ten.includes('skills-own')], [10, 3, true], 'the first ten skills, the agents the Agents segment shows');
+  assert.equal(excerpted(20).filter(id => id.startsWith('catalog:skill')).length, 20, 'Show 10 more: ten more');
+  const sent = (shown: number, id: string) => { const answer = search.ask('parcel', shown); return answer.ready ? answer.rows.find(row => row.id === id) : undefined; };
+  assert.deepEqual([sent(10, 'catalog:agent-1')?.item?.name, sent(10, 'catalog:skill-29')], ['agent-1', { id: 'catalog:skill-29', kind: 'skill' }], 'what a row draws, for a row drawn at once; the rest, their id and kind');
   search.close();
 });

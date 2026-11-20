@@ -7,7 +7,7 @@ import { acting, announce, filesSkillAvailable, noToolManaged, noToolManagedSent
 import { button, emptyState, fileBlocks, h, icon, section } from './dom.ts';
 import { toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill } from './types.ts';
-import { brandMark, emptyList, kindGlyph, libraryTable, notAllRead, outcomeBand, resultInHeader, skillsBrowser, wrappingPath } from './matrix.ts';
+import { brandMark, emptyList, kindGlyph, libraryTable, notAllRead, outcomeBand, pluginsListed, resultInHeader, skillsBrowser, wrappingPath } from './matrix.ts';
 import { heldKinds } from './presence.ts';
 import { andList, kindNouns, noToolsSentence, orList, sentence } from './words.ts';
 import { rowCount } from './pluginrows.ts';
@@ -138,12 +138,14 @@ export function libraryPage() {
   const home = state.home;
   if (!home) return notRead();
   const kinds = heldKinds(home);
-  const none = (kind: PageKind) => emptyWithActions(kindEmpty(kind), `${kind}-empty`);
+  // A segment with none of its kind; on All, a Library with nothing of any kind, drawn as a list so its Find searches the listed plugins.
+  const none = (kind: PageKind) => (state.libraryKind === 'all' ? emptyWithActions(libraryEmpty(kinds), 'library-empty') : emptyWithActions(kindEmpty(kind), `${kind}-empty`));
   // A Files view whose skill is gone (the last one deleted, say) is left here, not as a move: places.ts available asks the same.
   if (state.libraryView === 'files' && !filesSkillAvailable(home, state.item)) Object.assign(state, { libraryView: 'list', item: undefined });
   if (noToolManaged()) return nothingHere(libraryEmpty(kinds), 'library-empty');
-  // Nothing of any kind: the empty words under the Library's bands (a kind's stop, its problems, Resume).
-  if (!kinds.some(kind => rowCount(home, kind))) return emptyList(emptyWithActions(libraryEmpty(kinds), 'library-empty'));
+  // Nothing of any kind: the empty words under the Library's bands (a kind's stop, its problems, Resume); with a marketplace listed
+  // whose plugins can be read, the list all the same, whose Find also finds their items (matrix.ts catalogGroup).
+  if (!kinds.some(kind => rowCount(home, kind)) && !pluginsListed()) return emptyList(emptyWithActions(libraryEmpty(kinds), 'library-empty'));
   if (state.libraryView !== 'files') return libraryTable(none);
   return skillsBrowser(key => {
     if (!home) return { where: [], contents: [] };

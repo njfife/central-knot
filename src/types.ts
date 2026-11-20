@@ -206,8 +206,11 @@ export interface DesktopApi {
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
   /** Reads which skills, agents and MCP servers the tools' session history shows were used (usage.ts readUsage), when the page collects usage (app.ts collectUsage); null for another home than the open one. */
   readUsage(home: string): Promise<UsageReading | null>;
-  /** Word search over what the Library holds (search.ts), answered beside main's queue from the index last published. */
-  search(typed: string): Promise<SearchAnswer>;
+  /**
+   * Word search over what the Library holds and the items of listed plugins installed in no managed tool (search.ts), answered
+   * beside main's queue from the index last published; `shown`: how many of those plugins' items the page draws (search.ts drawnAtOnce).
+   */
+  search(typed: string, shown?: number): Promise<SearchAnswer>;
   /** A search index was published: built or tagged again for a newer view of `home` (search.ts searchFollower). */
   onSearchPublished(callback: (home: string, readId: number) => void): void;
   /** A skill edit's SKILL.md before and after, for "See change". */
@@ -860,8 +863,17 @@ export interface UsageReading { at: string; tools: ToolUsage[] }
 
 // ---------- Word search (search.ts) ----------
 
-/** One row a search found: its row id (itemrow.ts rowId), and where it matched only in its text, a fragment of that text around the match. */
-export interface SearchHit { id: string; excerpt?: string }
+/**
+ * An item of a listed plugin installed in no managed tool (searchdocs.ts catalogDocs): what its row in Find's group "In plugins
+ * you don't have" draws, and the plugin's page it opens (`source`: its marketplace, spelled as listed). Never a Library row.
+ */
+export interface CatalogItem { kind: PartKind; name: string; description: string; plugin: string; marketName: string; source: string }
+/**
+ * One row a search found: its id (a Library row's, itemrow.ts rowId; or a catalog item's, `catalog:` and more, which alone has a
+ * `kind`); and for a row the page draws at once (search.ts drawnAtOnce), where it matched only in its text, a fragment of that
+ * text around the match (`excerpt`), and a catalog item's `item`. The others are sent as their id and kind only, for the counts.
+ */
+export interface SearchHit { id: string; excerpt?: string; kind?: PartKind; item?: CatalogItem }
 /**
  * A search's answer: not ready while main holds no index (before the first, and from a switch of home until that home's
  * first); else from the index last published, for the home and the read (HomeView readId) it names, which the page compares
@@ -1094,9 +1106,9 @@ export interface AppPreferences { appearance: Appearance; signIn: SignIn; histor
 /**
  * How much of what the listed marketplaces' plugins hold is read (plugintext.ts): `read` of the `of` plugins that can be read have
  * text read at the pin now listed (one whose pin moved and whose new read hasn't landed is not counted); `elsewhere` of them are
- * kept in other repositories (what the first reading downloads); `reading` while a run goes on.
+ * kept in other repositories (what the first reading downloads); `reading` while a run goes on; `on`: its switch (Settings).
  */
-export interface PluginTextView { read: number; of: number; elsewhere: number; reading: boolean }
+export interface PluginTextView { read: number; of: number; elsewhere: number; reading: boolean; on: boolean }
 /** One line of what automatic plugin updates did: when, which plugin of which marketplace, and the words. `warn`: it needs reading (a step failed, or has a note). */
 export interface PluginUpdateLine { at: number; source: string; plugin: string; text: string; warn?: true; /** A failed update that is tried again by itself. */ again?: true }
 /**

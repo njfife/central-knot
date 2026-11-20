@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { caughtUpNames, holdingBuild, plural, timesApart } from '../src/model.ts';
+import { mock, test } from 'node:test';
+import { atMostEvery, caughtUpNames, holdingBuild, plural, timesApart } from '../src/model.ts';
 
 test('plural words read naturally', () => {
   assert.equal(plural(1, 'copy', 'copies'), '1 copy');
@@ -53,4 +53,24 @@ test('What holds this build, one install at a time: nothing is written before th
   assert.equal(holdingBuild([alpha, acme]), alpha);
   assert.equal(holdingBuild([]), undefined, 'none found');
   assert.equal(holdingBuild(undefined), undefined, 'can’t be told (an Applications folder that can’t be read): not held');
+});
+
+test('At most once every few seconds: the first call runs at once, a burst after it runs once at the end of that time, and a call after a quiet spell runs at once again', () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
+  try {
+    const runs: number[] = [];
+    const call = atMostEvery(5_000, () => runs.push(Date.now()));
+    const at = (ms: number) => mock.timers.tick(ms - Date.now());
+    call();
+    for (const ms of [1_000, 2_000, 4_900]) { at(ms); call(); }
+    at(5_000);
+    assert.deepEqual(runs, [0, 5_000], 'three calls within the five seconds: one run, at their end');
+    at(9_000); call();
+    at(10_000);
+    assert.deepEqual(runs, [0, 5_000, 10_000], 'a call while the last run’s five seconds last waits for their end');
+    at(30_000); call();
+    assert.deepEqual(runs, [0, 5_000, 10_000, 30_000], 'after a quiet spell, at once');
+    at(40_000);
+    assert.deepEqual(runs, [0, 5_000, 10_000, 30_000], 'nothing owed, nothing run');
+  } finally { mock.timers.reset(); }
 });

@@ -47,10 +47,11 @@ export const inTool = (fact: Pick<LibraryFacts, 'copies' | 'plugin' | 'loads'>, 
   fact.copies[tool] !== undefined || !!fact.plugin?.[tool] || !!fact.loads?.[tool];
 
 /**
- * Whether a row of the person's own is this plugin's item already: some tool has that row's item through this plugin (its
- * box says so), or the row's item is linked to this plugin (library.ts A PLUGIN: its row says "from the plugin").
+ * Whether a row of the person's own (of `row`'s kind) is this plugin's item already: some tool has that row's item through this
+ * plugin (its box says so), or the row's item is linked to this plugin (library.ts A PLUGIN: its row says "from the plugin").
+ * Find's catalog documents ask it too (searchdocs.ts catalogDocs).
  */
-const onOwnRow = (fact: LibraryFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
+export const onOwnRow = (fact: LibraryFacts, row: Pick<PluginRow, 'kind' | 'name' | 'plugin' | 'marketName'>) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
   && (Object.values(fact.plugin ?? {}).some(given => given.plugin === row.plugin && given.marketplace === row.marketName)
     || fact.fromSource?.link === pluginLink(row.plugin, row.marketName));
 

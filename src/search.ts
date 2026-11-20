@@ -11,21 +11,23 @@
 //   first; then every word, the last as a prefix (the person is still typing it); if nothing, each word that finds nothing
 //   (the first LOOKED_UP of them) gets the known words nearest it (`nearest`) beside it and every word is asked again; if
 //   still nothing, any of the typed words. Every word is quoted, so nothing typed reaches MATCH as syntax. Ranked by bm25()
-//   with the name weighted most (`WEIGHTS`), ties by row id;
-// - the excerpt of a row found in its text alone (`around`): the file's own words from BEFORE words before the first that
-//   matched, EXCERPT_WORDS in all, "…" where cut; where more of the typed words matched in a camelCase word's parts than in
-//   the text, around that word (`markWord`);
+//   with the name weighted most (`WEIGHTS`), ties by row id: ids alone, as many as are found;
+// - the excerpt of a row found in its text alone, asked apart from the ranking and only for the rows named (`Index.excerpts`):
+//   the file's own words from BEFORE words before the first that matched, EXCERPT_WORDS in all, "…" where cut; where more of
+//   the typed words matched in a camelCase word's parts than in the text, around that word (`markWord`);
 // - the one index main keeps (`searchFollower`): built from a view's documents in slices that give way to main's other work,
 //   superseded by a newer view while it gathers or builds, tagged again (not rebuilt) when the content is the same, closed
-//   when replaced or superseded, when another home opens and at quit.
-// Nothing is written to disk and nothing is fetched. A document's id is opaque here (the page's row id). Not here: what a
-// document is for the Library (searchdocs.ts libraryDocs), the answer's shape (types.ts SearchAnswer), the page's use of it.
+//   when replaced or superseded, when another home opens and at quit; its answer excerpts only the rows the page draws at
+//   once (`drawnAtOnce`), and sends a catalog item's details only for those.
+// Nothing is written to disk and nothing is fetched. A document's id is opaque here (a Library row's id, or a catalog item's,
+// which carries what its row draws: `catalog`). Not here: what a document is (searchdocs.ts libraryDocs, catalogDocs), the
+// answer's shape (types.ts SearchAnswer), the page's use of it.
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import type { SearchAnswer, SearchHit } from './types.ts';
+import type { CatalogItem, PartKind, SearchAnswer, SearchHit } from './types.ts';
 
-/** One thing to find: its id on the page, the names its row shows, its description and its text. */
-export interface SearchDoc { id: string; names: string[]; description: string; text: string }
+/** One thing to find: its id on the page, the names its row shows, its description and its text; a catalog item's, what its row draws. */
+export interface SearchDoc { id: string; names: string[]; description: string; text: string; catalog?: CatalogItem }
 
 /**
  * bm25()'s weight for the names, the description, the text and the text's camelCase parts (at the text's weight): tuned on
@@ -62,8 +64,8 @@ const unaccented = (word: string) => word.normalize('NFD').replace(/\p{M}/gu, ''
 /** One word as MATCH reads it: quoted, so it is only ever a word; a prefix with `*`. */
 const term = (word: string, prefix = false) => `"${word.replaceAll('"', '""')}"${prefix ? '*' : ''}`;
 
-/** A built index: its answer to a typed text, rows in rank order; `close` frees it. */
-export interface Index { ask(typed: string): SearchHit[]; close(): void }
+/** A built index: its answer to a typed text, rows in rank order with no excerpt (`ask`); the excerpts of the rows named that matched in their text alone (`excerpts`); `close` frees it. */
+export interface Index { ask(typed: string): SearchHit[]; excerpts(typed: string, ids: string[]): Map<string, string>; close(): void }
 
 /**
  * Indexes `docs` in memory, giving way to main's other work every SLICE documents; none once `wanted` says a newer view
@@ -92,14 +94,15 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
     for (const word of cut(indexed(`${doc.names.join(' ')} ${doc.description}`))) surface.add(unaccented(word));
   }
   db.exec('COMMIT');
-  // Only the ids are kept of the documents (a row's rowid is its place here, from 1): their texts are in the index.
-  const ids = sorted.map(doc => doc.id);
+  // Only the ids (and a catalog item's row) are kept of the documents (a row's rowid is its place here, from 1): their texts are in the index.
+  const ids = sorted.map(doc => doc.id), rowids = new Map(ids.map((id, at) => [id, at + 1])), catalog = sorted.map(doc => doc.catalog);
   const stems = (db.prepare('SELECT term FROM stems ORDER BY term').all() as { term: string }[]).map(row => row.term);
   const known = [...surface].sort();
-  // The text's snippet and its camelCase parts', each matched word marked; none for a row its names and description explain.
-  const ranked = db.prepare(`SELECT rowid, CASE WHEN rowid IN (SELECT rowid FROM docs WHERE docs MATCH ?) THEN NULL
-    ELSE snippet(docs, 2, char(1), char(2), '…', ${EXCERPT_WORDS}) || char(0) || snippet(docs, 3, char(1), char(2), '', 2) END AS excerpt
-    FROM docs WHERE docs MATCH ? ORDER BY bm25(docs, ${WEIGHTS.join(', ')}), rowid`);
+  const ranked = db.prepare(`SELECT rowid FROM docs WHERE docs MATCH ? ORDER BY bm25(docs, ${WEIGHTS.join(', ')}), rowid`);
+  // The text's snippet and its camelCase parts', each matched word marked, for the rows asked for that their names and description
+  // don't explain. One pass over what the text matches: asked row by row (rowid = ?), a prefix is looked up again for each row.
+  const excerpted = db.prepare(`SELECT rowid, CASE WHEN rowid IN (SELECT value FROM json_each(?)) AND rowid NOT IN (SELECT rowid FROM docs WHERE docs MATCH ?)
+    THEN snippet(docs, 2, char(1), char(2), '…', ${EXCERPT_WORDS}) || char(0) || snippet(docs, 3, char(1), char(2), '', 2) END AS excerpt FROM docs WHERE docs MATCH ?`);
   const textOf = db.prepare('SELECT text FROM docs WHERE rowid = ?');
   /** A row's excerpt: around the first word of its text that matched; where more words matched in camelCase words' parts, around such a word (markWord). */
   const excerptOf = (rowid: number, snippets: string) => {
@@ -107,8 +110,6 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
     return marked(text).length >= marked(parts).length ? around(text) : around(markWord((textOf.get(rowid) as { text: string }).text, parts));
   };
   const any = db.prepare('SELECT 1 FROM docs WHERE docs MATCH ? LIMIT 1');
-  /** The rows `expr` finds, best first; an excerpt for a row its names and description alone don't explain. */
-  const find = (expr: string) => ranked.all(`{names description} : (${expr})`, expr) as { rowid: number; excerpt: string | null }[];
   /** A known word as MATCH asks it: whole, or as a prefix where Porter changes that stem again so that, whole, it finds nothing. */
   const asked = (word: string) => (any.get(term(word)) ? term(word) : term(word, true));
   /** Each typed word as MATCH asks it (`asTyped`), or with its nearest known words beside it where it finds nothing alone. */
@@ -120,18 +121,34 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
     });
   }
 
+  /** What MATCH asks for a typed text: the first of the query's tries that finds a row; none for no words, or when none does. The last one worked out is kept (ask, then excerpts). */
+  let last: { typed: string; expr?: string } | undefined;
+  function matchFor(typed: string) {
+    if (last?.typed === typed) return last.expr;
+    const said = words(typed);
+    // Every word as typed, the last a prefix: the person is still typing it.
+    const asTyped = said.map((word, at) => term(word, at === said.length - 1));
+    const tries = said.length ? [() => asTyped.join(' AND '), () => withNearest(said, asTyped).join(' AND '), () => asTyped.join(' OR ')] : [];
+    last = { typed };
+    for (const expr of tries) if (any.get(last.expr = expr())) return last.expr;
+    return (last.expr = undefined);
+  }
+  /** The rows one of whose names is the typed text whole: first, and with no excerpt. */
+  const exactFor = (typed: string) => byName.get(typed.trim().normalize('NFC').toLowerCase()) ?? [];
+
   return {
     ask(typed) {
-      const said = words(typed);
-      if (!said.length) return [];
-      // Every word as typed, the last a prefix: the person is still typing it.
-      const asTyped = said.map((word, at) => term(word, at === said.length - 1));
-      const tries = [() => asTyped.join(' AND '), () => withNearest(said, asTyped).join(' AND '), () => asTyped.join(' OR ')];
-      let found: { rowid: number; excerpt: string | null }[] = [];
-      for (const expr of tries) if ((found = find(expr())).length) break;
-      const exact = byName.get(typed.trim().normalize('NFC').toLowerCase()) ?? [];
-      const rows = [...exact.map(rowid => ({ rowid, excerpt: null })), ...found.filter(row => !exact.includes(row.rowid))];
-      return rows.map(({ rowid, excerpt }) => ({ id: ids[rowid - 1], ...(excerpt ? { excerpt: excerptOf(rowid, excerpt) } : {}) }));
+      if (!words(typed).length) return [];
+      const expr = matchFor(typed), exact = exactFor(typed);
+      const found = expr ? (ranked.all(expr) as { rowid: number }[]).map(row => row.rowid) : [];
+      return [...exact, ...found.filter(rowid => !exact.includes(rowid))].map(rowid => { const item = catalog[rowid - 1]; return { id: ids[rowid - 1]!, ...(item ? { kind: item.kind, item } : {}) }; });
+    },
+    excerpts(typed, wanted) {
+      const expr = matchFor(typed), exact = exactFor(typed);
+      const asked = wanted.map(id => rowids.get(id)).filter((rowid): rowid is number => rowid !== undefined && !exact.includes(rowid));
+      if (!expr || !asked.length) return new Map();
+      const rows = (excerpted.all(JSON.stringify(asked), `{names description} : (${expr})`, expr) as { rowid: number; excerpt: string | null }[]).filter(row => row.excerpt);
+      return new Map(rows.map(({ rowid, excerpt }) => [ids[rowid - 1]!, excerptOf(rowid, excerpt!)]));
     },
     close: () => db.close(),
   };
@@ -195,10 +212,20 @@ function distance(from: string, to: string, most: number): number {
 export interface Published { home: string; readId: number }
 
 /**
+ * The rows of an answer whose excerpts are asked for: those the page draws as soon as it has the answer (matrix.ts): every row
+ * of the Library's own, and of the catalog's, the first `shown` of every kind together and of each kind alone (a segment of the
+ * kind switch). The others are ranked only, for the counts; "Show 10 more" asks again with ten more (matrix.ts catalogGroup).
+ */
+function drawnAtOnce(rows: SearchHit[], shown: number): Set<string> {
+  const catalog = rows.filter(row => row.kind), first = (kind?: PartKind) => catalog.filter(row => !kind || row.kind === kind).slice(0, shown);
+  return new Set([...rows.filter(row => !row.kind), ...first(), ...first('skill'), ...first('agent'), ...first('mcp')].map(row => row.id));
+}
+
+/**
  * The one index main keeps. `follow` takes each new view of a home: its documents gathered, then built, or (the same content)
  * the index tagged with the new read; a newer `follow` supersedes one still gathering or building; another home closes the
- * old index at once. `published` hears each build or new tag. `ask` answers from the index as published, never waiting on a build.
- * `build`: how an index is made (a test counts them).
+ * old index at once. `published` hears each build or new tag. `ask` answers from the index as published, never waiting on a
+ * build: every row ranked, the excerpts and a catalog item's details of those drawnAtOnce. `build`: how an index is made (a test counts them).
  */
 export function searchFollower(published: (tag: Published) => void, build = buildIndex) {
   let current: (Published & { digest: string; index: Index }) | undefined;
@@ -219,7 +246,13 @@ export function searchFollower(published: (tag: Published) => void, build = buil
       }
       published({ home, readId });
     },
-    ask: (typed: string): SearchAnswer => (current ? { ready: true, home: current.home, readId: current.readId, rows: current.index.ask(typed) } : { ready: false }),
+    ask(typed: string, shown = 0): SearchAnswer {
+      if (!current) return { ready: false };
+      const rows = current.index.ask(typed), drawn = drawnAtOnce(rows, shown), excerpts = current.index.excerpts(typed, [...drawn]);
+      // A catalog row not drawn at once goes as its id and kind: the counts need no more (3,332 rows for "a": 0.3 MB, not 2.2).
+      const sent = (row: SearchHit): SearchHit => (!drawn.has(row.id) ? { id: row.id, ...(row.kind ? { kind: row.kind } : {}) } : excerpts.has(row.id) ? { ...row, excerpt: excerpts.get(row.id) } : row);
+      return { ready: true, home: current.home, readId: current.readId, rows: rows.map(sent) };
+    },
     close() { turn++; current?.index.close(); current = undefined; },
   };
 }

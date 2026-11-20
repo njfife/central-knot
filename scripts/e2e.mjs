@@ -6715,7 +6715,8 @@ esac
  * What plugins hold, read in the background (plugintext.ts), on screen, over a marketplace Central Knot lists whose one plugin kept
  * elsewhere is on GitHub. First Git's url.insteadOf sends GitHub to a port where nothing answers: the four kept in the marketplace
  * are read, Settings says the fifth couldn't be and is tried again. Then, launched again, to a local repository standing in for
- * GitHub (no network either): all five are read; turned off, what was read stays and the row says so.
+ * GitHub (no network either): all five are read, and the Library, holding nothing, offers Find, which finds the fifth's skill;
+ * turned off, what was read stays and the row says so. Then Find's group "In plugins you don't have" (catalogFindChecks).
  */
 async function pluginTextFlow() {
   const home = join(scratch, 'text-home'), data = join(scratch, 'text-data'), real = join(scratch, 'text-real'), market = join(scratch, 'text-market'), hosts = join(scratch, 'text-hosts');
@@ -6765,6 +6766,16 @@ async function pluginTextFlow() {
   a = await launch(data, [], real, { CK_PLUGIN_TEXT: 'on', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
   await toSettings();
   check('launched again, the fifth is read too', await saying(/^Read 5 of 5 plugins\.$/) && kept().some(entry => entry.plugin === 'spark' && entry.items.some(item => item.name === 'spark-app')), [await said(), kept().map(entry => entry.plugin)]);
+  // This home has nothing of its own: with a marketplace listed, the Library still offers Find, which finds what is read.
+  const until = async (test, ms) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+  await a.click('#nav-library');
+  check('a Library with nothing yet offers Find, and finds spark-app in the plugin not installed, and no line once all are read', await until(async () => {
+    await a.run(`(() => { const i = document.querySelector('#find'); if (!i) return; i.value = 'spark-app'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    return (await a.all('.ov-catalog-row .ov-name-text', 'e.textContent')).join() === 'spark-app' && !(await a.exists('#catalog-coverage'));
+  }, 20000), [await a.exists('#find'), await a.all('.ov-catalog-row', 'e.textContent')]);
+  if (shots) { await sizeTo(a, 1316, 819); await a.shot('catalog-empty-library-1316-light'); await fullSize(a); }
+  await a.click('#nav-settings');
   await pictures('read');
   await a.click('#plugin-text-on');
   for (let tries = 0; tries < 50 && await switched() !== 'false'; tries++) await wait(100);
@@ -6784,6 +6795,242 @@ async function pluginTextFlow() {
   await toSettings();
   check('while the fifth is read, the row says how far it has got', await saying(/^Reading: 4 of 5 plugins\.$/), await said());
   await pictures('reading', [[860, 600]]);
+  await a.quit();
+  silent.close();
+  await catalogFindChecks();
+}
+
+/**
+ * Find's group "In plugins you don't have" (matrix.ts catalogGroup), the second part of pluginTextFlow: a made-up home (this
+ * computer's, with Claude Code and Copilot CLI) listing two folder marketplaces, catalog-market (Copilot CLI by a link to its
+ * folder: one marketplace) and catalog-fork, whose plugins are kept in repositories on the local Git fixture: devkit (the skill
+ * changelog-writer, named unlike its plugin, and the agent triager; in both marketplaces), parcels (25 skills and 3 agents on
+ * "the rounds", whose text says "waybill") and slowpoke, whose host refuses, so not every plugin is read. The manager's case by
+ * the exact name, half of it and a letter wrong, each row opening its plugin's page and Back; only catalog hits, twenty revealed,
+ * the kind switch, each chip, a link and Back at 860×600; Turn these off beside the group; a tool whose record of its plugins
+ * can't be read, then left out; parcels' pin moved to a host that never answers; devkit installed from its page while that
+ * reading goes on, and Back; reading switched off; another home. Linked items (pluginrows.ts onOwnRow) are tests/searchdocs.test.ts's.
+ */
+async function catalogFindChecks() {
+  const H = homeWith('catalog-home'), hosts = join(scratch, 'catalog-hosts'), market = join(scratch, 'catalog-market'), fork = join(scratch, 'catalog-fork'), alias = join(scratch, 'catalog-alias');
+  const doc = (name, description, body) => `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`;
+  const put = (root, files) => { for (const [path, body] of Object.entries(files)) { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), body); } };
+  const repo = (name, files) => {
+    const at = join(hosts, `github.com/acme/${name}.git`);
+    put(at, files);
+    for (const args of [['init', '--quiet', '--initial-branch=main'], ['add', '-A'], ['-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', 'commit', '--quiet', '-m', name], ['config', 'uploadpack.allowFilter', 'true']]) spawnSync('git', ['-C', at, ...args]);
+    return at;
+  };
+  const devkit = repo('devkit', { 'skills/changelog-writer/SKILL.md': doc('changelog-writer', 'Drafts release entries from merged work.', 'Group the merged pull requests by area.'), 'agents/triager.md': doc('triager', 'Sorts new issues.', 'You read each new issue and label it.') });
+  const two = at => String(at).padStart(2, '0');
+  repo('parcels', Object.fromEntries([...Array.from({ length: 25 }, (_, at) => [`skills/courier-${two(at + 1)}/SKILL.md`, doc(`courier-${two(at + 1)}`, 'Carries a parcel on the rounds.', `Print the waybill for parcel ${at + 1}.`)]),
+    ...[1, 2, 3].map(at => [`agents/dispatcher-${at}.md`, doc(`dispatcher-${at}`, 'Plans the rounds.', 'Check each waybill first.')])]));
+  const catalog = (root, name, plugins) => put(root, { '.claude-plugin/marketplace.json': JSON.stringify({ name, owner: { name: 'Acme' }, plugins }, null, 2) });
+  const parcelsEntry = { name: 'parcels', source: { source: 'github', repo: 'acme/parcels' }, description: 'Parcel rounds.' };
+  catalog(market, 'catalog-market', [{ name: 'devkit', source: { source: 'github', repo: 'acme/devkit' }, description: 'Tools for a release.' }, parcelsEntry,
+    { name: 'slowpoke', source: { source: 'url', url: 'https://slow.example.test/acme/slowpoke.git' }, description: 'Never answers.' }]);
+  catalog(fork, 'catalog-fork', [{ name: 'devkit', source: { source: 'github', repo: 'acme/devkit' }, description: 'The same tools, from a fork.' }]);
+  symlinkSync(market, alias);
+  put(H.home, {
+    '.claude/plugins/known_marketplaces.json': JSON.stringify({ 'catalog-market': { source: { source: 'directory', path: market } }, 'catalog-fork': { source: { source: 'directory', path: fork } } }),
+    '.copilot/settings.json': JSON.stringify({ extraKnownMarketplaces: { 'catalog-market': { source: { source: 'directory', path: alias } } } }),
+    // Claude Code keeps sessions, so it can tell: notes used 2 days ago (the No use seen chip needs a tool that can tell).
+    '.claude/projects/-work/s1.jsonl': `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'notes' } }] }, timestamp: new Date(Date.now() - 2 * DAY).toISOString() })}\n`,
+  });
+  skill(H.claude, 'notes');
+  skill(H.claude, 'spare', doc('spare', 'Keeps the waybill numbers.', 'One line per waybill.'));
+  skill(H.claude, 'clash', text('clash', 'One way.'));
+  skill(H.copilot, 'clash', text('clash', 'Another way.'));
+  writeClaudeInstall(H.home, 'local-market', 'kit', '1.0.0', { 'skills/zulu/SKILL.md': text('zulu', 'Plugin skill.') });
+  // Claude Code, standing in: installs devkit from catalog-market as Claude Code would, from its repository's files.
+  const devkitCopy = join(H.home, '.claude/plugins/cache/catalog-market/devkit/1.0.0');
+  writeFileSync(join(H.home, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)" && exit 0
+echo "$*" >> "$HOME/claude-calls.txt"
+case "$*" in
+  "plugin install devkit@catalog-market --scope user") mkdir -p '${devkitCopy}' && cp -R '${devkit}/skills' '${devkit}/agents' '${devkitCopy}/' && "${process.execPath}" -e "const fs = require('fs'), file = '${join(H.home, '.claude/plugins/installed_plugins.json')}', now = JSON.parse(fs.readFileSync(file, 'utf8')); now.plugins['devkit@catalog-market'] = [{ scope: 'user', installPath: '${devkitCopy}', version: '1.0.0' }]; fs.writeFileSync(file, JSON.stringify(now))" ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  writeFileSync(join(H.data, 'app-settings.json'), JSON.stringify({ home: { mode: 'actual' }, closeExplained: true }));
+  // First setup's Yes takes the skills in; spare's version is then set 40 days back, so No use seen holds it.
+  let a = await launch(H.data, [], H.home);
+  const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+  const skillsRecord = join(H.home, '.central-knot/skills.json');
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  check('first setup takes spare and notes in', await until(() => ['spare', 'notes'].every(key => !!jsonOrNothing(skillsRecord)?.items?.[key])));
+  await a.quit();
+  const kept = JSON.parse(readFileSync(skillsRecord, 'utf8'));
+  kept.items.spare.versions = kept.items.spare.versions.map(version => ({ ...version, at: new Date(Date.now() - 40 * DAY).toISOString() }));
+  writeFileSync(skillsRecord, JSON.stringify(kept, null, 2));
+
+  const silent = await silentServer();
+  // GitHub, the local repositories; slowpoke's host, a port that refuses at once; the host parcels' pin moves to, one that never answers.
+  const git = { GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/',
+    GIT_CONFIG_KEY_1: 'url.http://127.0.0.1:9/.insteadOf', GIT_CONFIG_VALUE_1: 'https://slow.example.test/', GIT_CONFIG_KEY_2: silent.instead.GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_2: 'https://hang.example.test/' };
+  a = await launch(H.data, ['--practice-copy'], H.home, { CK_PLUGIN_TEXT: 'on', ...git });
+  await a.run(`(window.ckPublished = 0, window.centralKnot.onSearchPublished(() => window.ckPublished++), true)`);
+  const done = async () => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const findText = async typed => { await a.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle(); };
+  /** The group's rows as drawn: each one's name and its plugin and marketplace. */
+  const group = () => a.all('.ov-catalog-row', `[e.querySelector('.ov-name-text').textContent, e.querySelector('.row-tag').textContent]`);
+  const groupCount = () => a.text('[data-section="catalog"] .ov-section-count');
+  const own = () => a.all('.ov-row[data-key]:not(.ov-catalog-row)', 'e.dataset.key');
+  const counts = () => a.run(`Object.fromEntries([...document.querySelectorAll('.kind-seg')].map(seg => [seg.id.replace('library-kind-', ''), seg.querySelector('.kind-seg-count').textContent]))`);
+  const coverage = () => a.text('#catalog-coverage');
+  const follow = async at => { await a.run(`document.querySelectorAll('.ov-catalog-row .ov-name-text')[${at}].click()`); await a.settle(); };
+  const opened = async () => { await until(() => a.exists('.crumb-here')); return [await a.text('#plugin-back'), await a.text('.crumb-here')]; };
+  const mouseBack = async () => {
+    for (const [type, buttons] of [['mousePressed', 8], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button: 'back', buttons, clickCount: 1 });
+    await a.settle();
+  };
+  /** With --shots: the page as it is at 860×600, the owner's own window 1316×819 (sidebar open, then as a rail) and 1728×1080, dark and light. */
+  const pictures = async (name, sizes = [[860, 600], [1316, 819, false], [1316, 819, true], [1728, 1080]]) => {
+    if (!shots) return;
+    for (const [width, height, rail] of sizes) for (const look of ['dark', 'light']) {
+      await sizeTo(a, width, height);
+      if (rail !== undefined && await a.run(`document.body.classList.contains('rail')`) !== rail) await a.click('#sidebar-toggle');
+      await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+      await wait(300);
+      await a.shot(`catalog-${name}-${width}${rail === undefined ? '' : rail ? '-rail' : '-open'}-${look}`);
+    }
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+    await fullSize(a);
+  };
+  await openKind(a, 'all');
+  // The index takes the text in at most once every five seconds while it changes (main.ts textChanged), and once at the end.
+  check('the listed plugins are read but slowpoke, whose host refuses, and the index has taken their text in: the group, and its line saying so',
+    await until(async () => { await findText('waybill'); return (await coverage()) === 'Not all plugins have been read yet: 3 of 4.' && (await groupCount()) === '28'; }, 30000), [await coverage(), await groupCount()]);
+  const published = await a.run('window.ckPublished');
+  await pictures('own-row-and-group');
+  await findText('zzqx');
+  check('nothing found anywhere: Nothing matches, and under it the line on the reading', (await a.text('.empty-title')) === 'Nothing matches' && !!(await coverage()), [await a.text('.empty-title'), await coverage()]);
+  await pictures('nothing-matches', [[860, 600], [1316, 819, false]]);
+
+  // The manager's case: a skill she remembers, in a plugin whose name says nothing of it.
+  await findText('changelog-writer');
+  same('by its exact name: no row of the Library’s, and one row in the group from each marketplace offering devkit, catalog-market once though both tools list it',
+    [await own(), await groupCount(), (await group()).sort()], [[], '2', [['changelog-writer', 'devkit · catalog-fork'], ['changelog-writer', 'devkit · catalog-market']]]);
+  for (const typed of ['changelog-writer', 'changelo', 'chnagelog writer']) for (const at of [0, 1]) {
+    await findText(typed);
+    const rows = await group(), [name, from] = rows[at] ?? [];
+    await follow(at);
+    same(`"${typed}": its rows are changelog-writer’s two, and the link of each opens devkit’s page in its own marketplace`, [rows.map(([each]) => each), await opened()], [['changelog-writer', 'changelog-writer'], [from?.split(' · ')[1], 'devkit']]);
+    await mouseBack();
+    same(`"${typed}": the mouse’s Back returns to the Library with Find’s text and the same rows`, [await a.run(`document.querySelector('#find')?.value`), await group()], [typed, rows]);
+  }
+
+  // Only catalog hits: "rounds" is in no row of the Library's.
+  await findText('rounds');
+  await pictures('only-catalog');
+  await sizeTo(a, 860, 600);
+  same('only catalog hits: no Results and no Nothing matches, the group: 28, ten rows, Show 10 more; the kind switch counts the Library’s rows alone',
+    [await own(), await a.exists('[data-section="results"]'), await a.text('.empty-title'), await groupCount(), (await group()).length, await a.text('#catalog-more'), await counts()],
+    [[], false, null, '28', 10, 'Show 10 more', { all: '0', skills: '0', mcp: '0', agents: '0' }]);
+  await a.click('#catalog-more');
+  await until(async () => (await group()).length === 20);
+  same('Show 10 more: twenty, then Show 8 more', [(await group()).length, await a.text('#catalog-more')], [20, 'Show 8 more']);
+  if (shots) { await a.run(`document.querySelector('#catalog-more').scrollIntoView({ block: 'end' })`); await a.shot('catalog-twenty-860-light'); await sizeTo(a, 860, 600); }
+  await a.click('#library-kind-agents');
+  same('the kind switch on Agents: the group’s three agents, its count 3, no Show more', [(await group()).map(([name]) => name), await groupCount(), await a.exists('#catalog-more')], [['dispatcher-1', 'dispatcher-2', 'dispatcher-3'], '3', false]);
+  await a.click('#library-kind-all');
+  const chips = await a.all('.chips .chip', 'e.id');
+  same('the chips offered: Copies differ, From plugins, No use seen', chips, ['chip-attention', 'chip-plugins', 'chip-unused']);
+  for (const chip of chips) {
+    await a.click(`#${chip}`);
+    same(`${chip}, only catalog hits: it counts none, and the group shows only under From plugins`, [await a.text(`#${chip} .chip-count`), await groupCount(), await a.exists('#turn-unused-off')], { 'chip-attention': ['0', null, false], 'chip-plugins': ['0', '28', false], 'chip-unused': ['0', null, false] }[chip]);
+    await a.click(`#${chip}`);
+  }
+  // "waybill" also finds the person's own spare, which No use seen holds: Turn these off turns it alone off.
+  await findText('waybill');
+  same('a new text: the Library’s spare, and the group’s first ten again', [await own(), (await group()).length], [[rowPart('', 'skills', 'spare')], 10]);
+  for (const chip of chips) {
+    await a.click(`#${chip}`);
+    const [count, drawn] = [await a.text(`#${chip} .chip-count`), await groupCount()];
+    same(`${chip}, with spare: its count is the Library’s rows’ alone, and the group shows only under From plugins`, [count, drawn], { 'chip-attention': ['0', null], 'chip-plugins': ['0', '28'], 'chip-unused': ['1', null] }[chip]);
+    if (chip === 'chip-unused') {
+      const before = readFileSync(join(H.home, '.claude/plugins/installed_plugins.json'), 'utf8');
+      check('No use seen’s band counts spare alone, with Turn these off', (await a.text('#unused-band .usage-lead') ?? '').startsWith('1 skill with no use seen') && await a.exists('#turn-unused-off'), await a.text('#unused-band'));
+      await a.click('#turn-unused-off');
+      await done();
+      await until(() => a.exists('#outcome-undo'));
+      same('Turn these off turned spare off, and installed or changed no plugin', [jsonOrNothing(skillsRecord)?.items?.spare?.on, readFileSync(join(H.home, '.claude/plugins/installed_plugins.json'), 'utf8') === before], [false, true]);
+      await a.click('#outcome-undo');
+      await done();
+    }
+    // Turn these off leaves the chip at 0, gone, and the list on All.
+    if (await a.run(`document.querySelector('#${chip}')?.getAttribute('aria-pressed') === 'true'`)) await a.click(`#${chip}`);
+  }
+  // Twenty revealed, a row lower down followed and Back: the same twenty (the scroll place on Back is places.ts's, for every page).
+  await findText('rounds');
+  await a.click('#catalog-more');
+  await until(async () => (await group()).length === 20);
+  const twenty = await group();
+  await a.run(`document.querySelectorAll('.ov-catalog-row')[15].scrollIntoView({ block: 'center' })`);
+  await follow(15);
+  same('a row lower down opens its plugin’s page', await opened(), ['catalog-market', 'parcels']);
+  await mouseBack();
+  same('Back at 860×600: Find’s text, and the same twenty rows revealed', [await a.run(`document.querySelector('#find').value`), await group()], ['rounds', twenty]);
+  same('nothing cut off at 860×600 with the group', await a.run(CUT_OFF), []);
+  await fullSize(a);
+
+  // A tool whose record of its plugins can't be read: nothing is claimed absent; that tool left out, the hits are back.
+  const copilotConfig = join(H.home, '.copilot/config.json');
+  writeFileSync(copilotConfig, '{ broken');
+  await a.click('#header-refresh');
+  await done();
+  await findText('changelog-writer');
+  check('Copilot CLI’s record of its plugins unreadable: no hit claimed, the line still there', await until(async () => !(await group()).length) && !!(await coverage()), [await group(), await coverage()]);
+  await a.click('#nav-harnesses');
+  await a.click('#manage-copilot-cli');
+  await done();
+  await a.click('#nav-library');
+  await findText('');
+  await findText('changelog-writer');
+  check('Copilot CLI left out: the hits are back', await until(async () => (await group()).length === 2), await group());
+
+  // parcels' pin moved to a host that never answers: while it is read, its old text is still found, and it no longer counts as read.
+  catalog(market, 'catalog-market', [{ name: 'devkit', source: { source: 'github', repo: 'acme/devkit' } }, { ...parcelsEntry, source: { source: 'url', url: 'https://hang.example.test/acme/parcels.git', sha: '0123456789abcdef0123456789abcdef01234567' } },
+    { name: 'slowpoke', source: { source: 'url', url: 'https://slow.example.test/acme/slowpoke.git' } }]);
+  await a.click('#nav-plugins');
+  await a.click('#header-refresh');
+  await done();
+  await a.click('#nav-library');
+  await findText('waybill');
+  check('a pin moved: the old text still found, the line counting parcels as not read', await until(async () => (await coverage()) === 'Not all plugins have been read yet: 2 of 4.' && (await groupCount()) === '28'), [await coverage(), await groupCount()]);
+  await findText('changelog-writer');
+  // devkit installed from catalog-market's page while reading goes on (parcels at its new pin), then Back: each of its items once, as a Library row.
+  await follow((await group()).findIndex(([, from]) => from === 'devkit · catalog-market'));
+  same('catalog-market’s devkit opened', await opened(), ['catalog-market', 'devkit']);
+  const devkitSwitch = await a.run(`[...document.querySelectorAll('[id^="pswitch-page-"]')].find(e => e.id.endsWith('-devkit'))?.id`);
+  await a.click(`#${devkitSwitch}`);
+  await done();
+  check('devkit is installed in Claude Code', await until(() => !!jsonOrNothing(join(H.home, '.claude/plugins/installed_plugins.json'))?.plugins?.['devkit@catalog-market']), readNow(join(H.home, 'claude-calls.txt')));
+  await mouseBack();
+  const installedRow = rowPart('', 'skills', 'devkit@catalog-market/changelog-writer');
+  check('Back: changelog-writer once, as a Library row, and catalog-fork’s still in the group', await until(async () => JSON.stringify([await own(), await group()]) === JSON.stringify([[installedRow], [['changelog-writer', 'devkit · catalog-fork']]])), [await own(), await group()]);
+  await findText('triager');
+  same('its agent too, while reading still goes on', [await own(), await group(), await coverage(), await a.run('window.centralKnot.pluginText().then(view => view.reading)')], [[rowPart('', 'agents', 'devkit@catalog-market/triager')], [['triager', 'devkit · catalog-fork']], 'Not all plugins have been read yet: 2 of 4.', true]);
+
+  // Reading switched off: what was read is still found, and the line says it is off.
+  await a.click('#catalog-settings');
+  await a.click('#plugin-text-on');
+  await a.click('#nav-library');
+  await findText('waybill');
+  check('reading switched off: the group as it was, and the line says so', await until(async () => (await coverage()) === 'Reading what plugins hold is off: 2 of 4 read.' && (await groupCount()) === '28'), [await coverage(), await groupCount()]);
+  if (shots) await a.run(`document.querySelector('#catalog-coverage').scrollIntoView({ block: 'end' })`);
+  await pictures('reading-off', [[860, 600], [1316, 819, false]]);
+  // Another home (the Practice copy) lists none of these marketplaces: nothing of this home's.
+  await a.click('#home-fixture');
+  check('the Practice copy opens', await until(async () => (await a.text('#home-label')) === 'Practice copy'));
+  await a.settle();
+  await findText('waybill');
+  same('another home: none of the first home’s plugins, and no line', await until(async () => !(await group()).length && !(await coverage())) && [await group(), await coverage()], [[], null]);
+  await a.click('#home-actual');
+  await until(async () => (await a.text('#home-label')) !== 'Practice copy');
+  console.log(`catalog group: ${published} publications of the index heard while the fixture's marketplaces were read`);
+  same('no page errors, In plugins you don’t have', a.pageErrors, []);
   await a.quit();
   silent.close();
 }

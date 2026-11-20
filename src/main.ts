@@ -38,8 +38,8 @@ import { clearDraftFolders, draftSources, draftTools, promptNow, writeDraft } fr
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { addSource, checkDue, checkSource, previewSource, removeSource, rowClick, sourcesView } from './sources.ts';
-import { searchFollower } from './search.ts';
-import { libraryDocs } from './searchdocs.ts';
+import { searchFollower, type SearchDoc } from './search.ts';
+import { catalogDocs, libraryDocs } from './searchdocs.ts';
 import { readUsage } from './usage.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
@@ -48,7 +48,7 @@ import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { homePass, passTells, syncOnceReport, type HomePass } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
-import { defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
+import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
 import { machineNames, writesRealHome } from './machine.ts';
@@ -154,6 +154,25 @@ async function read(): Promise<Snapshot[]> {
 let handoff = { id: 0, home: '', snapshots: [] as Snapshot[] };
 /** Word search's one index, which follows each view handed over (syncAndView); the page hears each one published. */
 const search = searchFollower(tag => send('search:published', tag.home, tag.readId));
+/** The view word search followed last, with its own documents (searchdocs.ts libraryDocs), gathered once for it. */
+let followed: { view: HomeView; own: Promise<SearchDoc[]> } | undefined;
+/**
+ * Word search's index follows a view (`next`, each view handed over), or the last one again: its own documents, and the items
+ * of the listed plugins installed in no managed tool (searchdocs.ts catalogDocs), worked out again at each, from the plugin text
+ * as it is now. Beside the queue: the view never waits for it.
+ */
+function followSearch(next = followed) {
+  if (!next) return;
+  followed = next;
+  const { view, own } = next;
+  const listed = async () => (await carriedMarket?.listings(view.readId).catch(() => undefined))?.sources ?? [];
+  void search.follow(view.home, view.readId, async () => [...await own, ...catalogDocs(view, pluginText?.texts() ?? [], await listed())]).catch(error => logFailure('search index', error));
+}
+/**
+ * The plugin text changed (plugintext.ts pushes its count after each fetch, and as its switch turns): word search takes it in
+ * from the last view, at once, then at most once every five seconds while it keeps changing, and once at the end.
+ */
+const textChanged = atMostEvery(5_000, () => followSearch());
 
 function context(): ShareContext {
   return {
@@ -680,7 +699,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
   handoff = { id: readId, home: current!.home, snapshots };
   // Word search's index follows the view, gathered from it and built beside the queue: the view never waits for it.
-  void search.follow(made.home, readId, () => libraryDocs(shared, made)).catch(error => logFailure('search index', error));
+  followSearch({ view: made, own: libraryDocs(shared, made) });
   toolsChangedHere(snapshots);
   addCarriedSoon(managed);
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
@@ -1377,7 +1396,7 @@ app.whenReady().then(async () => {
     if (on) pluginText?.restart(); else pluginText?.stop();
     return preferences();
   });
-  handleNow('plugin-text:view', async () => pluginText?.view() ?? { read: 0, of: 0, elsewhere: 0, reading: false });
+  handleNow('plugin-text:view', async () => pluginText?.view() ?? { read: 0, of: 0, elsewhere: 0, reading: false, on: pluginTextOn() });
   // Updates (PLT-02): checks run outside the queue; the restart waits in it, so it never lands in the middle of a write.
   // A custom build never asks for, or takes, the standard app's releases (ORG-07): it has no updater until it has a location of its own.
   updater = smoke || custom ? undefined : startUpdater({
@@ -1433,7 +1452,7 @@ app.whenReady().then(async () => {
   // What marketplace plugins hold, read by itself in the background from when a home opens (plugintext.ts). Test-only, read only
   // when set: CK_PLUGIN_TEXT=never for none (the end-to-end run's other flows, which a fetch from GitHub would walk into).
   if (!smoke && process.env.CK_PLUGIN_TEXT !== 'never') {
-    pluginText = pluginTextJob({ dataDir: join(app.getPath('userData'), 'plugins'), on: pluginTextOn, log, listings: () => markets.listings(handoff.id), changed: view => send('plugin-text:changed', view) });
+    pluginText = pluginTextJob({ dataDir: join(app.getPath('userData'), 'plugins'), on: pluginTextOn, log, listings: () => markets.listings(handoff.id), changed: view => { send('plugin-text:changed', view); textChanged(); } });
     if (current) pluginText.restart();
   }
   // Sources read again by themselves once a day, on the plugin updates' schedule turn below (sources.ts checkDue holds the
@@ -1512,7 +1531,7 @@ app.whenReady().then(async () => {
   handleNow('usage:read', async home => (current && home === current.home
     ? readUsage({ home: current.home, overrides: context().overrides, dataHome: current.mode === 'actual' ? process.env.XDG_DATA_HOME : undefined }) : null));
   // Word search: answered at once from the index last published (search.ts), which reads no file and waits for no pass.
-  handleNow('search:ask', async typed => search.ask(typeof typed === 'string' ? typed : ''));
+  handleNow('search:ask', async (typed, shown) => search.ask(typeof typed === 'string' ? typed : '', Number.isInteger(shown) ? Number(shown) : 0));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined), true) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
