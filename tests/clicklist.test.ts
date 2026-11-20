@@ -56,7 +56,7 @@ const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, last
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
-const { backgroundProblems, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { backgroundProblems, libraryTable, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
 const { newItem } = await import('../src/library.ts');
 const { keptBack } = await import('../src/clickplan.ts');
@@ -304,21 +304,21 @@ function onLibrary() {
   Object.assign(app, { page: 'library', harness: undefined });
 }
 
+/** The Library, on a home of one skill the table can draw (libraryTable): the next read brings `change`, every read after it the home as it was. */
 function backgroundWhileReading(t: TestContext, change: 'skills' | 'agents' | 'caught up' = 'skills') {
   onLibrary();
   const tools = ['copilot-cli'];
-  const kind = { tools, items: [], notices: [] };
-  const home = { home: '/home', label: 'Practice', sync: { managed: tools, caughtUp: [], gate: { state: 'open' } },
-    skills: { ...kind, items: [{ key: 'notes' }], library: { bar: { key: 'bar', name: 'bar', deleted: true, except: [] } } }, mcp: kind, agents: kind } as unknown as HomeView;
+  const kind = { tools, items: [], notices: [], gate: { state: 'open' }, unread: [], problems: [] };
+  const home = { home: '/home', label: 'Practice', sync: { managed: tools, present: tools, caughtUp: [], gate: { state: 'open' }, access: { allowed: true } },
+    skills: { ...kind, items: [{ key: 'notes', name: 'notes', description: '', copies: {}, except: [], on: true }], library: { bar: { key: 'bar', name: 'bar', deleted: true, except: [] } } }, mcp: kind, agents: kind } as unknown as HomeView;
   app.home = home;
   const notice: ItemNotice = { kind: 'deleted-by-hand', key: 'notes', item: 'notes', history: 'deletion',
     winner: 'copilot-cli', losers: [], orderProved: true };
-  const reads = t.mock.method(api, 'refresh');
+  const reads = t.mock.method(api, 'refresh', async () => home);
   const background: HomeView = change === 'caught up'
     ? { ...home, sync: { ...home.sync, caughtUp: [{ item: 'bar', harness: 'copilot-cli', outcome: 'written', message: '', of: 'skills' }] } }
     : { ...home, [change]: { ...home[change], notices: [notice] } };
   reads.mock.mockImplementationOnce(async () => background);
-  reads.mock.mockImplementationOnce(async () => home, 1);
   return home;
 }
 
@@ -332,6 +332,32 @@ test('Refresh draws the notice a background read brought while the page was busy
     assert.deepEqual(draws[0], ['deletion']);
     assert.doesNotMatch(app.said.text, /Nothing changed/);
   } finally { setRenderer(() => {}); }
+});
+
+test('Refresh beside a notice an earlier read drew says what it read and stops there; once the notice is dismissed, it says "Nothing changed"', async t => {
+  backgroundWhileReading(t);
+  main.syncChanged();
+  await settled();
+  const noticeDrawn = () => textOf(libraryTable()).includes('notes was deleted in Copilot CLI');
+  assert.equal(noticeDrawn(), true);
+  await readAgain();
+  assert.deepEqual([app.said.text, noticeDrawn()], ['Read 1 skill, 0 MCP servers and 0 agents from Practice.', true]);
+  // Dismissed by its ×, or by its Undo, which History offers too, where the list isn't drawn again before the next Refresh.
+  // (The tests after this one bring the same notice again.)
+  app.dismissed.add('deletion');
+  t.after(() => app.dismissed.delete('deletion'));
+  await readAgain();
+  assert.deepEqual([app.said.text, noticeDrawn()], ['Read 1 skill, 0 MCP servers and 0 agents from Practice. Nothing changed.', false]);
+});
+
+test('Another home opened from beside the last home’s notice says "Nothing changed": that notice goes with its home', async t => {
+  const home = backgroundWhileReading(t);
+  main.syncChanged();
+  await settled();
+  assert.match(textOf(libraryTable()), /notes was deleted in Copilot CLI/);
+  t.mock.method(api, 'selectHome', async () => ({ ...home, home: '/other', label: 'Other' }));
+  await loadHome('custom');
+  assert.match(app.said.text, /^Opened Other\. Read 1 skill, 0 MCP servers and 0 agents\. Nothing changed\./);
 });
 
 test('A deletion notice held during Delete takes the finished result’s place and points its Undo to History', async t => {

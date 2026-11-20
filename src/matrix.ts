@@ -1201,6 +1201,8 @@ function toldNotices(kind: PageKind): Told[] {
 
 /** A kind's automatic changes not yet painted on any page (a painted notice is seen: syncNotice), those dismissed aside. */
 export const unseenNotices = (kind: PageKind) => (state.home?.[kind].notices ?? []).filter(notice => !state.dismissed.has(notice.history) && !state.seenNotices.has(notice.history));
+/** Whether a notice a list drew for the open home is still kept there, not dismissed or undone (app.ts readFound: no "Nothing changed" beside it). */
+export const noticesKept = () => tableHomes.notices === state.home?.home && [...keptNotices.values()].some(kept => [...kept.keys()].some(key => !state.dismissed.has(key)));
 /** The notices a table shows: each of its kinds', newest first, those dismissed aside. */
 function visibleNotices(t: Table) {
   if (!state.home) return [];

@@ -36,7 +36,7 @@ import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
-import { findInHome, holdOrder, kindsShown, resultInHeader, noticeLinesOnPage, rowByKey } from './matrix.ts';
+import { findInHome, holdOrder, kindsShown, resultInHeader, noticeLinesOnPage, noticesKept, rowByKey } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -811,10 +811,11 @@ function readFound(view: HomeView, from?: string): string {
   const found = { skills: view.skills.items.length + pluginItemCount(view, 'skills'), mcp: view.mcp.items.length + pluginItemCount(view, 'mcp'), agents: view.agents.items.length + pluginItemCount(view, 'agents') };
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   // A catch-up that copied something has its own Caught up band, and what sync did on its own (an edit spread, a deletion)
-  // its notice: either is a change, so neither read says "Nothing changed".
+  // its notice: either is a change, so neither read says "Nothing changed". Nor does a read while a list still keeps an
+  // earlier read's notice (matrix.ts noticesKept): side by side, the two would read as a contradiction.
   const caught = caughtUpNames(view).items.length > 0;
   const told = [view.skills.notices, view.mcp.notices, view.agents.notices].some(notices => notices.length > 0);
-  return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${caught || told ? '' : ' Nothing changed.'}`;
+  return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${caught || told || noticesKept() ? '' : ' Nothing changed.'}`;
 }
 
 /**
