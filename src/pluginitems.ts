@@ -3,15 +3,15 @@
 // copy that can't be read is said, never a reason the personal items go missing. Also what a tool's own settings add to its
 // sessions besides those plugins (sessionSettings), read with its instruction file. The page's lines from both: sessionhooks.ts.
 import { readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { installedContents, readHooks } from './catalogdetail.ts';
 import { openCodeSettings } from './harnesses.ts';
 import { readJsonc, readTomlTables } from './textedit.ts';
-import { record, text } from './values.ts';
+import { nameOfFile, record, text } from './values.ts';
 import { installedCopies, installedPlugins, registeredMarketplaces, type PluginContext } from './plugins.ts';
 import { samePart } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
-import type { DeclaredHook, HarnessId, InstalledPlugin, InstructionFile, PartKind, PluginItem } from './types.ts';
+import type { DeclaredHook, HarnessId, InstalledPlugin, InstructionFile, NamedPart, PartKind, PluginItem } from './types.ts';
 
 /** Why a copy's items couldn't be listed, when its record says it is there. */
 export const UNREADABLE = 'Its files couldn’t be read.';
@@ -31,7 +31,9 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
       const base: InstalledPlugin = { tool, plugin, marketName: marketplace, ...(off ? { off } : {}), items: [], listed: !!source, ...(source ? { source } : {}) };
       if (state.state !== 'installed') return { ...base, problem: state.state === 'not-known' ? state.reason : UNREADABLE };
       if (!contents) return { ...base, problem: UNREADABLE };
-      const file = (kind: 'skill' | 'agent') => (part: { name: string; description: string }): PluginItem => ({ kind, name: part.name, description: part.description });
+      // `path`: the skill's folder ('.' for the plugin's root) or the agent's file, as each copy has it (catalogdetail.ts skillsIn).
+      const file = (kind: 'skill' | 'agent') => (part: NamedPart): PluginItem => ({ kind, name: part.name, description: part.description,
+        ...(part.path === '.' ? { keyName: plugin, root: true as const } : { keyName: kind === 'agent' ? nameOfFile(basename(part.path)) : basename(part.path) }) });
       const items: PluginItem[] = [
         ...contents.skills.map(file('skill')),
         ...contents.mcpServers.map(server => ({ kind: 'mcp' as const, name: server.name, description: '', runs: server.runs })),
