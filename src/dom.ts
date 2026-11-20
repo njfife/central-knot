@@ -145,6 +145,7 @@ const isDrag = (press: Press, releasedAt: number | undefined) => press.dragged |
  * run another window takes the focus in the middle of presses, and the release still comes here. Space on a button is a press too:
  * the browser clicks a button at the key's release only if that button heard the key's press, so the one now there in its place,
  * which has the focus (app.ts keepingFocus gives it), is clicked at the key's release, as the keyboard clicks (no point, detail 0).
+ * A window that loses the focus ends Space's record: its key-up goes to the other window.
  */
 export function keepClicksAcrossRedraws(where: () => string): void {
   const held = (control: Element): Held => ({ control, id: control.id, says: says(control), where: where(), disabled: control.matches(':disabled') });
@@ -179,6 +180,7 @@ export function keepClicksAcrossRedraws(where: () => string): void {
   }, true);
   // Space's press on a button, kept to the key's release.
   let keyed: Held | undefined;
+  window.addEventListener('blur', () => { keyed = undefined; });
   document.addEventListener('keydown', event => {
     const control = (event.target as Element | null)?.closest?.('button[id]');
     if (event.key === ' ' && !event.repeat) keyed = control ? held(control) : undefined;
