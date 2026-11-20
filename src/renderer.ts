@@ -225,7 +225,7 @@ function renderStatus() {
  * its sentence then the first of them, each on one line; without, its sentence in two (style.css .header-result); either cut where
  * it runs past them, with Show all (matrix.ts wholeToggle). With no result, they hold the newest notice, said as an automatic change,
  * its sentence cut where it runs past them, with its × (style.css .header-notice). Beside them, the Notices control counts the
- * notices, marked while one is unseen; a notice arriving while a result is on show is told there alone, the result keeping the
+ * notices, marked and filled while one is unseen; a notice arriving while a result is on show is told there alone, the result keeping the
  * lines until it fades, is closed or a newer result takes its place. A card hangs from the header over the page, one at a time
  * (state.shownWhole says which): the result whole, from Show all, or every notice, from Notices or the notice in the lines
  * (matrix.ts noticesCard). A card closes like a menu: on Show less or Notices again, its ×, Escape, or a press that begins outside
