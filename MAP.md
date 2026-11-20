@@ -88,7 +88,7 @@ The Plugins page is titled Plugin marketplaces on screen (`plugins` in the code;
 
 ## Profiles
 Named sets of library items to have On: switching to one turns those On and every other library item Off, by the library's own clicks; which profile is in use is worked out, never stored.
-- `profileplan.ts` the rules, pure: what a switch changes (`switchPlan`), which profiles are in use (`inUse`), what a switch's Undo turns back (`undoPlan`)
+- `profileplan.ts` the rules, pure: what a switch changes (`switchPlan`), which profiles are in use (`inUse`), what a switch's Undo turns back (`undoPlan`), and what the Library lists that no profile can tick, with the page's line on it (`leftOut`, `leftOutWords`)
 - `profiles.ts` profiles.json, a switch carried out (`switchProfile`, one History entry: `librarypass.ts PassOptions told`) and its Undo (`undoSwitch`) · `profilemigrate.ts` a profiles file from before profiles were sets of items, moved once (`migrateProfiles`)
 - `profilespage.ts` the page and every word it shows, and the status bar's profile menu; the menu bar's is `main.ts profileMenu`; a profile entry's sentence and Undo in History are `historypage.ts profileSwitch`
 - **Start:** `profileplan.ts`, then `profiles.ts`'s header. **Examples:** `tests/profiles.test.ts` (the migration's fixture home included), and the move in a whole old home in `tests/upgrade.test.ts`; profile switches among `tests/serverswalk.test.ts`'s steps.
