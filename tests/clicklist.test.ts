@@ -980,6 +980,22 @@ test('× ends the run: its clicks still waiting go on as a run of their own, who
   assert.equal(app.outcome?.text, '2 skills are off: b and c.');
 });
 
+test('Another page opened and left while a run is carried out does not end it: the run is said whole, and its one Undo puts back all of it', async t => {
+  onLibrary();
+  homeWith(t, ['a', 'b', 'c'].map(key => ({ kind: 'skills', key })));
+  for (const name of ['a', 'b', 'c']) flip(name, false);
+  await settled();
+  await main.pass(offMade('skills', 'a'));
+  showPage('history');
+  showPage('library');
+  await main.pass(offMade('skills', 'b'));
+  await main.pass(offMade('skills', 'c'));
+  assert.equal(app.outcome?.text, '3 skills are off: a, b and c.');
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual(main.restored, ['off-skills-c', 'off-skills-b', 'off-skills-a']);
+});
+
 test('A run left for another page: its result is said in the status bar, never in the header of the page open', async () => {
   onLibrary();
   flip('a', false);
