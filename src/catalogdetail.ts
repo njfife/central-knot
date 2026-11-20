@@ -198,6 +198,9 @@ function launchOf(tool: HarnessId, hook: Record<string, unknown>): DeclaredHook[
   return shell ? { shell } : undefined;
 }
 
+/** The hooks files read for one plugin copy, by path: each one's JSON (none where it isn't), and whether it is there all the same. */
+type HooksFiles = Map<string, Promise<{ value?: Record<string, unknown>; unread: boolean }>>;
+
 /**
  * A plugin's hooks, each with where it is declared, as `tool` reads them: from its default files and each file its manifest or
  * entry names, and inline there (`named`: a path, an object, or a list of either). Codex and Copilot CLI read what a manifest
@@ -205,16 +208,42 @@ function launchOf(tool: HarnessId, hook: Record<string, unknown>): DeclaredHook[
  * copilotManifest); Claude Code reads it beside hooks/hooks.json. For Codex an empty object names none and still stands in
  * place of hooks/hooks.json, so `"hooks": {}` is how a plugin keeps Claude Code's hooks out of Codex (superpowers does); no
  * field, or an empty list, leaves that file read (Codex's plugin loader, read at 0.142.3 and on main, measured with 0.169.1).
- * `unread`: each file that is there but couldn't be read as JSON, so what it declares isn't known.
+ * `unread`: each file that is there but couldn't be read as JSON, so what it declares isn't known. Each file is read through
+ * `files`, so the tools reading one copy open and parse it once (hooksOf).
  */
-async function pluginHooks(tool: HarnessId | undefined, root: string, folder: string, named: unknown): Promise<{ hooks: DeclaredHook[]; unread: string[] }> {
+async function pluginHooks(tool: HarnessId | undefined, root: string, folder: string, named: unknown, files: HooksFiles): Promise<{ hooks: DeclaredHook[]; unread: string[] }> {
   const sectionOf = (value: Record<string, unknown> | undefined) => record(value?.hooks) ?? value ?? {};
   const listed = Array.isArray(named) ? named : named === undefined ? [] : [named];
   const defaults = listed.length && tool !== 'claude-cli' && tool ? [] : tool === 'copilot-cli' ? COPILOT_HOOK_FILES : ['hooks/hooks.json'];
-  const files = [...new Set([...defaults, ...listed.filter(item => typeof item === 'string')].map(path => resolve(folder, path)))];
-  const read = await Promise.all(files.map(async file => { const value = await jsonInside(root, file); return { file, value, unread: !value && await present(file) }; }));
+  const paths = [...new Set([...defaults, ...listed.filter(item => typeof item === 'string')].map(path => resolve(folder, path)))];
+  const readOnce = (file: string) => {
+    if (!files.has(file)) files.set(file, jsonInside(root, file).then(async value => ({ value, unread: !value && await present(file) })));
+    return files.get(file)!;
+  };
+  const read = await Promise.all(paths.map(async file => ({ file, ...(await readOnce(file)) })));
   return { hooks: [...read.flatMap(({ file, value }) => readHooks(tool, file, sectionOf(value))), ...listed.flatMap(item => readHooks(tool, folder, sectionOf(record(item))))],
     unread: read.filter(each => each.unread).map(each => each.file) };
+}
+
+/**
+ * A plugin copy's hooks as `readAs.tool` reads them (`hooks`, `unread`), and the hooks each tool would run of it (`byTool`): for a
+ * copy read for every tool (no `readAs.tool`), every tool with plugins, each by its own manifest and rule; for one tool's copy,
+ * that tool alone. `declared`: this copy's manifest with its entry; `own`: its manifest alone. Every file is read once (HooksFiles).
+ */
+async function hooksOf(folder: string, root: string, readAs: ReadAs, declared: Record<string, unknown>, own: Record<string, unknown>) {
+  const files: HooksFiles = new Map();
+  const named = async (tool: HarnessId | undefined) => {
+    // Copilot CLI: what its own manifest names, else what this copy's does.
+    if (tool === 'copilot-cli') return (await copilotManifest(folder))?.hooks ?? declared.hooks;
+    // Codex: what the one manifest it picks names, without the entry.
+    if (tool === 'codex-cli') return (readAs.codex ?? await codexManifest(folder, own)).hooks;
+    // Claude Code, and a copy read for every tool: this copy's manifest and entry.
+    return declared.hooks;
+  };
+  const readBy = async (tool: HarnessId | undefined) => pluginHooks(tool, root, folder, await named(tool), files);
+  const read = await readBy(readAs.tool);
+  const byTool = readAs.tool ? { [readAs.tool]: read.hooks } : Object.fromEntries(await Promise.all(pluginTools.map(async tool => [tool, (await readBy(tool)).hooks])));
+  return { ...read, byTool };
 }
 
 /** What an MCP server runs: its command and arguments, or the URL it connects to. */
@@ -229,8 +258,9 @@ export const pluginManifest = (folder: string, root = folder) => jsonInside(root
 /**
  * The one manifest Codex reads for a plugin copy: its .codex-plugin/plugin.json, else Claude Code's; {} when it has
  * neither. (Codex also looks first for a root plugin.json naming the agent-plugins schema; that rare layout isn't read.)
+ * `claude`: Claude Code's, where already read ({} for none), so it isn't read again.
  */
-export const codexManifest = async (folder: string) => (await jsonInside(folder, join(folder, '.codex-plugin/plugin.json'))) ?? (await pluginManifest(folder)) ?? {};
+export const codexManifest = async (folder: string, claude?: Record<string, unknown>) => (await jsonInside(folder, join(folder, '.codex-plugin/plugin.json'))) ?? claude ?? (await pluginManifest(folder)) ?? {};
 
 /** The files a manifest or entry names for a section: a path, or a list of paths (an inline section names none). */
 const namedFiles = (named: unknown) => (typeof named === 'string' ? [named] : Array.isArray(named) ? strings(named) ?? [] : []);
@@ -323,12 +353,7 @@ export async function skillNamesIn(folder: string, entry: Record<string, unknown
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs = {}): Promise<PluginContents> {
   const manifests = await manifestOf(folder, entry, root, readAs), { own, added } = manifests;
   const declared: Record<string, unknown> = { ...own, ...added, version: text(own.version) || added.version };
-  // Its hooks as `tool` reads them: what that tool's manifest names (Copilot CLI's own, else this one; Codex's alone, without the
-  // entry), by its rule. With no tool, this copy's manifest and entry, for every tool.
-  const hooksAs = async (tool: HarnessId | undefined) => pluginHooks(tool, root, folder, tool === 'copilot-cli' ? (await copilotManifest(folder))?.hooks ?? declared.hooks
-    : tool === 'codex-cli' ? (readAs.codex ?? await codexManifest(folder)).hooks : declared.hooks);
-  const hooks = await hooksAs(readAs.tool);
-  const hooksByTool = readAs.tool ? { [readAs.tool]: hooks.hooks } : Object.fromEntries(await Promise.all(pluginTools.map(async tool => [tool, (await hooksAs(tool)).hooks])));
+  const hooks = await hooksOf(folder, root, readAs, declared, own);
   const servers = (await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json')).values;
   const lsp = (await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json')).values;
   const read: Omit<PluginContents, 'onlyInstructions'> = {
@@ -336,7 +361,7 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
     commands: await markdownIn(root, folder, listedOr(folder, manifests, 'commands')),
     agents: await markdownIn(root, folder, listedOr(folder, manifests, 'agents')),
     instructions: await instructionsIn(root, folder),
-    hooks: hooks.hooks, hooksByTool, ...(hooks.unread.length ? { hooksUnread: hooks.unread } : {}),
+    hooks: hooks.hooks, hooksByTool: hooks.byTool, ...(hooks.unread.length ? { hooksUnread: hooks.unread } : {}),
     mcpServers: serverList(servers),
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),
     lspServers: Object.keys(lsp).sort(),
