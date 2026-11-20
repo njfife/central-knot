@@ -1257,9 +1257,10 @@ const FILE_COLUMN_BLANK = `(() => {
 
 /**
  * The opened row `key` and its details under it as the page draws them (style.css .ov-row.open), each colour named by the
- * page's own token (picked, accent, warning, line). With the pointer on the row: where the pointer is, the row's background
- * and box shadows, then the details'. Then, the pointer off the page and the keyboard's focus on the row's first control:
- * where the focus is, and the row's look again. The focus is let go after.
+ * page's own token (picked, accent, warning, line). Once its list rests (an opening moves it in the frame after the click:
+ * matrix.ts openRow), with the pointer on the row: where the pointer is, the row's background and box shadows, then the
+ * details'. Then, the pointer off the page and the keyboard's focus on the row's first control: where the focus is, and the
+ * row's look again. The focus is let go after.
  */
 async function openedRowLook(a, kind, key) {
   const row = `.ov-row.open[data-key="${rowPart('', kind, key)}"]`;
@@ -1272,6 +1273,7 @@ async function openedRowLook(a, kind, key) {
     const row = document.querySelector('${row}');
     return ${what};
   })()`);
+  await stillList(a, await a.run(`document.querySelector('${row}').closest('.scroll').id`));
   const [x, y] = await a.run(`(() => { const box = document.querySelector('${row}').getBoundingClientRect(); return [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)]; })()`);
   await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
   const underPointer = await read(`[row.matches(':hover') ? 'pointer on the row' : 'pointer elsewhere', drawn(row), drawn(row.nextElementSibling)]`);
@@ -2023,6 +2025,12 @@ async function practiceFlow() {
   // An opened row and its details are one block, the row too under the pointer and with the focus in it. Scrolled until
   // the middle of its details is at the table's top, the row has gone up with the list: none of it is in view, nor drawn
   // over the details.
+  // As in a window others cover (on the Mac, four groups at once), the first frame after the click comes late, with the
+  // pointer's next move or a second on: the list moves only then, so the look is read once it rests.
+  await a.run(`(() => { const raf = window.requestAnimationFrame.bind(window), held = [];
+    const go = () => { if (window.requestAnimationFrame === raf) return; window.requestAnimationFrame = raf; for (const callback of held.splice(0)) callback(performance.now()); };
+    window.requestAnimationFrame = callback => held.push(callback);
+    document.addEventListener('mousemove', go, { capture: true, once: true }); setTimeout(go, 1000); })()`);
   await opened('zz-1');
   same('an opened row and its details are one block: one background, one accent bar down both, no line under the row, under the pointer and with the focus in it', await openedRowLook(a, 'skills', 'zz-1'),
     ['pointer on the row', 'picked, accent 3px 0px 0px 0px inset', 'picked, accent 3px 0px 0px 0px inset', 'keyboard focus in the row', 'picked, accent 3px 0px 0px 0px inset']);
