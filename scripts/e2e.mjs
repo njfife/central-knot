@@ -665,10 +665,10 @@ async function backPlaceFlow() {
   for (const [width, height] of [[860, 600], [1316, 819]]) {
     size = `${width}×${height}`;
     await sizeTo(a, width, height);
-    // The Library on Skills, Find "skill", From plugins: a plugin's skill opened, and its link to its plugin's page.
+    // The Library on Skills, Find "skill", From on Any plugin: a plugin's skill opened, and its link to its plugin's page.
     await openKind(a, 'skills');
     await typeIn('find', 'skill');
-    if (!(await a.exists('#chip-plugins[aria-pressed="true"]'))) await a.click('#chip-plugins');
+    if (await a.run(`document.querySelector('#item-from')?.value`) !== 'plugins') await chooseFrom(a, 'plugins');
     if (!(await a.exists(`${pluginSkillOpen}[aria-expanded="true"]`))) await a.click(pluginSkillOpen);
     await journey('the Library → a plugin’s page', library, () => scrollTo(library, 130, pluginSkill), () => a.click('[id^="open-whole-skills-"][id$="/plugin-skill-04"]'), 'plugins-scroll', () => readme(315));
     // Plugin marketplaces' list, Find "pack" and the examples chip: a plugin's page, by the keys; then back by its breadcrumb.
@@ -694,7 +694,7 @@ async function backPlaceFlow() {
       { viewBack: { find: '', chips: [], opened: [] } });
     // The Library on Skills, Find "sample", sample-16 opened → its Files: back by the window's Back, then by the Files view's own.
     await openKind(a, 'skills');
-    if (await a.exists('#chip-plugins[aria-pressed="true"]')) await a.click('#chip-plugins');
+    if (await a.run(`document.querySelector('#item-from')?.value`) !== 'anywhere') await chooseFrom(a, 'anywhere');
     await typeIn('find', 'sample');
     if (!(await a.exists(`#${rowPart('open', 'skills', 'sample-16')}[aria-expanded="true"]`))) await a.click(`#${rowPart('open', 'skills', 'sample-16')}`);
     const files = `#${rowPart('files', 'skills', 'sample-16')}`;
@@ -9962,7 +9962,9 @@ async function fromFlow() {
 
   // ---------- One home: two marketplaces with a plugin called review each, a source, the person's own ----------
   const H = homeWith('from-home');
-  const market = (name, files) => { const dir = join(scratch, `from-${name}`); put(dir, { '.claude-plugin/marketplace.json': JSON.stringify({ name, owner: { name: 'Team' }, plugins: [{ name: 'review', source: './plugins/review', description: `Review, from ${name}.` }] }), ...Object.fromEntries(Object.entries(files).map(([path, text]) => [`plugins/review/${path}`, text])) }); return dir; };
+  // Each marketplace lists review; market-one also twenty plugins installed nowhere, before it by name, so its list scrolls.
+  const listedOnly = name => (name === 'market-one' ? Array.from({ length: 20 }, (_, at) => ({ name: `aide-${String(at + 1).padStart(2, '0')}`, source: './plugins/aide', description: 'Listed only.' })) : []);
+  const market = (name, files) => { const dir = join(scratch, `from-${name}`); put(dir, { '.claude-plugin/marketplace.json': JSON.stringify({ name, owner: { name: 'Team' }, plugins: [...listedOnly(name), { name: 'review', source: './plugins/review', description: `Review, from ${name}.` }] }), 'plugins/aide/README.md': '# aide\n', ...Object.fromEntries(Object.entries(files).map(([path, text]) => [`plugins/review/${path}`, text])) }); return dir; };
   const one = { 'skills/shared/SKILL.md': md('shared', 'skill', 'Check the ledger.'), 'skills/lint/SKILL.md': md('lint', 'skill', 'Lint the ledger.') };
   const two = { 'skills/shared/SKILL.md': md('shared', 'skill', 'Check the ledger.'), 'agents/audit.md': md('audit', 'agent', 'Audit it.') };
   const marketOne = market('market-one', one), marketTwo = market('market-two', two);
@@ -10054,6 +10056,9 @@ async function fromFlow() {
   await until(() => a.exists('.market-item'));
   await a.run(`[...document.querySelectorAll('.market-item')].find(item => item.textContent.includes('market-one'))?.click()`);
   await until(() => a.exists('.plugin-row-library'));
+  // The list scrolled to review's row (once it rests: stillList), its place kept by the visit Back returns to (places.ts).
+  for (let tries = 0; tries < 4 && !(await stillList(a, 'plugins-scroll')); tries++);
+  const listAt = await a.run(`(list => { list.scrollTop += list.querySelector('[data-plugin="review"]').getBoundingClientRect().top - list.getBoundingClientRect().top - 120; return Math.round(list.scrollTop); })(document.getElementById('plugins-scroll'))`);
   const link = await a.run(`document.querySelector('[data-plugin="review"] .plugin-row-library')?.id`);
   await a.click(`#${link}`);
   same('Its items in the Library: the Library on All, From that review, Find and the chip let go, no row open',
@@ -10063,6 +10068,8 @@ async function fromFlow() {
   same('another kind keeps From', [await fromIs(a), (await listed(a)).sort()], ['plugin:review@market-one', [id('skills', 'review@market-one/lint'), id('skills', 'shared')]]);
   await mouseBack(a);
   same('one Back returns to market-one’s plugins', [await a.run(`document.querySelector('.page-title')?.textContent`), await a.text('.market-item.selected .market-item-name')], ['Plugin marketplaces', 'market-one']);
+  await until(async () => await a.run(`Math.round(document.getElementById('plugins-scroll')?.scrollTop ?? -1)`) === listAt);
+  same('and to where its list was scrolled', [listAt > 0, await a.run(`Math.round(document.getElementById('plugins-scroll')?.scrollTop ?? -1)`)], [true, listAt]);
 
   // ---------- (d) A source of every kind, added while an old Find is set ----------
   const mixed = repo('platform-engineering-group/shared-agent-skills-for-the-whole-company', { 'skills/kit-skill/SKILL.md': md('kit-skill', 'skill', 'A skill.'), 'agents/kit-agent.md': md('kit-agent', 'agent', 'An agent.'),
