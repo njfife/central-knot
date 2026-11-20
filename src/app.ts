@@ -969,7 +969,9 @@ export function leaveResults(page = state.page) {
 let moveRequested: 'visit' | 'back' | undefined;
 // Functions that move the person mark a visit for the next draw. A read that changes the place leaves it a repair. A page's own
 // Back control (matrix.ts backFromFiles, pluginspage.ts's breadcrumb) marks its move `back`, which the moves it makes keep:
-// where it lands on the visit before, places.ts goes Back to that visit instead.
+// where it lands on the visit before, places.ts goes Back to that visit instead. The controls mark it here rather than call
+// places.ts: a page importing places.ts would load the modules places.ts imports before app.ts has finished loading
+// (editparts.ts then reads `machine` too early; tests/clicklist.test.ts fails).
 export const noteMove = (move: 'visit' | 'back' = 'visit') => { if (moveRequested !== 'back') moveRequested = move; };
 export const takeMove = () => { const moved = moveRequested; moveRequested = undefined; return moved; };
 

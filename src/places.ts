@@ -1,5 +1,7 @@
 // Back and Forward in this window: the destination drawn, its visits, the existing page actions that reopen it, and each visit's
-// scroll place, put back once Back or Forward has drawn it (renderer.ts keeps scroll places only across a redraw of one place).
+// scroll place, put back once Back or Forward has drawn it. renderer.ts copies each scrolling area's offset by its id across every
+// draw, to whichever page draws that id next, moves included; a move to a page that starts at its top resets the area itself
+// (pluginstate.ts browse, harnesspage.ts goHarness, app.ts selectItem).
 // app.ts placeNow is narrower: it names the table where an action's result belongs.
 import { absentKinds, filesSkillAvailable, harnessManaged, harnessTabShown, leaveFiles, takeMove, machine, noToolManaged, rerender, showPage, state } from './app.ts';
 import { goHarness } from './harnesspage.ts';
@@ -61,15 +63,18 @@ export const offsetsNow = (): Offsets => new Map([...document.querySelectorAll<H
 const leftAt = new WeakMap<Place, Offsets>();
 /**
  * The visit Back or Forward opened, while its place is put back after each draw: the offsets `wanted`, and where the last draw left
- * each area (`drawn`: as far as it went, while its page was still filling). Let go on a move, and area by area once something else
- * (the person, a glide) moves one.
+ * each area (`drawn`: as far as it went, while its page was still filling). Let go on a move (recordDraw), and area by area once
+ * something else (the person, a glide) moves one (placeOnScreen, at each draw and each Back or Forward).
  */
 let puttingBack: { visit: Place; wanted: Offsets; drawn: Offsets } | undefined;
 
 /** Puts back the place `visit` was left at, after each draw from now until it is let go (putBack); with none, lets go. */
 const putBackPlaceOf = (visit?: Place) => { puttingBack = visit && { visit, wanted: new Map(leftAt.get(visit)), drawn: new Map() }; };
 
-/** The scroll place on screen, from the offsets `now`: an area still being put back counts at the offset wanted; one moved since is let go. */
+/**
+ * Lets go of each area being put back that something else moved since the last draw (its offset `now` is not where putBack left
+ * it), then gives the scroll place on screen: the offsets `now`, an area still being put back at the offset wanted.
+ */
 function placeOnScreen(now: Offsets): Offsets {
   if (!puttingBack) return now;
   const { wanted, drawn } = puttingBack;
@@ -131,7 +136,8 @@ function traverse(step: number) {
 
 /**
  * Where a page's own Back control (the Files view's Back, a plugin's page's breadcrumb: app.ts noteMove) landed, `place`, is the visit
- * the person came from (past other skills' Files or other plugins' pages on the way): how many visits back it is; else 0, a visit.
+ * the person came from (past other skills' Files or other plugins' pages on the way): the step back to it, negative (-1 for the visit
+ * before), as `travel` takes it; else 0, and the move is a visit.
  */
 function stepsBackTo(place: Place): number {
   const { entries, cursor } = visits;

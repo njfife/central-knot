@@ -581,7 +581,7 @@ async function backFlow() {
  * with Find, the chip and the opened row as Back leaves them today. Then at 860×600: two visits to the Library, each to its own place;
  * a list whose rows went while away (as far as it goes, no error), left again before they are back (the place it was putting back is
  * kept), and scrolled by the person before they are back (the person's place wins); a skill's Files, whose list is not moved to its
- * chosen row.
+ * chosen row, also when another page came between, at both sizes, while a resize after still moves it.
  */
 async function backPlaceFlow() {
   const P = homeWith('back-place'), market = join(scratch, 'back-place-market'), away = join(scratch, 'back-place-away');
@@ -774,6 +774,32 @@ async function backPlaceFlow() {
   await a.settle();
   same('another skill chosen and Back before the next frame: the skill shown again, its list where it was left',
     [await a.text('#skill-detail h2'), await placeWhen('skills-list', listEnd)], ['sample-00', listEnd]);
+  // The skill's Files, its list scrolled past the skill shown, left for another page: Back to it, then Back to the Library and
+  // Forward to it again. Its list is where it was left once the list's size has been watched again (matrix.ts listWatcher, which
+  // watched the list leave the page), at both sizes.
+  /** A few frames and the resize reports they bring. */
+  const watched = () => a.run(`new Promise(done => { let frames = 0; const tick = () => (++frames < 4 ? requestAnimationFrame(tick) : setTimeout(() => done(true), 100)); requestAnimationFrame(tick); setTimeout(() => done(false), 3000); })`);
+  for (const [width, height] of [[860, 600], [1316, 819]]) {
+    size = `${width}×${height}`;
+    await sizeTo(a, width, height);
+    const left = await scrollTo('skills-list', 100000);
+    await a.click('#nav-settings');
+    await mouse('back');
+    await watched();
+    const afterBack = await placeOf('skills-list');
+    const leftAgain = await scrollTo('skills-list', 100000);
+    await mouse('back');
+    await mouse('forward');
+    await watched();
+    same(`at ${size}, a skill's Files left for Settings, its list past the skill shown: Back brings the list back where it was`,
+      [left > 0, await a.text('#skill-detail h2'), afterBack], [true, 'sample-00', left]);
+    same(`at ${size}, and left for the Library by Back: Forward brings it back where it was`, [await a.text('#skill-detail h2'), await placeOf('skills-list')], ['sample-00', leftAgain]);
+  }
+  // A real resize after that still brings the skill shown into view (here into the narrower window's rail layout).
+  await sizeTo(a, 860, 600);
+  await watched();
+  check('a resize after Back or Forward still brings the skill shown into view in its list', await a.run(`(() => { const list = document.getElementById('skills-list'), row = list.querySelector('.list-row.selected'), area = list.getBoundingClientRect(), box = row.getBoundingClientRect();
+    return box.top >= area.top + list.querySelector('.list-head').offsetHeight - 1 && box.bottom <= area.top + list.clientHeight + 1; })()`), await placeOf('skills-list'));
   same('no page errors, Back and Forward’s places', a.pageErrors, []);
   await a.quit();
 }

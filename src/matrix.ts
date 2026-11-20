@@ -1407,12 +1407,13 @@ const copiesDifferChipShown = (t: Table) => rowsIn(t).some(skill => needsChoice(
 let filesFrom: { tool?: HarnessId } = {};
 /**
  * A skill's files and contents: the Library's Files view, from wherever its details were opened. `placed`: by Back or Forward,
- * which put its list's scroll place back (places.ts), so the list is not moved to bring the skill into view (revealSelected).
+ * which put its list's scroll place back (places.ts), so the list is not moved to bring the skill into view (revealSelected), nor
+ * by the first report of its size (listWatcher).
  */
 export function openFiles(key: string, placed = false) {
   noteMove();
   filesFrom = { tool: state.page === 'harnesses' ? state.harness : undefined };
-  if (placed) revealed = key;
+  if (placed) { revealed = key; listSize = ''; }
   if (state.page !== 'library') showPage('library');
   state.libraryView = 'files';
   state.item = key;
@@ -2270,11 +2271,14 @@ function revealSelected() {
  * Watches the skills list drawn last, so a resize keeps its selected row in view. A ResizeObserver also reports each new
  * list when it starts watching it, and every redraw makes a new list: that report counts only when the list's size
  * differs from the last one's (the layout changed with the redraw), so a plain redraw leaves the list where it was scrolled.
+ * A list that leaves the page reports 0×0, so the next list drawn would always differ from it: after Back or Forward, whose
+ * list's place is put back (openFiles `placed`), there is no last size (`listSize` ''), and the new list's first report is only
+ * the size later ones are compared with.
  */
 let listSize = '';
 const listWatcher = new ResizeObserver(entries => {
   const size = entries.map(entry => `${Math.round(entry.contentRect.width)}×${Math.round(entry.contentRect.height)}`).join();
-  if (size !== listSize) revealSelected();
+  if (listSize && size !== listSize) revealSelected();
   listSize = size;
 });
 
