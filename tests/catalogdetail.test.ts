@@ -4,8 +4,10 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { inside, installedContents, marketplacePage, pluginContents, pluginFiles, readHooks, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
-import { componentsFrom, outcomes } from '../src/pluginoutcomes.ts';
+import { componentsFrom, outcomes, sessionTextNote } from '../src/pluginoutcomes.ts';
+import { summaryOf } from '../src/pluginstatus.ts';
 import { hookLine } from '../src/sessionhooks.ts';
+import type { Components } from '../src/types.ts';
 
 const noLinks = process.platform === 'win32';
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -257,6 +259,30 @@ test('A Codex manifest’s empty hooks object names none in place of hooks/hooks
     assert.deepEqual([await listed('codex-cli'), await listed('claude-cli'), await listed('copilot-cli')], [[], fromTheFile, fromTheFile]);
     // No `hooks`, or an empty list, names nothing: Codex reads hooks/hooks.json (measured with Codex 0.169.1's hooks/list).
     for (const hooks of [undefined, []]) { await codexManifest(hooks); assert.deepEqual(await listed('codex-cli'), fromTheFile); }
+  } finally { await cleanup(); }
+});
+
+test('“In each tool” gives a tool Hooks and Session text lines only from the hooks that tool runs of the copy: a Codex manifest’s `"hooks": {}` leaves Codex neither, and Claude Code and Copilot CLI keep theirs', async () => {
+  const { root, cleanup } = await box();
+  try {
+    // The same superpowers shape, read for every tool, as a plugin's page reads the marketplace's copy.
+    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup|clear|compact', hooks: [{ type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start' }] }] } }));
+    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.2' }));
+    const codexManifest = (hooks?: unknown) => put(join(root, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.2', skills: './skills/', hooks }));
+    const read = async () => componentsFrom(await pluginContents(root, {}, root));
+    const lines = (components: Components) => Object.fromEntries((['claude-cli', 'copilot-cli', 'codex-cli'] as const).map(tool => [tool,
+      outcomes(tool, components).filter(outcome => outcome.component === 'Hooks' || outcome.component === 'Session text').map(outcome => `${outcome.component} ${outcome.text}`)]));
+    const claude = ['Hooks run; a hook that fails does not stop the install', 'Session text comes from start-of-session and prompt hooks'];
+    const copilot = ['Hooks start-of-session hooks run; others may not', `Session text is limited: ${sessionTextNote('copilot-cli')}`];
+    await codexManifest({});
+    const emptied = await read();
+    assert.deepEqual(lines(emptied), { 'claude-cli': claude, 'copilot-cli': copilot, 'codex-cli': [] });
+    // What it holds is the same for every tool: its row's summary still says hooks.
+    assert.equal(summaryOf(emptied), 'hooks');
+    // No `hooks` in its Codex manifest: Codex reads hooks/hooks.json, and has both lines.
+    await codexManifest(undefined);
+    assert.deepEqual(lines(await read()), { 'claude-cli': claude, 'copilot-cli': copilot,
+      'codex-cli': ['Hooks start-of-session hooks run after you trust them in Codex; others may not', `Session text waits for trust: ${sessionTextNote('codex-cli')}`] });
   } finally { await cleanup(); }
 });
 

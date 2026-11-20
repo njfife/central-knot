@@ -50,11 +50,15 @@ export function sessionTextNote(tool: HarnessId): string | undefined {
   return undefined;
 }
 
-/** What a plugin's read contents come to: the counts its row shows (pluginstatus.ts summaryOf), and what its outcomes need. */
+/**
+ * What a plugin's read contents come to: the counts its row shows (pluginstatus.ts summaryOf), and what its outcomes need. A
+ * tool's Hooks and Session text lines come from the hooks that tool would run (`hooksByTool`), never from another tool's reading.
+ */
 export const componentsFrom = (contents: PluginContents): Components => ({
   skills: contents.skills.length, commands: contents.commands.length, agents: contents.agents.length, hooks: contents.hooks.length > 0,
   mcp: contents.mcpServers.length, mcpRootVariable: contents.mcpUsesPluginRoot, bin: contents.bin,
-  sessionTextHooks: pluginTools.filter(tool => contents.hooks.some(hook => addsText(tool, hook))),
+  hooksIn: pluginTools.filter(tool => contents.hooksByTool[tool]?.length),
+  sessionTextHooks: pluginTools.filter(tool => contents.hooksByTool[tool]?.some(hook => addsText(tool, hook))),
   skillNames: contents.skills.map(skill => skill.name),
 });
 
@@ -67,21 +71,21 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
     add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'works', 'work as they are');
     add(components.agents, 'Agents', 'works', 'work as they are');
-    add(components.hooks, 'Hooks', 'works', 'run; a hook that fails does not stop the install');
+    add(components.hooksIn.includes(tool), 'Hooks', 'works', 'run; a hook that fails does not stop the install');
     add(components.sessionTextHooks.includes(tool), 'Session text', 'works', 'comes from start-of-session and prompt hooks');
     add(components.mcp, 'MCP servers', 'works', 'run unchanged');
   } else if (tool === 'copilot-cli') {
     add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'limited', 'become skills');
     add(components.agents, 'Agents', 'works', 'get the plugin’s name in front, e.g.', 'agent');
-    add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run; others may not');
+    add(components.hooksIn.includes(tool), 'Hooks', 'limited', 'start-of-session hooks run; others may not');
     add(components.sessionTextHooks.includes(tool), 'Session text', 'limited', `is limited: ${sessionTextNote(tool)}`);
     add(components.mcp, 'MCP servers', 'works', 'run unchanged');
   } else if (tool === 'codex-cli') {
     add(components.skills, 'Skills', 'works', 'get the plugin’s name in front, e.g.', 'skill');
     add(components.commands, 'Commands', 'limited', 'are turned into skills when installed');
     add(components.agents, 'Agents', 'ignored', 'are ignored: copied, never offered');
-    add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run after you trust them in Codex; others may not');
+    add(components.hooksIn.includes(tool), 'Hooks', 'limited', 'start-of-session hooks run after you trust them in Codex; others may not');
     add(components.sessionTextHooks.includes(tool), 'Session text', 'limited', `waits for trust: ${sessionTextNote(tool)}`);
     add(components.mcp, 'MCP servers', components.mcpRootVariable ? 'fails' : 'unknown', components.mcpRootVariable ? 'won’t start: Codex does not fill in `${CLAUDE_PLUGIN_ROOT}`' : 'may not start: not confirmed in Codex');
   }
