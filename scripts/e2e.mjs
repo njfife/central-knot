@@ -9377,7 +9377,15 @@ echo "$*" >> "$HOME/claude-calls.txt"
   const codexCopy = join(home, '.codex/plugins/cache', name, 'release-helper/0.4.1');
   mkdirSync(join(codexCopy, 'hooks'), { recursive: true });
   writeFileSync(join(codexCopy, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [command('node "${PLUGIN_ROOT}/hooks/remind.mjs" --days 2'), command(long)] }] } }));
-  writeFileSync(join(home, '.codex/config.toml'), `[marketplaces.${name}]\nsource = ${JSON.stringify(market)}\n\n[plugins."release-helper@${name}"]\nenabled = true\n`);
+  // superpowers' shape, shortened: Claude Code's start-of-session hook in hooks/hooks.json, and a Codex manifest whose `"hooks": {}`
+  // names none in its place, so Codex runs none. In the marketplace and installed in Codex, whose strip has no group for it.
+  const powers = join(market, 'plugins/superpowers'), catalog = join(market, '.claude-plugin/marketplace.json'), listed = JSON.parse(readFileSync(catalog, 'utf8'));
+  writeFileSync(catalog, JSON.stringify({ ...listed, plugins: [...listed.plugins, { name: 'superpowers', source: './plugins/superpowers', version: '7.0.2' }] }));
+  for (const [path, value] of Object.entries({ '.claude-plugin/plugin.json': { name: 'superpowers', version: '7.0.2' }, '.codex-plugin/plugin.json': { name: 'superpowers', version: '7.0.2', skills: './skills/', hooks: {} },
+    'hooks/hooks.json': { hooks: { SessionStart: [{ matcher: 'startup|clear|compact', hooks: [command('"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start')] }] } } })) { mkdirSync(dirname(join(powers, path)), { recursive: true }); writeFileSync(join(powers, path), JSON.stringify(value)); }
+  skill(join(powers, 'skills'), 'brainstorming');
+  cpSync(powers, join(home, '.codex/plugins/cache', name, 'superpowers/7.0.2'), { recursive: true });
+  writeFileSync(join(home, '.codex/config.toml'), `[marketplaces.${name}]\nsource = ${JSON.stringify(market)}\n\n[plugins."release-helper@${name}"]\nenabled = true\n\n[plugins."superpowers@${name}"]\nenabled = true\n`);
   mkdirSync(join(home, '.copilot/hooks'), { recursive: true });
   writeFileSync(join(home, '.copilot/hooks/team.json'), JSON.stringify({ version: 1, hooks: { userPromptSubmitted: [{ type: 'command', bash: './team-prompt.sh' }] } }));
   mkdirSync(join(home, '.pi/agent'), { recursive: true });
@@ -9496,6 +9504,15 @@ echo "$*" >> "$HOME/claude-calls.txt"
   for (let tries = 0; tries < 100 && !(await a.exists('#session-codex-cli')); tries++) await wait(100);
   same('Codex’s Instructions tab has its strip', (await groups('codex-cli'))[0]?.[1].length, 2);
   await pictures('session-strip-harness-tab', '#session-codex-cli', [[1316, 819, false]]);
+  // superpowers' page says what its strips say: Claude Code and Copilot CLI would run its hook, Codex none of it.
+  await a.click(byId('nav-plugins'));
+  if (await a.exists('#plugin-back')) await a.click('#plugin-back');
+  for (let tries = 0; tries < 100 && !(await a.exists('#popen-0-superpowers')); tries++) await wait(100);
+  await a.click('#popen-0-superpowers');
+  for (let tries = 0; tries < 100 && await a.run(`document.querySelector('#pbox-0-superpowers-codex-cli')?.dataset.state`) !== 'installed'; tries++) await wait(100);
+  same('on superpowers’ page, In each tool has no Hooks or Session text line for Codex, which runs none of its hooks', await a.run(`[...document.querySelectorAll('.plugin-outcome-row')]
+    .map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-kind')].map(kind => kind.textContent)])`),
+  [['Claude Code', ['Skills', 'Hooks', 'Session text']], ['Copilot CLI', ['Skills', 'Hooks', 'Session text']], ['Codex', ['Skills']]]);
   // Nothing the strips offer wrote a file: in the tools' folders, only the uninstall's record changed.
   const after = toolFolders();
   same('in the tools’ folders only the uninstall’s record changed', Object.entries(after).flatMap(([folder, files]) => Object.keys({ ...files, ...before[folder] }).filter(path => files[path] !== before[folder][path]).map(path => join(folder, path))),

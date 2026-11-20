@@ -595,8 +595,12 @@ export interface HistoryEvent {
 
 // ---------- Marketplaces and plugins ----------
 export interface Components {
-  skills: number; commands: number; agents: number; hooks: boolean; mcp: number; mcpRootVariable: boolean; bin: boolean;
-  /** The tools in which one of its hooks can add text to sessions (pluginoutcomes.ts addsText). */
+  skills: number; commands: number; agents: number; mcp: number; mcpRootVariable: boolean; bin: boolean;
+  /** It holds hooks, as read for every tool: the row's summary says so (pluginstatus.ts summaryOf). */
+  hooks: boolean;
+  /** The tools that would run one of its hooks, each by its own rule (PluginContents.hooksByTool): their Hooks line in "In each tool". */
+  hooksIn: HarnessId[];
+  /** The tools in which one of the hooks they would run can add text to sessions (pluginoutcomes.ts addsText). */
   sessionTextHooks: HarnessId[];
   /** The skills' folder names, to show how a tool will name them. */
   skillNames?: string[];
@@ -804,8 +808,10 @@ export interface PluginContents {
   instructions: NamedPart[];
   /** It holds instruction files and nothing else that could be a part, so installing it makes no tool read anything of it (catalogdetail.ts holdsOnlyInstructions). */
   onlyInstructions: boolean;
-  /** Its hooks, each as it is declared. */
+  /** Its hooks, each as it is declared: as `ReadAs.tool` reads them, or for a copy read for every tool, hooks/hooks.json and what its manifest or entry names. */
   hooks: DeclaredHook[];
+  /** The hooks each tool would run of this copy, by its own rule (catalogdetail.ts pluginHooks): every tool with plugins for a copy read for every tool, the one `ReadAs.tool` names otherwise. */
+  hooksByTool: Partial<Record<HarnessId, DeclaredHook[]>>;
   /** Each hooks file it has that couldn't be read as JSON: what those declare isn't known (catalogdetail.ts pluginHooks). */
   hooksUnread?: string[];
   /** Each MCP server with what it runs or connects to, and its entry as the plugin writes it, as JSON. */

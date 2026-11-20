@@ -4,6 +4,7 @@
 import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
+import { pluginTools } from './presence.ts';
 import type { DeclaredHook, HarnessId, NamedPart, PluginContents, PluginDetail } from './types.ts';
 import { githubRepo, isFolder, isHttps, nameOfFile, record, strings, text } from './values.ts';
 import { commandLine } from './words.ts';
@@ -316,12 +317,18 @@ export async function skillNamesIn(folder: string, entry: Record<string, unknown
  * its key, and an inline { content } one isn't listed. Agents folders are read too, though Claude Code takes only files.
  * An entry with "strict": false that also lists parts beside a plugin.json is one Claude Code refuses; it is read merged.
  * Hooks and servers are read from their default files plus whatever plugin.json or the entry names (each tool's own rule for
- * hooks: pluginHooks). Instruction files are read at their fixed places (INSTRUCTION_FILES), in every copy alike.
+ * hooks: pluginHooks); a copy read for every tool also has each tool's own reading of its hooks (`hooksByTool`), which is what
+ * "In each tool" says of them. Instruction files are read at their fixed places (INSTRUCTION_FILES), in every copy alike.
  */
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs = {}): Promise<PluginContents> {
   const manifests = await manifestOf(folder, entry, root, readAs), { own, added } = manifests;
   const declared: Record<string, unknown> = { ...own, ...added, version: text(own.version) || added.version };
-  const hooks = await pluginHooks(readAs.tool, root, folder, readAs.tool === 'copilot-cli' ? (await copilotManifest(folder))?.hooks ?? declared.hooks : declared.hooks);
+  // Its hooks as `tool` reads them: what that tool's manifest names (Copilot CLI's own, else this one; Codex's alone, without the
+  // entry), by its rule. With no tool, this copy's manifest and entry, for every tool.
+  const hooksAs = async (tool: HarnessId | undefined) => pluginHooks(tool, root, folder, tool === 'copilot-cli' ? (await copilotManifest(folder))?.hooks ?? declared.hooks
+    : tool === 'codex-cli' ? (readAs.codex ?? await codexManifest(folder)).hooks : declared.hooks);
+  const hooks = await hooksAs(readAs.tool);
+  const hooksByTool = readAs.tool ? { [readAs.tool]: hooks.hooks } : Object.fromEntries(await Promise.all(pluginTools.map(async tool => [tool, (await hooksAs(tool)).hooks])));
   const servers = (await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json')).values;
   const lsp = (await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json')).values;
   const read: Omit<PluginContents, 'onlyInstructions'> = {
@@ -329,7 +336,7 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
     commands: await markdownIn(root, folder, listedOr(folder, manifests, 'commands')),
     agents: await markdownIn(root, folder, listedOr(folder, manifests, 'agents')),
     instructions: await instructionsIn(root, folder),
-    hooks: hooks.hooks, ...(hooks.unread.length ? { hooksUnread: hooks.unread } : {}),
+    hooks: hooks.hooks, hooksByTool, ...(hooks.unread.length ? { hooksUnread: hooks.unread } : {}),
     mcpServers: serverList(servers),
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),
     lspServers: Object.keys(lsp).sort(),
