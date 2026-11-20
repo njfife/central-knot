@@ -286,6 +286,33 @@ test('“In each tool” gives a tool Hooks and Session text lines only from the
   } finally { await cleanup(); }
 });
 
+test('“In each tool” says which of a plugin’s hooks Copilot CLI and Codex are known to run (start-of-session and prompt hooks; Copilot CLI drops what a prompt hook prints), in step with its Session text line and the line over its hooks that add text; with neither kind, that they are unconfirmed', async () => {
+  const { root, cleanup } = await box();
+  try {
+    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'p', version: '1.0.0' }));
+    const command = (text: string) => [{ hooks: [{ type: 'command', command: text }] }];
+    // Stop: unified-computer-use's shape, its only hooks at Stop, each calling an MCP tool.
+    const kinds = { start: { SessionStart: command('echo start') }, prompt: { UserPromptSubmit: command('echo prompt') },
+      both: { SessionStart: command('echo start'), UserPromptSubmit: command('echo prompt') }, stop: { Stop: [{ hooks: [{ type: 'mcp_tool', server: 'cua', tool: 'stop' }] }] } };
+    /** Each tool's Hooks and Session text lines, and the line over the hooks that add text where the page has that group. */
+    const said = async (kind: keyof typeof kinds) => {
+      await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: kinds[kind] }));
+      const components = componentsFrom(await pluginContents(root, {}, root)), tools: HarnessId[] = ['copilot-cli', 'codex-cli'];
+      return { ...Object.fromEntries(tools.map(tool => [tool, outcomes(tool, components).filter(outcome => ['Hooks', 'Session text'].includes(outcome.component)).map(outcome => `${outcome.component} ${outcome.text}`)])),
+        about: components.sessionTextHooks.length ? sessionHooksAbout(components.sessionTextHooks, tools) : null };
+    };
+    const copilotText = `Session text is limited: ${sessionTextNote('copilot-cli')}`, codexText = `Session text waits for trust: ${sessionTextNote('codex-cli')}`;
+    const about = (none: string) => `These run when a session starts or you send a prompt (in Codex, once you trust them); what they add is known only when they run.${none}`;
+    assert.deepEqual(await said('start'), { 'copilot-cli': ['Hooks start-of-session hooks run; others may not', copilotText],
+      'codex-cli': ['Hooks start-of-session hooks run after you trust them in Codex; others may not', codexText], about: about('') });
+    assert.deepEqual(await said('prompt'), { 'copilot-cli': ['Hooks prompt hooks run, but what a prompt hook prints is not used; others may not'],
+      'codex-cli': ['Hooks prompt hooks run after you trust them in Codex; others may not', codexText], about: about(' In Copilot CLI, none of them adds text.') });
+    assert.deepEqual(await said('both'), { 'copilot-cli': ['Hooks start-of-session and prompt hooks run, but what a prompt hook prints is not used; others may not', copilotText],
+      'codex-cli': ['Hooks start-of-session and prompt hooks run after you trust them in Codex; others may not', codexText], about: about('') });
+    assert.deepEqual(await said('stop'), { 'copilot-cli': ['Hooks may not run: not confirmed in Copilot CLI'], 'codex-cli': ['Hooks may not run: not confirmed in Codex'], about: null });
+  } finally { await cleanup(); }
+});
+
 test('The line under a plugin page’s hooks that can add text names each tool that takes text from none of them, and says Codex waits for trust only where Codex takes some', async () => {
   const { root, cleanup } = await box();
   try {

@@ -21,7 +21,7 @@ import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
 import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, categoriesOf, copiesToCompare, marketTitle, matches, pluginPlace, undoLimits } from './pluginstatus.ts';
+import { FIND_FROM, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, undoLimits } from './pluginstatus.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginTurn, PluginTurnResult, PluginsView } from './types.ts';
 import { andList, toolNames } from './words.ts';
@@ -279,9 +279,11 @@ export const addMarketplace = (source: string) => act('adding', async () => {
   if (added && app.page === 'plugins') noteMove();
   market.nav = { ...startNav(), source: added?.source };
   showView(result.view);
-  // The outcome first, the name last, so a narrow status bar that shortens the message cuts the name, not the news.
-  const what = result.already ? 'Marketplace already on this page' : 'Marketplace added';
-  tell({ page: 'plugins', item: added?.name || undefined, text: added ? `${what}: ${plural(added.plugins.length, 'plugin')}, nothing installed (${marketTitle(added)}).` : `${what}. Nothing was installed.` });
+  // The outcome first, the name last, so a narrow status bar that shortens the message cuts the name, not the news. What is
+  // installed is counted as its row counts it: one a tool has already, the add didn't install.
+  const what = result.already ? 'Marketplace already on this page' : 'Marketplace added', some = added && result.view ? installedFrom(result.view, added) : 0;
+  const text = added ? `${what}: ${plural(added.plugins.length, 'plugin')}, ${some ? `${some} installed` : 'nothing installed'} (${marketTitle(added)}).` : `${what}. Nothing was installed.`;
+  tell({ page: 'plugins', item: added?.name || undefined, text });
   // Once added, focus leaves the add box (now gone), so the next key press doesn't land in an input that isn't there.
 }).then(() => { if (!market.problem) (document.activeElement as HTMLElement | null)?.blur(); });
 

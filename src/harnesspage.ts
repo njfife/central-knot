@@ -5,7 +5,7 @@
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
 import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
-import { installsIn, pluginsInstalled, type MarketPlugin } from './pluginstatus.ts';
+import { installsIn, pluginsInstalled, takesItemsOnly, type MarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
@@ -67,9 +67,6 @@ function pluginsIn(tool: HarnessId): PluginsHere {
   return installs ? { state: 'read', ...installs } : { state: 'unsupported' };
 }
 
-/** What a tool that takes no marketplace plugins (Pi) says about them: on its card, its tab's tooltip and its Plugins tab. */
-const pluginsNotHandled = (tool: HarnessId) => `Central Knot doesn’t move ${names[tool]}’s plugins`;
-
 /**
  * How the tool was found, short: a sample or chosen folder is only a folder; on this computer, its CLI (with its version),
  * its desktop app with no CLI, or neither. Both found: both named, since the app is never the CLI.
@@ -122,7 +119,7 @@ function instructionCount(tool: HarnessId): Count {
 /** A tool's plugins on its card (pluginstatus.ts pluginsInstalled, the Overview's count too). */
 function pluginCount(tool: HarnessId): Count {
   const plugins = pluginsInstalled(state.home, tool);
-  if (plugins.state === 'unsupported') return { value: '—', note: pluginsNotHandled(tool), faint: true };
+  if (plugins.state === 'unsupported') return { value: '—', note: takesItemsOnly(names[tool]), faint: true };
   if (plugins.state === 'unknown') return { value: '?', note: 'its record couldn’t be read', faint: true };
   return { value: plugins.count ? String(plugins.count) : '', note: plugins.count ? 'installed' : 'none installed', faint: !plugins.count };
 }
@@ -248,7 +245,7 @@ function tabs(home: HomeView, tool: HarnessId) {
       // A kind this tool cannot hold shows no count and a quieter tab; its tooltip and its page say why.
       return h(`button.harness-tab${state.harnessTab === tab ? '.selected' : ''}${counted?.shown === '—' ? '.harness-tab-none' : ''}`, {
         type: 'button', role: 'tab', id: `harness-tab-${tab}`, 'aria-selected': String(state.harnessTab === tab), disabled: !!state.busy && state.harnessTab !== tab,
-        title: !counted ? undefined : counted.shown === '—' ? (isKind(tab) ? kindNotUsed(tool, tab) : pluginsNotHandled(tool)) : `${counted.shown} in ${names[tool]}${counted.elsewhere ? ` · ${counted.elsewhere} only in other tools` : ''}`,
+        title: !counted ? undefined : counted.shown === '—' ? (isKind(tab) ? kindNotUsed(tool, tab) : takesItemsOnly(names[tool])) : `${counted.shown} in ${names[tool]}${counted.elsewhere ? ` · ${counted.elsewhere} only in other tools` : ''}`,
         onclick: () => goHarness(tool, tab),
       }, tabLabel(tab), counted && counted.shown !== '—' && counted.shown > 0 ? h('span.harness-tab-count', {}, String(counted.shown)) : null);
     }));
@@ -306,7 +303,7 @@ function pluginsTab(tool: HarnessId) {
   if (plugins.state === 'unsupported') {
     // Only the tools that take a plugin whole are named as where plugins install; this one takes a plugin's items.
     const takers = (market.view?.tools ?? []).filter(takesPlugins);
-    return page(emptyState('puzzle', pluginsNotHandled(tool), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on ${pageNames.plugins} puts its skills, agents and MCP servers in ${names[tool]} as items of Central Knot’s that follow the plugin. ` : ''}${names[tool]}’s own packages stay as they are.`));
+    return page(emptyState('puzzle', takesItemsOnly(names[tool]), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on ${pageNames.plugins} puts its skills, agents and MCP servers in ${names[tool]} as items of Central Knot’s that follow the plugin. ` : ''}${names[tool]}’s own packages stay as they are.`));
   }
   // What could not be checked is said, so the list is never taken for everything installed.
   const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${pluginTitle(plugin)}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];

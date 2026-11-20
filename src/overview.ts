@@ -22,7 +22,7 @@ import { dayAndTime, dayWords, plural } from './model.ts';
 import { noToolsLead, notRead, previewReason } from './pages.ts';
 import { rowCount } from './pluginrows.ts';
 import { fromAnyPlugin } from './origins.ts';
-import { pluginsInstalled, type PluginsInstalled } from './pluginstatus.ts';
+import { pluginsInstalled, takesItemsOnly, type PluginsInstalled } from './pluginstatus.ts';
 import { heldKinds } from './presence.ts';
 import type { HarnessId, HomeView } from './types.ts';
 import { updateLine } from './updateview.ts';
@@ -231,7 +231,7 @@ function toolsTable(home: HomeView) {
   const rows = tools.map(tool => ({ tool, kinds: kinds.map(kind => kindShown(kind, tool)),
     plugins: plugins ? pluginsShown(pluginsInstalled(home, tool)) : undefined, sessions: sessionsCell(histories.find(each => each.tool === tool)) }));
   const shown = rows.flatMap(row => [...row.kinds, row.plugins, row.sessions.textContent]), kindDash = rows.some(row => row.kinds.includes('—'));
-  const dashes = [kindDash ? 'that tool can’t hold that kind' : '', rows.some(row => row.plugins === '—') ? 'Central Knot doesn’t move that tool’s plugins' : ''].filter(Boolean);
+  const dashes = [kindDash ? 'that tool can’t hold that kind' : '', rows.some(row => row.plugins === '—') ? takesItemsOnly('that tool') : ''].filter(Boolean);
   const unknown = shown.some(value => value?.endsWith('?'));
   const key = [dashes.length ? `—: ${dashes.join(', or ')}.` : '',
     unknown ? '?: not known, as what that tool keeps there couldn’t all be read. A number before the mark is what was counted, and there may be more.' : ''].filter(Boolean).join(' ');
