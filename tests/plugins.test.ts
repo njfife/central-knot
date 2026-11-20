@@ -37,7 +37,7 @@ async function marketplace(root: string, extra: unknown[] = []) {
   await put(join(full, 'skills/two/SKILL.md'), '---\nname: two\ndescription: Two.\n---\nB\n');
   await put(join(full, 'commands/go.md'), 'Go.\n');
   await put(join(full, 'agents/helper.md'), 'Helper.\n');
-  await put(join(full, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [] } }));
+  await put(join(full, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo started' }] }] } }));
   await put(join(full, '.mcp.json'), JSON.stringify({ mcpServers: { local: { command: '${CLAUDE_PLUGIN_ROOT}/server' } } }));
   await put(join(root, 'plugins/marker/.claude-plugin/plugin.json'), JSON.stringify({ name: 'marker', version: '0.3.0' }));
   await put(join(root, 'plugins/marker/skills/ck-marker-skill/SKILL.md'), '---\nname: ck-marker-skill\ndescription: Marker.\n---\nReply ck-mk-1.\n');
@@ -67,7 +67,7 @@ test('A catalog lists its plugins and what each holds, and reads nothing outside
     const catalog = await parseCatalog(root, root, 'folder');
     assert.equal(catalog.name, 'ck-test-market');
     assert.deepEqual(catalog.plugins.map(plugin => plugin.name), ['escape', 'full', 'marker']);
-    assert.deepEqual(catalog.plugins.find(plugin => plugin.name === 'full')!.components, { skills: 2, commands: 1, agents: 1, hooks: true, mcp: 1, mcpRootVariable: true, bin: false, sessionTextHooks: true, skillNames: ['one', 'two'] });
+    assert.deepEqual(catalog.plugins.find(plugin => plugin.name === 'full')!.components, { skills: 2, commands: 1, agents: 1, hooks: true, mcp: 1, mcpRootVariable: true, bin: false, sessionTextHooks: ['claude-cli', 'copilot-cli', 'codex-cli'], skillNames: ['one', 'two'] });
     assert.equal(catalog.plugins.find(plugin => plugin.name === 'escape')!.components, undefined, 'a path outside is not read');
     // A version the entry doesn't give comes from the plugin's own plugin.json, whether or not its files are counted.
     for (const counts of [true, false]) assert.equal((await parseCatalog(root, root, 'folder', { counts })).plugins.find(plugin => plugin.name === 'marker')!.version, '0.3.0');

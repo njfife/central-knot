@@ -35,9 +35,13 @@ const api = {
   selectHome: async (): Promise<HomeView | null> => null,
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
   onSyncChanged: (listener: () => void) => { main.syncChanged = listener; },
+  syncNow: async (_home: string): Promise<unknown> => null,
 };
-// The page's modules, loaded under node with no window: the little of the DOM they touch as they load and redraw.
-const element = (): any => ({ dataset: {}, style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, setAttribute() {}, addEventListener() {}, replaceChildren() {}, append() {}, appendChild() {}, focus() {} });
+// The page's modules, loaded under node with no window: the little of the DOM they touch as they load and redraw. An element keeps
+// what is appended to it, so a test can read the words a part draws (textOf).
+const element = (): any => ({ dataset: {}, style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, children: [], content: {}, setAttribute() {}, addEventListener() {}, replaceChildren() {},
+  append(...kids: unknown[]) { this.children.push(...kids); }, appendChild() {}, focus() {}, querySelector: () => element(), after() {} });
+const textOf = (node: any): string => (typeof node === 'string' ? node : (node?.children ?? []).map(textOf).join(''));
 const announcement = element();
 Object.assign(globalThis, {
   window: { centralKnot: new Proxy(api, { get: (known, name) => (known as Record<string | symbol, unknown>)[name] ?? (() => Promise.resolve(null)) }), addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }) },
@@ -48,11 +52,12 @@ Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh'
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
 const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, whyKindReadOnly, whyReadOnly,
-  loadHome, problemKey, queueClick, readAgain, setRenderer, showPage, state: app } = await import('../src/app.ts');
+  loadHome, problemKey, queueClick, readAgain, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
-const { toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { backgroundProblems, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { pluginsResult } = await import('../src/pluginspage.ts');
 const { newItem } = await import('../src/library.ts');
 const { keptBack } = await import('../src/clickplan.ts');
 const { clickWords } = await import('../src/pluginparts.ts');
@@ -79,7 +84,8 @@ function start() {
   endRun();
   resetMarket();
   Object.assign(main, { sent: [], restored: [], reads: { plugins: 0, home: 0 }, answers: [], duringHomeRead: undefined });
-  app.home = { home: '/home', sync: { managed: [], gate: { state: 'open' } } } as unknown as typeof app.home;
+  const none = { tools: [], items: [], notices: [], library: {} };
+  app.home = { home: '/home', sync: { managed: [], gate: { state: 'open' } }, skills: none, mcp: none, agents: none } as unknown as typeof app.home;
   Object.assign(app, { page: 'plugins', outcome: undefined, libraryKind: 'all' });
   market.read.data = view;
 }
@@ -532,6 +538,129 @@ test('A run where every row fell short names them once: the lead names them, the
   await settled();
   for (const name of ['a', 'b', 'c']) await main.pass(partly(name));
   assert.equal(app.outcome?.text, '3 of 3 didn’t go through in every tool: a, b and c. All 3 are off.');
+});
+
+/**
+ * A home whose skills, now Off, are `keys`: those in `linked` read by Codex and Pi through links into the shared folder, with no copy
+ * of Central Knot's (skills.ts anotherWay), and `draft`, found with copies that differ, waiting for a choice of copy.
+ */
+function linkedHome(keys: string[], linked: string[]) {
+  const tools = ['claude-cli', 'codex-cli', 'pi-cli'], readers = ['codex-cli', 'pi-cli'];
+  const reads = (key: string) => (linked.includes(key) ? { anotherWay: Object.fromEntries(readers.map(tool => [tool, 'It has it through a link in its skills folder, which is not Central Knot’s copy.'])),
+    loads: Object.fromEntries(readers.map(tool => [tool, { folder: key, name: key, skillFile: `/home/.agents/skills/${key}/SKILL.md`, switchedOff: false }])) } : {});
+  const draft = { key: 'draft', name: 'draft', copies: { 'claude-cli': { hash: 'x' }, 'codex-cli': { hash: 'y' } }, takeInAnswers: { click: { wait: 'copies-differ' }, rule: { wait: 'copies-differ' } } };
+  const empty = { tools, items: [], notices: [], problems: [], unread: [], library: {} };
+  app.home = { home: '/home', label: 'Practice', sync: { managed: tools, caughtUp: [], access: { allowed: true }, gate: { state: 'ready' } },
+    skills: { ...empty, items: [...keys.map(key => ({ key, name: key, copies: {}, ...reads(key) })), draft], library: Object.fromEntries(keys.map(key => [key, newItem(key, key)])) }, mcp: empty, agents: empty } as unknown as HomeView;
+}
+/** draft's Add in its turn: its copies differ, so the pass waits for a choice (librarypass.ts addClicked). */
+const waitsForChoice: PassResult = { results: [{ item: 'draft', outcome: 'held', differs: true, message: 'Copies differ. Choose which copy to use.' }], writes: 0 };
+
+test('A run of four Offs, two of them still read by Codex and Pi through links: after what went through, one sentence names the two and the tools that still read them', async () => {
+  onLibrary();
+  linkedHome(['a', 'b', 'c', 'd'], ['a', 'b']);
+  for (const name of ['a', 'b', 'c', 'd']) flip(name, false);
+  await settled();
+  for (const name of ['a', 'b', 'c', 'd']) await main.pass(did(name));
+  // It is no failure: no warning, and no reason.
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons], ['4 skills are off: a, b, c and d. Codex and Pi still read a and b another way.', false, []]);
+});
+
+test('A run where one row waits for a choice of copy: it is not counted On or Off, it is no reason, and a sentence says it waits', async () => {
+  onLibrary();
+  linkedHome(['a'], ['a']);
+  flip('a', false);
+  flip('draft', true);
+  await settled();
+  await main.pass(did('a'));
+  await main.pass(waitsForChoice);
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons],
+    ['1 skill is off: a. Codex and Pi still read a another way. draft has differing copies. Choose which copy every tool uses.', false, []]);
+});
+
+test('A row a refusal left Off, which tools still read, says both: first that it didn’t go through, then among the rows still read', async () => {
+  onLibrary();
+  linkedHome(['a', 'b'], ['a', 'b']);
+  flip('a', false);
+  flip('b', false);
+  await settled();
+  // a is Off in Central Knot, and its removal failed in Claude Code.
+  onNow.set(rowId('skills', 'a'), false);
+  await main.pass(failedWrite('a'));
+  await main.pass(did('b'));
+  assert.equal(app.outcome?.text, '1 of 2 didn’t go through in every tool: a. 1 skill is off: b. Codex and Pi still read a and b another way.');
+});
+
+test('Sync once is a new result too: a refused Off’s line from before goes when its result lands', async t => {
+  onLibrary();
+  linkedHome(['a'], []);
+  flip('a', false);
+  await settled();
+  await main.pass(failedWrite('a'));
+  assert.equal(app.skillsResult?.results.filter(keptBack).length, 1);
+  t.mock.method(api, 'syncNow', async () => ({ view: app.home, text: 'Synced once.', reasons: [], warn: false, history: false }));
+  await syncNow();
+  assert.deepEqual([app.outcome?.text, app.skillsResult?.results.filter(keptBack) ?? []], ['Synced once.', []]);
+});
+
+test('The background’s line for a failed removal stands while the view still owes that removal, in Automatic sync’s own words while it is on; one no longer owed is not said', () => {
+  onLibrary();
+  linkedHome(['a', 'b'], []);
+  // a's removal from Claude Code is still owed; b's went through at a later pass in the same delivered history (main.ts keepPass).
+  const plan = (remove: string[]) => ({ orderProved: true, keep: [], write: [], remove, forget: [], current: [], ownCopy: [] });
+  const items = app.home!.skills.items as unknown as { key: string; plan?: unknown }[];
+  items.find(item => item.key === 'a')!.plan = plan(['claude-cli']);
+  items.find(item => item.key === 'b')!.plan = plan([]);
+  const failed = (item: string) => ({ item, harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, of: 'skills' as const, message: 'Could not remove Claude Code’s copy yet. Central Knot will try again.' });
+  app.home!.sync.caughtUp = [failed('a'), failed('b'), { item: 'b', harness: 'claude-cli', outcome: 'removed', of: 'skills', message: 'Removed. Central Knot keeps it.' }];
+  app.home!.syncOn = true;
+  assert.deepEqual(backgroundProblems().map(({ problem, retried }) => [problem.item, retried]), [['a', true]]);
+  app.home!.syncOn = false;
+  assert.deepEqual(backgroundProblems().map(({ problem, retried }) => [problem.item, retried]), [['a', false]]);
+});
+
+test('Sync once from the menu on Plugin marketplaces, an older run’s result there: the header draws Sync once’s result and its reasons, not the run’s', () => {
+  start();
+  market.lastRun = { done: installed('alpha').done, undo: false, home: '/home' };
+  app.outcome = { page: 'plugins', band: true, warn: true, text: 'Not everything was synced.', reasons: [['notes', ' (Codex): Could not remove Codex’s copy yet.']] };
+  const drawn = pluginsResult().map(textOf).join(' | ');
+  assert.match(drawn, /Not everything was synced\./);
+  assert.match(drawn, /notes \(Codex\): Could not remove Codex’s copy yet\./);
+  assert.doesNotMatch(drawn, /alpha/);
+});
+
+test('A new run lets go every kind’s earlier click reasons: after two refusals stood past their 8 seconds, an agent switched with no problem has no reason and no problem line, and the skills’ notices stay', async t => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    onLibrary();
+    homeWith(t, [{ kind: 'skills', key: 'a' }, { kind: 'skills', key: 'b' }, { kind: 'agents', key: 'helper' }]);
+    const notice: ItemNotice = { kind: 'deleted-by-hand', key: 'notes', item: 'notes', history: 'deletion', winner: 'claude-cli', losers: [], orderProved: true };
+    flip('a', false);
+    flip('b', false);
+    await settled();
+    await main.pass(failedWrite('a'));
+    await main.pass({ ...failedWrite('b'), notices: [notice] });
+    assert.equal(app.skillsResult?.results.filter(keptBack).length, 2);
+    mock.timers.tick(9000);
+    flip('helper', false, undefined, 'agents');
+    await settled();
+    await main.pass(offMade('agents', 'helper'));
+    assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.skillsResult?.results.filter(keptBack), app.skillsResult?.notices], ['helper is off.', [], [], [notice]]);
+  } finally { mock.timers.reset(); }
+});
+
+test('An Undo lets go every kind’s earlier click reasons: after a run whose skill was refused and whose agent went off, its Undo shows no skill’s problem line', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'a' }, { kind: 'agents', key: 'helper' }]);
+  flip('a', false);
+  flip('helper', false, undefined, 'agents');
+  await settled();
+  await main.pass(failedWrite('a'));
+  await main.pass(offMade('agents', 'helper'));
+  assert.equal(app.skillsResult?.results.filter(keptBack).length, 1);
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([main.restored, app.outcome?.text, app.skillsResult?.results.filter(keptBack)], [['off-agents-helper'], 'Undone: helper is as before.', []]);
 });
 
 test('A run made on one tool’s page is said there only: on another tool’s page, the status bar says it, and no row there flashes', async () => {

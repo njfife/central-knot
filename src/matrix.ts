@@ -32,10 +32,10 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { byName, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rowId, timeIn, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, waitsForSync, fromSourceWords, harnessIs, inLibrary, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, inLibrary, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
-import { listed, type Version } from './library.ts';
+import { itemKey, listed, type Version } from './library.ts';
 import { keptBack } from './clickplan.ts';
 import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, SearchHit, SyncGate, SyncNotice } from './types.ts';
 import type { HarnessId, TakenInNotice, ThroughPlugin, UsageReading } from './types.ts';
@@ -55,7 +55,7 @@ const names = toolNames as Record<Tool, string>;
  * Opens a plugin's page on Plugins, where the plugin itself is handled. `marketplace`: its
  * marketplace's name, to find it by when the page lists that marketplace under another spelling of its address.
  */
-function openPlugin({ source, plugin, marketplace }: { source?: string; plugin: string; marketplace?: string }) {
+export function openPlugin({ source, plugin, marketplace }: { source?: string; plugin: string; marketplace?: string }) {
   const lists = (entry: { plugins: { name: string }[] }) => entry.plugins.some(item => item.name === plugin);
   const listed = market.view?.marketplaces.find(entry => entry.source === source && lists(entry)) ?? market.view?.marketplaces.find(entry => !!marketplace && entry.name === marketplace && lists(entry));
   market.nav = { source: listed?.source ?? source, marketName: listed ? undefined : marketplace, plugin, tab: 'plugins', find: '', category: undefined };
@@ -271,6 +271,8 @@ function rowsOf(kind: PageKind): ItemRow[] {
   if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fact => fromFacts(kind, fact)).map(row => ({ ...row, pluginOn: pluginOnIn(row) })) };
   return factsCache[kind]!.list;
 }
+/** A kind's row by its key, as the home on screen has it now: what a run's result reads of each row it changed (app.ts runOutcome). */
+export const rowByKey = (kind: PageKind, key: string) => rowsOf(kind).find(row => row.key === key);
 /**
  * A table (useLibrary, useTab): the kinds it lists (the Library's segment's; a tab's one) and the harness whose page it is on
  * (`tool`, none on the Library: its column comes first, and the rows it has before the others), as its caller names them; its
@@ -723,7 +725,7 @@ function compareChoices(t: Table, skill: ItemRow, inFiles = false, then?: () => 
 
 /** The copy question of the found item of `kind` keyed `key`, for first setup's walkthrough (firstsetup.ts): `then` runs once a choice's click is done. */
 export function copyQuestion(t: Table, kind: PageKind, key: string, then: () => void): HTMLElement | null {
-  const skill = rowsOf(kind).find(row => row.key === key);
+  const skill = rowByKey(kind, key);
   return skill && isDiffering(skill) ? compareChoices(t, skill, false, then, 'walk-') : null;
 }
 
@@ -976,7 +978,8 @@ function listNotices(t: Table) {
 
 /**
  * A list page's last result, for the header (renderer.ts resultHere): its band, then its problem lines (what its click could not
- * do, then its reasons: app.ts Outcome), or else what a background pass could not do (any kind's), until a click or × ends them.
+ * do, then its reasons: app.ts Outcome), or else, with neither on show, what a background pass could not do (any kind's), until its
+ * × closes them or a read no longer has them (app.ts setHome).
  */
 export function listResult(): HTMLElement[] {
   // The last results, the page's: on the Library every kind's, whatever the segment, as a run there is one (app.ts placeNow);
@@ -984,19 +987,38 @@ export function listResult(): HTMLElement[] {
   // Outcome kinds), so two alike are told apart.
   const table = useTableShown(), kinds = !table ? [] : table.tool || !state.home ? table.kinds : heldKinds(state.home);
   const kept = kinds.flatMap(kind => (lastResult(kind)?.results ?? []).filter(keptBack).map(problem => ({ kind, problem })));
-  const result = kinds.map(lastResult).find(Boolean), done = outcomeBand(), several = new Set([...kept.map(each => each.kind), ...(done ? state.outcome?.kinds ?? [] : [])]).size > 1;
-  const background = !table || result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed' && !state.dismissed.has(problemKey(entry)));
-  // A tool's refusal is said in parts (problemLines): its kind where several, the item's name, then its tool and what failed.
-  const lines = [...background.map(problem => ({ kind: undefined, problem })), ...kept]
-    .map(({ kind, problem }): Child[] | string => [several && kind ? `${kindNouns[kind].title}: ` : '', h('strong.item-name', {}, problem.item), `${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`])
-    .concat((done ? state.outcome?.reasons ?? [] : []).map(reason => (typeof reason === 'string' ? reason : [h('strong.item-name', {}, reason[0]), reason[1]])));
+  const done = outcomeBand(), several = new Set([...kept.map(each => each.kind), ...(done ? state.outcome?.kinds ?? [] : [])]).size > 1;
+  // The background's lines wait while a result or a click's problem line is on show, and come back with the next read after it.
+  const background = !table || done || kept.length ? [] : backgroundProblems();
+  // A tool's refusal is said in parts (problemLines): its kind where several, the item's name, then its tool and what failed. A
+  // removal Automatic sync keeps trying is said as its own, so it never reads as a click's result come back.
+  const refusal = (problem: DestinationResult, kind?: PageKind): Child[] => [several && kind ? `${kindNouns[kind].title}: ` : '', h('strong.item-name', {}, problem.item), `${problem.harness ? ` (${names[problem.harness]})` : ''}: ${problem.message}`];
+  const said = ({ problem, retried }: (typeof background)[number]): Child[] => (retried
+    ? [`Automatic sync still couldn’t remove ${names[problem.harness!]}’s copy of `, h('strong.item-name', {}, problem.item), '. Central Knot will try again.'] : refusal(problem));
+  const lines: (Child[] | string)[] = [...background.map(said), ...kept.map(({ kind, problem }) => refusal(problem, kind)),
+    ...(done ? state.outcome?.reasons ?? [] : []).map(reason => (typeof reason === 'string' ? reason : [h('strong.item-name', {}, reason[0]), reason[1]]))];
   // With no result above them, their × closes them and the click's result they belong to.
-  const close = () => { for (const entry of background) state.dismissed.add(problemKey(entry)); closeResult(); };
+  const close = () => { for (const { problem } of background) state.dismissed.add(problemKey(problem)); closeResult(); };
   // With no problem line, Show all follows the sentence, for one the header's two lines cut.
   if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0));
-  return [done, lines.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, done ? state.outcome : result ?? background[0]), done ? null : closeButton(close, { id: 'problems-dismiss' })) : null]
+  return [done, lines.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, done ? state.outcome : kept.length ? lastResult(kept[0]!.kind) : background[0]?.problem), done ? null : closeButton(close, { id: 'problems-dismiss' })) : null]
     .filter((band): band is HTMLElement => !!band);
 }
+
+/**
+ * What the background passes could not do, as the latest read reports it (types.ts SyncView caughtUp), but what its × closed: each
+ * failure; a removal that failed, where the read names its kind (`of`), only while the item's row still owes it (its plan removes it
+ * from that tool: a later pass may have done it, or the item is On or deleted since). `retried`: such a removal Automatic sync
+ * keeps trying, said in its own words (listResult).
+ */
+export const backgroundProblems = () => (state.home?.sync.caughtUp ?? [])
+  .filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed' && !state.dismissed.has(problemKey(entry)))
+  .flatMap(problem => {
+    const removal = problem.removal && problem.outcome === 'failed' && problem.harness;
+    if (!removal || !problem.of) return [{ problem, retried: false }];
+    const owed = !!rowByKey(problem.of, itemKey(problem.item))?.plan?.remove.includes(problem.harness!);
+    return owed ? [{ problem, retried: !!state.home?.syncOn }] : [];
+  });
 
 /**
  * What went wrong, under a result in the header (renderer.ts resultHere): its first line, on the header's second line, then
@@ -1511,8 +1533,8 @@ function turnOff(t: Table, skill: ItemRow, seen: boolean): Click {
   // A tool's own copy, which Off leaves alone (library.ts), is still there too: said as its mark says it.
   const own = ownCopies(skill, itemOf(skill), tools());
   const said = (notIn: HarnessId[]) => {
-    const now = rowsOf(skill.kind).find(row => row.key === skill.key);
-    const ways = now ? otherReadLines(now, tools()) : [];
+    const now = rowByKey(skill.kind, skill.key);
+    const ways = now ? [...stillReadWords([{ name, row: now }], tools()), ...switchedOffWords(now, tools())] : [];
     const still = stillIn(skill, itemOf(skill), [...notIn, ...plugins.leftIn], tools());
     return lib.say.said.off(name, still, tools(), leftOutTools(), own, ways) + pluginSaid(notIn);
   };
@@ -1618,12 +1640,12 @@ function flip(t: Table, skill: ItemRow, on: boolean) {
     if (t.view.comparing === idOf(skill)) { t.view.comparing = undefined; rerender(); return; }
     t.view.comparing = undefined;
     openRow(t, skill);
-    announce(`${nameOf(skill)}’s copies differ. Choose which copy every tool uses.`, true);
+    announce(copiesDiffer([nameOf(skill)]), true);
     return;
   }
   // Refused in its turn if its row is no longer as it was drawn when clicked.
   const seen = wantedOn(kind, key) ?? libraryPlace(itemOf(skill)) === 'on', refocus = focusOn(t, skill);
-  const rowNow = () => rowsOf(kind).find(row => row.key === key);
+  const rowNow = () => rowByKey(kind, key);
   queueClick({ kind, key, on }, nameOf(skill), () => { const now = rowNow(); return now && (on ? turnOn(t, now, undefined, seen) : turnOff(t, now, seen)); },
     () => { const now = rowNow(); return now && libraryPlace(itemOf(now)) === 'on'; });
   // Add gives way to the switch: the focus goes with it.
@@ -1646,7 +1668,7 @@ function itemSwitch(t: Table, skill: ItemRow, prefix = '') {
 function librarySwitch(t: Table, skill: ItemRow, id: string) {
   const item = itemOf(skill), wanted = wantedOn(skill.kind, skill.key), on = wanted ?? libraryPlace(item) === 'on', tools = toolsFor(t, skill.kind);
   // Where a tool has it through a plugin with no switch for one item there, the click turns the whole plugin: said first.
-  const label = wanted !== undefined ? turningLabel(nameOf(skill), wanted) : [switchLabel(skill, item, tools), wholeWords(throughItems(t, skill), !on)].filter(Boolean).join(' ');
+  const label = wanted !== undefined ? turningLabel(nameOf(skill), wanted) : [switchLabel(skill, item, tools, leftOutTools()), wholeWords(throughItems(t, skill), !on)].filter(Boolean).join(' ');
   return toggle({ on, partial: wanted === undefined && isPartial(item, tools, skill), label, onchange: next => flip(t, skill, next), disabled: queueOff(kindStops(skill.kind)), id });
 }
 
@@ -2055,8 +2077,9 @@ function offNote(t: Table, list: ItemRow[]) {
   const ownIn = (skill: ItemRow) => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind));
   const own = list.filter(skill => ownIn(skill).length), where = [...new Set(own.flatMap(ownIn))];
   if (own.length) return `in Central Knot; ${own.length} also in ${andList(where.map(tool => names[tool]))}, ${own.length === 1 ? 'a copy' : 'copies'} Central Knot didn’t put there`;
-  const ways = list.flatMap(row => otherReadLines(row, toolsFor(t, row.kind)));
-  if (ways.length) return list.length === 1 ? ways.join(' ') : 'in Central Knot; some tools still read copies elsewhere (see each row)';
+  // A tool that has a copy another way still has it, whether it reads it or its own switch has it off.
+  const ways = list.flatMap(row => [...otherReadLines(row, toolsFor(t, row.kind)), ...switchedOffWords(row, toolsFor(t, row.kind))]);
+  if (ways.length) return list.length === 1 ? ways.join(' ') : 'in Central Knot; some tools still have copies elsewhere (see each row)';
   return leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
 }
 
