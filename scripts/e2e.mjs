@@ -753,8 +753,16 @@ async function backPlaceFlow() {
   await goAway();
   await mouse('back');
   const box = await a.run(`(({ left, top, width, height }) => ({ x: left + width / 2, y: top + height / 2 }))(document.getElementById('${library}').getBoundingClientRect())`);
-  await a.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -150 });
-  check('the list comes to rest after the person’s scroll', await stillList(a, library));
+  // The person's wheel, sent again until the list has moved: the protocol answers before the page has scrolled, and a window the
+  // other groups' windows cover (on the Mac, four at once) can take a wheel late or not at all.
+  for (let sent = 0; sent < 5 && await placeOf(library) === end; sent++) {
+    await a.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -150 });
+    await until(async () => await placeOf(library) !== end);
+  }
+  check('the person’s wheel moves the list', await placeOf(library) < end, { end, at: await placeOf(library) });
+  let rested = false;
+  for (let tries = 0; tries < 4 && !rested; tries++) rested = await stillList(a, library);
+  check('the list comes to rest after the person’s scroll', rested);
   const mine = await placeOf(library);
   await comeBack();
   same('a scroll by the person while the list waits for its rows wins: the list stays where they put it', [mine < end, await placeOf(library)], [true, mine]);
@@ -9833,9 +9841,14 @@ async function headerResultFlow() {
     [await lines(), await a.run(`document.querySelector('#header .header-result').getBoundingClientRect().bottom <= innerHeight`), await inView('#outcome-undo'), await inView('#outcome-dismiss'), await scrollbar(), await lastInView()],
     [many, true, true, true, true, false]);
   await pictures('dozen-reasons-whole', [860, 600]);
+  // Read after the page is drawn again, as it is soon after a run (the Git repo's count read again: app.ts afterActing), when that
+  // comes within 3 s of the Tab: the card is drawn anew, and keeps its scroll (renderer.ts renderWindow).
   await a.run(`document.querySelector('#outcome-undo').focus()`);
   for (let tabs = 0; tabs < 4 && await a.run(`document.activeElement?.id`) !== 'problems-show-all'; tabs++) await key('Tab', 9);
-  same('the keyboard reaches the last reason: Tab to Show less, at its end, brings it into view', [await a.run(`document.activeElement?.id`), await lastInView(), await inView('#outcome-dismiss')], ['problems-show-all', true, true]);
+  await a.run(`window.tabbedTo = document.activeElement`);
+  await until(() => a.run(`document.activeElement !== window.tabbedTo`), 3000);
+  same('the keyboard reaches the last reason: Tab to Show less, at its end, brings it into view, and the page drawn again keeps it there',
+    [await a.run(`document.activeElement?.id`), await lastInView(), await inView('#outcome-dismiss')], ['problems-show-all', true, true]);
   if (shots) await a.shot('result-dozen-reasons-end-860');
   await undo();
   for (const folder of [claude, copilot]) chmodSync(folder, 0o755);
@@ -9919,9 +9932,12 @@ async function headerResultFlow() {
   await a.click('#header-refresh');
   check('the two deletions wait for Sync once', await until(() => a.exists('#sync-now')), await a.text('.bands'));
   await pressOn('#sync-now');
-  same('Sync once from the Library: “Not everything was synced.” first, and a reason for each refusal', [(await a.text(sentence))?.startsWith('Not everything was synced.'), (await toggle())?.[0]], [true, 'Show all 2 reasons']);
+  const syncedOnce = [(await a.text(sentence))?.startsWith('Not everything was synced.'), (await toggle())?.[0]];
+  same('Sync once from the Library: “Not everything was synced.” first, and a reason for each refusal', syncedOnce, [true, 'Show all 2 reasons']);
   await pictures('sync-once', [860, 600]);
   await pressOn('#problems-show-all');
+  // A count that is wrong now and then on the Mac (4): its reasons, which only the opened card shows.
+  if (syncedOnce[1] !== 'Show all 2 reasons') console.error(`  its reasons: ${JSON.stringify(await a.all('#header .problem-text'))}`);
   await pictures('sync-once-whole', [860, 600]);
   await a.click('#nav-overview');
   await a.click('#overview-sync-now');

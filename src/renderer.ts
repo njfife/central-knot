@@ -222,7 +222,8 @@ function renderStatus() {
  * sentence then the first of them, each on one line; without, its sentence in two (style.css .header-result); either cut where
  * it runs past them, with Show all (matrix.ts wholeToggle). Show all opens the whole of it as a card hanging from the header
  * over the page (.result-whole), which closes like a menu: on Show less, ×, Escape, or a press that begins outside it
- * (foldResult). A newer result shows folded; a result no longer drawn lets its card go, so none opens again by itself.
+ * (foldResult), and keeps its scroll through a redraw (renderWindow). A newer result shows folded; a result no longer drawn lets
+ * its card go, so none opens again by itself.
  */
 function resultHere() {
   const parts = state.home && !heldBy(state.home) && resultInHeader() ? (state.page === 'plugins' ? pluginsResult() : listResult()) : [];
@@ -261,6 +262,7 @@ function render() {
 
 function renderWindow() {
   const scrolled = offsetsNow();
+  const cardScrolled = document.querySelector('#header .result-whole')?.scrollTop ?? 0;
   const selected = keepSelection();
   const { rail } = applyLayout();
   renderHeader(rail);
@@ -273,11 +275,14 @@ function renderWindow() {
   renderStatus();
   fitBars();
   // What was selected (a field's own scroll with it), then the scroll places, each where it was, and over them the place of a
-  // visit Back or Forward opened (places.ts putBack); keepingFocus puts the focus back after, without scrolling to it (dom.ts
-  // keepSelection neither focuses nor scrolls the page).
+  // visit Back or Forward opened (places.ts putBack), and the result's card, open before and after, scrolled as it was (no visit
+  // keeps its place); keepingFocus puts the focus back after, without scrolling to it (dom.ts keepSelection neither focuses nor
+  // scrolls the page).
   selected();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
   putBack();
+  const card = document.querySelector('#header .result-whole');
+  if (card) card.scrollTop = cardScrolled;
   if (state.home) document.body.dataset.ready = 'true';
 }
 
