@@ -2354,7 +2354,8 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
       index && place.get(idOf(shown[index - 1])) === place.get(idOf(skill)) ? null : h('div.list-group', {}, placeNames[place.get(idOf(skill))!]), listRow(skill)]))
     : emptyState('search-x', 'Nothing matches', `“${view.listFind}”`);
   const skill = shownDetail;
-  if (skill.key !== revealed) { revealed = skill.key; requestAnimationFrame(revealSelected); }
+  // At the next frame, only if it is still the skill to reveal: Back or Forward may have opened another by then (openFiles `placed`).
+  if (skill.key !== revealed) { const key = revealed = skill.key; requestAnimationFrame(() => { if (revealed === key) revealSelected(); }); }
   requestAnimationFrame(() => {
     listWatcher.disconnect();
     const list = document.getElementById('skills-list'); if (list) listWatcher.observe(list);

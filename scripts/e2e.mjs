@@ -613,10 +613,15 @@ async function backPlaceFlow() {
   const placeOf = id => a.run(`Math.round(document.getElementById(${JSON.stringify(id)})?.scrollTop ?? -1)`);
   /** The place of `id` once it is `want`, or what it is after 3 s: a page still filling is put back once it has its height. */
   const placeWhen = async (id, want) => { for (let tries = 0; tries < 30 && await placeOf(id) !== want; tries++) await wait(100); return placeOf(id); };
-  /** Writes the place of the list `id` once it rests (stillList): `anchor`'s top `y` px under the list's top, or `y` px down; reads it back. */
+  /**
+   * Writes the place of the list `id` once it rests (stillList, for up to four of its 3 s: a glide a row's opening started runs
+   * slower where the window draws few frames): `anchor`'s top `y` px under the list's top, or `y` px down; reads it back.
+   */
   const scrollTo = async (id, y, anchor) => {
     await until(() => a.exists(`#${id}`));
-    check(`the list ${id} comes to rest before its place is written`, await stillList(a, id));
+    let rested = false;
+    for (let tries = 0; tries < 4 && !rested; tries++) rested = await stillList(a, id);
+    check(`at ${size}, the list ${id} comes to rest before its place is written`, rested, { y, anchor, at: await placeOf(id) });
     await a.run(`(() => { const list = document.getElementById(${JSON.stringify(id)}), row = ${anchor ? `list.querySelector(${JSON.stringify(anchor)})` : 'null'};
       list.scrollTop = row ? list.scrollTop + row.getBoundingClientRect().top - list.getBoundingClientRect().top - ${y} : ${y}; })()`);
     return placeOf(id);
@@ -705,6 +710,7 @@ async function backPlaceFlow() {
 
   // ---------- One step past ----------
   await sizeTo(a, 860, 600);
+  size = '860×600';
   await typeIn('find', '');
   // Two visits to the Library, each scrolled to a place of its own.
   const first = await scrollTo(library, 300);
@@ -761,6 +767,13 @@ async function backPlaceFlow() {
   await mouse('back');
   same('Back to a skill’s Files: the skill shown again, its list where it was left, though the skill is out of view there',
     [listEnd > 0, await a.text('#skill-detail h2'), await placeWhen('skills-list', listEnd)], [true, 'sample-00', listEnd]);
+  // Another skill chosen and the mouse's Back pressed before the next frame (as in a window that draws few frames): the reveal the
+  // choice asked for, which runs at that frame, does not move the list put back.
+  await a.run(`(async () => { document.getElementById(${JSON.stringify(rowPart('list', 'skills', 'sample-40'))}).click(); await Promise.resolve();
+    document.dispatchEvent(new MouseEvent('mouseup', { button: 3, bubbles: true, cancelable: true })); })()`);
+  await a.settle();
+  same('another skill chosen and Back before the next frame: the skill shown again, its list where it was left',
+    [await a.text('#skill-detail h2'), await placeWhen('skills-list', listEnd)], ['sample-00', listEnd]);
   same('no page errors, Back and Forward’s places', a.pageErrors, []);
   await a.quit();
 }
