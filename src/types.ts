@@ -600,6 +600,9 @@ export interface Components {
   hooks: boolean;
   /** The tools that would run one of its hooks, each by its own rule (PluginContents.hooksByTool): their Hooks line in "In each tool". */
   hooksIn: HarnessId[];
+  /** Those in which one of them runs when a session starts, or when a prompt is sent: the kinds Copilot CLI and Codex are known to run (pluginoutcomes.ts knownToRun). */
+  startHooksIn: HarnessId[];
+  promptHooksIn: HarnessId[];
   /** The tools in which one of the hooks they would run can add text to sessions (pluginoutcomes.ts addsText). */
   sessionTextHooks: HarnessId[];
   /** The skills' folder names, to show how a tool will name them. */

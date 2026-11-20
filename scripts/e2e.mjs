@@ -2399,6 +2399,14 @@ async function practiceFlow() {
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-title-line')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  // Claude Code has its issue-tracker already: the add's sentence counts it, as the marketplace's row does; added again, the same.
+  const addSaid = () => a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
+  same('the add says how many of its plugins are installed, as its row does', [await addSaid(), await a.text('.market-item.selected .market-item-meta')], ['Marketplace added: 5 plugins, 1 installed (ck-test-market).', '5 plugins · 1 installed']);
+  await a.click('#open-add-marketplace');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+  for (let tries = 0; tries < 50 && !/already/.test(await addSaid()); tries++) await wait(100);
+  same('added again, it is on this page already, with its plugin installed counted', await addSaid(), 'Marketplace already on this page: 5 plugins, 1 installed (ck-test-market).');
   same('scrolled, the marketplaces’ list stays where it was through Refresh', await placeThroughRedraw(a, '.market-list', () => a.click('#header-refresh')), [true, 40]);
   await a.send('Emulation.setDeviceMetricsOverride', { width: SMALLEST[0], height: SMALLEST[1], deviceScaleFactor: 1, mobile: false });
   // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
@@ -6423,6 +6431,9 @@ esac
   await done();
   same('unticked, its items leave Pi alone (not triage, his own now), it is recorded, the row says so, and the switch shows partial', [inPi(), installed(), entry()?.except, await boxIs('pi-cli'), await a.text('.plugin-panel .plugin-click'), await switchIs('#pswitch-page-0-issue-tracker')],
     [[true, false], true, ['pi-cli'], ['false', false, 'absent'], 'Its items taken out of Pi', 'true partial']);
+  // Its items are put back by Central Knot, through no tool's command: the tooltip ends its sentence where nothing follows.
+  const undoTitle = await a.run(`document.querySelector('#plugins-undo')?.title ?? ''`);
+  check('the Undo of a click in Pi alone says a whole sentence, nothing empty after a colon', /^Reverses what changed for issue-tracker\.( |$)/.test(undoTitle) && !/: \./.test(undoTitle), undoTitle);
   const checked = calls().length;
   await a.run(`window.centralKnot.checkPluginUpdates().then(() => true)`);
   same('the automatic updates leave Pi out', [inPi(), calls().length, entry()?.except], [[true, false], checked, ['pi-cli']]);
@@ -6804,6 +6815,30 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x38, y: y38, button: 'left', clickCount: 1 });
   await done();
   same('a press released after a redraw replaced its switch still counts as its click', [redrawn, await switchOn(a, 'mcp', 'srv-38'), await switchOn(a, 'mcp', 'srv-32')], [true, false, false]);
+  // So does a Space on the focused switch (a button clicks at the key's release) when the page is drawn again between its key-down
+  // and its key-up, as a background read or the clicks before it ending may. `repeats`: the key held, the keyboard repeating its
+  // key-down after the redraw (Chromium arms the switch now there for a click of its own); `blur`: the window loses the focus before
+  // the release. Answers whether the switch was replaced, how many clicks reached it, and whether its row is On after. In a grouped
+  // run another copy's window can take the focus mid-press, which ends the press with nothing clicked: it is then pressed once more.
+  const spaceAcrossRedraw = async (key, { repeats = 0, blur = false } = {}, again = true) => {
+    const control = rowPart('switch', 'mcp', key), space = { key: ' ', code: 'Space', windowsVirtualKeyCode: 32 };
+    await putAt(table, row(key), 200);
+    await a.run(`(() => { const now = document.getElementById('${control}'); now.dataset.pressed = 'yes'; now.focus(); Object.assign(window, { ckCounted: '${control}', ckClicks: 0, ckBlurs: 0 });
+      if (!window.ckCounting) { addEventListener('click', event => { if (event.target.closest?.('button')?.id === window.ckCounted) window.ckClicks++; }, true); addEventListener('blur', () => window.ckBlurs++); }
+      return window.ckCounting = true; })()`);
+    await a.send('Input.dispatchKeyEvent', { type: 'keyDown', ...space, text: ' ' });
+    await a.run(`(() => { for (let times = 0; times < 2; times++) document.querySelector('#sidebar-toggle').click(); return true; })()`);
+    for (let repeat = 0; repeat < repeats; repeat++) { await wait(30); await a.send('Input.dispatchKeyEvent', { type: 'keyDown', ...space, text: ' ', autoRepeat: true }); }
+    if (blur) await a.run(`dispatchEvent(new FocusEvent('blur')), true`);
+    const replaced = await a.run(`document.getElementById('${control}').dataset.pressed !== 'yes'`), lostFocus = !blur && await a.run(`window.ckBlurs > 0`);
+    await a.send('Input.dispatchKeyEvent', { type: 'keyUp', ...space });
+    await done();
+    if (lostFocus && again) return spaceAcrossRedraw(key, { repeats, blur }, false);
+    return [replaced, await a.run(`window.ckClicks`), await switchOn(a, 'mcp', key)];
+  };
+  same('a Space on a switch released after a redraw replaced it counts as one click', await spaceAcrossRedraw('srv-28'), [true, 1, false]);
+  same('held down, the key repeating after the redraw, it is still one click', await spaceAcrossRedraw('srv-29', { repeats: 3 }), [true, 1, false]);
+  same('the window losing the focus before the release (its key-up went to another window): no click', await spaceAcrossRedraw('srv-27', { blur: true }), [true, 0, true]);
 
   // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it. The
   // last result closed first, so the click below is a run of its own.
@@ -9492,7 +9527,10 @@ echo "$*" >> "$HOME/claude-calls.txt"
   // superpowers' shape, shortened: Claude Code's start-of-session hook in hooks/hooks.json, and a Codex manifest whose `"hooks": {}`
   // names none in its place, so Codex runs none. In the marketplace and installed in Codex, whose strip has no group for it.
   const powers = join(market, 'plugins/superpowers'), catalog = join(market, '.claude-plugin/marketplace.json'), listed = JSON.parse(readFileSync(catalog, 'utf8'));
-  writeFileSync(catalog, JSON.stringify({ ...listed, plugins: [...listed.plugins, { name: 'superpowers', source: './plugins/superpowers', version: '7.0.2' }] }));
+  writeFileSync(catalog, JSON.stringify({ ...listed, plugins: [...listed.plugins, { name: 'superpowers', source: './plugins/superpowers', version: '7.0.2' }, { name: 'stop-hooks', source: './plugins/stop-hooks', version: '1.0.0' }] }));
+  // unified-computer-use's shape: its only hooks at Stop, each calling an MCP tool, so none starts with a session or adds text.
+  mkdirSync(join(market, 'plugins/stop-hooks/hooks'), { recursive: true });
+  writeFileSync(join(market, 'plugins/stop-hooks/hooks/hooks.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'mcp_tool', server: 'cua', tool: 'stop' }] }] } }));
   for (const [path, value] of Object.entries({ '.claude-plugin/plugin.json': { name: 'superpowers', version: '7.0.2' }, '.codex-plugin/plugin.json': { name: 'superpowers', version: '7.0.2', skills: './skills/', hooks: {} },
     'hooks/hooks.json': { hooks: { SessionStart: [{ matcher: 'startup|clear|compact', hooks: [command('"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start')] }] } } })) { mkdirSync(dirname(join(powers, path)), { recursive: true }); writeFileSync(join(powers, path), JSON.stringify(value)); }
   skill(join(powers, 'skills'), 'brainstorming');
@@ -9633,6 +9671,33 @@ echo "$*" >> "$HOME/claude-calls.txt"
   const after = toolFolders();
   same('in the tools’ folders only the uninstall’s record changed', Object.entries(after).flatMap(([folder, files]) => Object.keys({ ...files, ...before[folder] }).filter(path => files[path] !== before[folder][path]).map(path => join(folder, path))),
     ['.claude/plugins/installed_plugins.json']);
+  // A plugin whose only hooks run at Stop: In each tool says Copilot CLI and Codex aren't confirmed to run them, nothing of start-of-session hooks.
+  await a.click('#plugin-back');
+  await a.click('#popen-0-stop-hooks');
+  for (let tries = 0; tries < 100 && !(await a.exists('.plugin-outcome-row')); tries++) await wait(100);
+  same('a plugin with only Stop hooks: In each tool says none is confirmed to run in Copilot CLI or Codex', await a.run(`[...document.querySelectorAll('.plugin-outcome-row')]
+    .map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-item')].map(item => item.textContent)])`),
+  [['Claude Code', ['Hooks run; a hook that fails does not stop the install']], ['Copilot CLI', ['Hooks may not run: not confirmed in Copilot CLI']], ['Codex', ['Hooks may not run: not confirmed in Codex']]]);
+  await pictures('stop-hooks-each-tool', '.plugin-outcome-list', atTwo, true);
+  // The Overview's "—" for Pi's and OpenCode's plugins says what their plugin pages do there: their items go in, not the plugin.
+  await a.click('#nav-overview');
+  for (let tries = 0; tries < 100 && !(await a.exists('#overview-tools-key')); tries++) await wait(100);
+  check('the Overview’s key says Pi and OpenCode take a plugin’s items, not the plugin', /that tool takes a plugin’s items, not the plugin\./.test(await a.text('#overview-tools-key') ?? ''), await a.text('#overview-tools-key'));
+  await pictures('overview-tools-key', '#overview-tools-key', atTwo, true);
+  if (shots) { await a.click('#nav-harnesses'); await pictures('harness-pi-card', '#harness-pi-cli', atTwo); await a.click('#harness-pi-cli'); await a.click('#harness-tab-plugins'); await pictures('harness-pi-plugins', '#harness-body', atTwo); }
+  // A marketplace only Codex reads: the reason Claude Code and Copilot CLI share is said once over its plugins.
+  const codexOnly = join(scratch, 'market-codex-only');
+  for (const [path, value] of Object.entries({ '.agents/plugins/marketplace.json': { name: 'codex-only', plugins: [{ name: 'latex', source: { source: 'local', path: './plugins/latex' } }] }, 'plugins/latex/.codex-plugin/plugin.json': { name: 'latex', version: '0.2.8' } })) {
+    mkdirSync(dirname(join(codexOnly, path)), { recursive: true }); writeFileSync(join(codexOnly, path), JSON.stringify(value));
+  }
+  same('a marketplace only Codex reads is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(codexOnly)}).then(result => result.problem ?? 'added')`), 'added');
+  await a.click('#nav-plugins');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await a.run(`[...document.querySelectorAll('.market-item')].some(item => item.textContent.includes('codex-only'))`)); tries++) await wait(100);
+  await a.run(`[...document.querySelectorAll('.market-item')].find(item => item.textContent.includes('codex-only')).click()`);
+  for (let tries = 0; tries < 100 && !/Only Codex/.test(await a.text('#plugins-scroll') ?? ''); tries++) await wait(100);
+  same('its plugins say once that only Codex reads it, for both Claude Code and Copilot CLI', ((await a.text('#plugins-scroll')) ?? '').split('Only Codex reads this marketplace').length - 1, 1);
+  await pictures('codex-only-marketplace', '.market-hint', atTwo);
   same('no page errors on the strips', a.pageErrors, []);
   await a.quit();
 }

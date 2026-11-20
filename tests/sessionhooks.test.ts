@@ -58,7 +58,7 @@ test('can it add text is each tool’s own rule: Copilot CLI takes only start-of
   // Its sentence names only the hooks it takes.
   assert.match(prompts.about, /^These hooks run a program when a session starts, and what it prints/);
   // The outcome table asks the same rule, tool by tool.
-  const table = (tool: HarnessId, sessionTextHooks: HarnessId[]) => outcomes(tool, { skills: 0, commands: 0, agents: 0, hooks: true, hooksIn: [tool], mcp: 0, mcpRootVariable: false, bin: false, sessionTextHooks })
+  const table = (tool: HarnessId, sessionTextHooks: HarnessId[]) => outcomes(tool, { skills: 0, commands: 0, agents: 0, hooks: true, hooksIn: [tool], startHooksIn: [tool], promptHooksIn: [], mcp: 0, mcpRootVariable: false, bin: false, sessionTextHooks })
     .some(outcome => outcome.component === 'Session text');
   assert.deepEqual([table('claude-cli', ['claude-cli']), table('copilot-cli', ['claude-cli'])], [true, false]);
 });
@@ -104,7 +104,7 @@ test('Codex and Copilot CLI say once what they take of a hook, in the words thei
   // Trusting a project is not enough in Codex: each hook is trusted in its /hooks (https://learn.chatgpt.com/docs/hooks).
   assert.equal(codex!.note, 'Codex runs a hook only after you trust it in `/hooks`');
   assert.equal(copilot!.note, 'Copilot CLI uses only what a start-of-session hook prints as top-level `additionalContext`, not Claude Code’s `hookSpecificOutput` form; it ignores what prompt hooks print');
-  const table = (tool: HarnessId) => outcomes(tool, { skills: 0, commands: 0, agents: 0, hooks: true, hooksIn: [tool], mcp: 0, mcpRootVariable: false, bin: false, sessionTextHooks: [tool] })
+  const table = (tool: HarnessId) => outcomes(tool, { skills: 0, commands: 0, agents: 0, hooks: true, hooksIn: [tool], startHooksIn: [tool], promptHooksIn: [], mcp: 0, mcpRootVariable: false, bin: false, sessionTextHooks: [tool] })
     .find(outcome => outcome.component === 'Session text')!.text;
   assert.deepEqual([table('codex-cli'), table('copilot-cli')], [`waits for trust: ${codex!.note}`, `is limited: ${copilot!.note}`]);
 });
