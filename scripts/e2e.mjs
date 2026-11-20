@@ -6717,6 +6717,7 @@ fs.writeFileSync(record, JSON.stringify(now));
     await a.run(`(() => { document.getElementById('${rowPart('open', 'mcp', key)}').click(); requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector('#item-order').dispatchEvent(new Event('change')))); })()`);
     await a.settle(); await stillList(a, table);
     const after = await rowAt(key);
+    await a.shot(`rows-opened-${key}`);
     await a.click(`#${rowPart('open', 'mcp', key)}`);
     return { before: before.top, after: after.top, tall: after.tall, list: after.list };
   };
@@ -9346,6 +9347,13 @@ async function libraryFlow() {
   const drawnNow = () => tb.all('.sync-notice .item-name', 'e.textContent');
   const firstSix = await drawnNow(), seventh = toolbarSkills.filter(name => !firstSix.includes(name));
   same('the seventh is said on the last line', [seventh.length, await tb.text('.sync-notice:last-child #notices-more')], [1, ' · and 1 more']);
+  if (shots) {
+    for (const [width, height, look] of [[1316, 819, 'light'], [1316, 819, 'dark'], [...SMALLEST, 'light']]) {
+      await sizeTo(tb, width, height); await tb.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+      await tb.shot(`library-seven-notices-${width}-${look}`);
+    }
+    await tb.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await fullSize(tb);
+  }
   await tb.click('#nav-overview');
   same('away from the Library, the dot counts and names the one notice not yet drawn', await tb.run(`document.querySelector('#nav-library .nav-unseen')?.title`), `1 automatic change: ${seventh[0]}`);
   await openKind(tb, 'all');
