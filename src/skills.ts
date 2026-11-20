@@ -6,12 +6,12 @@
 //   folder, a copy in a folder it reads but Central Knot doesn't own (~/.agents/skills), another tool's folder it reads
 //   (OpenCode reads Claude Code's) while the skill is really there, or a plugin;
 // - why a tool can't be given a skill (cannotTake): a name it reserves, or a shape it won't load (share.ts targetFor);
-// - a tool's own switch for a skill (toolFacts, `loads`): read at each look and never written by a pass, but for Pi's inclusion of
-//   a copy it puts in or takes out (skillswitch.ts followCopy). A switch set in a tool, by a person or by Central Knot before the
-//   library, is left as it is and shown as a mark on that tool's line.
-//   Three actions write it: clearSwitch, its Undo switchBack, and takeOver, which carries it to the copy it makes (takeOver
-//   is also the one that makes a copy outside Central Knot's its own); and the profiles migration releases one an earlier
-//   profile set, once (profilemigrate.ts).
+// - a tool's own switch for a skill (toolFacts, `loads`): read at each look (offIn: off where it keeps out every copy the tool
+//   loads). A switch set in a tool, by a person or by Central Knot before the library, is left as it is and shown as a mark on
+//   that tool's line. It is written by clearSwitch, its Undo switchBack, and takeOver, which carries it to the copy it makes
+//   (takeOver is also the one that makes a copy outside Central Knot's its own); by the profiles migration, which releases one an
+//   earlier profile set, once (profilemigrate.ts); and by a pass, which keeps Pi's inclusion of Central Knot's copy in step with
+//   the copy (skillKind.follow: skillswitch.ts followCopy).
 // Around the pass: applySkills and restoreSkill run it for skills (the page's clicks);
 // skillsView is the Library's reading of skills (types.ts LibraryView); skillsForRepo is what the Git repo's Push sends. Elsewhere: the folders, skillfiles.ts; where things
 // are kept and the migration from the earlier record, skillstore.ts and skillmigrate.ts; the row and its words,
@@ -106,9 +106,9 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
     if (copy && !('unseen' in copy)) disk.shapes.set(item.key, { ...copy.skill, folder: item.name });
   }
   for (const [key, slot] of [...disk.byKey, ...disk.outside]) if (!disk.shapes.has(key)) disk.shapes.set(key, Object.values(slot).find(Boolean)!.skill);
-  // Each copy (its own, else one it has another way) its tool's own switch turns off there: for the rule (librarypass.ts Disk.switchedOff).
+  // The tools whose own switch keeps every copy they load out: for the rule (librarypass.ts Disk.switchedOff).
   for (const key of new Set([...disk.byKey.keys(), ...disk.outside.keys()])) {
-    const off = managed.filter(tool => { const copy = disk.byKey.get(key)?.[tool] ?? disk.outside.get(key)?.[tool]; return !!copy && isDisabled(context, disk.switches.get(tool)!, switchTarget(copy)); });
+    const off = managed.filter(tool => offIn(context, disk, key, tool));
     if (off.length) disk.switchedOff.set(key, off);
   }
   return disk;
@@ -159,6 +159,8 @@ async function readAlsoRead(context: ShareContext, disk: SkillDisk, managed: Har
   let sharedTakeable = true;
   for (const tool of managed) if (disk.locked.has(tool) && await landingOf(rootOf(context, tool)) === shared) sharedTakeable = false;
   for (const tool of managed) {
+    const switches = await readSwitchFile(context, tool);
+    disk.switches.set(tool, switches);
     for (const { path, label } of alsoReads(context, tool)) {
       const landing = await landingOf(path);
       const owner = [] as HarnessId[];
@@ -172,14 +174,18 @@ async function readAlsoRead(context: ShareContext, disk: SkillDisk, managed: Har
       const why = away ? `${nameOf(tool)} loads the copy in ${nameOf(away)}’s skills folder (${pathWords(context, path)}), which Central Knot doesn’t manage here.`
         : `${nameOf(tool)} also reads a copy at ${pathWords(context, path)}, which is not Central Knot’s.`;
       for (const copy of copiesIn(await readSkillsFolder(tool, path, label))) {
+        // A copy its own switch keeps out is no way to the skill while the copy in its own folder is let in (Pi's list goes by
+        // path): that one stays, rather than give way to one the tool doesn't load.
+        const here = disk.byKey.get(copy.key)?.[tool];
+        if (here && isDisabled(context, switches, switchTarget(copy)) && !isDisabled(context, switches, switchTarget(here))) continue;
         // This copy, not a link in the tool's own folder, is the way said and taken over: Central Knot's copy in place of
-        // the link would be one too many while the tool still reads this one (library.ts), and go again.
-        if (disk.ways.get(copy.key)?.[tool]?.take === 'link') { delete disk.ways.get(copy.key)![tool]; delete disk.outside.get(copy.key)![tool]; }
+        // the link would be one too many while the tool still reads this one (library.ts), and go again. Pi loads such a skill
+        // by the link's path, which it finds first (measured), so for Pi the link's copy stays the one its switch names.
+        if (disk.ways.get(copy.key)?.[tool]?.take === 'link') { delete disk.ways.get(copy.key)![tool]; if (tool !== 'pi-cli') delete disk.outside.get(copy.key)![tool]; }
         add(disk.ways, copy.key, tool, { why, path: copy.directory, take });
         add(disk.outside, copy.key, tool, copy);
       }
     }
-    disk.switches.set(tool, await readSwitchFile(context, tool));
   }
 }
 
@@ -266,15 +272,14 @@ export const skillKind: Kind<SkillContent, SkillCopy, SkillDisk> = {
     const read = await readCopy(tool, content.directory, '');
     return 'unseen' in read ? undefined : wontLoad(context, tool, item.name, read.skill);
   },
-  remove: async (context, item, here) => {
-    try {
-      await removeFolder(context, here.directory, here.hash);
-      // Its `+` in Pi goes as it is turned off there; a copy that gives way to another (a shared one) leaves it for that one.
-      if (!wantedIn(item, here.tool)) await letPiFollow(context, here.tool, switchTarget(here), false);
-      return 'removed';
-    }
+  remove: async (context, _item, here) => {
+    try { await removeFolder(context, here.directory, here.hash); return 'removed'; }
     catch (error) { if (!errorCode(error)) throw error; return errorCode(error) === 'CK_CHANGED' ? 'changed' : 'failed'; }
   },
+  // Pi's skills list keeps step with Central Knot's copy there (skillswitch.ts followCopy). A list that can't take it leaves the
+  // copy read as off in Pi, with Let Pi load it on its line.
+  follow: (context, item, tool, placed) => followCopy(context, tool, { folder: item.name, name: item.name, skillFile: join(rootOf(context, tool), item.name, 'SKILL.md') }, placed)
+    .catch(error => { if (!errorCode(error)) throw error; return undefined; }),
   historyAction: libraryAction,
   merge: mergeSkill,
 };
@@ -287,10 +292,7 @@ async function writeSkill(context: ShareContext, item: LibraryItem, tool: Harnes
   const target = here?.directory ?? join(rootOf(context, tool), item.name);
   try {
     if (here) await swapFolder(context, content.directory, target, here.hash);
-    else {
-      await placeFolder(context, tool, content.directory, target, await readTree(content.directory));
-      await letPiFollow(context, tool, { folder: item.name, name: item.name, skillFile: join(target, 'SKILL.md') }, true);
-    }
+    else await placeFolder(context, tool, content.directory, target, await readTree(content.directory));
     return undefined;
   } catch (error) {
     if (!errorCode(error)) throw error;
@@ -298,10 +300,6 @@ async function writeSkill(context: ShareContext, item: LibraryItem, tool: Harnes
     return { stopped: changed ? `${nameOf(tool)}’s copy changed just now, so it stays until the next look.` : `Could not write ${nameOf(tool)}’s copy. ${plainError(error)}` };
   }
 }
-
-/** followCopy once a folder is placed or gone, never failing that write: a `+` that didn't land leaves Pi's mark off (Let Pi load it). */
-const letPiFollow = (context: ShareContext, tool: HarnessId, target: SwitchTarget, placed: boolean) =>
-  followCopy(context, tool, target, placed).catch(error => { if (!errorCode(error)) throw error; });
 
 // ---------- The pass, for skills ----------
 
@@ -348,8 +346,8 @@ async function switchBack(context: ShareContext, tools: HarnessId[], past: Histo
   if (problem) return { stopped: problem, results: [], writes: 0 };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0 };
-  for (const { tool, target } of entries) {
-    try { await setDisabled(context, tool, target!, true); }
+  for (const { tool, target, exclusions } of entries) {
+    try { await setDisabled(context, tool, target!, true, exclusions); }
     catch (error) { return { stopped: `Could not set ${toolName(tool)}’s switch: ${switchFailure(error)}`, results: [], writes: 0 }; }
   }
   const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: past.key, of: 'skill', item: past.item, kind: 'switched', cause: 'switch', switched: entries.map(entry => ({ ...entry, disabled: true })), losers: [], orderProved: true };
@@ -381,9 +379,11 @@ export async function clearSwitch(context: ShareContext, tools: HarnessId[], key
   if (problem) return stop(problem);
   const gate = await libraryGate(context, { start: true, resume });
   if ('refused' in gate) return stop(gate.refused);
-  try { await setDisabled(context, tool, target, false, await overrideBefore(context, key, tool, target)); }
+  let exclusions: string[] | undefined;
+  try { exclusions = (await setDisabled(context, tool, target, false, await overrideBefore(context, key, tool, target))).removed; }
   catch (error) { return stop(`Could not clear ${toolName(tool)}’s switch: ${switchFailure(error)}`); }
-  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, of: 'skill', item: name, kind: 'switched', switched: [{ tool, disabled: false, target }], losers: [], orderProved: true };
+  const switched = { tool, disabled: false, target, ...(exclusions?.length ? { exclusions } : {}) };
+  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, of: 'skill', item: name, kind: 'switched', switched: [switched], losers: [], orderProved: true };
   await appendHistory(context, [event]);
   const done = await applySkills(context, tools, [], { only: new Set([key]) });
   const cleared: DestinationResult = { item: name, harness: tool, outcome: 'switched', disabled: false, message: `${toolName(tool)} loads it again from its next session.` };
@@ -494,6 +494,15 @@ function loadTarget(look: SkillLook, key: string, name: string, tool: HarnessId)
 }
 /** How a tool's own switch names one copy of a skill. */
 const switchTarget = (copy: SkillCopy): SwitchTarget => ({ folder: copy.name, name: copy.skill.name, skillFile: join(copy.directory, 'SKILL.md') });
+/**
+ * Whether a tool's own switch keeps out every copy of a skill it loads: its own and the one it has another way (Pi can have
+ * both: its own folder's and the shared folder's of one name, and loads either), else the copy in the folder it reads.
+ */
+function offIn(context: ShareContext, disk: SkillDisk, key: string, tool: HarnessId): boolean {
+  const source = disk.readsFrom[tool], own = [disk.byKey.get(key)?.[tool], disk.outside.get(key)?.[tool]].filter(copy => !!copy);
+  const copies = own.length ? own : source && disk.byKey.get(key)?.[source] ? [disk.byKey.get(key)![source]!] : [];
+  return copies.length > 0 && copies.every(copy => isDisabled(context, disk.switches.get(tool)!, switchTarget(copy)));
+}
 
 /** Each version's note (library.ts VersionChange): the files that differ, as agents.ts changesOf says it for an agent's fields. */
 async function changesOf(context: ShareContext, item: LibraryItem): Promise<VersionChange[]> {
@@ -609,7 +618,7 @@ function toolFacts(look: SkillLook, row: RowOf, tool: HarnessId, facts: ToolFact
   const outsideWay = disk.ways.get(key)?.[tool];
   if (item && !item.deleted && outsideWay?.take && outsideCopy) facts.takeOver[tool] = { kind: outsideWay.take, path: outsideWay.path };
   const target = given && !here ? undefined : loadTarget(look, key, name, tool);
-  if (target) facts.loads[tool] = { ...target, switchedOff: isDisabled(look.context, disk.switches.get(tool)!, target) };
+  if (target) facts.loads[tool] = { ...target, switchedOff: offIn(look.context, disk, key, tool) };
 }
 
 /** A copy outside a tool's own folder that has moved on since the skill was taken in: neither its current version nor another of its versions. */

@@ -1,6 +1,6 @@
 // A tool's own switch for one skill (capability data, Appendix B; ENB-01, ENB-02): the copy stays where it is and keeps
-// receiving updates; the tool just doesn't load it. Central Knot's Off never writes it (Off takes the folder out: library.ts),
-// and On and Off write it only for a copy put in Pi or taken out where a pattern in Pi's settings keeps it out (followCopy).
+// receiving updates; the tool just doesn't load it. Central Knot's Off takes the folder out instead (library.ts); its On and Off
+// write here only Pi's inclusion of the copy they put in or take out (followCopy, from the pass: librarypass.ts Kind.follow).
 // It is read for the mark on that tool's line (skills.ts rowFacts), cleared by skills.ts clearSwitch (and set again by its
 // Undo, switchBack), carried to Central Knot's copy by skills.ts takeOver, released once by the profiles migration
 // (profilemigrate.ts), and flipped for a plugin's skill (plugins.ts). Each tool keeps its switch in its own user-wide settings
@@ -14,16 +14,21 @@
 //   Codex        config.toml     [[skills.config]] path = "<…/SKILL.md>" enabled = false   (by path: a name rule would hit every same-name skill)
 //   Pi           settings.json   "skills": ["-skills/<folder>/SKILL.md"]   (the exact exclusion `pi config` writes; where a `!` pattern
 //                                such as "!*" keeps a copy out, "+skills/<folder>/SKILL.md", the exact inclusion it writes, lets it
-//                                in. Read as Pi 1.5.2 reads the list: piOff. An entry that isn't text stops Pi: read as all out)
+//                                in; a `-` wins over a `+`. A shared copy, or one whose folder name ~/.agents/skills has too, goes by
+//                                its absolute path, which names it alone. His entries are his: piSwitched. Read as Pi 1.5.2 reads
+//                                the list: piOff. An entry that isn't text stops Pi from starting: read as keeping every skill out)
 //   OpenCode     opencode.json   "permission": { "skill": { "<name>": "deny" } }   (by name, whichever folder holds it; the last
 //                                rule that matches a name decides, so the rule goes last. Measured 2026-11-10 on 1.19.5 and 2.2.5:
 //                                a denied skill is left out of what a new session is sent.)
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, matchesGlob, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { minimatch } from 'minimatch';
 import { openCodeSettings, toolConfigRoot } from './harnesses.ts';
 import { errorCode, plainError, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { editTomlArray, readJsonc, readTomlTables, setJsonMember, tomlValue, type TomlTable, type TomlValue } from './textedit.ts';
 import type { HarnessId, SwitchProblem, SwitchTarget } from './types.ts';
+import type { Followed } from './librarypass.ts';
 export type { SwitchTarget };
 import { problemText, toolName } from './words.ts';
 import { record, withoutBom } from './values.ts';
@@ -59,17 +64,23 @@ export function isDisabled(context: ShareContext, file: SwitchFile, target: Swit
 
 /**
  * Turns one tool's copy of a skill off or on, then reads the file back to confirm. Writes only over the text it read (a save
- * made meanwhile is never overwritten) and only when something changes. `restore`: what Claude Code's override held before a
- * Disable (say "name-only"), put back by Enable instead of no override; without it, Enable puts back the value kept for that
- * folder. Returns whether it changed, and that earlier value. Throws an error whose message says why (see switchFailure).
+ * made meanwhile is never overwritten) and only when something changes. `restore`: what the switch held before the change this
+ * one undoes: Claude Code's override before a Disable (say "name-only"), put back by Enable instead of no override (without
+ * it, Enable puts back the value kept for that folder); Pi's exact exclusions an Enable took out (`removed`), put back by Disable.
+ * Returns whether it changed, and those earlier values. Throws an error whose message says why (see switchFailure).
  */
-export async function setDisabled(context: ShareContext, tool: HarnessId, target: SwitchTarget, disabled: boolean, restore?: string): Promise<{ changed: boolean; previous?: string }> {
+export async function setDisabled(context: ShareContext, tool: HarnessId, target: SwitchTarget, disabled: boolean, restore?: string | string[]): Promise<{ changed: boolean; previous?: string; removed?: string[] }> {
   const file = await readSwitchFile(context, tool);
   if (file.problem || !file.parsed) throw failure(problemText(file.problem!));
   const now = stateIn(context, tool, file.parsed, target);
   if (now.disabled === disabled) return { changed: false };
+  if (tool === 'pi-cli') {
+    const next = piSwitched(piList(file), piCopy(context, target), context.home, !disabled, 'switch', [restore ?? []].flat());
+    await writeConfirmed(context, file, target, withSkills(file, next.skills), disabled);
+    return { changed: true, removed: next.removed };
+  }
   if (tool === 'claude-cli' && !disabled) restore ??= (await readKeptOverrides(context))[target.folder];
-  await writeConfirmed(context, file, target, withSwitch(context, file, target, disabled, restore), disabled);
+  await writeConfirmed(context, file, target, withSwitch(context, file, target, disabled, restore as string | undefined), disabled);
   if (tool === 'claude-cli') await keepOverrides(context, { [target.folder]: disabled ? now.previous : undefined });
   return { changed: true, previous: now.previous };
 }
@@ -82,19 +93,19 @@ async function writeConfirmed(context: ShareContext, file: SwitchFile, target: S
 }
 
 /**
- * Pi, as the pass puts a copy in its skills folder (`placed`) or takes out one that is off there now (skills.ts writeSkill,
- * skillKind.remove): piSwitched with the person's own switch for it left alone, written and read back as setDisabled writes.
- * Other tools, and a file with a problem, are left as they are.
+ * Pi's skills list as the pass keeps it in step with Central Knot's copy there (librarypass.ts Kind.follow): after the copy is
+ * put in (`placed`), or is gone for good. piSwitched decides, for a pass; written and read back as setDisabled writes. Answers
+ * what it changed, and that his list keeps a copy just put in out (his exact `-`); nothing for another tool or a file with a problem.
  */
-export async function followCopy(context: ShareContext, tool: HarnessId, target: SwitchTarget, placed: boolean) {
-  if (tool !== 'pi-cli') return;
-  const file = await readSwitchFile(context, tool);
-  if (file.problem || !file.parsed) return;
-  const skills = list((file.parsed as { json: Record<string, unknown> }).json.skills) as string[];
-  const copy = piCopy(context, target);
-  const next = piSwitched(skills, copy, context.home, placed, false);
-  if (JSON.stringify(next) === JSON.stringify(skills)) return;
+export async function followCopy(context: ShareContext, tool: HarnessId, target: SwitchTarget, placed: boolean): Promise<Followed | undefined> {
+  const file = tool === 'pi-cli' ? await readSwitchFile(context, tool) : undefined;
+  if (!file?.parsed || file.problem) return undefined;
+  const skills = piList(file), copy = piCopy(context, target), next = piSwitched(skills, copy, context.home, placed, 'pass').skills;
+  const off: Followed = placed && piOff(next, copy, context.home) ? { off: true } : {};
+  if (next.length === skills.length) return off;
+  const entry = placed ? next.at(-1) : skills.find(each => !next.includes(each));
   await writeConfirmed(context, file, target, withSkills(file, next), piOff(next, copy, context.home));
+  return { ...off, changed: `${entry} ${placed ? 'added to Pi’s skills list (settings.json), where a pattern keeps skills out' : 'taken out of Pi’s skills list (settings.json) with its copy'}.` };
 }
 
 // Claude Code overrides a Disable replaced (say "name-only"), by skill folder. Kept in the store, not only in History (which
@@ -197,48 +208,53 @@ export function codexSkillSwitches(tables: TomlTable[]): { switches: CodexSkillS
   return { switches: found, inline };
 }
 /**
- * How Pi names a copy: `exact`, the paths an exact `+` or `-` matches (absolute, and from its agent folder or, for a shared copy,
- * ~/.agents; each for SKILL.md and its folder); `named`, those and the two names a `!` pattern is also matched against; `written`,
- * what Central Knot writes: `pi config`'s form in Pi's own folder, else the absolute path (from ~/.agents it names Pi's own too).
+ * How Pi names a copy (`file`, its absolute path): `exact`, the paths an exact `+` or `-` matches (absolute, and from its agent
+ * folder or, for a shared copy, ~/.agents; a skill's for SKILL.md and its folder, an agent's loose file for itself); `named`,
+ * those and the names a `!` pattern is also matched against; `written`, Central Knot's form: `pi config`'s in Pi's own folder,
+ * else (a shared copy, or one whose folder name the shared folder has too, which that path would name as well) the absolute path.
  */
-type PiCopy = { written: string; exact: Set<string>; named: string[] };
+type PiCopy = { file: string; written: string; exact: Set<string>; named: string[] };
 function piCopy(context: ShareContext, target: SwitchTarget): PiCopy {
   const inside = (rel: string) => !rel.startsWith('..') && !isAbsolute(rel), file = forwardSlashes(target.skillFile);
-  const own = relative(toolConfigRoot(context, 'pi-cli'), target.skillFile);
+  const own = relative(toolConfigRoot(context, 'pi-cli'), target.skillFile), skill = basename(file) === 'SKILL.md';
   const rel = [own, relative(join(context.home, '.agents'), target.skillFile)].find(inside);
-  const exact = [file, ...(rel ? [forwardSlashes(rel)] : [])].flatMap(path => [path, path.replace(/\/SKILL\.md$/, '')]);
-  const named = [...exact, 'SKILL.md', basename(dirname(target.skillFile))];
-  return { written: inside(own) ? forwardSlashes(own) : file, exact: new Set(exact), named };
+  const exact = [file, ...(rel ? [forwardSlashes(rel)] : [])].flatMap(path => (skill ? [path, dirname(path)] : [path]));
+  const alone = inside(own) && !(skill && existsSync(join(context.home, '.agents', dirname(own))));
+  return { file, written: alone ? forwardSlashes(own) : file, exact: new Set(exact), named: [...exact, basename(file), ...(skill ? [basename(dirname(file))] : [])] };
 }
 /** An entry's path after its sign, as Pi reads it: `~/` from the home; for an exact one (`+`, `-`), a leading `./` dropped. */
 const piPath = (entry: string, home: string) => {
   const path = entry[0] === '!' ? entry.slice(1) : entry.slice(1).replace(/^\.\//, '');
   return path.startsWith('~/') ? `${forwardSlashes(home)}${path.slice(1)}` : path;
 };
+/** Pi's `skills` list, of a file that has no problem (an entry that isn't text is one: parse). */
+const piList = (file: SwitchFile) => list((file.parsed as { json: Record<string, unknown> }).json.skills) as string[];
 /**
  * Whether Pi keeps this copy out, as Pi 1.5.2 does (measured 2026-11-20, capability data Appendix B), wherever each entry stands:
- * an exact `-` keeps it out; else an exact `+` lets it in; else a matching `!` pattern keeps it out (minimatch, as Pi uses; `!!…`,
- * Pi's negation, keeps nearly all out). On macOS Node's matchesGlob ignores a wildcard's case, which Pi doesn't: it may read off.
+ * an exact `-` keeps it out; else an exact `+` lets it in; else a matching `!` pattern keeps it out. A pattern is matched as Pi
+ * matches it: minimatch with its defaults, so letters keep their case on every platform and `!!…` is Pi's negation.
  */
 function piOff(skills: string[], copy: PiCopy, home: string): boolean {
   const exact = (sign: string) => skills.some(entry => entry[0] === sign && copy.exact.has(piPath(entry, home)));
   if (exact('-')) return true;
-  const matches = (entry: string) => entry[1] === '!' || copy.named.some(name => matchesGlob(name, piPath(entry, home)));
-  return !exact('+') && skills.some(entry => entry[0] === '!' && matches(entry));
+  return !exact('+') && skills.some(entry => entry[0] === '!' && copy.named.some(name => minimatch(name, piPath(entry, home))));
 }
 /**
- * Pi's list with this copy let in (`load`) or out, changed as little as does it; no other entry moves, and a pattern never changes.
- * In: where `own` (Let Pi load it), its exclusions go; then `+` where a pattern still keeps it out and no exclusion of its own does.
- * Out: its `+` goes where a pattern then keeps it out; else, where `own`, `-`.
+ * Pi's list with this copy let in (`load`) or kept out. His entries are his: Central Knot adds and takes out only its own `+` and
+ * `-` for the copy (in `written`, or the absolute path, which names it alone), never a `!` pattern, an entry in another form, or
+ * one for another copy. In a pass (`'pass'`) it changes nothing where his exact `-` decides. Let Pi load it (`'switch'`) takes out
+ * his exact `-` for the copy too, since a `-` wins over any `+`, and answers it (`removed`) for its Undo to put back (`back`).
  */
-function piSwitched(skills: string[], copy: PiCopy, home: string, load: boolean, own: boolean): string[] {
-  const its = (signs: string) => (entry: string) => signs.includes(entry[0]) && copy.exact.has(piPath(entry, home));
+function piSwitched(skills: string[], copy: PiCopy, home: string, load: boolean, by: 'pass' | 'switch', back: string[] = []): { skills: string[]; removed: string[] } {
+  const minus = (entry: string) => entry[0] === '-' && copy.exact.has(piPath(entry, home));
+  if (by === 'pass' && skills.some(minus)) return { skills, removed: [] };
   if (load) {
-    const kept = own ? skills.filter(entry => !its('-!')(entry)) : skills;
-    return piOff(kept, copy, home) && !kept.some(its('-!')) ? [...kept, `+${copy.written}`] : kept;
+    const kept = skills.filter(entry => !minus(entry));
+    return { skills: piOff(kept, copy, home) ? [...kept, `+${copy.written}`] : kept, removed: skills.filter(minus) };
   }
-  const kept = skills.filter(entry => !its('+')(entry));
-  return piOff(kept, copy, home) ? kept : own ? [...skills, `-${copy.written}`] : skills;
+  // Out: its `+` goes where that alone keeps it out (a pattern does); else, by the switch, its `-` comes, his entries all kept.
+  const kept = [...skills.filter(entry => entry !== `+${copy.written}` && entry !== `+${copy.file}`), ...back];
+  return { skills: piOff(kept, copy, home) ? kept : by === 'switch' ? [...skills, ...back, `-${copy.written}`] : skills, removed: [] };
 }
 /** The settings' text with Pi's `skills` list as given (gone when empty), a byte-order mark kept. */
 const withSkills = (file: SwitchFile, skills: string[]) => {
@@ -269,7 +285,7 @@ function stateIn(context: ShareContext, tool: HarnessId, parsed: ParsedSwitches,
   return { disabled: skills.some(entry => typeof entry !== 'string') || piOff(skills as string[], piCopy(context, target), context.home) };
 }
 
-/** The file's text with this copy turned off or on. Only the switch changes. */
+/** The file's text with this copy turned off or on, for every tool but Pi (whose list is piSwitched's). Only the switch changes. */
 function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarget, disabled: boolean, restore?: string): string {
   if (file.tool === 'codex-cli') return codexWithSwitch(context, file.text, target, disabled);
   // A leading byte-order mark (some Windows editors add one) is kept, and set aside while editing.
@@ -287,27 +303,24 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
     const others = list(json.disabledSkills).filter(name => name !== target.name);
     return bom + putList('disabledSkills', disabled ? [...others, target.name] : others);
   }
-  if (file.tool === 'opencode-cli') {
-    // Already as asked: not a byte changes.
-    if ((openCodeAction(openCodeRules(json), target.name) === 'deny') === disabled) return file.text;
-    const path = ['permission', 'skill'];
-    const permission = record(json.permission) ?? {};
-    const map: Record<string, unknown> = typeof permission.skill === 'string' ? { '*': permission.skill } : record(permission.skill) ?? {};
-    const { [target.name]: own, ...others } = map;
-    const { skill: _skill, ...rest } = permission;
-    // What the other rules say once this skill's own is out: an Enable they would still deny gets an `allow` of its own.
-    const decides = openCodeAction(openCodeRules({ permission: { ...permission, skill: others } }), target.name);
-    const next = disabled ? { ...others, [target.name]: 'deny' } : decides === 'deny' ? { ...others, [target.name]: 'allow' } : others;
-    // `skill` as one word becomes a map that says the same, so one skill's rule has a place.
-    if (typeof permission.skill === 'string') return bom + setJsonMember(text, path, next);
-    // A map the Enable leaves empty goes with its last entry, and so does a `permission` that held nothing else.
-    if (!Object.keys(next).length) return bom + setJsonMember(text, Object.keys(rest).length ? path : ['permission'], undefined);
-    // Its own rule, when it is the last that matches, changes its word where it is; otherwise it goes to the end, where it decides.
-    const inPlace = own !== undefined && target.name in next && Object.keys(map).findLast(pattern => openCodeMatches(pattern, target.name)) === target.name;
-    const out = own === undefined || inPlace ? text : setJsonMember(text, [...path, target.name], undefined);
-    return bom + (target.name in next ? setJsonMember(out, [...path, target.name], (next as Record<string, unknown>)[target.name]) : out);
-  }
-  return withSkills(file, piSwitched(list(json.skills) as string[], piCopy(context, target), context.home, !disabled, true));
+  // OpenCode. Already as asked: not a byte changes.
+  if ((openCodeAction(openCodeRules(json), target.name) === 'deny') === disabled) return file.text;
+  const path = ['permission', 'skill'];
+  const permission = record(json.permission) ?? {};
+  const map: Record<string, unknown> = typeof permission.skill === 'string' ? { '*': permission.skill } : record(permission.skill) ?? {};
+  const { [target.name]: own, ...others } = map;
+  const { skill: _skill, ...rest } = permission;
+  // What the other rules say once this skill's own is out: an Enable they would still deny gets an `allow` of its own.
+  const decides = openCodeAction(openCodeRules({ permission: { ...permission, skill: others } }), target.name);
+  const next = disabled ? { ...others, [target.name]: 'deny' } : decides === 'deny' ? { ...others, [target.name]: 'allow' } : others;
+  // `skill` as one word becomes a map that says the same, so one skill's rule has a place.
+  if (typeof permission.skill === 'string') return bom + setJsonMember(text, path, next);
+  // A map the Enable leaves empty goes with its last entry, and so does a `permission` that held nothing else.
+  if (!Object.keys(next).length) return bom + setJsonMember(text, Object.keys(rest).length ? path : ['permission'], undefined);
+  // Its own rule, when it is the last that matches, changes its word where it is; otherwise it goes to the end, where it decides.
+  const inPlace = own !== undefined && target.name in next && Object.keys(map).findLast(pattern => openCodeMatches(pattern, target.name)) === target.name;
+  const out = own === undefined || inPlace ? text : setJsonMember(text, [...path, target.name], undefined);
+  return bom + (target.name in next ? setJsonMember(out, [...path, target.name], (next as Record<string, unknown>)[target.name]) : out);
 }
 
 /**

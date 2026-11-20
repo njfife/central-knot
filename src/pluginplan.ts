@@ -174,9 +174,12 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
     const [off, on] = part ? ['part-off', 'part-on'] as const : ['skill-off', 'skill-on'] as const;
     const onWith = undo ? [] : mine.filter(entry => heldWith(entry).length);
     // A plugin's items in Pi and OpenCode (pluginlibrary.ts): what each tool has of them now, said apart from installs.
-    const items = (outcome: ActionReport['outcome'], changed: boolean) => mine.filter(entry => isItems(entry.action) && entry.report.outcome === outcome && !!entry.report.changed === changed)
-      .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
-    const itemGroups: Group[] = [[items('installed', true), undo ? 'its items as they were in' : 'its items put in'], [items('uninstalled', true), undo ? 'its items as they were, out of' : 'its items taken out of'],
+    const itemRuns = (outcome: ActionReport['outcome'], changed: boolean) => mine.filter(entry => isItems(entry.action) && entry.report.outcome === outcome && !!entry.report.changed === changed)
+      .sort((first, second) => byToolOrder(first.tool, second.tool));
+    const items = (outcome: ActionReport['outcome'], changed: boolean) => itemRuns(outcome, changed).map(entry => names[entry.tool]);
+    // What putting its items in or taking them out also changed in a tool's own settings (pluginlibrary.ts reportIn's notes) follows.
+    const noted = (outcome: ActionReport['outcome']) => itemRuns(outcome, true).flatMap(entry => entry.report.notes ?? []).map(note => `; ${note.replace(/\.$/, '')}`).join('');
+    const itemGroups: Group[] = [[items('installed', true), undo ? 'its items as they were in' : 'its items put in', noted('installed')], [items('uninstalled', true), undo ? 'its items as they were, out of' : 'its items taken out of', noted('uninstalled')],
       [items('updated', true), 'its items updated in'], [items('installed', false), 'its items already in'], [items('uninstalled', false), 'its items already out of'], [items('updated', false), 'its items already up to date in']];
     const groups: Group[] = item
       ? [[tools(off, true), undo ? `${item} off again in` : `${item} turned off in`], [tools(on, true), undo ? `${item} back on in` : `${item} turned on in`],
@@ -195,7 +198,7 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
       lines.push({ source, plugin, ...named, ok: false, text, short: text });
     }
     // A note on a step that worked (an update that couldn't turn a server off again, plugins.ts) needs reading, like a failure.
-    for (const entry of mine.filter(candidate => succeeded(candidate.report) && candidate.report.notes?.length)) {
+    for (const entry of mine.filter(candidate => succeeded(candidate.report) && candidate.report.notes?.length && !isItems(candidate.action))) {
       const text = `${names[entry.tool]}: ${entry.report.notes!.join(' ')}`;
       lines.push({ source, plugin, ok: false, text, short: text });
     }

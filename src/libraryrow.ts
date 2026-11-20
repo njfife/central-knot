@@ -69,7 +69,7 @@ export const libraryWords = {
     shared: 'Every tool it is on in gets the same folder: every file as it is, and its scripts still runnable.',
     // A skill's folder is the same in every tool: no part of it stays one tool's own.
     own: () => '',
-    switchedOff: { line: where => `${where} doesn’t load it, and Central Knot leaves that switch as it is.`, tag: 'The opened row can clear it.' },
+    switchedOff: { line: where => `${where} doesn’t load it.`, tag: 'The opened row can clear it.' },
   },
   mcp: {
     item: kindNouns.mcp.one, an: kindNouns.mcp.a, many: kindNouns.mcp.many, copy: 'entry',
@@ -587,7 +587,7 @@ export function sentences(words: RowWords) {
    * taken in (the latest, where times prove it), or a copy deleted by hand that turned the item off. `action`: the notice's button, which runs its History entry's
    * own action (historyactions.ts); `help`: what that does.
    */
-  function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved'> | PluginItemNotice): { text: string; action?: 'undo' | 'turn-on'; help: string } {
+  function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved' | 'settingsChanged'> | PluginItemNotice): { text: string; action?: 'undo' | 'turn-on'; help: string } {
     // A plugin's item (library.ts A PLUGIN): let go as the person's own, said with no button (History has the entry), or dropped.
     if ('link' in notice) return notice.kind === 'let-go' ? { text: `${notice.item} is your own now: you changed it here, so it no longer follows ${linkLabel(notice.link)}. It stays in the tools that have it; its row lets it into the others.`, help: '' }
       : { text: `${notice.item}: ${linkLabel(notice.link)} no longer has it, so it is off. Central Knot keeps it.`, action: 'turn-on', help: `Put ${notice.item} back in every tool, as your own: it no longer follows the plugin` };
@@ -595,7 +595,7 @@ export function sentences(words: RowWords) {
     const earlier = `Make the version from before ${who}’s edit current again, in every tool ${name} is on in`;
     if (notice.kind === 'deleted-by-hand') {
       // The tools it was taken out of.
-      const text = `${name} was deleted in ${who}, so it is off${others ? ` and was taken out of ${others}` : ''}. Central Knot keeps it.`;
+      const text = `${name} was deleted in ${who}, so it is off${others ? ` and was taken out of ${others}` : ''}. Central Knot keeps it.${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''}`;
       return { text, action: 'turn-on', help: `Put ${name} back in every tool, each ${copy} as it was` };
     }
     if (notice.kind === 'conflict') {
@@ -609,9 +609,9 @@ export function sentences(words: RowWords) {
    * What Synchronize everything's notice says (types.ts TakenInNotice), on its page and in Settings: how many it took in and
    * where it found them, their names, and that History can undo each.
    */
-  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from'>): string {
+  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>): string {
     const count = notice.items.length, many = count === 1 ? noun : words.many;
-    return `Synchronize everything took in ${count} ${many}, found in ${andList(notice.from.map(toolName))}: ${andList(notice.items)}. History can undo ${count === 1 ? 'it' : 'each'}.`;
+    return `Synchronize everything took in ${count} ${many}, found in ${andList(notice.from.map(toolName))}: ${andList(notice.items)}.${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''} History can undo ${count === 1 ? 'it' : 'each'}.`;
   }
 
   return { harnessLine, placeTag, said, noticeWords, takenInWords };

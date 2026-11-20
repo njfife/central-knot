@@ -1581,7 +1581,7 @@ async function practiceFlow() {
   for (let tries = 0; tries < 80 && !(await offMarks(a, 'skills', 'release-notes')).length; tries++) await wait(100);
   same('a switch set in Claude Code’s settings reaches the open page, and is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'skills', 'release-notes'), /switched off in Claude Code/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? ''), await switchOn(a, 'skills', 'release-notes')], [true, ['claude-cli'], true, true]);
   await opened('release-notes');
-  check('its line in the opened row says the tool doesn’t load it', /Claude Code doesn’t load it, and Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its line in the opened row says the tool doesn’t load it', /switched off in Claude Code’s own settings: Claude Code doesn’t load it\./.test(await a.text('.details') ?? ''), await a.text('.details'));
   // While the skills record is damaged, Let Claude Code load it is drawn and off, as the row's other controls are (that a click
   // writes nothing then is tests/librarygate.test.ts's).
   const clearSwitch = `#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`, skillsRecordHere = join(practice, '.central-knot/skills.json'), skillsRecordGood = readFileSync(skillsRecordHere, 'utf8');
@@ -6371,7 +6371,8 @@ esac
   await done();
   same('On installs it in Claude Code with its own command and puts its items in Pi', [calls(), installed(), inPi(), await marks(), await switchIs('#pswitch-0-issue-tracker')],
     [['plugin marketplace add ' + market, 'plugin install issue-tracker@ck-test-market --scope user'], true, [true, true], ['installed', 'items'], 'true']);
-  check('the result says what the switch did, with Undo', /issue-tracker: installed in Claude Code; its items put in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
+  // With his pattern in Pi's list, what it added there too (pluginlibrary.ts reportIn's notes).
+  check('the result says what the switch did, with what it added to his Pi list, and Undo', /issue-tracker: installed in Claude Code; its items put in Pi; \+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
   await pictures('plugin-switch-list');
   // Sync once from the menu bar with the switch's result up: its own result takes the header, as on the item lists, and × lets it
@@ -6410,8 +6411,33 @@ esac
   await a.click('#header-refresh');
   if ((await a.run(`document.querySelector('#${rowPart('open', 'skills', 'triage')}')?.getAttribute('aria-expanded')`)) !== 'true') await a.click(`#${rowPart('open', 'skills', 'triage')}`);
   check('with no inclusion, triage is off in Pi: its mark, its line, and Let Pi load it', await offInPi() && /Pi doesn’t load it/.test(await a.text('.details') ?? '') && await a.exists(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`), await a.text('.details'));
+  // The plugin's page counts what Pi loads: triage, which his list keeps out, is said apart.
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#pbox-0-issue-tracker-pi-cli'))) await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-issue-tracker-pi-cli')); tries++) await wait(100);
+  const boxSays = await a.run(`document.querySelector('#pbox-0-issue-tracker-pi-cli')?.title`);
+  check('the plugin’s box for Pi says Pi’s own settings keep one of its items out', /1 of its 2 items is on there \(Pi’s own settings keep 1 out\)/.test(boxSays ?? ''), boxSays);
+  await openKind(a, 'skills');
+  if ((await a.run(`document.querySelector('#${rowPart('open', 'skills', 'triage')}')?.getAttribute('aria-expanded')`)) !== 'true') await a.click(`#${rowPart('open', 'skills', 'triage')}`);
   await a.click(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`);
   same('Let Pi load it puts the inclusion back after his entries, and the mark is on', [piSkills(), await offInPi()], [[...hisList, '+skills/triage/SKILL.md'], false]);
+  // A found skill his exact `-` keeps out of Pi, taken in by Add: its result says where it is on, which is not Pi.
+  mkdirSync(join(home, '.claude/skills/kept-note'), { recursive: true });
+  writeFileSync(join(home, '.claude/skills/kept-note/SKILL.md'), '---\nname: kept-note\ndescription: Made-up.\n---\n\nMade-up.\n');
+  writeFileSync(piSettings, `${JSON.stringify({ skills: [...hisList, '+skills/triage/SKILL.md', '-skills/kept-note/SKILL.md'] }, null, 2)}\n`);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'kept-note')}"] .add-item`)); tries++) await wait(100);
+  await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'kept-note')}"] .add-item`);
+  await done();
+  check('Add of a skill his list keeps out of Pi says it is on in Claude Code, not in Pi', /kept-note is in Central Knot now, and on in Claude Code\./.test(await a.text('#header') ?? ''), await a.text('#header'));
+  // One his pattern alone keeps out: Add says it is on in Pi too, and what it added to his list.
+  mkdirSync(join(home, '.claude/skills/open-note'), { recursive: true });
+  writeFileSync(join(home, '.claude/skills/open-note/SKILL.md'), '---\nname: open-note\ndescription: Made-up.\n---\n\nMade-up.\n');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'open-note')}"] .add-item`)); tries++) await wait(100);
+  await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'open-note')}"] .add-item`);
+  await done();
+  check('Add under his pattern says what it added to his Pi list', /open-note is in Central Knot now, and on in Claude Code and Pi\. \+skills\/open-note\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('#header') ?? ''), await a.text('#header'));
   await openKind(a, 'mcp');
   check('issues is one row on MCP servers, from the plugin too', /from the plugin issue-tracker/.test(await a.text(`.ov-row[data-key="${rowPart('', 'mcp', 'issues')}"]`) ?? ''), await a.text('.page'));
   await a.click('#nav-plugins');
@@ -6543,6 +6569,10 @@ esac
   await a.click('#nav-plugins');
   same('each row shows its switch On, its marks, and its own result', [await switchIs('#pswitch-0-release-helper'), await switchIs('#pswitch-0-starter-skills'), await marks('release-helper'), await marks('starter-skills'), await rowSays('release-helper'), await rowSays('starter-skills')],
     ['true', 'true', ['installed', 'items'], ['installed', 'items'], 'ended', 'ended']);
+  // History's entry for the On says what it added to his Pi list.
+  await a.click('#nav-history');
+  for (let tries = 0; tries < 50 && !/added to Pi’s skills list/.test(await a.text('.page') ?? ''); tries++) await wait(100);
+  check('History says the On added triage to his Pi list', /\+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('.page') ?? ''), (await a.text('.page'))?.slice(0, 600));
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
 }

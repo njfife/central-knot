@@ -29,6 +29,7 @@ import { mergeAgent } from './merge.ts';
 import { partsHolding, pluginHolds, type ThroughWhichPlugin } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
 import { errorCode, exists, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
+import { followCopy } from './skillswitch.ts';
 import { sourceFacts } from './sources.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ToolCopy } from './types.ts';
@@ -178,6 +179,9 @@ export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
     try { await removeFileChecked(here.file, here.text); return 'removed'; }
     catch (error) { return errorCode(error) === 'CK_CHANGED' ? 'changed' : 'failed'; }
   },
+  // In Pi an agent is a skill, a loose file in its skills folder, which its skills list keeps step with (skillswitch.ts followCopy).
+  follow: (context, item, tool, placed) => followCopy(context, tool, { folder: item.name, name: item.name, skillFile: fileFor(context, tool as AgentTool, item.name) }, placed)
+    .catch(error => { if (!errorCode(error)) throw error; return undefined; }),
   historyAction: libraryAction,
   merge: mergeAgent,
 };

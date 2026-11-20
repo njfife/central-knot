@@ -22,7 +22,11 @@ const itemOf = (event: HistoryEvent) => { const entry = libraryEntry(event); ret
 /** A take-over's entry names the copy's path as the page shows paths (from ~, or "…" inside another home). */
 const pathsShown = (event: HistoryEvent): HistoryEvent => (event.kind === 'took-over' ? { ...event, losers: event.losers.map(copy => (copy.path ? { ...copy, path: shownPath(copy.path) } : copy)) } : event);
 /** A library item's entry in its kind's words (historyactions.ts librarySentence). */
-const said = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event)); };
+const said = (event: HistoryEvent) => {
+  const entry = libraryEntry(event), words = entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event));
+  // What the pass changed in a tool's settings with the copies (Pi's skills list) follows the entry's sentence.
+  return words && event.settingsChanged ? { ...words, text: `${words.text} ${event.settingsChanged.join(' ')}` } : words;
+};
 /** Whether the entry is another's Undo: that one's `undoneBy` names it. */
 const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 

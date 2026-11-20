@@ -558,7 +558,9 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
   const notClaimed = [...notIn, ...(plugged?.failedIn ?? [])], held = new Set(ours.filter(heldWhole).map(entry => entry.item.toLowerCase()));
   const changed = click.rows.map((row, at) => ({ ...row, name: click.items[at] ?? row.key })).filter(row => !held.has(row.name.toLowerCase()));
-  const said = typeof click.said === 'string' ? click.said : click.said(notClaimed, wrote);
+  // What the click also changed in a tool's own settings with its copies (Pi's skills list: librarypass.ts Kind.follow) follows.
+  const settings = [...new Set(ours.flatMap(entry => (entry.settingsChanged ? [entry.settingsChanged] : [])))];
+  const said = [typeof click.said === 'string' ? click.said : click.said(notClaimed, wrote), ...settings].join(' ');
   const choose = differs ? ` ${copiesDiffer(click.items)}` : '';
   const along = plugged && !switchProblems(plugged).length ? click.plugins?.said : undefined;
   const text = done || !refusal ? [said, along].filter(Boolean).join(' ') + choose : refusal.message;
