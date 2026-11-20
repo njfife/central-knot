@@ -84,10 +84,11 @@ test('The Profiles page says what the Library lists that no profile can tick: it
   assert.deepEqual(ids(homeItems(home)), ['skill:notes', 'skill:pager'], 'the profile lists what is in Central Knot and no plugin’s');
   assert.deepEqual(leftOut(home), { skill: { plugin: 3, found: 1 }, mcp: { plugin: 0, found: 1 }, agent: { plugin: 0, found: 0 } });
   assert.equal(leftOutWords(leftOut(home)), 'Not listed here: 1 skill and 1 MCP server found in your tools that aren’t in Central Knot yet '
-    + '(Add them in the Library); 3 skills from plugins, which a profile doesn’t switch yet.');
+    + '(under Found in the Library, with Add on each that can be taken in); 3 skills from plugins, which a profile doesn’t switch yet.');
   const none = { plugin: 0, found: 0 };
-  assert.equal(leftOutWords({ skill: { plugin: 0, found: 1 }, mcp: none, agent: none }), 'Not listed here: 1 skill found in your tools that isn’t in Central Knot yet (Add it in the Library).');
-  assert.equal(leftOutWords({ skill: none, mcp: { plugin: 1, found: 0 }, agent: none }), 'Not listed here: 1 MCP server from plugins, which a profile doesn’t switch yet.');
+  assert.equal(leftOutWords({ skill: { plugin: 0, found: 1 }, mcp: none, agent: none }),
+    'Not listed here: 1 skill found in your tools that isn’t in Central Knot yet (under Found in the Library, with Add if it can be taken in).');
+  assert.equal(leftOutWords({ skill: none, mcp: { plugin: 1, found: 0 }, agent: none }), 'Not listed here: 1 MCP server from a plugin, which a profile doesn’t switch yet.');
 
   // Everything in Central Knot; gone, deleted, still linked to pi-pack (no row anywhere); and a plugin's item only on a row of the
   // person's own: nothing left out.

@@ -62,17 +62,19 @@ export function leftOut(home: HomeView): Record<ItemKind, LeftOut> {
 }
 
 /**
- * The Profiles page's line on what its list leaves out, with leftOut's counts: what is found and the way to it, then how many of
- * a plugin's items are not listed, in a clause of its own; '' when it leaves nothing out.
+ * The Profiles page's line on what its list leaves out, with leftOut's counts: what is found and where the Library shows it
+ * (its Found heading, whose rows have Add, turned off on a row that can't be taken in: matrix.ts addButton), then how many of a
+ * plugin's items are not listed, in a clause of its own; '' when it leaves nothing out.
  */
 export function leftOutWords(counts: Record<ItemKind, LeftOut>): string {
   const counted = (why: keyof LeftOut) => andList(KINDS.filter(kind => counts[kind][why]).map(kind => {
     const nouns = kindNouns[pageOfPart[kind]];
     return plural(counts[kind][why], nouns.one, nouns.many);
   }));
-  const found = counted('found'), one = KINDS.reduce((sum, kind) => sum + counts[kind].found, 0) === 1;
-  const parts = [found && `${found} found in your tools that ${one ? 'isn’t' : 'aren’t'} in Central Knot yet (Add ${one ? 'it' : 'them'} in the Library)`,
-    counted('plugin') && `${counted('plugin')} from plugins, which a profile doesn’t switch yet`].filter(Boolean);
+  const one = (why: keyof LeftOut) => KINDS.reduce((sum, kind) => sum + counts[kind][why], 0) === 1;
+  const parts = [counted('found') && `${counted('found')} found in your tools that ${one('found') ? 'isn’t' : 'aren’t'} in Central Knot yet `
+    + `(under Found in the Library, with Add ${one('found') ? 'if it' : 'on each that'} can be taken in)`,
+    counted('plugin') && `${counted('plugin')} from ${one('plugin') ? 'a plugin' : 'plugins'}, which a profile doesn’t switch yet`].filter(Boolean);
   return parts.length ? `Not listed here: ${parts.join('; ')}.` : '';
 }
 
