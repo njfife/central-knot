@@ -9988,7 +9988,9 @@ async function headerResultFlow() {
  * an agent of its name apart; (c) a word in files found under Any plugin, then the source, and Turn these off: only the
  * source's row the chip holds and Turn these off takes goes Off (not one a plugin also brings), and Undo puts it back; (d) a source of every kind added while an old Find is set:
  * the band's Open in the Library, Files and back, the source removed and its items still listed; (e) a plugin whose one item
- * is an agent linked to it in Pi, Off: its page's link finds it; edited in Pi, the pass lets it go and Your own finds it.
+ * is an agent linked to it in Pi, Off: its page's link finds it; edited in Pi, the pass lets it go and Your own finds it; (f) a
+ * long list scrolled deep: a plugin in From, Anywhere again, a chip pressed and let go, Find typed and emptied, and another kind
+ * each show their list from its top, on the Library and a tool's tab; Sort, Refresh and Back keep the list's place.
  */
 async function fromFlow() {
   const git = (cwd, ...rest) => spawnSync('git', ['-C', cwd, '-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', '-c', 'commit.gpgsign=false', ...rest], { encoding: 'utf8', env: { ...process.env, GIT_COMMITTER_DATE: old.toISOString(), GIT_AUTHOR_DATE: old.toISOString() } });
@@ -10235,6 +10237,80 @@ esac
   await chooseFrom(a, 'yours');
   same('Your own finds it', await listed(a), [id('agents', 'release-reviewer')]);
   same('no page errors, the From menu in a home with Pi', a.pageErrors, []);
+  await a.quit();
+
+  // ---------- (f) A long list scrolled deep: each choice of which rows it lists shows them from its top (matrix.ts listFromTop) ----------
+  const F = homeWith('from-top'), fMarket = join(scratch, 'from-top-market'), pad = n => String(n).padStart(2, '0');
+  const kitFiles = Object.fromEntries(Array.from({ length: 24 }, (_, at) => [`skills/kit-${pad(at + 1)}/SKILL.md`, md(`kit-${pad(at + 1)}`, 'skill', 'A kit skill.')]));
+  put(fMarket, { '.claude-plugin/marketplace.json': JSON.stringify({ name: 'top-market', owner: { name: 'Team' }, plugins: [{ name: 'kit', source: './plugins/kit', description: 'A kit.' }] }),
+    ...Object.fromEntries(Object.entries(kitFiles).map(([path, body]) => [`plugins/kit/${path}`, body])) });
+  writeClaudeInstall(F.home, 'top-market', 'kit', '1.0.0', kitFiles);
+  put(F.home, { '.claude/plugins/known_marketplaces.json': JSON.stringify({ 'top-market': { source: { source: 'directory', path: fMarket }, installLocation: fMarket } }),
+    '.claude/projects/-work/s1.jsonl': `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'own-01' } }] }, timestamp: new Date(Date.now() - 2 * DAY).toISOString() })}\n` });
+  writeFileSync(join(F.data, 'marketplaces.json'), JSON.stringify([fMarket]));
+  // Sixty of the person's own, 40 days old (so No use seen can hold them), one used two days ago; and the plugin kit's 24 skills.
+  for (let n = 1; n <= 60; n++) { const folder = skill(F.claude, `own-${pad(n)}`, md(`own-${pad(n)}`, 'skill', 'Mine.')); for (const path of [join(folder, 'SKILL.md'), folder]) utimesSync(path, old, old); }
+  a = await launch(F.data, [], F.real);
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  await done(a);
+  await openKind(a, 'all');
+  await sizeTo(a, 1316, 819);
+  const all = 'table-library-all', kitFrom = 'plugin:kit@top-market';
+  const placeOf = (list = all) => a.run(`Math.round(document.getElementById(${JSON.stringify(list)})?.scrollTop ?? -1)`);
+  /** Writes the list's place, as far down as it goes, and reads it back. */
+  const scrollTo = (y, list = all) => a.run(`(list => { list.scrollTop = ${y}; return Math.round(list.scrollTop); })(document.getElementById(${JSON.stringify(list)}))`);
+  const headIn = () => a.run(`(list => list.querySelector('.ov-section').getBoundingClientRect().top >= list.getBoundingClientRect().top)(document.getElementById('${all}'))`);
+  const sortBy = async value => { await a.run(`(select => { select.value = '${value}'; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-order'))`); await a.settle(); };
+  const escapeFind = async () => { await a.run(`document.querySelector('#find').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`); await a.settle(); };
+  /** The list `on` scrolled 1600 px down, then `act`: [that place, the place of the list `list` after]. */
+  const madeDeep = async (act, list = all, on = list) => { const left = await scrollTo(1600, on); await act(); return [left, await placeOf(list)]; };
+  const seen = {};
+  seen.from = await madeDeep(() => chooseFrom(a, kitFrom));
+  same('scrolled deep, a plugin chosen in From: its 24 rows from the top, their heading in view', [seen.from, (await listed(a)).length, await headIn()], [[1600, 0], 24, true]);
+  const kitEnd = await scrollTo(10000);
+  await chooseFrom(a, 'anywhere');
+  seen.anywhere = [kitEnd, await placeOf()];
+  same('the plugin’s list scrolled to its end, Anywhere again: the whole list from the top', [kitEnd > 0, seen.anywhere[1], await headIn()], [true, 0, true]);
+  check('usage is read, and No use seen is offered', await until(() => a.exists('#chip-unused')));
+  seen.chipOn = await madeDeep(() => a.click('#chip-unused'));
+  seen.chipOff = await madeDeep(() => a.click('#chip-unused'));
+  same('a chip pressed, and let go: each list from the top', [seen.chipOn, seen.chipOff], [[1600, 0], [1600, 0]]);
+  seen.findTyped = await madeDeep(async () => { await find(a, 'own'); await until(async () => (await listed(a)).length === 60); });
+  seen.findEscaped = await madeDeep(async () => { await escapeFind(); await until(async () => (await listed(a)).length === 84); });
+  same('Find typed, and emptied by Escape: each list from the top', [seen.findTyped, seen.findEscaped], [[1600, 0], [1600, 0]]);
+  // Sort lists the same rows under the same headings, and a redraw that changes no choice moves nothing: the list stays.
+  seen.sortUsed = await madeDeep(() => sortBy('used'));
+  seen.sortName = await madeDeep(() => sortBy('name'));
+  seen.refresh = await madeDeep(async () => { await a.click('#header-refresh'); await done(a); });
+  same('Sort, either way, and Refresh leave the list where it was', [seen.sortUsed, seen.sortName, seen.refresh], [[1600, 1600], [1600, 1600], [1600, 1600]]);
+  // Another kind's list has an id of its own, which opens at its top (matrix.ts tableId).
+  seen.kindSkills = await madeDeep(() => a.click('#library-kind-skills'), 'table-library-skills', all);
+  seen.kindAll = await madeDeep(() => a.click('#library-kind-all'), all, 'table-library-skills');
+  same('another kind, and All again: each list from the top', [seen.kindSkills, seen.kindAll], [[1600, 0], [1600, 0]]);
+  // Back after a look at another page: the place that visit had, From's choice with it; a choice made there still starts at the top.
+  const leftAt = await scrollTo(1600);
+  await a.click('#nav-settings');
+  await mouseBack(a);
+  await until(async () => await placeOf() === leftAt, 3000);
+  seen.back = [leftAt, await placeOf()];
+  same('Back from Settings: the place the Library was left at', seen.back, [1600, 1600]);
+  await chooseFrom(a, kitFrom);
+  const kitLeft = await scrollTo(10000);
+  await a.click('#nav-settings');
+  await mouseBack(a);
+  await until(async () => await placeOf() === kitLeft, 3000);
+  same('From on the plugin, its list scrolled, Settings and Back: still that plugin, at its place', [await fromIs(a), await placeOf()], [kitFrom, kitLeft]);
+  await chooseFrom(a, 'anywhere');
+  same('then Anywhere: the whole list from the top, not where Back put the list', await placeOf(), 0);
+  // A tool's tab, the same: Claude Code's Skills.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-skills');
+  seen.tabFrom = await madeDeep(() => chooseFrom(a, kitFrom), 'table-skills-claude-cli');
+  same('on Claude Code’s Skills tab, scrolled deep, the plugin chosen in From: from the top', seen.tabFrom, [1600, 0]);
+  console.log(`from: the list's place [before the choice, after]: ${JSON.stringify(seen)}`);
+  same('no page errors, the list from its top', a.pageErrors, []);
   await a.quit();
   if (shots) await fromPictures({ md, put, repo, served, until, done });
 }
