@@ -14,15 +14,18 @@
 //   or launch where the row's description doesn't already say it. A plugin's skill's other files are not named: its folder
 //   is never listed at a view, and listing it would be a walk of every plugin skill's folder at every view.
 // Not here: an MCP server's plugin's own description (only its marketplace's catalog has it, which a view doesn't read).
+// And the items of listed plugins installed in no managed tool (catalogDocs), from the plugin text the job keeps (plugintext.ts),
+// gathered beside the view's own at each follow and as the text changes (main.ts followSearch).
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { readVersion as agentVersion } from './agentstore.ts';
 import { bodyOf } from './discovery.ts';
 import { kindSource, rowId } from './itemrow.ts';
 import type { LibraryItem } from './library.ts';
-import { installedCopies } from './plugins.ts';
-import { pageRows, type PluginRow } from './pluginrows.ts';
-import { partOfPage, samePart } from './pluginstatus.ts';
+import { installedCopies, sameSource, sourceKey } from './plugins.ts';
+import { onOwnRow, pageRows, type PluginRow } from './pluginrows.ts';
+import { installedNowhere, partOfPage, samePart } from './pluginstatus.ts';
+import type { PluginText } from './plugintext.ts';
 import type { PluginTool } from './presence.ts';
 import type { SearchDoc } from './search.ts';
 import { notCopied, type ShareContext } from './share.ts';
@@ -62,6 +65,30 @@ export async function libraryDocs(context: ShareContext, view: HomeView): Promis
     }
   }
   return docs;
+}
+
+/**
+ * The items of listed plugins installed in no managed tool (pluginstatus.ts installedNowhere), each a document of its own: its
+ * id `catalog:` and the JSON of [its marketplace's canonical source (plugins.ts sourceKey), the plugin, the kind, the item's path
+ * in it or a server's name], which no Library row's id (skills-, agents-, mcp-) can be; its names, its own and its plugin's; its
+ * description (a server's launch); its text, the first 1,000 characters of its file as kept (a skill's or agent's after its
+ * frontmatter, as a Library row's: the name and description are the document's already); and what its row draws (types.ts
+ * CatalogItem). One already a Library row (linked to that plugin in Pi or OpenCode: pluginrows.ts onOwnRow) is left to that row.
+ * `texts`: as the job keeps them (plugintext.ts texts()), whatever pin each was read at; only those of a marketplace the open home
+ * lists (`listed`, marketplaces.ts listings) are used: another home's stay kept until the job matches them to this home's listing.
+ */
+export function catalogDocs(view: HomeView, texts: PluginText[], listed: string[]): SearchDoc[] {
+  const markets = new Set(listed.map(sourceKey));
+  const linked = Object.fromEntries((Object.keys(partOfPage) as Page[]).map(page => [partOfPage[page], kindSource(view, page).facts.filter(fact => fact.fromSource || fact.plugin)]));
+  return texts.flatMap(text => {
+    const market = sourceKey(text.source), named = { plugin: text.plugin, marketName: text.marketName };
+    if (!markets.has(market) || !installedNowhere(view, text.plugin, source => sameSource(source, text.source))) return [];
+    return text.items.filter(item => !linked[item.kind]!.some(fact => onOwnRow(fact, { ...item, ...named }))).map(item => {
+      const description = item.kind === 'mcp' ? item.runs ?? '' : item.description;
+      return { id: `catalog:${JSON.stringify([market, text.plugin, item.kind, item.path ?? item.name])}`, names: [item.name, text.plugin], description, text: item.kind === 'mcp' ? item.start : bodyOf(item.start),
+        catalog: { kind: item.kind, name: item.name, description, ...named, source: text.source } };
+    });
+  });
 }
 
 /** A row's own texts: its current version's (`item`, in the library), then each tool's copy whose content differs from it, once each. */

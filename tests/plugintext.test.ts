@@ -187,7 +187,7 @@ test('What is fetched for a plugin kept in another repository is what the reader
     assert.equal(alpha.commit, w.pin);
     assert.deepEqual(names(kept.text('inside')), ['skill tidy-desk'], 'a plugin kept in its marketplace comes from the catalog’s own read');
     assert.deepEqual(names(kept.text('solo')), ['skill quiet-hours'], 'an unpinned one is read at its tip');
-    assert.deepEqual(kept.views.at(-1), { read: 3, of: 4, elsewhere: 3, reading: false }, 'the repository that is not there is the one not read');
+    assert.deepEqual(kept.views.at(-1), { read: 3, of: 4, elsewhere: 3, reading: false, on: true }, 'the repository that is not there is the one not read');
     const file = JSON.parse(await readFile(join(w.dataDir, 'plugin-text.json'), 'utf8'));
     assert.equal(file.format, 1);
     assert.deepEqual(file.plugins.map((entry: PluginText) => entry.plugin).sort(), ['alpha', 'inside', 'solo']);
@@ -205,7 +205,7 @@ test('A repository that is gone, or a server that declines a filtered fetch, lea
     await kept.run();
     assert.deepEqual(kept.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside', 'solo']);
     assert.match(kept.logs.join('\n'), /absent: its folder is not in the repository at that commit\./, 'a folder that is not there is a read that failed, not one with nothing in it');
-    assert.deepEqual(kept.views.at(-1), { read: 3, of: 6, elsewhere: 5, reading: false });
+    assert.deepEqual(kept.views.at(-1), { read: 3, of: 6, elsewhere: 5, reading: false, on: true });
     assert.match(kept.logs.join('\n'), /missing\.git at HEAD: No access, or no repository there.*Tried again in 10 minutes\./);
     assert.match(kept.logs.join('\n'), /plain\.git at HEAD: its server declines a filtered fetch, and a whole copy is never taken\./);
     assert.ok((w.proxy.sent.get('plain.git') ?? 0) < 20_000, `the declining server sent ${w.proxy.sent.get('plain.git')} bytes, not its 300 kB`);
@@ -227,7 +227,7 @@ test('A repository is fetched only once its server has said it filters: one that
     await kept.run();
     assert.equal(w.proxy.asked.get('plain.git'), 1, 'one request in all: the question, answered 502');
     assert.match(kept.logs.join('\n'), /plain\.git at HEAD: .*Tried again in 10 minutes\./);
-    assert.deepEqual(kept.views.at(-1), { read: 0, of: 1, elsewhere: 1, reading: false });
+    assert.deepEqual(kept.views.at(-1), { read: 0, of: 1, elsewhere: 1, reading: false, on: true });
   } finally { await w.close(); }
 });
 
@@ -365,7 +365,7 @@ test('Refresh during a pin change, then the marketplace’s last alias removed: 
     await until(() => w.proxy.waiting.length > 0, 'the late fetch to be held');
     // Until the new pin is read, the text read at the old one is still given (for finding a skill, better than none); the count leaves it out.
     assert.equal(kept.text('alpha')?.commit, w.pin);
-    assert.deepEqual(kept.job.view(), { read: 2, of: 4, elsewhere: 3, reading: true });
+    assert.deepEqual(kept.job.view(), { read: 2, of: 4, elsewhere: 3, reading: true, on: true });
     sources = [];
     kept.tell(false);
     const before = kept.ended(), told = kept.keptThen.length;
@@ -447,7 +447,7 @@ test('What was read is there whether the switch is on or off: matched to what is
     off.switch(false);
     await off.run();
     assert.deepEqual(off.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside', 'solo'], 'a launch with it off has what was read');
-    assert.deepEqual(off.job.view(), { read: 3, of: 4, elsewhere: 3, reading: false });
+    assert.deepEqual(off.job.view(), { read: 3, of: 4, elsewhere: 3, reading: false, on: false });
     sources = [await lampMarket(w.base)];
     await off.run();
     assert.deepEqual(off.job.texts().map(entry => entry.plugin), ['lamp'], 'another home, while off: the first home’s text goes');
@@ -479,10 +479,10 @@ test('A marketplace whose catalog the Plugins page fetched first is read when th
     const source = 'https://example.test/market.git';
     const kept = jobOver(w.dataDir, () => [source]);
     await kept.run();
-    assert.deepEqual(kept.views.at(-1), { read: 0, of: 0, elsewhere: 0, reading: false }, 'no copy of its catalog yet');
+    assert.deepEqual(kept.views.at(-1), { read: 0, of: 0, elsewhere: 0, reading: false, on: true }, 'no copy of its catalog yet');
     assert.equal((await readCatalog({ home: w.base, dataDir: w.dataDir, binaries: {} }, source)).problem, undefined, 'the page’s own read');
     await kept.run(() => kept.tell(false));
-    assert.deepEqual(kept.views.at(-1), { read: 3, of: 4, elsewhere: 3, reading: false });
+    assert.deepEqual(kept.views.at(-1), { read: 3, of: 4, elsewhere: 3, reading: false, on: true });
   } finally { await w.close(); }
 });
 
@@ -548,7 +548,7 @@ test('Two spellings of one marketplace are one: each plugin is kept once', { ski
     const kept = jobOver(w.dataDir, () => [w.market, alias]);
     await kept.run();
     assert.deepEqual(kept.job.texts().map(entry => entry.plugin).sort(), ['alpha', 'inside', 'solo']);
-    assert.deepEqual(kept.views.at(-1), { read: 3, of: 4, elsewhere: 3, reading: false });
+    assert.deepEqual(kept.views.at(-1), { read: 3, of: 4, elsewhere: 3, reading: false, on: true });
   } finally { await w.close(); }
 });
 
