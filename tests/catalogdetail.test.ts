@@ -242,6 +242,24 @@ test('A plugin’s manifest names its hooks in each form its tool takes: Codex a
   } finally { await cleanup(); }
 });
 
+test('A Codex manifest’s empty hooks object names none in place of hooks/hooks.json, so Codex runs none of that file’s hooks; Claude Code and Copilot CLI still read it', async () => {
+  const { root, cleanup } = await box();
+  try {
+    // A plugin built for several tools (superpowers 7.0.2's copy, shortened): Claude Code's start-of-session hook in its default
+    // file, and a Codex manifest whose `"hooks": {}` keeps Codex from falling back to that file.
+    const start = '"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start';
+    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup|clear|compact', hooks: [{ type: 'command', command: start, shell: 'bash', async: false }] }] } }));
+    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.2' }));
+    const codexManifest = (hooks?: unknown) => put(join(root, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.2', skills: './skills/', hooks }));
+    const listed = async (tool: 'claude-cli' | 'codex-cli' | 'copilot-cli') => (await installedContents(tool, root)).hooks.map(hook => [hook.event, hook.matcher, hookLine(hook)]);
+    const fromTheFile = [['SessionStart', 'startup|clear|compact', start]];
+    await codexManifest({});
+    assert.deepEqual([await listed('codex-cli'), await listed('claude-cli'), await listed('copilot-cli')], [[], fromTheFile, fromTheFile]);
+    // No `hooks`, or an empty list, names nothing: Codex reads hooks/hooks.json (measured with Codex 0.169.1's hooks/list).
+    for (const hooks of [undefined, []]) { await codexManifest(hooks); assert.deepEqual(await listed('codex-cli'), fromTheFile); }
+  } finally { await cleanup(); }
+});
+
 test('A hooks file that is there but can’t be read as JSON is named, so its hooks read as unknown, never as none', async () => {
   const { root, cleanup } = await box();
   try {
