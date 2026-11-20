@@ -699,8 +699,19 @@ export type PartKind = 'skill' | 'mcp' | 'agent';
 export interface PartRef { kind: PartKind; name: string }
 
 // ---------- What a plugin installed whole brings (pluginitems.ts) ----------
-/** One skill, MCP server or agent inside a tool's installed copy of a plugin, by its real name (the tool calls it `plugin:name`). */
-export interface PluginItem { kind: PartKind; name: string; description: string; /** MCP servers: what it runs or connects to. */ runs?: string }
+/**
+ * One skill, MCP server or agent inside a tool's installed copy of a plugin, by the name the tool loads it by (it calls it
+ * `plugin:name`, and its own switch for the item takes that name). Its key in a profile's plan is profileplan.ts pluginItemKey's.
+ */
+export interface PluginItem { kind: PartKind; name: string; description: string; /** MCP servers: what it runs or connects to. */ runs?: string;
+  /**
+   * Skills and agents: the name its plan key is made of (profileplan.ts pluginItemKey): a skill's folder's and an agent's file's
+   * without .md (values.ts nameOfFile), as Pi and OpenCode name its placed copy; for the skill of a plugin that is one skill
+   * (`root`), the plugin's. An MCP server has none: its name is both.
+   */
+  keyName?: string;
+  /** A skill that is the whole plugin, SKILL.md at its root (catalogdetail.ts skillsIn: its path is "."). */
+  root?: true }
 /** A plugin installed whole in one tool, read from that tool's own records and its copy of the plugin. */
 export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
   /** The whole plugin is turned off in that tool. */ off?: boolean;
@@ -1334,15 +1345,19 @@ export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the
 // ---------- Profiles ----------
 
 /**
- * A named set of library items to have On (profileplan.ts): `skill:<key>`, `agent:<key>` and `mcp:<key>`. Switching to it
- * turns those On and every other library item Off; nothing else is kept about it, and which profile is in use is worked out.
+ * A named set of library items to have On (profileplan.ts): `skill:<key>`, `agent:<key>` and `mcp:<key>`, and plugins' items as
+ * `plugin:<kind>:<key>` (profileplan.ts pluginItemId), which no switch acts on yet. Switching to it turns those library items On
+ * and every other library item Off; nothing else is kept about it, and which profile is in use is worked out.
  */
 export interface Profile { id: string; name: string; items: string[] }
 
 export interface ProfilesView {
   profiles: Profile[];
-  /** The ids of the plugins the home records: an item linked to one is outside profiles (profileplan.ts liveItems). */
-  plugins?: string[];
+  /**
+   * The plugins the home records (pluginrecord.ts PluginEntry): an item linked to one is outside the profiles' own items
+   * (profileplan.ts liveItems), and is that plugin's item (profileplan.ts pluginLive).
+   */
+  plugins?: { id: string; plugin: string; marketName: string; on: boolean }[];
   /** Why profiles can't be read or saved here, if they can't. */
   problem?: string;
 }

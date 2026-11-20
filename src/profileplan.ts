@@ -7,19 +7,40 @@
 // Library lists that no profile can tick, a plugin's items and items only found in a tool, is counted for the page (leftOut).
 // Read by profiles.ts (which carries a switch out), profilemigrate.ts, the Profiles page, History's page and the menus
 // (main.ts), so each says the same. The profiles file and the switch itself are profiles.ts's.
-import type { ItemKind, LibraryItem } from './library.ts';
+// A PLUGIN'S ITEMS, the rules a profile is to switch them by, read by nothing but their tests yet: each item every tool has now
+// with how a switch meets each copy (pluginLive), what a switch to a profile would turn of them, tool by tool (pluginPlan), and
+// whether they agree with a profile (pluginItemsAgree). An item is one plan key (pluginItemKey) whichever way each tool has it,
+// and a profile names it by pluginItemId, never as an item of the person's own. The Library's rows don't group by that key
+// (pluginrows.ts pageRows has its own).
+import { itemKey, type ItemKind, type LibraryItem } from './library.ts';
 import { placeOf } from './libraryrow.ts';
 import { plural } from './model.ts';
 import { pageRows } from './pluginrows.ts';
 import { pageOfPart } from './pluginstatus.ts';
-import { andList, kindNouns } from './words.ts';
-import type { HistoryEvent, HomeView, Profile } from './types.ts';
+import { cantSwitch, onNow, ownSwitch, sharesName, type PluginItemAt } from './pluginswitch.ts';
+import { takesPlugins } from './presence.ts';
+import { andList, kindNouns, toolNames } from './words.ts';
+import type { HarnessId, HistoryEvent, HomeView, PluginItem, Profile } from './types.ts';
 
 /** What every screen calls the state where no profile is in use. */
 export const NO_PROFILE = 'No profile';
 
 /** A profile's name for a library item: its kind and key, `skill:notes`. */
 export const itemId = (kind: ItemKind, key: string) => `${kind}:${key}`;
+/**
+ * A plugin's item's plan key, one rule for each tool's copy, installed whole (a PluginItem, by its `keyName`) or placed in Pi or
+ * OpenCode (a library item linked to the plugin, by placedKeyName): `plugin@marketplace/item`, a skill by its folder's name (one at
+ * the plugin's root by the plugin's) and an agent by its file's, compared as library keys are (itemKey), an MCP server by its name
+ * as written. Not the name a tool's switch takes (PluginItem `name`).
+ */
+export const pluginItemKey = ({ plugin, marketName }: { plugin: string; marketName: string }, item: Pick<PluginItem, 'kind' | 'name' | 'keyName'>) =>
+  `${plugin}@${marketName}/${item.kind === 'mcp' ? item.name : itemKey(item.keyName ?? item.name)}`;
+
+/**
+ * A profile's name for a plugin's item: `plugin:`, its kind and pluginItemKey, `plugin:skill:document-tools@team-tools/pdf`.
+ * A library item's id begins with its kind, so none is one of these, whatever its name holds.
+ */
+export const pluginItemId = (kind: ItemKind, key: string) => `plugin:${itemId(kind, key)}`;
 
 /** A live library item (not deleted) as profiles see it. `except`: the tools it is kept out of, which a switch keeps. */
 export interface LiveItem { id: string; kind: ItemKind; key: string; name: string; on: boolean; except: LibraryItem['except'] }
@@ -42,7 +63,9 @@ export function liveItems(libraries: Libraries, plugins: ReadonlySet<string>): L
 
 /** A home view's live items that profiles act on (each kind's `library` in types.ts HomeView), as the page and the menus read them. */
 export const homeItems = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 'profiles'>) =>
-  liveItems({ skill: home.skills.library, mcp: home.mcp.library, agent: home.agents.library }, new Set(home.profiles.plugins));
+  liveItems({ skill: home.skills.library, mcp: home.mcp.library, agent: home.agents.library }, recordedPlugins(home));
+/** The ids of the plugins the home records. */
+const recordedPlugins = (home: Pick<HomeView, 'profiles'>) => new Set(home.profiles.plugins?.map(entry => entry.id));
 
 /** Of one kind, how many of the Library's rows no profile lists, by why. */
 export interface LeftOut { plugin: number; found: number }
@@ -53,7 +76,7 @@ export interface LeftOut { plugin: number; found: number }
  * tool, not in Central Knot yet (`found`: libraryrow.ts placeOf). A deleted item is in neither list.
  */
 export function leftOut(home: HomeView): Record<ItemKind, LeftOut> {
-  const plugins = new Set(home.profiles.plugins), count = (kind: ItemKind) => {
+  const plugins = recordedPlugins(home), count = (kind: ItemKind) => {
     const page = pageOfPart[kind], { items, library } = home[page];
     return { plugin: pageRows(home, page).rows.length + Object.values(library).filter(item => !item.deleted && linkedToPlugin(item, plugins)).length,
       found: items.filter(row => placeOf(library[row.key]) === 'found').length };
@@ -77,6 +100,100 @@ export function leftOutWords(counts: Record<ItemKind, LeftOut>): string {
     counted('plugin') && `${counted('plugin')} from ${one('plugin') ? 'a plugin' : 'plugins'}, which a profile doesn’t switch yet`].filter(Boolean);
   return parts.length ? `Not listed here: ${parts.join('; ')}.` : '';
 }
+
+// ---------- A plugin's items ----------
+
+/**
+ * One tool's copy of a plugin's item as a switch to a profile meets it. `on`: on there now (pluginswitch.ts onNow; in Pi and
+ * OpenCode its library item's On). `way`: `switch`, the item's own switch there (pluginswitch.ts ownSwitch; in Pi and OpenCode its
+ * library item's On and Off); `stays`, the tool has none for one item of its kind (a skill in Claude Code, an agent in Copilot
+ * CLI), so the copy is left as its plugin has it and agrees with any profile; `held`, its switch can't be used now, and `why`.
+ * `target`: what a switch turns, the copy installed whole as pluginswitch.ts click takes it, or the placed copy's library item.
+ */
+export type PluginCopy = { tool: HarnessId; on: boolean; target: PluginItemAt | { libraryKey: string } }
+  & ({ way: 'switch' | 'stays' } | { way: 'held'; why: string });
+
+/** A plugin's item some tool has now: its id in a profile (pluginItemId), the plugin's name, and each tool's copy. */
+export interface PluginLive { id: string; kind: ItemKind; name: string; plugin: string; copies: PluginCopy[] }
+
+/** Why a copy can't be switched while its whole plugin is off in its tool (installed whole), or on Plugins (placed). */
+const pluginOff = (plugin: string, tool: HarnessId) => `The whole plugin ${plugin} is off in ${toolNames[tool]}.`;
+/**
+ * Why a copy installed whole can't be switched now, if it can't: the whole plugin is off in that tool (so the copy is off); its
+ * switch can't be written (pluginswitch.ts cantSwitch); or Copilot CLI would take another server of its name with it (sharesName).
+ */
+function heldWhy(home: HomeView, at: PluginItemAt): string | undefined {
+  if (at.install.off) return pluginOff(at.install.plugin, at.tool);
+  return cantSwitch(at) ?? sharesName(at, home.mcp.items.flatMap(row => row.copies['copilot-cli']?.folder ?? []), home.pluginItems ?? []);
+}
+
+/** A plugin as the home records it (types.ts ProfilesView `plugins`). */
+type Recorded = NonNullable<HomeView['profiles']['plugins']>[number];
+/**
+ * The name a placed copy's plan key is made of: its library item's name, which is its key's (as atlink.ts pluginItems named it),
+ * or the plugin's for a plugin that is one skill at its root. Placed, that skill is named by the plugin's folder in the
+ * marketplace's copy; the plan knows it is the root skill when a tool's installed copy of the plugin read its one skill at the
+ * root (PluginItem `root`) and the plugin has one skill placed. With no tool having it installed, it keeps its own name.
+ */
+function placedKeyName(home: HomeView, kind: ItemKind, item: LibraryItem, entry: Recorded): string {
+  const atRoot = (home.pluginItems ?? []).some(install => install.plugin === entry.plugin && install.marketName === entry.marketName && install.items.some(part => part.root));
+  const placed = Object.values(home.skills.library).filter(skill => !skill.deleted && skill.source === entry.id).length;
+  return kind === 'skill' && atRoot && placed === 1 ? entry.plugin : item.name;
+}
+
+/**
+ * Every plugin's item a tool has now, one per pluginItemKey whichever way each tool has it: installed whole (a copy that can't be
+ * read has none), then placed in Pi or OpenCode, a library item linked to a plugin the home records, in each of those managed
+ * tools it isn't kept out of (Off too: its On brings it back there), held while the plugin is Off on Plugins (its Off turned the
+ * item Off: pluginlibrary.ts runItems).
+ */
+export function pluginLive(home: HomeView): PluginLive[] {
+  const found = new Map<string, PluginLive>();
+  const add = (kind: ItemKind, key: string, name: string, plugin: string, copy: PluginCopy) => {
+    const id = pluginItemId(kind, key);
+    if (!found.has(id)) found.set(id, { id, kind, name, plugin, copies: [] });
+    found.get(id)!.copies.push(copy);
+  };
+  for (const install of home.pluginItems ?? []) for (const item of install.items) {
+    const at = { kind: item.kind, name: item.name, tool: install.tool, install }, why = heldWhy(home, at);
+    const way = !ownSwitch(at) ? { way: 'stays' as const } : why ? { way: 'held' as const, why } : { way: 'switch' as const };
+    add(item.kind, pluginItemKey(install, item), item.name, install.plugin, { tool: install.tool, on: onNow(at), target: at, ...way });
+  }
+  for (const kind of KINDS) {
+    const { tools, library } = home[pageOfPart[kind]];
+    for (const item of Object.values(library)) {
+      const entry = !item.deleted && home.profiles.plugins?.find(each => each.id === item.source);
+      if (!entry) continue;
+      const key = pluginItemKey(entry, { kind, name: placedKeyName(home, kind, item, entry) });
+      for (const tool of tools.filter(each => !takesPlugins(each) && !item.except.includes(each))) {
+        const way = entry.on ? { way: 'switch' as const } : { way: 'held' as const, why: pluginOff(entry.plugin, tool) };
+        add(kind, key, item.name, entry.plugin, { tool, on: item.on, target: { libraryKey: item.key }, ...way });
+      }
+    }
+  }
+  return [...found.values()];
+}
+
+/** What a switch to a profile would do to one plugin's item: toward `on` (the profile has it), the tools it turns (`turn`), and those it can't (`held`). */
+export interface PluginTurn { id: string; on: boolean; turn: HarnessId[]; held: { tool: HarnessId; why: string }[] }
+
+/**
+ * What switching to `profile` would turn of the plugins' items, one item in one tool at a time, never a whole plugin: each copy
+ * that is not as the profile has the item (on for one it has, off for one it leaves out) is turned where its way is `switch` and
+ * held where it is `held`; a copy that `stays` is left. Only items with something turned or held are listed; an id the profile
+ * names that no tool has now is in none (dormant, as a deleted item's is).
+ */
+export function pluginPlan(profile: Pick<Profile, 'items'>, items: PluginLive[]): PluginTurn[] {
+  return items.flatMap(item => {
+    const on = profile.items.includes(item.id), differ = item.copies.filter(copy => copy.on !== on);
+    const turn = differ.filter(copy => copy.way === 'switch').map(copy => copy.tool);
+    const held = differ.flatMap(copy => (copy.way === 'held' ? [{ tool: copy.tool, why: copy.why }] : []));
+    return turn.length || held.length ? [{ id: item.id, on, turn, held }] : [];
+  });
+}
+
+/** Whether the plugins' items agree with a profile (their part of "in use"): a switch to it would turn none, and hold none. */
+export const pluginItemsAgree = (profile: Pick<Profile, 'items'>, items: PluginLive[]) => !pluginPlan(profile, items).length;
 
 /** What a switch, or its Undo, changes: the items it turns On, and those it turns Off. */
 export interface Turns { on: LiveItem[]; off: LiveItem[] }

@@ -1,10 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, writeFile, readFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, realpath, rm, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
+import { pluginFiles } from '../src/catalogdetail.ts';
+import { readPlugin } from '../src/pluginlibrary.ts';
 import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords } from '../src/pluginrows.ts';
+import { newItem } from '../src/library.ts';
+import { pluginItemKey, pluginLive } from '../src/profileplan.ts';
 import type { PluginContext } from '../src/plugins.ts';
 import { kindSource } from '../src/itemrow.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts } from '../src/types.ts';
@@ -86,6 +90,56 @@ test('Codex: its plugin table turned off, a skill switched off by name, and no a
     await copy(join(box.home, '.codex/plugins/cache/m/demo/1.2.0'));
     await put(join(box.home, '.codex/config.toml'), '[plugins."demo@m"]\nenabled = false\n\n[[skills.config]]\nname = "demo:hello"\nenabled = false\n');
     assert.deepEqual(brief(await readPluginItems(box.context, ['codex-cli'])), [{ tool: 'codex-cli', plugin: 'demo', marketName: 'm', off: true, skillsOff: ['hello'], listed: false, problem: undefined, items: ['skill:hello', 'mcp:tracker'] }]);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin’s item has one plan key by both routes, read on real files: installed in Claude Code and Codex, and placed in Pi from its marketplace', async () => {
+  const box = await sandbox();
+  try {
+    // The marketplace m: demo, whose skill's folder is pdf with SKILL.md naming it pdf-reader, an agent named only by its file
+    // (checker.agent.md) and a server; and solo, one skill with SKILL.md at its root, in a folder of another name, bundle.
+    const market = join(box.home, 'market'), demo = join(market, 'plugins/demo'), bundle = join(market, 'plugins/bundle');
+    await copy(demo);
+    await rm(join(demo, 'skills/hello'), { recursive: true });
+    await put(join(demo, 'skills/pdf/SKILL.md'), '---\nname: pdf-reader\ndescription: Reads PDFs.\n---\nRead.\n');
+    await put(join(bundle, 'SKILL.md'), '---\nname: solo-skill\ndescription: One skill.\n---\nX\n');
+    // Installed: each tool's copy of the plugin's folder.
+    const installs = { demo: join(box.home, '.claude/plugins/cache/m/demo/1.2.0'), solo: join(box.home, '.claude/plugins/cache/m/solo/1.0.0') };
+    await cp(demo, installs.demo, { recursive: true });
+    await cp(bundle, installs.solo, { recursive: true });
+    await cp(demo, join(box.home, '.codex/plugins/cache/m/demo/1.2.0'), { recursive: true });
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+      'demo@m': [{ scope: 'user', installPath: installs.demo, version: '1.2.0' }], 'solo@m': [{ scope: 'user', installPath: installs.solo, version: '1.0.0' }] } }));
+    await put(join(box.home, '.codex/config.toml'), '[plugins."demo@m"]\nenabled = true\n');
+    const read = await readPluginItems(box.context, ['claude-cli', 'codex-cli']);
+    const installed = (tool: HarnessId, plugin: string) => {
+      const install = read.find(found => found.tool === tool && found.plugin === plugin)!;
+      return install.items.map(item => [item.name, pluginItemKey(install, item)]);
+    };
+    // Placed: the plugin's items as Pi gets them (pluginlibrary.ts readPlugin, the read that makes its library items), by name.
+    const placed = async (plugin: string, folder: string) => {
+      const entry = { id: `${plugin}-id`, source: market, marketName: 'm', plugin, on: true, except: [] };
+      const reads = await readPlugin(await pluginFiles(folder, {}, market), entry, '', new Set(), []);
+      return reads.flatMap(each => [...each.names.values()].flatMap(seen => ('name' in seen ? [{ key: pluginItemKey(entry, { kind: each.kind, name: seen.name }), name: seen.name }] : [])))
+        .sort((first, second) => first.key.localeCompare(second.key));
+    };
+    // The name stays the one the tool loads it by, which its own switch takes (Codex: demo:pdf-reader); the key is the folder's.
+    assert.deepEqual(installed('claude-cli', 'demo'), [['pdf-reader', 'demo@m/pdf'], ['tracker', 'demo@m/tracker'], ['checker', 'demo@m/checker']]);
+    assert.deepEqual(installed('codex-cli', 'demo'), [['pdf-reader', 'demo@m/pdf'], ['tracker', 'demo@m/tracker']], 'Codex’s copy: the same key (and no agents)');
+    assert.deepEqual((await placed('demo', demo)).map(each => each.key), ['demo@m/checker', 'demo@m/pdf', 'demo@m/tracker'], 'Pi’s: the same keys');
+    // A plugin that is one skill: installed, keyed by the plugin's name; placed, its library item keeps the name of its folder in
+    // the marketplace, bundle. The plan maps that one placed skill to the installed copy's key, knowing it from the installed read.
+    const [soloPlaced] = await placed('solo', bundle);
+    assert.deepEqual([installed('claude-cli', 'solo'), soloPlaced], [[['solo-skill', 'solo@m/solo']], { key: 'solo@m/bundle', name: 'bundle' }]);
+    const home = (installs: InstalledPlugin[]) => ({ pluginItems: installs, profiles: { profiles: [], plugins: [{ id: 'solo-id', plugin: 'solo', marketName: 'm', on: true }] },
+      skills: { tools: ['claude-cli', 'pi-cli'], items: [], library: { bundle: { ...newItem('bundle', soloPlaced!.name), on: true, source: 'solo-id' } } },
+      mcp: { tools: [], items: [], library: {} }, agents: { tools: [], items: [], library: {} } }) as unknown as HomeView;
+    const plan = (view: HomeView) => pluginLive(view).map(item => [item.id, item.copies.map(copy => copy.tool)]);
+    assert.deepEqual(plan(home(read.filter(install => install.plugin === 'solo'))), [['plugin:skill:solo@m/solo', ['claude-cli', 'pi-cli']]], 'one item, both routes');
+    assert.deepEqual(plan(home([])), [['plugin:skill:solo@m/bundle', ['pi-cli']]], 'with no tool having it installed, its own key');
+    // The same plugin from another marketplace is another item; a skill's case is folded as library keys are, a server's kept.
+    assert.equal(pluginItemKey({ plugin: 'demo', marketName: 'elsewhere' }, { kind: 'skill', name: 'PDF' }), 'demo@elsewhere/pdf');
+    assert.equal(pluginItemKey({ plugin: 'demo', marketName: 'm' }, { kind: 'mcp', name: 'Tracker' }), 'demo@m/Tracker');
   } finally { await box.cleanup(); }
 });
 

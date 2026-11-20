@@ -7,6 +7,7 @@
 // (format 1) is read here for the page and moved once by profilemigrate.ts.
 //
 //   profiles.json   { formatVersion: 2, profiles: [{ id, name, items: ['skill:notes', 'mcp:docs', 'agent:writer'] }] }
+//                   a plugin's item, which no switch acts on yet, as profileplan.ts pluginItemId names it: 'plugin:skill:document-tools@team-tools/pdf'
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -56,8 +57,9 @@ export async function readProfileFile(home: string): Promise<{ view: ProfilesVie
   }
 }
 
-/** The home's profiles, for the page and the menus, with the plugins whose items they leave alone (profileplan.ts liveItems). */
-export const readProfiles = async (home: string): Promise<ProfilesView> => ({ ...(await readProfileFile(home)).view, plugins: (await recordedIds(home)).plugins.map(entry => entry.id) });
+/** The home's profiles, for the page and the menus, with the plugins the home records (types.ts ProfilesView `plugins`). */
+export const readProfiles = async (home: string): Promise<ProfilesView> =>
+  ({ ...(await readProfileFile(home)).view, plugins: (await recordedIds(home)).plugins.map(({ id, plugin, marketName, on }) => ({ id, plugin, marketName, on })) });
 
 /** Writes the profiles as format 2. */
 export const saveProfiles = (home: string, profiles: Profile[]) =>
@@ -92,7 +94,7 @@ export async function saveProfile(context: ShareContext, input: ProfileEdit): Pr
   if (!name) return { problem: 'A profile needs a name.' };
   if (name.length > 40) return { problem: 'Keep the name to 40 characters or fewer.' };
   if (opened.profiles.some(profile => profile.id !== input.id && profile.name.toLowerCase() === name.toLowerCase())) return { problem: `There is already a profile called “${name}”.` };
-  const items = [...new Set((input.items ?? existing?.items ?? []).filter(item => /^(skill|agent|mcp):./.test(item)))];
+  const items = [...new Set((input.items ?? existing?.items ?? []).filter(item => /^(plugin:)?(skill|agent|mcp):./.test(item)))];
   const id = existing?.id ?? (input.restore ? input.id : undefined) ?? randomUUID();
   const profiles = existing ? opened.profiles.map(profile => (profile.id === id ? { id, name, items } : profile)) : [...opened.profiles, { id, name, items }];
   await saveProfiles(context.home, profiles);
