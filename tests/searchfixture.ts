@@ -67,6 +67,12 @@ const skills: Item[] = [
   ['product-brief', 'Writes a one-page product brief.', 'The problem, who has it, what success looks like, and what is out of scope.'],
   ['dashboard-metrics', 'Chooses the metrics for a team dashboard.', 'A few leading indicators, each with an owner and a target.'],
   ['markdown-tables', 'Formats data as Markdown tables.', 'Align the columns, escape pipes, and keep wide tables to six columns.'],
+  // Names a person types from their start. The words alone rank handoff above them for "to-": its description holds "to" five times.
+  ['to-prd', 'Turns a conversation into a product requirements document and files it as an issue.', 'Ask what problem it solves, list the users, write the scope and what is left out, then open the issue with the document as its body.'],
+  ['to-issues', 'Splits a plan into small issues that can each be picked up alone.', 'Read the plan, cut it into thin slices from end to end, and open one issue per slice with what done means.'],
+  ['todo-sweep', 'Collects the TODO comments in a codebase into a list of tasks.', 'Search for TODO and FIXME, group them by module, and drop the ones that are already done.'],
+  ['auto-triage', 'Labels new bugs by area and how bad they are.', 'Read each report, choose a label, and ask for the steps to reproduce when they are missing.'],
+  ['handoff', 'Hands work over to another agent: what to keep, what to drop, where to go next and how to pick it up.', 'Write down what to read first, what to try next and what to leave to the next agent, and tell it how to run the tests.'],
   ['standup', 'Writes a short daily update.', 'Yesterday, today and blockers: three lines, each under twenty words, with the ticket numbers you touched.'],
 ];
 /** A plugin's own rows: their key is plugin@marketplace/name (pluginrows.ts pageRows), and they are named by the item and its plugin. */

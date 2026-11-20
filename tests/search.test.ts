@@ -1,7 +1,8 @@
 // Word search (src/search.ts) as worked examples. First the query set, the measure the weights were tuned on and then frozen:
-// a made-up Library (tests/searchfixture.ts) and thirty-one things a person might type, each with the row that must be among
-// the first three. Then what finds nothing, how text becomes words, the excerpt (asked apart from the ranking, for the rows
-// named), and the one index main keeps, whose answer excerpts only what the page draws at once.
+// a made-up Library (tests/searchfixture.ts) and thirty-four things a person might type, each with the row that must be among
+// the first three. Then a name put first by its start, what finds nothing, how text becomes words, the excerpt (asked apart
+// from the ranking, for the rows named, read as words), and the one index main keeps, whose answer excerpts only what the page
+// draws at once, each of its two parts putting first a name typed from its start.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
@@ -42,9 +43,13 @@ const querySet: { typed: string; wants: string[]; first?: true; why: string }[] 
   { typed: 'release', wants: ['skills-release-notes', 'skills-mobile-release', 'agents-release-manager'], why: 'a name’s word, in texts too' },
   { typed: 'notes', wants: ['skills-release-notes', 'skills-meeting-notes'], why: 'a name’s word, in texts too' },
   { typed: 'api', wants: ['skills-api-design', 'agents-api-tester', 'skills-acme-devkit@acme-tools/api-mocker'], why: 'a name’s word, in texts too' },
+  // A name typed from its start, whose word other rows hold more often (bm25 counts each, the name's once): the names it starts first (search.ts startFor).
+  { typed: 'to-', wants: ['skills-to-prd', 'skills-to-issues'], why: 'a name’s start, ending in its hyphen' },
+  { typed: 'to-p', wants: ['skills-to-prd'], first: true, why: 'the one name that starts so' },
+  { typed: 'pr', wants: ['skills-pr-review', 'skills-product-brief', 'agents-product-manager'], why: 'two letters: the names they start' },
 ];
 
-test('the query set: each row a person means is among the first three, an exact name first', async () => {
+test('the query set: each row a person means is among the first three, or the very first where it must be', async () => {
   const index = (await buildIndex(library))!;
   try {
     const missed = querySet.filter(({ typed, wants, first }) => {
@@ -53,6 +58,22 @@ test('the query set: each row a person means is among the first three, an exact 
     }).map(({ typed, why }) => `${typed} (${why}): ${index.ask(typed).slice(0, 3).map(hit => hit.id).join(', ')}`);
     assert.deepEqual(missed, [], `${querySet.length - missed.length} of ${querySet.length} found`);
   } finally { index.close(); }
+});
+
+test('a name is put first by its start as typed, from two characters: not by its middle, a space for its hyphen, or one letter', async () => {
+  const index = (await buildIndex(library))!;
+  try {
+    const first = (typed: string, count: number) => index.ask(typed).slice(0, count).map(hit => hit.id);
+    // figma-to-code has "to" in its middle: ranked by its words, after the three names that start with it.
+    assert.deepEqual(first('to', 3).sort(), ['skills-to-issues', 'skills-to-prd', 'skills-todo-sweep']);
+    // A space where the names have a hyphen, and one letter, start no name: the words alone rank (handoff's description holds "to" five times).
+    assert.deepEqual([first('to p', 1), first('t', 1)], [['skills-handoff'], ['skills-unit-tests-first']]);
+  } finally { index.close(); }
+  // A name its words miss: Porter keeps running as run, so "runn" finds only another row's runner. Its start still puts it first.
+  const stems = (await buildIndex([{ id: 'skills-running-tests', names: ['running-tests'], description: '', text: '' }, { id: 'skills-ci', names: ['ci'], description: '', text: 'Start the runner.' }]))!;
+  try {
+    assert.deepEqual(stems.ask('runn').map(hit => hit.id), ['skills-running-tests', 'skills-ci']);
+  } finally { stems.close(); }
 });
 
 test('nonsense, punctuation alone and FTS5’s own syntax find nothing and break nothing', async () => {
@@ -154,6 +175,56 @@ test('a match in a camelCase word quotes that word and the words around it, not 
   const index = (await buildIndex([{ id: 'skills-ship-it', names: ['ship-it'], description: 'Gets a package out.', text }, { id: 'skills-ship-it-too', names: ['ship-it-too'], description: 'Gets a package out.', text: other }]))!;
   try {
     assert.deepEqual(index.excerpts('release notes', ['skills-ship-it', 'skills-ship-it-too']), new Map([['skills-ship-it', '…is done, run prepareReleaseNotes and attach the file.'], ['skills-ship-it-too', '…is done, run prepareReleaseNotes and attach the file.']]));
+  } finally { index.close(); }
+});
+
+test('an excerpt reads as words: Markdown’s marks are taken off for showing; what a word finds is unchanged', async () => {
+  const texts = {
+    lead: '# Ask the lead\n\nWhen a plan is unclear, ask first.\n\n## Before you ask\n\nTickets that `/to-tickets` produced are already agent-ready, so **don\'t** grill them again.',
+    critique: 'Gather what people said.\n\n- Read the feedback and support tickets\n- Note each **sentiment** and its source\n\n## Tips\n1. **Share the context** with the reviewer\n2. Keep *one* critique per screen',
+    release: '## Steps\n\n| Step | Command | Notes |\n|------|---------|-------|\n| Build | `npm run build` | must pass |\n| Notes | `npm run changelog` | see [the release guide](docs/release.md) |',
+    links: 'Before tagging, read [the guide](https://wiki.example/releasing) and the [checklist](docs/checklist.md).',
+    cut: 'Read the [long and careful guide to cutting a release by hand](docs/release.md) first.',
+    shell: 'Check the build first.\n\nRun `cat build.log | grep error` and then `npm run build || exit 1` before you push.',
+    bare: 'Step | Command\n---|---\nBuild | npm run build\nNotes | npm run changelog',
+    bold: 'Before you push, run **`npm test`** and read what it says.',
+  };
+  const index = (await buildIndex(Object.entries(texts).map(([id, text]) => ({ id, names: [id], description: '', text }))))!;
+  try {
+    const excerpt = ([id, typed]: [keyof typeof texts, string]) => index.excerpts(typed, [id]).get(id);
+    assert.deepEqual(([['lead', 'produced'], ['critique', 'sentiment'], ['critique', 'tips'], ['release', 'changelog'], ['release', 'build'],
+      ['links', 'checklist'], ['cut', 'first'], ['links', 'releasing'], ['shell', 'grep'], ['shell', 'exit'], ['bare', 'command'], ['bold', 'push']] as [keyof typeof texts, string][]).map(excerpt), [
+      'Tickets that /to-tickets produced are already agent-ready, so don…', // code and emphasis marks; FTS5 cut the snippet in "don't"
+      '…tickets Note each sentiment and its source', // a list item's mark
+      'Tips 1. Share the context with the…', // a heading's mark
+      '…Notes npm run changelog see the release guide…', // a table's bars; a link cut by the excerpt's end, as its text
+      'Step Command Notes Build npm run build must pass Notes npm…', // a table's rule row
+      '…guide and the checklist…', // a link as its text, and one cut by the excerpt's end
+      '…release by hand first.', // a link cut by the excerpt's start
+      '…tagging, read [the guide](https://wiki.example/releasing) and the checklist…', // a link whose address holds the word found: as written
+      '…cat build.log | grep error and then npm run build || exit…', // a shell's pipe: no table's bar, on a line that neither starts nor ends with one
+      '…run build || exit…', // and its ||
+      'Step | Command Build | npm run build Notes | npm run…', // a table without outer bars: its rule row goes, its bars stay
+      'Before you push, run npm test and read what it says.', // bold around a code span
+    ]);
+    const found = (typed: string) => index.ask(typed).map(hit => hit.id);
+    assert.deepEqual([found('tickets'), found('wiki')], [['lead', 'critique'], ['links']], 'a word in a code span or a link’s address is found as before');
+  } finally { index.close(); }
+});
+
+test('an excerpt keeps to one paragraph, the one that holds the most words found: a skill’s text runs on into its other files’ names', async () => {
+  // As searchdocs.ts makes a skill's text: its SKILL.md after the frontmatter, a blank line, the names of its other files.
+  const triage = '# Triage\n\nLabel each new issue.\n\n- Read the title and body\n- Ask for steps when they are missing\n\nA zebracorn line added by hand.\n\nAGENT-BRIEF.md\nOUT-OF-SCOPE.md';
+  // A word found in a camelCase word's parts (search.ts markWord) keeps to its paragraph too.
+  const gate = 'Guards a module.\n\nRun `checkTypes` before **changing** anything.\n\nscripts/gate.sh';
+  // Of two paragraphs, the one that holds more of the words found: the file's name holds both "decision" and "template".
+  const ledger = 'Write each decision down.\n\ntemplates/decision.md';
+  const index = (await buildIndex([{ id: 'triage', names: ['triage'], description: '', text: triage }, { id: 'gate', names: ['gate'], description: '', text: gate },
+    { id: 'ledger', names: ['ledger'], description: '', text: ledger }]))!;
+  try {
+    const excerpt = (typed: string, id: string) => index.excerpts(typed, [id]).get(id);
+    assert.deepEqual([excerpt('zebracorn', 'triage'), excerpt('types', 'gate'), excerpt('decision', 'ledger'), excerpt('decision template', 'ledger')],
+      ['A zebracorn line added by hand.', 'Run checkTypes before changing anything.', 'Write each decision down.', 'templates/decision.md']);
   } finally { index.close(); }
 });
 
@@ -266,6 +337,19 @@ test('two skills of his, one with “repair” and one with “pipeline”: “r
   const before = ids();
   await search.follow('/home', 2, async () => [...mine, catalogDoc(0, 'Repair the pipeline.')]);
   assert.deepEqual([before.sort(), ids()], [['skills-deploy-runbook', 'skills-restore-runbook'], [...before, 'catalog:0']]);
+  search.close();
+});
+
+test('his rows and the catalog’s each put first the names typed from their start, his before the catalog’s', async () => {
+  const search = searchFollower(() => {});
+  const many = 'Hands work over to another agent: what to keep, what to drop, where to go next and how to pick it up.';
+  const item = (at: number, name: string, description: string): SearchDoc => ({ ...catalogDoc(at, ''), names: [name, 'plugin'], description });
+  // In each part the words alone rank the other row first: its description holds "to" five times, the name only once.
+  await search.follow('/home', 1, async () => [{ id: 'skills-handoff', names: ['handoff'], description: many, text: '' },
+    { id: 'skills-to-prd', names: ['to-prd'], description: 'Files a requirements document for the plan, with its scope, its users and what is left out of it.', text: '' },
+    item(0, 'pass-on', many), item(1, 'to-issues', 'Splits a plan into small issues, each with its own scope and what done means for it.')]);
+  const answer = search.ask('to-');
+  assert.deepEqual(answer.ready && answer.rows.map(row => row.id), ['skills-to-prd', 'skills-handoff', 'catalog:1', 'catalog:0']);
   search.close();
 });
 

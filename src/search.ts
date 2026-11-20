@@ -8,13 +8,16 @@
 //   `mcp__server__tool`, a path and a URL's parts split, and `k8s` stays one word. The words kept for corrections are the
 //   names' and descriptions' as indexed, whole and in parts (`cut(indexed(…))`);
 // - the query's rule (`Index.ask`): a text with no words asks nothing; a row one of whose names is the typed text whole comes
-//   first; then every word, the last as a prefix (the person is still typing it); if nothing, each word that finds nothing
-//   (the first LOOKED_UP of them) gets the known words nearest it (`nearest`) beside it and every word is asked again; if
-//   still nothing, any of the typed words. Every word is quoted, so nothing typed reaches MATCH as syntax. Ranked by bm25()
-//   with the name weighted most (`WEIGHTS`), ties by row id: ids alone, as many as are found;
+//   first; then, from two characters, those one of whose names starts with it as typed (`startFor`), whatever the words'
+//   weights; then the rest. Rows are found by every word (a row its name's start brings comes even where they miss it), the
+//   last as a prefix (the person is still typing it); if nothing, each word that finds nothing (the first LOOKED_UP of them)
+//   gets the known words nearest it (`nearest`) beside it and every word is asked again; if still nothing, any of the typed
+//   words. Every word is quoted, so nothing typed reaches MATCH as syntax. Ranked by bm25() with the name weighted most
+//   (`WEIGHTS`), ties by row id: ids alone, as many as are found;
 // - the excerpt of a row found in its text alone, asked apart from the ranking and only for the rows named (`Index.excerpts`):
-//   the file's own words from BEFORE words before the first that matched, EXCERPT_WORDS in all, "…" where cut; where more of
-//   the typed words matched in a camelCase word's parts than in the text, around that word (`markWord`);
+//   the file's own words from BEFORE words before the first that matched, EXCERPT_WORDS in all, "…" where cut, in the paragraph
+//   that holds the most of them, with Markdown's marks taken off for showing (`around`, `plain`); where more of the typed words
+//   matched in a camelCase word's parts than in the text, around that word (`markWord`);
 // - the index main keeps (`searchFollower`), in two parts, his own documents and the catalog's, each built and asked alone so
 //   that plugin text never changes what his own Find returns: built from a view's documents in slices that give way to main's
 //   other work, superseded by a newer view while it gathers or builds, a part kept (not rebuilt) when its content is the same,
@@ -134,15 +137,24 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
     for (const expr of tries) if (any.get(last.expr = expr())) return last.expr;
     return (last.expr = undefined);
   }
+  /** The typed text as names are compared with it: trimmed, in the index's Unicode form, in lower case. */
+  const asName = (typed: string) => typed.trim().normalize('NFC').toLowerCase();
   /** The rows one of whose names is the typed text whole: first, and with no excerpt. */
-  const exactFor = (typed: string) => byName.get(typed.trim().normalize('NFC').toLowerCase()) ?? [];
+  const exactFor = (typed: string) => byName.get(asName(typed)) ?? [];
+  /** The rows one of whose names starts with the typed text, from two characters, hyphens and spaces as typed ("to-" starts to-prd, "to p" does not). */
+  function startFor(typed: string) {
+    const start = asName(typed);
+    return new Set([...start].length < 2 ? [] : [...byName].flatMap(([name, rowids]) => (name.startsWith(start) ? rowids : [])));
+  }
 
   return {
     ask(typed) {
       if (!words(typed).length) return [];
-      const expr = matchFor(typed), exact = exactFor(typed);
+      const expr = matchFor(typed), starts = startFor(typed);
       const found = expr ? (ranked.all(expr) as { rowid: number }[]).map(row => row.rowid) : [];
-      return [...exact, ...found.filter(rowid => !exact.includes(rowid))].map(rowid => { const item = catalog[rowid - 1]; return { id: ids[rowid - 1]!, ...(item ? { kind: item.kind, item } : {}) }; });
+      // Each row once: a name typed whole; then a name it starts, as ranked (one the words don't find after those); then the rest as ranked.
+      const order = new Set([...exactFor(typed), ...found.filter(rowid => starts.has(rowid)), ...starts, ...found]);
+      return [...order].map(rowid => { const item = catalog[rowid - 1]; return { id: ids[rowid - 1]!, ...(item ? { kind: item.kind, item } : {}) }; });
     },
     excerpts(typed, wanted) {
       const expr = matchFor(typed), exact = exactFor(typed);
@@ -156,25 +168,41 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
 }
 
 /**
- * An excerpt of `marked` (text with the words that matched marked) that shows the first of them: from BEFORE words before it, to
- * EXCERPT_WORDS words in all, "…" where cut, on one line, the marks taken out.
+ * An excerpt of `snippet` (text with the words that matched marked), from its paragraph that holds the most different words that
+ * matched, the first of equals (a skill's text runs on into its other files' names), read as words (`plain`): from BEFORE words
+ * before the first marked, to EXCERPT_WORDS words in all, "…" where cut, on one line, without OPEN and CLOSE.
  */
-function around(marked: string) {
-  const cutBefore = marked.startsWith('…'), text = cutBefore ? marked.slice(1) : marked;
+function around(snippet: string) {
+  const paragraph = plain(snippet.split(/\n[ \t]*\n/).reduce((most, part) => (marked(part).length > marked(most).length ? part : most)));
+  const cutBefore = paragraph.startsWith('…'), text = cutBefore ? paragraph.slice(1) : paragraph;
   const start = text.slice(0, Math.max(0, text.indexOf(OPEN))).search(/\S*$/);
   const before = text.slice(0, start).split(/\s+/).filter(Boolean), after = text.slice(start).split(/\s+/).filter(Boolean);
   const kept = before.slice(-BEFORE), shown = after.slice(0, EXCERPT_WORDS - kept.length);
   const lead = cutBefore || kept.length < before.length ? '…' : '', tail = shown.length < after.length ? '…' : '';
   return `${lead}${[...kept, ...shown].join(' ')}${tail}`.replaceAll(OPEN, '').replaceAll(CLOSE, '');
 }
+/**
+ * Text as words, for showing only (what is indexed and found is the text as written): Markdown's marks taken off, the words that
+ * matched always kept. A heading's or list item's mark at a line's start, a rule row (a line of dashes, a table's colons and
+ * bars), emphasis (`*`) and code marks; a link as its text, whole or cut by the excerpt, unless its address holds a word that
+ * matched; the bars, as spaces, of a table's row: a line that starts or ends with a bar. So a shell's `|` and `||` inside a line
+ * stay, and so do the bars of a table written without its outer ones (`a | b`). Not a parser: `_` emphasis, quotes and HTML stay.
+ * "## **Run** `npm test`, see [the guide](x.md)" → "Run npm test, see the guide".
+ */
+function plain(text: string) {
+  return text.replace(/^[ \t]*(?:#{1,6}|[-*+])[ \t]+|^[ \t|:]*-{3,}[-:| \t]*$/gmu, '')
+    .replace(/!?\[(?=[^\][\n]*(?:$|…|\]\((?![^)\s]*\u0001)))/gu, '').replace(/\]\((?![^)\s]*\u0001)[^)\s…]*\)?/gu, '')
+    .replace(/(?<=^|[\s(["'…\u0001])\*+(?=[\p{L}\p{N}\u0001`])|(?<=[\p{L}\p{N}\u0002`.,:;!?)])\*+(?=[.,:;!?)\]"'…]*(?:[\s\u0002]|$))|`/gu, '')
+    .replace(/^[ \t]*\|.*$|^.*\|[ \t]*$/gmu, row => row.replaceAll('|', ' '));
+}
 /** The different words a snippet has marked, in lower case, in the order first marked. */
 const marked = (snippet: string) => [...new Set([...snippet.matchAll(/\u0001([^\u0002]*)\u0002/gu)].map(match => match[1].toLowerCase()))];
-/** `text` with one camelCase word marked: the first whose parts hold every part marked in `parts`, else the first that holds the first. */
+/** `text` with one camelCase word marked, its spaces and lines kept: the first whose parts hold every part marked in `parts`, else the first that holds the first. */
 function markWord(text: string, parts: string) {
-  const wanted = marked(parts), all = text.split(/\s+/), pieces = (word: string) => (CAMEL.test(word) ? cut(apart(word)) : []);
+  const wanted = marked(parts), all = text.split(/(\s+)/), pieces = (word: string) => (CAMEL.test(word) ? cut(apart(word)) : []);
   const every = all.findIndex(word => wanted.every(part => pieces(word).includes(part)));
   const at = every >= 0 ? every : all.findIndex(word => pieces(word).includes(wanted[0]));
-  return all.map((word, each) => (each === at ? `${OPEN}${word}${CLOSE}` : word)).join(' ');
+  return all.map((word, each) => (each === at ? `${OPEN}${word}${CLOSE}` : word)).join('');
 }
 
 /**
