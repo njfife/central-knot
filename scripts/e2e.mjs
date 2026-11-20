@@ -6807,6 +6807,30 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x38, y: y38, button: 'left', clickCount: 1 });
   await done();
   same('a press released after a redraw replaced its switch still counts as its click', [redrawn, await switchOn(a, 'mcp', 'srv-38'), await switchOn(a, 'mcp', 'srv-32')], [true, false, false]);
+  // So does a Space on the focused switch (a button clicks at the key's release) when the page is drawn again between its key-down
+  // and its key-up, as a background read or the clicks before it ending may. `repeats`: the key held, the keyboard repeating its
+  // key-down after the redraw (Chromium arms the switch now there for a click of its own); `blur`: the window loses the focus before
+  // the release. Answers whether the switch was replaced, how many clicks reached it, and whether its row is On after. In a grouped
+  // run another copy's window can take the focus mid-press, which ends the press with nothing clicked: it is then pressed once more.
+  const spaceAcrossRedraw = async (key, { repeats = 0, blur = false } = {}, again = true) => {
+    const control = rowPart('switch', 'mcp', key), space = { key: ' ', code: 'Space', windowsVirtualKeyCode: 32 };
+    await putAt(table, row(key), 200);
+    await a.run(`(() => { const now = document.getElementById('${control}'); now.dataset.pressed = 'yes'; now.focus(); Object.assign(window, { ckCounted: '${control}', ckClicks: 0, ckBlurs: 0 });
+      if (!window.ckCounting) { addEventListener('click', event => { if (event.target.closest?.('button')?.id === window.ckCounted) window.ckClicks++; }, true); addEventListener('blur', () => window.ckBlurs++); }
+      return window.ckCounting = true; })()`);
+    await a.send('Input.dispatchKeyEvent', { type: 'keyDown', ...space, text: ' ' });
+    await a.run(`(() => { for (let times = 0; times < 2; times++) document.querySelector('#sidebar-toggle').click(); return true; })()`);
+    for (let repeat = 0; repeat < repeats; repeat++) { await wait(30); await a.send('Input.dispatchKeyEvent', { type: 'keyDown', ...space, text: ' ', autoRepeat: true }); }
+    if (blur) await a.run(`dispatchEvent(new FocusEvent('blur')), true`);
+    const replaced = await a.run(`document.getElementById('${control}').dataset.pressed !== 'yes'`), lostFocus = !blur && await a.run(`window.ckBlurs > 0`);
+    await a.send('Input.dispatchKeyEvent', { type: 'keyUp', ...space });
+    await done();
+    if (lostFocus && again) return spaceAcrossRedraw(key, { repeats, blur }, false);
+    return [replaced, await a.run(`window.ckClicks`), await switchOn(a, 'mcp', key)];
+  };
+  same('a Space on a switch released after a redraw replaced it counts as one click', await spaceAcrossRedraw('srv-28'), [true, 1, false]);
+  same('held down, the key repeating after the redraw, it is still one click', await spaceAcrossRedraw('srv-29', { repeats: 3 }), [true, 1, false]);
+  same('the window losing the focus before the release (its key-up went to another window): no click', await spaceAcrossRedraw('srv-27', { blur: true }), [true, 0, true]);
 
   // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it. The
   // last result closed first, so the click below is a run of its own.
