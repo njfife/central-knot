@@ -279,19 +279,22 @@ ul { list-style: none; }
 #header:has(.header-result, .header-notice, .notices-card) > .page-title { flex: none; }
 @container content (width < 900px) { #header:has(.header-result, .header-notice, .notices-card) > .page-title { display: none; } }
 /* The sync notices in the header (matrix.ts headerNotices, placed by renderer.ts resultHere). With no result there, the newest
-   in its two lines: its sentence cut where it runs past them, its × at the right; its actions are in the card. Notices, as the
-   toolbar's chips look (.chip), takes its room from the lines, never the header's height. */
-.header-notice { flex: 1 1 0; min-width: 0; display: flex; align-items: center; font-size: 12px; line-height: 16px; }
+   in its two lines, led by "Automatic change:": its sentence cut where it runs past them, its × at the right; a click on it opens
+   the card, where its actions are. Notices, a button as Refresh is with its count on a fill, takes its room from the lines, never
+   the header's height. */
+.header-notice { flex: 1 1 0; min-width: 0; display: flex; align-items: center; font-size: 12px; line-height: 16px; cursor: pointer; }
 .header-notice > .sync-notice { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; }
 .header-notice .notice-text { max-width: none; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.notices-control { flex: none; }
-/* Their card: the result's card (.result-whole), one height whatever it holds, so a notice arriving while it is open grows the
-   list inside it, which scrolls under its head; See change's panel opens in that one scroll, with no height of its own. */
-.notices-card { flex: 1 1 0; min-width: 0; height: min(24rem, calc(100vh - 120px)); display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 16px; }
-.notices-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 4px; border-bottom: 1px solid var(--line); color: var(--ink-soft); }
+.notice-source { flex: none; color: var(--ink-soft); }
+.btn.notices-control[aria-expanded="true"] { background: var(--current); }
+.notices-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--press); font-size: 11.5px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+/* Their card: the result's card (.result-whole), as tall as its notices up to the window less 120px, past which they scroll under
+   its top line (their count, Dismiss all, its ×); See change's panel opens in that one scroll, pushing the next notice down. */
+.notices-card { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 16px; }
+.notices-head { display: flex; align-items: center; gap: 12px; padding-bottom: 4px; border-bottom: 1px solid var(--line); color: var(--ink-soft); }
+.notices-head > .band-dismiss { margin-left: auto; }
 .notices-card .sync-notice-lines { gap: 10px; }
-.notices-card > #notices-dismiss { align-self: flex-start; }
-.notices-card .change-panel, .notices-card .change-panel > .ins-diff { max-height: none; overflow: visible; }
+.notices-card .sync-notice > .change-panel, .notices-card .change-panel > .ins-diff { max-height: none; overflow: visible; }
 .header-end { display: flex; gap: 8px; }
 
 #status { container: status / inline-size; height: 28px; flex: none; display: flex; align-items: center; gap: 26px; padding: 0 16px 0 24px; background: var(--chrome); border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 12px; line-height: 16px; white-space: nowrap; }
@@ -400,10 +403,10 @@ ul { list-style: none; }
 .find-input { flex: 1; min-width: 0; border: 0; padding: 0 0 0 4px; background: transparent; color: var(--ink); font: 400 13px/20px var(--sans); outline: none !important; user-select: text; cursor: text; }
 .find-input::placeholder { color: var(--ink-soft); }
 .chips { display: flex; flex: none; align-items: center; gap: 4px; }
-.chip, .notices-control { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; white-space: nowrap; border: 1px solid transparent; border-radius: 999px; background: none; color: var(--ink-soft); font: inherit; font-size: 12.5px; cursor: pointer; }
-.chip:hover, .notices-control:hover { background: var(--hover); color: var(--ink); }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; white-space: nowrap; border: 1px solid transparent; border-radius: 999px; background: none; color: var(--ink-soft); font: inherit; font-size: 12.5px; cursor: pointer; }
+.chip:hover { background: var(--hover); color: var(--ink); }
 /* On, a chip keeps its width (no heavier weight): pressing it never changes the bar's fit. */
-.chip-on, .notices-control[aria-expanded="true"] { background: var(--current); border-color: var(--control-line); color: var(--ink); }
+.chip-on { background: var(--current); border-color: var(--control-line); color: var(--ink); }
 .chip-count { font-variant-numeric: tabular-nums; color: var(--ink-faint); font-size: 11.5px; }
 .chip-warn .chip-count { color: var(--warning); font-weight: 600; }
 /* The item lists' From and Sort (matrix.ts fromChoice, orderChoice): a caption and its select, as tall as a chip; the captions

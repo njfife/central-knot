@@ -584,7 +584,6 @@ export const problemsBand = (problems: DestinationResult[]) => h('div.band', { r
   h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (problems.length > 4 ? ` · and ${problems.length - 4} more` : '')));
 
 /** Names shown as names, so a server called "files" does not read as a word in the sentence. */
-const nameList = (items: string[]) => items.flatMap((item, index) => [index ? (index === items.length - 1 ? ' and ' : ', ') : '', h('strong.item-name', {}, item)]).filter(part => part !== '');
 
 /** Where an item's details are drawn: under its row, docked beside the table, or in the Library's Files view. */
 type Placement = 'row' | 'dock' | 'files';
@@ -631,12 +630,6 @@ function pathLine(tool: Tool, path: string) {
 /** Show in folder: reveals a file in the file manager; nothing is opened or changed. */
 const showInFolder = (path: string) => h('button.inline-link.details-path-show', { type: 'button', title: 'Show this file in the file manager; nothing is opened or changed', onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder');
 
-/** Where an earlier Undo went, said by what it undoes: "The undo for your change to files moved to History." */
-function movedUndoText(label: string, items: string[]): (string | HTMLElement)[] {
-  const named = nameList(items.slice(0, 3));
-  const what = label === 'Undo' && items.length ? ['your change to ', ...named] : [label.replace(/^Undo\s*/, '') || 'your last change'];
-  return ['Earlier: the undo for ', ...what, ' is in '];
-}
 
 /**
  * `to` with the words `from` lacks marked (`keep` 'added'), or `from` with the words `to` lacks ('removed'): what an MCP edit
@@ -1156,19 +1149,32 @@ export function changePanel(eventId: string) {
 // ---------- Sync notices: kept by the list on screen, said in the window's header ----------
 // What sync changed by itself (a pass's notice, types.ts SyncNotice) lives in the header, never above a list, so no notice arriving
 // moves a row; renderer.ts resultHere places what headerNotices gives: the Notices control (noticesControl), the newest notice in
-// the header's two lines while no result has them, and every notice in the card only that control opens (noticesCard). A list
-// keeps a notice until its ×, its Undo or a newer event folds it into History (toldNotices); it is seen once drawn in the lines
-// or the card (noticeUnseen), and until then it lives across reads in app.ts keepUnshown.
+// the header's two lines while no result has them (noticeLine), and every notice in the card either opens (noticesCard). Newest is
+// last to arrive (noticeArrived). A list keeps a notice until its ×, its Undo, a later save's of its item (supersedes) or, the
+// card closed, any newer one folds it into History (toldNotices); it is seen once drawn in the lines or the card (noticeUnseen),
+// and until then it lives across reads in app.ts keepUnshown.
 
-/** A notice as a table shows it: the kind it is about (`of`), whether it was said while sync was off (`once`), and when it first showed (`seq`: state.said.seq). */
-type Told = SyncNotice & { of: PageKind; once?: boolean; seq: number };
-/** Notices stay until read: each read brings only what is new, so the page keeps earlier ones until × or Undo, or another home. */
+/** A notice as a table shows it: the kind it is about (`of`), whether it was said while sync was off (`once`), and its place in the order of arrival (`arrived`: noticeArrived). */
+type Told = SyncNotice & { of: PageKind; once?: boolean; arrived: number };
+/** Notices stay until read: each read brings only what is new, so the page keeps earlier ones until × or Undo, a newer one folds them, or another home. */
 const keptNotices = new Map<PageKind, Map<string, Told>>();
 /** Notices folded into History by a newer one: never shown again, though the read still lists them. */
 const foldedNotices = new Map<PageKind, Set<string>>();
 const keptSync = new Map<PageKind, boolean>();
-/** One kind's notices, kept or folded as the header shows them. */
-function toldNotices(kind: PageKind): Told[] {
+/**
+ * Each notice's place in the order of arrival, given the first time the page meets it: as the view that brings it is taken (app.ts
+ * setHome), or a click's result (toldNotices). The newest is the last to arrive, whatever its kind or the page open then.
+ */
+const arrivals = new Map<string, number>();
+export const noticeArrived = (id: string) => { if (!arrivals.has(id)) arrivals.set(id, arrivals.size); return arrivals.get(id)!; };
+/**
+ * Whether `newer` tells of a later save of the item `older` tells of a save of (an edit, competing edits or a deletion by hand,
+ * types.ts ItemNotice), and takes its place: one active notice per item's saves, so an Undo undoes its own, every save in History.
+ * A plugin's notice of an item (its own now, or dropped) stays beside it.
+ */
+export const supersedes = (newer: SyncNotice, older: SyncNotice) => newer.history !== older.history && 'winner' in newer && 'winner' in older && newer.key === older.key;
+/** One kind's notices, kept or folded as the header shows them; `cardOpen`, the card is open on them. */
+function toldNotices(kind: PageKind, cardOpen: boolean): Told[] {
   if (!state.home) return [];
   // What the kind's view says sync did, and what its last click's result does.
   const fresh = [...state.home[kind].notices, ...(lastResult(kind)?.notices ?? [])];
@@ -1176,18 +1182,21 @@ function toldNotices(kind: PageKind): Told[] {
   if (!kept) keptNotices.set(kind, kept = new Map());
   let folded = foldedNotices.get(kind);
   if (!folded) foldedNotices.set(kind, folded = new Set());
-  const keyOf = (notice: SyncNotice) => notice.history;
-  // A newer event folds what was said before into History, where it stays with its Undo: notices never pile up. A click's result
-  // folds none (it is said in the header's lines), so a notice never goes at a click. Turning sync on or off retires the ones it
-  // no longer lists.
+  const keyOf = (notice: SyncNotice) => notice.history, retire = (key: string) => { folded!.add(key); kept!.delete(key); };
+  // A newer event folds what was said before into History, where it stays with its Undo: notices never pile up. While the card is
+  // open, nothing is taken from what it shows but a notice a newer one supersedes. A click's result folds none (it is said in the
+  // header's lines), so a notice never goes at a click. Turning sync on or off retires the ones it no longer lists.
   const news = fresh.filter(notice => !kept!.has(keyOf(notice)) && !folded!.has(keyOf(notice)));
-  for (const key of [...kept.keys()]) if (news.length) { folded.add(key); kept.delete(key); }
+  if (news.length && !cardOpen) for (const key of [...kept.keys()]) retire(key);
   if (keptSync.get(kind) !== state.home.syncOn) for (const key of [...kept.keys()]) if (!fresh.some(notice => keyOf(notice) === key)) kept.delete(key);
   keptSync.set(kind, state.home.syncOn);
   // The wording is fixed when the notice first shows: a Sync once stays "Synced once" after sync is turned on.
-  for (const notice of fresh) { const key = keyOf(notice); if (!kept.has(key) && !folded.has(key)) kept.set(key, { ...notice, of: kind, once: !state.home.syncOn, seq: state.said.seq }); }
+  for (const notice of news) {
+    for (const [key, told] of kept) if (supersedes(notice, told)) retire(key);
+    kept.set(keyOf(notice), { ...notice, of: kind, once: !state.home.syncOn, arrived: noticeArrived(keyOf(notice)) });
+  }
   for (const key of [...kept.keys()]) if (state.dismissed.has(key)) kept.delete(key);
-  return [...kept.values()].reverse();
+  return [...kept.values()];
 }
 
 /**
@@ -1198,12 +1207,19 @@ function toldNotices(kind: PageKind): Told[] {
 export const noticeUnseen = (id: string) => !state.dismissed.has(id) && !state.seenNotices.has(id) && ![...foldedNotices.values()].some(folded => folded.has(id));
 /** A kind's automatic changes not yet seen (noticeUnseen). */
 export const unseenNotices = (kind: PageKind) => (state.home?.[kind].notices ?? []).filter(notice => noticeUnseen(notice.history));
-/** Whether a notice a list drew for the open home is still kept there, not dismissed or undone (app.ts readFound: no "Nothing changed" beside it). */
+/** Whether the header keeps a notice for the open home, not dismissed or undone (app.ts readFound: no "Nothing changed" beside it). */
 export const noticesKept = () => tableHomes.notices === state.home?.home && [...keptNotices.values()].some(kept => [...kept.keys()].some(key => !state.dismissed.has(key)));
-/** The notices a table shows: each of its kinds', newest first, those dismissed aside. */
-function visibleNotices(t: Table) {
+/** The card open on a list (app.ts state.shownWhole): the list it was opened on (cardOf) and how many notices had arrived by then (`upTo`). */
+type NoticesCard = { noticesOf: string; upTo: number };
+/**
+ * The notices a table shows: each of its kinds', newest first, those dismissed aside; with the card open (`card`), what arrived since
+ * it opened goes after what it showed, in the order it came, so nothing in it moves.
+ */
+function visibleNotices(t: Table, card?: NoticesCard) {
   if (!state.home) return [];
-  return t.kinds.flatMap(toldNotices).sort((first, second) => second.seq - first.seq).filter(notice => !state.dismissed.has(notice.history));
+  const later = (notice: Told) => !!card && notice.arrived >= card.upTo;
+  return t.kinds.flatMap(kind => toldNotices(kind, !!card)).filter(notice => !state.dismissed.has(notice.history))
+    .sort((first, second) => Number(later(first)) - Number(later(second)) || (later(first) ? first.arrived - second.arrived : second.arrived - first.arrived));
 }
 
 /**
@@ -1218,14 +1234,6 @@ function noticesTable(): Table | undefined {
   return every.kinds.some(kind => rowCount(home, kind)) || pluginsListed() ? t : every;
 }
 
-/** Which of this news the header shows for the list on screen, in its lines or its card, where it can tell the person where their Undo went. */
-export function newsShownHere(news: { kind: PageKind; notice: SyncNotice }[], outcome: Outcome): string[] {
-  const t = state.home && !holdingBuild(state.home.otherBuilds) ? noticesTable() : undefined;
-  if (!t || !outcomeShown(outcome, t)) return [];
-  const fresh = new Set(news.filter(each => t.kinds.includes(each.kind)).map(each => each.notice.history));
-  return visibleNotices(t).map(notice => notice.history).filter(id => fresh.has(id));
-}
-
 /** The kinds whose notices the header shows: the sidebar's dot leaves them to the Notices control (renderer.ts). */
 export const noticeKindsShown = (): PageKind[] => noticesTable()?.kinds ?? [];
 
@@ -1235,45 +1243,44 @@ export const noticeKindsShown = (): PageKind[] => noticesTable()?.kinds ?? [];
  * whose mark asks what they left unseen. None where no list is drawn (noticesTable), or with no notice kept.
  */
 export function headerNotices(resultShown: boolean): { lines?: HTMLElement; card: boolean; control: HTMLElement } | undefined {
-  const t = noticesTable(), list = t ? visibleNotices(t) : [];
+  const t = noticesTable();
+  const card = t && (state.shownWhole as NoticesCard | undefined)?.noticesOf === cardOf(t) ? state.shownWhole as NoticesCard : undefined;
+  const list = t ? visibleNotices(t, card) : [];
   if (!t || !list.length) return undefined;
   // The names two kinds share, which a notice's words name its kind beside (kindWord).
   t.shared = sharedNames(t);
-  const card = (state.shownWhole as { noticesOf?: string } | undefined)?.noticesOf === cardOf(t);
-  const lines = card ? noticesCard(t, list) : resultShown ? undefined : h('div.header-notice', {}, syncNotice(t, list[0]!, false));
-  return { lines, card, control: noticesControl(t, list, card) };
+  const open = () => { state.shownWhole = { noticesOf: cardOf(t), upTo: arrivals.size }; rerender(); };
+  const lines = card ? noticesCard(t, list) : resultShown ? undefined : h('div.header-notice', { title: 'Show every notice', onclick: open }, syncNotice(t, list[0]!, false));
+  return { lines, card: !!card, control: noticesControl(list, !!card, open) };
 }
-/** Which list's notices the open card holds (app.ts state.shownWhole): its home's and its table's, so it opens on none other. */
-const cardOf = (t: Table) => `${state.home?.home}\n${tableId(t)}`;
+/**
+ * Which view's notices the open card holds: its home, its table (a segment or a tool's tab) and, the Files view sharing the
+ * Library's table, the skill shown there; so it opens on no other, and goes when that view is left, by Back too.
+ */
+const cardOf = (t: Table) => JSON.stringify([state.home?.home, tableId(t), state.libraryView === 'files' ? state.item : undefined]);
 
-/** Notices: counting the list's notices as the toolbar's chips count (style.css), marked while one is unseen; the one way to the card. */
-function noticesControl(t: Table, list: Told[], open: boolean) {
+/** Notices: a button, as Refresh is, its count on a fill of its own, marked while one is unseen; it opens the card (`open`) and closes it. */
+function noticesControl(list: Told[], open: boolean, openCard: () => void) {
   const unseen = list.some(notice => noticeUnseen(notice.history));
-  return h('button.notices-control', {
-    type: 'button', id: 'notices', 'aria-expanded': String(open), 'aria-label': `Notices: ${list.length}${unseen ? ', not all seen' : ''}`,
-    title: `${plural(list.length, 'automatic change')}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`,
-    onclick: () => { state.shownWhole = open ? undefined : { noticesOf: cardOf(t) }; rerender(); },
-  }, 'Notices', h('span.chip-count', {}, String(list.length)), unseen ? h('span.notices-unseen') : null);
+  const control = button({ variant: 'outline', label: 'Notices', id: 'notices', onclick: () => { if (!open) openCard(); else { state.shownWhole = undefined; rerender(); } },
+    attrs: { 'aria-expanded': String(open), 'aria-label': `Notices: ${list.length}${unseen ? ', not all seen' : ''}`, title: `${plural(list.length, 'automatic change')}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}` } });
+  control.classList.add('notices-control');
+  control.append(h('span.notices-count', {}, String(list.length)));
+  if (unseen) control.append(h('span.notices-unseen'));
+  return control;
 }
 
 /**
- * Every notice whole, newest first, each with its actions (See change, Undo or Turn it on, History, Turn sync on), then Dismiss all:
- * the card hanging from the header that only Notices opens, one height whatever it holds (style.css .notices-card), so a notice
- * arriving while it is open grows the list inside it. Its ×, Escape and a press outside close it; so does an action of a notice
- * (renderer.ts foldResult). An earlier result's Undo that stepped aside for these notices (app.ts undoMoved) is said on the last.
+ * Every notice whole, each with its actions (See change, Undo or Turn it on, History, Turn sync on), under a top line with their
+ * count, Dismiss all and the card's ×: the card hanging from the header that Notices or the notice in the lines opens, as tall as
+ * its notices up to the window's height less 120px, past which they scroll in it (style.css .notices-card). An action that stays
+ * on this page leaves it open, its notice leaving the list once done; one that leaves the page (History, a name's link) closes it,
+ * as do its ×, Escape and a press outside (renderer.ts foldResult). Empty, it goes.
  */
 function noticesCard(t: Table, list: Told[]) {
-  const lines = list.map(notice => syncNotice(t, notice, true));
-  const moved = state.undoMoved?.page === state.page && !state.outcome && list.some(notice => state.undoMoved!.notices.includes(notice.history))
-    ? h('span.notice-tail.tone-faint', { id: 'undo-moved' }, ...movedUndoText(state.undoMoved!.label, state.undoMoved!.items), h('button.inline-link', { type: 'button', id: 'notice-undo-moved', onclick: () => showPage('history') }, 'History'), '.') : null;
-  if (moved) {
-    const link = lines.at(-1)!.querySelector<HTMLElement>('[id^="notice-history-"]');
-    if (link) link.title = `${moved.textContent?.replace(/^Earlier: the undo/, 'The earlier undo').replace(/ is in History\.$/, ' is here too')}.`;
-    else lines.at(-1)!.append(moved);
-  }
   const close = closeButton(() => { state.shownWhole = undefined; document.getElementById('notices')?.focus({ preventScroll: true }); rerender(); }, { id: 'notices-close', label: 'Close the notices', title: 'Close' });
   return h('div.notices-card.result-whole', { id: 'notices-card', role: 'region', 'aria-label': 'Notices' },
-    h('div.notices-head', {}, h('span.notices-title', {}, plural(list.length, 'notice')), close), h('div.sync-notice-lines', {}, lines), dismissNotices(list));
+    h('div.notices-head', {}, h('span.notices-title', {}, plural(list.length, 'notice')), dismissNotices(list), close), h('div.sync-notice-lines', {}, list.map(notice => syncNotice(t, notice, true))));
 }
 
 /** A notice's kind, by its mark, where the table lists several kinds (the Library on All). */
@@ -1307,7 +1314,10 @@ function libraryNotice(lib: LibraryPage, notice: ItemNotice | PluginItemNotice, 
   return ['trash-2', 'tone-muted', text, on];
 }
 
-/** A notice's sentence with its ×, drawn and so seen; `whole` (the card) adds its actions and See change's panel. */
+/** What leads a notice: in the card its mark; in the header's lines, where a click's result is said, that it is an automatic change, as the sidebar's dot says. */
+const noticeLead = (whole: boolean, glyph: IconName, tone: string) => (whole ? icon(glyph, 14, tone) : h('span.notice-source', {}, 'Automatic change:'));
+
+/** A notice's sentence with its ×, drawn and so seen; `whole` (the card) adds its actions, its name's link to its row and See change's panel. */
 function syncNotice(t: Table, notice: Told, whole: boolean) {
   if (notice.kind === 'taken-in') return takenInNotice(t, notice, whole);
   // Undo is the one action here that writes files: a small outlined button, apart from the quieter links. It says "Undo", as
@@ -1321,15 +1331,15 @@ function syncNotice(t: Table, notice: Told, whole: boolean) {
   state.seenNotices.add(notice.history);
   // The rows a notice just told about show a brief highlight: on a draw in the next 3 s.
   if (told && !firstShown.has(noticeKey)) askFlash(idOf(told), Date.now() + 3000);
-  // The item's name opens its row: one click from "what changed" to the item, with no separate Details link.
-  const name = told && t.view.comparing !== idOf(told)
+  // In the card the item's name opens its row: one click from "what changed" to the item, with no separate Details link.
+  const name = whole && told && t.view.comparing !== idOf(told)
     ? h('button.item-name.notice-name', { type: 'button', id: `notice-open-${notice.history}`, title: `Show ${notice.item}’s details`, onclick: (event: Event) => { event.stopPropagation(); if (t.tool) reveal(t, told); else showRow(told.kind, told.key); } }, notice.item)
     : h('strong.item-name', {}, notice.item);
   const said = notice.item && text.startsWith(notice.item) ? [name, text.slice(notice.item.length)] : [text];
   // With sync off, a notice can only come from Sync now: say sync stays off, and offer to turn it on.
   const off = !!state.home && !state.home.syncOn;
   const history = !off ? smallAction('History', `notice-history-${notice.history}`, () => showPage('history')) : null;
-  return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone), noticeKind(t, notice),
+  return h('p.sync-notice', { 'data-kind': notice.kind }, noticeLead(whole, glyph, tone), noticeKind(t, notice),
     h('span.notice-text', {}, offNow && notice.kind !== 'deleted-by-hand' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history)}`)),
     whole ? h('span.notice-actions', {},
       notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.of) : null,
@@ -1345,7 +1355,7 @@ function syncNotice(t: Table, notice: Told, whole: boolean) {
 function takenInNotice(t: Table, notice: TakenInNotice & Pick<Told, 'of' | 'once'>, whole: boolean) {
   const off = !!state.home && !state.home.syncOn, once = notice.once ?? off;
   state.seenNotices.add(notice.history);
-  return h('p.sync-notice', { 'data-kind': notice.kind }, icon('plus', 14, 'tone-success'), noticeKind(t, notice),
+  return h('p.sync-notice', { 'data-kind': notice.kind }, noticeLead(whole, 'plus', 'tone-success'), noticeKind(t, notice),
     h('span.notice-text', {}, once ? 'Synced once: ' : '', libraryPages[notice.of].say.takenInWords(notice), h('span.notice-age', {}, ` · ${age(notice.history)}`)),
     whole ? h('span.notice-actions', {}, smallAction('History', `notice-history-${notice.history}`, () => showPage('history'))) : null,
     closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history); rerender(); }, { id: `notice-dismiss-${notice.history}`, label: 'Dismiss this notice of what Synchronize everything took in', title: 'Dismiss', look: '.notice-dismiss' }));

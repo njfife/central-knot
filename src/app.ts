@@ -36,7 +36,7 @@ import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
-import { findInHome, holdOrder, newsShownHere, noticesKept, noticeUnseen, resultInHeader, rowByKey, usageNotCollected } from './matrix.ts';
+import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -130,11 +130,11 @@ export const state = {
   /**
    * The card hanging from the header, one at a time (renderer.ts resultHere): a result shown whole (Show all: matrix.ts
    * wholeToggle), an item list's outcome, kept result or first background problem, Plugins' run or problem; or the sync notices
-   * (Notices: matrix.ts noticesCard), named by the list they are of (`noticesOf`: its home and table). Folded by renderer.ts
-   * foldResult, and let go when what it shows is no longer drawn (renderer.ts resultHere); a newer result is another object, so
-   * it shows folded.
+   * (matrix.ts noticesCard), named by the list and place they are of (`noticesOf`) with how many had arrived when it opened
+   * (`upTo`). Folded by renderer.ts foldResult, and let go when what it shows is no longer drawn (renderer.ts resultHere); a newer
+   * result is another object, so it shows folded.
    */
-  shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | { noticesOf: string } | undefined,
+  shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | { noticesOf: string; upTo: number } | undefined,
   /** What the tools' session history shows was used (usage.ts), for this home: collected when it opens and on Update usage statistics (collectUsage). */
   usage: pageData<UsageReading>(),
   /** Whether the usage band shows above the Library's list (matrix.ts usageBand): opened by Update usage statistics, closed by its close button and when a home opens. */
@@ -153,8 +153,6 @@ export const state = {
   drafting: undefined as HarnessId | undefined,
   /** Sync notices the person has dismissed, by History event or item, and a background pass's problems (matrix.ts listResult). */
   dismissed: new Set<string>(),
-  // The page whose Apply result (and its Undo) stepped aside for a sync notice: the notice says where the Undo went.
-  undoMoved: undefined as { page: Page; notices: string[]; label: string; items: string[] } | undefined,
   /** Sync notices drawn in the header's lines or its open card: seen (matrix.ts noticeUnseen). */
   seenNotices: new Set<string>(),
   /** Whether the content is wide enough to dock an open row's details beside its table; set by the renderer's layout. */
@@ -298,6 +296,8 @@ export function setHome(view: HomeView | null | undefined, { reload = true, say,
   if (news) takeBackgroundNews(news);
   const before = state.home ? homeTools().join() : undefined;
   state.home = keepUnshown(state.home, view);
+  // Each notice's place in the order of arrival is given as its view is taken: the newest is the last to arrive, of any kind.
+  for (const [, notices] of noticesByKind(view)) for (const notice of notices) noticeArrived(notice.history);
   if (news && !acting()) sayBackgroundNews();
   // A closed background problem stays closed while reads report it, and is forgotten once one doesn't (matrix.ts listResult).
   for (const key of state.dismissed) if (key.startsWith('problem:') && !view.sync.caughtUp.some(entry => problemKey(entry) === key)) state.dismissed.delete(key);
@@ -352,7 +352,6 @@ export async function busy(message: string, work: (page: Page) => Promise<void>)
   // Any other action, an Undo too, ends the run of clicks (clicklist.ts).
   endRun();
   state.outcome = undefined;
-  state.undoMoved = undefined;
   state.busy = message;
   showActing();
   announce(message);
@@ -1163,7 +1162,7 @@ export interface Outcome {
   /** Something was left undone: a warning icon, not a tick. */
   warn?: boolean;
   note?: string;
-  /** The names it says, for its words alone (bold in its band, and where its Undo moved to: undoMoved), each with its kind where another kind's has its name (words.ts rowNames): `rows` is whose it is. */
+  /** The names it says, for its words alone (bold in its band), each with its kind where another kind's has its name (words.ts rowNames): `rows` is whose it is. */
   item?: string;
   items?: string[];
   /** The rows it is about: an open copy question of one of them, or the Files view of another skill, hides it (matrix.ts outcomeShown). */
@@ -1666,14 +1665,15 @@ const noticesByKind = (view: HomeView): [PageKind, SyncNotice[]][] => [['skills'
 
 /**
  * A sync notice not seen yet (matrix.ts noticeUnseen) stays in the next read of the same home until it is seen, dismissed or
- * folded into History by a newer one: main says each notice once, and a pass's own writes (a settings file it wrote) bring a read with none right
- * after the one that had them, so a page opened a moment later still tells what Synchronize everything, or an edit, did.
+ * folded into History by a newer one: main says each notice once, and a pass's own writes (a settings file it wrote) bring a read
+ * with none right after the one that had them, so a page opened a moment later still tells what Synchronize everything, or an
+ * edit, did. One the read brings a later save's notice of the same item for is superseded (matrix.ts supersedes): its save is in History.
  */
 function keepUnshown(was: HomeView | undefined, view: HomeView): HomeView {
   if (!was || was.home !== view.home) return view;
   const kept = (kind: PageKind) => {
     const now = view[kind].notices, known = new Set(now.map(notice => notice.history));
-    const unshown = was[kind].notices.filter(notice => !known.has(notice.history) && noticeUnseen(notice.history));
+    const unshown = was[kind].notices.filter(notice => !known.has(notice.history) && noticeUnseen(notice.history) && !now.some(newer => supersedes(newer, notice)));
     return unshown.length ? { ...view[kind], notices: [...unshown, ...now] } : view[kind];
   };
   return { ...view, skills: kept('skills'), mcp: kept('mcp'), agents: kept('agents') };
@@ -1715,22 +1715,10 @@ function takeBackgroundNews(view: HomeView) {
   }
 }
 
-/**
- * Says fresh background news. A result gives way only to news the header shows here (matrix.ts newsShownHere), and only one whose
- * Undo stays in History: the newest notice then has the header's lines, and the notices' card says where that Undo went (undoMoved).
- */
+/** Says fresh background news in the status bar. A result on show keeps the header's lines: the news is counted beside it (matrix.ts headerNotices). */
 function sayBackgroundNews() {
   const news = backgroundNews.splice(0).filter(({ notice }) => !state.dismissed.has(notice.history));
   if (!news.length) return;
-  const outcome = state.outcome;
-  const undo = outcome?.act?.inHistory ? outcome.act : outcome?.undo;
-  if (undo && outcome) {
-    const notices = newsShownHere(news, outcome);
-    if (notices.length) {
-      state.undoMoved = { page: outcome.page, label: undo.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices };
-      state.outcome = undefined;
-    }
-  }
   // Each item once, its kind named where another kind's news has its name (words.ts rowNames).
   const items = [...new Set(rowNames(news.flatMap(({ kind, notice }) => noticeNames(notice).map(name => ({ kind, name })))))];
   // Heard alone once the header has drawn each notice (seen), shown in the status bar until then (paintStatusMessage).

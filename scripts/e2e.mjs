@@ -323,7 +323,7 @@ const rowKeys = async (a, kind) => keysOf(kind, await a.all('.ov-row[data-key]',
 const cellState = (a, kind, key, tool) => a.run(`document.getElementById(${JSON.stringify(rowPart('cell', kind, key, tool))})?.dataset.state ?? null`);
 /** The tools whose mark on an item's row is drawn off: off with the copy kept, or (a library item) a state of that tool's own (held). */
 const offMarks = (a, kind, key) => a.all(`.ov-row[data-key=${JSON.stringify(rowPart('', kind, key))}] .tool-mark:is([data-look="off"], [data-look="held"])`, 'e.dataset.tool');
-/** Opens the header's card of sync notices by its one way in, Notices (matrix.ts noticesCard), and gives what it says; '' with no notice. */
+/** Opens the header's card of sync notices by Notices (matrix.ts noticesCard), and gives what it says; '' with no notice. */
 const openNotices = async a => { if (!(await a.exists('#notices'))) return ''; if (!(await a.exists('#notices-card'))) await a.click('#notices'); return await a.text('#notices-card') ?? ''; };
 /** Whether the header's Notices names `name` (its tooltip names the first three notices it counts). */
 const noticesName = async (a, name) => (await a.run(`document.querySelector('#notices')?.title ?? ''`) ?? '').includes(name);
@@ -1688,7 +1688,7 @@ async function practiceFlow() {
   await a.run(`document.querySelector('#notices-card .sync-notice[data-kind="edit"] [id^="notice-undo-"]').click()`);
   await a.settle();
   same('Undo makes the version before it current again, everywhere', [readFileSync(standupPath('claude'), 'utf8'), readFileSync(standupPath('copilot'), 'utf8')], [standupBefore, standupBefore]);
-  same('the card closed at its Undo, whose result has the header’s lines', [await a.exists('#notices-card'), /standup/.test(await a.text('#header [data-outcome]') ?? '')], [false, true]);
+  same('its Undo done, its notice leaves the card, which, empty, goes: the result has the header’s lines', [await a.exists('#notices-card'), /standup/.test(await a.text('#header [data-outcome]') ?? '')], [false, true]);
   // Sorted by last updated, the skill just made current again comes first under On, its row saying when, and the choice holds
   // on the Library’s agents too; sorted by name again, the rows are as before. Nothing else in this run changes the order.
   const onRows = async () => (await sectionsNow(a, 'skills')).find(([role]) => role === 'on')?.[1] ?? [];
@@ -7075,16 +7075,20 @@ fs.writeFileSync(record, JSON.stringify(now));
     const headerTall = () => a.run(`document.querySelector('#header').offsetHeight`);
     /** Whether the header's Notices names one of `names` (its tooltip names the first three it counts). */
     const told = names => a.run(`(said => ${JSON.stringify(names)}.some(name => said.includes(name)))(document.querySelector('#notices')?.title ?? '')`);
-    /** `list`'s places read before `edit` and once its notice has arrived, the header's height after. */
-    const across = async (list, edit, names) => {
-      await letNoticesGo(a);
-      const before = await placesNow(list, 'data-key');
+    const counted = () => a.run(`Number(document.querySelector('#notices .notices-count')?.textContent ?? 0)`);
+    /**
+     * `list`'s places read before `edit` and once its notice has arrived, the header's height after. Every notice let go first,
+     * or, with `kept`, the notices on show kept: Notices counts `kept` as the edit lands.
+     */
+    const across = async (list, edit, names, kept) => {
+      if (kept === undefined) await letNoticesGo(a);
+      const from = await counted(), before = await placesNow(list, 'data-key');
       edit();
       const arrived = await until(() => told(names));
       await a.settle();
-      return { arrived, before, after: await placesNow(list, 'data-key'), header: await headerTall() };
+      return { arrived, from, kept: kept ?? 0, before, after: await placesNow(list, 'data-key'), header: await headerTall() };
     };
-    const still = (name, { arrived, before, after, header }) => same(name, [arrived, after, header], [true, before, 48]);
+    const still = (name, { arrived, from, kept, before, after, header }) => same(name, [arrived, from, after, header], [true, kept, before, 48]);
     // Three agents, taken in through the page's own call.
     const shortList = ['ag-x', 'ag-y', 'ag-z'], agentFile = key => join(home, '.claude/agents', `${key}.md`);
     const editAgent = key => () => writeFileSync(agentFile(key), `---\nname: ${key}\ndescription: The ${key} agent.\n---\n\nEdited ${Date.now()}.\n`);
@@ -7095,7 +7099,7 @@ fs.writeFileSync(record, JSON.stringify(now));
     await sizeTo(a, ...SMALLEST);
     const agentsTable = 'table-library-agents';
     still('a list too short to scroll: a first notice arrives, and no row moves', await across(agentsTable, editAgent('ag-x'), ['ag-x']));
-    still('…nor when a second replaces it', await across(agentsTable, editAgent('ag-y'), ['ag-y']));
+    still('…nor when a second replaces it, the first still on show', await across(agentsTable, editAgent('ag-y'), ['ag-y'], 1));
     // Eleven servers On, so in Claude Code's file, each edited there as a person would.
     const inFile = servers.slice(10, 21);
     await a.run(`window.centralKnot.applyServers(${JSON.stringify(inFile.map(key => ({ key, on: true, except: [] })))}, false, ${JSON.stringify(home)}).then(() => true)`);
@@ -7106,7 +7110,7 @@ fs.writeFileSync(record, JSON.stringify(now));
     const editServers = (...keys) => () => { const now = JSON.parse(readFileSync(claudeJson, 'utf8')); for (const key of keys) now.mcpServers[key] = { ...now.mcpServers[key], args: [`--edit-${++edits}`] }; writeFileSync(claudeJson, JSON.stringify(now)); };
     await a.run(`document.getElementById('${table}').scrollTop = 0`);
     still('at the top of a long list: five notices arrive at once, and no row moves', await across(table, editServers(...inFile.slice(0, 5)), inFile.slice(0, 5)));
-    still('…nor when a sixth arrives after them', await across(table, editServers(inFile[5]), [inFile[5]]));
+    still('…nor when a sixth arrives after them, the five still on show', await across(table, editServers(inFile[5]), [inFile[5]], 5));
     // A click's completion brings one: an edit lands while a click waits behind one that runs (holdRun).
     await letNoticesGo(a);
     await holdRun();
@@ -8675,7 +8679,7 @@ async function searchFlow() {
   const sections = () => b.all('.ov-section', 'e.dataset.section');
   const counts = () => b.run(`Object.fromEntries([...document.querySelectorAll('.kind-seg')].map(seg => [seg.id.replace('library-kind-', ''), seg.querySelector('.kind-seg-count').textContent]))`);
   const excerpt = key => b.text(`.ov-row[data-key="${key}"] .ov-excerpt`);
-  // Each row's place in the list: its top, from the list's own top, so a band above the list (a sync notice) moves none.
+  // Each row's place in the list: its top, from the list's own top, so a band above the list (the usage band, say) moves none.
   const places = () => b.all('.ov-row[data-key]', `Math.round(e.getBoundingClientRect().top - e.closest('.scroll').getBoundingClientRect().top)`);
   // A view handed over, with its index published: a new skill in Claude Code's folder, read by the next background pass.
   const published = () => b.run('window.ckPublished.length'), total = () => b.text('#nav-library .nav-count');
@@ -9268,7 +9272,8 @@ async function libraryFlow() {
   check('on All, the agent’s notice is in the header, naming its kind beside its name, and the dot goes', /review/.test(await noticeInLines(a) ?? '') && (await a.text('#header .header-notice .row-kind')) === 'agent' && !(await a.exists('#nav-library .nav-unseen')), [await noticeInLines(a), await a.exists('#nav-library .nav-unseen')]);
   // A notice's name is a link to its row, which shows it whatever Find says.
   await find(a, 'zzz');
-  await a.click('[id^="notice-open-"]');
+  await openNotices(a);
+  await a.click('#notices-card [id^="notice-open-"]');
   same('a notice’s link with Find hiding its row: Find let go, the row open', [await a.run(`document.querySelector('#find').value`), await opened(a)], ['', [rowPart('', 'agents', 'review')]]);
   // From a skill's Files view, a notice's link leaves Files for the list, its row open there.
   const spareFile = join(A.claude, 'spare/SKILL.md');
@@ -9277,7 +9282,8 @@ async function libraryFlow() {
   check('the pass tells the page of spare’s edit', await until(async () => /spare/.test(await noticeInLines(a) ?? ''), 30000), await a.text('#header'));
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
   await a.click(`#${rowPart('files', 'skills', 'notes')}`);
-  await a.click('.sync-notice [id^="notice-open-"]');
+  await openNotices(a);
+  await a.click('#notices-card [id^="notice-open-"]');
   same('a notice’s link from notes’s Files: the list, spare’s row open', [await a.exists('#skill-detail'), await opened(a)], [false, [rowPart('', 'skills', 'spare')]]);
   // Another home's notices don't come along (a development run: it opens a folder through main's dialog).
   if (a.inspect) {
@@ -9443,6 +9449,9 @@ async function libraryFlow() {
   const T = homeWith('library-toolbar');
   const toolbarSkills = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda', 'mu'];
   for (const name of toolbarSkills) skill(T.claude, name);
+  // Copilot CLI managed too, so an edit in Claude Code spreads to it; and an agent, so a notice of another kind can arrive after a skill's.
+  mkdirSync(T.copilot, { recursive: true });
+  const checker = agent(T.home, 'claude-cli', 'checker', agentText('checker', 'You check.'));
   const tb = await launch(T.data, [], T.real);
   await tb.click('#nav-overview');
   await tb.click('#setup-yes');
@@ -9490,20 +9499,30 @@ async function libraryFlow() {
     await clickMovesNothing(`at ${oneLine}×600, the narrowest the bar keeps to one line with the sidebar open`, refused);
   }
   // ---------- Sync notices live in the header: its two lines, Notices and its card ----------
-  // One skill edited in Claude Code: its notice in the header's lines, counted by Notices and seen. The card that only Notices opens,
-  // from the keyboard too, See change inside its one scroll, and six edited at once while it is open: the card keeps its height.
-  // A click Claude Code refuses keeps the lines with its problem line; two edits arrive meanwhile, the second folding the first
-  // into History: counted and marked, unseen until the result goes, the first never seen and no longer unseen. Twelve deleted by
-  // hand at once: all in the card, the seventh and the twelfth too, and no dot on the open Library, whose every kind is on show.
+  // A skill edited in Claude Code: its notice in the header's lines, said as an automatic change, counted by Notices (a button)
+  // and seen; a click on it opens the card, which is as tall as its notices and closes when its view is left, by Back too. Notices
+  // from the keyboard. While the card is open an arrival is added after what is on show, which keeps its place; See change pushes
+  // the next notice down. Six at once: Dismiss all in the card's top line; a double click on Undo undoes one notice, the second
+  // click nothing, the card staying open; a name's link leaves the page and closes it. A click's result keeps the header's lines
+  // through an arrival, and so does a refused one's; two edits arrive meanwhile, the second folding the first into History. Away
+  // from the Library: a skill saved twice is one notice, whose Undo undoes the second save alone; a skill then an agent edited, the
+  // agent's is the newest. Twelve deleted by hand at once: all in the card, the seventh and the twelfth too, and no dot on the open
+  // Library, whose every kind is on show.
   await letNoticesGo(tb);
   await fullSize(tb);
   const edit = (...names) => { for (const name of names) writeFileSync(join(T.claude, name, 'SKILL.md'), text(name, `Edited by hand ${Date.now()}.`)); };
+  const copilotSays = name => readNow(join(T.copilot, name, 'SKILL.md'));
   /** Notices as it is: its count and whether it is marked; null where it isn't drawn. */
-  const control = () => tb.run(`(n => n && [n.querySelector('.chip-count').textContent, !!n.querySelector('.notices-unseen')])(document.querySelector('#notices'))`);
+  const control = () => tb.run(`(n => n && [n.querySelector('.notices-count')?.textContent, !!n.querySelector('.notices-unseen')])(document.querySelector('#notices'))`);
   const header48 = () => tb.run(`document.querySelector('#header').offsetHeight`);
   const cardTall = () => tb.run(`Math.round(document.querySelector('#notices-card')?.getBoundingClientRect().height ?? 0)`);
   const inCard = () => tb.all('#notices-card .sync-notice .item-name', 'e.textContent');
   const dotSays = () => tb.run(`document.querySelector('#nav-library .nav-unseen')?.title ?? null`);
+  const statusSays = () => tb.run(`(said => !said.classList.contains('visually-hidden') && said.dataset.text)(document.querySelector('#announcement'))`);
+  const centre = selector => tb.run(`(node => node && (box => ({ x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }))(node.getBoundingClientRect()))(document.querySelector(${JSON.stringify(selector)}))`);
+  /** A click on the control `selector` names, where it is (the check after it says what is wrong where it isn't). */
+  const pressIf = async selector => { await tb.run(`document.querySelector(${JSON.stringify(selector)})?.click()`); await done(tb); };
+  const topOf = selector => tb.run(`Math.round(document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect().top ?? -1)`);
   const keyed = async (key, code, text, modifiers = 0) => { for (const type of ['keyDown', 'keyUp']) await tb.send('Input.dispatchKeyEvent', { type, key, code: key === ' ' ? 'Space' : key, windowsVirtualKeyCode: code, modifiers, ...(type === 'keyDown' && text ? { text } : {}) }); await tb.settle(); };
   /** Pictures (with --shots) at 860×528 (the rail), 1316×819 with the sidebar open and as a rail, and 1728×1117, light and dark; `again` brings the state back after the sidebar's toggle, a press outside the card. */
   const noticePictures = async (name, again = async () => {}) => {
@@ -9518,7 +9537,9 @@ async function libraryFlow() {
   };
   edit('alpha');
   check('alpha edited in Claude Code: its notice comes to the header’s lines', await until(async () => /alpha was edited in Claude Code/.test(await noticeInLines(tb) ?? ''), 30000), await tb.text('#header'));
-  same('Notices counts it, unmarked: drawn in the lines, it is seen; the header 48px', [await control(), await header48()], [['1', false], 48]);
+  same('said as an automatic change, with no result’s check; Notices counts it, unmarked: drawn in the lines, it is seen; the header 48px',
+    [(await noticeInLines(tb))?.startsWith('Automatic change'), await tb.run(`document.querySelector('#header .header-notice .sync-notice')?.firstElementChild?.className`), await control(), await header48()], [true, 'notice-source', ['1', false], 48]);
+  same('Notices is a button when closed: a border as Refresh has, its count on a fill of its own', await tb.run(`(([control, refresh, count]) => [getComputedStyle(control).borderTopColor === getComputedStyle(refresh).borderTopColor, getComputedStyle(control).borderTopWidth, !!count && getComputedStyle(count).backgroundColor !== 'rgba(0, 0, 0, 0)'])(['#notices', '#header-refresh', '#notices .notices-count'].map(id => document.querySelector(id)))`), [true, '1px', true]);
   await noticePictures('one-in-lines');
   await tb.run(`document.getElementById('sidebar-toggle').focus()`);
   for (let tabs = 0; tabs < 6 && await tb.run(`document.activeElement?.id`) !== 'notices'; tabs++) await keyed('Tab', 9);
@@ -9530,25 +9551,66 @@ async function libraryFlow() {
     await keyed('Escape', 27); keyboard.push([await tb.exists('#notices-card'), await tb.run(`document.activeElement?.id`)]);
   }
   same('Tab reaches Notices; Space and Return open the card; Shift+Tab goes into it; Escape closes it, the focus back on Notices', keyboard, ['notices', true, true, [false, 'notices'], true, true, [false, 'notices']]);
+  // The card is left with its view: alpha's Files, the card open, then the mouse's Back and Forward.
+  await tb.click(`#${rowPart('open', 'skills', 'alpha')}`); await tb.click(`#${rowPart('files', 'skills', 'alpha')}`);
   await openNotices(tb);
-  const oneTall = await cardTall();
+  const cardOnFiles = await tb.exists('#notices-card');
+  await mouseBack(tb);
+  const afterBack = [await tb.exists('#skill-detail'), await tb.exists('#notices-card')];
+  for (const [type, buttons] of [['mousePressed', 16], ['mouseReleased', 0]]) await tb.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button: 'forward', buttons, clickCount: 1 });
+  await tb.settle();
+  same('the card open on Files closes when Back leaves it, and Forward doesn’t bring it back', [cardOnFiles, afterBack, [await tb.exists('#skill-detail'), await tb.exists('#notices-card')]], [true, [false, false], [true, false]]);
+  await tb.click('#files-back');
+  await pressIf('#header .header-notice .notice-text');
+  same('a click on the notice in the lines opens the card, as tall as its one notice', [await tb.exists('#notices-card'), (await cardTall()) < 140], [true, true]);
   await noticePictures('card-one', () => openNotices(tb));
-  await tb.click('#notices-card .see-change');
-  check('See change opens the edit in the card', await until(() => tb.exists('#notices-card .change-panel pre')), await tb.text('#notices-card'));
-  same('…inside the card’s one scroll: the edit no scroll of its own, the card as tall', [await tb.run(`(pre => getComputedStyle(pre).overflowY === 'visible' && getComputedStyle(pre).maxHeight === 'none')(document.querySelector('#notices-card .change-panel pre'))`), await cardTall()], [true, oneTall]);
+  // An arrival while the card is open: added after what is on show, which keeps its place.
+  const alphaLine = '#notices-card .sync-notice:first-child', alphaTop = await topOf(alphaLine);
+  edit('beta', 'gamma');
+  check('two edited while the card is open: the card lists three', await until(async () => (await inCard()).length === 3, 30000), await inCard());
+  same('…alpha’s first, where it was, the two added after it', [(await inCard())[0], await topOf(alphaLine)], ['alpha', alphaTop]);
+  await pressIf(`${alphaLine} .see-change`);
+  check('See change opens alpha’s edit in the card', await until(() => tb.exists('#notices-card .change-panel pre')), await tb.text('#notices-card'));
+  same('…in the card’s one scroll, pushing the next notice below it: the edit has no height or scroll of its own',
+    await tb.run(`(([pre, next]) => pre && next ? [getComputedStyle(pre).overflowY, getComputedStyle(pre.parentElement).maxHeight, next.getBoundingClientRect().top >= pre.getBoundingClientRect().bottom] : [!!pre, !!next])([document.querySelector('#notices-card .change-panel pre'), document.querySelector('#notices-card .sync-notice:nth-child(2)')])`), ['visible', 'none', true]);
+  if (shots) for (const [width, height] of [[1316, 819], [1728, 1117]]) { await sizeTo(tb, width, height); await openNotices(tb); await tb.shot(`notices-see-change-${width}-light`); }
+  await fullSize(tb);
+  await closeNotices(tb);
   edit('beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta');
-  check('six edited at once while the card is open: it lists the six', await until(async () => (await inCard()).length === 6, 30000), await inCard());
-  same('…and keeps its height, Notices counting six', [await cardTall(), (await control())?.[0]], [oneTall, '6']);
-  await noticePictures('card-six', () => openNotices(tb));
-  // An action of a notice closes the card, so what it did shows in the lines; a ×, which changes only the card, keeps it open.
-  const undone = await tb.run(`document.querySelector('#notices-card [id^="notice-undo-"]').closest('.sync-notice').querySelector('.item-name').textContent`);
-  await tb.click('#notices-card [id^="notice-undo-"]'); await done(tb);
-  same('Undo on one of the six closes the card: its result has the lines, the focus on Notices, five left', [await tb.exists('#notices-card'), (await tb.text('#header [data-outcome] .band-text') ?? '').startsWith(undone), await tb.run(`document.activeElement?.id`), (await control())?.[0]], [false, true, 'notices', '5']);
+  check('six edited at once, the card closed: Notices counts six, the three before folded into History', await until(async () => (await control())?.[0] === '6', 30000), await control());
   await openNotices(tb);
-  await tb.click('#notices-card [id^="notice-dismiss-"]');
+  same('Dismiss all is in the card’s top line, beside the count', await tb.text('#notices-card .notices-head #notices-dismiss'), 'Dismiss all');
+  await noticePictures('card-six', () => openNotices(tb));
+  // A double click on Undo: the first undoes that notice alone, which leaves the open card; the second does nothing.
+  const sixEdited = ['beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta'].map(copilotSays), openBefore = await tb.all('.ov-row[aria-expanded="true"]', 'e.dataset.key');
+  const undone = await tb.run(`document.querySelector('#notices-card [id^="notice-undo-"]')?.closest('.sync-notice').querySelector('.item-name').textContent`);
+  const undoAt = await centre('#notices-card [id^="notice-undo-"]') ?? { x: 0, y: 0 };
+  await mouse(tb, 'mouseMoved', undoAt, 0); await mouse(tb, 'mousePressed', undoAt, 1); await mouse(tb, 'mouseReleased', undoAt, 0);
+  await wait(120);
+  for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await tb.send('Input.dispatchMouseEvent', { type, x: undoAt.x, y: undoAt.y, button: 'left', buttons, clickCount: 2 });
+  await done(tb);
+  same('a double click on Undo undoes that notice alone: the card open with five, the page under it untouched, the result in the status bar',
+    [await tb.exists('#notices-card'), (await inCard()).length, ['beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta'].filter((name, at) => copilotSays(name) !== sixEdited[at]), await tb.all('.ov-row[aria-expanded="true"]', 'e.dataset.key'), await tb.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id`), (await statusSays() || '').startsWith(undone)],
+    [true, 5, [undone], openBefore, 'library-kind-all', true]);
+  await pressIf('#notices-card [id^="notice-dismiss-"]');
   same('a notice’s × in the card dismisses that one alone, the card staying open', [(await inCard()).length, await tb.exists('#notices-card')], [4, true]);
-  await tb.click('#notices-dismiss');
+  await openNotices(tb);
+  const opening = await tb.run(`document.querySelector('#notices-card [id^="notice-open-"]')?.textContent`);
+  await pressIf('#notices-card [id^="notice-open-"]');
+  same('a name’s link leaves the card for its row: the card closed, the row open', [await tb.exists('#notices-card'), await tb.all('.ov-row[aria-expanded="true"]', 'e.dataset.key')], [false, [rowPart('', 'skills', opening)]]);
+  await pressIf(`#${rowPart('open', 'skills', opening)}`);
+  await openNotices(tb);
+  await pressIf('#notices-dismiss');
   same('Dismiss all lets every notice go: no card, no Notices', [await tb.exists('#notices-card'), await tb.exists('#notices')], [false, false]);
+  // A click's result keeps the header's lines when a notice arrives: counted, its sentence and Undo still there.
+  await tb.click(`#${rowPart('switch', 'skills', 'alpha')}`); await done(tb);
+  const alphaOff = await tb.text('#header [data-outcome] .band-text');
+  edit('gamma');
+  check('a click, then an edit: Notices counts it', await until(async () => (await control())?.[0] === '1', 30000), await control());
+  same('…the click’s result keeping the lines, its sentence and Undo as they were', [await tb.text('#header [data-outcome] .band-text'), await tb.exists('#outcome-undo'), await noticeInLines(tb)], [alphaOff, true, null]);
+  await pressIf('#outcome-undo');
+  if (!(await switchOn(tb, 'skills', 'alpha'))) { await tb.click(`#${rowPart('switch', 'skills', 'alpha')}`); await done(tb); }
+  await letNoticesGo(tb);
   chmodSync(T.claude, 0o555);
   await tb.click(`#${rowPart('switch', 'skills', 'beta')}`); await done(tb);
   same('a click Claude Code refuses: its result and its problem line have the header’s lines', [await tb.exists('#header [data-outcome]'), await tb.exists('#header .problem-line')], [true, true]);
@@ -9556,7 +9618,7 @@ async function libraryFlow() {
   check('an edit meanwhile: Notices counts it, marked, the result keeping the lines', await until(async () => JSON.stringify(await control()) === '["1",true]', 30000), await control());
   edit('delta');
   check('a second folds the first into History: Notices names delta', await until(() => tb.run(`/delta/.test(document.querySelector('#notices')?.title ?? '')`), 30000), await tb.run(`document.querySelector('#notices')?.title`));
-  same('…counting one, marked, the result keeping the lines, the header 48px', [await control(), await tb.exists('#header .problem-line'), await noticeInLines(tb), await header48()], [['1', true], true, null, 48]);
+  same('…counting one, marked, the result and its problem line keeping the lines, the header 48px', [await control(), await tb.exists('#header [data-outcome]'), await tb.exists('#header .problem-line'), await noticeInLines(tb), await header48()], [['1', true], true, true, null, 48]);
   await noticePictures('with-result');
   chmodSync(T.claude, 0o755);
   await tb.click('#nav-overview');
@@ -9570,6 +9632,36 @@ async function libraryFlow() {
   same('its × closes it: delta’s notice has the lines, and is seen', [/delta was edited/.test(await noticeInLines(tb) ?? ''), await control()], [true, ['1', false]]);
   if (!(await switchOn(tb, 'skills', 'beta'))) { await tb.click(`#${rowPart('switch', 'skills', 'beta')}`); await done(tb); }
   await letNoticesGo(tb);
+  // Away from the Library, iota saved twice, the first save reaching Copilot CLI before the second: one notice, whose Undo undoes
+  // the second save alone; History keeps both.
+  await tb.click('#nav-settings');
+  const iotaFirst = text('iota', 'First save.'), iotaSecond = text('iota', 'Second save.');
+  writeFileSync(join(T.claude, 'iota/SKILL.md'), iotaFirst);
+  check('iota’s first save reaches Copilot CLI', await until(() => copilotSays('iota') === iotaFirst, 30000), copilotSays('iota'));
+  check('…and the dot names it', await until(async () => /iota/.test(await dotSays() ?? ''), 30000), await dotSays());
+  writeFileSync(join(T.claude, 'iota/SKILL.md'), iotaSecond);
+  check('its second save reaches Copilot CLI', await until(() => copilotSays('iota') === iotaSecond, 30000), copilotSays('iota'));
+  // The second save's notice reaches the page with the read after its pass (no sign of it on the page but the dot, which must not change).
+  await wait(2000);
+  same('away, the dot counts one notice for iota, not two', await dotSays(), '1 automatic change: iota');
+  await openKind(tb, 'all');
+  same('back on the Library, Notices counts one, and the card has one notice for iota', [(await control())?.[0], (await openNotices(tb), await inCard())], ['1', ['iota']]);
+  await pressIf('#notices-card [id^="notice-undo-"]');
+  same('its Undo undoes the second save alone: both tools have the first', [readNow(join(T.claude, 'iota/SKILL.md')), copilotSays('iota')], [iotaFirst, iotaFirst]);
+  await tb.click('#nav-history');
+  check('History has both saves', await until(async () => (await editsInHistory()).filter(entry => entry === 'iota: true').length >= 2), await editsInHistory());
+  await openKind(tb, 'all');
+  await letNoticesGo(tb);
+  // Away, a skill edited, then the agent: back on All, the agent's notice is the newest, in the lines and first in the card.
+  await tb.click('#nav-overview');
+  edit('kappa');
+  check('kappa edited away: the dot names it', await until(async () => /kappa/.test(await dotSays() ?? ''), 30000), await dotSays());
+  writeFileSync(checker, agentText('checker', 'You check, edited.'));
+  check('then the agent: the dot names it too', await until(async () => /checker/.test(await dotSays() ?? ''), 30000), await dotSays());
+  await openKind(tb, 'all');
+  same('back on All, the agent’s notice, the last to arrive, has the lines and the card’s first place', [/checker was edited/.test(await noticeInLines(tb) ?? ''), (await openNotices(tb), (await inCard())[0])], [true, 'checker']);
+  await closeNotices(tb);
+  await letNoticesGo(tb);
   for (const name of toolbarSkills) rmSync(join(T.claude, name), { recursive: true, force: true });
   check('twelve skills deleted by hand at once: Notices counts twelve', await until(async () => (await control())?.[0] === '12', 30000), await control());
   check('and the Library, open on All, has no dot', !(await tb.exists('#nav-library .nav-unseen')), await dotSays());
@@ -9578,6 +9670,11 @@ async function libraryFlow() {
   await openKind(tb, 'all');
   await openNotices(tb);
   same('the card holds all twelve, the seventh and the twelfth too', [...await inCard()].sort(), [...toolbarSkills].sort());
+  await sizeTo(tb, 1728, 1117);
+  await openNotices(tb);
+  same('at 1728×1117 the card is as tall as its twelve: every one in view, nothing to scroll', await tb.run(`(card => card.scrollHeight <= card.clientHeight + 1 && card.getBoundingClientRect().bottom < innerHeight)(document.querySelector('#notices-card'))`), true);
+  if (shots) await tb.shot('notices-card-twelve-tall-1728-light');
+  await fullSize(tb);
   await noticePictures('card-twelve', () => openNotices(tb));
   await closeNotices(tb);
   await tb.click('#nav-overview');

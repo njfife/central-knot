@@ -223,13 +223,14 @@ function renderStatus() {
  * sync notices: matrix.ts headerNotices) live in the header's own 48px, so neither lies over anything by itself nor moves anything
  * under it, whatever arrives. Its two lines hold the result while there is one on show, however long it stays: with problem lines,
  * its sentence then the first of them, each on one line; without, its sentence in two (style.css .header-result); either cut where
- * it runs past them, with Show all (matrix.ts wholeToggle). With no result, they hold the newest notice, its sentence cut where it
- * runs past them, with its × (style.css .header-notice). Beside them, the Notices control counts the notices, marked while one is
- * unseen; a notice arriving while a result is on show is told there alone. A card hangs from the header over the page, one at a
- * time (state.shownWhole says which): the result whole, from Show all, or every notice, from Notices alone (matrix.ts noticesCard).
- * A card closes like a menu: on Show less or Notices again, its ×, Escape, or a press that begins outside it (foldResult), and keeps
- * its scroll through a redraw by its id (scrolledNow). A newer result shows folded; a card whose result or notices are no longer
- * drawn goes, so none opens again by itself.
+ * it runs past them, with Show all (matrix.ts wholeToggle). With no result, they hold the newest notice, said as an automatic change,
+ * its sentence cut where it runs past them, with its × (style.css .header-notice). Beside them, the Notices control counts the
+ * notices, marked while one is unseen; a notice arriving while a result is on show is told there alone, the result keeping the
+ * lines until it fades, is closed or a newer result takes its place. A card hangs from the header over the page, one at a time
+ * (state.shownWhole says which): the result whole, from Show all, or every notice, from Notices or the notice in the lines
+ * (matrix.ts noticesCard). A card closes like a menu: on Show less or Notices again, its ×, Escape, or a press that begins outside
+ * it (foldResult), and keeps its scroll through a redraw by its id (scrolledNow). A newer result shows folded; a card whose result
+ * or notices are no longer drawn, or whose place is left, goes, so none opens again by itself.
  */
 function resultHere() {
   const parts = state.home && !heldBy(state.home) && resultInHeader() ? (state.page === 'plugins' ? pluginsResult() : listResult()) : [];
@@ -241,7 +242,7 @@ function resultHere() {
 }
 /**
  * Folds the card on screen into the header's two lines, answering whether there was one. The redraw waits, so a click that folds it
- * still does its own work. The notices' card folded from within (an action of a notice, Escape) gives the focus back to Notices.
+ * still does its own work. The notices' card folded from within (a notice's way off the page, Escape) gives the focus back to Notices.
  */
 function foldResult(fromWithin = false): boolean {
   const card = document.querySelector('#header .result-whole');
@@ -252,13 +253,18 @@ function foldResult(fromWithin = false): boolean {
   return true;
 }
 // A press that began in the card and is let go outside it (a selection dragged out) is no press outside: the card stays. A
-// click from the keyboard (detail 0) has no press. In the notices' card a notice's action closes it, so what it did shows in the
-// lines it frees; See change and a ×, which change only the card, keep it.
+// click from the keyboard (detail 0) has no press. In the notices' card, a notice's way off the page (History, its name's link to
+// its row) closes it; every other action stays on this page and keeps it. The second click of a double click begun there does
+// nothing, wherever it lands: the first may have moved what lay under it (a notice done leaves the list, which grows shorter).
 const inCard = (event: Event) => !!(event.target as Element).closest('#header :is(.header-result, .notices-card)');
-const actsFromCard = (event: Event) => !!(event.target as Element).closest('#notices-card button:not(.see-change, .band-dismiss)');
-let pressedInCard = false;
+const leavesCard = (event: Event) => !!(event.target as Element).closest('#notices-card :is([id^="notice-history-"], [id^="notice-open-"])');
+let pressedInCard = false, clickedInNotices = false;
 document.addEventListener('pointerdown', event => { pressedInCard = inCard(event); }, true);
-document.addEventListener('click', event => { if (actsFromCard(event)) foldResult(true); else if (!(event.detail && pressedInCard) && !inCard(event)) foldResult(); }, true);
+document.addEventListener('click', event => {
+  if (event.detail > 1 && clickedInNotices) { event.stopImmediatePropagation(); event.preventDefault(); return; }
+  clickedInNotices = !!(event.target as Element).closest('#notices-card');
+  if (leavesCard(event)) foldResult(true); else if (!(event.detail && pressedInCard) && !inCard(event)) foldResult();
+}, true);
 // Escape with a card open folds it and does nothing else, before any other Escape is heard: a find box, or a search field's own
 // clearing, keeps its words.
 window.addEventListener('keydown', event => { if (event.key === 'Escape' && foldResult(true)) { event.stopPropagation(); event.preventDefault(); } }, true);
@@ -292,7 +298,7 @@ function renderWindow() {
   const { rail } = applyLayout();
   renderHeader(rail);
   drawPage(renderPage);
-  // After the page, which marks the notices it paints seen: the sidebar's dot is for those it didn't.
+  // After the header, which marks the notices it draws seen: the sidebar's dot is for those it didn't.
   renderSidebar();
   recordDraw(visitOffsets);
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
