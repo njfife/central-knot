@@ -21,7 +21,7 @@
 // best first, under one heading (foundRows), and after it the items of listed plugins installed in no managed tool, which are
 // no rows of the Library's (catalogGroup). A tool's tabs match their Find here (holdsFindText); the Files view, itself.
 // From (fromChoice: where a row came from, origins.ts) and the chip narrow what Find leaves (picked), and every count and
-// Turn these off goes by that one list (listedRows).
+// Turn these off goes by that one list (listedRows). A choice of From, a chip or Find's text shows its list from the top (listFromTop).
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
@@ -467,7 +467,7 @@ function filterBar(t: Table) {
   const shows = (id: Filter) => listedRows({ ...t, view: { ...view, filter: id } }).length;
   // `count`: how many it shows, amber when they need something (`warn`).
   const chip = (id: Filter, label: string, glyph: IconName, count: number, warn = false) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn && count ? '.chip-warn' : ''}`,
-    { type: 'button', id: `chip-${id}`, 'aria-pressed': String(view.filter === id), 'aria-label': `${label} ${count}`, 'data-tip': label, onclick: () => { view.filter = view.filter === id ? 'all' : id; closeHidden(t); rerender(); } },
+    { type: 'button', id: `chip-${id}`, 'aria-pressed': String(view.filter === id), 'aria-label': `${label} ${count}`, 'data-tip': label, onclick: () => relist(t, { filter: view.filter === id ? 'all' : id }) },
     icon(glyph, 13, 'chip-icon'), h('span.chip-label', {}, label), heldCount('span.chip-count', String(count), listedRows({ ...over, view: { ...view, filter: id, from: 'anywhere', find: '' } }).length));
   // A chip is offered while something matches it, over every kind the Library holds (overEveryKind), or while it is the one on.
   const offered = (id: Filter, matching: boolean) => matching || view.filter === id;
@@ -483,21 +483,36 @@ const fromMenu = (): FromEntry[][] => {
 };
 /** Whether a choice of From is in the menu now: a plugin's while it has rows here, a source's while the home records it. */
 const fromOffered = (from: From) => fromMenu().flat().some(entry => entry.value === from);
-/** After From or the chip changed: an opened row they no longer list is closed, its armed Delete with it, as Find's in drawTable. */
-const closeHidden = (t: Table) => { if (!listedRows(t).some(row => idOf(row) === t.view.comparing)) Object.assign(t.view, { comparing: undefined, confirmDelete: undefined }); };
+/**
+ * From or a chip chosen (`choice`): an opened row the new list no longer holds is closed, its armed Delete with it, as Find's in
+ * drawTable; and the new list shows from its top (listFromTop).
+ */
+function relist(t: Table, choice: Partial<Pick<View, 'from' | 'filter'>>) {
+  Object.assign(t.view, choice);
+  if (!listedRows(t).some(row => idOf(row) === t.view.comparing)) Object.assign(t.view, { comparing: undefined, confirmDelete: undefined });
+  listFromTop(t);
+  rerender();
+}
+/**
+ * The one rule for a choice of which rows a table lists (From and a chip: relist; Find's text: findTyped): the new list shows from
+ * its top, the place the old one was scrolled to meaning nothing in it. A draw keeps each list where it was (renderer.ts), and Back
+ * lets go of a place it is putting back once its list moves (places.ts), so the list on screen is put at its top before the draw.
+ * Not Sort, which lists the same rows under the same headings; nor the kind switch, whose list has an id of its own (tableId).
+ */
+const listFromTop = (t: Table) => { const list = document.getElementById(tableId(t)); if (list) list.scrollTop = 0; };
 /** Whether the table's From shows a row, by where it came from (origins.ts originOf). */
 const fromHolds = (t: Table, row: ItemRow | PluginRow) => fromShows(t.view.from, originOf(row));
 
 /**
  * The From menu, between the chips and Sort, on the Library and a tool's tabs: kept in the table's view, applied with the chip
  * (picked). Closed, it is as wide as its widest entry whatever is chosen, so a choice never changes the bar's fit, and has a chip's
- * on look while it narrows the list (style.css .from-select). A choice that hides the opened row closes it (closeHidden).
+ * on look while it narrows the list (style.css .from-select). A choice shows its list from the top, the opened row closed if it hides it (relist).
  */
 function fromChoice(t: Table) {
   const menu = fromMenu(), chosen = menu.flat().find(entry => entry.value === t.view.from) ?? menu[0]![0]!;
   const option = (entry: FromEntry) => h('option', { value: entry.value, selected: entry === chosen, title: entry.title }, entry.label);
   const [top, plugins, links] = menu, group = (label: string, entries: FromEntry[]) => (entries.length ? h('optgroup', { label }, entries.map(option)) : null);
-  const choose = (event: Event) => { t.view.from = (event.target as HTMLSelectElement).value as From; closeHidden(t); rerender(); };
+  const choose = (event: Event) => relist(t, { from: (event.target as HTMLSelectElement).value as From });
   return h('span.from', {}, h('label.from-word', { for: 'item-from' }, 'From'),
     h(`span.select.select-bar.from-select${chosen.value === 'anywhere' ? '' : '.from-on'}`, {}, h('select', { id: 'item-from', 'aria-label': 'From', title: chosen.title ?? chosen.label, onchange: choose },
       top!.map(option), group('Plugins', plugins!), group(pageNames.sources, links!)), icon('chevrons-up-down', 14)));
@@ -1311,7 +1326,7 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
 let drawnSegment: PageKind | 'all' | undefined;
 /**
  * The Library's table: its segment's kinds. Another segment than the one drawn last starts its list afresh: at its top (its
- * table's id names the segment: libraryTableId), its pins let go (its list's name names its kinds: listNow), its armed Delete
+ * table's id names the segment: tableId), its pins let go (its list's name names its kinds: listNow), its armed Delete
  * disarmed, and an opened row it no longer lists closed. Find, the chip and From stay (a chip is offered over every kind: overEveryKind).
  */
 function useLibrary(): Table {
@@ -1327,8 +1342,11 @@ function useLibrary(): Table {
 const useTab = (kind: PageKind, tool: Tool) => tableOf(kind, [kind], tool);
 /** The Library's Files view: a list of the skills beside one skill's files, in the Library's view, which it gives back as it was (backFromFiles). */
 const useFiles = () => tableOf('library', ['skills'], undefined, true);
-/** The id of the Library's table, its segment in it, so a redraw keeps its scroll place and another segment opens at its top. */
-const libraryTableId = () => `table-library-${segment()}`;
+/**
+ * The id of a table's list: the Library's names its segment, a tab's its kind and tool. A redraw keeps a list's scroll place by its
+ * id (renderer.ts), so another segment or tab opens at its own top.
+ */
+const tableId = (t: Table) => (t.tool ? `table-${t.kinds[0]}-${t.tool}` : `table-library-${segment()}`);
 
 /**
  * The table on screen, worked out from the page (the Library or its Files view, or a tool's tab of a kind under Harnesses), with
@@ -1394,15 +1412,15 @@ export function findInHome(home: string) {
 }
 /** Find given new text (typed, Escape, Clear Find, a link that lets it go, a view started afresh): an armed Delete disarms, the group's first rows only are drawn, and on the Library the rows held are let go. */
 const newFind = (view: View, text: string) => { Object.assign(view, { find: text, confirmDelete: undefined, revealed: MORE }); if (view === views.library) unpin(); };
-/** Find emptied: Escape in it, or Clear Find under "Nothing matches". */
-const clearFind = (view: View) => { newFind(view, ''); rerender(); };
 /**
- * Find typed: a tool's tab is drawn at once; the Library's list once main has answered (askFind), at once with Find empty. Until
+ * Find typed, or emptied (Escape in it, Clear Find under "Nothing matches"): the list shows from its top (listFromTop). A tool's tab
+ * is drawn at once; the Library's list once main has answered (askFind), at once with Find empty. Until
  * the page is next drawn (a draw builds it anew), the list on screen is the text before's and nothing below the toolbar acts
  * (inert): this ask draws it when it returns, unless the text has changed since, whose own ask then does.
  */
 function findTyped(t: Table, text: string) {
   newFind(t.view, text);
+  listFromTop(t);
   if (!searching(t)) { rerender(); return; }
   for (const before of document.querySelectorAll<HTMLElement>('.ov-page .toolbar ~ *, .ov-page .dock-main ~ *')) before.inert = true;
   void askFind(text).then(came => { if (came !== 'dropped' || t.view.find === text) rerender(); });
@@ -1602,7 +1620,7 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   const nothing = shown.length || plugins.length || inPlugins?.length ? null : !view.find.trim() && !all.length && !plugged(t).rows.length && none ? none(t.kinds[0]!)
     : emptyState('search-x', 'Nothing matches', [view.find.trim() ? `“${view.find.trim()}”` : '', view.filter !== 'all' ? `Only: ${chipNames[view.filter]}` : '',
       view.from !== 'anywhere' ? `From: ${fromMenu().flat().find(entry => entry.value === view.from)?.label}` : ''].filter(Boolean).join(' · '),
-      view.find.trim() ? button({ variant: 'outline', size: 'small', label: 'Clear Find', id: 'find-clear', onclick: () => clearFind(view) }) : undefined);
+      view.find.trim() ? button({ variant: 'outline', size: 'small', label: 'Clear Find', id: 'find-clear', onclick: () => findTyped(t, '') }) : undefined);
   // With no hit at all, the group's line on the reading goes under those words, in view.
   const said = nothing && inPlugins && coverageLine();
   if (said) nothing!.append(h('p.catalog-coverage', {}, said[0], ' · ', said[1]));
@@ -1611,9 +1629,8 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
     usageBand(t),
     view.filter === 'unused' ? unusedBand(t, listedRows(t).filter((row): row is ItemRow => !isPluginRow(row))) : null,
     notices(t),
-    // A stable id per segment (and per harness and kind), so a redraw (the dock's breakpoint crossed, say) keeps the table where it
-    // was scrolled, and another segment or harness's table opens at its own top.
-    h('div.scroll.matrix', { id: tool ? `table-${t.kinds[0]}-${tool}` : libraryTableId() },
+    // Its id keeps it where it was scrolled across a redraw (the dock's breakpoint crossed, say): tableId.
+    h('div.scroll.matrix', { id: tableId(t) },
       // No column heads: each row's switch comes first, and its marks name their tools.
       nothing ?? withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${tool ? nouns[t.kinds[0]!][1] : 'Items'} and where they are on` }, sections), columns(t).length),
       markLegend(t, all, plugins))];
@@ -2523,7 +2540,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
 document.addEventListener('keydown', event => {
   const id = (event.target as HTMLElement | null)?.id;
   if (event.key !== 'Escape' || (id !== 'find' && id !== 'skills-find')) return;
-  const view = useTableShown()?.view;
+  const t = useTableShown(), view = t?.view;
   if (id === 'skills-find' && view?.listFind) { view.listFind = ''; rerender(); }
-  if (id === 'find' && view?.find) clearFind(view);
+  if (id === 'find' && t && view?.find) findTyped(t, '');
 });
