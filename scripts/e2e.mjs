@@ -614,8 +614,8 @@ async function backPlaceFlow() {
   /** The place of `id` once it is `want`, or what it is after 3 s: a page still filling is put back once it has its height. */
   const placeWhen = async (id, want) => { for (let tries = 0; tries < 30 && await placeOf(id) !== want; tries++) await wait(100); return placeOf(id); };
   /**
-   * Writes the place of the list `id` once it rests (stillList, for up to four of its 3 s: a glide a row's opening started runs
-   * slower where the window draws few frames): `anchor`'s top `y` px under the list's top, or `y` px down; reads it back.
+   * Writes the place of the list `id` once it rests (stillList, for up to four of its 3 s: a scroll still moving runs slower where
+   * the window draws few frames): `anchor`'s top `y` px under the list's top, or `y` px down; reads it back.
    */
   const scrollTo = async (id, y, anchor) => {
     await until(() => a.exists(`#${id}`));
@@ -1080,9 +1080,8 @@ async function chooseFrom(a, value) {
 }
 /**
  * Whether the list `id` came to rest (still for six frames) within 3 s; it is found by its id each frame, as a redraw replaces it. A
- * row opened with details past the list's bottom glides the list to it (matrix.ts openRow); a scroll place written while it glides
- * still has the glide's later steps added to it, some after the place was read. A check that writes a scroll place checks this
- * first, so a list that never rests fails under its own name. A window the other groups' windows cover draws few frames or none for
+ * scroll that animates (a mouse wheel's) adds its later steps to a scroll place written meanwhile, some after the place was read.
+ * A check that writes a scroll place checks this first, so a list that never rests fails under its own name. A window the other groups' windows cover draws few frames or none for
  * a while (on the Mac, four groups at once): at the end of the 3 s, a list still where it started has rested too.
  */
 const stillList = (a, id) => a.run(`new Promise(done => { const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop, first = at(); let last = first, still = 0, ended = false;
@@ -6358,7 +6357,7 @@ esac
   // back on after. The menu reaches the page through the main process, which only a development run opens to the checks.
   if (a.inspect) {
     await a.click('#sync-switch');
-    same('Automatic sync is off, so the menu offers Sync once', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
+    same('Automatic sync is off, so the menu offers Sync once; the switch’s result is still on show', [await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), await a.exists('#plugins-result')], ['false', true]);
     const menu = await mainHelpers(a.inspect);
     try { await menu.tellPage('sync:request'); } finally { menu.close(); }
     for (let tries = 0; tries < 50 && !(await a.exists('#header [data-outcome]')); tries++) await wait(100);
@@ -6367,6 +6366,8 @@ esac
       !!(await a.text('#header [data-outcome] .band-text')) && !(await a.exists('#plugins-result')), await a.text('#header'));
     if (shots) { await sizeTo(a, 1316, 819); await a.shot('plugins-sync-once-1316'); await fullSize(a); }
     await a.click('#outcome-dismiss');
+    // The switch's result went when Sync once's took its place (pluginstate.ts overRun), so × uncovers nothing older.
+    same('× on Sync once’s result leaves the header empty: the switch’s older result doesn’t come back', [await a.exists('#plugins-result'), await a.exists('#header .header-result')], [false, false]);
     await a.click('#sync-switch');
     same('Automatic sync on again', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
   } else console.log('No main-process inspector: skipping Sync once from the menu on Plugin marketplaces.');
@@ -6704,6 +6705,32 @@ fs.writeFileSync(record, JSON.stringify(now));
   const pinnedThere = (await sectionsNow(a, 'mcp'))[0][1].includes('srv-02') && !(await switchOn(a, 'mcp', 'srv-02'));
   await a.click('#header-refresh');
   same('a row turned Off stays under On until Refresh, which puts it under Off', [pinnedThere, (await sectionsNow(a, 'mcp')).at(-1)], [true, ['off', ['srv-02', ...offNow].sort()]]);
+
+  // Opening a row moves the list the least that shows its details (matrix.ts openRow). Each row is opened with a redraw in the
+  // frame after (the Sort chosen again), as a background read may land, and measured once the list rests: its top from the
+  // list's top, and how tall it is with its details.
+  const rowAt = key => a.run(`(() => { const one = document.querySelector(${JSON.stringify(row(key))}), list = document.getElementById('${table}').getBoundingClientRect(), end = one.nextElementSibling?.matches('.details') ? one.nextElementSibling : one;
+    return { top: Math.round(one.getBoundingClientRect().top - list.top), tall: Math.round(end.getBoundingClientRect().bottom - one.getBoundingClientRect().top), list: Math.round(list.height) }; })()`);
+  const opened = async (key, y) => {
+    await putAt(table, row(key), y);
+    const before = await rowAt(key);
+    await a.run(`(() => { document.getElementById('${rowPart('open', 'mcp', key)}').click(); requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector('#item-order').dispatchEvent(new Event('change')))); })()`);
+    await a.settle(); await stillList(a, table);
+    const after = await rowAt(key);
+    await a.shot(`rows-opened-${key}`);
+    await a.click(`#${rowPart('open', 'mcp', key)}`);
+    return { before: before.top, after: after.top, tall: after.tall, list: after.list };
+  };
+  const fits = await opened('srv-12', 40);
+  same('a row opened whose details fit under it: the list doesn’t move', fits.after, fits.before);
+  const low = await opened('srv-30', fits.list - fits.tall + 60);
+  same('a row opened whose details run 60 px past the list’s bottom: the list moves by exactly those 60 px, and a redraw in the next frame leaves it there',
+    [low.before + low.tall - low.list, low.before - low.after], [60, 60]);
+  // 860×440: a list shorter than the row with its details.
+  await sizeTo(a, 860, 440);
+  const deep = await opened('srv-17', 100);
+  same('a row opened whose details and row are taller than the list: the row goes to the list’s top, its name in view', [deep.tall > deep.list, deep.after], [true, 8]);
+  await sizeTo(a, 1280, 800);
 
   // Clicks behind one that still runs (holdRun) wait their turn. Clicked again while its click waits, a row is taken back at once,
   // and nothing is written for it.
@@ -9339,6 +9366,25 @@ async function libraryFlow() {
   for (const name of toolbarSkills) rmSync(join(T.claude, name), { recursive: true });
   check('seven skills deleted by hand: six notices on show', await until(async () => (await tb.all('.sync-notice')).length === 6, 30000), await tb.text('.bands'));
   check('and the Library, open on All, has no dot', !(await tb.exists('#nav-library .nav-unseen')), await tb.run(`document.querySelector('#nav-library .nav-unseen')?.title`));
+  // The seventh, not drawn, is said on the last line, and is drawn once one above it is dismissed. The sidebar's dot counts only
+  // the notices not yet drawn (matrix.ts unseenNotices): away from the Library it names the seventh alone, then none.
+  const drawnNow = () => tb.all('.sync-notice .item-name', 'e.textContent');
+  const firstSix = await drawnNow(), seventh = toolbarSkills.filter(name => !firstSix.includes(name));
+  same('the seventh is said on the last line', [seventh.length, await tb.text('.sync-notice:last-child #notices-more')], [1, ' · and 1 more']);
+  if (shots) {
+    for (const [width, height, look] of [[1316, 819, 'light'], [1316, 819, 'dark'], [...SMALLEST, 'light']]) {
+      await sizeTo(tb, width, height); await tb.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+      await tb.shot(`library-seven-notices-${width}-${look}`);
+    }
+    await tb.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await fullSize(tb);
+  }
+  await tb.click('#nav-overview');
+  same('away from the Library, the dot counts and names the one notice not yet drawn', await tb.run(`document.querySelector('#nav-library .nav-unseen')?.title`), `1 automatic change: ${seventh[0]}`);
+  await openKind(tb, 'all');
+  await tb.click('[id^="notice-dismiss-"]');
+  same('one dismissed, the seventh is drawn, and no more is said', [(await drawnNow()).includes(seventh[0]), (await drawnNow()).length, await tb.exists('#notices-more')], [true, 6, false]);
+  await tb.click('#nav-overview');
+  check('every notice drawn, the Library has no dot', !(await tb.exists('#nav-library .nav-unseen')), await tb.run(`document.querySelector('#nav-library .nav-unseen')?.title`));
   same('no page errors, a click moves no row', tb.pageErrors, []);
   await tb.quit();
 

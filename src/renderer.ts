@@ -23,7 +23,7 @@ import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
 import { sources, sourcesPage } from './sourcespage.ts';
 import { profilesPage, profileStatus } from './profilespage.ts';
-import type { HomeMode, HomeView, SyncView } from './types.ts';
+import type { HomeMode, HomeView, SyncNotice, SyncView } from './types.ts';
 import { noticeNames, plural } from './model.ts';
 import { anyOn } from './itemrow.ts';
 import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
@@ -56,22 +56,21 @@ function applyLayout(): { rail: boolean; wide: boolean } {
 /** A page's row: its name, how many it holds, and a dot while a change sync made on its own is unseen. `countTitle` says the
  * count in words (the tooltip and screen readers); `quiet` greys it (the Git repo's counts while unreachable). */
 function navRow(page: Page, label: string, glyph: IconName, count?: number | string, countTitle?: string, quiet = false) {
-  const current = state.page === page;
+  const current = state.page === page, news = unseen(page);
   return h('button.nav-row', {
     type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': countTitle ? `${label}: ${countTitle}` : label, title: label,
     onclick: () => showPage(page),
   }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 || quiet ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true', title: countTitle }, String(count)),
     // A change sync made on its own shows as a dot on its page until that notice is painted (seen) or dismissed.
-    unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
+    news.length ? h('span.nav-unseen', { title: unseenText(news) }) : null);
 }
 
 const anythingOn = () => !!state.home && anyOn(state.home);
-/** The automatic changes a page shows: the Library's, of every kind it lists. */
-const noticesFor = (page: Page) => (!state.home || page !== 'library' ? [] : heldKinds(state.home).flatMap(kind => state.home![kind].notices));
-/** The Library's automatic changes not painted yet; on the open Library, of the kinds not on show (a segment of another kind hides theirs). */
-const unseen = (page: Page) => (!state.home || page !== 'library' ? 0
-  : heldKinds(state.home).filter(kind => state.page !== 'library' || !kindsShown().includes(kind)).flatMap(unseenNotices).length);
-const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`; };
+/** The Library's automatic changes not painted yet (matrix.ts unseenNotices); on the open Library, of the kinds not on show (a segment of another kind hides theirs). */
+const unseen = (page: Page) => (!state.home || page !== 'library' ? []
+  : heldKinds(state.home).filter(kind => state.page !== 'library' || !kindsShown().includes(kind)).flatMap(unseenNotices));
+/** The dot's tooltip: how many changes it counts, and the first three names. */
+const unseenText = (list: SyncNotice[]) => `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`;
 
 const homeHelp: Record<HomeMode, string> = {
   fixture: 'Practice copy: sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools.',
