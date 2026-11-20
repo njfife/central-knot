@@ -2,7 +2,8 @@
 // here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 // Clicks go by one of two routes, split by whether the plugin's record changes: the switch and each tool's box go through
 // turnPlugin (main records first, marketplaces.ts turn); Update, Update all, a skill's switch and their Undo go through
-// applyPluginOps. Both set market.lastRun, which the window's header says with one Undo (pluginspage.ts pluginsResult).
+// applyPluginOps. Both set market.lastRun, which the window's header says with one Undo (pluginspage.ts pluginsResult); a newer
+// result said there in its place lets it go (overRun).
 // Which clicks wait their turn and which lock, in one place:
 // - A switch or a tool's box joins the page's one list of clicks (clicklist.ts, which the item lists' switches join too) as a
 //   PluginClick, sent to main one click at a time, in the order clicked (runClick); its run is decided there as an item's is
@@ -14,7 +15,7 @@
 //   which also says why), so a click on one lands on a disabled control and is dropped, never run twice. A switch is off under
 //   busy too.
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
-import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, state as app, tell } from './app.ts';
+import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, saidInStatusBar, state as app, tell, type Outcome } from './app.ts';
 import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
@@ -512,6 +513,11 @@ export function undoLast(): void {
 
 /** × on the run's result in the header: it goes, and its problem lines with it, and the run of clicks ends (clicklist.ts endRun). */
 export function closeRun(): void { endRun(); clearRun(); }
+/**
+ * Whether the app's result `outcome` is said in the header in the run's place (pluginspage.ts pluginsResult): one made on Plugins,
+ * not in the status bar, with no action of the page's own (Sync once from the menu). It is newer, so app.ts tell lets the run go.
+ */
+export const overRun = (outcome: Outcome | undefined): boolean => outcome?.page === 'plugins' && !outcome.act && !saidInStatusBar(outcome);
 const clearRun = () => { market.lastRun = undefined; market.problem = undefined; };
 /** The run's result with no problem line goes by itself, as a list page's result does (app.ts FADE_MS); its Undo with it. */
 export function fadeRun(): void { if (market.lastRun && !market.problem && lastLines().every(line => line.ok)) clearRun(); }

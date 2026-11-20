@@ -29,7 +29,7 @@ import { asksWhichCopy, copiesDiffer, libraryWords, stillReadWords } from './lib
 import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
-import { endListNews, fadeRun, loadPlugins, resetMarket } from './pluginstate.ts';
+import { closeRun, endListNews, fadeRun, loadPlugins, overRun, resetMarket } from './pluginstate.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
@@ -217,6 +217,8 @@ export function announce(text: string, quiet = false, link?: { label: string; ru
  */
 export function tell(outcome: Outcome | undefined, otherwise = ''): void {
   state.outcome = outcome;
+  // Said on Plugins in the run's place, it is the newer result: the run's goes, so this one's × uncovers nothing older.
+  if (overRun(outcome)) closeRun();
   if (!outcome) announce(otherwise);
   else { announce(spoken(outcome), !saidInStatusBar(outcome)); outcome.said = state.said.seq; }
   fadeLater();
