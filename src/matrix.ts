@@ -928,11 +928,11 @@ export const resultInHeader = () => state.page === 'library' || state.page === '
  * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar. While a
  * table is on screen (useTableShown), its open copy choice hides an older result. On a list page it is drawn in the header only
  * (listResult); the pages that draw it in a band are the others. `inCard`: in the notices' card where its notice was (noticeLines),
- * even with nothing to offer, unmarked so the status bar says it too (app.ts paintStatusMessage), and with no ×.
+ * unmarked so the status bar says it too (app.ts paintStatusMessage), and with no ×.
  */
 export function outcomeBand(inCard = false): HTMLElement | null {
   const outcome = state.outcome;
-  if (!outcome || !outcomeShown(outcome, useTableShown()) || (!inCard && saidInStatusBar(outcome))) return null;
+  if (!outcome || !outcomeShown(outcome, useTableShown()) || saidInStatusBar(outcome)) return null;
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
