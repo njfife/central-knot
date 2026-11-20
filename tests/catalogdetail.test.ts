@@ -4,10 +4,10 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { inside, installedContents, marketplacePage, pluginContents, pluginFiles, readHooks, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
-import { componentsFrom, outcomes, sessionTextNote } from '../src/pluginoutcomes.ts';
+import { componentsFrom, outcomes, sessionHooksAbout, sessionTextNote } from '../src/pluginoutcomes.ts';
 import { summaryOf } from '../src/pluginstatus.ts';
 import { hookLine } from '../src/sessionhooks.ts';
-import type { Components } from '../src/types.ts';
+import type { Components, HarnessId } from '../src/types.ts';
 
 const noLinks = process.platform === 'win32';
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -283,6 +283,35 @@ test('“In each tool” gives a tool Hooks and Session text lines only from the
     await codexManifest(undefined);
     assert.deepEqual(lines(await read()), { 'claude-cli': claude, 'copilot-cli': copilot,
       'codex-cli': ['Hooks start-of-session hooks run after you trust them in Codex; others may not', `Session text waits for trust: ${sessionTextNote('codex-cli')}`] });
+  } finally { await cleanup(); }
+});
+
+test('The line under a plugin page’s hooks that can add text names each tool that takes text from none of them, and says Codex waits for trust only where Codex takes some', async () => {
+  const { root, cleanup } = await box();
+  try {
+    // The superpowers shape again, its one hook's event changed below, read for every tool as a plugin's page reads it.
+    const command = { type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start' };
+    const hooks = (event: string) => put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { [event]: [{ hooks: [command] }] } }));
+    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.2' }));
+    const codexManifest = (hooks?: unknown) => put(join(root, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.2', skills: './skills/', hooks }));
+    // `tools`: the tools its "In each tool" describes, all three unless said.
+    const line = async (tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli']) => sessionHooksAbout(componentsFrom(await pluginContents(root, {}, root)).sessionTextHooks, tools);
+    const runs = 'These run when a session starts or you send a prompt', known = 'what they add is known only when they run.';
+    // Its Codex manifest's `"hooks": {}`: Codex takes text from none of them, so nothing is said of trusting them there.
+    await hooks('SessionStart');
+    await codexManifest({});
+    assert.equal(await line(), `${runs}; ${known} In Codex, none of them adds text.`);
+    // No `hooks` there: every tool takes text from it, Codex once you trust it.
+    await codexManifest(undefined);
+    assert.equal(await line(), `${runs} (in Codex, once you trust them); ${known}`);
+    // Codex not here: neither its trust nor its name.
+    assert.equal(await line(['claude-cli', 'copilot-cli']), `${runs}; ${known}`);
+    // Copilot CLI's own spelling of the event: only Copilot CLI takes text from it.
+    await hooks('sessionStart');
+    assert.equal(await line(), `${runs}; ${known} In Claude Code and Codex, none of them adds text.`);
+    // A prompt hook: Claude Code and Codex take its text, Codex once trusted; Copilot CLI ignores what a prompt hook prints.
+    await hooks('UserPromptSubmit');
+    assert.equal(await line(), `${runs} (in Codex, once you trust them); ${known} In Copilot CLI, none of them adds text.`);
   } finally { await cleanup(); }
 });
 

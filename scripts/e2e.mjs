@@ -9513,6 +9513,10 @@ echo "$*" >> "$HOME/claude-calls.txt"
   same('on superpowers’ page, In each tool has no Hooks or Session text line for Codex, which runs none of its hooks', await a.run(`[...document.querySelectorAll('.plugin-outcome-row')]
     .map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-kind')].map(kind => kind.textContent)])`),
   [['Claude Code', ['Skills', 'Hooks', 'Session text']], ['Copilot CLI', ['Skills', 'Hooks', 'Session text']], ['Codex', ['Skills']]]);
+  // What it holds says the same of its hook: Codex is named as taking no text from it, and nothing is said of trusting it there.
+  same('on superpowers’ page, the line under its hooks that can add text names Codex as taking text from none, with no wait for trust', await a.run(`[...document.querySelectorAll('.plugin-group')]
+    .find(group => group.querySelector('h4')?.textContent.startsWith('Hooks that can add text to sessions'))?.querySelector('.plugin-group-note')?.textContent`),
+  'These run when a session starts or you send a prompt; what they add is known only when they run. In Codex, none of them adds text.');
   // Nothing the strips offer wrote a file: in the tools' folders, only the uninstall's record changed.
   const after = toolFolders();
   same('in the tools’ folders only the uninstall’s record changed', Object.entries(after).flatMap(([folder, files]) => Object.keys({ ...files, ...before[folder] }).filter(path => files[path] !== before[folder][path]).map(path => join(folder, path))),

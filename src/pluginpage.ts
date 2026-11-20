@@ -8,7 +8,7 @@ import { acting, showPage, state as app } from './app.ts';
 import { afterLayout, button, fileBlocks, h, icon, toggle as switchToggle, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { groupBy } from './model.ts';
-import { addsText, outcomes } from './pluginoutcomes.ts';
+import { addsText, componentsFrom, outcomes, sessionHooksAbout } from './pluginoutcomes.ts';
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
@@ -227,8 +227,6 @@ const fileKinds: Record<FileKind, { title: string; file: string; about?: string 
 };
 /** A hook of the marketplace's copy that can add text in one of the tools that take plugins (pluginoutcomes.ts addsText). */
 const addsTextSomewhere = (hook: DeclaredHook) => pluginTools.some(tool => addsText(tool, hook));
-/** Said under "Hooks that can add text to sessions": what is true of every such hook in every tool ("In each tool" has each tool's limits). */
-const SESSION_HOOKS_ABOUT = 'These run when a session starts or you send a prompt (in Codex, once you trust them); what they add is known only when they run.';
 
 /**
  * One group of hooks: its heading, an optional line under it, and a row per hook (its event, then how it starts:
@@ -347,8 +345,9 @@ function fileGroup(owner: string, idFor: (key: string) => string, kind: FileKind
 
 /**
  * The plugin's parts by name, with what each says it does; skills, commands, agents and instruction files open their files.
- * The hooks that can add text to sessions in some tool (addsTextSomewhere) are a group before the others, both drawn
- * by hookGroup. What is opened is kept per plugin; element ids start with the marketplace's place in the list (`marketIndex`).
+ * The hooks that can add text to sessions in some tool (addsTextSomewhere) are a group before the others, under the line
+ * pluginoutcomes.ts sessionHooksAbout makes for the tools "In each tool" describes; both groups are drawn by hookGroup.
+ * What is opened is kept per plugin; element ids start with the marketplace's place in the list (`marketIndex`).
  */
 function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView, detail: PluginDetail | null | undefined, reading: boolean, offered: string | undefined) {
   const owner = pluginKey(entry.source, plugin.name);
@@ -365,7 +364,8 @@ function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: n
         : 'Its files live outside this marketplace, so its skills, commands, agents and instruction files are read from the tools that installed it.') : null,
     empty && !detail.problem ? h('p.plugin-muted', {}, 'Nothing Central Knot recognizes: no skills, commands, agents, instruction files, hooks or servers.') : null,
     ...files.map(({ kind, parts }) => fileGroup(owner, idFor, kind, parts, detail.offered, kind === 'skills' ? skillColumns(view, entry, plugin, marketIndex, parts.map(part => part.name)) : undefined)),
-    hookGroup(`${owner}\u0000session`, 'Hooks that can add text to sessions', detail.hooks.filter(addsTextSomewhere), SESSION_HOOKS_ABOUT),
+    hookGroup(`${owner}\u0000session`, 'Hooks that can add text to sessions', detail.hooks.filter(addsTextSomewhere),
+      sessionHooksAbout(componentsFrom(detail).sessionTextHooks, nativeTools(view, entry, plugin.name))),
     hookGroup(`${owner}\u0000hooks`, 'Other hooks', detail.hooks.filter(hook => !addsTextSomewhere(hook))),
     detail.mcpServers.length ? h('div.plugin-group', {}, h('h4', {}, `MCP servers (${detail.mcpServers.length})`),
       partList(`${owner}\u0000mcp`, detail.mcpServers.map(server => ({ name: server.name, text: server.runs, mono: true })))) : null,
