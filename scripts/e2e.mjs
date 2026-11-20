@@ -9639,6 +9639,53 @@ async function headerResultFlow() {
   await undo();
   same('its Undo puts the four back on', await a.run(`${JSON.stringify(linkedRun.map(switchOf))}.map(selector => document.querySelector(selector).getAttribute('aria-checked'))`), ['true', 'true', 'true', 'true']);
 
+  // A run goes on whatever page is open meanwhile (app.ts leaveResults). One switch clicked and carried out, then three more
+  // clicked, and History opened while they are carried out and the Library again: one result for the four, and its Undo puts the
+  // four back.
+  const four = names.slice(0, 4), fourOff = `4 skills are off: ${four.slice(0, 3).join(', ')} and ${four[3]}.`;
+  const fourOn = () => a.run(`${JSON.stringify(four.map(switchOf))}.map(selector => document.querySelector(selector).getAttribute('aria-checked'))`);
+  /** Switches clicked in the page, then, in the same go (so they are still being carried out), the controls `then` names. */
+  const clickThen = (list, then) => a.run(`[...${JSON.stringify(list.map(switchOf))}, ...${JSON.stringify(then)}].forEach(selector => document.querySelector(selector).click())`);
+  await dismiss();
+  await clickRun(four.slice(0, 1));
+  await clickThen(four.slice(1), ['#nav-history', '#nav-library', '#library-kind-all']);
+  await done();
+  same('History opened and left while three of a run of four are carried out: one result for the four', await a.text(sentence), fourOff);
+  await undo();
+  same('…and its Undo puts the four back on', await fourOn(), ['true', 'true', 'true', 'true']);
+  // One step past: History stays open until the run ends. Its one result is said where a result made on another page is (the
+  // status bar: app.ts sayRun), never in a header; the Library opened again has none of it, and History opened again has each
+  // of the four's way back, the newest entry of each.
+  await dismiss();
+  await clickRun(four.slice(0, 1));
+  await clickThen(four.slice(1), ['#nav-history']);
+  await done();
+  const saidOnHistory = await a.run(`document.getElementById('announcement').dataset.text`), shownOnHistory = await a.exists('#header [data-outcome]');
+  await openKind(a, 'all');
+  const shownOnLibrary = await a.exists('#header [data-outcome]');
+  await a.click('#nav-history');
+  const wayBack = name => `[...document.querySelectorAll('.history-row[data-kind="off"]')].find(row => row.querySelector('strong')?.title === ${JSON.stringify(name)})?.querySelector('.history-actions button')?.textContent ?? null`;
+  const waysBack = () => a.run(`[${four.map(wayBack).join(', ')}]`);
+  await until(async () => (await waysBack()).every(Boolean));
+  same('History open until a run of four ends: the status bar says the four and no header does; back on the Library no result of it, and History, opened again, has each one’s way back',
+    [saidOnHistory, shownOnHistory, shownOnLibrary, await waysBack()], [fourOff, false, false, Array(4).fill('Turn it on')]);
+  await openKind(a, 'all');
+  await clickRun(four);
+  same('the four switched back on', await fourOn(), ['true', 'true', 'true', 'true']);
+  // A second run started on another page while the first is carried out: two runs, each with its own result (a run is the clicks
+  // on one place: clicklist.ts runAt). Two switches on the Library; Claude Code's Skills tab opened while they are carried out,
+  // and a third switched there.
+  await dismiss();
+  await a.run(`(region => { window.ckSaid = []; new MutationObserver(records => records.forEach(record => window.ckSaid.push(record.oldValue))).observe(region, { attributeFilter: ['data-text'], attributeOldValue: true }); })(document.getElementById('announcement'))`);
+  await clickThen(four.slice(0, 2), ['#nav-harnesses', '#harness-claude-cli', '#harness-tab-skills', switchOf(four[2])]);
+  await done();
+  same('a second run started on Claude Code’s Skills tab while the Library’s run of two is carried out: the two said alone where they were left, the third alone in its own header',
+    [(await a.run(`window.ckSaid`)).includes(`2 skills are off: ${four[0]} and ${four[1]}.`), (await a.text(sentence))?.replace(/ is off.*/, '')], [true, four[2]]);
+  await undo();
+  await openKind(a, 'all');
+  await clickRun(four.slice(0, 2));
+  same('the three switched back on', await fourOn(), ['true', 'true', 'true', 'true']);
+
   // A result's reasons are its own run's. Two refusals left up past the 8 seconds between runs, then the agent switched with no
   // problem: its result has no reason and no Show all of theirs; then a run of a refused skill and the agent, and its Undo, which
   // leaves no line of the run's refusal.
