@@ -237,7 +237,7 @@ test('two marketplaces offering one plugin with the same text give two hits; an 
 
 test('text read at an older pin is still given, unmarked: the plugin’s page says what is true now', () => {
   const older = { ...kept('https://github.com/acme/tools', 'devkit', [devkit[0]!]), from: '["https://github.com/acme/tools","","","0ld"]', commit: '0ld' };
-  assert.deepEqual(docsOf(viewWith(), [older]).map(doc => [doc.names, doc.plugin]), [[['changelog-writer'], 'devkit']]);
+  assert.deepEqual(docsOf(viewWith(), [older]).map(doc => [doc.names, doc.plugin, doc.catalog?.plugin]), [[['changelog-writer'], 'devkit', 'devkit']]);
 });
 
 test('only the marketplaces the open home lists: text kept from another home’s, until the job matches it to this one, gives nothing; another spelling of a listed one counts', () => {

@@ -1418,13 +1418,14 @@ const newFind = (view: View, text: string) => { Object.assign(view, { find: text
  * Find typed, or emptied (Escape in it, Clear Find under "Nothing matches"): the new list shows from its top (listFromTop) as it is
  * drawn. A tool's tab is drawn at once; the Library's list once main has answered (askFind), at once with Find empty. Until
  * the page is next drawn (a draw builds it anew), the list on screen is the text before's, where it was, and nothing below the
- * toolbar acts (inert): this ask draws it when it returns, unless the text has changed since, whose own ask then does.
+ * toolbar acts (inert): this ask draws it when it returns, from its top only while Find still holds its text, unless the text
+ * has changed since, whose own ask then does (emptied, Find has drawn the whole list already, and he may have scrolled it).
  */
 function findTyped(t: Table, text: string) {
   newFind(t.view, text);
   if (!searching(t)) { listFromTop(t); rerender(); return; }
   for (const before of document.querySelectorAll<HTMLElement>('.ov-page .toolbar ~ *, .ov-page .dock-main ~ *')) before.inert = true;
-  void askFind(text).then(came => { if (came !== 'dropped' || t.view.find === text) { listFromTop(t); rerender(); } });
+  void askFind(text).then(came => { const current = t.view.find === text; if (current) listFromTop(t); if (came !== 'dropped' || current) rerender(); });
 }
 /** The Library's list while its Find has text: one list of the rows Find finds (foundRows), under one heading, Sort at Best match. */
 const searching = (t: Table) => !t.tool && !filesView(t) && !!t.view.find.trim();

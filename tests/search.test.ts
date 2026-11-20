@@ -204,13 +204,14 @@ test('an excerpt reads as words: Markdown’s marks are taken off for showing; w
     shell: 'Check the build first.\n\nRun `cat build.log | grep error` and then `npm run build || exit 1` before you push.',
     bare: 'Step | Command\n---|---\nBuild | npm run build\nNotes | npm run changelog',
     row: '| Instead of | Do |\n|---|---|\n| When a sheet must choose between many options, replace a long category decision tree | Keep the category in a lookup sheet |',
+    pipe: 'Check the log.\n\nRun it now: cat log | grep error\n\n| When | Do |\n|---|---|\n| Before you push | Run it now: cat log | grep error |',
     bold: 'Before you push, run **`npm test`** and read what it says.',
   };
   const index = (await buildIndex(Object.entries(texts).map(([id, text]) => ({ id, names: [id], description: '', text }))))!;
   try {
     const excerpt = ([id, typed]: [keyof typeof texts, string]) => index.excerpts(typed, [id]).get(id);
     assert.deepEqual(([['lead', 'produced'], ['critique', 'sentiment'], ['critique', 'tips'], ['release', 'changelog'], ['release', 'build'],
-      ['links', 'checklist'], ['cut', 'first'], ['links', 'releasing'], ['shell', 'grep'], ['shell', 'exit'], ['bare', 'command'], ['row', 'decision'], ['bold', 'push']] as [keyof typeof texts, string][]).map(excerpt), [
+      ['links', 'checklist'], ['cut', 'first'], ['links', 'releasing'], ['shell', 'grep'], ['shell', 'exit'], ['bare', 'command'], ['row', 'decision'], ['pipe', 'now'], ['bold', 'push']] as [keyof typeof texts, string][]).map(excerpt), [
       'Tickets that /to-tickets produced are already agent-ready, so don…', // code and emphasis marks; FTS5 cut the snippet in "don't"
       '…tickets Note each sentiment and its source', // a list item's mark
       'Tips 1. Share the context with the…', // a heading's mark
@@ -223,6 +224,7 @@ test('an excerpt reads as words: Markdown’s marks are taken off for showing; w
       '…run build || exit…', // and its ||
       'Step | Command Build | npm run build Notes | npm run…', // a table without outer bars: its rule row goes, its bars stay
       '…a long category decision tree Keep the category in a…', // a table's row cut at both ends: its bars as the row is written
+      '…Run it now: cat log | grep error', // a whole line (the excerpt cut before it), no row though a row holds its words: its pipe stays
       'Before you push, run npm test and read what it says.', // bold around a code span
     ]);
     const found = (typed: string) => index.ask(typed).map(hit => hit.id);

@@ -10378,10 +10378,17 @@ esac
     await wait(1500);
     await until(async () => (await listed(a)).length === 60);
     same('Find typed, its answer held back: [as the key is pressed, while the answer waits, once it is drawn]', [typed, waiting, await placeOf()], [1600, 1600, 0]);
-    await main.restore('search:ask');
-    main.close();
     await escapeFind();
     await until(async () => (await listed(a)).length === 84);
+    // Typed, then emptied by Escape before its answer, the whole list scrolled meanwhile: the late answer leaves it where he put it.
+    await a.run(`(i => { i.value = 'kit'; i.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#find'))`);
+    await escapeFind();
+    const mine = await scrollTo(1200);
+    await wait(2000);
+    await a.settle();
+    same('Find emptied before its answer came, the list scrolled meanwhile: the late answer leaves it there', [mine, await placeOf(), (await listed(a)).length], [1200, 1200, 84]);
+    await main.restore('search:ask');
+    main.close();
   }
   // Sort lists the same rows under the same headings, and a redraw that changes no choice moves nothing: the list stays.
   seen.sortUsed = await madeDeep(() => sortBy('used'));

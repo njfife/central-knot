@@ -31,8 +31,9 @@ import { DatabaseSync } from 'node:sqlite';
 import type { CatalogItem, PartKind, SearchAnswer, SearchHit } from './types.ts';
 
 /**
- * One thing to find: its id on the page, its own names that its row shows, the name of the plugin it comes from (a name to the
- * words and exactFor, not to startFor), its description and its text; a catalog item's, what its row draws.
+ * One thing to find: its id on the page, its own names that its row shows, the name of the plugin it comes from (a field of its
+ * own because the start rule, startFor, reads only an item's own names; to the words and exactFor it is a name), its description
+ * and its text; a catalog item's, what its row draws.
  */
 export interface SearchDoc { id: string; names: string[]; plugin?: string; description: string; text: string; catalog?: CatalogItem }
 
@@ -116,8 +117,9 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
   const textOf = db.prepare('SELECT text FROM docs WHERE rowid = ?');
   /** A row's excerpt: around the first word of its text that matched; where more words matched in camelCase words' parts, around such a word (markWord). */
   const excerptOf = (rowid: number, snippets: string) => {
-    const [text, parts] = snippets.split('\0'), written = (textOf.get(rowid) as { text: string }).text;
-    return around(marked(text).length >= marked(parts).length ? text : markWord(written, parts), written);
+    const [text, parts] = snippets.split('\0'), written = () => (textOf.get(rowid) as { text: string }).text;
+    const excerpt = marked(text).length >= marked(parts).length ? text : markWord(written(), parts);
+    return around(excerpt, excerpt.includes('|') ? written() : ''); // the text as written only where a bar may be a table's
   };
   const any = db.prepare('SELECT 1 FROM docs WHERE docs MATCH ? LIMIT 1');
   /** A known word as MATCH asks it: whole, or as a prefix where Porter changes that stem again so that, whole, it finds nothing. */
@@ -194,14 +196,16 @@ function around(snippet: string, written: string) {
  * Text as words, for showing only (what is indexed and found is the text as written): Markdown's marks taken off, the words that
  * matched always kept. A heading's or list item's mark at a line's start, a rule row (a line of dashes, a table's colons and
  * bars), emphasis (`*`) and code marks; a link as its text, whole or cut by the excerpt, unless its address holds a word that
- * matched; the bars, as spaces, of a table's row: a line that starts or ends with a bar as `written` (the row's whole text), or
- * a piece of one the excerpt cut. So a shell's `|` and `||` inside a line stay, and so do the bars of a table written without
- * its outer ones (`a | b`). Not a parser: `_` emphasis, quotes and HTML stay.
+ * matched; the bars, as spaces, of a table's row: a line that starts or ends with a bar as `written` (the row's whole text), the
+ * same whole or, where the excerpt cut the line (no line of `written`), a piece of one. So a shell's `|` and `||` inside a line
+ * stay, and so do the bars of a table written without its outer ones (`a | b`). Not a parser: `_` emphasis, quotes and HTML stay.
  * "## **Run** `npm test`, see [the guide](x.md)" → "Run npm test, see the guide".
  */
 function plain(text: string, written: string) {
-  const rows = written.match(/^[ \t]*\|.*$|^.*\|[ \t]*$/gmu) ?? [], ofRow = (line: string) => line.replace(/^…|…$|[\u0001\u0002]/gu, '');
-  return text.replace(/^.*$/gmu, line => (rows.some(row => row.includes(ofRow(line))) ? line.replaceAll('|', ' ') : line))
+  const lines: string[] = written.match(/^.*$/gmu) ?? [], rows: string[] = written.match(/^[ \t]*\|.*$|^.*\|[ \t]*$/gmu) ?? [];
+  const isRow = (line: string) => { const words = line.replace(/^…|…$|[\u0001\u0002]/gu, '');
+    return lines.includes(words) ? rows.includes(words) : rows.some(row => row.includes(words)); };
+  return text.replace(/^.*$/gmu, line => (isRow(line) ? line.replaceAll('|', ' ') : line))
     .replace(/^[ \t]*(?:#{1,6}|[-*+])[ \t]+|^[ \t|:]*-{3,}[-:| \t]*$/gmu, '')
     .replace(/!?\[(?=[^\][\n]*(?:$|…|\]\((?![^)\s]*\u0001)))/gu, '').replace(/\]\((?![^)\s]*\u0001)[^)\s…]*\)?/gu, '')
     .replace(/(?<=^|[\s(["'…\u0001])\*+(?=[\p{L}\p{N}\u0001`])|(?<=[\p{L}\p{N}\u0002`.,:;!?)])\*+(?=[.,:;!?)\]"'…]*(?:[\s\u0002]|$))|`/gu, '');
