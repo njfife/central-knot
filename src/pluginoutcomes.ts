@@ -6,7 +6,7 @@
 // A plugin's instruction files have no row: no tool reads them (the plugin's page says so once).
 import { pluginTools } from './presence.ts';
 import type { Components, DeclaredHook, HarnessId, Outcome, PluginContents } from './types.ts';
-import { toolList } from './words.ts';
+import { toolList, toolNames } from './words.ts';
 
 const START = 'when a session starts', PROMPT = 'when you send a prompt';
 /**
@@ -19,10 +19,14 @@ const TEXT_EVENTS: Partial<Record<HarnessId, Record<string, string>>> = {
   'copilot-cli': { sessionStart: START, SessionStart: START },
   'codex-cli': { SessionStart: START, UserPromptSubmit: PROMPT },
 };
+/** Copilot CLI's prompt events: it runs such a hook and takes nothing it prints (capability data, Appendix D). */
+const COPILOT_PROMPTS = ['userPromptSubmitted', 'UserPromptSubmit'];
+/** When a hook runs, if it is of a kind the tool is known to run (Appendix D): one of its TEXT_EVENTS, or Copilot CLI's prompt hook. */
+const knownToRun = (tool: HarnessId, hook: DeclaredHook) => TEXT_EVENTS[tool]?.[hook.event] ?? (tool === 'copilot-cli' && COPILOT_PROMPTS.includes(hook.event) ? PROMPT : undefined);
 /** Whether a hook can add text to the tool's sessions: one of its events, and a program it starts. What it adds is known only when it runs. */
 export const addsText = (tool: HarnessId, hook: DeclaredHook) => !!hook.launch && Object.hasOwn(TEXT_EVENTS[tool] ?? {}, hook.event);
 /** Copilot CLI runs a prompt hook and takes nothing it prints: its note says so where such a hook has no row. */
-export const ignoresText = (tool: HarnessId, hook: DeclaredHook) => tool === 'copilot-cli' && !!hook.launch && ['userPromptSubmitted', 'UserPromptSubmit'].includes(hook.event);
+export const ignoresText = (tool: HarnessId, hook: DeclaredHook) => tool === 'copilot-cli' && !!hook.launch && COPILOT_PROMPTS.includes(hook.event);
 /** When a tool's hooks that can add text run, in words: "when a session starts or when you send a prompt". */
 export const textEventsWords = (tool: HarnessId) => [...new Set(Object.values(TEXT_EVENTS[tool] ?? {}))].join(' or ');
 /** A start-of-session matcher's values, as Claude Code and Codex match it against how the session started. */
@@ -70,6 +74,8 @@ export const componentsFrom = (contents: PluginContents): Components => ({
   skills: contents.skills.length, commands: contents.commands.length, agents: contents.agents.length, hooks: contents.hooks.length > 0,
   mcp: contents.mcpServers.length, mcpRootVariable: contents.mcpUsesPluginRoot, bin: contents.bin,
   hooksIn: pluginTools.filter(tool => contents.hooksByTool[tool]?.length),
+  startHooksIn: pluginTools.filter(tool => contents.hooksByTool[tool]?.some(hook => knownToRun(tool, hook) === START)),
+  promptHooksIn: pluginTools.filter(tool => contents.hooksByTool[tool]?.some(hook => knownToRun(tool, hook) === PROMPT)),
   sessionTextHooks: pluginTools.filter(tool => contents.hooksByTool[tool]?.some(hook => addsText(tool, hook))),
   skillNames: contents.skills.map(skill => skill.name),
 });
@@ -79,6 +85,11 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
   if (tool !== 'claude-cli' && tool !== 'copilot-cli' && tool !== 'codex-cli') return [];
   const list: Outcome[] = [];
   const add = (present: boolean | number, component: string, result: Outcome['result'], text: string, names?: Outcome['names']) => { if (present) list.push({ component, result, text, ...(names ? { names } : {}) }); };
+  // Copilot CLI's and Codex's Hooks: the kinds of its hooks known to run there, then how (`how`); a plugin with neither kind is unconfirmed.
+  const prompts = components.promptHooksIn.includes(tool);
+  const kinds = [components.startHooksIn.includes(tool) ? 'start-of-session' : '', prompts ? 'prompt' : ''].filter(Boolean).join(' and ');
+  const hooksLine = (how: string) => add(components.hooksIn.includes(tool), 'Hooks', kinds ? 'limited' : 'unknown',
+    kinds ? `${kinds} hooks run${how}; others may not` : `may not run: not confirmed in ${toolNames[tool]}`);
   if (tool === 'claude-cli') {
     add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'works', 'work as they are');
@@ -90,14 +101,14 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
     add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'limited', 'become skills');
     add(components.agents, 'Agents', 'works', 'get the plugin’s name in front, e.g.', 'agent');
-    add(components.hooksIn.includes(tool), 'Hooks', 'limited', 'start-of-session hooks run; others may not');
+    hooksLine(prompts ? ', but what a prompt hook prints is not used' : '');
     add(components.sessionTextHooks.includes(tool), 'Session text', 'limited', `is limited: ${sessionTextNote(tool)}`);
     add(components.mcp, 'MCP servers', 'works', 'run unchanged');
   } else if (tool === 'codex-cli') {
     add(components.skills, 'Skills', 'works', 'get the plugin’s name in front, e.g.', 'skill');
     add(components.commands, 'Commands', 'limited', 'are turned into skills when installed');
     add(components.agents, 'Agents', 'ignored', 'are ignored: copied, never offered');
-    add(components.hooksIn.includes(tool), 'Hooks', 'limited', 'start-of-session hooks run after you trust them in Codex; others may not');
+    hooksLine(' after you trust them in Codex');
     add(components.sessionTextHooks.includes(tool), 'Session text', 'limited', `waits for trust: ${sessionTextNote(tool)}`);
     add(components.mcp, 'MCP servers', components.mcpRootVariable ? 'fails' : 'unknown', components.mcpRootVariable ? 'won’t start: Codex does not fill in `${CLAUDE_PLUGIN_ROOT}`' : 'may not start: not confirmed in Codex');
   }

@@ -2391,6 +2391,14 @@ async function practiceFlow() {
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-title-line')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  // Claude Code has its issue-tracker already: the add's sentence counts it, as the marketplace's row does; added again, the same.
+  const addSaid = () => a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
+  same('the add says how many of its plugins are installed, as its row does', [await addSaid(), await a.text('.market-item.selected .market-item-meta')], ['Marketplace added: 5 plugins, 1 installed (ck-test-market).', '5 plugins · 1 installed']);
+  await a.click('#open-add-marketplace');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+  for (let tries = 0; tries < 50 && !/already/.test(await addSaid()); tries++) await wait(100);
+  same('added again, it is on this page already, with its plugin installed counted', await addSaid(), 'Marketplace already on this page: 5 plugins, 1 installed (ck-test-market).');
   same('scrolled, the marketplaces’ list stays where it was through Refresh', await placeThroughRedraw(a, '.market-list', () => a.click('#header-refresh')), [true, 40]);
   await a.send('Emulation.setDeviceMetricsOverride', { width: SMALLEST[0], height: SMALLEST[1], deviceScaleFactor: 1, mobile: false });
   // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
@@ -6415,6 +6423,9 @@ esac
   await done();
   same('unticked, its items leave Pi alone (not triage, his own now), it is recorded, the row says so, and the switch shows partial', [inPi(), installed(), entry()?.except, await boxIs('pi-cli'), await a.text('.plugin-panel .plugin-click'), await switchIs('#pswitch-page-0-issue-tracker')],
     [[true, false], true, ['pi-cli'], ['false', false, 'absent'], 'Its items taken out of Pi', 'true partial']);
+  // Its items are put back by Central Knot, through no tool's command: the tooltip ends its sentence where nothing follows.
+  const undoTitle = await a.run(`document.querySelector('#plugins-undo')?.title ?? ''`);
+  check('the Undo of a click in Pi alone says a whole sentence, nothing empty after a colon', /^Reverses what changed for issue-tracker\.( |$)/.test(undoTitle) && !/: \./.test(undoTitle), undoTitle);
   const checked = calls().length;
   await a.run(`window.centralKnot.checkPluginUpdates().then(() => true)`);
   same('the automatic updates leave Pi out', [inPi(), calls().length, entry()?.except], [[true, false], checked, ['pi-cli']]);
@@ -9484,7 +9495,10 @@ echo "$*" >> "$HOME/claude-calls.txt"
   // superpowers' shape, shortened: Claude Code's start-of-session hook in hooks/hooks.json, and a Codex manifest whose `"hooks": {}`
   // names none in its place, so Codex runs none. In the marketplace and installed in Codex, whose strip has no group for it.
   const powers = join(market, 'plugins/superpowers'), catalog = join(market, '.claude-plugin/marketplace.json'), listed = JSON.parse(readFileSync(catalog, 'utf8'));
-  writeFileSync(catalog, JSON.stringify({ ...listed, plugins: [...listed.plugins, { name: 'superpowers', source: './plugins/superpowers', version: '7.0.2' }] }));
+  writeFileSync(catalog, JSON.stringify({ ...listed, plugins: [...listed.plugins, { name: 'superpowers', source: './plugins/superpowers', version: '7.0.2' }, { name: 'stop-hooks', source: './plugins/stop-hooks', version: '1.0.0' }] }));
+  // unified-computer-use's shape: its only hooks at Stop, each calling an MCP tool, so none starts with a session or adds text.
+  mkdirSync(join(market, 'plugins/stop-hooks/hooks'), { recursive: true });
+  writeFileSync(join(market, 'plugins/stop-hooks/hooks/hooks.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'mcp_tool', server: 'cua', tool: 'stop' }] }] } }));
   for (const [path, value] of Object.entries({ '.claude-plugin/plugin.json': { name: 'superpowers', version: '7.0.2' }, '.codex-plugin/plugin.json': { name: 'superpowers', version: '7.0.2', skills: './skills/', hooks: {} },
     'hooks/hooks.json': { hooks: { SessionStart: [{ matcher: 'startup|clear|compact', hooks: [command('"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start')] }] } } })) { mkdirSync(dirname(join(powers, path)), { recursive: true }); writeFileSync(join(powers, path), JSON.stringify(value)); }
   skill(join(powers, 'skills'), 'brainstorming');
@@ -9625,6 +9639,33 @@ echo "$*" >> "$HOME/claude-calls.txt"
   const after = toolFolders();
   same('in the tools’ folders only the uninstall’s record changed', Object.entries(after).flatMap(([folder, files]) => Object.keys({ ...files, ...before[folder] }).filter(path => files[path] !== before[folder][path]).map(path => join(folder, path))),
     ['.claude/plugins/installed_plugins.json']);
+  // A plugin whose only hooks run at Stop: In each tool says Copilot CLI and Codex aren't confirmed to run them, nothing of start-of-session hooks.
+  await a.click('#plugin-back');
+  await a.click('#popen-0-stop-hooks');
+  for (let tries = 0; tries < 100 && !(await a.exists('.plugin-outcome-row')); tries++) await wait(100);
+  same('a plugin with only Stop hooks: In each tool says none is confirmed to run in Copilot CLI or Codex', await a.run(`[...document.querySelectorAll('.plugin-outcome-row')]
+    .map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-item')].map(item => item.textContent)])`),
+  [['Claude Code', ['Hooks run; a hook that fails does not stop the install']], ['Copilot CLI', ['Hooks may not run: not confirmed in Copilot CLI']], ['Codex', ['Hooks may not run: not confirmed in Codex']]]);
+  await pictures('stop-hooks-each-tool', '.plugin-outcome-list', atTwo, true);
+  // The Overview's "—" for Pi's and OpenCode's plugins says what their plugin pages do there: their items go in, not the plugin.
+  await a.click('#nav-overview');
+  for (let tries = 0; tries < 100 && !(await a.exists('#overview-tools-key')); tries++) await wait(100);
+  check('the Overview’s key says Pi and OpenCode take a plugin’s items, not the plugin', /that tool takes a plugin’s items, not the plugin\./.test(await a.text('#overview-tools-key') ?? ''), await a.text('#overview-tools-key'));
+  await pictures('overview-tools-key', '#overview-tools-key', atTwo, true);
+  if (shots) { await a.click('#nav-harnesses'); await pictures('harness-pi-card', '#harness-pi-cli', atTwo); await a.click('#harness-pi-cli'); await a.click('#harness-tab-plugins'); await pictures('harness-pi-plugins', '#harness-body', atTwo); }
+  // A marketplace only Codex reads: the reason Claude Code and Copilot CLI share is said once over its plugins.
+  const codexOnly = join(scratch, 'market-codex-only');
+  for (const [path, value] of Object.entries({ '.agents/plugins/marketplace.json': { name: 'codex-only', plugins: [{ name: 'latex', source: { source: 'local', path: './plugins/latex' } }] }, 'plugins/latex/.codex-plugin/plugin.json': { name: 'latex', version: '0.2.8' } })) {
+    mkdirSync(dirname(join(codexOnly, path)), { recursive: true }); writeFileSync(join(codexOnly, path), JSON.stringify(value));
+  }
+  same('a marketplace only Codex reads is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(codexOnly)}).then(result => result.problem ?? 'added')`), 'added');
+  await a.click('#nav-plugins');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await a.run(`[...document.querySelectorAll('.market-item')].some(item => item.textContent.includes('codex-only'))`)); tries++) await wait(100);
+  await a.run(`[...document.querySelectorAll('.market-item')].find(item => item.textContent.includes('codex-only')).click()`);
+  for (let tries = 0; tries < 100 && !/Only Codex/.test(await a.text('#plugins-scroll') ?? ''); tries++) await wait(100);
+  same('its plugins say once that only Codex reads it, for both Claude Code and Copilot CLI', ((await a.text('#plugins-scroll')) ?? '').split('Only Codex reads this marketplace').length - 1, 1);
+  await pictures('codex-only-marketplace', '.market-hint', atTwo);
   same('no page errors on the strips', a.pageErrors, []);
   await a.quit();
 }
