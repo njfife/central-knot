@@ -7096,12 +7096,14 @@ fs.writeFileSync(record, JSON.stringify(now));
     const agentsTable = 'table-library-agents';
     still('a list too short to scroll: a first notice arrives, and no row moves', await across(agentsTable, editAgent('ag-x'), ['ag-x']));
     still('…nor when a second replaces it', await across(agentsTable, editAgent('ag-y'), ['ag-y']));
-    // The servers in Claude Code's file now, each edited there as a person would.
+    // Eleven servers On, so in Claude Code's file, each edited there as a person would.
+    const inFile = servers.slice(10, 21);
+    await a.run(`window.centralKnot.applyServers(${JSON.stringify(inFile.map(key => ({ key, on: true, except: [] })))}, false, ${JSON.stringify(home)}).then(() => true)`);
     await sizeTo(a, 1280, 800);
     await openKind(a, 'mcp');
+    await a.click('#header-refresh');
     let edits = 0;
     const editServers = (...keys) => () => { const now = JSON.parse(readFileSync(claudeJson, 'utf8')); for (const key of keys) now.mcpServers[key] = { ...now.mcpServers[key], args: [`--edit-${++edits}`] }; writeFileSync(claudeJson, JSON.stringify(now)); };
-    const inFile = servers.filter(key => Object.keys(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers).includes(key));
     await a.run(`document.getElementById('${table}').scrollTop = 0`);
     still('at the top of a long list: five notices arrive at once, and no row moves', await across(table, editServers(...inFile.slice(0, 5)), inFile.slice(0, 5)));
     still('…nor when a sixth arrives after them', await across(table, editServers(inFile[5]), [inFile[5]]));
@@ -7110,10 +7112,10 @@ fs.writeFileSync(record, JSON.stringify(now));
     await holdRun();
     const beforeClick = await placesNow(table, 'data-key');
     editServers(inFile[6])();
-    await clickAt(await middleOf(`#${rowPart('switch', 'mcp', inFile[7])}`));
+    await clickAt(await middleOf(`#${rowPart('switch', 'mcp', servers[1])}`));
     await letRunGo();
     still('a click’s completion brings a notice with its result, and no row moves', { arrived: await until(() => told([inFile[6]])), before: beforeClick, after: await placesNow(table, 'data-key'), header: await headerTall() });
-    await putAt(table, row(inFile[20]), 300);
+    await putAt(table, row(servers[24]), 300);
     still('scrolled deep: a notice arrives, and no row moves', await across(table, editServers(inFile[8]), [inFile[8]]));
     // Held across an arrival: a switch in the middle, then the lowest one wholly in view, each pressed, a notice let arrive, then let go.
     await a.run(`(() => { window.ckSwitchClicks = {}; document.addEventListener('click', event => { const id = event.target.closest?.('.switch')?.id; if (id) window.ckSwitchClicks[id] = (window.ckSwitchClicks[id] ?? 0) + 1; }, true); return true; })()`);
@@ -7129,7 +7131,7 @@ fs.writeFileSync(record, JSON.stringify(now));
       await done();
       return [arrived, await a.run(`window.ckSwitchClicks`), await a.run(`document.getElementById('${id}').getAttribute('aria-checked')`) !== was];
     };
-    const middleSwitch = rowPart('switch', 'mcp', inFile[21]);
+    const middleSwitch = rowPart('switch', 'mcp', servers[25]);
     same('a switch in the middle pressed and held while a notice arrives, then let go: one click, on that switch', await heldAcross(middleSwitch, inFile[9]), [true, { [middleSwitch]: 1 }, true]);
     const lowest = await lowestSwitch();
     same('the lowest switch in view pressed and held while a notice arrives, then let go: one click, on that switch', await heldAcross(lowest, inFile[10]), [true, { [lowest]: 1 }, true]);
@@ -9502,7 +9504,7 @@ async function libraryFlow() {
   const cardTall = () => tb.run(`Math.round(document.querySelector('#notices-card')?.getBoundingClientRect().height ?? 0)`);
   const inCard = () => tb.all('#notices-card .sync-notice .item-name', 'e.textContent');
   const dotSays = () => tb.run(`document.querySelector('#nav-library .nav-unseen')?.title ?? null`);
-  const keyed = async (key, code, text) => { for (const type of ['keyDown', 'keyUp']) await tb.send('Input.dispatchKeyEvent', { type, key, code: key === ' ' ? 'Space' : key, windowsVirtualKeyCode: code, ...(type === 'keyDown' && text ? { text } : {}) }); await tb.settle(); };
+  const keyed = async (key, code, text, modifiers = 0) => { for (const type of ['keyDown', 'keyUp']) await tb.send('Input.dispatchKeyEvent', { type, key, code: key === ' ' ? 'Space' : key, windowsVirtualKeyCode: code, modifiers, ...(type === 'keyDown' && text ? { text } : {}) }); await tb.settle(); };
   /** Pictures (with --shots) at 860×528 (the rail), 1316×819 with the sidebar open and as a rail, and 1728×1117, light and dark; `again` brings the state back after the sidebar's toggle, a press outside the card. */
   const noticePictures = async (name, again = async () => {}) => {
     if (!shots) return;
@@ -9523,9 +9525,11 @@ async function libraryFlow() {
   const keyboard = [await tb.run(`document.activeElement?.id`)];
   for (const [key, code, typed] of [[' ', 32, ' '], ['Enter', 13, '\r']]) {
     await keyed(key, code, typed); keyboard.push(await tb.exists('#notices-card'));
+    // Shift+Tab takes the focus into the card (it comes before Notices), then Escape.
+    await keyed('Tab', 9, undefined, 8); keyboard.push(await tb.run(`!!document.activeElement?.closest('#notices-card')`));
     await keyed('Escape', 27); keyboard.push([await tb.exists('#notices-card'), await tb.run(`document.activeElement?.id`)]);
   }
-  same('Tab reaches Notices; Space and Return open the card; Escape closes it, the focus back on Notices', keyboard, ['notices', true, [false, 'notices'], true, [false, 'notices']]);
+  same('Tab reaches Notices; Space and Return open the card; Shift+Tab goes into it; Escape closes it, the focus back on Notices', keyboard, ['notices', true, true, [false, 'notices'], true, true, [false, 'notices']]);
   await openNotices(tb);
   const oneTall = await cardTall();
   await noticePictures('card-one', () => openNotices(tb));
@@ -9536,8 +9540,13 @@ async function libraryFlow() {
   check('six edited at once while the card is open: it lists the six', await until(async () => (await inCard()).length === 6, 30000), await inCard());
   same('…and keeps its height, Notices counting six', [await cardTall(), (await control())?.[0]], [oneTall, '6']);
   await noticePictures('card-six', () => openNotices(tb));
+  // An action of a notice closes the card, so what it did shows in the lines; a ×, which changes only the card, keeps it open.
+  const undone = await tb.run(`document.querySelector('#notices-card [id^="notice-undo-"]').closest('.sync-notice').querySelector('.item-name').textContent`);
+  await tb.click('#notices-card [id^="notice-undo-"]'); await done(tb);
+  same('Undo on one of the six closes the card: its result has the lines, the focus on Notices, five left', [await tb.exists('#notices-card'), (await tb.text('#header [data-outcome] .band-text') ?? '').startsWith(undone), await tb.run(`document.activeElement?.id`), (await control())?.[0]], [false, true, 'notices', '5']);
+  await openNotices(tb);
   await tb.click('#notices-card [id^="notice-dismiss-"]');
-  same('a notice’s × in the card dismisses that one alone, the card staying open', [(await inCard()).length, await tb.exists('#notices-card')], [5, true]);
+  same('a notice’s × in the card dismisses that one alone, the card staying open', [(await inCard()).length, await tb.exists('#notices-card')], [4, true]);
   await tb.click('#notices-dismiss');
   same('Dismiss all lets every notice go: no card, no Notices', [await tb.exists('#notices-card'), await tb.exists('#notices')], [false, false]);
   chmodSync(T.claude, 0o555);
