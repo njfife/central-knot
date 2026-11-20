@@ -144,7 +144,8 @@ const isDrag = (press: Press, releasedAt: number | undefined) => press.dragged |
  * for its own click, which comes next (pressWasDrag). A window that loses the focus keeps the record: on the Mac's four-window
  * run another window takes the focus in the middle of presses, and the release still comes here. Space on a button is a press too:
  * the browser clicks a button at the key's release only if that button heard the key's press, so the one now there in its place,
- * which has the focus (app.ts keepingFocus gives it), is clicked at the key's release, as the keyboard clicks (no point, detail 0).
+ * which has the focus (app.ts keepingFocus gives it), is clicked at the key's release, as the keyboard clicks (no point, detail 0),
+ * and that key-up's own default is prevented, as the key's repeats may have armed that button for a click of the browser's too.
  * A window that loses the focus ends Space's record: its key-up goes to the other window.
  */
 export function keepClicksAcrossRedraws(where: () => string): void {
@@ -191,7 +192,9 @@ export function keepClicksAcrossRedraws(where: () => string): void {
     keyed = undefined;
     const now = nowThere(was);
     const replaced = now && now !== was.control && now === event.target;
-    if (replaced) now.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    if (!replaced) return;
+    event.preventDefault();
+    now.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   }, true);
   // The release's own click has been heard by its text: what the release kept for it ends here.
   window.addEventListener('click', () => { released = undefined; });
