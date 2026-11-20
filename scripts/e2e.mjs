@@ -9660,14 +9660,15 @@ async function libraryFlow() {
   check('History has both saves', await until(async () => (await editsInHistory()).filter(entry => entry === 'iota: true').length >= 2), await editsInHistory());
   await openKind(tb, 'all');
   await letNoticesGo(tb);
-  // Away, a skill edited, then the agent: back on All, the agent's notice is the newest, in the lines and first in the card.
+  // Away, the agent edited, then a skill: back on All, the skill's notice is the newest, in the lines and first in the card, though
+  // the Library lists skills before agents.
   await tb.click('#nav-overview');
-  edit('kappa');
-  check('kappa edited away: the dot names it', await until(async () => /kappa/.test(await dotSays() ?? ''), 30000), await dotSays());
   writeFileSync(checker, agentText('checker', 'You check, edited.'));
-  check('then the agent: the dot names it too', await until(async () => /checker/.test(await dotSays() ?? ''), 30000), await dotSays());
+  check('the agent edited away: the dot names it', await until(async () => /checker/.test(await dotSays() ?? ''), 30000), await dotSays());
+  edit('kappa');
+  check('then kappa: the dot names it too', await until(async () => /kappa/.test(await dotSays() ?? ''), 30000), await dotSays());
   await openKind(tb, 'all');
-  same('back on All, the agent’s notice, the last to arrive, has the lines and the card’s first place', [/checker was edited/.test(await noticeInLines(tb) ?? ''), (await openNotices(tb), (await inCard())[0])], [true, 'checker']);
+  same('back on All, kappa’s notice, the last to arrive, has the lines and the card’s first place', [/kappa was edited/.test(await noticeInLines(tb) ?? ''), (await openNotices(tb), (await inCard())[0])], [true, 'kappa']);
   await closeNotices(tb);
   await letNoticesGo(tb);
   for (const name of toolbarSkills) rmSync(join(T.claude, name), { recursive: true, force: true });
