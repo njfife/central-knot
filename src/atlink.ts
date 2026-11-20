@@ -291,9 +291,9 @@ export async function serverAt(where: { folder: string; folderName: string; file
 // (as Claude Code finds a plugin's: the paths its plugin.json names, else skills/, agents/ and .mcp.json, or one skill at its root),
 // through the per-item checks a link's readers use (skillAt, agentInText, serverAt), never their place-finding; what is no agent
 // at a link (a README, a page with no front matter) is none here either. Each item is named as a link's are: its folder from
-// `root`, and that folder's own name (`rootName` for the root), never Central Knot's copy's. Two routes read with it, a
-// marketplace's plugin in Pi and OpenCode (`marketplace`: pluginlibrary.ts readPlugin) and a plugin's own folder at a source's
-// link (`link`: holdsAt), and they differ only in a skill's key (library.ts A SOURCE says the two rules). What its files leave
+// `root`, and that folder's own name (`rootName` for the root: a marketplace's plugin's own name), never Central Knot's copy's.
+// Two routes read with it, a marketplace's plugin in Pi and OpenCode (`marketplace`: pluginlibrary.ts readPlugin) and a plugin's
+// own folder at a source's link (`link`: holdsAt), and they differ only in a skill's key (library.ts A SOURCE says the two rules). What its files leave
 // unread (PluginFiles `unread`) is an unreadable line of that kind: one by name, or one line (`unread`) for a folder of them that
 // can't be listed, a servers file that isn't JSON, or a plugin.json that can't be read (then every kind's).
 
@@ -316,7 +316,7 @@ export async function pluginItems(files: PluginFiles, root: string, rootName: st
   const named = (names: string[]): ItemThere<unknown>[] => names.filter(name => name !== '*').map(name => ({ ...plugin, key: itemKey(name), name, unreadable: 'it can’t be read' }));
   const whole = (unread: boolean, what: string, key: string, why: string): Pick<PluginKindRead, 'unread'> => (!unread ? {}
     : { unread: { ...plugin, key: itemKey(files.unread.manifest ? 'plugin.json' : key), unreadable: files.unread.manifest ? `its .claude-plugin/plugin.json can’t be read, so where its ${what} are isn’t known` : why } });
-  const skills = await Promise.all(files.skills.map(({ name, dir }) => { const at = where(dir); return route === 'link' ? skillAt(root, at.folder, at.folderName) : skillAt(root, at.folder, name, true); }));
+  const skills = await Promise.all(files.skills.map(({ dir }) => { const at = where(dir); return skillAt(root, at.folder, at.folderName, route === 'marketplace'); }));
   const agents = files.agents.flatMap(({ name, path, text, whole: all }): ItemThere<unknown>[] => {
     const file = join(files.folder, path), there = { ...where(dirname(file)), key: itemKey(name), name, files: [basename(file)] }, shown = relative(root, file);
     const read = all ? agentInText({ path: shown, tool: 'claude-cli', name }, text, false) : undefined;

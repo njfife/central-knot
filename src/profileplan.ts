@@ -9,14 +9,13 @@
 // (main.ts), so each says the same. The profiles file and the switch itself are profiles.ts's.
 // A PLUGIN'S ITEMS, the rules a profile is to switch them by, read by nothing but their tests yet: each item every tool has now
 // with how a switch meets each copy (pluginLive), what a switch to a profile would turn of them, tool by tool (pluginPlan), and
-// whether they agree with a profile (pluginItemsAgree). A profile names one as `skill:<plugin@marketplace/item>` (pluginrows.ts
-// pluginItemKey), never as the person's own item of that name.
-import { itemKey, type ItemKind, type LibraryItem } from './library.ts';
+// whether they agree with a profile (pluginItemsAgree). A profile names one by pluginItemId, never as an item of the person's own.
+import type { ItemKind, LibraryItem } from './library.ts';
 import { placeOf } from './libraryrow.ts';
 import { plural } from './model.ts';
 import { pageRows, pluginItemKey } from './pluginrows.ts';
 import { pageOfPart } from './pluginstatus.ts';
-import { cantSwitch, onNow, ownSwitch, type PluginItemAt } from './pluginswitch.ts';
+import { cantSwitch, onNow, ownSwitch, sharesName, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, kindNouns, toolNames } from './words.ts';
 import type { HarnessId, HistoryEvent, HomeView, Profile } from './types.ts';
@@ -26,6 +25,11 @@ export const NO_PROFILE = 'No profile';
 
 /** A profile's name for a library item: its kind and key, `skill:notes`. */
 export const itemId = (kind: ItemKind, key: string) => `${kind}:${key}`;
+/**
+ * A profile's name for a plugin's item: `plugin:`, its kind and pluginrows.ts pluginItemKey, `plugin:skill:document-tools@team-tools/pdf`.
+ * A library item's id begins with its kind, so none is one of these, whatever its name holds.
+ */
+export const pluginItemId = (kind: ItemKind, key: string) => `plugin:${itemId(kind, key)}`;
 
 /** A live library item (not deleted) as profiles see it. `except`: the tools it is kept out of, which a switch keeps. */
 export interface LiveItem { id: string; kind: ItemKind; key: string; name: string; on: boolean; except: LibraryItem['except'] }
@@ -93,39 +97,42 @@ export function leftOutWords(counts: Record<ItemKind, LeftOut>): string {
  * OpenCode its library item's On). `way`: `switch`, the item's own switch there (pluginswitch.ts ownSwitch; in Pi and OpenCode its
  * library item's On and Off); `stays`, the tool has none for one item of its kind (a skill in Claude Code, an agent in Copilot
  * CLI), so the copy is left as its plugin has it and agrees with any profile; `held`, its switch can't be used now, and `why`.
+ * `target`: what a switch turns, the copy installed whole as pluginswitch.ts click takes it, or the placed copy's library item.
  */
-export type PluginCopy = { tool: HarnessId; on: boolean } & ({ way: 'switch' | 'stays' } | { way: 'held'; why: string });
+export type PluginCopy = { tool: HarnessId; on: boolean; target: PluginItemAt | { libraryKey: string } }
+  & ({ way: 'switch' | 'stays' } | { way: 'held'; why: string });
 
-/** A plugin's item some tool has now: its id in a profile, the plugin's name, and each tool's copy. */
+/** A plugin's item some tool has now: its id in a profile (pluginItemId), the plugin's name, and each tool's copy. */
 export interface PluginLive { id: string; kind: ItemKind; name: string; plugin: string; copies: PluginCopy[] }
 
+/** Why a copy can't be switched while its whole plugin is off in its tool (installed whole), or on Plugins (placed). */
+const pluginOff = (plugin: string, tool: HarnessId) => `The whole plugin ${plugin} is off in ${toolNames[tool]}.`;
 /**
  * Why a copy installed whole can't be switched now, if it can't: the whole plugin is off in that tool (so the copy is off); its
- * switch can't be written (pluginswitch.ts cantSwitch); or Copilot CLI, which turns a server off by its bare name
- * (partswitch.ts), has one of the person's own of that name (the Library's row, by its key) that would go with it.
+ * switch can't be written (pluginswitch.ts cantSwitch); or Copilot CLI would take another server of its name with it (sharesName).
  */
 function heldWhy(home: HomeView, at: PluginItemAt): string | undefined {
-  if (at.install.off) return `The whole plugin ${at.install.plugin} is off in ${toolNames[at.tool]}.`;
-  const named = at.tool === 'copilot-cli' && at.kind === 'mcp' && home.mcp.items.some(row => row.key === itemKey(at.name) && row.copies['copilot-cli']);
-  return cantSwitch(at) ?? (named ? `Copilot CLI turns a server off by its name, and a server of your own there is named “${at.name}” too.` : undefined);
+  if (at.install.off) return pluginOff(at.install.plugin, at.tool);
+  return cantSwitch(at) ?? sharesName(at, home.mcp.items.flatMap(row => row.copies['copilot-cli']?.folder ?? []), home.pluginItems ?? []);
 }
 
 /**
  * Every plugin's item a tool has now, one per pluginItemKey whichever way each tool has it: installed whole (a copy that can't be
  * read has none), then placed in Pi or OpenCode, a library item linked to a plugin the home records, in each of those managed
- * tools it isn't kept out of (Off too: its On brings it back there).
+ * tools it isn't kept out of (Off too: its On brings it back there), held while the plugin is Off on Plugins (its Off turned the
+ * item Off: pluginlibrary.ts runItems).
  */
 export function pluginLive(home: HomeView): PluginLive[] {
   const found = new Map<string, PluginLive>();
   const add = (kind: ItemKind, key: string, name: string, plugin: string, copy: PluginCopy) => {
-    const id = itemId(kind, key);
+    const id = pluginItemId(kind, key);
     if (!found.has(id)) found.set(id, { id, kind, name, plugin, copies: [] });
     found.get(id)!.copies.push(copy);
   };
   for (const install of home.pluginItems ?? []) for (const item of install.items) {
     const at = { kind: item.kind, name: item.name, tool: install.tool, install }, why = heldWhy(home, at);
     const way = !ownSwitch(at) ? { way: 'stays' as const } : why ? { way: 'held' as const, why } : { way: 'switch' as const };
-    add(item.kind, pluginItemKey(install, item), item.name, install.plugin, { tool: install.tool, on: onNow(at), ...way });
+    add(item.kind, pluginItemKey(install, item), item.name, install.plugin, { tool: install.tool, on: onNow(at), target: at, ...way });
   }
   for (const kind of KINDS) {
     const { tools, library } = home[pageOfPart[kind]];
@@ -133,7 +140,10 @@ export function pluginLive(home: HomeView): PluginLive[] {
       const entry = !item.deleted && home.profiles.plugins?.find(each => each.id === item.source);
       if (!entry) continue;
       const key = pluginItemKey(entry, { kind, name: item.name });
-      for (const tool of tools.filter(each => !takesPlugins(each) && !item.except.includes(each))) add(kind, key, item.name, entry.plugin, { tool, on: item.on, way: 'switch' });
+      for (const tool of tools.filter(each => !takesPlugins(each) && !item.except.includes(each))) {
+        const way = entry.on ? { way: 'switch' as const } : { way: 'held' as const, why: pluginOff(entry.plugin, tool) };
+        add(kind, key, item.name, entry.plugin, { tool, on: item.on, target: { libraryKey: item.key }, ...way });
+      }
     }
   }
   return [...found.values()];

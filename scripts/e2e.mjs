@@ -10981,10 +10981,47 @@ async function fromPictures({ md, put, repo, served, until, done }) {
   await g.quit();
 }
 
+/**
+ * Two versions of one plugin whose folder pdf names its skill differently (Claude Code has document-tools 1.0.0, where it is
+ * pdf-reader; Codex 2.0.0, where it is pdf-tool) are one row, keyed by the folder (pluginrows.ts pluginItemKey), and each tool's
+ * control, mark and file read take that tool's copy's own name (pluginrows.ts copyAt): Codex's box is Codex's switch for pdf-tool,
+ * never its whole plugin.
+ */
+async function renamedSkillFlow() {
+  const home = join(scratch, 'home-renamed'), data = join(scratch, 'renamed-data'), tools = join(scratch, 'tools-renamed');
+  const md = (name, what) => `---\nname: ${name}\ndescription: ${what}\n---\n\n${what}\n`;
+  toolClis(tools);
+  writeClaudeInstall(home, 'm', 'document-tools', '1.0.0', { 'skills/pdf/SKILL.md': md('pdf-reader', 'Reads PDFs.'), 'skills/spreadsheet/SKILL.md': md('spreadsheet', 'Sheets.') });
+  for (const [folder, name, what] of [['pdf', 'pdf-tool', 'Reads PDFs, renamed.'], ['spreadsheet', 'spreadsheet', 'Sheets.']]) {
+    const file = join(home, '.codex/plugins/cache/m/document-tools/2.0.0/skills', folder, 'SKILL.md');
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, md(name, what));
+  }
+  const config = join(home, '.codex/config.toml'), before = '[plugins."document-tools@m"]\nenabled = true\n';
+  writeFileSync(config, before);
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  const a = await launch(data, [], tools), key = 'document-tools@m/pdf';
+  await openKind(a, 'skills');
+  for (let tries = 0; tries < 60 && !(await a.exists(byId(rowPart('open', 'skills', key)))); tries++) await wait(100);
+  same('one row for both versions, named as the first copy names it', await a.all('.ov-row', 'e.dataset.key'), [rowPart('', 'skills', key), rowPart('', 'skills', 'document-tools@m/spreadsheet')]);
+  await a.click(byId(rowPart('open', 'skills', key)));
+  await a.click(byId(rowPart('pfile', 'skills', key)));
+  for (let tries = 0; tries < 60 && !/Reads PDFs, renamed/.test(await a.text('.details-file') ?? ''); tries++) await wait(100);
+  check('its file is read from each tool’s copy by that copy’s own name', /Claude Code[\s\S]*name: pdf-reader[\s\S]*Codex[\s\S]*name: pdf-tool/.test(await a.text('.details-file') ?? ''), await a.text('.details-file'));
+  await a.click(byId(rowPart('enable', 'skills', key, 'codex-cli')));
+  for (let tries = 0; tries < 60 && readFileSync(config, 'utf8') === before; tries++) await wait(100);
+  same('Codex’s box turns off pdf-tool with Codex’s own switch, and leaves the plugin on', readFileSync(config, 'utf8'), `${before}\n[[skills.config]]\nname = "document-tools:pdf-tool"\nenabled = false\n`);
+  for (let tries = 0; tries < 60 && (await cellState(a, 'skills', key, 'codex-cli')) !== 'plugin-off'; tries++) await wait(100);
+  same('its Codex mark reads that switch; the plugin’s other skill is still on there', [await cellState(a, 'skills', key, 'codex-cli'), await cellState(a, 'skills', 'document-tools@m/spreadsheet', 'codex-cli')], ['plugin-off', 'plugin']);
+  same('no page errors', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
   [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.

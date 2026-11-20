@@ -49,7 +49,7 @@ import { market } from './pluginstate.ts';
 import type { PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { pageOfPart, partOfPage } from './pluginstatus.ts';
-import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, rowCount, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
+import { cellWords, copyAt, handledWhere, inTool, insideTitle, offIn, pageRows, rowCount, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -150,7 +150,10 @@ function readFile(row: PluginRow) {
   const id = idOf(row), from = versionsOf(row);
   filesShown.set(id, { from });
   const read = (texts: { tool: HarnessId; text: string }[]) => { if (filesShown.get(id)?.from === from) { filesShown.set(id, { from, texts }); rerender(); } };
-  void window.centralKnot.pluginItemTexts(row.plugin, row.marketName, row.kind, row.name).then(read, () => read([]));
+  // Each tool's copy by its own name (copyAt): two versions of the plugin may name the item differently.
+  const names = [...new Set(pluginTools(row).map(tool => row.copies[tool]!.name))];
+  void Promise.all(names.map(name => window.centralKnot.pluginItemTexts(row.plugin, row.marketName, row.kind, name)
+    .then(texts => texts.filter(text => row.copies[text.tool]?.name === name), () => []))).then(each => read(each.flat()));
 }
 /** Shows or hides a plugin item's file. */
 function toggleFile(row: PluginRow) {
@@ -177,8 +180,7 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
       excerptLine(t, row),
       handledNote(row, '', elId('open-whole', row))),
     h('div.details-tools', {}, toolsFor(t, kindOf(row)).map(tool => {
-      const install = row.copies[tool as HarnessId] ? row.installs[tool as HarnessId] : undefined;
-      const item: PluginItemAt | undefined = install && { kind: row.kind, name: row.name, tool: tool as HarnessId, install };
+      const item = copyAt(row, tool as HarnessId);
       return h('div.details-tool', {}, h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
         h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? cantSwitch(item) ?? switchWords(item) : ''].filter(Boolean).join(' ')),
@@ -1783,7 +1785,7 @@ function turnOn(t: Table, skill: ItemRow, use?: Tool, seen?: boolean): Click {
 /** The items a person's own row has through a plugin: in each tool with no copy of its own that has it through an installed plugin. */
 const throughItems = (t: Table, skill: ItemRow): PluginItemAt[] => toolsFor(t, skill.kind).flatMap(tool => { const item = itemThrough(skill, tool); return item ? [item] : []; });
 /** The items a plugin's row stands for: one in each tool that has it through the plugin. */
-const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(tool => (row.installs[tool] ? [{ kind: row.kind, name: row.name, tool, install: row.installs[tool]! }] : []));
+const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(tool => copyAt(row, tool) ?? []);
 
 /**
  * One click of a main switch (app.ts Click): the item's own copies' `changes` with its switches in the tools that have it

@@ -33,7 +33,7 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
       if (!contents) return { ...base, problem: UNREADABLE };
       // `path`: the skill's folder ('.' for the plugin's root) or the agent's file, as each copy has it (catalogdetail.ts skillsIn).
       const file = (kind: 'skill' | 'agent') => (part: NamedPart): PluginItem => ({ kind, name: part.name, description: part.description,
-        fileName: part.path === '.' ? plugin : kind === 'agent' ? nameOfFile(basename(part.path)) : basename(part.path) });
+        keyName: part.path === '.' ? plugin : kind === 'agent' ? nameOfFile(basename(part.path)) : basename(part.path) });
       const items: PluginItem[] = [
         ...contents.skills.map(file('skill')),
         ...contents.mcpServers.map(server => ({ kind: 'mcp' as const, name: server.name, description: '', runs: server.runs })),

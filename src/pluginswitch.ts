@@ -67,6 +67,20 @@ export function cantSwitch(item: PluginItemAt): string | undefined {
 }
 
 /**
+ * Why Copilot CLI can't switch a plugin's server alone, if it can't: it turns a server off by its bare name (partswitch.ts), so
+ * every server it has spelled exactly so goes with it, one of the person's own (`own`: his servers' names there, as its file spells
+ * them) or another installed plugin's (`installs`). A profile's plan holds such a server (profileplan.ts); the Library's own
+ * switch only warns of it (clickWords).
+ */
+export function sharesName(item: PluginItemAt, own: readonly string[], installs: readonly InstalledPlugin[]): string | undefined {
+  if (item.tool !== 'copilot-cli' || item.kind !== 'mcp') return undefined;
+  const hasIt = (install: InstalledPlugin) => install.tool === item.tool && install.items.some(part => part.kind === 'mcp' && part.name === item.name);
+  const other = installs.find(install => install !== item.install && hasIt(install));
+  const whose = own.includes(item.name) ? 'a server of your own there is named' : other ? `${other.plugin} there has a server named` : undefined;
+  return whose && `Copilot CLI turns a server off by its name alone, and ${whose} “${item.name}” too.`;
+}
+
+/**
  * The plugin choices that turn the item on or off in its tool, added to `draft` (or, clicked again before they run, taken back).
  * Each click changes the clicked item:
  * - an item with its own switch flips that switch. Where the whole plugin is off, the plugin goes on for it, with the

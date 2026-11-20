@@ -705,11 +705,11 @@ export interface PartRef { kind: PartKind; name: string }
  */
 export interface PluginItem { kind: PartKind; name: string; description: string; /** MCP servers: what it runs or connects to. */ runs?: string;
   /**
-   * Skills and agents: its name in the plugin's files, which Pi and OpenCode name its placed copy by (library.ts A SOURCE, the two
-   * key rules): a skill's folder's (for a plugin that is one skill, SKILL.md at its root, the plugin's name), an agent's file's
-   * without .md (values.ts nameOfFile). An MCP server has none: its name is both.
+   * Skills and agents: the name its key is made of (pluginrows.ts pluginItemKey), the one Pi and OpenCode name its placed copy by:
+   * a skill's folder's (for a plugin that is one skill, SKILL.md at its root, the plugin's), an agent's file's without .md
+   * (values.ts nameOfFile). An MCP server has none: its name is both.
    */
-  fileName?: string }
+  keyName?: string }
 /** A plugin installed whole in one tool, read from that tool's own records and its copy of the plugin. */
 export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
   /** The whole plugin is turned off in that tool. */ off?: boolean;
@@ -1354,7 +1354,7 @@ export interface ProfilesView {
    * The plugins the home records (pluginrecord.ts PluginEntry): an item linked to one is outside the profiles' own items
    * (profileplan.ts liveItems), and is that plugin's item (profileplan.ts pluginLive).
    */
-  plugins?: { id: string; plugin: string; marketName: string }[];
+  plugins?: { id: string; plugin: string; marketName: string; on: boolean }[];
   /** Why profiles can't be read or saved here, if they can't. */
   problem?: string;
 }

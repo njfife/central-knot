@@ -146,9 +146,9 @@ export function noUseSeen(item: LibraryItem | undefined, figure: RowFigure, read
 /** Whether Turn these off leaves an item to its own row: a plugin's item (a tool has it through one), or one linked to a plugin. */
 export const leftToItsRow = (facts: LibraryFacts) => Object.keys(facts.plugin ?? {}).length > 0 || !!(facts.fromSource && pluginOf(facts.fromSource.link));
 
-/** A plugin's own row (pluginrows.ts PluginRow) as the match reads it: its name in the plugin, through the plugin in each tool that has it (off where it is off there). */
+/** A plugin's own row (pluginrows.ts PluginRow) as the match reads it: through the plugin in each tool that has it, by that copy's own name (off where it is off there). */
 export const pluginRowFacts = (row: PluginRow): UsageFacts => ({ key: row.name, name: row.name, copies: {},
-  plugin: Object.fromEntries(pluginTools(row).filter(tool => row.copies[tool]).map(tool => [tool, { plugin: row.plugin, marketplace: row.marketName, name: row.name, ...(offIn(row, tool) ? { off: true as const } : {}) }])) });
+  plugin: Object.fromEntries(pluginTools(row).filter(tool => row.copies[tool]).map(tool => [tool, { plugin: row.plugin, marketplace: row.marketName, name: row.copies[tool]!.name, ...(offIn(row, tool) ? { off: true as const } : {}) }])) });
 
 /**
  * One tool's history in a reading: how many sessions it started within USAGE_DAYS (`recent`), and how far back it goes:
