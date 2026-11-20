@@ -2184,7 +2184,7 @@ async function practiceFlow() {
     same(`nothing is cut off at ${width}×${height} with an agent’s row open on its versions, one being read`, await a.run(CUT_OFF), []);
   }
   await fullSize(a);
-  await a.click(`#${rowPart('version-current', 'agents', 'code-reviewer', '1')}`);
+  same('Make current on the version read puts the other in its place in the list, shown from its top', await placeThroughRedraw(a, '.version-read-block', () => a.click(`#${rowPart('version-current', 'agents', 'code-reviewer', '1')}`)), [true, 0]);
   for (let tries = 0; tries < 30 && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'); tries++) await wait(100);
   same('Make current writes the earlier version to every harness, each file as it was', reviewerNow(), taken);
   same('it is the current version, first, naming the one it went back to, into which that one is folded (one row per content)', [(await versionsShown()).length, /^back to: found in Claude Code, .*Current$/.test((await versionsShown())[0])], [2, true]);
@@ -5926,6 +5926,14 @@ async function draftFlow() {
   const a = await launch(data, [], realHome);
   const says = async selector => (await a.text(selector)) ?? '';
   const untilThere = async selector => { for (let tries = 0; tries < 80 && !(await a.exists(selector)); tries++) await wait(100); return a.exists(selector); };
+  // A change outside, read in the background: a skill folder written into the home until the page is drawn again (the mark
+  // placeThroughRedraw leaves on the header), then taken away.
+  const readInBackground = async () => {
+    const folder = join(home, '.claude/skills/read-in-the-background');
+    mkdirSync(folder, { recursive: true }); writeFileSync(join(folder, 'SKILL.md'), text('read-in-the-background'));
+    for (let tries = 0; tries < 50 && !(await a.run(`!document.querySelector('#header > *').ckDrawn`)); tries++) await wait(100);
+    rmSync(folder, { recursive: true, force: true });
+  };
   const typeModel = name => a.run(`(() => { const box = document.querySelector('#base-draft-model'); box.value = ${JSON.stringify(name)}; box.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const argsSent = () => readNow(ran).trim().split('\n');
   // In view within a pixel: scroll positions are whole pixels, layout is not.
@@ -6046,6 +6054,11 @@ async function draftFlow() {
   for (const clickCount of [1, 2]) for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: word.x + 12, y: word.y, button: 'left', buttons, clickCount });
   await a.settle();
   same('a double-click on a word selects it, in the editor its first click opened', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionEnd)]; })()`), ['ins-text-codex-cli', 'last']);
+  same('scrolled, the focused editor stays where it was when a change outside is read in the background', await placeThroughRedraw(a, '#ins-text-codex-cli', readInBackground), [true, 40]);
+  same('and with nothing typed, its file replaced outside and read again shows the new text from its top', await placeThroughRedraw(a, '#ins-text-codex-cli', async () => {
+    writeFileSync(agentsMd, Array.from({ length: 30 }, (_, line) => `Replaced outside, line ${line + 1}.`).join('\n'));
+    await a.click('#header-refresh');
+  }), [true, 0]);
   await a.press('Escape');
   writeFileSync(agentsMd, codex0);
   await a.click('#header-refresh'); await openKind(a, 'skills'); await a.click('#nav-instructions');
@@ -6067,12 +6080,7 @@ async function draftFlow() {
     && (await a.run(`getComputedStyle(document.querySelector('#base-draft-prompt')).userSelect`)) === 'text', shown);
   check('the tools’ texts stay on the page under it, as they were', (await says('[aria-label="Claude Code instructions"] pre.ins-preview')) === claude0.trimEnd() && !(await a.exists('#base-head .ins-actions')), await says('#base-card'));
   await a.shot('draft-panel');
-  const elsewhere = join(home, '.claude/skills/read-in-the-background');
-  same('scrolled, the prompt stays where it was when a change outside is read in the background', await placeThroughRedraw(a, '#base-draft-prompt', async () => {
-    mkdirSync(elsewhere, { recursive: true }); writeFileSync(join(elsewhere, 'SKILL.md'), text('read-in-the-background'));
-    for (let tries = 0; tries < 50 && !(await a.run(`!document.querySelector('#header > *').ckDrawn`)); tries++) await wait(100);
-  }), [true, 40]);
-  rmSync(elsewhere, { recursive: true, force: true });
+  same('scrolled, the prompt stays where it was when a change outside is read in the background', await placeThroughRedraw(a, '#base-draft-prompt', readInBackground), [true, 40]);
   for (const [width, height] of [[860, 600], [1280, 800], [1728, 1080], [2560, 1440]]) {
     await sizeTo(a, width, height); same(`nothing cut off in the draft panel at ${width}×${height}`, await a.run(CUT_OFF), []); await a.shot(`draft-panel-${width}`);
   }

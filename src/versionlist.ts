@@ -55,7 +55,8 @@ function versionRow(view: VersionListView, version: Version, index: number, when
     h('span.version-from', {}, h('span', {}, versionOrigin(item, version, backWhen)),
       note ? h('span.version-note', { title: versionChangeHelp(change) }, note) : null, current ? h('span.version-current', {}, icon('check', 12), 'Current') : null),
     h('span.version-actions', {}, readIt, makeCurrent),
-    read ? h('div.version-read', { id: id('version-read-text') }, versionText(read.text, current ? undefined : read.current, id('version-read-block'))) : null);
+    read ? h('div.version-read', { id: id('version-read-text') },
+      versionText(read.text, current ? undefined : read.current, partId('version-read-block', view.rowId, version.hash))) : null);
 }
 
 /** `text` against `current`, as diff.ts readAgainst marks it: tinted only in this one, struck only in the current one. */
@@ -64,8 +65,8 @@ const againstCurrent = (current: string, text: string): Child[] =>
 
 /**
  * A version being read: its parts, headed by those that differ from the current version and with those differences marked;
- * or what stands in for them. Each block's id starts with `blockId`, which names the version read by its place in the list, as
- * `reading` does: its scroll is kept through a redraw, and another version's starts at its top.
+ * or what stands in for them. Each block's id starts with `blockId`, which names the version read by its content (its hash), not
+ * its place in the list: its scroll is kept through a redraw, and another version's starts at its top, Make current's swap too.
  */
 function versionText(read: VersionText, current: VersionText | undefined, blockId: string) {
   if (read === 'reading') return 'Reading…';

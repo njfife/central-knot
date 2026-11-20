@@ -262,22 +262,24 @@ function render() {
 
 /**
  * The redraw's one rule for scroll places: every element with an id that is scrolled, either way, as the redraw begins (a page's
- * scroll area, a box inside it, the result's card, a text field) is put back where it was when the redraw draws that id again.
- * A box's id names what it shows (an item's copies, a version, a plugin's file, a README as drawn), so other content starts at
- * its top. Back and Forward keep their own places, the page's scroll areas only (places.ts offsetsNow).
+ * scroll area, a box inside it, the result's card, a text field) is put back where it was when the redraw draws that id again,
+ * a text field only when it holds the same text. A box's id names what it shows (an item's copies, a version, a plugin's file, a
+ * README as drawn), so other content starts at its top. Back and Forward keep a rule of their own (places.ts), as a visit's place
+ * is stored and outlives moves, while a box's lasts only while its content is drawn.
  */
 const scrolledNow = () => [...document.querySelectorAll<HTMLElement>('[id]')].filter(node => node.scrollTop || node.scrollLeft)
-  .map(node => ({ id: node.id, top: node.scrollTop, left: node.scrollLeft }));
+  .map(node => ({ id: node.id, top: node.scrollTop, left: node.scrollLeft, text: fieldText(node) }));
+const fieldText = (node: Element) => (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement ? node.value : undefined);
 
 function renderWindow() {
-  const scrolled = offsetsNow(), kept = scrolledNow();
+  const visitOffsets = offsetsNow(), kept = scrolledNow();
   const selected = keepSelection();
   const { rail } = applyLayout();
   renderHeader(rail);
   drawPage(renderPage);
   // After the page, which marks the notices it paints seen: the sidebar's dot is for those it didn't.
   renderSidebar();
-  recordDraw(scrolled);
+  recordDraw(visitOffsets);
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
   runAfterLayout();
   renderStatus();
@@ -286,7 +288,10 @@ function renderWindow() {
   // opened (places.ts putBack); keepingFocus puts the focus back after, without scrolling to it (dom.ts keepSelection neither
   // focuses nor scrolls).
   selected();
-  for (const { id, top, left } of kept) { const node = document.getElementById(id); if (node) Object.assign(node, { scrollTop: top, scrollLeft: left }); }
+  for (const { id, top, left, text } of kept) {
+    const node = document.getElementById(id);
+    if (node && fieldText(node) === text) Object.assign(node, { scrollTop: top, scrollLeft: left });
+  }
   putBack();
   if (state.home) document.body.dataset.ready = 'true';
 }
