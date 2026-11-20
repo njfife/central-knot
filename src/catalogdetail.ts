@@ -201,8 +201,10 @@ function launchOf(tool: HarnessId, hook: Record<string, unknown>): DeclaredHook[
  * A plugin's hooks, each with where it is declared, as `tool` reads them: from its default files and each file its manifest or
  * entry names, and inline there (`named`: a path, an object, or a list of either). Codex and Copilot CLI read what a manifest
  * names in place of their default files (https://learn.chatgpt.com/docs/hooks; Copilot CLI's from its own manifest,
- * copilotManifest); Claude Code reads it beside hooks/hooks.json. `unread`: each file that is there but couldn't be read as
- * JSON, so what it declares isn't known.
+ * copilotManifest); Claude Code reads it beside hooks/hooks.json. For Codex an empty object names none and still stands in
+ * place of hooks/hooks.json, so `"hooks": {}` is how a plugin keeps Claude Code's hooks out of Codex (superpowers does); no
+ * field, or an empty list, leaves that file read (Codex's plugin loader, read at 0.142.3 and on main, measured with 0.169.1).
+ * `unread`: each file that is there but couldn't be read as JSON, so what it declares isn't known.
  */
 async function pluginHooks(tool: HarnessId | undefined, root: string, folder: string, named: unknown): Promise<{ hooks: DeclaredHook[]; unread: string[] }> {
   const sectionOf = (value: Record<string, unknown> | undefined) => record(value?.hooks) ?? value ?? {};
