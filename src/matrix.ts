@@ -457,15 +457,15 @@ const chipNames = { attention: 'Copies differ', unused: `No use seen in ${USAGE_
  * has a short form, its mark, for a crowded toolbar: the whole group folds together (dom.ts fitBars), with each name as its tooltip.
  */
 function filterBar(t: Table) {
-  const view = t.view;
+  const view = t.view, over = overEveryKind(t);
   // How many a chip shows: of what Find and From leave, in the segment (listedRows with that chip on), as the kind switch counts.
   const shows = (id: Filter) => listedRows({ ...t, view: { ...view, filter: id } }).length;
   // `count`: how many it shows, amber when they need something (`warn`).
   const chip = (id: Filter, label: string, glyph: IconName, count: number, warn = false) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn && count ? '.chip-warn' : ''}`,
     { type: 'button', id: `chip-${id}`, 'aria-pressed': String(view.filter === id), 'aria-label': `${label} ${count}`, 'data-tip': label, onclick: () => { view.filter = view.filter === id ? 'all' : id; rerender(); } },
-    icon(glyph, 13, 'chip-icon'), h('span.chip-label', {}, label), h('span.chip-count', {}, String(count)));
+    icon(glyph, 13, 'chip-icon'), h('span.chip-label', {}, label), heldCount('span.chip-count', String(count), listedRows({ ...over, view: { ...view, filter: id, from: 'anywhere', find: '' } }).length));
   // A chip is offered while something matches it, over every kind the Library holds (overEveryKind), or while it is the one on.
-  const over = overEveryKind(t), offered = (id: Filter, matching: boolean) => matching || view.filter === id;
+  const offered = (id: Filter, matching: boolean) => matching || view.filter === id;
   const chips = [offered('attention', copiesDifferChipShown(over)) ? chip('attention', chipNames.attention, 'diff', shows('attention'), true) : null,
     offered('unused', !!unusedCount(over)) ? chip('unused', chipNames.unused, 'history', shows('unused')) : null].filter(Boolean);
   return chips.length ? h('div.chips', { role: 'group', 'aria-label': 'Show only' }, chips) : null;
@@ -481,15 +481,33 @@ const fromOffered = (from: From) => fromMenu().flat().some(entry => entry.value 
 /** Whether the table's From shows a row, by where it came from (origins.ts originOf). */
 const fromHolds = (t: Table, row: ItemRow | PluginRow) => fromShows(t.view.from, originOf(row));
 
-/** The From menu, between the chips and Sort, on the Library and a tool's tabs: kept in the table's view, applied with the chip (picked); closed, as wide as its choice (style.css .from-select). */
+/**
+ * The From menu, between the chips and Sort, on the Library and a tool's tabs: kept in the table's view, applied with the chip
+ * (picked). Closed, it is as wide as its widest entry whatever is chosen, so a choice never changes the bar's fit, and has a chip's
+ * on look while it narrows the list (style.css .from-select). A choice that hides the opened row closes it, its armed Delete too.
+ */
 function fromChoice(t: Table) {
   const menu = fromMenu(), chosen = menu.flat().find(entry => entry.value === t.view.from) ?? menu[0]![0]!;
   const option = (entry: FromEntry) => h('option', { value: entry.value, selected: entry === chosen, title: entry.title }, entry.label);
   const [top, plugins, links] = menu, group = (label: string, entries: FromEntry[]) => (entries.length ? h('optgroup', { label }, entries.map(option)) : null);
-  const choose = (event: Event) => { t.view.from = (event.target as HTMLSelectElement).value as From; rerender(); };
+  const choose = (event: Event) => {
+    t.view.from = (event.target as HTMLSelectElement).value as From;
+    if (!listedRows(t).some(row => idOf(row) === t.view.comparing)) Object.assign(t.view, { comparing: undefined, confirmDelete: undefined });
+    rerender();
+  };
   return h('span.from', {}, h('label.from-word', { for: 'item-from' }, 'From'),
-    h('span.select.select-bar.from-select', {}, h('select', { id: 'item-from', 'aria-label': 'From', title: chosen.title ?? chosen.label, onchange: choose },
+    h(`span.select.select-bar.from-select${chosen.value === 'anywhere' ? '' : '.from-on'}`, {}, h('select', { id: 'item-from', 'aria-label': 'From', title: chosen.title ?? chosen.label, onchange: choose },
       top!.map(option), group('Plugins', plugins!), group(pageNames.sources, links!)), icon('chevrons-up-down', 14)));
+}
+
+/**
+ * A count on the toolbar (the kind switch's, a chip's) holding the room of `most`, the most it says with no Find, From or chip:
+ * what they leave never changes the bar's width, so a choice never changes its height (dom.ts fitBars).
+ */
+function heldCount(tag: string, counted: string, most: number) {
+  const count = h(tag, {}, counted);
+  count.style.minWidth = `${String(most).length}ch`;
+  return count;
 }
 
 /** Each kind's mark: before a Library row's name, on the kind switch and on the Overview's cards. */
@@ -514,15 +532,17 @@ const sharedNames = (t: Table) => {
 function kindSwitch(t: Table) {
   const home = state.home, kinds = home ? heldKinds(home) : [];
   if (!home || t.tool || kinds.length < 2) return null;
-  const every: Table = { ...t, kinds }, count = (kind: PageKind) => listedRows({ ...every, kinds: [kind] }).length;
+  const every: Table = { ...t, kinds }, count = (kind: PageKind, view = t.view) => listedRows({ ...every, kinds: [kind], view }).length;
+  const whole = (kind: PageKind) => count(kind, { ...t.view, filter: 'all', from: 'anywhere', find: '' });
   const unread = (kind: PageKind) => notAllRead(home, kind);
   // A kind not on show whose automatic change wasn't painted is marked, as the sidebar's dot says (renderer.ts).
   const news = (id: PageKind | 'all') => id !== 'all' && !t.kinds.includes(id) && unseenNotices(id).length > 0;
-  const choice = (id: PageKind | 'all', label: string, glyph: IconName, counted: number, unsure: boolean) => h(`button.kind-seg${segment() === id ? '.kind-seg-on' : ''}`, {
+  const choice = (id: PageKind | 'all', label: string, glyph: IconName, counted: number, most: number, unsure: boolean) => h(`button.kind-seg${segment() === id ? '.kind-seg-on' : ''}`, {
     type: 'button', id: `library-kind-${id}`, 'aria-pressed': String(segment() === id), title: unsure ? `${label}: ${counted} known; some couldn’t be read` : news(id) ? `${label}: an automatic change to see` : undefined,
-    onclick: () => { state.libraryKind = id; rerender(); } }, icon(glyph, 13, 'tone-muted'), h('span.kind-seg-label', {}, label), h('span.kind-seg-count', {}, `${counted}${unsure ? '?' : ''}`), news(id) ? h('span.kind-seg-news') : null);
-  return h('div.kind-switch', { role: 'group', 'aria-label': 'Kind' }, choice('all', 'All', 'layers', kinds.reduce((sum, kind) => sum + count(kind), 0), kinds.some(unread)),
-    ...kinds.map(kind => choice(kind, kindNouns[kind].title, kindGlyph[kind], count(kind), unread(kind))));
+    onclick: () => { state.libraryKind = id; rerender(); } }, icon(glyph, 13, 'tone-muted'), h('span.kind-seg-label', {}, label), heldCount('span.kind-seg-count', `${counted}${unsure ? '?' : ''}`, most), news(id) ? h('span.kind-seg-news') : null);
+  const sum = (each: (kind: PageKind) => number) => kinds.reduce((total, kind) => total + each(kind), 0);
+  return h('div.kind-switch', { role: 'group', 'aria-label': 'Kind' }, choice('all', 'All', 'layers', sum(count), sum(whole), kinds.some(unread)),
+    ...kinds.map(kind => choice(kind, kindNouns[kind].title, kindGlyph[kind], count(kind), whole(kind), unread(kind))));
 }
 
 /** Whether what this home holds of a kind isn't all known: a tool's file of it, or its own record, couldn't be read (not the home's record, which stops every kind alike). */
@@ -1276,7 +1296,7 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
   forgetOtherHomes(t, name);
   if (t.view.shownFor !== harness) startFresh(t.view, harness);
   if (files) return t;
-  // A plugin with no row left, or a source removed: From is let go, as a chip is below.
+  // A plugin with no row left, or a source removed: From is let go, at once (a chip waits while rows are pinned, below).
   if (!fromOffered(t.view.from)) t.view.from = 'anywhere';
   // Not while rows are pinned under it: they stay listed (drawTable).
   if (pinnedHere(t).rows.size > 0) return t;
@@ -1495,7 +1515,7 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   // Found; the others, only other tools have. A row whose own switch was clicked here stays under the heading it was under.
   const under = (role: Role) => [shown.filter(skill => placeIn(pins, idOf(skill), sectionOf(t, skill)) === role), shown.filter(skill => sectionOf(t, skill) === role)] as const;
   const sections = found ? [foundSection(t, found)] : [section(t, 'on', ...under('on')), section(t, 'found', ...under('found')), pluginSection(t, plugins), tool ? section(t, 'away', ...under('away')) : null, section(t, 'off', ...under('off'))];
-  // Nothing listed: none of the segment's kind here, or nothing Find and the chip leave (said apart from a home with nothing).
+  // Nothing listed: none of the segment's kind here, or nothing Find, From and the chip leave (said apart from a home with nothing).
   const nothing = shown.length || plugins.length ? null : !all.length && !plugged(t).rows.length && none ? none(t.kinds[0]!)
     : emptyState('search-x', 'Nothing matches', [view.find.trim() ? `“${view.find.trim()}”` : '', view.filter !== 'all' ? `Only: ${chipNames[view.filter]}` : '',
       view.from !== 'anywhere' ? `From: ${fromMenu().flat().find(entry => entry.value === view.from)?.label}` : ''].filter(Boolean).join(' · '),

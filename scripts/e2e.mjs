@@ -3372,7 +3372,7 @@ async function sourcesFlow() {
   await a.shot('sources-look');
   await a.click('#source-add');
   await until(() => a.exists('.source-row'));
-  check('Add says deslop is in Central Knot, Off', /Added github\.com\/stephenturner\/skill-deslop \(main\)\. deslop is in Central Knot, Off: turn it on in Skills\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('.band-done'));
+  check('Add says deslop is in Central Knot, Off, to turn on in the Library', /Added github\.com\/stephenturner\/skill-deslop \(main\)\. deslop is in Central Knot\. It is off\. Turn it on in the Library\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('.band-done'));
   same('in Central Knot, Off, in no tool', [record()?.on, Object.values(roots).some(root => existsSync(join(home, root, 'deslop')))], [false, false]);
   check('its row says it is in Central Knot, Off, and says beforehand that Check now can change skills and agents in the tools', /In Central Knot, Off/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
     && /Check now reads the link again, as Central Knot does once a day while Automatic sync is on: a skill, an agent or an MCP server changed there is updated in the tools it is on in, unless you changed it here \(then it waits for you\); one no longer there is turned off and taken out of them\./.test(await a.text('.source-row') ?? ''), await a.text('.source-row'));
@@ -3472,7 +3472,7 @@ async function sourcesFlow() {
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('name: deslop', 'name: unslop') });
   await a.click(`#source-check-${id}`);
   check('renamed there, Check now turns deslop Off and takes it out of every tool, said first, as a warning, with Turn on; unslop comes in Off', /^deslop is no longer at github\.com\/stephenturner\/skill-deslop \(main\): it was turned off and taken out of all 3 tools; Central Knot keeps it\./.test(await a.text('.band-done .band-text') ?? '')
-    && /unslop is in Central Knot, Off/.test(await a.text('.band-done .band-text') ?? '') && await a.exists('.band-done svg.tone-warning') && (await a.text('#outcome-undo')) === 'Turn deslop on'
+    && /unslop is in Central Knot\. It is off\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists('.band-done svg.tone-warning') && (await a.text('#outcome-undo')) === 'Turn deslop on'
     && await until(() => Object.values(roots).every(root => !existsSync(join(home, root, 'deslop')))) && record()?.on === false, await a.text('.band-done'));
   await a.click('#nav-history');
   check('History says the source dropped it', await until(async () => /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it, so it is off and removed from all 3 tools/.test(await a.text('.page') ?? '')), await a.text('.page'));
@@ -3501,7 +3501,7 @@ async function sourcesFlow() {
   await a.click('#nav-sources');
   check('its line on the source’s row says it is deleted, with Add', await until(async () => await a.exists(`#source-bring-${id}-skill-unslop`)) && /Not brought in: deleted from Central Knot\./.test(await a.text('.source-row .source-name[data-key="unslop"]') ?? ''), await a.text('.source-row'));
   await a.click(`#source-bring-${id}-skill-unslop`);
-  check('Add on its line brings unslop back into Central Knot, Off, and says so', await until(async () => /unslop is in Central Knot, Off: turn it on in Skills\./.test(await a.text('.band-done .band-text') ?? ''))
+  check('Add on its line brings unslop back into Central Knot, Off, and says so', await until(async () => /unslop is in Central Knot\. It is off\. Turn it on in the Library\./.test(await a.text('.band-done .band-text') ?? ''))
     && !unslop()?.deleted && unslop()?.on === false && !(await a.exists(`#source-bring-${id}-skill-unslop`)), [await a.text('.band-done'), unslop()]);
 
   // A source with a skill, an agent and an MCP server: the look lists all three, Add brings them in Off, the agent turned On on
@@ -3527,7 +3527,7 @@ async function sourcesFlow() {
   await a.shot('sources-look-agent');
   await a.click('#source-add');
   await until(async () => (await a.all('.source-row')).length === 2);
-  check('Add says notes, reviewer and relay are in Central Knot, Off, to turn on in Skills, Agents and MCP servers', /notes, reviewer and relay are in Central Knot, Off: turn them on in Skills, Agents and MCP servers\./.test(await a.text('.band-done .band-text') ?? '') && agentRecord()?.on === false, await a.text('.band-done'));
+  check('Add says notes, reviewer and relay are in Central Knot, Off, to turn on in the Library', /notes, reviewer and relay are in Central Knot\. All 3 are off\. Turn them on in the Library\./.test(await a.text('.band-done .band-text') ?? '') && agentRecord()?.on === false, await a.text('.band-done'));
   const kitId = await a.run(`[...document.querySelectorAll('.source-row')].find(row => row.textContent.includes('team/kit')).dataset.source`);
   await openKind(a, 'agents');
   await until(() => a.exists(`#${rowPart('open', 'agents', 'reviewer')}`));
@@ -9424,6 +9424,16 @@ async function fromFlow() {
   await done(a);
   await chooseFrom(a, 'yours');
   same('Your own: the two skills and the agent shared, not the source’s row just clicked', (await listed(a)).sort(), [id('agents', 'shared'), id('skills', 'notes'), id('skills', 'tidy')]);
+  // notes opened, docked beside the list, its Delete armed; another From hides its row: the row, its panel and Delete go with it.
+  await sizeTo(a, 1728, 1080);
+  await a.click(`#${rowPart('open', 'skills', 'notes')}`);
+  await a.click(`#${rowPart('delete', 'skills', 'notes')}`);
+  check('notes is open beside the list, its Delete armed', await a.exists(`#${rowPart('delete-confirm', 'skills', 'notes')}`));
+  await chooseFrom(a, `source:${ledger}`);
+  same('another From that hides notes closes its row and disarms its Delete', [await a.exists('.ov-row[aria-expanded="true"]'), await a.exists('.ov-page.docked'), await a.exists(`#${rowPart('delete-confirm', 'skills', 'notes')}`)], [false, false, false]);
+  await chooseFrom(a, 'anywhere');
+  same('back on Anywhere, notes is listed, not opened', [(await listed(a)).includes(id('skills', 'notes')), await a.exists('.ov-row[aria-expanded="true"]')], [true, false]);
+  await fullSize(a);
 
   // ---------- (c) A word in files: Any plugin, then the source; Turn these off and Undo ----------
   await chooseFrom(a, 'anywhere');
@@ -9470,10 +9480,13 @@ async function fromFlow() {
   // ---------- (d) A source of every kind, added while an old Find is set ----------
   const mixed = repo('platform-engineering-group/shared-agent-skills-for-the-whole-company', { 'skills/kit-skill/SKILL.md': md('kit-skill', 'skill', 'A skill.'), 'agents/kit-agent.md': md('kit-agent', 'agent', 'An agent.'),
     '.mcp.json': JSON.stringify({ mcpServers: { 'kit-server': { type: 'http', url: 'https://kit.example.test/mcp' } } }) });
+  // A source whose one skill, notes, differs from the person's own brings nothing in: its row has no Show in the Library.
+  await addSource(repo('team/notes-only', { 'skills/notes/SKILL.md': md('notes', 'skill', 'Another way of keeping notes.') }));
+  same('Show in the Library shows on a source with rows here, not on one with none', await a.run(`[...document.querySelectorAll('.source-row')].map(row => [row.textContent.includes('notes-only'), !!row.querySelector('[id^="source-library-"]')])`), [[false, true], [true, false]]);
   await openKind(a, 'all');
   await find(a, 'ledger');
   await addSource(mixed);
-  same('Add’s band offers Open in the Library', await a.text('#source-open-library'), 'Open in the Library');
+  same('Add’s band says the three are off, to turn on in the Library, and offers Open in the Library', [/are in Central Knot\. All 3 are off\. Turn them on in the Library\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('#source-open-library')], [true, 'Open in the Library']);
   await a.click('#source-open-library');
   same('it lands on All, From the source, Find let go: its skill, agent and server', [await fromIs(a), await a.run(`document.querySelector('#find').value`), (await listed(a)).sort()],
     [`source:${mixed}`, '', [id('agents', 'kit-agent'), id('mcp', 'kit-server'), id('skills', 'kit-skill')]]);
@@ -9493,8 +9506,22 @@ async function fromFlow() {
   for (let width = 1600; width >= 860; width -= 16) { await sizeTo(a, width, 819); folds.push(await a.run(`[[...document.querySelectorAll('.chip-label')].every(label => !label.offsetWidth), !document.querySelector('.from-word').offsetWidth, !document.querySelector('.order-word').offsetWidth]`)); }
   same('narrowing the window, the chips’ words fold before the captions of From and Sort, never after', [folds.some(([chips, from, sort]) => chips && !from && !sort), folds.some(([chips, from, sort]) => (from || sort) && !chips)], [true, false]);
   await fullSize(a);
-  await chooseFrom(a, 'anywhere');
-  check('on Anywhere, From is as wide as its word, not as the long name in its menu', await a.run(`document.querySelector('#item-from').clientWidth`) < 150, await a.run(`document.querySelector('#item-from').clientWidth`));
+  // At one width the toolbar has one height, whatever From, a chip or Find holds: no click moves the list. Where the bar wraps and
+  // has room, From keeps its caption; its box has a chip's on look while it narrows the list.
+  // Each state's height, and the widths of the bar's parts but Find (which takes the room left): the counts hold theirs too.
+  const barHeight = () => a.run(`(bar => [bar.getBoundingClientRect().height, ...[...bar.children].filter(part => !part.matches('.find')).map(part => part.getBoundingClientRect().width)].map(Math.round).join(' '))(document.querySelector('.ov-page .toolbar'))`);
+  for (const [width, height, sidebar] of [[1316, 819, 'open'], [860, 600, 'rail']]) {
+    const at = await sizedTo(width, height, sidebar), heights = {};
+    for (const from of ['anywhere', 'yours', 'plugins', 'plugin:review@market-one', 'sources', `source:${ledger}`, `source:${mixed}`]) { await chooseFrom(a, from); heights[from] = await barHeight(); }
+    await chooseFrom(a, 'anywhere');
+    await a.click('#chip-unused'); heights.chip = await barHeight(); await a.click('#chip-unused');
+    await find(a, 'ledger'); heights.find = await barHeight(); await find(a, '');
+    check(`${at}, the toolbar has one height, and its parts their widths, whatever From, a chip or Find holds`, new Set(Object.values(heights)).size === 1, heights);
+    const looks = [await a.run(`document.querySelector('.from-word').offsetWidth > 0`), await a.exists('.from-select.from-on')];
+    await chooseFrom(a, 'yours');
+    same(`${at}, the bar wrapped with room, From keeps its caption, and its box looks on only while it narrows the list`, [...looks, await a.exists('.from-select.from-on')], [true, false, true]);
+  }
+  await fullSize(a);
   await chooseFrom(a, `source:${mixed}`);
   await a.click(`#${rowPart('open', 'skills', 'kit-skill')}`);
   await a.click(`#${rowPart('files', 'skills', 'kit-skill')}`);
@@ -9631,6 +9658,14 @@ async function fromPictures({ md, put, repo, served, until, done }) {
   await pictures('long-source');
   await chooseFrom(g, 'plugin:review@market-one');
   await pictures('plugin');
+  // Your own; No use seen on; and Nothing matches under a From choice (review from market-one has no agent), named.
+  await chooseFrom(g, 'yours');
+  await pictures('yours', ['860', '1316-open']);
+  await chooseFrom(g, 'anywhere'); await g.click('#chip-unused');
+  await pictures('chip-on', ['860', '1316-open']);
+  await g.click('#chip-unused'); await chooseFrom(g, 'plugin:review@market-one'); await g.click('#library-kind-agents');
+  await pictures('nothing-matches', ['860', '1316-open']);
+  await g.click('#library-kind-all');
   // Automatic sync off, with a change waiting: the toolbar holds the waiting count too.
   await chooseFrom(g, 'anywhere');
   await g.click('#sync-switch');

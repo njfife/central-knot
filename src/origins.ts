@@ -2,7 +2,7 @@
 // (fromShows) and the choices it offers (fromChoices); the menu is drawn by matrix.ts fromChoice. Pure: no DOM. A row can come
 // from several places: the person's own (found, or kept from no recorded source and linked to no plugin, even where a tool also
 // gets it through a plugin); a Library source, by the link the row's view resolves (types.ts LibraryFacts fromSource; never the
-// item's stored source id, which a removed source leaves behind), marked removed once that source dropped it; and plugins, each
+// item's stored source id, which a removed source leaves behind), one that source dropped too; and plugins, each
 // by its link (sourcelink.ts pluginLink): a plugin's own row, a tool that gets the item through a plugin (LibraryFacts plugin),
 // an item linked to a plugin in Pi or OpenCode. Those two are what folds a plugin's item onto a row (pluginrows.ts onOwnRow).
 // Never from version history: an item edited away from its plugin, which the pass let go, is the person's own.
@@ -17,8 +17,8 @@ import type { HomeView, LibraryFacts } from './types.ts';
 export interface Origins {
   /** The person's own: from no recorded source and linked to no plugin. */
   yours: boolean;
-  /** The Library source it came from, by its link; `removed` once that source dropped it. */
-  source?: { link: string; removed?: true };
+  /** The Library source it came from, by its link (an item that source dropped too). */
+  source?: string;
   /** The plugins it came from, each by its link (pluginLink), once each. */
   plugins: string[];
 }
@@ -28,8 +28,7 @@ export function originOf(row: Pick<LibraryFacts, 'fromSource' | 'plugin'> | Plug
   if ('marketName' in row) return { yours: false, plugins: [pluginLink(row.plugin, row.marketName)] };
   const link = row.fromSource?.link, linkedToPlugin = !!link && pluginOf(link) !== undefined;
   const plugins = new Set([...(linkedToPlugin ? [link] : []), ...Object.values(row.plugin ?? {}).map(given => pluginLink(given.plugin, given.marketplace))]);
-  const source = link && !linkedToPlugin ? { link, ...(row.fromSource!.removed ? { removed: true as const } : {}) } : undefined;
-  return { yours: !link, ...(source ? { source } : {}), plugins: [...plugins] };
+  return { yours: !link, ...(link && !linkedToPlugin ? { source: link } : {}), plugins: [...plugins] };
 }
 
 /** Each row of a kind in a home with where it came from: the person's own rows (the kind's view), then a plugin's own (pageRows). */
@@ -47,6 +46,8 @@ export function pluginsHere(home: HomeView): Set<string> {
   return found.get(home)!;
 }
 const found = new WeakMap<HomeView, Set<string>>();
+/** The sources with a row of a kind this home holds, by their links: a source's row offers Show in the Library only then (sourcespage.ts). */
+export const sourcesHere = (home: HomeView) => new Set(heldKinds(home).flatMap(kind => originsIn(home, kind).flatMap(origins => origins.source ?? [])));
 
 /** The From menu's choice: Anywhere (every row), Your own, any plugin or one (pluginFrom), any Library source or one (sourceFrom). */
 export type From = 'anywhere' | 'yours' | 'plugins' | 'sources' | `plugin:${string}` | `source:${string}`;
@@ -59,7 +60,7 @@ export const sourceFrom = (link: string): From => `${SOURCE}${link}`;
 /** Whether a choice of From shows a row that came from `origins`. */
 export const fromShows = (from: From, origins: Origins): boolean => from === 'anywhere' || (from === 'yours' ? origins.yours
   : from === 'plugins' ? origins.plugins.length > 0 : from === 'sources' ? !!origins.source
-  : from.startsWith(SOURCE) ? origins.source?.link === from.slice(SOURCE.length) : origins.plugins.includes(from));
+  : from.startsWith(SOURCE) ? origins.source === from.slice(SOURCE.length) : origins.plugins.includes(from));
 
 /** One entry of the menu: its choice, its words, and the whole of what they shorten (a source's link). */
 export interface FromEntry { value: From; label: string; title?: string }

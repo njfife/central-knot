@@ -69,12 +69,12 @@ test('An item linked to a plugin in Pi, with no whole install anywhere, is that 
   assert.deepEqual(originsIn(homeOf([], [], [fact('auditor', ['claude-cli'])]), 'agents'), [{ yours: true, plugins: [] }]);
 });
 
-test('A source removed from the home leaves its items the person’s own; an item a source dropped keeps that source, marked removed', () => {
+test('A source removed from the home leaves its items the person’s own; an item a source dropped keeps that source', () => {
   const link = 'https://github.com/team/skills';
   // After Remove, the view no longer resolves the item's stored source id: it has no fromSource.
   assert.deepEqual(originOf(fact('kept', ['claude-cli'])), { yours: true, plugins: [] });
   const dropped = originOf(fact('gone', [], { fromSource: { link, removed: true } }));
-  assert.deepEqual(dropped, { yours: false, source: { link, removed: true }, plugins: [] });
+  assert.deepEqual(dropped, { yours: false, source: link, plugins: [] });
   assert.deepEqual([fromShows(sourceFrom(link), dropped), fromShows('sources', dropped), fromShows('yours', dropped)], [true, true, false]);
 });
 
