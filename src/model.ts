@@ -1,7 +1,8 @@
-// Small helpers both the main process and the page use: times in words (dayAndTime, timesApart), History's days (the choices
+// Small helpers both the main process and the page use (but atMostEvery, main's alone): times in words (dayAndTime, timesApart), History's days (the choices
 // and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, one install at a time (what
 // holds this build: holdingBuild, holdsUntil, QUIT_WAIT_MS), a notice's names, what the Caught up band names (caughtUpNames),
-// the notices a view set aside brought, carried into the next view (withSetAside), and grouping.
+// the notices a view set aside brought, carried into the next view (withSetAside), grouping, and a call paced to at most once
+// every so often (atMostEvery).
 // Pure: no DOM, no files. Tools' and kinds' names and lists in words are words.ts's.
 import type { HarnessId, HistoryDays, HomeView, OtherBuild, Snapshot, SyncNotice } from './types.ts';
 import { rowNames } from './words.ts';
@@ -111,4 +112,18 @@ export function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
     if (group) group.push(item); else groups.set(at, [item]);
   }
   return groups;
+}
+
+/**
+ * `run` paced: a call runs it at once, unless it ran less than `ms` ago; then it runs once when those `ms` end, however many calls
+ * came meanwhile, so the last of a burst is never lost (main.ts takes plugin text into word search so).
+ */
+export function atMostEvery(ms: number, run: () => void): () => void {
+  let waiting: ReturnType<typeof setTimeout> | undefined, owed = false;
+  const call = () => {
+    if (waiting) { owed = true; return; }
+    run();
+    waiting = setTimeout(() => { waiting = undefined; if (owed) { owed = false; call(); } }, ms);
+  };
+  return call;
 }

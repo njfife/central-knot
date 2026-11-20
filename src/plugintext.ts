@@ -308,7 +308,7 @@ export interface PluginTextJob {
    * Refresh, the four-hour read): each Git catalog was fetched just before, and a repository that failed is tried again at once.
    */
   listed(listing: Listed, fresh: boolean): void;
-  /** Quit, or the switch turned off: git is stopped, with every process it started; what had finished is saved, and then the promise ends. */
+  /** Quit, or the switch turned off: git is stopped, with every process it started; what had finished is saved, the count pushed, and then the promise ends. */
   stop(): Promise<void>;
   /** The count: of the plugins listed that can be read (`of`), those whose kept text was read at the pin now listed (`read`). */
   view(): PluginTextView;
@@ -336,7 +336,7 @@ export function pluginTextJob(host: PluginTextHost): PluginTextJob {
   let kept = new Map<string, PluginText>(), loaded = false;
   /** The listing as last told (`said`), or asked for when a home opened: its catalogs as read (`read`), and once they are (`done`). A newer telling replaces it. */
   let told: { said: Listed; read: Promise<Listing>; done?: Listing } | undefined;
-  let running: Promise<void> | undefined, again = false, cancel = new AbortController(), shown: PluginTextView = { read: 0, of: 0, elsewhere: 0, reading: false };
+  let running: Promise<void> | undefined, again = false, cancel = new AbortController(), shown: PluginTextView = { read: 0, of: 0, elsewhere: 0, reading: false, on: host.on() };
   /** Repositories that failed, by fetch key: when each may be tried again. */
   const waits = new Map<string, { tries: number; until: number }>();
   /** The time, as kept in `readAt`. */
@@ -365,10 +365,10 @@ export function pluginTextJob(host: PluginTextHost): PluginTextJob {
     try { await writeDurably(file, JSON.stringify({ format: FORMAT, plugins: [...kept.values()] })); }
     catch (error) { dirty = true; host.log(`plugin text: not saved: ${error instanceof Error ? error.message : String(error)}`); }
   }));
-  /** Pushes the count (view) to Settings. */
+  /** Pushes the count (view) to Settings and to Find (main.ts textChanged). */
   const show = (busy: boolean) => {
     const wanted = [...(told?.done?.wanted.values() ?? [])], read = wanted.filter(want => { const have = kept.get(want.key); return !!have && (!want.remote || have.from === want.from); });
-    shown = { read: read.length, of: wanted.length, elsewhere: wanted.filter(want => want.remote).length, reading: busy };
+    shown = { read: read.length, of: wanted.length, elsewhere: wanted.filter(want => want.remote).length, reading: busy, on: host.on() };
     host.changed(shown);
   };
 
@@ -473,8 +473,8 @@ export function pluginTextJob(host: PluginTextHost): PluginTextJob {
       told = telling(next);
       start();
     },
-    stop() { again = false; cancel.abort(); clearTimeout(later); return (running ?? Promise.resolve()).then(() => save()); },
-    view: () => shown,
+    stop() { again = false; cancel.abort(); clearTimeout(later); return (running ?? Promise.resolve()).then(() => save()).then(() => show(false)); },
+    view: () => ({ ...shown, on: host.on() }),
     texts: () => [...kept.values()],
   };
 }

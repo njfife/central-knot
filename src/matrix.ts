@@ -18,7 +18,8 @@
 // A row's switch or Add joins the page's list of clicks (flip, pluginRowSwitch → app.ts queueClick) and is worked out in its turn,
 // perhaps while another table is drawn: its closures hold the row and the table it was clicked on, so it is worked out there.
 // The Library's Find is answered by word search in main (search.ts, asked by askFind): while it has text the list is one list,
-// best first, under one heading (foundRows). A tool's tabs match their Find here (holdsFindText); the Files view, itself.
+// best first, under one heading (foundRows), and after it the items of listed plugins installed in no managed tool, which are
+// no rows of the Library's (catalogGroup). A tool's tabs match their Find here (holdsFindText); the Files view, itself.
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
@@ -37,7 +38,7 @@ import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
 import { keptBack } from './clickplan.ts';
-import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, SearchHit, SyncGate, SyncNotice } from './types.ts';
+import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, PluginTextView, SearchHit, SyncGate, SyncNotice } from './types.ts';
 import type { HarnessId, TakenInNotice, ThroughPlugin, UsageReading } from './types.ts';
 import { pluginOf } from './sourcelink.ts';
 import { heldKinds } from './presence.ts';
@@ -339,10 +340,14 @@ export function differingIn({ facts }: KindSource, tool: Tool) {
   return facts.filter(fact => inTool(fact, tool as HarnessId) && asksWhichCopy(fact)).length;
 }
 type Filter = 'all' | 'attention' | 'plugins' | 'unused';
+/** How many rows of the Library's group "In plugins you don't have" are drawn at first, and added by each "Show 10 more" (catalogGroup). */
+const MORE = 10;
 const newView = () => ({
   filter: 'all' as Filter,
   /** Find's text: on the Library, asked of word search (askFind); on a tool's tab, matched here (holdsFindText). Changed through newFind. */
   find: '',
+  /** How many rows of the Library's group "In plugins you don't have" are drawn (catalogGroup): MORE, and MORE more at each "Show 10 more". */
+  revealed: MORE,
   // A row's fields name it by its row id (itemrow.ts rowId).
   /** The row whose details are open. */
   comparing: undefined as string | undefined,
@@ -815,11 +820,10 @@ function nameCell(t: Table, skill: ItemRow, attention: boolean) {
  * marked "In its text:" (the description stays in the name's tooltip and the opened row). Cut to the row's one line as a
  * description is, and left out with every description where they have no room (settleDescriptions): the opened row has it then.
  */
-function aboutLine(t: Table, row: ItemRow | PluginRow) {
-  const excerpt = excerptOf(t, row);
-  if (excerpt) return h('span.ov-name-about.ov-excerpt', { title: `In its text: ${excerpt}` }, ...inItsText(excerpt));
-  return row.description ? h('span.ov-name-about', { title: row.description }, row.description) : null;
-}
+const aboutLine = (t: Table, row: ItemRow | PluginRow) => about(excerptOf(t, row), row.description);
+/** The line after a name, a catalog item's too (catalogRow): its text's excerpt, marked "In its text:", else its description. */
+const about = (excerpt: string | undefined, description: string) => (excerpt ? h('span.ov-name-about.ov-excerpt', { title: `In its text: ${excerpt}` }, ...inItsText(excerpt))
+  : description ? h('span.ov-name-about', { title: description }, description) : null);
 /** An opened row's line of its file's text, where Find found the row only there (excerptOf). */
 const excerptLine = (t: Table, row: ItemRow | PluginRow) => { const excerpt = excerptOf(t, row); return excerpt ? h('p.details-description.details-excerpt', {}, ...inItsText(excerpt)) : null; };
 /** An excerpt as a row and its details show it: led by a faint "In its text:". */
@@ -1298,33 +1302,36 @@ const holdsFindText = (t: Table, row: ItemRow | PluginRow) => {
 
 // ---------- The Library's Find, answered by word search (search.ts, in main) ----------
 
-/** An answer to the Library's Find (askFind): the text asked, the home main answered for, and the rows found by row id, best first. */
-interface FindAnswer { text: string; home: string; hits: Map<string, SearchHit> }
+/**
+ * An answer to the Library's Find (askFind): the text asked, the home main answered for, the Library's own rows found by row id,
+ * best first, and apart from them the catalog's (searchdocs.ts catalogDocs: the hits with a `kind`, which only theirs have), best first.
+ */
+interface FindAnswer { text: string; home: string; hits: Map<string, SearchHit>; catalog: SearchHit[] }
 /**
  * The answer in hand: the latest ask's (an older ask's answer is dropped, pagedata.ts), kept across reads and through a reply
  * that main has no index yet, until another is kept or another home is taken (findInHome). Used only for its text and home (hitsFor).
  */
 const findAnswer = pageData<FindAnswer>();
 /** Two answers alike: the same text and home, and the same rows in the same order, with the same excerpts. */
-const sameAnswer = (one?: FindAnswer, other?: FindAnswer) => !!one && !!other && JSON.stringify([one.text, one.home, [...one.hits.values()]]) === JSON.stringify([other.text, other.home, [...other.hits.values()]]);
+const sameAnswer = (one?: FindAnswer, other?: FindAnswer) => !!one && !!other && JSON.stringify([one.text, one.home, [...one.hits.values()], one.catalog]) === JSON.stringify([other.text, other.home, [...other.hits.values()], other.catalog]);
 /**
- * Asks main for the Library's Find text (preload.ts search), answered at once from the index last published; it never causes a
- * read of the home. What came of it: 'dropped' (a newer ask is on its way); 'same' (the answer in hand again, or no index again);
+ * Asks main for the Library's Find text (preload.ts search), answered at once from the index last published, with excerpts for
+ * the group's rows revealed (search.ts drawnAtOnce); it never causes a read of the home. What came of it: 'dropped' (a newer ask is on its way); 'same' (the answer in hand again, or no index again);
  * or 'new': another answer kept, which a hold in force follows (followHold), or no index (an answer in hand for this text and
  * home is still used, else holdsFindText).
  */
 async function askFind(text: string): Promise<'dropped' | 'same' | 'new'> {
   const before = { data: findAnswer.data, noIndex: findAnswer.state === 'failed' };
   const read = await readPageData(findAnswer, async () => {
-    const answer = await window.centralKnot.search(text);
-    return answer.ready ? { text, home: answer.home, hits: new Map(answer.rows.map(hit => [hit.id, hit])) } : null;
+    const answer = await window.centralKnot.search(text, views.library.revealed);
+    return answer.ready ? { text, home: answer.home, hits: new Map(answer.rows.filter(hit => !hit.kind).map(hit => [hit.id, hit])), catalog: answer.rows.filter(hit => hit.kind) } : null;
   });
   if (read === 'dropped') return 'dropped';
   if (read === 'ready' ? sameAnswer(before.data, findAnswer.data) : before.noIndex) return 'same';
   if (read === 'ready') followHold();
   return 'new';
 }
-/** The Library's Find asked again while it has text, wherever the person is; the Library is drawn again only for another answer. */
+/** The Library's Find asked again while it has text, wherever the person is (or for more of the group's rows); the Library is drawn again only for another answer. */
 function askAgain() {
   const text = views.library.find;
   if (text.trim()) void askFind(text).then(came => { if (came === 'new' && state.page === 'library') rerender(); });
@@ -1336,8 +1343,8 @@ export function findInHome(home: string) {
   if (findAnswer.data?.home !== home) resetPageData(findAnswer);
   askAgain();
 }
-/** Find given new text (typed, Escape, Clear Find, a link that lets it go, a view started afresh): an armed Delete disarms, and on the Library the rows held are let go. */
-const newFind = (view: View, text: string) => { Object.assign(view, { find: text, confirmDelete: undefined }); if (view === views.library) unpin(); };
+/** Find given new text (typed, Escape, Clear Find, a link that lets it go, a view started afresh): an armed Delete disarms, the group's first rows only are drawn, and on the Library the rows held are let go. */
+const newFind = (view: View, text: string) => { Object.assign(view, { find: text, confirmDelete: undefined, revealed: MORE }); if (view === views.library) unpin(); };
 /** Find emptied: Escape in it, or Clear Find under "Nothing matches". */
 const clearFind = (view: View) => { newFind(view, ''); rerender(); };
 /**
@@ -1353,8 +1360,10 @@ function findTyped(t: Table, text: string) {
 }
 /** The Library's list while its Find has text: one list of the rows Find finds (foundRows), under one heading, Sort at Best match. */
 const searching = (t: Table) => !t.tool && !filesView(t) && !!t.view.find.trim();
-/** The rows the answer in hand found, by row id, best first, on the Library's list while its Find has text and the answer is for that text and the home on screen; else none. */
-const hitsFor = (t: Table) => { const answer = findAnswer.data; return searching(t) && answer?.text === t.view.find && answer.home === state.home?.home ? answer.hits : undefined; };
+/** The answer in hand, on the Library's list while its Find has text and the answer is for that text and the home on screen; else none. */
+const answerFor = (t: Table) => { const answer = findAnswer.data; return searching(t) && answer?.text === t.view.find && answer.home === state.home?.home ? answer : undefined; };
+/** The Library's own rows the answer in hand found (answerFor), by row id, best first. */
+const hitsFor = (t: Table) => answerFor(t)?.hits;
 /** Whether Find finds a row: in the answer in hand (hitsFor), else as holdsFindText says. */
 const matchesFind = (t: Table, row: ItemRow | PluginRow) => { const hits = hitsFor(t); return hits ? hits.has(idOf(row)) : holdsFindText(t, row); };
 /** Where Find found a row only in its file's text, that text around the match (search.ts around), else none. */
@@ -1377,6 +1386,74 @@ function followHold() {
   for (const id of pins.rows.keys()) if (!hits.has(id)) pins.rows.delete(id);
   holdFound(t);
 }
+
+// ---------- Find's group "In plugins you don't have" (searchdocs.ts catalogDocs) ----------
+
+/**
+ * The group's hits for the Library's Find (the answer in hand: answerFor), best first, of the kinds the kind switch shows; none
+ * under a chip that shows no plugin's item (as chipShows says of a plugin's own row): then the group isn't drawn. None of them is
+ * a row of the Library's, so the kind switch, the chips, Results, pins and Turn these off (listedRows) count and touch none.
+ */
+const catalogHits = (t: Table) => (t.view.filter === 'all' || t.view.filter === 'plugins' ? answerFor(t)?.catalog.filter(hit => t.kinds.includes(pageOfPart[hit.kind!])) ?? [] : undefined);
+/**
+ * The group, after the Library's own results while Find has text: "Nothing in your Library matches" above it where nothing of
+ * his does; its heading, with the count of its matches, how to get one, and how much is read (coverageLine), the heading shown
+ * for that alone with no hit; its first `revealed` rows (catalogRow; after "Show 10 more", once main has sent their details);
+ * "Show 10 more" while there are more.
+ */
+function catalogGroup(t: Table, hits: SearchHit[]) {
+  const first = hits.slice(0, t.view.revealed), left = hits.length - first.length, rows = first.filter(hit => hit.item), said = coverageLine();
+  const reading = said && said.map(part => sectionNote(true, part));
+  const more = () => { t.view.revealed += MORE; rerender(); askAgain(); };
+  return h('div', { role: 'rowgroup' },
+    hits.length && answerFor(t)?.hits.size === 0 ? h('p.catalog-none', {}, 'Nothing in your Library matches') : null,
+    hits.length || reading ? h('div.ov-section.catalog-head', { role: 'row', 'data-section': 'catalog' }, h('div.ov-section-label', { role: 'cell' },
+      h('strong', {}, 'In plugins you don’t have'), h('span.ov-section-count', {}, plural(hits.length, 'match', 'matches')),
+      hits.length ? sectionNote(true, 'a name opens its plugin’s page, to install it there') : null, reading)) : null,
+    rows.map(hit => catalogRow(t, hit)),
+    left ? h('div.ov-more', { role: 'row' }, h('div', { role: 'cell' }, button({ variant: 'ghost', size: 'small', label: `Show ${Math.min(MORE, left)} more`, id: 'catalog-more', onclick: more }))) : null);
+}
+/**
+ * An item of the group: its kind's mark; its name, a link to its plugin's page (openPlugin), where the plugin's own switch installs
+ * it (Back returns to Find's text and the rows revealed, both kept in the view); its plugin and marketplace; its text's excerpt
+ * or its description. No switch: it is not here.
+ */
+function catalogRow(t: Table, hit: SearchHit) {
+  const item = hit.item!;
+  return h('div.ov-row.ov-catalog-row', { role: 'row', 'data-key': hit.id },
+    h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell' },
+      h('span.ov-name-main', {}, kindMark(t, pageOfPart[item.kind]), h('button.inline-link.ov-name-text', { type: 'button', id: partId('name', hit.id), title: `Open the plugin ${item.plugin} in ${pageNames.plugins}`, onclick: () => openPlugin({ source: item.source, plugin: item.plugin, marketplace: item.marketName }) }, item.name)),
+      h('span.row-tag.row-part', { title: `In the plugin ${item.plugin}, in the marketplace ${item.marketName}` }, icon('puzzle', 12, 'tone-faint'), `${item.plugin} · ${item.marketName}`),
+      about(hit.excerpt, item.description)));
+}
+/** What main last said of the plugin text (plugintext.ts view): the reading's words on the group's heading (coverageWords), and whether an empty Library offers Find (pluginsListed). Asked once, then followed. */
+let textNow: PluginTextView | undefined;
+/**
+ * How much is read while not every listed plugin is (more may show): "still reading" only while a run goes on (the view's
+ * `reading`, as Settings says it: settingspage.ts textCoverage), else how many are read; or that reading is off; none once all are read.
+ */
+const coverageWords = (text = textNow) => (!text?.of || (text.on && text.read >= text.of) ? undefined
+  : !text.on ? `reading plugins is off, ${text.read} of ${text.of} read`
+  : text.reading ? `still reading plugins, ${text.read} of ${text.of}: more may show` : `${text.read} of ${plural(text.of, 'plugin')} read: more may show`);
+/** Those words (coverageWords) and the way to its switch on Settings: on the group's heading, or under "Nothing matches". */
+function coverageLine() {
+  const words = coverageWords();
+  const toSettings = () => { showPage('settings'); requestAnimationFrame(() => document.getElementById('setting-plugin-text')?.scrollIntoView({ block: 'center' })); };
+  return words ? [h('span', { id: 'catalog-coverage' }, words), h('button.inline-link', { type: 'button', id: 'catalog-settings', onclick: toSettings }, 'Settings')] as const : undefined;
+}
+/** Whether a listed marketplace has plugins to read: a Library with nothing yet then offers Find (pages.ts libraryPage). */
+export const pluginsListed = () => !!textNow?.of;
+/** A new count from main: the line's words change in place (no click is lost to a redraw); the page is drawn again where the line, or an empty Library's Find, comes or goes, and the list acts. */
+function takeText(view: PluginTextView) {
+  const before = { words: coverageWords(), listed: pluginsListed() };
+  textNow = view;
+  const line = document.getElementById('catalog-coverage'), words = coverageWords();
+  if (line && words) line.textContent = words;
+  // While a keystroke's answer is awaited, what is below the toolbar is inert (findTyped): that answer's draw brings the line.
+  else if (state.page === 'library' && !document.querySelector('.ov-page [inert]') && (!!words !== !!before.words || pluginsListed() !== before.listed)) rerender();
+}
+window.centralKnot.onPluginTextChanged(takeText);
+void window.centralKnot.pluginText().then(takeText, () => undefined);
 
 /** Whether the chip that is on shows a row, a plugin's own too (with no chip, or From plugins). */
 const chipShows = (t: Table, row: ItemRow | PluginRow) => (isPluginRow(row) ? t.view.filter === 'all' || t.view.filter === 'plugins' : onChip(t, row));
@@ -1455,6 +1532,8 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   const pins = pinnedHere(t);
   const { shown, plugins } = drawnRows(t, pins);
   const found = searching(t) ? foundOrder(t, [...shown, ...plugins], pins) : undefined;
+  // After the Library's own, while Find has text: the items of plugins installed nowhere, unless the chip hides them (catalogHits).
+  const inPlugins = found && catalogHits(t);
   const find = findInput({ id: 'find', label: 'Find', value: view.find, onInput: text => findTyped(t, text) });
   // A copy question doesn't outlive the visit: back on the page, its row is closed. Nor does a row Find no longer lists stay open.
   const isOpen = (row: ItemRow | PluginRow) => idOf(row) === view.comparing;
@@ -1465,11 +1544,14 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
   // Found; the others, only other tools have. A row whose own switch was clicked here stays under the heading it was under.
   const under = (role: Role) => [shown.filter(skill => placeIn(pins, idOf(skill), sectionOf(t, skill)) === role), shown.filter(skill => sectionOf(t, skill) === role)] as const;
-  const sections = found ? [foundSection(t, found)] : [section(t, 'on', ...under('on')), section(t, 'found', ...under('found')), pluginSection(t, plugins), tool ? section(t, 'away', ...under('away')) : null, section(t, 'off', ...under('off'))];
-  // Nothing listed: none of the segment's kind here, or nothing Find and the chip leave (said apart from a home with nothing).
-  const nothing = shown.length || plugins.length ? null : !all.length && !plugged(t).rows.length && none ? none(t.kinds[0]!)
+  const sections = found ? [foundSection(t, found), inPlugins && catalogGroup(t, inPlugins)] : [section(t, 'on', ...under('on')), section(t, 'found', ...under('found')), pluginSection(t, plugins), tool ? section(t, 'away', ...under('away')) : null, section(t, 'off', ...under('off'))];
+  // Nothing listed: none of the segment's kind here (Find empty), or nothing Find and the chip leave, whatever the segment.
+  const nothing = shown.length || plugins.length || inPlugins?.length ? null : !view.find.trim() && !all.length && !plugged(t).rows.length && none ? none(t.kinds[0]!)
     : emptyState('search-x', 'Nothing matches', [view.find.trim() ? `“${view.find.trim()}”` : '', view.filter !== 'all' ? `Only: ${chipNames[view.filter]}` : ''].filter(Boolean).join(' · '),
       view.find.trim() ? button({ variant: 'outline', size: 'small', label: 'Clear Find', id: 'find-clear', onclick: () => clearFind(view) }) : undefined);
+  // With no hit at all, the group's line on the reading goes under those words, in view.
+  const said = nothing && inPlugins && coverageLine();
+  if (said) nothing!.append(h('p.catalog-coverage', {}, said[0], ' · ', said[1]));
   const table = [
     h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), orderChoice(t), h('div.toolbar-end', {}, toolbarState(t), usageControls(t))),
     usageBand(t),

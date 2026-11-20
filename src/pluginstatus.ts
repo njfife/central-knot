@@ -1,5 +1,6 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
-// it, whether it is installed there, how many plugins a tool has installed (pluginsInstalled), and a short summary of what it holds.
+// it, whether it is installed there, how many plugins a tool has installed (pluginsInstalled), whether it is installed in none
+// (installedNowhere, for Find), and a short summary of what it holds.
 import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
@@ -19,6 +20,16 @@ export function pluginsInstalled(home: Pick<HomeView, 'pluginItems' | 'pluginRec
   if (home?.pluginRecordsUnread?.includes(tool)) return { state: 'unknown' };
   return { state: 'read', count: new Set((home?.pluginItems ?? []).filter(install => install.tool === tool).map(install => `${install.plugin}@${install.marketName}`)).size };
 }
+
+/**
+ * Whether a marketplace's plugin is installed in no tool managed now, so Find may offer its items as ones the person doesn't
+ * have (searchdocs.ts catalogDocs): no install of it in the view (HomeView pluginItems: the managed tools' alone, so a tool left
+ * out doesn't count), an install turned Off or whose copy can't be read counting; `sameMarket`: whether a tool's spelling of its
+ * marketplace's source is this one's. Never claimed while some tool's record of its plugins can't be read, nor over an install
+ * whose marketplace that tool doesn't list (it may be this one).
+ */
+export const installedNowhere = (home: Pick<HomeView, 'pluginItems' | 'pluginRecordsUnread'>, plugin: string, sameMarket: (source: string) => boolean) =>
+  !home.pluginRecordsUnread?.length && !(home.pluginItems ?? []).some(install => install.plugin === plugin && (!install.source || sameMarket(install.source)));
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
