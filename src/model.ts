@@ -1,4 +1,4 @@
-// Small helpers both the main process and the page use: times in words (dayAndTime, timesApart), History's days (the choices
+// Small helpers both the main process and the page use (but atMostEvery, main's alone): times in words (dayAndTime, timesApart), History's days (the choices
 // and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, one install at a time (what
 // holds this build: holdingBuild, holdsUntil, QUIT_WAIT_MS), a notice's names, what the Caught up band names (caughtUpNames),
 // the notices a view set aside brought, carried into the next view (withSetAside), grouping, and a call paced to at most once

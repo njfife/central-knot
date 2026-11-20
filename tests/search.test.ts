@@ -241,3 +241,30 @@ test('an answer excerpts what the page draws at once: every row of the Library�
   assert.deepEqual([sent(10, 'catalog:agent-1')?.item?.name, sent(10, 'catalog:skill-29')], ['agent-1', { id: 'catalog:skill-29', kind: 'skill' }], 'what a row draws, for a row drawn at once; the rest, their id and kind');
   search.close();
 });
+
+/** An item of a plugin not installed (searchdocs.ts catalogDocs) whose text holds `words`. */
+const catalogDoc = (at: number, words: string): SearchDoc => ({ id: `catalog:${at}`, names: [`plugin-item-${at}`, 'plugin'], description: '', text: words,
+  catalog: { kind: 'skill', name: `plugin-item-${at}`, description: '', plugin: 'plugin', marketName: 'market', source: 'market' } });
+
+test('his own results are what they would be with no catalog document: every query of the set, with a plugin’s item holding all its words beside them', async () => {
+  const own = searchFollower(() => {}), both = searchFollower(() => {});
+  await own.follow('/home', 1, async () => library);
+  // Each typed text's words, whole, in a plugin's text: each try (every word, the nearest words, any word) would find them there.
+  await both.follow('/home', 1, async () => [...library, ...querySet.map(({ typed }, at) => catalogDoc(at, `${typed} ${typed.replace(/[^\p{L}\p{N}]+/gu, ' ')}`))]);
+  const his = (answer: ReturnType<typeof own.ask>) => (answer.ready ? answer.rows.filter(row => !row.kind) : []);
+  const differ = querySet.filter(({ typed }) => JSON.stringify(his(both.ask(typed))) !== JSON.stringify(his(own.ask(typed)))).map(({ typed }) => typed);
+  assert.deepEqual(differ, []);
+  own.close(); both.close();
+});
+
+test('two skills of his, one with “repair” and one with “pipeline”: “repair pipeline” lists both, before and after a plugin’s item holding both words is read', async () => {
+  const search = searchFollower(() => {});
+  const mine = [{ id: 'skills-restore-runbook', names: ['restore-runbook'], description: 'A practical guide.', text: 'Repair damaged builds.' },
+    { id: 'skills-deploy-runbook', names: ['deploy-runbook'], description: 'A practical guide.', text: 'Use the pipeline.' }];
+  const ids = () => { const answer = search.ask('repair pipeline'); return answer.ready ? answer.rows.map(row => row.id) : []; };
+  await search.follow('/home', 1, async () => mine);
+  const before = ids();
+  await search.follow('/home', 2, async () => [...mine, catalogDoc(0, 'Repair the pipeline.')]);
+  assert.deepEqual([before.sort(), ids()], [['skills-deploy-runbook', 'skills-restore-runbook'], [...before, 'catalog:0']]);
+  search.close();
+});

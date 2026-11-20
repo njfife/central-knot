@@ -15,10 +15,11 @@
 // - the excerpt of a row found in its text alone, asked apart from the ranking and only for the rows named (`Index.excerpts`):
 //   the file's own words from BEFORE words before the first that matched, EXCERPT_WORDS in all, "…" where cut; where more of
 //   the typed words matched in a camelCase word's parts than in the text, around that word (`markWord`);
-// - the one index main keeps (`searchFollower`): built from a view's documents in slices that give way to main's other work,
-//   superseded by a newer view while it gathers or builds, tagged again (not rebuilt) when the content is the same, closed
-//   when replaced or superseded, when another home opens and at quit; its answer excerpts only the rows the page draws at
-//   once (`drawnAtOnce`), and sends a catalog item's details only for those.
+// - the index main keeps (`searchFollower`), in two parts, his own documents and the catalog's, each built and asked alone so
+//   that plugin text never changes what his own Find returns: built from a view's documents in slices that give way to main's
+//   other work, superseded by a newer view while it gathers or builds, a part kept (not rebuilt) when its content is the same,
+//   closed when replaced or superseded, when another home opens and at quit; its answer excerpts only the rows the page draws
+//   at once (`drawnAtOnce`), and sends a catalog item's details only for those.
 // Nothing is written to disk and nothing is fetched. A document's id is opaque here (a Library row's id, or a catalog item's,
 // which carries what its row draws: `catalog`). Not here: what a document is (searchdocs.ts libraryDocs, catalogDocs), the
 // answer's shape (types.ts SearchAnswer), the page's use of it.
@@ -212,47 +213,58 @@ function distance(from: string, to: string, most: number): number {
 export interface Published { home: string; readId: number }
 
 /**
- * The rows of an answer whose excerpts are asked for: those the page draws as soon as it has the answer (matrix.ts): every row
- * of the Library's own, and of the catalog's, the first `shown` of every kind together and of each kind alone (a segment of the
- * kind switch). The others are ranked only, for the counts; "Show 10 more" asks again with ten more (matrix.ts catalogGroup).
+ * The rows of an answer whose excerpts are asked for: those the page draws as soon as it has the answer. The page's rule, which
+ * this follows and which changes with it (matrix.ts drawTable, catalogHits, catalogGroup): every row of the Library's own, and of
+ * the catalog's the first `shown` (View revealed) of the kinds the kind switch shows, which here is every kind together and each
+ * alone, so a change of segment needs no new ask. The others are ranked only, for the counts; "Show 10 more" asks again.
  */
 function drawnAtOnce(rows: SearchHit[], shown: number): Set<string> {
   const catalog = rows.filter(row => row.kind), first = (kind?: PartKind) => catalog.filter(row => !kind || row.kind === kind).slice(0, shown);
   return new Set([...rows.filter(row => !row.kind), ...first(), ...first('skill'), ...first('agent'), ...first('mcp')].map(row => row.id));
 }
 
+/** One part of the index main keeps (his own documents, or the catalog's), with the digest of what it was built from; no index for none. */
+interface Part { digest: string; index?: Index }
+
 /**
- * The one index main keeps. `follow` takes each new view of a home: its documents gathered, then built, or (the same content)
- * the index tagged with the new read; a newer `follow` supersedes one still gathering or building; another home closes the
- * old index at once. `published` hears each build or new tag. `ask` answers from the index as published, never waiting on a
- * build: every row ranked, the excerpts and a catalog item's details of those drawnAtOnce. `build`: how an index is made (a test counts them).
+ * The index main keeps, in two parts: the Library's own documents and the catalog's (those with `catalog`), each built and asked
+ * on its own, so that what his own Find returns, in what order and with what words a typo is mended to, is what it would be with
+ * no plugin text; and a change on one side builds that side alone. `follow` takes each new view of a home: its documents
+ * gathered, then each part built, or (the same content) kept and tagged with the new read; a newer `follow` supersedes one still
+ * gathering or building; another home closes the old parts at once. `published` hears each build or new tag. `ask` answers from
+ * the parts as published, never waiting on a build: his rows ranked, then the catalog's; the excerpts and a catalog item's
+ * details of those drawnAtOnce. `build`: how an index is made (a test counts them).
  */
 export function searchFollower(published: (tag: Published) => void, build = buildIndex) {
-  let current: (Published & { digest: string; index: Index }) | undefined;
+  let current: (Published & { parts: Part[] }) | undefined;
   let turn = 0;
+  const closing = (parts: Part[], kept: Part[] = []) => parts.forEach(part => { if (!kept.some(other => other.index === part.index)) part.index?.close(); });
   return {
     async follow(home: string, readId: number, gather: () => Promise<SearchDoc[]>): Promise<void> {
       const mine = ++turn;
-      if (current && current.home !== home) { current.index.close(); current = undefined; }
+      if (current && current.home !== home) { closing(current.parts); current = undefined; }
       const docs = await gather();
       if (mine !== turn) return;
-      const digest = createHash('sha256').update(JSON.stringify([...docs].sort(byId))).digest('hex');
-      if (current?.digest === digest) current = { ...current, readId };
-      else {
-        const index = await build(docs, () => mine === turn);
-        if (!index) return;
-        current?.index.close();
-        current = { home, readId, digest, index };
+      const parts: Part[] = [];
+      for (const [at, side] of [docs.filter(doc => !doc.catalog), docs.filter(doc => doc.catalog)].entries()) {
+        const digest = createHash('sha256').update(JSON.stringify([...side].sort(byId))).digest('hex'), was = current?.parts[at];
+        const index = was?.digest === digest ? was.index : side.length ? await build(side, () => mine === turn) : undefined;
+        if (side.length && !index) { closing(parts, current?.parts); return; }
+        parts.push({ digest, index });
       }
+      closing(current?.parts ?? [], parts);
+      current = { home, readId, parts };
       published({ home, readId });
     },
     ask(typed: string, shown = 0): SearchAnswer {
       if (!current) return { ready: false };
-      const rows = current.index.ask(typed), drawn = drawnAtOnce(rows, shown), excerpts = current.index.excerpts(typed, [...drawn]);
+      const indexes = current.parts.flatMap(part => (part.index ? [part.index] : []));
+      const rows = indexes.flatMap(index => index.ask(typed)), drawn = drawnAtOnce(rows, shown);
+      const excerpts = new Map(indexes.flatMap(index => [...index.excerpts(typed, [...drawn])]));
       // A catalog row not drawn at once goes as its id and kind: the counts need no more (3,332 rows for "a": 0.3 MB, not 2.2).
       const sent = (row: SearchHit): SearchHit => (!drawn.has(row.id) ? { id: row.id, ...(row.kind ? { kind: row.kind } : {}) } : excerpts.has(row.id) ? { ...row, excerpt: excerpts.get(row.id) } : row);
       return { ready: true, home: current.home, readId: current.readId, rows: rows.map(sent) };
     },
-    close() { turn++; current?.index.close(); current = undefined; },
+    close() { turn++; closing(current?.parts ?? []); current = undefined; },
   };
 }

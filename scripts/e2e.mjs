@@ -6874,6 +6874,7 @@ async function pluginTextFlow() {
   // This home has nothing of its own: with a marketplace listed, the Library still offers Find, which finds what is read.
   const until = async (test, ms) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
   await a.click('#nav-library');
+  check('with nothing of any kind, on All, the Library’s own empty words, under Find', await until(() => a.exists('#find'), 10000) && (await a.text('.empty-title')) === 'Nothing in the Library yet', await a.text('.empty-title'));
   check('a Library with nothing yet offers Find, and finds spark-app in the plugin not installed, and no line once all are read', await until(async () => {
     await a.run(`(() => { const i = document.querySelector('#find'); if (!i) return; i.value = 'spark-app'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
     await a.settle();
@@ -6926,7 +6927,11 @@ async function catalogFindChecks() {
     for (const args of [['init', '--quiet', '--initial-branch=main'], ['add', '-A'], ['-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', 'commit', '--quiet', '-m', name], ['config', 'uploadpack.allowFilter', 'true']]) spawnSync('git', ['-C', at, ...args]);
     return at;
   };
-  const devkit = repo('devkit', { 'skills/changelog-writer/SKILL.md': doc('changelog-writer', 'Drafts release entries from merged work.', 'Group the merged pull requests by area.'), 'agents/triager.md': doc('triager', 'Sorts new issues.', 'You read each new issue and label it.') });
+  const devkit = repo('devkit', { 'skills/changelog-writer/SKILL.md': doc('changelog-writer', 'Drafts release entries from merged work.', 'Group the merged pull requests by area. Repair the pipeline when it breaks.'), 'agents/triager.md': doc('triager', 'Sorts new issues.', 'You read each new issue and label it.') });
+  // A plugin with a long name, its skill's name long too, and an MCP server.
+  const toolkit = 'platform-engineering-release-automation-toolkit';
+  repo(toolkit, { 'skills/quarterly-release-readiness-and-rollback-review/SKILL.md': doc('quarterly-release-readiness-and-rollback-review', 'Reviews whether a release is ready, and how it would be rolled back, every quarter.', 'Check the ledger of changes first.'),
+    '.mcp.json': JSON.stringify({ mcpServers: { 'ledger-feed': { command: 'npx', args: ['-y', 'ledger-feed'] } } }) });
   const two = at => String(at).padStart(2, '0');
   repo('parcels', Object.fromEntries([...Array.from({ length: 25 }, (_, at) => [`skills/courier-${two(at + 1)}/SKILL.md`, doc(`courier-${two(at + 1)}`, 'Carries a parcel on the rounds.', `Print the waybill for parcel ${at + 1}.`)]),
     ...[1, 2, 3].map(at => [`agents/dispatcher-${at}.md`, doc(`dispatcher-${at}`, 'Plans the rounds.', 'Check each waybill first.')])]));
@@ -6934,7 +6939,7 @@ async function catalogFindChecks() {
   const parcelsEntry = { name: 'parcels', source: { source: 'github', repo: 'acme/parcels' }, description: 'Parcel rounds.' };
   catalog(market, 'catalog-market', [{ name: 'devkit', source: { source: 'github', repo: 'acme/devkit' }, description: 'Tools for a release.' }, parcelsEntry,
     { name: 'slowpoke', source: { source: 'url', url: 'https://slow.example.test/acme/slowpoke.git' }, description: 'Never answers.' }]);
-  catalog(fork, 'catalog-fork', [{ name: 'devkit', source: { source: 'github', repo: 'acme/devkit' }, description: 'The same tools, from a fork.' }]);
+  catalog(fork, 'catalog-fork', [{ name: 'devkit', source: { source: 'github', repo: 'acme/devkit' }, description: 'The same tools, from a fork.' }, { name: toolkit, source: { source: 'github', repo: `acme/${toolkit}` }, description: 'Release automation.' }]);
   symlinkSync(market, alias);
   put(H.home, {
     '.claude/plugins/known_marketplaces.json': JSON.stringify({ 'catalog-market': { source: { source: 'directory', path: market } }, 'catalog-fork': { source: { source: 'directory', path: fork } } }),
@@ -6946,6 +6951,10 @@ async function catalogFindChecks() {
   skill(H.claude, 'spare', doc('spare', 'Keeps the waybill numbers.', 'One line per waybill.'));
   skill(H.claude, 'clash', text('clash', 'One way.'));
   skill(H.copilot, 'clash', text('clash', 'Another way.'));
+  // His two skills, one with "repair" and one with "pipeline"; and sixteen of "the ledger", enough to push the group below the fold.
+  skill(H.claude, 'restore-runbook', doc('restore-runbook', 'A practical guide.', 'Repair damaged builds.'));
+  skill(H.claude, 'deploy-runbook', doc('deploy-runbook', 'A practical guide.', 'Use the pipeline.'));
+  for (let at = 1; at <= 16; at++) skill(H.claude, `ledger-${two(at)}`, doc(`ledger-${two(at)}`, 'Balances the ledger.', 'Add up each column.'));
   writeClaudeInstall(H.home, 'local-market', 'kit', '1.0.0', { 'skills/zulu/SKILL.md': text('zulu', 'Plugin skill.') });
   // Claude Code, standing in: installs devkit from catalog-market as Claude Code would, from its repository's files.
   const devkitCopy = join(H.home, '.claude/plugins/cache/catalog-market/devkit/1.0.0');
@@ -6980,7 +6989,10 @@ esac
   const findText = async typed => { await a.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle(); };
   /** The group's rows as drawn: each one's name and its plugin and marketplace. */
   const group = () => a.all('.ov-catalog-row', `[e.querySelector('.ov-name-text').textContent, e.querySelector('.row-tag').textContent]`);
-  const groupCount = () => a.text('[data-section="catalog"] .ov-section-count');
+  const groupCount = async () => (await a.text('[data-section="catalog"] .ov-section-count'))?.replace(/ match(es)?$/, '') ?? null;
+  /** The group's heading line as it reads. */
+  const heading = () => a.text('[data-section="catalog"]');
+  const enter = async () => { for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) }); await a.settle(); };
   const own = () => a.all('.ov-row[data-key]:not(.ov-catalog-row)', 'e.dataset.key');
   const counts = () => a.run(`Object.fromEntries([...document.querySelectorAll('.kind-seg')].map(seg => [seg.id.replace('library-kind-', ''), seg.querySelector('.kind-seg-count').textContent]))`);
   const coverage = () => a.text('#catalog-coverage');
@@ -7006,12 +7018,33 @@ esac
   await openKind(a, 'all');
   // The index takes the text in at most once every five seconds while it changes (main.ts textChanged), and once at the end.
   check('the listed plugins are read but slowpoke, whose host refuses, and the index has taken their text in: the group, and its line saying so',
-    await until(async () => { await findText('waybill'); return (await coverage()) === 'Not all plugins have been read yet: 3 of 4.' && (await groupCount()) === '28'; }, 30000), [await coverage(), await groupCount()]);
+    await until(async () => { await findText('waybill'); return (await coverage()) === 'still reading plugins, 4 of 5: more may show' && (await groupCount()) === '28'; }, 30000), [await coverage(), await groupCount()]);
+  same('the group’s heading says its count is of matches, how to get one, and how much is read, with the way to Settings',
+    [await heading(), await a.exists('[data-section="catalog"] #catalog-settings')], ['In plugins you don’t have28 matches·a name opens its plugin’s page, to install it there·still reading plugins, 4 of 5: more may show·Settings', true]);
+  // His own results are what they would be with no plugin text: "repair" in one skill of his, "pipeline" in another, both in devkit's.
+  await findText('repair pipeline');
+  same('"repair pipeline": both his skills still, and devkit’s, which holds both words, in the group', [(await own()).sort(), (await group()).map(([name]) => name)],
+    [[rowPart('', 'skills', 'deploy-runbook'), rowPart('', 'skills', 'restore-runbook')], ['changelog-writer', 'changelog-writer']]);
+  await findText('spare');
+  same('a match of his alone: the group’s heading still says how much is read', [await groupCount(), (await group()).length, !!(await a.run(`document.querySelector('[data-section="catalog"] #catalog-coverage')?.textContent`))], ['0', 0, true]);
   const published = await a.run('window.ckPublished');
   await pictures('own-row-and-group');
   await findText('zzqx');
-  check('nothing found anywhere: Nothing matches, and under it the line on the reading', (await a.text('.empty-title')) === 'Nothing matches' && !!(await coverage()), [await a.text('.empty-title'), await coverage()]);
+  check('nothing found anywhere: Nothing matches, and under it the line on the reading', (await a.text('.empty-title')) === 'Nothing matches' && (await coverage()) === 'still reading plugins, 4 of 5: more may show', [await a.text('.empty-title'), await coverage()]);
   await pictures('nothing-matches', [[860, 600], [1316, 819, false]]);
+  // A long item's name in a plugin with a long name; then sixteen rows of his for "ledger", the group below them with an MCP server.
+  await findText('quarterly-release-readiness');
+  await pictures('long-names', [[860, 600]]);
+  await findText('ledger');
+  same('"ledger": his sixteen rows, then the plugin’s skill and its MCP server', [(await own()).length, (await group()).map(([name]) => name).sort()], [16, ['ledger-feed', 'quarterly-release-readiness-and-rollback-review']]);
+  await pictures('many-own-rows', [[1316, 819, false]]);
+  if (shots) {
+    await sizeTo(a, 1316, 819);
+    await a.run(`document.querySelector('[data-section="catalog"]').scrollIntoView({ block: 'center' })`);
+    await wait(300);
+    await a.shot('catalog-many-own-rows-scrolled-to-group-1316-open-light');
+    await fullSize(a);
+  }
 
   // The manager's case: a skill she remembers, in a plugin whose name says nothing of it.
   await findText('changelog-writer');
@@ -7022,9 +7055,23 @@ esac
     const rows = await group(), [name, from] = rows[at] ?? [];
     await follow(at);
     same(`"${typed}": its rows are changelog-writer’s two, and the link of each opens devkit’s page in its own marketplace`, [rows.map(([each]) => each), await opened()], [['changelog-writer', 'changelog-writer'], [from?.split(' · ')[1], 'devkit']]);
+    if (shots && typed === 'changelo' && at === 0) { await sizeTo(a, 1316, 819); await wait(300); await a.shot('catalog-plugin-page-opened-1316-light'); }
     await mouseBack();
+    if (shots && typed === 'changelo' && at === 0) { await wait(300); await a.shot('catalog-after-back-1316-light'); await fullSize(a); }
     same(`"${typed}": the mouse’s Back returns to the Library with Find’s text and the same rows`, [await a.run(`document.querySelector('#find')?.value`), await group()], [typed, rows]);
   }
+
+  // The keyboard's focus on a row's name stays there through a redraw (a background view), and Enter opens its plugin.
+  await findText('changelog-writer');
+  await a.run(`document.querySelector('.ov-catalog-row .ov-name-text').focus()`);
+  const views = await a.run('window.ckPublished');
+  skill(H.claude, 'focus-probe');
+  check('a background view lands', await until(async () => (await a.run('window.ckPublished')) > views, 30000));
+  await a.settle();
+  same('the focus is still on the row’s name after the redraw', await a.run(`document.activeElement?.closest('.ov-catalog-row') ? document.activeElement.textContent : document.activeElement?.tagName`), 'changelog-writer');
+  await enter();
+  same('Enter on it opens its plugin’s page', (await opened())[1], 'devkit');
+  if (await a.exists('.crumb-here')) await mouseBack(); else await a.click('#nav-library');
 
   // Only catalog hits: "rounds" is in no row of the Library's.
   await findText('rounds');
@@ -7033,12 +7080,16 @@ esac
   same('only catalog hits: no Results and no Nothing matches, the group: 28, ten rows, Show 10 more; the kind switch counts the Library’s rows alone',
     [await own(), await a.exists('[data-section="results"]'), await a.text('.empty-title'), await groupCount(), (await group()).length, await a.text('#catalog-more'), await counts()],
     [[], false, null, '28', 10, 'Show 10 more', { all: '0', skills: '0', mcp: '0', agents: '0' }]);
+  same('nothing of his matches: one line says so above the group', await a.text('.catalog-none'), 'Nothing in your Library matches');
   await a.click('#catalog-more');
   await until(async () => (await group()).length === 20);
   same('Show 10 more: twenty, then Show 8 more', [(await group()).length, await a.text('#catalog-more')], [20, 'Show 8 more']);
   if (shots) { await a.run(`document.querySelector('#catalog-more').scrollIntoView({ block: 'end' })`); await a.shot('catalog-twenty-860-light'); await sizeTo(a, 860, 600); }
   await a.click('#library-kind-agents');
   same('the kind switch on Agents: the group’s three agents, its count 3, no Show more', [(await group()).map(([name]) => name), await groupCount(), await a.exists('#catalog-more')], [['dispatcher-1', 'dispatcher-2', 'dispatcher-3'], '3', false]);
+  await findText('zzqx');
+  same('on Agents, where he has none, a word nothing has: Nothing matches, with Clear Find', [await a.text('.empty-title'), await a.exists('#find-clear')], ['Nothing matches', true]);
+  await findText('rounds');
   await a.click('#library-kind-all');
   const chips = await a.all('.chips .chip', 'e.id');
   same('the chips offered: Copies differ, From plugins, No use seen', chips, ['chip-attention', 'chip-plugins', 'chip-unused']);
@@ -7080,6 +7131,28 @@ esac
   same('nothing cut off at 860×600 with the group', await a.run(CUT_OFF), []);
   await fullSize(a);
 
+  // In a development run, main's answer held back: a new count arriving between a keystroke and the answer leaves the list inert.
+  const inspector = a.inspect ? await a.main() : undefined;
+  if (inspector) {
+    await findText('rounds');
+    // Quiet first: two seconds with no index published, so no background view of the home redraws the list in what is checked.
+    for (let last = await a.run('window.ckPublished'), quiet = 0; quiet < 20;) { await wait(100); const now = await a.run('window.ckPublished'); quiet = now === last ? quiet + 1 : 0; last = now; }
+    const real = await a.run('window.centralKnot.pluginText()');
+    await inspector.run(`(() => { const handlers = electron.ipcMain._invokeHandlers, real = handlers.get('search:ask'); globalThis.ckSearch = real;
+      handlers.set('search:ask', (event, typed, shown) => typed === 'round' ? new Promise(done => setTimeout(done, 2500)).then(() => real(event, typed, shown)) : real(event, typed, shown)); return true; })()`);
+    const push = view => inspector.run(`(contents => (Object.getPrototypeOf(contents).send.call(contents, 'plugin-text:changed', ${JSON.stringify(view)}), true))(electron.BrowserWindow.getAllWindows()[0].webContents)`);
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'round'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    const views = await a.run('window.ckPublished');
+    await push({ ...real, read: real.of });
+    await wait(300);
+    same('a count that takes the reading line away, between a keystroke and main’s answer: the list stays inert (no view landed meanwhile)', [await a.exists('.ov-page [inert]'), await a.run('window.ckPublished') === views], [true, true]);
+    await wait(2700);
+    await push(real);
+    await a.settle();
+    await inspector.run(`(electron.ipcMain._invokeHandlers.set('search:ask', globalThis.ckSearch), true)`);
+    inspector.close();
+  }
+
   // A tool whose record of its plugins can't be read: nothing is claimed absent; that tool left out, the hits are back.
   const copilotConfig = join(H.home, '.copilot/config.json');
   writeFileSync(copilotConfig, '{ broken');
@@ -7103,7 +7176,7 @@ esac
   await done();
   await a.click('#nav-library');
   await findText('waybill');
-  check('a pin moved: the old text still found, the line counting parcels as not read', await until(async () => (await coverage()) === 'Not all plugins have been read yet: 2 of 4.' && (await groupCount()) === '28'), [await coverage(), await groupCount()]);
+  check('a pin moved: the old text still found, the line counting parcels as not read', await until(async () => (await coverage()) === 'still reading plugins, 3 of 5: more may show' && (await groupCount()) === '28'), [await coverage(), await groupCount()]);
   await findText('changelog-writer');
   // devkit installed from catalog-market's page while reading goes on (parcels at its new pin), then Back: each of its items once, as a Library row.
   await follow((await group()).findIndex(([, from]) => from === 'devkit · catalog-market'));
@@ -7116,14 +7189,14 @@ esac
   const installedRow = rowPart('', 'skills', 'devkit@catalog-market/changelog-writer');
   check('Back: changelog-writer once, as a Library row, and catalog-fork’s still in the group', await until(async () => JSON.stringify([await own(), await group()]) === JSON.stringify([[installedRow], [['changelog-writer', 'devkit · catalog-fork']]])), [await own(), await group()]);
   await findText('triager');
-  same('its agent too, while reading still goes on', [await own(), await group(), await coverage(), await a.run('window.centralKnot.pluginText().then(view => view.reading)')], [[rowPart('', 'agents', 'devkit@catalog-market/triager')], [['triager', 'devkit · catalog-fork']], 'Not all plugins have been read yet: 2 of 4.', true]);
+  same('its agent too, while reading still goes on', [await own(), await group(), await coverage(), await a.run('window.centralKnot.pluginText().then(view => view.reading)')], [[rowPart('', 'agents', 'devkit@catalog-market/triager')], [['triager', 'devkit · catalog-fork']], 'still reading plugins, 3 of 5: more may show', true]);
 
   // Reading switched off: what was read is still found, and the line says it is off.
   await a.click('#catalog-settings');
   await a.click('#plugin-text-on');
   await a.click('#nav-library');
   await findText('waybill');
-  check('reading switched off: the group as it was, and the line says so', await until(async () => (await coverage()) === 'Reading what plugins hold is off: 2 of 4 read.' && (await groupCount()) === '28'), [await coverage(), await groupCount()]);
+  check('reading switched off: the group as it was, and the line says so', await until(async () => (await coverage()) === 'reading plugins is off, 3 of 5 read' && (await groupCount()) === '28'), [await coverage(), await groupCount()]);
   if (shots) await a.run(`document.querySelector('#catalog-coverage').scrollIntoView({ block: 'end' })`);
   await pictures('reading-off', [[860, 600], [1316, 819, false]]);
   // Another home (the Practice copy) lists none of these marketplaces: nothing of this home's.

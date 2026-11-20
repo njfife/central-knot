@@ -1304,7 +1304,7 @@ const holdsFindText = (t: Table, row: ItemRow | PluginRow) => {
 
 /**
  * An answer to the Library's Find (askFind): the text asked, the home main answered for, the Library's own rows found by row id,
- * best first, and apart from them, by the namespace of their ids, the catalog's (searchdocs.ts catalogDocs), best first.
+ * best first, and apart from them the catalog's (searchdocs.ts catalogDocs: the hits with a `kind`, which only theirs have), best first.
  */
 interface FindAnswer { text: string; home: string; hits: Map<string, SearchHit>; catalog: SearchHit[] }
 /**
@@ -1396,18 +1396,22 @@ function followHold() {
  */
 const catalogHits = (t: Table) => (t.view.filter === 'all' || t.view.filter === 'plugins' ? answerFor(t)?.catalog.filter(hit => t.kinds.includes(pageOfPart[hit.kind!])) ?? [] : undefined);
 /**
- * The group, after the Library's own results while Find has text: its heading and count, its first `revealed` rows (catalogRow;
- * after "Show 10 more", once main has sent their details), "Show 10 more" while there are more, and the reading's line
- * (coverageLine), even with no hit.
+ * The group, after the Library's own results while Find has text: "Nothing in your Library matches" above it where nothing of
+ * his does; its heading, with the count of its matches, how to get one, and how much is read (coverageLine), the heading shown
+ * for that alone with no hit; its first `revealed` rows (catalogRow; after "Show 10 more", once main has sent their details);
+ * "Show 10 more" while there are more.
  */
 function catalogGroup(t: Table, hits: SearchHit[]) {
-  const first = hits.slice(0, t.view.revealed), left = hits.length - first.length, rows = first.filter(hit => hit.item);
+  const first = hits.slice(0, t.view.revealed), left = hits.length - first.length, rows = first.filter(hit => hit.item), said = coverageLine();
+  const reading = said && said.map(part => sectionNote(true, part));
   const more = () => { t.view.revealed += MORE; rerender(); askAgain(); };
   return h('div', { role: 'rowgroup' },
-    hits.length ? h('div.ov-section', { role: 'row', 'data-section': 'catalog' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'In plugins you don’t have'), h('span.ov-section-count', {}, String(hits.length)))) : null,
+    hits.length && answerFor(t)?.hits.size === 0 ? h('p.catalog-none', {}, 'Nothing in your Library matches') : null,
+    hits.length || reading ? h('div.ov-section.catalog-head', { role: 'row', 'data-section': 'catalog' }, h('div.ov-section-label', { role: 'cell' },
+      h('strong', {}, 'In plugins you don’t have'), h('span.ov-section-count', {}, plural(hits.length, 'match', 'matches')),
+      hits.length ? sectionNote(true, 'a name opens its plugin’s page, to install it there') : null, reading)) : null,
     rows.map(hit => catalogRow(t, hit)),
-    left ? h('div.ov-more', { role: 'row' }, h('div', { role: 'cell' }, button({ variant: 'ghost', size: 'small', label: `Show ${Math.min(MORE, left)} more`, id: 'catalog-more', onclick: more }))) : null,
-    coverageLine());
+    left ? h('div.ov-more', { role: 'row' }, h('div', { role: 'cell' }, button({ variant: 'ghost', size: 'small', label: `Show ${Math.min(MORE, left)} more`, id: 'catalog-more', onclick: more }))) : null);
 }
 /**
  * An item of the group: its kind's mark; its name, a link to its plugin's page (openPlugin), where the plugin's own switch installs
@@ -1418,30 +1422,31 @@ function catalogRow(t: Table, hit: SearchHit) {
   const item = hit.item!;
   return h('div.ov-row.ov-catalog-row', { role: 'row', 'data-key': hit.id },
     h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell' },
-      h('span.ov-name-main', {}, kindMark(t, pageOfPart[item.kind]), h('button.inline-link.ov-name-text', { type: 'button', title: `Open the plugin ${item.plugin} in ${pageNames.plugins}`, onclick: () => openPlugin({ source: item.source, plugin: item.plugin, marketplace: item.marketName }) }, item.name)),
+      h('span.ov-name-main', {}, kindMark(t, pageOfPart[item.kind]), h('button.inline-link.ov-name-text', { type: 'button', id: partId('name', hit.id), title: `Open the plugin ${item.plugin} in ${pageNames.plugins}`, onclick: () => openPlugin({ source: item.source, plugin: item.plugin, marketplace: item.marketName }) }, item.name)),
       h('span.row-tag.row-part', { title: `In the plugin ${item.plugin}, in the marketplace ${item.marketName}` }, icon('puzzle', 12, 'tone-faint'), `${item.plugin} · ${item.marketName}`),
       about(hit.excerpt, item.description)));
 }
 /** What main last said of the plugin text (plugintext.ts view): the group's last line, and whether an empty Library offers Find (pluginsListed). Asked once, then followed. */
 let textNow: PluginTextView | undefined;
-/** The group's last line while not every listed plugin is read: how far reading has got, or that it is off; none once all are read. */
+/** How much is read while not every listed plugin is (more may show), or that reading is off; none once all are read. */
 const coverageWords = (text = textNow) => (!text?.of || (text.on && text.read >= text.of) ? undefined
-  : text.on ? `Not all plugins have been read yet: ${text.read} of ${text.of}.` : `Reading what plugins hold is off: ${text.read} of ${text.of} read.`);
-/** That line (coverageWords), with the way to its switch on Settings. */
+  : text.on ? `still reading plugins, ${text.read} of ${text.of}: more may show` : `reading plugins is off, ${text.read} of ${text.of} read`);
+/** Those words (coverageWords) and the way to its switch on Settings: on the group's heading, or under "Nothing matches". */
 function coverageLine() {
   const words = coverageWords();
   const toSettings = () => { showPage('settings'); requestAnimationFrame(() => document.getElementById('setting-plugin-text')?.scrollIntoView({ block: 'center' })); };
-  return words ? h('p.catalog-coverage', {}, h('span', { id: 'catalog-coverage' }, words), ' ', h('button.inline-link', { type: 'button', id: 'catalog-settings', onclick: toSettings }, 'Settings')) : null;
+  return words ? [h('span', { id: 'catalog-coverage' }, words), h('button.inline-link', { type: 'button', id: 'catalog-settings', onclick: toSettings }, 'Settings')] as const : undefined;
 }
 /** Whether a listed marketplace has plugins to read: a Library with nothing yet then offers Find (pages.ts libraryPage). */
 export const pluginsListed = () => !!textNow?.of;
-/** A new count from main: the line's words change in place (no click is lost to a redraw); the page is drawn again where the line, or an empty Library's Find, comes or goes. */
+/** A new count from main: the line's words change in place (no click is lost to a redraw); the page is drawn again where the line, or an empty Library's Find, comes or goes, and the list acts. */
 function takeText(view: PluginTextView) {
   const before = { words: coverageWords(), listed: pluginsListed() };
   textNow = view;
   const line = document.getElementById('catalog-coverage'), words = coverageWords();
   if (line && words) line.textContent = words;
-  else if (state.page === 'library' && (!!words !== !!before.words || pluginsListed() !== before.listed)) rerender();
+  // While a keystroke's answer is awaited, what is below the toolbar is inert (findTyped): that answer's draw brings the line.
+  else if (state.page === 'library' && !document.querySelector('.ov-page [inert]') && (!!words !== !!before.words || pluginsListed() !== before.listed)) rerender();
 }
 window.centralKnot.onPluginTextChanged(takeText);
 void window.centralKnot.pluginText().then(takeText, () => undefined);
@@ -1536,12 +1541,13 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   // Found; the others, only other tools have. A row whose own switch was clicked here stays under the heading it was under.
   const under = (role: Role) => [shown.filter(skill => placeIn(pins, idOf(skill), sectionOf(t, skill)) === role), shown.filter(skill => sectionOf(t, skill) === role)] as const;
   const sections = found ? [foundSection(t, found), inPlugins && catalogGroup(t, inPlugins)] : [section(t, 'on', ...under('on')), section(t, 'found', ...under('found')), pluginSection(t, plugins), tool ? section(t, 'away', ...under('away')) : null, section(t, 'off', ...under('off'))];
-  // Nothing listed: none of the segment's kind here, or nothing Find and the chip leave (said apart from a home with nothing).
-  const nothing = shown.length || plugins.length || inPlugins?.length ? null : !all.length && !plugged(t).rows.length && none ? none(t.kinds[0]!)
+  // Nothing listed: none of the segment's kind here (Find empty), or nothing Find and the chip leave, whatever the segment.
+  const nothing = shown.length || plugins.length || inPlugins?.length ? null : !view.find.trim() && !all.length && !plugged(t).rows.length && none ? none(t.kinds[0]!)
     : emptyState('search-x', 'Nothing matches', [view.find.trim() ? `“${view.find.trim()}”` : '', view.filter !== 'all' ? `Only: ${chipNames[view.filter]}` : ''].filter(Boolean).join(' · '),
       view.find.trim() ? button({ variant: 'outline', size: 'small', label: 'Clear Find', id: 'find-clear', onclick: () => clearFind(view) }) : undefined);
   // With no hit at all, the group's line on the reading goes under those words, in view.
-  if (nothing && inPlugins) nothing.append(coverageLine() ?? '');
+  const said = nothing && inPlugins && coverageLine();
+  if (said) nothing!.append(h('p.catalog-coverage', {}, said[0], ' · ', said[1]));
   const table = [
     h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), orderChoice(t), h('div.toolbar-end', {}, toolbarState(t), usageControls(t))),
     usageBand(t),
