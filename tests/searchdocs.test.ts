@@ -1,12 +1,13 @@
 // The Library's documents for word search (src/searchdocs.ts), gathered from real views of a made-up home and asked through
 // the index that follows them (src/search.ts searchFollower), as main does at each view: a skill found in a tool, then kept
-// Off, is found by its text, through a version made current, a delete and a restore; a plugin's skill in one tool, then in two with texts that
-// differ, is one row with each copy's text, description and address, folded onto the person's own row too; a namesake of
-// the person's own and an agent of the same name keep rows of their own; an agent kept Off by its prompt, a server by its
-// command, and a skill a tool loads from the shared folder by its text, beside another tool's own copy too. Then the items of
-// listed plugins installed in no managed tool (catalogDocs), from the plugin text as plugintext.ts keeps it: the manager's
-// case, a skill named unlike its plugin, by its name, half of it and a letter wrong; what counts as installed; two marketplaces
-// of one plugin; an item already a Library row; text read at an older pin.
+// Off, is found by its text, through a version made current, a delete and a restore; a plugin's skill in one tool, then in
+// two with texts that differ, is one row with each copy's text, description and address, folded onto the person's own row
+// too; lifted by its own name's start, not its plugin's; a namesake of the person's own and an agent of the same name keep
+// rows of their own; an agent kept Off by its prompt, a server by its command, and a skill a tool loads from the shared
+// folder by its text, beside another tool's own copy too. Then the items of listed plugins installed in no managed tool
+// (catalogDocs), from the plugin text as plugintext.ts keeps it: the manager's case, a skill named unlike its plugin, by its
+// name, half of it and a letter wrong; what counts as installed; two marketplaces of one plugin; an item already a Library
+// row; text read at an older pin.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -118,6 +119,19 @@ test('a plugin’s skill in one tool, then in two whose texts differ, is one row
   } finally { search.close(); await box.cleanup(); }
 });
 
+test('a plugin’s row is lifted by the start of its own name, not its plugin’s: “de” puts his design-notes before the plugin design’s user-research, which its word still finds', async () => {
+  const box = await sandbox(['claude-cli']);
+  const search = searching(box);
+  try {
+    const copy = join(box.home, '.claude/plugins/cache/m/design/1.0.0');
+    await write(join(copy, 'skills/user-research/SKILL.md'), '---\nname: user-research\ndescription: Plans user research for a design.\n---\nAsk five people.\n');
+    await write(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'design@m': [{ scope: 'user', installPath: copy, version: '1.0.0' }] } }));
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Write down each choice.', 'design-notes') }, [], 'design-notes');
+    // The words alone rank user-research first: its plugin's name and its description both say "design".
+    assert.deepEqual((await search.found('de')).map(row => row.id), ['skills-design-notes', 'skills-design@m/user-research']);
+  } finally { search.close(); await box.cleanup(); }
+});
+
 test('a plugin in two tools whose copies differ: each copy’s description, address and text is found on its one row, and on the person’s own row it folds onto', async () => {
   const box = await sandbox(['claude-cli', 'copilot-cli']);
   const search = searching(box);
@@ -185,7 +199,7 @@ const idsOf = (view: HomeView, texts: PluginText[]) => docsOf(view, texts).map(d
 test('an item of a listed plugin installed nowhere is a document of its own: by its name and its plugin’s, its description (a server’s launch) and its first lines after their frontmatter; found by its exact name, half of it and a letter wrong', async () => {
   const docs = docsOf(viewWith(), [kept('https://github.com/Acme/Tools.git', 'devkit', devkit)]);
   assert.deepEqual(docs[0], {
-    id: 'catalog:["github.com/acme/tools","devkit","skill","skills/changelog-writer"]', names: ['changelog-writer', 'devkit'], description: 'Drafts release entries from merged work.',
+    id: 'catalog:["github.com/acme/tools","devkit","skill","skills/changelog-writer"]', names: ['changelog-writer'], plugin: 'devkit', description: 'Drafts release entries from merged work.',
     text: 'Group the merged pull requests by area.',
     catalog: { kind: 'skill', name: 'changelog-writer', description: 'Drafts release entries from merged work.', plugin: 'devkit', marketName: 'acme-tools', source: 'https://github.com/Acme/Tools.git' },
   });
@@ -223,7 +237,7 @@ test('two marketplaces offering one plugin with the same text give two hits; an 
 
 test('text read at an older pin is still given, unmarked: the plugin’s page says what is true now', () => {
   const older = { ...kept('https://github.com/acme/tools', 'devkit', [devkit[0]!]), from: '["https://github.com/acme/tools","","","0ld"]', commit: '0ld' };
-  assert.deepEqual(docsOf(viewWith(), [older]).map(doc => [doc.names, doc.catalog?.plugin]), [[['changelog-writer', 'devkit'], 'devkit']]);
+  assert.deepEqual(docsOf(viewWith(), [older]).map(doc => [doc.names, doc.plugin]), [[['changelog-writer'], 'devkit']]);
 });
 
 test('only the marketplaces the open home lists: text kept from another home’s, until the job matches it to this one, gives nothing; another spelling of a listed one counts', () => {

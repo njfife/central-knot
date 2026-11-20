@@ -115,7 +115,7 @@ const servers: Item[] = [
   ['docs-search', 'URL · https://docs.example.dev/mcp', 'https://docs.example.dev/mcp'],
 ];
 
-/** Each item as a document; a plugin's own row is named by its item's name and its plugin's (its key is both, with the marketplace). */
+/** Each item as a document; a plugin's own row is named by its item's name, and gives its plugin's apart (its key is both, with the marketplace). */
 const docs = (page: 'skills' | 'mcp' | 'agents', items: Item[]): SearchDoc[] => items.map(([key, description, text, name]) =>
-  ({ id: rowId(page, key), names: key.includes('/') ? [name!, key.split('@')[0]] : name ? [key, name] : [key], description, text }));
+  ({ id: rowId(page, key), ...(key.includes('/') ? { names: [name!], plugin: key.split('@')[0] } : { names: name ? [key, name] : [key] }), description, text }));
 export const library: SearchDoc[] = [...docs('skills', skills), ...docs('skills', pluginSkills), ...docs('agents', agents), ...docs('mcp', servers)];

@@ -1,8 +1,9 @@
 // What a document is for the Library (search.ts indexes them; this file only gathers them), in main, from the view just
 // handed over and that view's own reads. One document per row of the Skills, MCP servers and Agents pages, by the page's
 // row id (itemrow.ts rowId), a plugin's own rows too (pluginrows.ts pageRows, whose rule folds a plugin's item onto the
-// person's own row: nothing is folded here). A row's names are those it shows: its key and shown name, and a plugin's own
-// row its plugin's name; its description is the row's, and its text every distinct text the row has, each once:
+// person's own row: nothing is folded here). A row's names are its own that it shows: its key and shown name (a plugin's own
+// row gives its plugin's name apart: search.ts SearchDoc plugin); its description is the row's, and its text every distinct
+// text the row has, each once:
 // - its current version's, On or Off: a skill's SKILL.md after its frontmatter (whose name and description are the row's)
 //   and the names of its other files (the one new reading search adds: at each view, once per distinct content of a row),
 //   an agent's prompt (agentstore.ts keeps what this view already read); an MCP server's command or address is its
@@ -61,7 +62,7 @@ export async function libraryDocs(context: ShareContext, view: HomeView): Promis
       docs.push({ id: rowId(page, fact.key), names: distinct([fact.key, fact.name]), description: fact.description, text: distinct(texts).join('\n\n') });
     }
     for (const row of rows) {
-      docs.push({ id: rowId(page, row.key), names: [row.name, row.plugin], description: row.description, text: distinct(await copyTexts(row, row.description)).join('\n\n') });
+      docs.push({ id: rowId(page, row.key), names: [row.name], plugin: row.plugin, description: row.description, text: distinct(await copyTexts(row, row.description)).join('\n\n') });
     }
   }
   return docs;
@@ -70,7 +71,7 @@ export async function libraryDocs(context: ShareContext, view: HomeView): Promis
 /**
  * The items of listed plugins installed in no managed tool (pluginstatus.ts installedNowhere), each a document of its own: its
  * id `catalog:` and the JSON of [its marketplace's canonical source (plugins.ts sourceKey), the plugin, the kind, the item's path
- * in it or a server's name], which no Library row's id (skills-, agents-, mcp-) can be; its names, its own and its plugin's; its
+ * in it or a server's name], which no Library row's id (skills-, agents-, mcp-) can be; its name, and its plugin's apart; its
  * description (a server's launch); its text, the first 1,000 characters of its file as kept (a skill's or agent's after its
  * frontmatter, as a Library row's: the name and description are the document's already); and what its row draws (types.ts
  * CatalogItem). One already a Library row (linked to that plugin in Pi or OpenCode: pluginrows.ts onOwnRow) is left to that row.
@@ -85,7 +86,7 @@ export function catalogDocs(view: HomeView, texts: PluginText[], listed: string[
     if (!markets.has(market) || !installedNowhere(view, text.plugin, source => sameSource(source, text.source))) return [];
     return text.items.filter(item => !linked[item.kind]!.some(fact => onOwnRow(fact, { ...item, ...named }))).map(item => {
       const description = item.kind === 'mcp' ? item.runs ?? '' : item.description;
-      return { id: `catalog:${JSON.stringify([market, text.plugin, item.kind, item.path ?? item.name])}`, names: [item.name, text.plugin], description, text: item.kind === 'mcp' ? item.start : bodyOf(item.start),
+      return { id: `catalog:${JSON.stringify([market, text.plugin, item.kind, item.path ?? item.name])}`, names: [item.name], plugin: text.plugin, description, text: item.kind === 'mcp' ? item.start : bodyOf(item.start),
         catalog: { kind: item.kind, name: item.name, description, ...named, source: text.source } };
     });
   });

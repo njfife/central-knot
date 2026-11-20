@@ -7,13 +7,13 @@
 //   `kubernet`). `words` makes the same cut for what is typed (camelCase apart, marks kept): `pr-review`,
 //   `mcp__server__tool`, a path and a URL's parts split, and `k8s` stays one word. The words kept for corrections are the
 //   names' and descriptions' as indexed, whole and in parts (`cut(indexed(…))`);
-// - the query's rule (`Index.ask`): a text with no words asks nothing; a row one of whose names is the typed text whole comes
-//   first; then, from two characters, those one of whose names starts with it as typed (`startFor`), whatever the words'
-//   weights; then the rest. Rows are found by every word (a row its name's start brings comes even where they miss it), the
-//   last as a prefix (the person is still typing it); if nothing, each word that finds nothing (the first LOOKED_UP of them)
-//   gets the known words nearest it (`nearest`) beside it and every word is asked again; if still nothing, any of the typed
-//   words. Every word is quoted, so nothing typed reaches MATCH as syntax. Ranked by bm25() with the name weighted most
-//   (`WEIGHTS`), ties by row id: ids alone, as many as are found;
+// - the query's rule (`Index.ask`): a text with no words asks nothing; a row one of whose names, its plugin's too, is the typed
+//   text whole comes first; then, from two characters, those one of whose own names starts with it as typed (`startFor`),
+//   whatever the words' weights; then the rest. Rows are found by every word (a row its name's start brings comes even where
+//   they miss it), the last as a prefix (the person is still typing it); if nothing, each word that finds nothing (the first
+//   LOOKED_UP of them) gets the known words nearest it (`nearest`) beside it and every word is asked again; if still nothing,
+//   any of the typed words. Every word is quoted, so nothing typed reaches MATCH as syntax. Ranked by bm25() with the name
+//   weighted most (`WEIGHTS`), ties by row id: ids alone, as many as are found;
 // - the excerpt of a row found in its text alone, asked apart from the ranking and only for the rows named (`Index.excerpts`):
 //   the file's own words from BEFORE words before the first that matched, EXCERPT_WORDS in all, "…" where cut, in the paragraph
 //   that holds the most of them, with Markdown's marks taken off for showing (`around`, `plain`); where more of the typed words
@@ -30,8 +30,11 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { CatalogItem, PartKind, SearchAnswer, SearchHit } from './types.ts';
 
-/** One thing to find: its id on the page, the names its row shows, its description and its text; a catalog item's, what its row draws. */
-export interface SearchDoc { id: string; names: string[]; description: string; text: string; catalog?: CatalogItem }
+/**
+ * One thing to find: its id on the page, its own names that its row shows, the name of the plugin it comes from (a name to the
+ * words and exactFor, not to startFor), its description and its text; a catalog item's, what its row draws.
+ */
+export interface SearchDoc { id: string; names: string[]; plugin?: string; description: string; text: string; catalog?: CatalogItem }
 
 /**
  * bm25()'s weight for the names, the description, the text and the text's camelCase parts (at the text's weight): tuned on
@@ -87,15 +90,18 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
   const sorted = [...docs].sort(byId);
   db.exec("CREATE VIRTUAL TABLE docs USING fts5(names, description, text, parts, tokenize = 'porter unicode61'); CREATE VIRTUAL TABLE stems USING fts5vocab(docs, 'row');");
   const add = db.prepare('INSERT INTO docs (rowid, names, description, text, parts) VALUES (?, ?, ?, ?, ?)');
-  const byName = new Map<string, number[]>(), surface = new Set<string>();
+  // Each name, a plugin's too, in lower case, with the rows it names (exactFor); each row's own names, at its rowid - 1 (startFor).
+  const byName = new Map<string, number[]>(), ownNames: string[][] = [], surface = new Set<string>();
+  const lower = (names: string[]) => names.map(name => name.normalize('NFC').toLowerCase());
   db.exec('BEGIN');
   for (const [at, doc] of sorted.entries()) {
     if (at && at % SLICE === 0) await new Promise(resolve => setImmediate(resolve));
     if (!wanted()) return undefined;
-    const text = doc.text.normalize('NFC');
-    add.run(at + 1, indexed(doc.names.join('\n')), indexed(doc.description), text, partsOf(text));
-    for (const name of new Set(doc.names.map(each => each.normalize('NFC').toLowerCase()))) byName.set(name, [...(byName.get(name) ?? []), at + 1]);
-    for (const word of cut(indexed(`${doc.names.join(' ')} ${doc.description}`))) surface.add(unaccented(word));
+    const text = doc.text.normalize('NFC'), names = doc.plugin ? [...doc.names, doc.plugin] : doc.names;
+    add.run(at + 1, indexed(names.join('\n')), indexed(doc.description), text, partsOf(text));
+    for (const name of new Set(lower(names))) byName.set(name, [...(byName.get(name) ?? []), at + 1]);
+    ownNames.push(lower(doc.names));
+    for (const word of cut(indexed(`${names.join(' ')} ${doc.description}`))) surface.add(unaccented(word));
   }
   db.exec('COMMIT');
   // Only the ids (and a catalog item's row) are kept of the documents (a row's rowid is its place here, from 1): their texts are in the index.
@@ -110,8 +116,8 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
   const textOf = db.prepare('SELECT text FROM docs WHERE rowid = ?');
   /** A row's excerpt: around the first word of its text that matched; where more words matched in camelCase words' parts, around such a word (markWord). */
   const excerptOf = (rowid: number, snippets: string) => {
-    const [text, parts] = snippets.split('\0');
-    return marked(text).length >= marked(parts).length ? around(text) : around(markWord((textOf.get(rowid) as { text: string }).text, parts));
+    const [text, parts] = snippets.split('\0'), written = (textOf.get(rowid) as { text: string }).text;
+    return around(marked(text).length >= marked(parts).length ? text : markWord(written, parts), written);
   };
   const any = db.prepare('SELECT 1 FROM docs WHERE docs MATCH ? LIMIT 1');
   /** A known word as MATCH asks it: whole, or as a prefix where Porter changes that stem again so that, whole, it finds nothing. */
@@ -139,12 +145,15 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
   }
   /** The typed text as names are compared with it: trimmed, in the index's Unicode form, in lower case. */
   const asName = (typed: string) => typed.trim().normalize('NFC').toLowerCase();
-  /** The rows one of whose names is the typed text whole: first, and with no excerpt. */
+  /** The rows one of whose names, or its plugin's name, is the typed text whole: first, and with no excerpt. */
   const exactFor = (typed: string) => byName.get(asName(typed)) ?? [];
-  /** The rows one of whose names starts with the typed text, from two characters, hyphens and spaces as typed ("to-" starts to-prd, "to p" does not). */
+  /**
+   * The rows one of whose own names (not its plugin's) starts with the typed text, from two characters, hyphens and spaces as
+   * typed ("to-" starts to-prd, "to p" does not), in rowid order.
+   */
   function startFor(typed: string) {
     const start = asName(typed);
-    return new Set([...start].length < 2 ? [] : [...byName].flatMap(([name, rowids]) => (name.startsWith(start) ? rowids : [])));
+    return new Set([...start].length < 2 ? [] : ownNames.flatMap((names, at) => (names.some(name => name.startsWith(start)) ? [at + 1] : [])));
   }
 
   return {
@@ -170,10 +179,10 @@ async function fill(db: DatabaseSync, docs: SearchDoc[], wanted: () => boolean):
 /**
  * An excerpt of `snippet` (text with the words that matched marked), from its paragraph that holds the most different words that
  * matched, the first of equals (a skill's text runs on into its other files' names), read as words (`plain`): from BEFORE words
- * before the first marked, to EXCERPT_WORDS words in all, "…" where cut, on one line, without OPEN and CLOSE.
+ * before the first marked, to EXCERPT_WORDS words in all, "…" where cut, on one line, without OPEN and CLOSE. `written`: for `plain`.
  */
-function around(snippet: string) {
-  const paragraph = plain(snippet.split(/\n[ \t]*\n/).reduce((most, part) => (marked(part).length > marked(most).length ? part : most)));
+function around(snippet: string, written: string) {
+  const paragraph = plain(snippet.split(/\n[ \t]*\n/).reduce((most, part) => (marked(part).length > marked(most).length ? part : most)), written);
   const cutBefore = paragraph.startsWith('…'), text = cutBefore ? paragraph.slice(1) : paragraph;
   const start = text.slice(0, Math.max(0, text.indexOf(OPEN))).search(/\S*$/);
   const before = text.slice(0, start).split(/\s+/).filter(Boolean), after = text.slice(start).split(/\s+/).filter(Boolean);
@@ -185,15 +194,17 @@ function around(snippet: string) {
  * Text as words, for showing only (what is indexed and found is the text as written): Markdown's marks taken off, the words that
  * matched always kept. A heading's or list item's mark at a line's start, a rule row (a line of dashes, a table's colons and
  * bars), emphasis (`*`) and code marks; a link as its text, whole or cut by the excerpt, unless its address holds a word that
- * matched; the bars, as spaces, of a table's row: a line that starts or ends with a bar. So a shell's `|` and `||` inside a line
- * stay, and so do the bars of a table written without its outer ones (`a | b`). Not a parser: `_` emphasis, quotes and HTML stay.
+ * matched; the bars, as spaces, of a table's row: a line that starts or ends with a bar as `written` (the row's whole text), or
+ * a piece of one the excerpt cut. So a shell's `|` and `||` inside a line stay, and so do the bars of a table written without
+ * its outer ones (`a | b`). Not a parser: `_` emphasis, quotes and HTML stay.
  * "## **Run** `npm test`, see [the guide](x.md)" → "Run npm test, see the guide".
  */
-function plain(text: string) {
-  return text.replace(/^[ \t]*(?:#{1,6}|[-*+])[ \t]+|^[ \t|:]*-{3,}[-:| \t]*$/gmu, '')
+function plain(text: string, written: string) {
+  const rows = written.match(/^[ \t]*\|.*$|^.*\|[ \t]*$/gmu) ?? [], ofRow = (line: string) => line.replace(/^…|…$|[\u0001\u0002]/gu, '');
+  return text.replace(/^.*$/gmu, line => (rows.some(row => row.includes(ofRow(line))) ? line.replaceAll('|', ' ') : line))
+    .replace(/^[ \t]*(?:#{1,6}|[-*+])[ \t]+|^[ \t|:]*-{3,}[-:| \t]*$/gmu, '')
     .replace(/!?\[(?=[^\][\n]*(?:$|…|\]\((?![^)\s]*\u0001)))/gu, '').replace(/\]\((?![^)\s]*\u0001)[^)\s…]*\)?/gu, '')
-    .replace(/(?<=^|[\s(["'…\u0001])\*+(?=[\p{L}\p{N}\u0001`])|(?<=[\p{L}\p{N}\u0002`.,:;!?)])\*+(?=[.,:;!?)\]"'…]*(?:[\s\u0002]|$))|`/gu, '')
-    .replace(/^[ \t]*\|.*$|^.*\|[ \t]*$/gmu, row => row.replaceAll('|', ' '));
+    .replace(/(?<=^|[\s(["'…\u0001])\*+(?=[\p{L}\p{N}\u0001`])|(?<=[\p{L}\p{N}\u0002`.,:;!?)])\*+(?=[.,:;!?)\]"'…]*(?:[\s\u0002]|$))|`/gu, '');
 }
 /** The different words a snippet has marked, in lower case, in the order first marked. */
 const marked = (snippet: string) => [...new Set([...snippet.matchAll(/\u0001([^\u0002]*)\u0002/gu)].map(match => match[1].toLowerCase()))];

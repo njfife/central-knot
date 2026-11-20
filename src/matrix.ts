@@ -1415,17 +1415,16 @@ export function findInHome(home: string) {
 /** Find given new text (typed, Escape, Clear Find, a link that lets it go, a view started afresh): an armed Delete disarms, the group's first rows only are drawn, and on the Library the rows held are let go. */
 const newFind = (view: View, text: string) => { Object.assign(view, { find: text, confirmDelete: undefined, revealed: MORE }); if (view === views.library) unpin(); };
 /**
- * Find typed, or emptied (Escape in it, Clear Find under "Nothing matches"): the list shows from its top (listFromTop). A tool's tab
- * is drawn at once; the Library's list once main has answered (askFind), at once with Find empty. Until
- * the page is next drawn (a draw builds it anew), the list on screen is the text before's and nothing below the toolbar acts
- * (inert): this ask draws it when it returns, unless the text has changed since, whose own ask then does.
+ * Find typed, or emptied (Escape in it, Clear Find under "Nothing matches"): the new list shows from its top (listFromTop) as it is
+ * drawn. A tool's tab is drawn at once; the Library's list once main has answered (askFind), at once with Find empty. Until
+ * the page is next drawn (a draw builds it anew), the list on screen is the text before's, where it was, and nothing below the
+ * toolbar acts (inert): this ask draws it when it returns, unless the text has changed since, whose own ask then does.
  */
 function findTyped(t: Table, text: string) {
   newFind(t.view, text);
-  listFromTop(t);
-  if (!searching(t)) { rerender(); return; }
+  if (!searching(t)) { listFromTop(t); rerender(); return; }
   for (const before of document.querySelectorAll<HTMLElement>('.ov-page .toolbar ~ *, .ov-page .dock-main ~ *')) before.inert = true;
-  void askFind(text).then(came => { if (came !== 'dropped' || t.view.find === text) rerender(); });
+  void askFind(text).then(came => { if (came !== 'dropped' || t.view.find === text) { listFromTop(t); rerender(); } });
 }
 /** The Library's list while its Find has text: one list of the rows Find finds (foundRows), under one heading, Sort at Best match. */
 const searching = (t: Table) => !t.tool && !filesView(t) && !!t.view.find.trim();

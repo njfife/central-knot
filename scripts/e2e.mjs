@@ -10077,7 +10077,8 @@ async function headerResultFlow() {
  * the band's Open in the Library, Files and back, the source removed and its items still listed; (e) a plugin whose one item
  * is an agent linked to it in Pi, Off: its page's link finds it; edited in Pi, the pass lets it go and Your own finds it; (f) a
  * long list scrolled deep: a plugin in From, Anywhere again, a chip pressed and let go, Find typed and emptied, and another kind
- * each show their list from its top, on the Library and a tool's tab; Sort, Refresh and Back keep the list's place.
+ * each show their list from its top, on the Library and a tool's tab (Find's answer held back: the old list stays where it was
+ * until the answer); Sort, Refresh and Back keep the list's place.
  */
 async function fromFlow() {
   const git = (cwd, ...rest) => spawnSync('git', ['-C', cwd, '-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', '-c', 'commit.gpgsign=false', ...rest], { encoding: 'utf8', env: { ...process.env, GIT_COMMITTER_DATE: old.toISOString(), GIT_AUTHOR_DATE: old.toISOString() } });
@@ -10366,6 +10367,22 @@ esac
   seen.findTyped = await madeDeep(async () => { await find(a, 'own'); await until(async () => (await listed(a)).length === 60); });
   seen.findEscaped = await madeDeep(async () => { await escapeFind(); await until(async () => (await listed(a)).length === 84); });
   same('Find typed, and emptied by Escape: each list from the top', [seen.findTyped, seen.findEscaped], [[1600, 0], [1600, 0]]);
+  // In a development run, main's answer to Find held back: the old list stays where it was until the answer, which shows from its top.
+  const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
+  if (main) {
+    await scrollTo(1600);
+    await main.slowReply('search:ask', 1500);
+    const typed = await a.run(`(i => { i.value = 'own'; i.dispatchEvent(new Event('input', { bubbles: true })); return Math.round(document.getElementById('${all}').scrollTop); })(document.querySelector('#find'))`);
+    await wait(500);
+    const waiting = await placeOf();
+    await wait(1500);
+    await until(async () => (await listed(a)).length === 60);
+    same('Find typed, its answer held back: [as the key is pressed, while the answer waits, once it is drawn]', [typed, waiting, await placeOf()], [1600, 1600, 0]);
+    await main.restore('search:ask');
+    main.close();
+    await escapeFind();
+    await until(async () => (await listed(a)).length === 84);
+  }
   // Sort lists the same rows under the same headings, and a redraw that changes no choice moves nothing: the list stays.
   seen.sortUsed = await madeDeep(() => sortBy('used'));
   seen.sortName = await madeDeep(() => sortBy('name'));
