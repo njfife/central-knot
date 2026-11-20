@@ -76,6 +76,22 @@ test('a name is put first by its start as typed, from two characters: not by its
   } finally { stems.close(); }
 });
 
+test('a name’s start is the item’s own: a plugin’s name lifts none of its items, though its word still finds them and, typed whole, lists them first', async () => {
+  // The plugin design's three items, ux-copy found by its plugin's name alone; his own design-notes, and codebase-design, whose name
+  // ends with the word and whose description says it twice: the words alone rank it above the plugin's design-critique.
+  const fromDesign = (name: string, description: string): SearchDoc => ({ id: `skills-design@m/${name}`, names: [name], plugin: 'design', description, text: '' });
+  const index = (await buildIndex([fromDesign('user-research', 'Plans user research for a design.'), fromDesign('ux-copy', 'Writes the words on a screen.'),
+    fromDesign('design-critique', 'Critiques a screen for usability and consistency.'), { id: 'skills-design-notes', names: ['design-notes'], description: 'Notes on each design decision.', text: '' },
+    { id: 'skills-codebase-design', names: ['codebase-design'], description: 'Shared design words for designing deep modules.', text: '' }]))!;
+  try {
+    const found = (typed: string) => index.ask(typed).map(hit => hit.id);
+    // design-notes, and the plugin's design-critique, by the start of their own names; then the words rank the rest, the plugin's name as a name.
+    assert.deepEqual(found('de'), ['skills-design-notes', 'skills-design@m/design-critique', 'skills-codebase-design', 'skills-design@m/user-research', 'skills-design@m/ux-copy']);
+    // The plugin's name whole: its three items first, as a name typed whole (exactFor).
+    assert.deepEqual(found('design').slice(0, 3).sort(), ['skills-design@m/design-critique', 'skills-design@m/user-research', 'skills-design@m/ux-copy']);
+  } finally { index.close(); }
+});
+
 test('nonsense, punctuation alone and FTS5’s own syntax find nothing and break nothing', async () => {
   const index = (await buildIndex(library))!;
   try {
@@ -187,13 +203,15 @@ test('an excerpt reads as words: Markdown’s marks are taken off for showing; w
     cut: 'Read the [long and careful guide to cutting a release by hand](docs/release.md) first.',
     shell: 'Check the build first.\n\nRun `cat build.log | grep error` and then `npm run build || exit 1` before you push.',
     bare: 'Step | Command\n---|---\nBuild | npm run build\nNotes | npm run changelog',
+    row: '| Instead of | Do |\n|---|---|\n| When a sheet must choose between many options, replace a long category decision tree | Keep the category in a lookup sheet |',
+    pipe: 'Check the log.\n\nRun it now: cat log | grep error\n\n| When | Do |\n|---|---|\n| Before you push | Run it now: cat log | grep error |',
     bold: 'Before you push, run **`npm test`** and read what it says.',
   };
   const index = (await buildIndex(Object.entries(texts).map(([id, text]) => ({ id, names: [id], description: '', text }))))!;
   try {
     const excerpt = ([id, typed]: [keyof typeof texts, string]) => index.excerpts(typed, [id]).get(id);
     assert.deepEqual(([['lead', 'produced'], ['critique', 'sentiment'], ['critique', 'tips'], ['release', 'changelog'], ['release', 'build'],
-      ['links', 'checklist'], ['cut', 'first'], ['links', 'releasing'], ['shell', 'grep'], ['shell', 'exit'], ['bare', 'command'], ['bold', 'push']] as [keyof typeof texts, string][]).map(excerpt), [
+      ['links', 'checklist'], ['cut', 'first'], ['links', 'releasing'], ['shell', 'grep'], ['shell', 'exit'], ['bare', 'command'], ['row', 'decision'], ['pipe', 'now'], ['bold', 'push']] as [keyof typeof texts, string][]).map(excerpt), [
       'Tickets that /to-tickets produced are already agent-ready, so don…', // code and emphasis marks; FTS5 cut the snippet in "don't"
       '…tickets Note each sentiment and its source', // a list item's mark
       'Tips 1. Share the context with the…', // a heading's mark
@@ -205,6 +223,8 @@ test('an excerpt reads as words: Markdown’s marks are taken off for showing; w
       '…cat build.log | grep error and then npm run build || exit…', // a shell's pipe: no table's bar, on a line that neither starts nor ends with one
       '…run build || exit…', // and its ||
       'Step | Command Build | npm run build Notes | npm run…', // a table without outer bars: its rule row goes, its bars stay
+      '…a long category decision tree Keep the category in a…', // a table's row cut at both ends: its bars as the row is written
+      '…Run it now: cat log | grep error', // a whole line (the excerpt cut before it), no row though a row holds its words: its pipe stays
       'Before you push, run npm test and read what it says.', // bold around a code span
     ]);
     const found = (typed: string) => index.ask(typed).map(hit => hit.id);
@@ -314,7 +334,7 @@ test('an answer excerpts what the page draws at once: every row of the Library�
 });
 
 /** An item of a plugin not installed (searchdocs.ts catalogDocs) whose text holds `words`. */
-const catalogDoc = (at: number, words: string): SearchDoc => ({ id: `catalog:${at}`, names: [`plugin-item-${at}`, 'plugin'], description: '', text: words,
+const catalogDoc = (at: number, words: string): SearchDoc => ({ id: `catalog:${at}`, names: [`plugin-item-${at}`], plugin: 'plugin', description: '', text: words,
   catalog: { kind: 'skill', name: `plugin-item-${at}`, description: '', plugin: 'plugin', marketName: 'market', source: 'market' } });
 
 test('his own results are what they would be with no catalog document: every query of the set, with a plugin’s item holding all its words beside them', async () => {
@@ -343,7 +363,7 @@ test('two skills of his, one with “repair” and one with “pipeline”: “r
 test('his rows and the catalog’s each put first the names typed from their start, his before the catalog’s', async () => {
   const search = searchFollower(() => {});
   const many = 'Hands work over to another agent: what to keep, what to drop, where to go next and how to pick it up.';
-  const item = (at: number, name: string, description: string): SearchDoc => ({ ...catalogDoc(at, ''), names: [name, 'plugin'], description });
+  const item = (at: number, name: string, description: string): SearchDoc => ({ ...catalogDoc(at, ''), names: [name], description });
   // In each part the words alone rank the other row first: its description holds "to" five times, the name only once.
   await search.follow('/home', 1, async () => [{ id: 'skills-handoff', names: ['handoff'], description: many, text: '' },
     { id: 'skills-to-prd', names: ['to-prd'], description: 'Files a requirements document for the plan, with its scope, its users and what is left out of it.', text: '' },
