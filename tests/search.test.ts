@@ -185,12 +185,15 @@ test('an excerpt reads as words: Markdown’s marks are taken off for showing; w
     release: '## Steps\n\n| Step | Command | Notes |\n|------|---------|-------|\n| Build | `npm run build` | must pass |\n| Notes | `npm run changelog` | see [the release guide](docs/release.md) |',
     links: 'Before tagging, read [the guide](https://wiki.example/releasing) and the [checklist](docs/checklist.md).',
     cut: 'Read the [long and careful guide to cutting a release by hand](docs/release.md) first.',
+    shell: 'Check the build first.\n\nRun `cat build.log | grep error` and then `npm run build || exit 1` before you push.',
+    bare: 'Step | Command\n---|---\nBuild | npm run build\nNotes | npm run changelog',
+    bold: 'Before you push, run **`npm test`** and read what it says.',
   };
   const index = (await buildIndex(Object.entries(texts).map(([id, text]) => ({ id, names: [id], description: '', text }))))!;
   try {
     const excerpt = ([id, typed]: [keyof typeof texts, string]) => index.excerpts(typed, [id]).get(id);
     assert.deepEqual(([['lead', 'produced'], ['critique', 'sentiment'], ['critique', 'tips'], ['release', 'changelog'], ['release', 'build'],
-      ['links', 'checklist'], ['cut', 'first'], ['links', 'releasing']] as [keyof typeof texts, string][]).map(excerpt), [
+      ['links', 'checklist'], ['cut', 'first'], ['links', 'releasing'], ['shell', 'grep'], ['shell', 'exit'], ['bare', 'command'], ['bold', 'push']] as [keyof typeof texts, string][]).map(excerpt), [
       'Tickets that /to-tickets produced are already agent-ready, so don…', // code and emphasis marks; FTS5 cut the snippet in "don't"
       '…tickets Note each sentiment and its source', // a list item's mark
       'Tips 1. Share the context with the…', // a heading's mark
@@ -199,6 +202,10 @@ test('an excerpt reads as words: Markdown’s marks are taken off for showing; w
       '…guide and the checklist…', // a link as its text, and one cut by the excerpt's end
       '…release by hand first.', // a link cut by the excerpt's start
       '…tagging, read [the guide](https://wiki.example/releasing) and the checklist…', // a link whose address holds the word found: as written
+      '…cat build.log | grep error and then npm run build || exit…', // a shell's pipe: no table's bar, on a line that neither starts nor ends with one
+      '…run build || exit…', // and its ||
+      'Step | Command Build | npm run build Notes | npm run…', // a table without outer bars: its rule row goes, its bars stay
+      'Before you push, run npm test and read what it says.', // bold around a code span
     ]);
     const found = (typed: string) => index.ask(typed).map(hit => hit.id);
     assert.deepEqual([found('tickets'), found('wiki')], [['lead', 'critique'], ['links']], 'a word in a code span or a link’s address is found as before');

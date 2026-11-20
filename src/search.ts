@@ -9,10 +9,11 @@
 //   names' and descriptions' as indexed, whole and in parts (`cut(indexed(…))`);
 // - the query's rule (`Index.ask`): a text with no words asks nothing; a row one of whose names is the typed text whole comes
 //   first; then, from two characters, those one of whose names starts with it as typed (`startFor`), whatever the words'
-//   weights; then the rest. Rows are found by every word, the last as a prefix (the person is still typing it); if nothing,
-//   each word that finds nothing (the first LOOKED_UP of them) gets the known words nearest it (`nearest`) beside it and every
-//   word is asked again; if still nothing, any of the typed words. Every word is quoted, so nothing typed reaches MATCH as
-//   syntax. Ranked by bm25() with the name weighted most (`WEIGHTS`), ties by row id: ids alone, as many as are found;
+//   weights; then the rest. Rows are found by every word (a row its name's start brings comes even where they miss it), the
+//   last as a prefix (the person is still typing it); if nothing, each word that finds nothing (the first LOOKED_UP of them)
+//   gets the known words nearest it (`nearest`) beside it and every word is asked again; if still nothing, any of the typed
+//   words. Every word is quoted, so nothing typed reaches MATCH as syntax. Ranked by bm25() with the name weighted most
+//   (`WEIGHTS`), ties by row id: ids alone, as many as are found;
 // - the excerpt of a row found in its text alone, asked apart from the ranking and only for the rows named (`Index.excerpts`):
 //   the file's own words from BEFORE words before the first that matched, EXCERPT_WORDS in all, "…" where cut, in the paragraph
 //   that holds the most of them, with Markdown's marks taken off for showing (`around`, `plain`); where more of the typed words
@@ -182,15 +183,17 @@ function around(snippet: string) {
 }
 /**
  * Text as words, for showing only (what is indexed and found is the text as written): Markdown's marks taken off, the words that
- * matched always kept. A heading's or list item's mark at a line's start, emphasis (`*`) and code marks, a table's bars (as
- * spaces) and rule rows; a link as its text, whole or cut by the excerpt, unless its address holds a word that matched. Not a
- * parser: `_` emphasis, quotes and HTML stay. "## **Run** `npm test`, see [the guide](x.md) | ok" → "Run npm test, see the guide   ok".
+ * matched always kept. A heading's or list item's mark at a line's start, a rule row (a line of dashes, a table's colons and
+ * bars), emphasis (`*`) and code marks; a link as its text, whole or cut by the excerpt, unless its address holds a word that
+ * matched; the bars, as spaces, of a table's row: a line that starts or ends with a bar. So a shell's `|` and `||` inside a line
+ * stay, and so do the bars of a table written without its outer ones (`a | b`). Not a parser: `_` emphasis, quotes and HTML stay.
+ * "## **Run** `npm test`, see [the guide](x.md)" → "Run npm test, see the guide".
  */
 function plain(text: string) {
-  return text.replace(/^[ \t]*(?:#{1,6}|[-*+])[ \t]+/gmu, '')
+  return text.replace(/^[ \t]*(?:#{1,6}|[-*+])[ \t]+|^[ \t|:]*-{3,}[-:| \t]*$/gmu, '')
     .replace(/!?\[(?=[^\][\n]*(?:$|…|\]\((?![^)\s]*\u0001)))/gu, '').replace(/\]\((?![^)\s]*\u0001)[^)\s…]*\)?/gu, '')
-    .replace(/(?<=^|[\s(["'…\u0001])\*+(?=[\p{L}\p{N}\u0001])|(?<=[\p{L}\p{N}\u0002.,:;!?)])\*+(?=[.,:;!?)\]"'…]*(?:[\s\u0002]|$))|`/gu, '')
-    .replace(/\|/gu, ' ').replace(/(?<=^|\s):?-{3,}:?(?=\s|$)/gu, '');
+    .replace(/(?<=^|[\s(["'…\u0001])\*+(?=[\p{L}\p{N}\u0001`])|(?<=[\p{L}\p{N}\u0002`.,:;!?)])\*+(?=[.,:;!?)\]"'…]*(?:[\s\u0002]|$))|`/gu, '')
+    .replace(/^[ \t]*\|.*$|^.*\|[ \t]*$/gmu, row => row.replaceAll('|', ' '));
 }
 /** The different words a snippet has marked, in lower case, in the order first marked. */
 const marked = (snippet: string) => [...new Set([...snippet.matchAll(/\u0001([^\u0002]*)\u0002/gu)].map(match => match[1].toLowerCase()))];
