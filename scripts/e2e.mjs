@@ -1014,10 +1014,13 @@ async function fullSize(a) {
  * Whether the list `id` came to rest (still for six frames) within 3 s; it is found by its id each frame, as a redraw replaces it. A
  * row opened with details past the list's bottom glides the list to it (matrix.ts openRow); a scroll place written while it glides
  * still has the glide's later steps added to it, some after the place was read. A check that writes a scroll place checks this
- * first, so a list that never rests fails under its own name.
+ * first, so a list that never rests fails under its own name. A window the other groups' windows cover draws few frames or none for
+ * a while (on the Mac, four groups at once): at the end of the 3 s, a list still where it started has rested too.
  */
-const stillList = (a, id) => a.run(`new Promise(done => { const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop, end = Date.now() + 3000; let last = at(), still = 0;
-  const look = () => { still = at() === last ? still + 1 : 0; last = at(); if (still === 6) done(true); else if (Date.now() > end) done(false); else requestAnimationFrame(look); }; requestAnimationFrame(look); })`);
+const stillList = (a, id) => a.run(`new Promise(done => { const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop, first = at(); let last = first, still = 0, ended = false;
+  const end = answer => { if (!ended) { ended = true; done(answer); } };
+  setTimeout(() => end(at() === first), 3000);
+  const look = () => { if (ended) return; still = at() === last ? still + 1 : 0; last = at(); if (still === 6) end(true); else requestAnimationFrame(look); }; requestAnimationFrame(look); })`);
 
 /**
  * One mouse event at the point `at`, as a real mouse sends it: `buttons` 1 while the left button is held, and no button named on a
