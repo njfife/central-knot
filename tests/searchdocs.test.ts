@@ -62,23 +62,23 @@ test('an item kept Off is found by its text; another version made current, delet
   const search = searching(box);
   try {
     await put(box, 'claude-cli', { 'SKILL.md': skillText('Keep a ledger of every decision.'), 'templates/decision.md': 'A decision.' });
-    assert.deepEqual(await search.found('ledger'), [{ id: 'skills-notes', excerpt: 'Keep a ledger of every decision. templates/decision.md' }], 'found in a tool, by its copy’s text');
+    assert.deepEqual(await search.found('ledger'), [{ id: 'skills-notes', excerpt: 'Keep a ledger of every decision.' }], 'found in a tool, by its copy’s text');
     await turnOn(box);
     const first = (await itemOf(box))!.hash;
     await put(box, 'claude-cli', { 'SKILL.md': skillText('Track the open questions.') });
     assert.deepEqual([await search.found('questions'), await search.found('ledger')].map(rows => rows.map(row => row.id)), [['skills-notes'], ['skills-notes']], 'an edit not yet taken in, beside the current version');
     await pass(box);
     await turnOff(box);
-    assert.deepEqual([await search.found('questions'), await search.found('ledger')], [[{ id: 'skills-notes', excerpt: 'Track the open questions. templates/decision.md' }], []], 'Off, its current version’s text');
+    assert.deepEqual([await search.found('questions'), await search.found('ledger')], [[{ id: 'skills-notes', excerpt: 'Track the open questions.' }], []], 'Off, its current version’s text');
     await makeCurrent(box, first);
     assert.deepEqual([await search.found('ledger'), await search.found('questions'), await search.found('decision template')],
-      [[{ id: 'skills-notes', excerpt: 'Keep a ledger of every decision. templates/decision.md' }], [], [{ id: 'skills-notes', excerpt: '…ledger of every decision. templates/decision.md' }]],
+      [[{ id: 'skills-notes', excerpt: 'Keep a ledger of every decision.' }], [], [{ id: 'skills-notes', excerpt: 'templates/decision.md' }]],
       'the version made current, with its other file’s name');
     await remove(box);
     assert.deepEqual(await search.found('ledger'), [], 'deleted');
     const deleted = (await historyOf(box)).find(event => event.kind === 'deleted')!;
     await restore(box, deleted.id);
-    assert.deepEqual(await search.found('ledger'), [{ id: 'skills-notes', excerpt: 'Keep a ledger of every decision. templates/decision.md' }], 'restored');
+    assert.deepEqual(await search.found('ledger'), [{ id: 'skills-notes', excerpt: 'Keep a ledger of every decision.' }], 'restored');
   } finally { search.close(); await box.cleanup(); }
 });
 
