@@ -79,6 +79,21 @@ export function linkLabel(link: string): string {
   return read.rest ? `${where} (${read.rest.join('/')})` : where;
 }
 
+/** Past this many characters, a source's label in a list of sources is shortened (shortLabels). */
+const LONG_LABEL = 32;
+/**
+ * Several sources' labels in one list (the Library's From menu): linkLabel's, shortened past LONG_LABEL characters to the
+ * repository's name and the last part of what the link named after it (a folder, or its branch: `skill-deslop (main)`), unless
+ * two would then be alike.
+ */
+export function shortLabels(links: readonly string[]): Map<string, string> {
+  const short = links.map(link => {
+    const label = linkLabel(link), read = readLink(link);
+    return label.length <= LONG_LABEL || 'refused' in read ? label : `${label.replace(/ \(.*\)$/, '').split('/').at(-1)}${read.rest?.length ? ` (${read.rest.at(-1)})` : ''}`;
+  });
+  return new Map(links.map((link, at) => [link, short.filter(each => each === short[at]).length > 1 ? linkLabel(link) : short[at]!]));
+}
+
 /**
  * A plugin's link, which its items' versions record as a Git source's record theirs (library.ts Origin `link`): `plugin:` and the
  * name the tools write (plugin@marketplace). It stays the same across launches and updates, and readLink refuses it, so it is

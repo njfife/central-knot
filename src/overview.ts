@@ -20,7 +20,8 @@ import { asksWhichCopy, waitsForSync } from './libraryrow.ts';
 import { firstReadingRuns, kindGlyph, openKind, outcomeBand, problemsBesideStop, usageOnShow, usageSums } from './matrix.ts';
 import { dayAndTime, dayWords, plural } from './model.ts';
 import { noToolsLead, notRead, previewReason } from './pages.ts';
-import { fromPluginsCount, rowCount } from './pluginrows.ts';
+import { rowCount } from './pluginrows.ts';
+import { fromAnyPlugin } from './origins.ts';
 import { pluginsInstalled, type PluginsInstalled } from './pluginstatus.ts';
 import { heldKinds } from './presence.ts';
 import type { HarnessId, HomeView } from './types.ts';
@@ -165,12 +166,12 @@ function syncState(kind: PageKind, home: HomeView): HTMLElement | null {
 
 /**
  * One kind: its page (the card's one button, over the whole card); how many there are, how many are On (the page's word: some may
- * still wait to sync), and how many its page's "From plugins" chip holds (pluginrows.ts fromPluginsCount); whether it is in step
+ * still wait to sync), and how many came from some plugin (origins.ts fromAnyPlugin, as the Library's From says); whether it is in step
  * (syncState); its usage (cardUsage).
  */
 function kindCard(kind: PageKind, home: HomeView) {
   const { title, short: noun } = kindNouns[kind], facts = kindSource(home, kind).facts;
-  const total = rowCount(home, kind), on = facts.filter(fact => fact.on).length, fromPlugins = fromPluginsCount(home, kind);
+  const total = rowCount(home, kind), on = facts.filter(fact => fact.on).length, fromPlugins = fromAnyPlugin(home, kind);
   const counts = total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} on` : 'none on'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`;
   return h('div.kind-card', {},
     h('div.kind-card-about', {},

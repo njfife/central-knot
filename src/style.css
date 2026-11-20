@@ -377,38 +377,48 @@ ul { list-style: none; }
 .toolbar-end:empty { border-left: 0; }
 .find { position: relative; flex: 1 1 352px; min-width: 80px; height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 4px 0 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--lift); }
 .find:focus-within { outline: 2px solid var(--focus); outline-offset: -2px; }
-.ov-page .find { flex: 0 1 240px; min-width: 120px; }
+/* An item list's Find keeps room for about 15 letters, two short words ("release notes"), in any step of a crowded bar: the
+   bar wraps first. More would put his 1316-wide window's bar, sidebar open, on two lines with nothing chosen. */
+.ov-page .toolbar .find { flex: 0 1 240px; min-width: 140px; }
+/* Wrapped, it starts from that floor and takes the room left on its line, so the rest packs onto as few lines as it can. */
+.ov-page .toolbar.bar-wrap .find { flex: 1 1 140px; }
 .find-glyph { color: var(--ink-soft); }
 .find-input { flex: 1; min-width: 0; border: 0; padding: 0 0 0 4px; background: transparent; color: var(--ink); font: 400 13px/20px var(--sans); outline: none !important; user-select: text; cursor: text; }
 .find-input::placeholder { color: var(--ink-soft); }
 .chips { display: flex; flex: none; align-items: center; gap: 4px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; white-space: nowrap; border: 1px solid transparent; border-radius: 999px; background: none; color: var(--ink-soft); font: inherit; font-size: 12.5px; cursor: pointer; }
 .chip:hover { background: var(--hover); color: var(--ink); }
-.chip-on { background: var(--current); border-color: var(--control-line); color: var(--ink); font-weight: 500; }
+/* On, a chip keeps its width (no heavier weight): pressing it never changes the bar's fit. */
+.chip-on { background: var(--current); border-color: var(--control-line); color: var(--ink); }
 .chip-count { font-variant-numeric: tabular-nums; color: var(--ink-faint); font-size: 11.5px; }
 .chip-warn .chip-count { color: var(--warning); font-weight: 600; }
-/* The item lists' order (matrix.ts orderChoice): "Sort" and its select, as tall as a chip; the word steps aside in a crowded bar. */
-.order { display: inline-flex; flex: none; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
+/* The item lists' From and Sort (matrix.ts fromChoice, orderChoice): a caption and its select, as tall as a chip; the captions
+   step aside in a crowded bar once the chips are marks. Each is as wide whatever it holds (Sort at Best match too), so no choice
+   changes the bar's fit: From as its widest entry, ending in "…" only on a line narrower than that. */
+.order, .from { display: inline-flex; flex: none; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
+.from, .select.from-select { min-width: 0; max-width: 100%; }
 .select.select-bar select { height: 28px; font-size: 12.5px; }
-.bar-icons .order-word { display: none; }
+.order .select select { width: calc(7.5em + 40px); }
+.bar-captionless :is(.order-word, .from-word) { display: none; }
+.select.from-select select { max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
+/* While From narrows the list, its box has the look of a chip that is on. */
+.select.from-select.from-on select { background: var(--current); }
 .apply-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
 .apply-waiting { color: var(--warning); }
 button.apply-state.text-action { border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 button.apply-state.apply-waiting.text-action { color: var(--warning); text-decoration-color: color-mix(in oklab, var(--warning) 50%, transparent); }
-/* A crowded toolbar first tightens its spacing; if it still can't fit after its buttons go icon-only, its actions take a
-   second line, at the right. */
+/* A crowded toolbar first tightens its spacing; if it still can't fit after its buttons and chips go icon-only and its
+   menus lose their captions, its actions take a second line, at the right. */
 .bar-short .toolbar-end { padding-left: 8px; }
 .bar-short .chip { padding: 0 8px; }
 .chip-icon { display: none; }
 .bar-icons .chip-label { display: none; }
 .bar-icons .chip-icon { display: block; }
-/* The chip that is on keeps its word: a bare mark doesn't say what the list is narrowed to. */
-.bar-icons .chip-on .chip-label { display: inline; }
-.bar-icons .chip-on .chip-icon { display: none; }
 .bar-icons .chip-warn .chip-icon { color: var(--warning); }
 .bar-icons .find { min-width: 88px; }
 .bar-wrap { flex-wrap: wrap; row-gap: 2px; }
-.bar-wrap .toolbar-end { border-left: 0; }
+/* Wrapped, its end is as tall as a chip, so a line is as tall whatever lands on it (dom.ts fitBars compares heights). */
+.bar-wrap .toolbar-end { border-left: 0; min-height: 28px; }
 /* The Library's kind switch (matrix.ts kindSwitch): first in the toolbar, one joined control whose words never fold; a wrapped
    bar keeps it first, on the first line. */
 .kind-switch { display: inline-flex; flex: none; align-items: stretch; height: 28px; border: 1px solid var(--control-line); border-radius: 8px; overflow: hidden; background: var(--surface); }
@@ -1282,6 +1292,12 @@ span.ins-confirm { margin-top: 0; }
 .plugin-row-about { flex: 0 1 auto; min-width: 0; font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-sep { flex: none; margin: 0 8px; color: var(--ink-faint); }
 .plugin-row-holds { flex: 0 0 auto; max-width: 100%; font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Its items in the Library (pluginparts.ts libraryLink), last on the line. Short of room, the description gives way first, then
+   what it holds, each ending in "…"; the link keeps its words until the line is narrower than they are, then it too ends in
+   "…", keeping the room of the two "·" before it (its whole words are its title). In a narrow table its "·" stays. */
+.plugin-row-line:has(> .plugin-row-library) > .plugin-row-about { flex-shrink: 100; }
+.plugin-row-line:has(> .plugin-row-library) > :is(.plugin-row-holds, .plugin-row-left) { flex-shrink: 1; min-width: 0; }
+.plugin-row-library { flex: none; max-width: calc(100% - 40px); padding: 0 4px; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
 .plugin-row-go { display: grid; place-items: center; }
 /* A tool behind the marketplace: the note, then Update for every such tool, wrapping under it when the name column is narrow. */
 .plugin-row-update { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; min-width: 0; }
@@ -1300,6 +1316,7 @@ span.ins-confirm { margin-top: 0; }
 .hint-short { display: none; }
 @container table (width < 700px) {
   .plugin-row-about, .plugin-row-sep, .hint-long { display: none; }
+  .plugin-row-sep:has(+ .plugin-row-library) { display: inline; }
   .hint-short { display: inline; }
 }
 .cannot-dash { font-weight: 700; color: var(--ink-soft); }

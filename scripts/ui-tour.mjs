@@ -271,7 +271,7 @@ if (wanted('library')) {
   await openKind(a, 'all');
   await a.size(1316, 822);
   await waitFor(a, `!!document.querySelector('#chip-unused')`, 20000);
-  for (const theme of ['dark', 'light']) { await a.theme(theme); await shot(a, `his-counts-1316-${theme}`, `His counts at 1316×822 (${theme}): about 150 skills, 9 servers and 47 agents on All, the three chips offered (Copies differ, From plugins, No use seen), the usage button keeping "Update usage".`); }
+  for (const theme of ['dark', 'light']) { await a.theme(theme); await shot(a, `his-counts-1316-${theme}`, `His counts at 1316×822 (${theme}): about 150 skills, 9 servers and 47 agents on All, the two chips offered (Copies differ, No use seen) and From, the usage button keeping "Update usage".`); }
   await a.theme('dark');
   await a.click('#chip-unused');
   await shot(a, 'his-counts-chip-on-1316', 'No use seen on at 1316×822: the chip that is on keeps its word, the kind switch counts what it leaves.');
@@ -1406,7 +1406,7 @@ if (wanted('plugin-items')) {
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
   const toPlugins = async () => { await a.run(`document.querySelector('.ov-section-plugins')?.scrollIntoView({ block: 'center' })`); await wait(150); };
   await openKind(a, 'skills'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.ov-section-plugins')`, 15000);
-  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “Only through a plugin” (the From plugins chip counts every row from a plugin, triage too), each marked “from <plugin>”, with its switch and a mark in each tool that has it (pdf-reader off in Copilot CLI and Codex, issue-tracker’s whole plugin off in Codex); triage is one row with the copy in Pi.');
+  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “Only through a plugin” (From: Any plugin lists every row from a plugin, triage too), each marked “from <plugin>”, with its switch and a mark in each tool that has it (pdf-reader off in Copilot CLI and Codex, issue-tracker’s whole plugin off in Codex); triage is one row with the copy in Pi.');
   await a.theme('light'); await shot(a, 'skills-light', 'The same, light.'); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
     await size(width, height); await toPlugins();
@@ -1478,7 +1478,7 @@ if (wanted('plugin-items')) {
     await shot(a, 'mcp-main-switch', 'Clicked the issues row’s own switch: it is on in Codex, the one tool that has it, with its plugin turned on there for it alone; with Undo.');
     await a.click('#outcome-undo-plugin'); await a.settle();
   }
-  await openKind(a, 'agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code, under “From plugins · installed with their plugin · switched here like any other”.');
+  await openKind(a, 'agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code, under “Only through a plugin · installed with their plugin · switched here like any other”.');
   if (await a.has(`${byId(rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer'))}`)) {
     await a.click(`${byId(rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer'))}`);
     await shot(a, 'agent-open', 'Opened release-reviewer: it opens with where it is on (“On in Claude Code · from the plugin release-helper”), where it is handled, and Claude Code’s line with its switch for this one agent.');
@@ -2638,7 +2638,7 @@ if (wanted('sources')) {
   await atEverySize('look', `Pasted the owner’s link, ${DESLOP}, and clicked Look: where it read (branch main, its root folder, the commit), one skill, deslop, named by its SKILL.md, at the root of skill-deslop; it comes in Off; its 8 files listed, SKILL.md and the four references among them. Add 1 skill, Cancel, and the line that what comes in is Off and nothing is written to the source`, true, '#source-preview');
   await a.size(860, 560); await focusOn('#source-add'); await shot(a, 'look-focus-860', 'Tabbed to Add 1 skill at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
   await a.click('#source-add'); await busyDone(); await a.settle();
-  await atEverySize('source-row', 'Clicked Add 1 skill: the band says deslop is in Central Knot, Off, with Open Skills; the source’s row: its link, branch, folder, commit and when it was read, the line saying what Check now can do in your tools, Check now and Remove…, and deslop, at the root of skill-deslop, In Central Knot, Off', true, '.source-row');
+  await atEverySize('source-row', 'Clicked Add 1 skill: the band says deslop is in Central Knot and is off, to turn on in the Library, with Open in the Library; the source’s row: its link, branch, folder, commit and when it was read, the line saying what Check now can do in your tools, Check now and Remove…, and deslop, at the root of skill-deslop, In Central Knot, Off', true, '.source-row');
   await openKind(a, 'skills'); await openRow('skills', 'deslop');
   await atEverySize('skill-off', 'On Skills, deslop’s row is Off, in no tool, as any Off item reads; opened, it says it is from github.com/stephenturner/skill-deslop (main), a source, with a link to Sources, and its one version says the same', true, `.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`, 'start');
   await turnOnRow('skills', 'deslop'); await switchOn('skills', 'deslop');
@@ -2748,7 +2748,7 @@ if (wanted('source-agents')) {
   await a.click('#source-look'); await busyDone(); await a.settle();
   await atEverySize('look', 'Looked at team/review-kit: one skill, notes, in the folder notes, and two agents, reviewer in the folder agents and release-notes-writer-for-the-whole-team in .claude/agents, each line saying its kind, where it sits and its file; each comes in Off; Add 1 skill and 2 agents', true, '#source-preview');
   await a.click('#source-add'); await busyDone(); await a.settle();
-  await atEverySize('source-row', 'Clicked Add 1 skill and 2 agents: the band says notes, reviewer and release-notes-writer-for-the-whole-team are in Central Knot, Off, to turn on in Skills and Agents, with Open Skills; the source’s row lists the skill and both agents, In Central Knot, Off', true, '.source-row');
+  await atEverySize('source-row', 'Clicked Add 1 skill and 2 agents: the band says notes, reviewer and release-notes-writer-for-the-whole-team are in Central Knot and all 3 are off, to turn on in the Library, with Open in the Library; the source’s row lists the skill and both agents, In Central Knot, Off', true, '.source-row');
   await openKind(a, 'agents'); await openRow('agents', 'reviewer');
   await atEverySize('agent-row-source', 'On Agents, reviewer is Off, in Central Knot only; opened, its version says it came from github.com/team/review-kit, and the line at the end says it is from that source, and that what changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here', true, `.ov-row[data-key="${rowPart('', 'agents', 'reviewer')}"]`, 'start');
   await turnOnRow('agents', 'reviewer'); await switchOn('agents', 'reviewer');
@@ -2958,7 +2958,7 @@ if (wanted('parts-migration')) {
   await addMarketplace(a, market);
   await refresh();
   await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`, 20000);
-  await a.click('#popen-0-document-tools'); await waitFor(a, `/Its items/.test(document.querySelector('.plugin-page')?.textContent ?? '')`, 15000);
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-items-section')`, 15000);
   await atEverySize('migrated-page', 'One look after the upgrade: document-tools’ parts are its items. Its items lists skill pdf-reader, edited in Pi, “Not brought in: you have your own”, and skill spreadsheet, left out of Pi, kept out there; Pi’s line counts its items on', true, '.plugin-items-section', 'start');
   await openKind(a, 'skills'); await openRow('skills', 'triage');
   await atEverySize('migrated-row', 'On Skills, triage, a part in Pi before, is an item “from the plugin issue-tracker”, on in Pi, opened: its tools’ lines and the line saying it follows the plugin', true, `.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`, 'start');

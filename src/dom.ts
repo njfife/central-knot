@@ -231,8 +231,11 @@ export function emptyState(glyph: IconName, title: string, body: string | undefi
 export const eyebrow = (text: string, count?: number) => h('h3.eyebrow', {}, text, count === undefined ? null : h('span.eyebrow-count', {}, String(count)));
 export const section = (title: string, ...body: (Child | Child[])[]) => h('section.section', {}, eyebrow(title), ...body);
 
-/** What a crowded bar gives up, in order, until it fits: some padding, then button labels, then its single line. */
-const FIT_STEPS = ['bar-short', 'bar-icons', 'bar-wrap'];
+/**
+ * What a crowded bar gives up, in order, until it fits: some padding, then the labels of its buttons and chips, then the
+ * captions beside its menus (an item list's From and Sort), then its single line.
+ */
+const FIT_STEPS = ['bar-short', 'bar-icons', 'bar-captionless', 'bar-wrap'];
 
 /**
  * Whether anything in a bar reaches past its content box, into its padding or beyond, or a part of the bar holds more
@@ -248,7 +251,7 @@ function overflows(bar: HTMLElement): boolean {
 
 /**
  * Fits each bar marked .fit-bar (toolbars, the Files view's header) to its width. A step applies only while the bar still
- * overflows without it, so every label stays as long as there is room. The renderer calls this after each draw and
+ * overflows without it, so every label stays as long as there is room; a bar that had to wrap then gets back what fits on its lines. The renderer calls this after each draw and
  * whenever the content area resizes.
  */
 export function fitBars(): void {
@@ -257,6 +260,13 @@ export function fitBars(): void {
     for (const step of FIT_STEPS) {
       if (!overflows(bar)) break;
       bar.classList.add(step);
+    }
+    // Wrapped, it takes back what it gave up, the last first (the captions, then the labels, then the padding), while that
+    // adds no line: a step that would is kept, and the ones before it too.
+    const height = bar.offsetHeight;
+    for (const step of bar.classList.contains('bar-wrap') ? FIT_STEPS.slice(0, -1).reverse() : []) {
+      bar.classList.remove(step);
+      if (overflows(bar) || bar.offsetHeight > height) { bar.classList.add(step); break; }
     }
     // Still too wide after every step: marked, so tests (scripts/e2e.mjs) read the same measurement instead of a copy of it.
     bar.toggleAttribute('data-overflows', overflows(bar));

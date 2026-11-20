@@ -1,7 +1,8 @@
 // Pieces the marketplace and plugin pages draw: a plugin's switch and its click's line (clickNote), a tool's mark on the list
-// and its box on the plugin's page, Update, a README, and "a · b · c" lines. The switch's and a box's click wait their turn
-// (pluginstate.ts turnPlugin); Update acts at once (applyPluginOps). What they say comes from pluginstatus.ts.
-import { acting } from './app.ts';
+// and its box on the plugin's page, Update, the link to its items in the Library (libraryLink), a README, and "a · b · c"
+// lines. The switch's and a box's click wait their turn (pluginstate.ts turnPlugin); Update acts at once (applyPluginOps).
+// What they say comes from pluginstatus.ts.
+import { acting, state as app } from './app.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
@@ -12,9 +13,23 @@ import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, toolNames as names } from './words.ts';
+import { pluginFrom, pluginsHere } from './origins.ts';
+import { openKind } from './matrix.ts';
 
 /** The name a plugin is shown by: its display name when the catalog gives one. */
 export const pluginTitle = (plugin: PluginView) => plugin.displayName ?? plugin.name;
+
+/**
+ * "Its items in the Library", on a plugin's page and its row on Plugins, where it has a row in the Library, an Off item linked
+ * to it too (origins.ts pluginsHere; none for a plugin only listed): the Library on All, From set to it (matrix.ts openKind).
+ */
+export function libraryLink(entry: MarketplaceView, plugin: PluginView, id: string, look: 'page' | 'row') {
+  const from = pluginFrom(plugin.name, entry.name);
+  if (!app.home || !pluginsHere(app.home).has(from)) return null;
+  const go = (event: Event) => { event.stopPropagation(); openKind('all', { from }); };
+  return look === 'page' ? button({ variant: 'link', size: 'micro', label: 'Its items in the Library', id, onclick: go })
+    : h('button.text-action.plugin-row-library', { type: 'button', id, title: 'Its items in the Library', onclick: go }, 'Its items in the Library');
+}
 
 /** What a plugin holds, as far as known: the catalog's counts, or its files once read (a plugin kept elsewhere). */
 export function componentsOf(entry: MarketplaceView, plugin: PluginView): Components | undefined {

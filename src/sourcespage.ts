@@ -3,7 +3,9 @@
 // One field takes the link; Look reads it and shows, item by item, what Add would do and what it won't bring in and why,
 // before anything is kept; Add brings each item into Central Knot, Off. Each source has a row: its link, what it brought (On
 // or Off), when it was last read, why it couldn't be read if so, Check now and Remove; an item there the library holds deleted
-// has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace and Keep mine; an item the
+// has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace and Keep mine; Show in the
+// Library, on a source with rows there (origins.ts sourcesHere), opens it with From set to that source (matrix.ts openKind,
+// origins.ts sourceFrom), as Add's band does; an item the
 // source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts fromSource) has a line
 // with Turn on, its switch in the Library. Every line and click carries its item's kind (types.ts SourceName `kind`; ids
 // too: source-merge-<id>-skill-<key>), which pluginstatus.ts pageOfPart maps to its page, and whose words (words.ts kindNouns)
@@ -21,6 +23,7 @@ import { dayAndTime, plural } from './model.ts';
 import { linkLabel } from './sourcelink.ts';
 import { andList, kindNouns, orList, pageNames, toolsPhrase, toPluginsLabel, turnIt } from './words.ts';
 import { openKind, outcomeBand } from './matrix.ts';
+import { sourceFrom, sourcesHere } from './origins.ts';
 import { pageOfPart } from './pluginstatus.ts';
 import { addMarketplace, market } from './pluginstate.ts';
 import type { ItemKind } from './library.ts';
@@ -64,16 +67,18 @@ export async function loadSources(): Promise<void> {
 
 /**
  * After a click that may have changed the library: the home read again, so the Library and every count follow, then the
- * band (what the click did, from `said`, with its one action, and Open on the page of the kind where something changed).
+ * band (what the click did, from `said`, with its one action, and where something changed: Open on the Library at that kind, or
+ * after Add, Open in the Library at the source just added, `added`).
  */
-async function settle(result: SourceResult, said: Said | undefined) {
+async function settle(result: SourceResult, said: Said | undefined, added?: string) {
   if (result.view) sources.view = result.view;
   sources.problem = result.stopped;
   sources.confirmRemove = undefined;
   setHome(await api().refresh(), { reload: false });
   if (said && !result.stopped) {
-    state.outcome = { page: 'sources', text: said.text, band: true, warn: said.warns, ...(said.note ? { note: said.note } : {}), ...(said.undo ? { undo: said.undo } : {}),
-      ...(said.open ? { next: { label: `Open ${kindNouns[said.open].title}`, id: `source-open-${said.open}`, run: () => openKind(said.open!) } } : {}) };
+    const open = !said.open ? undefined : added ? { label: 'Open in the Library', id: 'source-open-library', run: () => openKind('all', { from: sourceFrom(added) }) }
+      : { label: `Open ${kindNouns[said.open].title}`, id: `source-open-${said.open}`, run: () => openKind(said.open!) };
+    state.outcome = { page: 'sources', text: said.text, band: true, warn: said.warns, ...(said.note ? { note: said.note } : {}), ...(said.undo ? { undo: said.undo } : {}), ...(open ? { next: open } : {}) };
   }
   announce(result.stopped ?? said?.text ?? '', true);
 }
@@ -84,11 +89,11 @@ const look = () => busy('Reading the link…', async () => {
   if (!('token' in sources.preview)) announce(sources.preview.refused, true);
 });
 
-const add = (token: string, label: string) => busy('Adding the source…', async () => {
+const add = (token: string, link: string, label: string) => busy('Adding the source…', async () => {
   const result = await api().addSource(token, state.home!.home);
   if (!result.stopped) { sources.preview = undefined; sources.draft = ''; }
   const said = whatItDid(result, label);
-  await settle(result, { ...said, text: `Added ${label}. ${said.text}` });
+  await settle(result, { ...said, text: `Added ${label}. ${said.text}` }, link);
 });
 
 /**
@@ -163,7 +168,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
     waiting.length ? `${names(waiting)} changed at the source; yours ${waiting.length === 1 ? 'stays current, since it was' : 'stay current, since they were'} changed here or a tool’s copy can’t be read just now: on ${waiting.length === 1 ? 'its row' : 'each one’s row'}, ${choices}.` : '',
     ...merges.map(entry => mergeWords(entry.kind, entry.name, entry.merge!, entry.written, homeTools)),
     ...kept.map(({ name }) => `${name} stays as you have it, and the source’s version no longer waits: it is kept as a version, and the source’s next change is compared with it.`),
-    made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in ${andList([...new Set(made.map(entry => nouns(entry.kind).title))])}.` : '',
+    made.length ? `${names(made)} ${are(made)} in Central Knot. ${made.length === 1 ? 'It is' : made.length === 2 ? 'Both are' : `All ${made.length} are`} off. Turn ${made.length === 1 ? 'it' : 'them'} on in the Library.` : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
     left.length ? `Not brought in: ${names(left)} (${left.length === 1 ? 'its row says' : 'their rows say'} why).` : '',
     result.notWhole ? `Not all of ${label} could be read (its row says why), so the source turned no ${orList(result.notWhole.map(kind => nouns(kind).one))} off.` : '',
@@ -314,7 +319,7 @@ function previewPanel(preview: SourcePreview) {
     notComingWords(preview.notComing) ? sayLine('circle-minus', 'tone-muted', notComingWords(preview.notComing)!) : null,
     preview.names.length ? h('ul.source-names', {}, preview.names.map(name => nameRow(name, true))) : null,
     h('div.source-preview-actions', {},
-      preview.refused ? null : button({ variant: 'primary', size: 'small', icon: 'plus', label: addLabel, id: 'source-add', disabled: !allowed || acting(), onclick: () => void add(preview.token, label) }),
+      preview.refused ? null : button({ variant: 'primary', size: 'small', icon: 'plus', label: addLabel, id: 'source-add', disabled: !allowed || acting(), onclick: () => void add(preview.token, preview.link, label) }),
       cancel,
       preview.refused ? null : h('span.source-note', {}, 'What comes in is Off: in Central Knot, in no tool, until you turn it on. Nothing is ever written to the source.')));
 }
@@ -344,6 +349,7 @@ function sourceRow(source: SourceView) {
   const read = source.readAt ? `read ${dayAndTime(source.readAt)}` : '';
   const actions = asking ? null : h('span.source-actions', {},
     button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', id: `source-check-${source.id}`, disabled: locked, attrs: { title: `Read ${label} again: what changed there comes into Central Knot, On or Off as each one is, unless you changed it here` }, onclick: () => void checkNow(source) }),
+    state.home && sourcesHere(state.home).has(source.link) ? button({ variant: 'ghost', size: 'small', label: 'Show in the Library', id: `source-library-${source.id}`, onclick: () => openKind('all', { from: sourceFrom(source.link) }) }) : null,
     button({ variant: 'ghost', size: 'small', label: 'Remove…', id: `source-remove-${source.id}`, disabled: locked, onclick: () => { sources.confirmRemove = source.id; rerender(); document.getElementById(`source-remove-cancel-${source.id}`)?.focus(); } }));
   const called = (name: SourceName) => name.name ?? name.key;
   const idOf = (click: string, name: SourceName) => `source-${click}-${source.id}-${name.kind}-${name.key}`;
