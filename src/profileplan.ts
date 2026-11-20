@@ -9,16 +9,18 @@
 // (main.ts), so each says the same. The profiles file and the switch itself are profiles.ts's.
 // A PLUGIN'S ITEMS, the rules a profile is to switch them by, read by nothing but their tests yet: each item every tool has now
 // with how a switch meets each copy (pluginLive), what a switch to a profile would turn of them, tool by tool (pluginPlan), and
-// whether they agree with a profile (pluginItemsAgree). A profile names one by pluginItemId, never as an item of the person's own.
-import type { ItemKind, LibraryItem } from './library.ts';
+// whether they agree with a profile (pluginItemsAgree). An item is one plan key (pluginItemKey) whichever way each tool has it,
+// and a profile names it by pluginItemId, never as an item of the person's own. The Library's rows don't group by that key
+// (pluginrows.ts pageRows has its own).
+import { itemKey, type ItemKind, type LibraryItem } from './library.ts';
 import { placeOf } from './libraryrow.ts';
 import { plural } from './model.ts';
-import { pageRows, pluginItemKey } from './pluginrows.ts';
+import { pageRows } from './pluginrows.ts';
 import { pageOfPart } from './pluginstatus.ts';
 import { cantSwitch, onNow, ownSwitch, sharesName, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, kindNouns, toolNames } from './words.ts';
-import type { HarnessId, HistoryEvent, HomeView, Profile } from './types.ts';
+import type { HarnessId, HistoryEvent, HomeView, PluginItem, Profile } from './types.ts';
 
 /** What every screen calls the state where no profile is in use. */
 export const NO_PROFILE = 'No profile';
@@ -26,7 +28,16 @@ export const NO_PROFILE = 'No profile';
 /** A profile's name for a library item: its kind and key, `skill:notes`. */
 export const itemId = (kind: ItemKind, key: string) => `${kind}:${key}`;
 /**
- * A profile's name for a plugin's item: `plugin:`, its kind and pluginrows.ts pluginItemKey, `plugin:skill:document-tools@team-tools/pdf`.
+ * A plugin's item's plan key, one rule for each tool's copy, installed whole (a PluginItem, by its `keyName`) or placed in Pi or
+ * OpenCode (a library item linked to the plugin, by placedKeyName): `plugin@marketplace/item`, a skill by its folder's name (one at
+ * the plugin's root by the plugin's) and an agent by its file's, compared as library keys are (itemKey), an MCP server by its name
+ * as written. Not the name a tool's switch takes (PluginItem `name`).
+ */
+export const pluginItemKey = ({ plugin, marketName }: { plugin: string; marketName: string }, item: Pick<PluginItem, 'kind' | 'name' | 'keyName'>) =>
+  `${plugin}@${marketName}/${item.kind === 'mcp' ? item.name : itemKey(item.keyName ?? item.name)}`;
+
+/**
+ * A profile's name for a plugin's item: `plugin:`, its kind and pluginItemKey, `plugin:skill:document-tools@team-tools/pdf`.
  * A library item's id begins with its kind, so none is one of these, whatever its name holds.
  */
 export const pluginItemId = (kind: ItemKind, key: string) => `plugin:${itemId(kind, key)}`;
@@ -116,6 +127,20 @@ function heldWhy(home: HomeView, at: PluginItemAt): string | undefined {
   return cantSwitch(at) ?? sharesName(at, home.mcp.items.flatMap(row => row.copies['copilot-cli']?.folder ?? []), home.pluginItems ?? []);
 }
 
+/** A plugin as the home records it (types.ts ProfilesView `plugins`). */
+type Recorded = NonNullable<HomeView['profiles']['plugins']>[number];
+/**
+ * The name a placed copy's plan key is made of: its library item's name, which is its key's (as atlink.ts pluginItems named it),
+ * or the plugin's for a plugin that is one skill at its root. Placed, that skill is named by the plugin's folder in the
+ * marketplace's copy; the plan knows it is the root skill when a tool's installed copy of the plugin read its one skill at the
+ * root (PluginItem `root`) and the plugin has one skill placed. With no tool having it installed, it keeps its own name.
+ */
+function placedKeyName(home: HomeView, kind: ItemKind, item: LibraryItem, entry: Recorded): string {
+  const atRoot = (home.pluginItems ?? []).some(install => install.plugin === entry.plugin && install.marketName === entry.marketName && install.items.some(part => part.root));
+  const placed = Object.values(home.skills.library).filter(skill => !skill.deleted && skill.source === entry.id).length;
+  return kind === 'skill' && atRoot && placed === 1 ? entry.plugin : item.name;
+}
+
 /**
  * Every plugin's item a tool has now, one per pluginItemKey whichever way each tool has it: installed whole (a copy that can't be
  * read has none), then placed in Pi or OpenCode, a library item linked to a plugin the home records, in each of those managed
@@ -139,7 +164,7 @@ export function pluginLive(home: HomeView): PluginLive[] {
     for (const item of Object.values(library)) {
       const entry = !item.deleted && home.profiles.plugins?.find(each => each.id === item.source);
       if (!entry) continue;
-      const key = pluginItemKey(entry, { kind, name: item.name });
+      const key = pluginItemKey(entry, { kind, name: placedKeyName(home, kind, item, entry) });
       for (const tool of tools.filter(each => !takesPlugins(each) && !item.except.includes(each))) {
         const way = entry.on ? { way: 'switch' as const } : { way: 'held' as const, why: pluginOff(entry.plugin, tool) };
         add(kind, key, item.name, entry.plugin, { tool, on: item.on, target: { libraryKey: item.key }, ...way });

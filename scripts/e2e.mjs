@@ -10983,9 +10983,9 @@ async function fromPictures({ md, put, repo, served, until, done }) {
 
 /**
  * Two versions of one plugin whose folder pdf names its skill differently (Claude Code has document-tools 1.0.0, where it is
- * pdf-reader; Codex 2.0.0, where it is pdf-tool) are one row, keyed by the folder (pluginrows.ts pluginItemKey), and each tool's
- * control, mark and file read take that tool's copy's own name (pluginrows.ts copyAt): Codex's box is Codex's switch for pdf-tool,
- * never its whole plugin.
+ * pdf-reader; Codex 2.0.0, where it is pdf-tool): the Library lists a plugin's items by name (pluginrows.ts pageRows), so they are
+ * two rows, each in the one tool that has it, and each acts by its own name: Codex's box on pdf-tool is Codex's switch for
+ * pdf-tool, never its whole plugin.
  */
 async function renamedSkillFlow() {
   const home = join(scratch, 'home-renamed'), data = join(scratch, 'renamed-data'), tools = join(scratch, 'tools-renamed');
@@ -11001,19 +11001,20 @@ async function renamedSkillFlow() {
   writeFileSync(config, before);
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
-  const a = await launch(data, [], tools), key = 'document-tools@m/pdf';
+  const a = await launch(data, [], tools), [reader, renamed, sheet] = ['pdf-reader', 'pdf-tool', 'spreadsheet'].map(name => `document-tools@m/${name}`);
   await openKind(a, 'skills');
-  for (let tries = 0; tries < 60 && !(await a.exists(byId(rowPart('open', 'skills', key)))); tries++) await wait(100);
-  same('one row for both versions, named as the first copy names it', await a.all('.ov-row', 'e.dataset.key'), [rowPart('', 'skills', key), rowPart('', 'skills', 'document-tools@m/spreadsheet')]);
-  await a.click(byId(rowPart('open', 'skills', key)));
-  await a.click(byId(rowPart('pfile', 'skills', key)));
+  for (let tries = 0; tries < 60 && !(await a.exists(byId(rowPart('open', 'skills', renamed)))); tries++) await wait(100);
+  same('two rows for the one folder, each in the one tool that has it by that name', [await a.all('.ov-row', 'e.dataset.key'), await cellState(a, 'skills', reader, 'codex-cli'), await cellState(a, 'skills', renamed, 'claude-cli')],
+    [[reader, renamed, sheet].map(key => rowPart('', 'skills', key)), 'plugin-none', 'plugin-none']);
+  await a.click(byId(rowPart('open', 'skills', renamed)));
+  await a.click(byId(rowPart('pfile', 'skills', renamed)));
   for (let tries = 0; tries < 60 && !/Reads PDFs, renamed/.test(await a.text('.details-file') ?? ''); tries++) await wait(100);
-  check('its file is read from each tool’s copy by that copy’s own name', /Claude Code[\s\S]*name: pdf-reader[\s\S]*Codex[\s\S]*name: pdf-tool/.test(await a.text('.details-file') ?? ''), await a.text('.details-file'));
-  await a.click(byId(rowPart('enable', 'skills', key, 'codex-cli')));
+  check('pdf-tool’s file is its one copy, Codex’s', /name: pdf-tool/.test(await a.text('.details-file') ?? '') && !/pdf-reader/.test(await a.text('.details-file') ?? ''), await a.text('.details-file'));
+  await a.click(byId(rowPart('enable', 'skills', renamed, 'codex-cli')));
   for (let tries = 0; tries < 60 && readFileSync(config, 'utf8') === before; tries++) await wait(100);
   same('Codex’s box turns off pdf-tool with Codex’s own switch, and leaves the plugin on', readFileSync(config, 'utf8'), `${before}\n[[skills.config]]\nname = "document-tools:pdf-tool"\nenabled = false\n`);
-  for (let tries = 0; tries < 60 && (await cellState(a, 'skills', key, 'codex-cli')) !== 'plugin-off'; tries++) await wait(100);
-  same('its Codex mark reads that switch; the plugin’s other skill is still on there', [await cellState(a, 'skills', key, 'codex-cli'), await cellState(a, 'skills', 'document-tools@m/spreadsheet', 'codex-cli')], ['plugin-off', 'plugin']);
+  for (let tries = 0; tries < 60 && (await cellState(a, 'skills', renamed, 'codex-cli')) !== 'plugin-off'; tries++) await wait(100);
+  same('its Codex mark reads that switch; the plugin’s other skill is still on there', [await cellState(a, 'skills', renamed, 'codex-cli'), await cellState(a, 'skills', sheet, 'codex-cli')], ['plugin-off', 'plugin']);
   same('no page errors', a.pageErrors, []);
   await a.quit();
 }

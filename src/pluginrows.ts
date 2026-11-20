@@ -1,33 +1,20 @@
-// What plugins installed whole bring, as rows of the Library (no DOM): one row per item of a plugin across every tool that has
-// the plugin, by the plugin's item's key (pluginItemKey, which profileplan.ts plans a plugin's items by too). An item the person
-// also has as their own (the same skill, or the plugin's item linked to it in Pi and OpenCode) stays on that row, whose box says
-// "Through a plugin" (types.ts LibraryFacts plugin); one that only shares a name is a row of its own here. These rows are never
-// managed: no sync, no profile, no repo; a box turns the item on or off in that tool (pluginswitch.ts), and the plugin's page is
-// where the plugin itself is handled.
+// What plugins installed whole bring, as rows of the Library (no DOM): one row per item of a
+// plugin across every tool that has the plugin. An item the person also has as their own (the same skill, or the plugin's item
+// linked to it in Pi and OpenCode) stays on that row, whose box says "Through a plugin" (types.ts LibraryFacts plugin); one
+// that only shares a name is a row of its own here. These rows are never managed: no sync, no profile, no repo; a box turns the
+// item on or off in that tool (pluginswitch.ts), and the plugin's page is where the plugin itself is handled.
 import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, pageNames, toolNames as names } from './words.ts';
-import type { PluginItemAt } from './pluginswitch.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, PartKind, PluginItem } from './types.ts';
 import { kindSource } from './itemrow.ts';
-import { itemKey } from './library.ts';
 import { pluginLink } from './sourcelink.ts';
 
 type Page = keyof typeof partOfPage;
 
-/**
- * A plugin's item's key, one rule for each tool's copy, installed whole (a PluginItem, by its `keyName`) or placed in Pi or
- * OpenCode (a library item linked to the plugin, by its name: atlink.ts pluginItems, `marketplace` route): `plugin@marketplace/item`,
- * a skill by its folder's name (one at the plugin's root by the plugin's) and an agent by its file's, compared as library keys are
- * (itemKey), an MCP server by its name as written. Not the name a tool's switch takes (each copy's `name`: copyAt). A profile
- * names it apart from the person's own items (profileplan.ts pluginItemId).
- */
-export const pluginItemKey = ({ plugin, marketName }: { plugin: string; marketName: string }, item: Pick<PluginItem, 'kind' | 'name' | 'keyName'>) =>
-  `${plugin}@${marketName}/${item.kind === 'mcp' ? item.name : itemKey(item.keyName ?? item.name)}`;
-
 /** One item of a plugin, by the plugin it comes with, and what each tool's installed copy of that plugin has of it. */
 export interface PluginRow {
-  /** pluginItemKey's. */
+  /** Unique beside the page's own keys: a folder or file name never holds "/". */
   key: string;
   kind: PartKind;
   name: string;
@@ -46,22 +33,13 @@ export interface PluginRow {
  */
 export interface PageRows { rows: PluginRow[]; folded: Map<string, PluginRow[]>; unread: InstalledPlugin[] }
 
-/**
- * One tool's copy of the row's item as its switch takes it (pluginswitch.ts), by that copy's own name: two versions of the plugin
- * may name the item of one folder differently, and the row's name is the first copy's.
- */
-export function copyAt(row: PluginRow, tool: HarnessId): PluginItemAt | undefined {
-  const copy = row.copies[tool], install = row.installs[tool];
-  return copy && install ? { kind: row.kind, name: copy.name, tool, install } : undefined;
-}
-
 /** Whether this tool's copy of the plugin has this item turned off, and how: the whole plugin, or the item's own switch (a skill's, an MCP server's, an agent's). */
 export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'item' | undefined {
   const install = row.installs[tool];
   if (!install || !row.copies[tool]) return undefined;
   if (install.off) return 'plugin';
   const off = { skill: install.skillsOff, mcp: install.serversOff, agent: install.agentsOff }[row.kind];
-  return off?.some(name => samePart({ kind: row.kind, name }, row.copies[tool]!)) ? 'item' : undefined;
+  return off?.some(name => samePart({ kind: row.kind, name }, row)) ? 'item' : undefined;
 }
 
 /** A tool has its own copies, items its plugins give it, and skill copies it reads through a link or another folder, even when its own switch has the copy off. */
@@ -90,7 +68,7 @@ export function pageRows(home: HomeView, page: Page): PageRows {
   const { facts } = kindSource(home, page);
   const byKey = new Map<string, PluginRow>();
   for (const install of home.pluginItems ?? []) for (const item of install.items.filter(entry => entry.kind === kind)) {
-    const id = pluginItemKey(install, item);
+    const id = `${install.plugin}@${install.marketName}/${kind === 'mcp' ? item.name : item.name.normalize('NFC').toLowerCase()}`;
     const row = byKey.get(id) ?? { key: id, kind, name: item.name, description: '', plugin: install.plugin, marketName: install.marketName, copies: {}, installs: {} };
     row.copies[install.tool] = item;
     // An MCP server reads as the page's own do: "Command · npx -y …", "URL · https://…".

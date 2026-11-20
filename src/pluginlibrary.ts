@@ -16,6 +16,7 @@
 // every pass (librarypass.ts letGo).
 // Known miss: a skill keyed by its folder (library.ts A SOURCE, the two key rules) whose SKILL.md names it otherwise is loaded
 // by Pi and OpenCode under that name, so it can meet a skill of that name there unmarked, and through a Git link is a second item.
+import { basename } from 'node:path';
 import { pluginItems, wasRead } from './atlink.ts';
 import type { PluginFiles } from './catalogdetail.ts';
 import { fromLinkSinceTakeIn, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
@@ -48,8 +49,7 @@ export interface ItemState { kind: ItemKind; key: string; on: boolean; except: H
  * makes is kept out of (pluginOutOf). `commitAt`: when its marketplace was read.
  */
 export async function readPlugin(files: PluginFiles, entry: PluginEntry, commitAt: string, recorded: ReadonlySet<string>, outOf: HarnessId[]): Promise<SourceRead<unknown>[]> {
-  // A plugin that is one skill at its root is that skill, named by the plugin (as each tool's installed copy keys it: pluginrows.ts pluginItemKey).
-  const read = await pluginItems(files, files.folder, entry.plugin, 'marketplace');
+  const read = await pluginItems(files, files.folder, basename(files.folder), 'marketplace');
   const any = Object.values(read).some(each => each.items.some(wasRead));
   return sourceKinds().map((kind): SourceRead<unknown> => {
     const { items, unread } = read[kind.kind.kind], names: SourceRead<unknown>['names'] = new Map();

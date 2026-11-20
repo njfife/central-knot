@@ -184,6 +184,16 @@ test('Copilot CLI turns a server off by its bare name: a plugin’s server named
   assert.deepEqual(plan(docsHome(installs, [], [['mcp', 'issues', true]], [mine('Issues')])), [[issuesId, ['copilot-cli', 'codex-cli'], []]]);
 });
 
+test('A plugin that is one skill at its root is one item installed and placed, though Pi has it under its folder’s name; not when the plugin has more than one skill placed', () => {
+  // Claude Code read document-tools as one skill, SKILL.md at its root; Pi has it from the marketplace, named by its folder, bundle.
+  const root = docsIn('claude-cli', { items: [{ kind: 'skill', name: 'docs-skill', keyName: 'document-tools', root: true, description: '' }] });
+  const rootId = 'plugin:skill:document-tools@team-tools/document-tools';
+  assert.deepEqual(copiesIn(docsHome([root], [{ key: 'bundle', on: true }])), { [rootId]: ['claude-cli on stays', 'pi-cli on'] });
+  // Two skills placed are not that one skill (the marketplace's version is not the one installed): each keeps its own key.
+  assert.deepEqual(Object.keys(copiesIn(docsHome([root], [{ key: 'bundle', on: true }, { key: 'forms', on: true }]))).sort(),
+    [rootId, 'plugin:skill:document-tools@team-tools/bundle', 'plugin:skill:document-tools@team-tools/forms'].sort());
+});
+
 test('A copy placed in Pi is held while its plugin is Off on Plugins: a profile never turns on what the plugin’s Off turned off', () => {
   const off = docsHome([], [{ key: 'pdf-reader', on: false }, { key: 'spreadsheet', on: false }], [], [], { on: false });
   assert.deepEqual(copiesIn(off)[pdfId], ['pi-cli off held']);
