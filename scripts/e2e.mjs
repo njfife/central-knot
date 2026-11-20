@@ -5400,8 +5400,60 @@ async function sharedCopiesFlow() {
   await a.click('#harness-tab-skills');
   same('OpenCode reads Claude Code’s copy of clash, so its card and Copies differ chip both count it',
     [parseInt(differ ?? '', 10), await a.text('.chip-warn .chip-count')], [1, '1']);
+  await sharedDeletionChecks(a, home);
   same('no page errors, shared copies', a.pageErrors, []);
   await a.quit();
+}
+
+/**
+ * A copy in the shared folder deleted by hand (library.ts THE SHARED FOLDER), in sharedCopiesFlow's home: two skills on, each in
+ * ~/.agents/skills, which every tool but Claude Code reads, and Claude Code's entry a link to it. Every tool's own skills folder
+ * is listed before and after each case: no file is written. The shared folder renamed away and back changes nothing and is said
+ * once; the copy deleted there turns its skill off, with one notice and one History entry naming the shared folder, and the
+ * notice's Turn it on gives each tool its own copy; only the link deleted is a deletion in Claude Code.
+ */
+async function sharedDeletionChecks(a, home) {
+  const agents = join(home, '.agents/skills'), roots = ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills'];
+  const listed = () => roots.map(root => readdirSync(join(home, root)).sort().map(name => (lstatSync(join(home, root, name)).isSymbolicLink() ? `${name} → ${readlinkSync(join(home, root, name))}` : name)).join(', '));
+  const twoPasses = async () => { await a.click('#header-refresh'); await wait(2200); await a.click('#header-refresh'); };
+  const noticeOf = name => a.run(`[...document.querySelectorAll('.sync-notice')].filter(notice => notice.textContent.includes(${JSON.stringify(`${name} was deleted`)})).map(notice => notice.querySelector('.notice-text')?.textContent.replace(/ · .*$/, '').trim())`);
+  for (const name of ['gone-one', 'link-one']) {
+    skill(agents, name, text(name, 'Read in the shared folder.'));
+    symlinkSync(`../../.agents/skills/${name}`, join(home, '.claude/skills', name));
+  }
+  await openKind(a, 'skills');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'link-one')}"] .add-item`)); tries++) await wait(100);
+  for (const name of ['gone-one', 'link-one']) {
+    await a.click(`.ov-row[data-key="${rowPart('', 'skills', name)}"] .add-item`);
+    for (let tries = 0; tries < 40 && !(await switchOn(a, 'skills', name)); tries++) await wait(100);
+  }
+  const before = listed();
+  renameSync(agents, `${agents}-away`);
+  await twoPasses();
+  const said = (await a.text('.bands') ?? '').split('The shared skills folder').length - 1;
+  same('the shared folder renamed away: nothing written, nothing off, said once', [listed(), await switchOn(a, 'skills', 'gone-one'), await switchOn(a, 'skills', 'link-one'), said, await a.exists('.sync-notice')], [before, true, true, 1, false]);
+  renameSync(`${agents}-away`, agents);
+  await twoPasses();
+  same('and back, all as before', [listed(), await switchOn(a, 'skills', 'gone-one'), (await a.text('.bands') ?? '').includes('The shared skills folder')], [before, true, false]);
+  rmSync(join(agents, 'gone-one'), { recursive: true });
+  await twoPasses();
+  same('the shared copy deleted: two passes later every tool’s folder is as it was, the link that leads nowhere too, and the skill is off', [listed(), await switchOn(a, 'skills', 'gone-one')], [before, false]);
+  same('one notice, naming the shared folder', await noticeOf('gone-one'), ['gone-one was deleted in the shared folder, so it is off. Central Knot keeps it.']);
+  if (shots) { await sizeTo(a, 1316, 819); await a.shot('shared-deleted-notice'); await fullSize(a); }
+  await a.click('#nav-history');
+  same('one History entry, naming the shared folder', await a.run(`[...document.querySelectorAll('.history-row[data-kind="off"]')].filter(row => row.textContent.includes('gone-one')).map(row => row.querySelector('.history-about')?.textContent)`),
+    ['Its copy was deleted in the shared folder, so it was turned off. Central Knot keeps it.']);
+  await openKind(a, 'skills');
+  await a.run(`[...document.querySelectorAll('.sync-notice')].find(notice => notice.textContent.includes('gone-one was deleted'))?.querySelector('[id^="notice-restore-"]')?.click()`);
+  for (let tries = 0; tries < 40 && !(await switchOn(a, 'skills', 'gone-one')); tries++) await wait(100);
+  same('its Turn it on gives each tool its own copy, Claude Code’s in place of the link, and writes nothing in the shared folder',
+    [...roots.slice(0, 4).map(root => lstatSync(join(home, root, 'gone-one'), { throwIfNoEntry: false })?.isDirectory() ?? false), existsSync(join(agents, 'gone-one'))], [true, true, true, true, false]);
+  rmSync(join(home, '.claude/skills/link-one'));
+  const linkBefore = listed();
+  await twoPasses();
+  same('only Claude Code’s link deleted: nothing written, off, the notice naming Claude Code', [listed(), await switchOn(a, 'skills', 'link-one'), await noticeOf('link-one')],
+    [linkBefore, false, ['link-one was deleted in Claude Code, so it is off. Central Knot keeps it.']]);
 }
 
 /**

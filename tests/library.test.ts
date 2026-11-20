@@ -53,6 +53,12 @@ test('A copy of its own that Central Knot never put there, where the harness has
   assert.equal(decide(ON, 'b', bothWays('x'), undefined), 'own-copy');
   assert.equal(decide(ON, 'b', bothWays('b'), undefined), 'own-copy');
 });
+/** No copy now, where the harness had the item only through the shared skills folder (LibraryItem throughShared): gone from there, or its link here to it gone. */
+const goneFromShared: HarnessCopy = { is: 'absent', goneFrom: 'shared' }, linkGone: HarnessCopy = { is: 'absent', goneFrom: 'here' };
+test('On, no copy where the harness had the item only through the shared folder, its copy there or its link to it deleted: deleted by hand, though nothing of Central Knot’s was applied there', () => {
+  for (const copy of [goneFromShared, linkGone]) assert.equal(decide(ON, 'b', copy, undefined), 'turn-off');
+  assert.equal(decide(OFF, 'b', goneFromShared, undefined), 'nothing');
+});
 test('Off, and the copy a removal was owed for is gone already: only forgotten', () => {
   assert.equal(decide(OFF, 'b', none, 'b'), 'forget');
   assert.equal(decide(OFF, 'b', none, undefined), 'nothing');
@@ -153,6 +159,33 @@ test('A harness that has the item another way never turns it Off; once the other
   assert.deepEqual(plan(agent, { 'claude-cli': none, 'copilot-cli': has('a'), 'codex-cli': has('a') }).write, ['claude-cli']);
   // A harness that can't be given the item keeps what was applied there: once it can, a copy gone by then was deleted by hand.
   assert.deepEqual(plan(item(), { 'claude-cli': held, 'copilot-cli': has('a'), 'codex-cli': has('a') }), { ...quiet, current: ['copilot-cli', 'codex-cli'] });
+});
+
+/** A harness that has the item only through the shared skills folder, at its folder there named `folder` (skills.ts). */
+const throughShared = (folder = 'reviewer'): HarnessCopy => ({ is: 'held', why: 'It reads a copy in ~/.agents/skills.', anotherWay: true, through: folder });
+test('A harness that has the item only through the shared folder: nothing of Central Knot’s goes there, and the plan notes the folder it reads, which carryOut keeps', async () => {
+  const agent = item({ applied: { 'claude-cli': 'a' } });
+  const made = plan(agent, { 'claude-cli': has('a'), 'copilot-cli': throughShared('reviewer'), 'codex-cli': throughShared('review-kit') });
+  assert.deepEqual(made, { ...quiet, current: ['claude-cli'], throughShared: { 'copilot-cli': 'reviewer', 'codex-cli': 'review-kit' } });
+  await carryOut(agent, made, { ...shelf(agent).made, copy: () => ({ hash: 'a', content: '' }), keepOwn: async () => {}, log: async () => {}, write: async () => true, remove: async () => true });
+  assert.deepEqual([agent.throughShared, agent.applied], [{ 'copilot-cli': 'reviewer', 'codex-cli': 'review-kit' }, { 'claude-cli': 'a' }]);
+});
+test('The shared folder’s copy deleted by hand: the item turns Off once, in the shared folder, and nothing is written; carryOut lets the folders go', async () => {
+  // Claude Code's entry was a link to the shared copy, which now leads nowhere; Copilot CLI read the shared folder itself.
+  const agent = item({ applied: {}, throughShared: { 'claude-cli': 'reviewer', 'copilot-cli': 'reviewer' } });
+  const made = plan(agent, { 'claude-cli': goneFromShared, 'copilot-cli': goneFromShared });
+  assert.deepEqual(made, { ...quiet, turnedOffBy: 'claude-cli', inSharedFolder: true, current: [] });
+  await carryOut(agent, made, { ...shelf(agent).made, copy: () => ({ hash: 'a', content: '' }), keepOwn: async () => {}, log: async () => {}, write: async () => true, remove: async () => true });
+  assert.deepEqual([agent.on, agent.throughShared], [false, undefined]);
+  // Its link deleted by hand in Claude Code, the shared copy still there: a deletion there, as for a copy of its own.
+  const linkOnly = plan(item({ applied: {}, throughShared: { 'claude-cli': 'reviewer', 'copilot-cli': 'reviewer' } }), { 'claude-cli': linkGone, 'copilot-cli': throughShared() });
+  assert.deepEqual(linkOnly, { ...quiet, turnedOffBy: 'claude-cli', current: [] });
+});
+test('A harness that had the item through the shared folder and can’t be seen for sure now keeps that, so a later look can still tell its copy went', () => {
+  const agent = item({ applied: { 'claude-cli': 'a' }, throughShared: { 'copilot-cli': 'reviewer' } });
+  assert.deepEqual(plan(agent, { 'claude-cli': has('a'), 'copilot-cli': unseen }), { ...quiet, current: ['claude-cli'], throughShared: { 'copilot-cli': 'reviewer' } });
+  // Kept out of it, or Off: nothing is had there any more.
+  assert.deepEqual(plan({ ...agent, except: ['copilot-cli'] }, { 'claude-cli': has('a'), 'copilot-cli': unseen }).throughShared, undefined);
 });
 
 // ---------- Copies with no time of their own ----------

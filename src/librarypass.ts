@@ -113,9 +113,16 @@ export interface Disk<Entry extends Seen> {
    * also where the harness has a copy of its own: there only `anotherWay` counts (library.ts, the table's last row). `item` is
    * as this pass's clicks left it, so library.ts wantedIn says where else it is wanted and `applied` whether a copy elsewhere
    * is Central Knot's; what the other harnesses hold is this Disk's (byKey, unseen). A folder that can't be written is
-   * `locked`, which the pass adds itself. Worked out at each look, never stored.
+   * `locked`, which the pass adds itself. Worked out at each look, never stored. `through`: it has it only through the
+   * shared skills folder, at this folder there (library.ts THE SHARED FOLDER).
    */
-  held(item: Wanted, harness: HarnessId): { why: string; anotherWay?: true } | undefined;
+  held(item: Wanted, harness: HarnessId): { why: string; anotherWay?: true; through?: string } | undefined;
+  /**
+   * For a harness the item is wanted in, with no copy and no other way now, that had it only through the shared folder
+   * (LibraryItem throughShared): its folder there gone (`shared`), its link here to it gone (`here`), or why that can't be told
+   * now (unseen). A kind with no shared folder leaves it out.
+   */
+  goneFrom?(item: Wanted, harness: HarnessId): 'shared' | 'here' | { unseen: string } | undefined;
   /**
    * Why a harness won't load the item's current version, where that holds whether or not it has a copy (a skill's shape a tool
    * refuses): nothing of the item is written there, so a copy it has stays as it is and is `held`. A kind with no such reason
@@ -146,7 +153,8 @@ export interface Disk<Entry extends Seen> {
  * each harness's own part where the record keeps one, and the source it is linked to (a plugin's item is held by plugins.ts
  * pluginHolds in the tools that take the plugin).
  */
-export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'> & Partial<Pick<LibraryItem, 'hash' | 'own' | 'source'>>;
+export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'>
+  & Partial<Pick<LibraryItem, 'hash' | 'own' | 'source' | 'throughShared'>>;
 
 /** One kind's part of the library as its record holds it: its items, and each harness's folder as a pass last saw it. */
 export interface KindLibrary { items: Record<string, LibraryItem>; folders: Partial<Record<HarnessId, FolderSeen>> }
@@ -412,7 +420,7 @@ async function cameBack(look: AnyLook, tool: HarnessId, shelf?: Shelf<unknown>) 
  * pass and by the page. `unseen`, so that nothing happens there: a copy that can't be read for sure, a folder away inside
  * the settle window, and a copy missing for less than the settle window (an editor's save moves the file away for a moment).
  * `held`: a harness the item should be in that can't be given a copy (Disk.held, or its folder is locked), or has it another
- * way (Disk.held).
+ * way (Disk.held). Absent where it had it only through the shared folder: gone from there (Disk.goneFrom), or unseen.
  */
 export function copiesOf(look: AnyLook, item: LibraryItem): Copies {
   const slot = look.disk.byKey.get(item.key) ?? {};
@@ -424,7 +432,7 @@ export function copiesOf(look: AnyLook, item: LibraryItem): Copies {
  */
 function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | undefined, inScope = true): HarnessCopy {
   const copy = copyRead(look, item, tool, here), at = `${look.kind.folder(look.context, tool)}#${look.kind.kind}:${item.key}`;
-  const owed = copy.is === 'absent' && wantedIn(item, tool) && item.applied[tool] !== undefined;
+  const owed = copy.is === 'absent' && wantedIn(item, tool) && (item.applied[tool] !== undefined || !!copy.goneFrom);
   if (owed && !inScope) return copy;
   if (owed && stillSettling(look, at)) {
     const { copy: noun, item: kindNoun } = look.kind.words;
@@ -447,7 +455,10 @@ function copyRead(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen 
   }
   const locked = look.disk.locked.get(tool);
   const held = kindHeld ?? (wanted && locked ? { why: locked.why } : undefined);
-  return held ? { is: 'held', ...held } : { is: 'absent' };
+  if (held) return { is: 'held', ...held };
+  const gone = wanted ? look.disk.goneFrom?.(item, tool) : undefined;
+  if (typeof gone === 'object') return { is: 'unseen', why: gone.unseen };
+  return gone ? { is: 'absent', goneFrom: gone } : { is: 'absent' };
 }
 /** What a pass read of an item outside its scope (a click's or a source's) ends that item's absences, and starts or ages none. */
 function seenOutside(look: AnyLook, item: LibraryItem) {
@@ -808,8 +819,8 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
     named.set(event, writes);
     return event.id;
   };
-  const notice = (kind: ItemNotice['kind'], winner: HarnessId, losers: HarnessId[], history: string, writes: HarnessId[], orderProved = true) => {
-    const told: ItemNotice = { key, item: item.name, kind, winner, losers, orderProved, history };
+  const notice = (kind: ItemNotice['kind'], winner: HarnessId, losers: HarnessId[], history: string, writes: HarnessId[], orderProved = true, inShared = {}) => {
+    const told: ItemNotice = { key, item: item.name, kind, winner, losers, orderProved, history, ...inShared };
     pass.notices.push(told);
     named.set(told, writes);
   };
@@ -841,8 +852,10 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
     notice(kind, made.takeIn, others.length ? others : written, id, others.length ? [] : written, made.orderProved);
   }
   if (made.turnedOffBy) {
-    const id = log({ kind: 'off', cause: 'deleted-by-hand', winner: { tool: made.turnedOffBy, hash: taken }, losers: before(did.removed) }, did.removed);
-    notice('deleted-by-hand', made.turnedOffBy, did.removed, id, did.removed);
+    const inShared = made.inSharedFolder ? { inSharedFolder: true as const } : {};
+    const entry = { kind: 'off' as const, cause: 'deleted-by-hand' as const, winner: { tool: made.turnedOffBy, hash: taken }, losers: before(did.removed) };
+    const id = log({ ...entry, ...inShared }, did.removed);
+    notice('deleted-by-hand', made.turnedOffBy, did.removed, id, did.removed, true, inShared);
   }
   // Edits no pass had taken in that give way to the current version (Pull, Make current): each is a version, offered back here.
   const gaveWay = made.takeIn ? [] : made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness);

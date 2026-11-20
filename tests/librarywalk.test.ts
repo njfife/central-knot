@@ -2,9 +2,10 @@
 // with an agent on the library in the same home ("writer"; in Pi a loose file beside the skill's folder, in the same skills folder):
 // every click the Library and History offer
 // (tests/skillclicks.ts), edits, files added, modes changed and folders deleted by hand, copies made by hand, a copy in
-// ~/.agents/skills (which Copilot CLI and Codex read) coming and going, Take over of it, a tool's own switch set by hand and
-// cleared, Automatic sync off and on, History's days passing, a folder that can't be written during a click, a crash at
-// each step of a write or a removal, a tool uninstalled or left out, the agent turned off and on, and a source (a made-up
+// ~/.agents/skills (which Copilot CLI, Codex and Pi read; beside the installer's other skill) coming and going (gone while a
+// tool had the skill only there: a deletion by hand), the whole shared folder away or unreadable for a pass, Take over of it,
+// a tool's own switch set by hand and cleared, Automatic sync off and on, History's days passing, a folder that can't be
+// written during a click, a crash at each step of a write or a removal, a tool uninstalled or left out, the agent turned off and on, and a source (a made-up
 // repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own in its notes/ folder: added, changed
 // there (its body, or its description, a line apart from the body a hand edit rewrites), checked, dropped and
 // brought back there, its SKILL.md unparseable there for one check, Add on its row for a notes held deleted, Replace, Merge
@@ -231,6 +232,9 @@ async function walk(seed: number): Promise<Finding[]> {
   });
 
   try {
+    // The installer's other skill, never in Central Knot: the shared folder still lists a skill once notes's copy goes from it.
+    await mkdir(join(box.home, '.agents/skills/kept'), { recursive: true });
+    await writeFile(join(box.home, '.agents/skills/kept/SKILL.md'), skillText('The installer’s.', 'kept'));
     if (seed % 2) {
       await put(box, 'claude-cli', rich(), ['empty']);
       await send(rowClicks.on((await seen(box)).row, undefined));
@@ -454,6 +458,21 @@ async function walk(seed: number): Promise<Finding[]> {
             if (done.writes || !(await seen(box, context())).item?.on) fail(`(settle) a folder deleted inside the settle window ${done.writes ? 'had folders written or removed' : 'turned the skill Off'}`);
           }
         } });
+      }
+      // The shared folder away or unreadable as a whole, from a settled home where a tool has the skill only through it: unseen,
+      // never a deletion (library.ts THE SHARED FOLDER).
+      if (settled && place === 'on' && held?.throughShared) {
+        const root = join(box.home, '.agents/skills'), aside = join(box.base, 'shared-aside');
+        const whole = (how: string, hide: () => Promise<unknown>, show: () => Promise<unknown>) => add(1, { name: `unseeable: the shared folder ${how}`, app: true, byHand: true, run: async () => {
+          await hide();
+          try {
+            const done = await pass();
+            if (!(await seen(box, context())).item?.on) fail(`the shared folder ${how} turned the skill Off`);
+            if (done.writes) fail(`the shared folder ${how} had folders written or removed`);
+          } finally { await show(); }
+        } });
+        whole('renamed away', () => rename(root, aside), () => rename(aside, root));
+        if (process.getuid?.() !== 0) whole('unreadable', () => chmod(root, 0), () => chmod(root, 0o755));
       }
 
       const act = pick(acts);
