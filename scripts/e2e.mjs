@@ -1644,6 +1644,10 @@ async function practiceFlow() {
   check('and says it is the current version now, with Undo', (await a.text('.sync-notices') ?? '').includes('standup was edited in Claude Code; that is its current version now') && await a.exists('[id^="notice-undo-"]'), await a.text('.bands'));
   check('without also calling it a catch-up', !(await a.text('.bands') ?? '').includes('Caught up'), await a.text('.bands'));
   check('and the status bar doesn’t say nothing changed beside it', !/Nothing changed/.test(await a.run(`document.querySelector('#announcement').dataset.text ?? ''`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
+  // A Refresh that finds nothing new while that notice is still up says what it read and stops there.
+  await a.click('#header-refresh');
+  const readBeside = await a.run(`document.querySelector('#announcement').dataset.text ?? ''`);
+  check('a Refresh beside the notice an earlier read drew says what it read, without "Nothing changed"', (await a.text('.sync-notices') ?? '').includes('standup was edited in Claude Code') && /^Read /.test(readBeside) && !/Nothing changed/.test(readBeside), readBeside);
   await a.shot('practice-edit-spread');
   // A click on a row leaves the notice where it is: it goes at its × or at a newer notice, never at a click.
   await a.click(`#${rowPart('switch', 'skills', 'notes')}`); await a.click('#outcome-undo');
