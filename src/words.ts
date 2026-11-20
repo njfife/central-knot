@@ -122,7 +122,7 @@ export const kindNames = Object.fromEntries(Object.entries(kindNouns).map(([kind
 export const rowNouns = (kinds: readonly HomeKind[]) => (new Set(kinds).size === 1 ? kindNouns[kinds[0]!] : { one: 'item', many: 'items' });
 /**
  * Reasons, each said once; where they are said over several kinds (`several`), each led by the kinds it is about ("MCP
- * servers: The MCP record is damaged. …"): a bulk Off's and its Undo's (app.ts), and the Library's bands (matrix.ts listNotices).
+ * servers: The MCP record is damaged. …"): a bulk Off's and its Undo's (app.ts), and the Library's bands (matrix.ts listBands).
  */
 export function saidByKind(pairs: readonly [HomeKind, string][], several: boolean): string[] {
   const kindsOf = new Map<string, HomeKind[]>();

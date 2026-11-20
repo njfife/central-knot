@@ -36,6 +36,8 @@ const api = {
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
   onSyncChanged: (listener: () => void) => { main.syncChanged = listener; },
   syncNow: async (_home: string): Promise<unknown> => null,
+  // A home's usage, read as it opens (app.ts collectUsage): none here; one that failed would be said in the status bar.
+  readUsage: async () => ({ at: '2026-11-20T00:00:00.000Z', tools: [] }),
 };
 // The page's modules, loaded under node with no window: the little of the DOM they touch as they load and redraw. An element keeps
 // what is appended to it, so a test can read the words a part draws (textOf).
@@ -56,7 +58,7 @@ const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, last
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
-const { backgroundProblems, libraryTable, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { backgroundProblems, headerNotices, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
 const { newItem } = await import('../src/library.ts');
 const { keptBack } = await import('../src/clickplan.ts');
@@ -304,7 +306,7 @@ function onLibrary() {
   Object.assign(app, { page: 'library', harness: undefined });
 }
 
-/** The Library, on a home of one skill the table can draw (libraryTable): the next read brings `change`, every read after it the home as it was. */
+/** The Library, on a home of one skill (its notices in the header: headerNotices): the next read brings `change`, every read after it the home as it was. */
 function backgroundWhileReading(t: TestContext, change: 'skills' | 'agents' | 'caught up' = 'skills') {
   onLibrary();
   const tools = ['copilot-cli'];
@@ -338,7 +340,7 @@ test('Refresh beside a notice an earlier read drew says what it read and stops t
   backgroundWhileReading(t);
   main.syncChanged();
   await settled();
-  const noticeDrawn = () => textOf(libraryTable()).includes('notes was deleted in Copilot CLI');
+  const noticeDrawn = () => textOf(headerNotices(false)?.lines).includes('notes was deleted in Copilot CLI');
   assert.equal(noticeDrawn(), true);
   await readAgain();
   assert.deepEqual([app.said.text, noticeDrawn()], ['Read 1 skill, 0 MCP servers and 0 agents from Practice.', true]);
@@ -354,49 +356,20 @@ test('Another home opened from beside the last home’s notice says "Nothing cha
   const home = backgroundWhileReading(t);
   main.syncChanged();
   await settled();
-  assert.match(textOf(libraryTable()), /notes was deleted in Copilot CLI/);
+  assert.match(textOf(headerNotices(false)?.lines), /notes was deleted in Copilot CLI/);
   t.mock.method(api, 'selectHome', async () => ({ ...home, home: '/other', label: 'Other' }));
   await loadHome('custom');
   assert.match(app.said.text, /^Opened Other\. Read 1 skill, 0 MCP servers and 0 agents\. Nothing changed\./);
 });
 
-test('A deletion notice held during Delete takes the finished result’s place and points its Undo to History', async t => {
+test('A deletion notice held during Delete leaves the finished result and its Undo in the header: the notice is only counted', async t => {
   backgroundWhileReading(t);
   main.syncChanged();
   const click = applyClick({ kind: 'skills', items: ['bar'], rows: [{ kind: 'skills', key: 'bar' }], changes: [{ key: 'bar', on: true, except: [], deleted: true }], said: 'Deleted bar.' });
   await main.pass({ ...did('bar'), made: ['delete-bar'] });
   await click;
-  assert.equal(app.said.text, 'Sync changed notes.');
-  assert.equal(app.outcome, undefined);
-  assert.deepEqual(app.undoMoved, { page: 'library', label: 'Undo', items: ['bar'], notices: ['deletion'] });
+  assert.deepEqual([app.said.text, app.outcome?.text, app.outcome?.act?.label], ['Sync changed notes.', 'Deleted bar.', 'Undo']);
 });
-
-test('An Agents notice leaves a skill’s result and its Undo on screen where the Library shows skills only', async t => {
-  backgroundWhileReading(t, 'agents');
-  app.libraryKind = 'skills';
-  main.syncChanged();
-  const click = applyClick({ kind: 'skills', items: ['bar'], rows: [{ kind: 'skills', key: 'bar' }], changes: [{ key: 'bar', on: true, except: [], deleted: true }], said: 'Deleted bar.' });
-  await main.pass({ ...did('bar'), made: ['delete-bar'] });
-  await click;
-  assert.equal(app.said.text, 'Sync changed notes.');
-  assert.equal(app.outcome?.act?.label, 'Undo');
-  assert.equal(app.undoMoved, undefined);
-});
-
-for (const pluginsOnly of [true, false]) {
-  test(`A notice on Skills keeps the Undo for ${pluginsOnly ? 'a plugin item’s switch' : 'a switch that changed a copy and a plugin item'}`, async t => {
-    backgroundWhileReading(t);
-    main.syncChanged();
-    const click = applyClick({ kind: 'skills', items: ['bar'], rows: [{ kind: 'skills', key: 'bar' }], said: 'Turned bar off.', pluginsOnly,
-      changes: pluginsOnly ? [] : [{ key: 'bar', on: false, except: [] }],
-      plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', skill: 'bar', action: 'skill-off' }] } });
-    if (!pluginsOnly) await main.pass({ ...did('bar'), made: ['delete-bar'] });
-    await click;
-    assert.equal(app.said.text, 'Sync changed notes.');
-    assert.equal(app.outcome?.act?.label, 'Undo');
-    assert.equal(app.undoMoved, undefined);
-  });
-}
 
 for (const [change, status, notices] of [
   ['skills', 'Sync changed notes.', ['deletion']],
@@ -806,7 +779,7 @@ test('Turn these off where one skill’s Off is refused as stale: the result say
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, flashRequests.has('skills-notes'), flashRequests.has('skills-spare')],
     ['1 of 2 didn’t go through in every tool: spare. Turned off 1 skill with no use seen in the last 30 days: notes. Central Knot keeps it, and turning it on puts it back as it was.',
       ['spare changed since the page was read. Nothing was changed; read again.'], true, false]);
-  // The result kept is about notes alone too: its names and rows, which a notice that moves its Undo reads (app.ts undoMoved).
+  // The result kept is about notes alone too: its names, which its band makes bold (matrix.ts outcomeBand), and its rows.
   assert.deepEqual([app.outcome?.items, app.outcome?.rows], [['notes'], [{ kind: 'skills', key: 'notes', name: 'notes' }]]);
   flashRequests.clear();
   app.outcome!.act!.run();
@@ -887,7 +860,7 @@ test('A skill and an agent both named review, and a server, switched on one page
   await main.pass(offMade('mcp', 'github'));
   assert.deepEqual(main.sent, ['review off, seen on', 'agent review off', 'server github off']);
   assert.equal(app.outcome?.text, '3 items are off: review (skill), review (agent) and github.');
-  // The names it says, which a moved Undo says too (undoMoved), each review with its kind.
+  // The names it says, which its band makes bold, each review with its kind.
   assert.deepEqual(app.outcome?.items, ['review (skill)', 'review (agent)', 'github']);
   assert.deepEqual(['skills-review', 'agents-review', 'mcp-github'].map(id => flashRequests.has(id)), [true, true, true]);
   // Each kind's last result, which its problem lines are read from, holds its own clicks' results alone.
