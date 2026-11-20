@@ -2,8 +2,9 @@
 // draws (renderPage: while another build holds this one, the held screen of otherbuildview.ts instead of every page, with the
 // sidebar's update control kept), and drawing again on a change. On a list page the last result is in the header's own two
 // lines, the whole of it only on Show all (resultHere says the rule). A redraw keeps what is selected, the scroll places and the
-// focus (render), and a press on a control it replaces still counts (dom.ts keepClicksAcrossRedraws). The page's state and
-// actions are app.ts's; each page is drawn by its own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
+// focus (render), Back and Forward put back a visit's scroll places (places.ts), and a press on a control it replaces still counts
+// (dom.ts keepClicksAcrossRedraws). The page's state and actions are app.ts's; each page is drawn by its own module (pages.ts and
+// the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, acting, drawPage, keepingFocus, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
@@ -28,7 +29,7 @@ import { anyOn } from './itemrow.ts';
 import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
 import { followPluginUpdates } from './pluginupdateview.ts';
 import { forgetHeldResult, heldBy, heldScreen } from './otherbuildview.ts';
-import { fullPlace, listenForTravel, recordDraw, restoring } from './places.ts';
+import { fullPlace, listenForTravel, offsetsNow, putBack, recordDraw, restoring } from './places.ts';
 import { placeKey } from './visits.ts';
 
 const region = (id: string) => document.getElementById(id)!;
@@ -253,30 +254,30 @@ afterLayout(() => {
   if (more) { more.hidden = true; more.hidden = ![...header.querySelectorAll('.problem-text, .problem-text > *, .band-done > .band-text, .toolbar-result-text')].some(cut); }
 });
 
-const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
-
 /** The whole window drawn again, the focus kept on the control that had it (app.ts keepingFocus). */
 function render() {
   if (!restoring) keepingFocus(renderWindow);
 }
 
 function renderWindow() {
-  const scrolled = remembered();
+  const scrolled = offsetsNow();
   const selected = keepSelection();
   const { rail } = applyLayout();
   renderHeader(rail);
   drawPage(renderPage);
   // After the page, which marks the notices it paints seen: the sidebar's dot is for those it didn't.
   renderSidebar();
-  recordDraw();
+  recordDraw(scrolled);
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
   runAfterLayout();
   renderStatus();
   fitBars();
-  // What was selected (a field's own scroll with it), then the scroll places, each where it was; keepingFocus puts the focus
-  // back after, without scrolling to it (dom.ts keepSelection neither focuses nor scrolls the page).
+  // What was selected (a field's own scroll with it), then the scroll places, each where it was, and over them the place of a
+  // visit Back or Forward opened (places.ts putBack); keepingFocus puts the focus back after, without scrolling to it (dom.ts
+  // keepSelection neither focuses nor scrolls the page).
   selected();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
+  putBack();
   if (state.home) document.body.dataset.ready = 'true';
 }
 

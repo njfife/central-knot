@@ -1528,14 +1528,17 @@ const drawnRows = (t: Table, pins: Pinned<Role>) => ({
 /** Whether the Copies differ chip is drawn: something here differs. A Copies differ filter whose chip is gone falls back to none. */
 const copiesDifferChipShown = (t: Table) => rowsIn(t).some(skill => needsChoice(t, skill));
 
-/** The list a Files view was opened from (the Library's, or a tool's Skills tab: `tool`), and its scroll place. */
-let filesFrom: { top: number; tool?: Tool } = { top: 0 };
-const fromTable = () => (filesFrom.tool ? `table-skills-${filesFrom.tool}` : libraryTableId());
-/** A skill's files and contents: the Library's Files view, from wherever its details were opened. */
-export function openFiles(key: string) {
+/** The list a Files view was opened from: the Library's, or a tool's Skills tab (`tool`). */
+let filesFrom: { tool?: HarnessId } = {};
+/**
+ * A skill's files and contents: the Library's Files view, from wherever its details were opened. `placed`: by Back or Forward,
+ * which put its list's scroll place back (places.ts), so the list is not moved to bring the skill into view (revealSelected), nor
+ * by the first report of its size (listWatcher).
+ */
+export function openFiles(key: string, placed = false) {
   noteMove();
-  filesFrom = { top: 0, tool: state.page === 'harnesses' ? state.harness : undefined };
-  filesFrom.top = document.getElementById(fromTable())?.scrollTop ?? 0;
+  filesFrom = { tool: state.page === 'harnesses' ? state.harness : undefined };
+  if (placed) { revealed = key; listSize = ''; }
   if (state.page !== 'library') showPage('library');
   state.libraryView = 'files';
   state.item = key;
@@ -1543,14 +1546,16 @@ export function openFiles(key: string) {
 }
 /** The Files view's back button's words: where it leads, the Library or the tool whose Skills tab it was opened from. */
 const backWords = () => (filesFrom.tool ? { label: names[filesFrom.tool], name: `Back to ${names[filesFrom.tool]}’s skills` } : { label: 'Library', name: 'Back to the Library' });
-/** Back from the Files view (its button, or Escape: renderer.ts): the list it was opened from as it was, its segment or tab, Find, chip, open row and scroll place. */
+/**
+ * Back from the Files view (its button, or Escape: renderer.ts): the list it was opened from as it was, its segment or tab, Find,
+ * chip and open row; its scroll place too, where the person came from there, as a Back through the visits (app.ts noteMove).
+ */
 export function backFromFiles() {
-  const { top, tool } = filesFrom;
+  const { tool } = filesFrom;
+  noteMove('back');
   // Back to a tool's Skills tab as harnesspage.ts goHarness sets it (Harnesses opens on its list), its view as it was (Files
   // draws the Library's), its open row counted as opened on this visit, so a copy question stays open.
   if (tool) { showPage('harnesses'); Object.assign(state, { harness: tool, harnessTab: 'skills' }); views.skills.openedOn = state.visit; rerender(); } else leaveFiles();
-  const table = document.getElementById(fromTable());
-  if (table) table.scrollTop = top;
 }
 
 /**
@@ -2376,7 +2381,7 @@ function roomHeld(shown: boolean, draw: (shown: boolean) => HTMLElement) {
 
 // ---------- The Library's Files view ----------
 
-/** The skill whose row was last scrolled into view, so the list moves only when the selection changes. */
+/** The skill whose row was last scrolled into view, or whose list Back or Forward put back as it was (openFiles), so the list moves only when the selection changes. */
 let revealed: string | undefined;
 
 /**
@@ -2397,11 +2402,14 @@ function revealSelected() {
  * Watches the skills list drawn last, so a resize keeps its selected row in view. A ResizeObserver also reports each new
  * list when it starts watching it, and every redraw makes a new list: that report counts only when the list's size
  * differs from the last one's (the layout changed with the redraw), so a plain redraw leaves the list where it was scrolled.
+ * A list that leaves the page reports 0×0, so the next list drawn would always differ from it: after Back or Forward, whose
+ * list's place is put back (openFiles `placed`), there is no last size (`listSize` ''), and the new list's first report is only
+ * the size later ones are compared with.
  */
 let listSize = '';
 const listWatcher = new ResizeObserver(entries => {
   const size = entries.map(entry => `${Math.round(entry.contentRect.width)}×${Math.round(entry.contentRect.height)}`).join();
-  if (size !== listSize) revealSelected();
+  if (listSize && size !== listSize) revealSelected();
   listSize = size;
 });
 
@@ -2481,7 +2489,8 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
       index && place.get(idOf(shown[index - 1])) === place.get(idOf(skill)) ? null : h('div.list-group', {}, placeNames[place.get(idOf(skill))!]), listRow(skill)]))
     : emptyState('search-x', 'Nothing matches', `“${view.listFind}”`);
   const skill = shownDetail;
-  if (skill.key !== revealed) { revealed = skill.key; requestAnimationFrame(revealSelected); }
+  // At the next frame, only if it is still the skill to reveal: Back or Forward may have opened another by then (openFiles `placed`).
+  if (skill.key !== revealed) { const key = revealed = skill.key; requestAnimationFrame(() => { if (revealed === key) revealSelected(); }); }
   requestAnimationFrame(() => {
     listWatcher.disconnect();
     const list = document.getElementById('skills-list'); if (list) listWatcher.observe(list);

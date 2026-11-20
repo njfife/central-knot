@@ -1113,9 +1113,11 @@ async function watchTravel(t: TestContext) {
   t.mock.method(window.centralKnot, 'onNavigate', (callback: typeof navigate) => { navigate = callback; });
   t.mock.method(document, 'getElementById', (id: string) => id === 'announcement' ? announcement : { ...element(), scrollTo() {} });
   listenForTravel();
-  setRenderer(recordDraw);
+  // A draw over a page with no scrolling areas.
+  const draw = () => recordDraw(new Map());
+  setRenderer(draw);
   t.after(() => setRenderer(() => {}));
-  return { navigate, recordDraw };
+  return { navigate, recordDraw: draw };
 }
 
 test('Back returns to the MCP explanation tab of a tool absent from the MCP view', async t => {
