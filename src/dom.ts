@@ -1,8 +1,9 @@
 // The page's element builder (h) and the small controls every page draws with: buttons, switches (toggle), checkboxes, icons,
 // empty states, section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout); a press and
-// its release counting as one click when a redraw replaced the control between them (keepClicksAcrossRedraws), and whether a
-// press on a text was a click or a drag, which every click on a text asks (pressWasDrag); and what a redraw keeps of what is
-// selected (keepSelection). No words of the app's own: what a control says is its caller's, and the styles are style.css's.
+// its release (the pointer's, or Space's on a button) counting as one click when a redraw replaced the control between them
+// (keepClicksAcrossRedraws), and whether a press on a text was a click or a drag, which every click on a text asks (pressWasDrag);
+// and what a redraw keeps of what is selected (keepSelection). No words of the app's own: what a control says is its caller's, and
+// the styles are style.css's.
 import { icons, type IconName } from './icons.ts';
 import { groupBy } from './model.ts';
 
@@ -113,8 +114,10 @@ function selectIn(text: Element, anchor: number, focus: number) {
   getSelection()?.setBaseAndExtent(...place(anchor), ...place(focus));
 }
 
-/** A press of the main button on a control a redraw may replace, from the press to its release (keepClicksAcrossRedraws). */
-interface Press { control: Element; id: string; says: string | null; where: string; pointer: number; disabled: boolean; at?: number; dragged: boolean }
+/** A pressed control a redraw may replace, as the press (the pointer's or Space's) found it (keepClicksAcrossRedraws). */
+interface Held { control: Element; id: string; says: string | null; where: string; disabled: boolean }
+/** A press of the main button, from the press to its release: the pointer that pressed, and on a text the character it landed on. */
+interface Press extends Held { pointer: number; at?: number; dragged: boolean }
 let pressed: Press | undefined;
 /** A text's release whose own click is still to come, in the same task (the Mac measured it): was it a drag (pressWasDrag). */
 let released: { id: string; drag: boolean } | undefined;
@@ -139,10 +142,13 @@ const isDrag = (press: Press, releasedAt: number | undefined) => press.dragged |
  * the press was a click (isDrag), or else gets the drag's selection, from the press to the release, or none when the release is
  * off it. When no such control is there, a text's selection is cleared. A text still there keeps whether its press was a drag
  * for its own click, which comes next (pressWasDrag). A window that loses the focus keeps the record: on the Mac's four-window
- * run another window takes the focus in the middle of presses, and the release still comes here.
+ * run another window takes the focus in the middle of presses, and the release still comes here. Space on a button is a press too:
+ * the browser clicks a button at the key's release only if that button heard the key's press, so the one now there in its place,
+ * which has the focus (app.ts keepingFocus gives it), is clicked at the key's release, as the keyboard clicks (no point, detail 0).
  */
 export function keepClicksAcrossRedraws(where: () => string): void {
-  const nowThere = (press: Press) => {
+  const held = (control: Element): Held => ({ control, id: control.id, says: says(control), where: where(), disabled: control.matches(':disabled') });
+  const nowThere = (press: Held) => {
     if (press.control.isConnected) return press.control;
     const now = document.getElementById(press.id);
     return now && !press.disabled && !now.matches(':disabled') && says(now) === press.says && where() === press.where ? now : null;
@@ -151,7 +157,7 @@ export function keepClicksAcrossRedraws(where: () => string): void {
     const control = event.button === 0 ? (event.target as Element | null)?.closest?.('button[id], pre[id]') : null;
     const at = control?.matches('pre') ? offsetIn(control, event.clientX, event.clientY) : undefined;
     released = undefined;
-    pressed = control ? { control, id: control.id, says: says(control), where: where(), pointer: event.pointerId, disabled: control.matches(':disabled'), at, dragged: event.shiftKey } : undefined;
+    pressed = control ? { ...held(control), pointer: event.pointerId, at, dragged: event.shiftKey } : undefined;
   }, true);
   document.addEventListener('pointermove', event => {
     const text = pressed?.at !== undefined && event.pointerId === pressed.pointer && event.buttons & 1 ? nowThere(pressed) : null;
@@ -170,6 +176,20 @@ export function keepClicksAcrossRedraws(where: () => string): void {
     else if (!isDrag(was, at)) click();
     else if (at === undefined) getSelection()?.removeAllRanges();
     else selectIn(now, was.at!, at);
+  }, true);
+  // Space's press on a button, kept to the key's release.
+  let keyed: Held | undefined;
+  document.addEventListener('keydown', event => {
+    const control = (event.target as Element | null)?.closest?.('button[id]');
+    if (event.key === ' ' && !event.repeat) keyed = control ? held(control) : undefined;
+  }, true);
+  document.addEventListener('keyup', event => {
+    const was = keyed;
+    if (event.key !== ' ' || !was) return;
+    keyed = undefined;
+    const now = nowThere(was);
+    const replaced = now && now !== was.control && now === event.target;
+    if (replaced) now.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   }, true);
   // The release's own click has been heard by its text: what the release kept for it ends here.
   window.addEventListener('click', () => { released = undefined; });

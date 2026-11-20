@@ -6769,6 +6769,17 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x38, y: y38, button: 'left', clickCount: 1 });
   await done();
   same('a press released after a redraw replaced its switch still counts as its click', [redrawn, await switchOn(a, 'mcp', 'srv-38'), await switchOn(a, 'mcp', 'srv-32')], [true, false, false]);
+  // So does a Space on the focused switch (a button clicks at the key's release) when the page is drawn again between its key-down
+  // and its key-up, as a background read or the clicks before it ending may: once, so srv-28 is Off after it.
+  const spaceOn = rowPart('switch', 'mcp', 'srv-28');
+  await putAt(table, row('srv-28'), 200);
+  await a.run(`(() => { const control = document.getElementById('${spaceOn}'); control.dataset.pressed = 'yes'; control.focus(); return true; })()`);
+  await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, text: ' ' });
+  await a.run(`(() => { for (let times = 0; times < 2; times++) document.querySelector('#sidebar-toggle').click(); return true; })()`);
+  const keyRedrawn = await a.run(`document.getElementById('${spaceOn}').dataset.pressed !== 'yes'`);
+  await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
+  await done();
+  same('a Space on a switch released after a redraw replaced it counts as one click', [keyRedrawn, await switchOn(a, 'mcp', 'srv-28')], [true, false]);
 
   // What the header says in the smallest window. An ordinary result fits in the header: Find and Sort are whole under it. The
   // last result closed first, so the click below is a run of its own.
