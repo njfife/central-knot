@@ -276,8 +276,22 @@ ul { list-style: none; }
 .band-lines:not(.lines-whole) .problem-text > * { white-space: pre; }
 .band-lines.lines-whole { gap: 4px; }
 .lines-whole .problem-text { display: block; white-space: normal; overflow-wrap: anywhere; }
-#header:has(.header-result) > .page-title { flex: none; }
-@container content (width < 900px) { #header:has(.header-result) > .page-title { display: none; } }
+#header:has(.header-result, .header-notice, .notices-card) > .page-title { flex: none; }
+@container content (width < 900px) { #header:has(.header-result, .header-notice, .notices-card) > .page-title { display: none; } }
+/* The sync notices in the header (matrix.ts headerNotices, placed by renderer.ts resultHere). With no result there, the newest
+   in its two lines: its sentence cut where it runs past them, its × at the right; its actions are in the card. Notices, a chip as
+   the toolbar's are, takes its room from the lines, never the header's height. */
+.header-notice { flex: 1 1 0; min-width: 0; display: flex; align-items: center; font-size: 12px; line-height: 16px; }
+.header-notice > .sync-notice { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; }
+.header-notice .notice-text { max-width: none; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.notices-control { flex: none; }
+/* Their card: the result's card (.result-whole), one height whatever it holds, so a notice arriving while it is open grows the
+   list inside it, which scrolls under its head; See change's panel opens in that one scroll, with no height of its own. */
+.notices-card { flex: 1 1 0; min-width: 0; height: min(24rem, calc(100vh - 120px)); display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 16px; }
+.notices-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 4px; border-bottom: 1px solid var(--line); color: var(--ink-soft); }
+.notices-card .sync-notice-lines { gap: 10px; }
+.notices-card > #notices-dismiss { align-self: flex-start; }
+.notices-card .change-panel, .notices-card .change-panel > .ins-diff { max-height: none; overflow: visible; }
 .header-end { display: flex; gap: 8px; }
 
 #status { container: status / inline-size; height: 28px; flex: none; display: flex; align-items: center; gap: 26px; padding: 0 16px 0 24px; background: var(--chrome); border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 12px; line-height: 16px; white-space: nowrap; }
@@ -433,11 +447,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A row's kind in words, beside a name two kinds share in the list (matrix.ts kindWord), at the description's weight. */
 .row-kind { flex: none; color: var(--ink-soft); font-size: 12px; }
 .row-kind::before { content: '· '; }
-/* A segment whose kind has an automatic change not seen yet, as the sidebar's dot (renderer.ts navRow). */
-.kind-seg-news { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+/* A segment whose kind has an automatic change not seen yet, as the sidebar's dot (renderer.ts navRow); Notices too, in the header. */
+.kind-seg-news, .notices-unseen { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
 .tool-mark.mark-blank { visibility: hidden; }
 
-/* ---------- Bands and notices under the toolbar ---------- */
+/* ---------- Bands under the toolbar ---------- */
 .bands { display: flex; flex-direction: column; }
 .band { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 16px; min-width: 0; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 16px; }
 /* A band that only informs about the page's own read (dom.ts rereadBand): softer than one that asks for something. */
@@ -467,16 +481,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
    waiting; the words give way before the two actions, cut with "…" (the tooltip has them whole). */
 .band-sync-off > .band-text { line-height: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.sync-notice-lines { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
+/* A sync notice, in the header's lines or its card (matrix.ts syncNotice). */
+.sync-notice-lines { display: grid; }
 .sync-notice { position: relative; margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; padding-right: 26px; }
 /* A long sentence wraps beside its mark (14px and the 8px gap), never on a line of its own under it. */
 .sync-notice > .notice-text { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 22px); }
 /* On the Library's All, a notice's kind mark sits between its icon and its words: the words keep the rest of the line. */
-.sync-notice > .kind-mark + .notice-text { max-width: calc(100% - 42px); }
+.sync-notice > .kind-mark + .notice-text { max-width: calc(100% - 44px); }
 .sync-notice > .kind-mark + .row-kind + .notice-text { max-width: calc(100% - 92px); }
-/* While first setup's walkthrough asks, each notice keeps to its first line until Show all (matrix.ts listNotices). */
-.notices-folded .notice-text { flex: 1 1 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.notices-folded .sync-notice-lines { grid-template-columns: minmax(0, 1fr); }
 .sync-notice .btn { flex: none; height: 26px; padding: 0 10px; font-size: 12px; }
 .sync-notice > .notice-dismiss { position: absolute; top: 2px; right: 0; }
 .notice-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; }

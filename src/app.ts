@@ -36,7 +36,7 @@ import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
-import { findInHome, holdOrder, kindsShown, resultInHeader, noticeLinesOnPage, noticesKept, rowByKey } from './matrix.ts';
+import { findInHome, holdOrder, newsShownHere, noticesKept, noticeUnseen, resultInHeader, rowByKey, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -124,18 +124,20 @@ export const state = {
    * What the status bar says (announce): the newest message, whether it is for screen readers only, and its place in
    * the order messages were said, so the newest always wins.
    */
-  said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void } },
+  said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void }; notices?: string[] },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
   /**
-   * The result shown whole, as a card hanging from the header (Show all: matrix.ts wholeToggle): an item list's outcome, kept
-   * result or first background problem; Plugins' run or problem. Folded by renderer.ts foldResult, and let go when that result
-   * is no longer drawn (renderer.ts resultHere); a newer result is another object, so it shows folded.
+   * The card hanging from the header, one at a time (renderer.ts resultHere): a result shown whole (Show all: matrix.ts
+   * wholeToggle), an item list's outcome, kept result or first background problem, Plugins' run or problem; or the sync notices
+   * (Notices: matrix.ts noticesCard), named by the list they are of (`noticesOf`: its home and table). Folded by renderer.ts
+   * foldResult, and let go when what it shows is no longer drawn (renderer.ts resultHere); a newer result is another object, so
+   * it shows folded.
    */
-  shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | undefined,
+  shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | { noticesOf: string } | undefined,
   /** What the tools' session history shows was used (usage.ts), for this home: collected when it opens and on Update usage statistics (collectUsage). */
   usage: pageData<UsageReading>(),
-  /** Whether the usage band shows above the Library's list (matrix.ts usageBand): opened by Update usage statistics and by a reading that fails, closed by its close button and when a home opens. */
+  /** Whether the usage band shows above the Library's list (matrix.ts usageBand): opened by Update usage statistics, closed by its close button and when a home opens. */
   usageBand: false,
   /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
   instructions: pageData<InstructionFile[]>(),
@@ -153,7 +155,7 @@ export const state = {
   dismissed: new Set<string>(),
   // The page whose Apply result (and its Undo) stepped aside for a sync notice: the notice says where the Undo went.
   undoMoved: undefined as { page: Page; notices: string[]; label: string; items: string[] } | undefined,
-  /** Sync notices already shown on their page, so the sidebar dot clears once seen. */
+  /** Sync notices drawn in the header's lines or its open card: seen (matrix.ts noticeUnseen). */
   seenNotices: new Set<string>(),
   /** Whether the content is wide enough to dock an open row's details beside its table; set by the renderer's layout. */
   wide: false,
@@ -203,10 +205,11 @@ export const setPracticeNote = (open: boolean): void => writeFlag(PRACTICE_NOTE,
 
 /**
  * Says something in the status bar, kept in state (state.said) so a redraw paints the same thing. The newest message is
- * the one shown. A quiet announcement is for screen readers only: the page already shows the same thing (a band).
+ * the one shown. A quiet announcement is for screen readers only: the page already shows the same thing (a band), or, for
+ * one about sync notices (`notices`), will once each is seen (paintStatusMessage).
  */
-export function announce(text: string, quiet = false, link?: { label: string; run: () => void }) {
-  state.said = { text, quiet, seq: state.said.seq + 1, link };
+export function announce(text: string, quiet = false, link?: { label: string; run: () => void }, notices?: string[]) {
+  state.said = { text, quiet, seq: state.said.seq + 1, link, notices };
   paintStatusMessage();
 }
 
@@ -267,8 +270,9 @@ export function paintStatusMessage() {
   const link = document.getElementById('said-link');
   if (link) { link.hidden = !told.link || told.quiet; link.textContent = told.link?.label ?? ''; link.onclick = told.link?.run ?? null; }
   // Only a message that repeats what the page shows (announced quiet) is for screen readers alone. A result the page didn't
-  // draw (no band on this page, or held back) is shown here after all: the drawn result is marked data-outcome.
-  const quiet = told.quiet && !(state.outcome && told.text === spoken(state.outcome) && !document.querySelector('[data-outcome]'));
+  // draw (no band on this page, or held back) is shown here after all: the drawn result is marked data-outcome. So is news of a
+  // sync notice not seen yet (matrix.ts noticeUnseen): one the header only counts, or of a kind not on show.
+  const quiet = told.quiet && !(state.outcome && told.text === spoken(state.outcome) && !document.querySelector('[data-outcome]')) && !told.notices?.some(noticeUnseen);
   region.classList.toggle('visually-hidden', quiet);
   // A narrow status bar shows a small mark instead of a message cut to a stub; its tooltip has the message (style.css).
   const mark = document.getElementById('message-mark');
@@ -357,7 +361,7 @@ export async function busy(message: string, work: (page: Page) => Promise<void>)
   try { await work(page); }
   catch { announce(couldNotFinish()); }
   // When the work said nothing since its "Reading…", what was said before comes back.
-  if (state.said.seq === working) announce(before.text, before.quiet, before.link);
+  if (state.said.seq === working) announce(before.text, before.quiet, before.link, before.notices);
   state.busy = undefined;
   showActing();
   rerender();
@@ -416,7 +420,8 @@ api().onWindowShown(() => { if (windowShown) return; windowShown = true; void co
 /**
  * Collects usage: main's usage:read reads the tools' own session history on this computer, and nothing leaves it. By itself
  * when a home opens (accept; after a start with no window, once the window first shows), and on Update usage statistics
- * (`asked`), whose click opens the band (state.usageBand), as a reading that fails does. Not `busy`: it changes nothing, so the
+ * (`asked`), whose click opens the band (state.usageBand); one by itself that fails is said in the status bar, and opens no band
+ * that would move the list. Not `busy`: it changes nothing, so the
  * page stays usable meanwhile. An answer for a home switched meanwhile is dropped (accept resets the slot). A reading that lands
  * moves no row: once its answer is known to be kept, the list on screen is held where it is (matrix.ts holdOrder), then the slot takes it.
  */
@@ -428,7 +433,7 @@ export async function collectUsage({ asked = false } = {}) {
   const reading = readPageData(state.usage, () => api().readUsage(home), holdOrder);
   rerender();
   const landed = await reading;
-  if (landed === 'failed') state.usageBand = true;
+  if (landed === 'failed' && !state.usageBand) announce(usageNotCollected);
   if (landed !== 'dropped') rerender();
 }
 
@@ -490,7 +495,7 @@ const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, h
   mcp: { send: (...args) => api().applyServers(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
   agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
 };
-/** Each kind's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, listNotices). */
+/** Each kind's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, toldNotices). */
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
 /**
  * What a new result (a click's, a run's, an Undo's, a Library action's, Sync once's) keeps for the kinds' problem lines: `own`, its own
@@ -1660,15 +1665,15 @@ api().onSaid(text => announce(text));
 const noticesByKind = (view: HomeView): [PageKind, SyncNotice[]][] => [['skills', view.skills.notices], ['mcp', view.mcp.notices], ['agents', view.agents.notices]];
 
 /**
- * A sync notice its page hasn't shown yet (state.seenNotices) stays in the next read of the same home until it is shown or
- * dismissed: main says each notice once, and a pass's own writes (a settings file it wrote) bring a read with none right
+ * A sync notice not seen yet (matrix.ts noticeUnseen) stays in the next read of the same home until it is seen, dismissed or
+ * folded into History by a newer one: main says each notice once, and a pass's own writes (a settings file it wrote) bring a read with none right
  * after the one that had them, so a page opened a moment later still tells what Synchronize everything, or an edit, did.
  */
 function keepUnshown(was: HomeView | undefined, view: HomeView): HomeView {
   if (!was || was.home !== view.home) return view;
   const kept = (kind: PageKind) => {
     const now = view[kind].notices, known = new Set(now.map(notice => notice.history));
-    const unshown = was[kind].notices.filter(notice => !known.has(notice.history) && !state.seenNotices.has(notice.history) && !state.dismissed.has(notice.history));
+    const unshown = was[kind].notices.filter(notice => !known.has(notice.history) && noticeUnseen(notice.history));
     return unshown.length ? { ...view[kind], notices: [...unshown, ...now] } : view[kind];
   };
   return { ...view, skills: kept('skills'), mcp: kept('mcp'), agents: kept('agents') };
@@ -1710,14 +1715,17 @@ function takeBackgroundNews(view: HomeView) {
   }
 }
 
-/** Says fresh background news. A result gives way only beside a notice that can point to its Undo in History. */
+/**
+ * Says fresh background news. A result gives way only to news the header shows here (matrix.ts newsShownHere), and only one whose
+ * Undo stays in History: the newest notice then has the header's lines, and the notices' card says where that Undo went (undoMoved).
+ */
 function sayBackgroundNews() {
   const news = backgroundNews.splice(0).filter(({ notice }) => !state.dismissed.has(notice.history));
   if (!news.length) return;
   const outcome = state.outcome;
   const undo = outcome?.act?.inHistory ? outcome.act : outcome?.undo;
   if (undo && outcome) {
-    const notices = noticeLinesOnPage(news, outcome);
+    const notices = newsShownHere(news, outcome);
     if (notices.length) {
       state.undoMoved = { page: outcome.page, label: undo.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices };
       state.outcome = undefined;
@@ -1725,8 +1733,8 @@ function sayBackgroundNews() {
   }
   // Each item once, its kind named where another kind's news has its name (words.ts rowNames).
   const items = [...new Set(rowNames(news.flatMap(({ kind, notice }) => noticeNames(notice).map(name => ({ kind, name })))))];
-  // Quiet where the table on screen shows all of the news (its kinds' notices) already.
-  announce(`Sync changed ${andList(items)}.`, news.every(({ kind }) => kindsShown().includes(kind)));
+  // Heard alone once the header has drawn each notice (seen), shown in the status bar until then (paintStatusMessage).
+  announce(`Sync changed ${andList(items)}.`, true, undefined, news.map(({ notice }) => notice.history));
 }
 
 /** A background refresh asked for while the page acted or while another ran: run it now, once, if nothing is running. */

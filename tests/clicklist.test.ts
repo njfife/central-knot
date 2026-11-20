@@ -36,6 +36,8 @@ const api = {
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
   onSyncChanged: (listener: () => void) => { main.syncChanged = listener; },
   syncNow: async (_home: string): Promise<unknown> => null,
+  // A home's usage, read as it opens (app.ts collectUsage): none here; one that failed would be said in the status bar.
+  readUsage: async () => ({ at: '2026-11-20T00:00:00.000Z', tools: [] }),
 };
 // The page's modules, loaded under node with no window: the little of the DOM they touch as they load and redraw. An element keeps
 // what is appended to it, so a test can read the words a part draws (textOf).
@@ -56,7 +58,7 @@ const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, last
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
-const { backgroundProblems, libraryTable, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { backgroundProblems, headerNotices, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
 const { newItem } = await import('../src/library.ts');
 const { keptBack } = await import('../src/clickplan.ts');
@@ -304,7 +306,7 @@ function onLibrary() {
   Object.assign(app, { page: 'library', harness: undefined });
 }
 
-/** The Library, on a home of one skill the table can draw (libraryTable): the next read brings `change`, every read after it the home as it was. */
+/** The Library, on a home of one skill (its notices in the header: headerNotices): the next read brings `change`, every read after it the home as it was. */
 function backgroundWhileReading(t: TestContext, change: 'skills' | 'agents' | 'caught up' = 'skills') {
   onLibrary();
   const tools = ['copilot-cli'];
@@ -338,7 +340,7 @@ test('Refresh beside a notice an earlier read drew says what it read and stops t
   backgroundWhileReading(t);
   main.syncChanged();
   await settled();
-  const noticeDrawn = () => textOf(libraryTable()).includes('notes was deleted in Copilot CLI');
+  const noticeDrawn = () => textOf(headerNotices(false)?.lines).includes('notes was deleted in Copilot CLI');
   assert.equal(noticeDrawn(), true);
   await readAgain();
   assert.deepEqual([app.said.text, noticeDrawn()], ['Read 1 skill, 0 MCP servers and 0 agents from Practice.', true]);
@@ -354,7 +356,7 @@ test('Another home opened from beside the last home’s notice says "Nothing cha
   const home = backgroundWhileReading(t);
   main.syncChanged();
   await settled();
-  assert.match(textOf(libraryTable()), /notes was deleted in Copilot CLI/);
+  assert.match(textOf(headerNotices(false)?.lines), /notes was deleted in Copilot CLI/);
   t.mock.method(api, 'selectHome', async () => ({ ...home, home: '/other', label: 'Other' }));
   await loadHome('custom');
   assert.match(app.said.text, /^Opened Other\. Read 1 skill, 0 MCP servers and 0 agents\. Nothing changed\./);

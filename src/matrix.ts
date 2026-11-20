@@ -2,11 +2,12 @@
 // in every tool Central Knot manages. A row's marks only say what each tool has; each tool's own controls are in the item's
 // details, and a click's result comes with an Undo of the whole click wherever History offers one (historyactions.ts says where
 // it doesn't: Take over, a take-in from Claude Code's MCP settings). Every kind is on Central Knot's library: its row is a
-// library row: librarypages.ts says what each kind supplies, libraryrow.ts what such a row says. A sync notice is
-// kept or folded once its page shows it (toldNotices); until then it lives across reads in app.ts keepUnshown. First setup's
-// walkthrough (firstsetup.ts) is a band among a table's bands, given copyQuestion to hold the question of the item it is at.
+// library row: librarypages.ts says what each kind supplies, libraryrow.ts what such a row says. The sync notices of the list on
+// screen are said in the window's header, not above it: kept, seen and drawn here (the section that starts at toldNotices),
+// placed by renderer.ts resultHere. First setup's walkthrough (firstsetup.ts) is a band among a table's bands, given copyQuestion
+// to hold the question of the item it is at.
 // Usage, collected when a home opens and on Update usage statistics (app.ts collectUsage): when it was collected and the button
-// at the toolbar's end, a band an Update or a failure opens (closed by its button), a figure on each row and a line per tool in
+// at the toolbar's end, a band an Update opens (closed by its button), a figure on each row and a line per tool in
 // an opened row, the Last used order (which a reading that lands never redraws: holdOrder), and the "No use seen in 30 days"
 // chip with its band and one Turn these off (built from each row's own Off: rowClicks.off); what the reading says of a row, and
 // the chip's rule, are usagerow.ts's.
@@ -29,7 +30,7 @@ import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { homeItems, inUse, itemId } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
-import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -289,8 +290,8 @@ interface Table { kinds: PageKind[]; tool?: Tool; view: View; used?: boolean; sh
 /** Every row the table lists, of each of its kinds, as the kinds' views have them (rowsOf). */
 const rowsIn = (t: Table) => t.kinds.flatMap(rowsOf);
 /**
- * Each kind a table lists, with what it brings beside its rows: its own record's stop (the home's is said once, by listNotices),
- * its problems beside that stop and its part of the usage reading (kindUsage). The bands (listNotices), whether the No use seen
+ * Each kind a table lists, with what it brings beside its rows: its own record's stop (the home's is said once, by listBands),
+ * its problems beside that stop and its part of the usage reading (kindUsage). The bands (listBands), whether the No use seen
  * chip is offered and its band (usedColumn, unusedCount, unusedBand) go over the kinds here. Kept for the last home, reading,
  * kinds and tool asked for, one entry: the asks for one table share it,
  * and on a segment of one kind the segment's asks and the chips' (overEveryKind) take turns, each working it out again. Not here:
@@ -970,16 +971,13 @@ export function outcomeBand(): HTMLElement | null {
 /**
  * Sync off: what waits, and the two ways on. Shown on every managed page, since the switch covers all of them. One height whatever
  * it says (style.css .band-sync-off): one line, the count, then every name as far as the line goes, cut with "…"; the whole
- * sentence, every name in it, is its tooltip. Not covered: while a sync notice shows and nothing waits, the band is not drawn (the
- * notice stands in for it, below), so the first change to wait then adds the band above the list.
+ * sentence, every name in it, is its tooltip.
  */
 function syncOffBand(t: Table): HTMLElement | null {
   if (!state.home || state.home.syncOn) return null;
   const waiting = rowsIn(t).filter(waitsForSync);
   const editedIn = (skill: ItemRow) => (skill.edited?.length ? `, edited in ${andList(skill.edited.map(tool => names[tool]))}` : '');
   const what = waiting.flatMap((skill, index) => [index ? ', ' : '', h('strong.item-name', {}, skill.name ?? skill.key), editedIn(skill)]);
-  // Right after a sync, its notice says what spread; the idle banner comes back once that is dismissed.
-  if (!waiting.length && visibleNotices(t).length) return null;
   const text = h('span.band-text', {}, ...(waiting.length
     ? [`Automatic sync is off. ${waiting.length} ${waiting.length === 1 ? 'change' : 'changes'} waiting: `, ...what, '.']
     : ['Automatic sync is off. Edits and deletions in your tools will wait here.']));
@@ -1009,8 +1007,8 @@ export function caughtUpBand(home: HomeView): HTMLElement | null {
  */
 export const problemsBesideStop = (problems: string[], gate: SyncGate) => problems.filter(problem => gate.state !== 'stopped' || problem !== gate.reason);
 
-/** The bands above a table, from its kind's view (listView). */
-function listNotices(t: Table) {
+/** The bands above a table, from its kind's view (listView). Its sync notices are the header's (headerNotices). */
+function listBands(t: Table) {
   const home = state.home!, parts = kindParts(t), several = parts.length > 1, bands: HTMLElement[] = [];
   const walk = walkthroughBand(t.kinds, (kind, key, then) => copyQuestion(t, kind, key, then));
   for (const band of [syncOffBand(t), walk]) if (band) bands.push(band);
@@ -1027,25 +1025,6 @@ function listNotices(t: Table) {
   }
   const unread = unreadBand(t);
   if (unread) bands.push(unread);
-  const shownNotices = visibleNotices(t);
-  const onScreen = shownNotices.slice(0, noticeLineLimit);
-  // An earlier result's Undo that stepped aside for this notice: one faint closing line inside the notice, not a band of its own.
-  const moved = state.undoMoved?.page === state.page && !state.outcome && onScreen.some(notice => state.undoMoved!.notices.includes(notice.history))
-    ? h('span.notice-tail.tone-faint', { id: 'undo-moved' }, ...movedUndoText(state.undoMoved!.label, state.undoMoved!.items), h('button.inline-link', { type: 'button', id: 'notice-undo-moved', onclick: () => showPage('history') }, 'History'), '.') : null;
-  if (shownNotices.length) {
-    const lines = onScreen.map(notice => syncNotice(t, notice));
-    if (moved) {
-      const link = lines.at(-1)!.querySelector<HTMLElement>('[id^="notice-history-"]');
-      if (link) link.title = `${moved.textContent?.replace(/^Earlier: the undo/, 'The earlier undo').replace(/ is in History\.$/, ' is here too')}.`;
-      else lines.at(-1)!.append(moved);
-    }
-    // Past the limit, the rest are counted on the last line; each is drawn (and so seen) once one above it is dismissed.
-    const more = shownNotices.length - onScreen.length;
-    if (more) lines.at(-1)!.querySelector('.notice-text')?.append(h('span.tone-faint', { id: 'notices-more' }, ` · and ${more} more`));
-    // While the walkthrough asks, each notice keeps to its first line, with the way to see them whole, as a long result folds.
-    const whole = walk ? smallAction(noticesWhole ? 'Show less' : 'Show all', 'notices-show-all', () => { noticesWhole = !noticesWhole; rerender(); }) : null;
-    bands.push(h(`div.band.sync-notices${walk && !noticesWhole ? '.notices-folded' : ''}`, { role: 'status' }, h('div.sync-notice-lines', {}, lines), whole, dismissNotices(shownNotices)));
-  }
   return bands.length ? h('div.bands', {}, bands) : null;
 }
 
@@ -1126,7 +1105,7 @@ function resumeBand(t: Table): HTMLElement | null {
 }
 
 /** The bands above a table: every item list reads its table's view (listView). */
-const notices = (t: Table) => (state.home ? listNotices(t) : null);
+const bands = (t: Table) => (state.home ? listBands(t) : null);
 
 /** The home each view, and the kept notices, were last drawn for. */
 const tableHomes: Partial<Record<keyof typeof views | 'notices', string>> = {};
@@ -1174,6 +1153,13 @@ export function changePanel(eventId: string) {
     : h(`span.ins-line.ins-${line.kind}`, {}, h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''), h('span.ins-code', {}, `${line.text}\n`)))));
 }
 
+// ---------- Sync notices: kept by the list on screen, said in the window's header ----------
+// What sync changed by itself (a pass's notice, types.ts SyncNotice) lives in the header, never above a list, so no notice arriving
+// moves a row; renderer.ts resultHere places what headerNotices gives: the Notices control (noticesControl), the newest notice in
+// the header's two lines while no result has them, and every notice in the card only that control opens (noticesCard). A list
+// keeps a notice until its ×, its Undo or a newer event folds it into History (toldNotices); it is seen once drawn in the lines
+// or the card (noticeUnseen), and until then it lives across reads in app.ts keepUnshown.
+
 /** A notice as a table shows it: the kind it is about (`of`), whether it was said while sync was off (`once`), and when it first showed (`seq`: state.said.seq). */
 type Told = SyncNotice & { of: PageKind; once?: boolean; seq: number };
 /** Notices stay until read: each read brings only what is new, so the page keeps earlier ones until × or Undo, or another home. */
@@ -1181,7 +1167,7 @@ const keptNotices = new Map<PageKind, Map<string, Told>>();
 /** Notices folded into History by a newer one: never shown again, though the read still lists them. */
 const foldedNotices = new Map<PageKind, Set<string>>();
 const keptSync = new Map<PageKind, boolean>();
-/** One kind's notices, kept or folded as a table of it shows them. */
+/** One kind's notices, kept or folded as the header shows them. */
 function toldNotices(kind: PageKind): Told[] {
   if (!state.home) return [];
   // What the kind's view says sync did, and what its last click's result does.
@@ -1192,8 +1178,8 @@ function toldNotices(kind: PageKind): Told[] {
   if (!folded) foldedNotices.set(kind, folded = new Set());
   const keyOf = (notice: SyncNotice) => notice.history;
   // A newer event folds what was said before into History, where it stays with its Undo: notices never pile up. A click's result
-  // folds none (it is said in the header), so a notice never goes from above the list at a click. Turning sync on or off retires
-  // the ones it no longer lists.
+  // folds none (it is said in the header's lines), so a notice never goes at a click. Turning sync on or off retires the ones it
+  // no longer lists.
   const news = fresh.filter(notice => !kept!.has(keyOf(notice)) && !folded!.has(keyOf(notice)));
   for (const key of [...kept.keys()]) if (news.length) { folded.add(key); kept.delete(key); }
   if (keptSync.get(kind) !== state.home.syncOn) for (const key of [...kept.keys()]) if (!fresh.some(notice => keyOf(notice) === key)) kept.delete(key);
@@ -1204,8 +1190,14 @@ function toldNotices(kind: PageKind): Told[] {
   return [...kept.values()].reverse();
 }
 
-/** A kind's automatic changes not yet painted on any page (a painted notice is seen: syncNotice), those dismissed aside. */
-export const unseenNotices = (kind: PageKind) => (state.home?.[kind].notices ?? []).filter(notice => !state.dismissed.has(notice.history) && !state.seenNotices.has(notice.history));
+/**
+ * Seen, the one rule: a notice is seen once its sentence is drawn in the header's lines, cut or not, or in the opened card (syncNotice
+ * marks it), and one dismissed, undone or folded into History by a newer one is no longer unseen. Asked by the sidebar's dot and the
+ * kind switch's (unseenNotices), the Notices control's mark, app.ts keepUnshown and the "Sync changed" message (app.ts paintStatusMessage).
+ */
+export const noticeUnseen = (id: string) => !state.dismissed.has(id) && !state.seenNotices.has(id) && ![...foldedNotices.values()].some(folded => folded.has(id));
+/** A kind's automatic changes not yet seen (noticeUnseen). */
+export const unseenNotices = (kind: PageKind) => (state.home?.[kind].notices ?? []).filter(notice => noticeUnseen(notice.history));
 /** Whether a notice a list drew for the open home is still kept there, not dismissed or undone (app.ts readFound: no "Nothing changed" beside it). */
 export const noticesKept = () => tableHomes.notices === state.home?.home && [...keptNotices.values()].some(kept => [...kept.keys()].some(key => !state.dismissed.has(key)));
 /** The notices a table shows: each of its kinds', newest first, those dismissed aside. */
@@ -1214,25 +1206,73 @@ function visibleNotices(t: Table) {
   return t.kinds.flatMap(toldNotices).sort((first, second) => second.seq - first.seq).filter(notice => !state.dismissed.has(notice.history));
 }
 
-/** How many notices a table draws, newest first; it counts the rest on the last (listNotices). */
-const noticeLineLimit = 6;
-/** The notices shown whole while first setup's walkthrough folds them (listNotices): this window's, until changed. */
-let noticesWhole = false;
-
-/** Which of this news the open table will draw, where it can tell the person where their Undo went. */
-export function noticeLinesOnPage(news: { kind: PageKind; notice: SyncNotice }[], outcome: Outcome): string[] {
-  const home = state.home;
-  if (!home || holdingBuild(home.otherBuilds)) return [];
-  const t = useTableShown();
-  if (!t || !outcomeShown(outcome, t)) return [];
-  const fresh = new Set(news.filter(each => t.kinds.includes(each.kind)).map(each => each.notice.history));
-  if (!fresh.size) return [];
-  if (t.tool ? !home[t.kinds[0]!].tools.some(tool => tool === t.tool) : !t.kinds.some(kind => rowCount(home, kind))) return [];
-  return visibleNotices(t).slice(0, noticeLineLimit).map(notice => notice.history).filter(id => fresh.has(id));
+/**
+ * The table whose notices the header shows, where a list or its empty state is: the table on screen (useTableShown), over every
+ * kind on a Library with nothing listed (as its empty state's bands are: emptyList); none on a tool's tab of a kind that tool
+ * can't hold, nor with no tool managed. With its shared names, which a notice's words name a kind by (kindWord).
+ */
+function noticesTable(): Table | undefined {
+  const t = useTableShown(), home = state.home;
+  if (!t || !home || noToolManaged() || (t.tool && !home[t.kinds[0]!].tools.some(tool => tool === t.tool))) return undefined;
+  const every = overEveryKind(t), shown = every.kinds.some(kind => rowCount(home, kind)) || pluginsListed() ? t : every;
+  return Object.assign(shown, { shared: sharedNames(shown) });
 }
 
-/** The kinds of the table on screen, whose notices it shows (app.ts sayBackgroundNews: news it shows is said quietly). */
-export const kindsShown = (): PageKind[] => useTableShown()?.kinds ?? [];
+/** Which of this news the header shows for the list on screen, in its lines or its card, where it can tell the person where their Undo went. */
+export function newsShownHere(news: { kind: PageKind; notice: SyncNotice }[], outcome: Outcome): string[] {
+  const t = state.home && !holdingBuild(state.home.otherBuilds) ? noticesTable() : undefined;
+  if (!t || !outcomeShown(outcome, t)) return [];
+  const fresh = new Set(news.filter(each => t.kinds.includes(each.kind)).map(each => each.notice.history));
+  return visibleNotices(t).map(notice => notice.history).filter(id => fresh.has(id));
+}
+
+/** The kinds whose notices the header shows: the sidebar's dot leaves them to the Notices control (renderer.ts). */
+export const noticeKindsShown = (): PageKind[] => noticesTable()?.kinds ?? [];
+
+/**
+ * The header's notices, for renderer.ts resultHere to place: the Notices control while the list keeps one, and in the header's two
+ * lines either the card, while it is open, or the newest notice, while no result has them (`resultShown`). Drawn before the control,
+ * whose mark asks what they left unseen. None where no list is drawn (noticesTable), or with no notice kept.
+ */
+export function headerNotices(resultShown: boolean): { lines?: HTMLElement; card: boolean; control: HTMLElement } | undefined {
+  const t = noticesTable(), list = t ? visibleNotices(t) : [];
+  if (!t || !list.length) return undefined;
+  const card = (state.shownWhole as { noticesOf?: string } | undefined)?.noticesOf === cardOf(t);
+  const lines = card ? noticesCard(t, list) : resultShown ? undefined : h('div.header-notice', {}, syncNotice(t, list[0]!, false));
+  return { lines, card, control: noticesControl(t, list, card) };
+}
+/** Which list's notices the open card holds (app.ts state.shownWhole): its home's and its table's, so it opens on none other. */
+const cardOf = (t: Table) => `${state.home?.home}\n${tableId(t)}`;
+
+/** Notices: a chip, as the toolbar's are, counting the list's notices and marked while one is unseen; the one way to the card. */
+function noticesControl(t: Table, list: Told[], open: boolean) {
+  const unseen = list.some(notice => noticeUnseen(notice.history));
+  return h(`button.chip.notices-control${open ? '.chip-on' : ''}`, {
+    type: 'button', id: 'notices', 'aria-expanded': String(open), 'aria-label': `Notices: ${list.length}${unseen ? ', not all seen' : ''}`,
+    title: `${plural(list.length, 'automatic change')}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`,
+    onclick: () => { state.shownWhole = open ? undefined : { noticesOf: cardOf(t) }; rerender(); },
+  }, h('span.chip-label', {}, 'Notices'), h('span.chip-count', {}, String(list.length)), unseen ? h('span.notices-unseen') : null);
+}
+
+/**
+ * Every notice whole, newest first, each with its actions (See change, Undo or Turn it on, History, Turn sync on), then Dismiss all:
+ * the card hanging from the header that only Notices opens, one height whatever it holds (style.css .notices-card), so a notice
+ * arriving while it is open grows the list inside it. Its ×, Escape and a press outside close it; so does an action of a notice
+ * (renderer.ts foldResult). An earlier result's Undo that stepped aside for these notices (app.ts undoMoved) is said on the last.
+ */
+function noticesCard(t: Table, list: Told[]) {
+  const lines = list.map(notice => syncNotice(t, notice, true));
+  const moved = state.undoMoved?.page === state.page && !state.outcome && list.some(notice => state.undoMoved!.notices.includes(notice.history))
+    ? h('span.notice-tail.tone-faint', { id: 'undo-moved' }, ...movedUndoText(state.undoMoved!.label, state.undoMoved!.items), h('button.inline-link', { type: 'button', id: 'notice-undo-moved', onclick: () => showPage('history') }, 'History'), '.') : null;
+  if (moved) {
+    const link = lines.at(-1)!.querySelector<HTMLElement>('[id^="notice-history-"]');
+    if (link) link.title = `${moved.textContent?.replace(/^Earlier: the undo/, 'The earlier undo').replace(/ is in History\.$/, ' is here too')}.`;
+    else lines.at(-1)!.append(moved);
+  }
+  const close = closeButton(() => { state.shownWhole = undefined; document.getElementById('notices')?.focus({ preventScroll: true }); rerender(); }, { id: 'notices-close', label: 'Close the notices', title: 'Close' });
+  return h('div.notices-card.result-whole', { id: 'notices-card', role: 'region', 'aria-label': 'Notices' },
+    h('div.notices-head', {}, h('span.notices-title', {}, plural(list.length, 'notice')), close), h('div.sync-notice-lines', {}, lines), dismissNotices(list));
+}
 
 /** A notice's kind, by its mark, where the table lists several kinds (the Library on All). */
 const noticeKind = (t: Table, notice: SyncNotice & Pick<Told, 'of'>) => (t.kinds.length > 1 ? [kindMark(t, notice.of), noticeNames(notice).map(name => kindWord(t, notice.of, name)).find(Boolean) ?? null] : null);
@@ -1265,8 +1305,9 @@ function libraryNotice(lib: LibraryPage, notice: ItemNotice | PluginItemNotice, 
   return ['trash-2', 'tone-muted', text, on];
 }
 
-function syncNotice(t: Table, notice: Told) {
-  if (notice.kind === 'taken-in') return takenInNotice(t, notice);
+/** A notice's sentence with its ×, drawn and so seen; `whole` (the card) adds its actions and See change's panel. */
+function syncNotice(t: Table, notice: Told, whole: boolean) {
+  if (notice.kind === 'taken-in') return takenInNotice(t, notice, whole);
   // Undo is the one action here that writes files: a small outlined button, apart from the quieter links. It says "Undo", as
   // every strip's result does; its tooltip says where.
   const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: 'Undo', id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
@@ -1288,23 +1329,23 @@ function syncNotice(t: Table, notice: Told) {
   const history = !off ? smallAction('History', `notice-history-${notice.history}`, () => showPage('history')) : null;
   return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone), noticeKind(t, notice),
     h('span.notice-text', {}, offNow && notice.kind !== 'deleted-by-hand' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history)}`)),
-    h('span.notice-actions', {},
+    whole ? h('span.notice-actions', {},
       notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.of) : null,
-      action, history, off ? smallAction('Turn sync on', `notice-sync-on-${notice.history}`, () => void setSync(true)) : null),
+      action, history, off ? smallAction('Turn sync on', `notice-sync-on-${notice.history}`, () => void setSync(true)) : null) : null,
     closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history); rerender(); }, { id: `notice-dismiss-${notice.history}`, label: `Dismiss this notice about ${notice.item}`, title: 'Dismiss', look: '.notice-dismiss' }),
-    notice.history ? changePanel(notice.history) : null);
+    whole && notice.history ? changePanel(notice.history) : null);
 }
 
 /**
  * Synchronize everything's notice for one pass (types.ts TakenInNotice): how many it took in, where it found them and their
- * names, with History, where each one's own Undo is. Nothing to undo here: each item has its own entry.
+ * names, with History (`whole`), where each one's own Undo is. Nothing to undo here: each item has its own entry.
  */
-function takenInNotice(t: Table, notice: TakenInNotice & Pick<Told, 'of' | 'once'>) {
+function takenInNotice(t: Table, notice: TakenInNotice & Pick<Told, 'of' | 'once'>, whole: boolean) {
   const off = !!state.home && !state.home.syncOn, once = notice.once ?? off;
   state.seenNotices.add(notice.history);
   return h('p.sync-notice', { 'data-kind': notice.kind }, icon('plus', 14, 'tone-success'), noticeKind(t, notice),
     h('span.notice-text', {}, once ? 'Synced once: ' : '', libraryPages[notice.of].say.takenInWords(notice), h('span.notice-age', {}, ` · ${age(notice.history)}`)),
-    h('span.notice-actions', {}, smallAction('History', `notice-history-${notice.history}`, () => showPage('history'))),
+    whole ? h('span.notice-actions', {}, smallAction('History', `notice-history-${notice.history}`, () => showPage('history'))) : null,
     closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history); rerender(); }, { id: `notice-dismiss-${notice.history}`, label: 'Dismiss this notice of what Synchronize everything took in', title: 'Dismiss', look: '.notice-dismiss' }));
 }
 
@@ -1589,7 +1630,7 @@ export function backFromFiles() {
  * problems, Resume, results), the Library's over every kind it holds, whatever the segment.
  */
 export function emptyList(empty: HTMLElement, tab?: { kind: PageKind; tool: Tool }) {
-  return h('div.page', {}, notices(tab ? useTab(tab.kind, tab.tool) : overEveryKind(useLibrary())), empty);
+  return h('div.page', {}, bands(tab ? useTab(tab.kind, tab.tool) : overEveryKind(useLibrary())), empty);
 }
 
 /**
@@ -1636,7 +1677,7 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
     h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), fromChoice(t), orderChoice(t), h('div.toolbar-end', {}, toolbarState(t), usageControls(t))),
     usageBand(t),
     view.filter === 'unused' ? unusedBand(t, listedRows(t).filter((row): row is ItemRow => !isPluginRow(row))) : null,
-    notices(t),
+    bands(t),
     // Its id keeps it where it was scrolled across a redraw (the dock's breakpoint crossed, say): tableId.
     h('div.scroll.matrix', { id: tableId(t) },
       // No column heads: each row's switch comes first, and its marks name their tools.
@@ -1984,9 +2025,11 @@ function usageControls(t: Table) {
   return [when.length ? h('span.apply-state', { id: 'usage-when' }, when) : null, go];
 }
 
+/** What the band says of a reading that failed; one collected by itself that fails is said in the status bar (app.ts collectUsage). */
+export const usageNotCollected = 'Usage statistics couldn’t be collected: the tools’ session history couldn’t be read.';
 /**
- * The band under the toolbar, while it is open (app.ts state.usageBand: an Update's click or a failed reading opens it, its
- * close button closes it): what collecting does while it collects, that it was collected, or that it couldn't be. Its three
+ * The band under the toolbar, while it is open (app.ts state.usageBand: an Update's click opens it, its close button closes
+ * it): what collecting does while it collects, that it was collected, or that it couldn't be. Its three
  * sentences share one place, the others kept but not shown, so the band is as high in each and no row moves when a reading
  * lands. Closed, nothing is lost: the time is beside the button, each tool's reach in the chip's band (unusedBand), and each
  * tool's figure, or why it can't say, in an opened row (usageLine).
@@ -1996,7 +2039,7 @@ function usageBand(t: Table) {
   const now = state.usage.state === 'reading' ? 0 : state.usage.state === 'failed' || !state.usage.data ? 2 : 1;
   const sentences = ['Collecting usage statistics: reading the tools’ own session history on this computer. Nothing leaves it.',
     'Usage statistics collected from the tools’ own session history on this computer. Nothing left it.',
-    'Usage statistics couldn’t be collected: the tools’ session history couldn’t be read.'];
+    usageNotCollected];
   return h('div.band.band-quiet.usage-line', { role: 'status', id: 'usage-line' }, icon('history', 14, 'tone-muted'),
     h('span.band-text.band-stack', {}, sentences.map((words, index) => h(`span${index === now ? '' : '.band-unshown'}`, {}, words))),
     closeButton(() => { state.usageBand = false; rerender(); }, { id: 'usage-line-close', label: 'Close this line about usage statistics', title: 'Close' }));
@@ -2525,7 +2568,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   // Its whole text on hover too, for a pane too narrow to show it.
   const paneStatus = switchStatus(t, skill);
   // The result and its Undo are in the window's header, as on the table; the list and the skill's pane below it.
-  return h('div.page', {}, notices(t), h('div.split', {},
+  return h('div.page', {}, bands(t), h('div.split', {},
     h('div.list-column', {},
       h('div.toolbar.list-toolbar.fit-bar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', ...backWords(), id: 'files-back', collapse: true, onclick: backFromFiles }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
       // The header rides inside the list's scroll area, so it has the rows' exact width, gutter and columns.

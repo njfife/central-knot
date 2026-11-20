@@ -323,6 +323,19 @@ const rowKeys = async (a, kind) => keysOf(kind, await a.all('.ov-row[data-key]',
 const cellState = (a, kind, key, tool) => a.run(`document.getElementById(${JSON.stringify(rowPart('cell', kind, key, tool))})?.dataset.state ?? null`);
 /** The tools whose mark on an item's row is drawn off: off with the copy kept, or (a library item) a state of that tool's own (held). */
 const offMarks = (a, kind, key) => a.all(`.ov-row[data-key=${JSON.stringify(rowPart('', kind, key))}] .tool-mark:is([data-look="off"], [data-look="held"])`, 'e.dataset.tool');
+/** Opens the header's card of sync notices by its one way in, Notices (matrix.ts noticesCard), and gives what it says; '' with no notice. */
+const openNotices = async a => { if (!(await a.exists('#notices'))) return ''; if (!(await a.exists('#notices-card'))) await a.click('#notices'); return await a.text('#notices-card') ?? ''; };
+/** Whether the header's Notices names `name` (its tooltip names the first three notices it counts). */
+const noticesName = async (a, name) => (await a.run(`document.querySelector('#notices')?.title ?? ''`) ?? '').includes(name);
+/** Closes the notices' card by its ×. */
+const closeNotices = async a => { if (await a.exists('#notices-close')) await a.click('#notices-close'); };
+/** The newest sync notice, in the header's two lines while no result has them; null with none there. */
+const noticeInLines = a => a.text('#header .header-notice');
+/** The result let go by its ×, then every sync notice, by the card's Dismiss all (three or more) or a notice's ×. */
+const letNoticesGo = async a => {
+  await a.run(`document.querySelector('#outcome-dismiss, #problems-dismiss')?.click()`); await a.settle();
+  for (let tries = 0; tries < 20 && await a.exists('#notices'); tries++) { await openNotices(a); await a.click('#notices-dismiss, #notices-card [id^="notice-dismiss-"]'); }
+};
 const switchOn = (a, kind, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(rowPart('', kind, key))}] .switch')?.getAttribute('aria-checked') === 'true'`);
 /** A heading's words as shown: its name, its count and its note, but not a note's hidden room (matrix.ts section). */
 const headingSays = (a, role) => a.run(`[...(document.querySelector('.ov-section[data-section="${role}"] .ov-section-label')?.childNodes ?? [])].filter(node => !node.classList?.contains('ov-section-room')).map(node => node.textContent).join('')`);
@@ -1660,18 +1673,19 @@ async function practiceFlow() {
   writeFileSync(standupPath('claude'), standupBefore.replace(/\n*$/, '\nEdited in Claude Code.\n'));
   await a.click('#header-refresh');
   same('an edit spreads to every tool on the next read', [readFileSync(standupPath('copilot'), 'utf8'), readFileSync(standupPath('codex'), 'utf8')].map(text => text.includes('Edited in Claude Code.')), [true, true]);
-  check('and says it is the current version now, with Undo', (await a.text('.sync-notices') ?? '').includes('standup was edited in Claude Code; that is its current version now') && await a.exists('[id^="notice-undo-"]'), await a.text('.bands'));
+  check('and says it is the current version now, in the header, with Undo in the notices’ card', (await noticeInLines(a) ?? '').includes('standup was edited in Claude Code; that is its current version now') && (await openNotices(a)).includes('standup was edited in Claude Code') && await a.exists('#notices-card [id^="notice-undo-"]'), await a.text('#header'));
+  await closeNotices(a);
   check('without also calling it a catch-up', !(await a.text('.bands') ?? '').includes('Caught up'), await a.text('.bands'));
   check('and the status bar doesn’t say nothing changed beside it', !/Nothing changed/.test(await a.run(`document.querySelector('#announcement').dataset.text ?? ''`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   // A Refresh that finds nothing new while that notice is still up says what it read and stops there.
   await a.click('#header-refresh');
   const readBeside = await a.run(`document.querySelector('#announcement').dataset.text ?? ''`);
-  check('a Refresh beside the notice an earlier read drew says what it read, without "Nothing changed"', (await a.text('.sync-notices') ?? '').includes('standup was edited in Claude Code') && /^Read /.test(readBeside) && !/Nothing changed/.test(readBeside), readBeside);
+  check('a Refresh beside the notice an earlier read drew says what it read, without "Nothing changed"', (await noticeInLines(a) ?? '').includes('standup was edited in Claude Code') && /^Read /.test(readBeside) && !/Nothing changed/.test(readBeside), readBeside);
   await a.shot('practice-edit-spread');
   // A click on a row leaves the notice where it is: it goes at its × or at a newer notice, never at a click.
   await a.click(`#${rowPart('switch', 'skills', 'notes')}`); await a.click('#outcome-undo');
-  check('a click on a row, and its Undo, leave the notice above the list as it was', (await a.text('.sync-notices') ?? '').includes('standup was edited in Claude Code; that is its current version now') && await switchOn(a, 'skills', 'notes'), await a.text('.bands'));
-  await a.run(`document.querySelector('.sync-notice[data-kind="edit"] [id^="notice-undo-"]').click()`);
+  check('a click on a row, and its Undo, leave the notice as it was, in the header’s Notices', (await openNotices(a)).includes('standup was edited in Claude Code; that is its current version now') && await switchOn(a, 'skills', 'notes'), await a.text('#header'));
+  await a.run(`document.querySelector('#notices-card .sync-notice[data-kind="edit"] [id^="notice-undo-"]').click()`);
   await a.settle();
   same('Undo makes the version before it current again, everywhere', [readFileSync(standupPath('claude'), 'utf8'), readFileSync(standupPath('copilot'), 'utf8')], [standupBefore, standupBefore]);
   // Sorted by last updated, the skill just made current again comes first under On, its row saying when, and the choice holds
@@ -1723,7 +1737,7 @@ async function practiceFlow() {
           if (clicked || copies().some(Boolean)) return;
           clicked = true;
           clearTimeout(limit);
-          done(clickAndRead(() => document.querySelector('.sync-notices')?.textContent ?? null));
+          done(clickAndRead(() => document.querySelector('#header .header-notice')?.textContent ?? null));
         });
       });
       true;
@@ -1734,9 +1748,11 @@ async function practiceFlow() {
     refreshNotice = await a.run('window.deletionRefresh');
   } finally { probe.close(); }
   await a.settle();
-  check('Refresh’s own draw offers to turn the deleted skill on', /release-notes was deleted[\s\S]*Turn it on/.test(refreshNotice), refreshNotice);
+  check('Refresh’s own draw says the skill was deleted, in the header', /release-notes was deleted/.test(refreshNotice), refreshNotice);
   same('then the skill turns off everywhere', releaseNotesIn(), [false, false, false]);
-  check('with a notice that Central Knot keeps it, offering Turn it on', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && /Turn it on/.test(await a.text('.sync-notices') ?? ''), await a.text('.bands'));
+  const deletedSays = await openNotices(a);
+  check('with a notice that Central Knot keeps it, its card offering Turn it on', deletedSays.includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && await a.exists('#notices-card [id^="notice-restore-"]'), deletedSays);
+  await closeNotices(a);
   check('and the table keeps it under Off, in Central Knot only', ((await sectionsNow(a, 'skills')).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && /in Central Knot only/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? '') && !(await switchOn(a, 'skills', 'release-notes')), await sectionsNow(a, 'skills'));
   await a.click('#nav-history');
   check('History lists it', (await a.text('#history-scroll') ?? '').includes('release-notes'), await a.text('#history-scroll'));
@@ -1798,9 +1814,9 @@ async function practiceFlow() {
   for (let tries = 0; tries < 40 && !watched; tries++) { await wait(250); watched = readNow(standupPath('claude')).includes('watched'); }
   check('a change on disk spreads on its own', watched);
   // The page hears of it once the pass that spread it has told it, and it has read again.
-  const heard = async () => (await a.text('.sync-notices') ?? '').includes('standup was edited in Copilot CLI');
+  const heard = async () => (await noticeInLines(a) ?? '').includes('standup was edited in Copilot CLI');
   for (let tries = 0; tries < 50 && !(await heard()); tries++) await wait(100);
-  check('and the page hears about it without a click', await heard(), await a.text('.bands'));
+  check('and the page hears about it without a click', await heard(), await a.text('#header'));
   // Only a missing event should use the deadline. Check each assertion once, after its prerequisite is observable.
   const waitFor = async (what, observed) => {
     const deadline = performance.now() + 60000;
@@ -1830,7 +1846,7 @@ async function practiceFlow() {
       // action is allowed to finish. Its notice must be there at the action's idle draw.
       await a.run('centralKnot.getSettings().then(() => true)');
     } finally { await held.release(); inspector.close(); }
-    const notice = await a.text('.sync-notices');
+    const notice = await noticeInLines(a);
     check('a notice from a background read set aside for an action is still shown', (notice ?? '').includes('standup was edited in Codex'), notice);
   }
   // A home switch that can't save its settings changes nothing: the page stays on this home, and this home (not the one asked
@@ -1893,8 +1909,14 @@ async function practiceFlow() {
   check('and a banner says automatic sync is off', (await a.text('.bands') ?? '').includes('Automatic sync is off'));
   check('and the toolbar counts it', (await a.text('.toolbar-end') ?? '').includes('1 change waiting'), await a.text('.toolbar-end'));
   await a.shot('practice-sync-off');
+  const firstRowTop = () => a.run(`Math.round(document.querySelector('.ov-row[data-key]').getBoundingClientRect().top)`), topBeforeOnce = await firstRowTop();
   await a.click('#sync-now');
   check('Sync now spreads it once', readFileSync(standupPath('copilot'), 'utf8').includes('Sync off'));
+  // Its notice is the header's: the band stays, saying sync is off, and no row moves.
+  for (let tries = 0; tries < 50 && !(await noticesName(a, 'standup')); tries++) await wait(100);
+  const onceSays = await openNotices(a);
+  await closeNotices(a);
+  same('after Sync once the band still says sync is off, its notice is in the header’s card, and no row moved', [/^Automatic sync is off\./.test(await a.text('.band-sync-off .band-text') ?? ''), /Synced once: standup was edited/.test(onceSays), await firstRowTop()], [true, true, topBeforeOnce]);
   await a.click('#sync-switch');
   same('Sync turns back on', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
   // A deletion in the background spreads, and History brings it back.
@@ -2115,7 +2137,9 @@ async function practiceFlow() {
   for (let tries = 0; tries < 24 && !mcpSpread; tries++) { await wait(250); mcpSpread = readNow(join(practice, '.codex/config.toml')).includes('command = "npx-edited"'); }
   check('an MCP edit in Copilot reaches Codex within 6 s', mcpSpread);
   for (let tries = 0; tries < 20 && !(await a.exists('.sync-notice[data-kind="edit"]')); tries++) await wait(250);
-  await fitsAtMinimum(a, 'MCP servers with the edit’s notice and its actions');
+  await fitsAtMinimum(a, 'MCP servers with the edit’s notice in the header');
+  await fitsAtMinimum(a, 'MCP servers with the notices’ card open, the edit’s actions in it', () => openNotices(a));
+  await closeNotices(a);
 
   // Agents: Central Knot holds each agent itself, with its versions (its library), and a harness is where an agent is applied.
   // An agent a harness has that Central Knot doesn't yet is found: its row's Add takes it in and applies it everywhere.
@@ -2164,7 +2188,9 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   for (let tries = 0; tries < 30 && !readFileSync(claudeAgent, 'utf8').includes('Edited in Codex.'); tries++) await wait(100);
   check('an edit in Codex reaches Claude Code and Copilot CLI, and Claude Code keeps its own fields', reviewerNow().every(text => text.includes('Edited in Codex.')) && readFileSync(claudeAgent, 'utf8').includes('tools:'), readFileSync(claudeAgent, 'utf8'));
-  check('its notice says the edit is the current version now, with Undo', /code-reviewer was edited in Codex; that is its current version now/.test(await a.text('main') ?? '') && await a.exists('[id^="notice-undo-"]'), (await a.text('main') ?? '').slice(0, 300));
+  const editSays = await openNotices(a);
+  check('its notice says the edit is the current version now, with Undo', /code-reviewer was edited in Codex; that is its current version now/.test(editSays) && await a.exists('#notices-card [id^="notice-undo-"]'), editSays.slice(0, 300));
+  await closeNotices(a);
   same('the versions list has both, the current one first, each saying what it changed', await versionsShown(), ['edited in Codexdescription changedCurrent', 'found in Claude Codefirst version']);
   // Read shows a version, marked against the current one; Make current applies an earlier one everywhere (main.ts passes the
   // click's `version` through).
@@ -2837,8 +2863,10 @@ async function practiceFlow() {
   await writeOldParts(practice, market, 'ck-test-market', 'document-tools', 'pi-cli', { skills: { 'pdf-reader': { edited: '\nMy own way of reading PDFs.\n' }, spreadsheet: { removed: true } } });
   await openKind(a, 'skills');
   await a.click('#header-refresh');
-  for (let tries = 0; tries < 50 && !/is your own now/.test(await a.text('.bands') ?? ''); tries++) await wait(100);
-  check('pdf-reader, edited in Pi before the move, is his own now, said once', /pdf-reader is your own now/.test(await a.text('.bands') ?? '') && !/from the plugin/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'pdf-reader')}"]`) ?? ''), [await a.text('.bands'), await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'pdf-reader')}"]`)]);
+  for (let tries = 0; tries < 50 && !(await noticesName(a, 'pdf-reader')); tries++) await wait(100);
+  const pdfOwn = await openNotices(a);
+  await closeNotices(a);
+  check('pdf-reader, edited in Pi before the move, is his own now, said once', /pdf-reader is your own now/.test(pdfOwn) && !/from the plugin/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'pdf-reader')}"]`) ?? ''), [pdfOwn, await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'pdf-reader')}"]`)]);
   await a.click('#nav-plugins');
   if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 50 && !(await a.exists('.plugin-items-section')); tries++) await wait(100);
@@ -5488,8 +5516,10 @@ async function syncEverythingFlow() {
   same('on the Library’s skills notes and fresh are On and review stays found', await sectionsNow(a, 'skills'), [['on', ['fresh', 'notes']], ['found', ['review']]]);
   check('the Found heading says the rule in force: Synchronize everything leaves these, and how many wait for a choice', /Synchronize everything leaves these \(open a row to see why\)\. 1 waits for your choice of copy/.test(await foundNote() ?? ''), await foundNote());
   const notice = '.sync-notice[data-kind="taken-in"] .notice-text';
-  same('one notice per pass says how many it took in, where they were found, and their names', await a.all(notice, 'e.textContent.replace(/ · .*$/, "")'),
+  await openNotices(a);
+  same('one notice per pass says how many it took in, where they were found, and their names, in the notices’ card', await a.all(`#notices-card ${notice}`, 'e.textContent.replace(/ · .*$/, "")'),
     ['Synchronize everything took in 1 skill, found in Claude Code: fresh. History can undo it.', 'Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.']);
+  await closeNotices(a);
   same('review’s row says why the rule leaves it: its copies differ, and opening it asks which', [await a.text(`#${rowPart('decide', 'skills', 'review')}`), await (async () => { await a.click(`#${rowPart('open', 'skills', 'review')}`); return a.exists('.details-differs'); })()], ['Copies differ', true]);
   await fitsAtMinimum(a, 'Skills with Synchronize everything on');
   await a.shot('everything-skills');
@@ -5498,7 +5528,7 @@ async function syncEverythingFlow() {
   let claudeFiles;
   for (let tries = 0; tries < 300 && claudeFiles !== 'files-mcp'; tries++) { claudeFiles = JSON.parse(readNow(join(home, '.claude.json')) || '{}').mcpServers?.files?.command; if (claudeFiles !== 'files-mcp') await wait(100); }
   same('on the Library’s MCP servers files, found in Codex, is On, and in Claude Code’s file too', [await sectionsNow(a, 'mcp'), claudeFiles], [[['on', ['files']]], 'files-mcp']);
-  check('and its notice, from the pass before the one that took fresh in, is still there to name it and Codex', /^Synchronize everything took in 1 MCP server, found in Codex: files\./.test(await a.text(notice) ?? ''), await a.text('.bands'));
+  check('and its notice, from the pass before the one that took fresh in, is still there to name it and Codex', /^Synchronize everything took in 1 MCP server, found in Codex: files\./.test(await a.text(notice) ?? ''), await a.text('#header'));
   await a.click('#nav-history');
   for (let tries = 0; tries < 30 && !(await a.exists('.history-row')); tries++) await wait(100);
   // The skill notes's own row, by its name and kind (release-notes, an agent, has one too).
@@ -6390,8 +6420,10 @@ esac
   writeFileSync(join(home, '.pi/agent/skills/triage/SKILL.md'), `${readFileSync(join(home, '.pi/agent/skills/triage/SKILL.md'), 'utf8')}\nMine.\n`);
   await a.click('#header-refresh');
   await openKind(a, 'skills');
-  for (let tries = 0; tries < 50 && !/is your own now/.test(await a.text('.bands') ?? ''); tries++) await wait(100);
-  check('changed in Pi, triage is his own now, said once', /triage is your own now: you changed it here, so it no longer follows the plugin issue-tracker/.test(await a.text('.bands') ?? '') && !/from the plugin/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`) ?? ''), await a.text('.bands'));
+  for (let tries = 0; tries < 50 && !(await noticesName(a, 'triage')); tries++) await wait(100);
+  const triageOwn = await openNotices(a);
+  await closeNotices(a);
+  check('changed in Pi, triage is his own now, said once', /triage is your own now: you changed it here, so it no longer follows the plugin issue-tracker/.test(triageOwn) && !/from the plugin/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`) ?? ''), triageOwn);
   writeFileSync(join(market, 'plugins/issue-tracker/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp', '--v2'] } } }));
   // Plugins opens again on the page last shown there, issue-tracker's; Refresh reads the marketplace's change.
   await a.click('#nav-plugins');
@@ -6991,8 +7023,81 @@ fs.writeFileSync(record, JSON.stringify(now));
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && (await order()).length !== plugins.length; tries++) await wait(100);
   same('a plugin turned On stays where it was until Refresh, which puts it with the installed ones', [pinnedInList, await order()], [[true, 'true'], inOrder([...installedNow, 'plug-02'])]);
+  await noticesMoveNoRow();
   same('no page errors, rows keep their places', a.pageErrors, []);
   await a.quit();
+
+  /**
+   * A sync notice moves no row: what a background read or a click's completion brings lives in the header's 48 px. Edits in Claude
+   * Code, which Automatic sync takes as the current version, each bring a notice. On a list too short to scroll (three agents, at
+   * 860×528), at the top of the 40 servers and scrolled deep among them, every row's top on screen and the list's scroll are read
+   * before and after a notice arrives: a first one, a replacement, five at once then a sixth, and one a click's completion brings.
+   * Then a switch pressed and held while a notice arrives, released after (two real events): one click, on that switch.
+   */
+  async function noticesMoveNoRow() {
+    const until = async (test, ms = 30000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+    const headerTall = () => a.run(`document.querySelector('#header').offsetHeight`);
+    /** Whether the header's Notices names one of `names` (its tooltip names the first three it counts). */
+    const told = names => a.run(`(said => ${JSON.stringify(names)}.some(name => said.includes(name)))(document.querySelector('#notices')?.title ?? '')`);
+    /** `list`'s places read before `edit` and once its notice has arrived, the header's height after. */
+    const across = async (list, edit, names) => {
+      await letNoticesGo(a);
+      const before = await placesNow(list, 'data-key');
+      edit();
+      const arrived = await until(() => told(names));
+      await a.settle();
+      return { arrived, before, after: await placesNow(list, 'data-key'), header: await headerTall() };
+    };
+    const still = (name, { arrived, before, after, header }) => same(name, [arrived, after, header], [true, before, 48]);
+    // Three agents, taken in through the page's own call.
+    const shortList = ['ag-x', 'ag-y', 'ag-z'], agentFile = key => join(home, '.claude/agents', `${key}.md`);
+    const editAgent = key => () => writeFileSync(agentFile(key), `---\nname: ${key}\ndescription: The ${key} agent.\n---\n\nEdited ${Date.now()}.\n`);
+    for (const key of shortList) editAgent(key)();
+    await a.run(`window.centralKnot.applyAgents(${JSON.stringify(shortList.map(key => ({ key, on: true, except: [] })))}, false, ${JSON.stringify(home)}).then(() => true)`);
+    await openKind(a, 'agents');
+    await a.click('#header-refresh');
+    await sizeTo(a, ...SMALLEST);
+    const agentsTable = 'table-library-agents';
+    still('a list too short to scroll: a first notice arrives, and no row moves', await across(agentsTable, editAgent('ag-x'), ['ag-x']));
+    still('…nor when a second replaces it', await across(agentsTable, editAgent('ag-y'), ['ag-y']));
+    // The servers in Claude Code's file now, each edited there as a person would.
+    await sizeTo(a, 1280, 800);
+    await openKind(a, 'mcp');
+    let edits = 0;
+    const editServers = (...keys) => () => { const now = JSON.parse(readFileSync(claudeJson, 'utf8')); for (const key of keys) now.mcpServers[key] = { ...now.mcpServers[key], args: [`--edit-${++edits}`] }; writeFileSync(claudeJson, JSON.stringify(now)); };
+    const inFile = servers.filter(key => Object.keys(JSON.parse(readFileSync(claudeJson, 'utf8')).mcpServers).includes(key));
+    await a.run(`document.getElementById('${table}').scrollTop = 0`);
+    still('at the top of a long list: five notices arrive at once, and no row moves', await across(table, editServers(...inFile.slice(0, 5)), inFile.slice(0, 5)));
+    still('…nor when a sixth arrives after them', await across(table, editServers(inFile[5]), [inFile[5]]));
+    // A click's completion brings one: an edit lands while a click waits behind one that runs (holdRun).
+    await letNoticesGo(a);
+    await holdRun();
+    const beforeClick = await placesNow(table, 'data-key');
+    editServers(inFile[6])();
+    await clickAt(await middleOf(`#${rowPart('switch', 'mcp', inFile[7])}`));
+    await letRunGo();
+    still('a click’s completion brings a notice with its result, and no row moves', { arrived: await until(() => told([inFile[6]])), before: beforeClick, after: await placesNow(table, 'data-key'), header: await headerTall() });
+    await putAt(table, row(inFile[20]), 300);
+    still('scrolled deep: a notice arrives, and no row moves', await across(table, editServers(inFile[8]), [inFile[8]]));
+    // Held across an arrival: a switch in the middle, then the lowest one wholly in view, each pressed, a notice let arrive, then let go.
+    await a.run(`(() => { window.ckSwitchClicks = {}; document.addEventListener('click', event => { const id = event.target.closest?.('.switch')?.id; if (id) window.ckSwitchClicks[id] = (window.ckSwitchClicks[id] ?? 0) + 1; }, true); return true; })()`);
+    const lowestSwitch = () => a.run(`(() => { const bottom = document.getElementById('${table}').getBoundingClientRect().bottom; return [...document.querySelectorAll('#${table} .ov-row[data-key] .switch')].filter(each => each.getBoundingClientRect().bottom <= bottom).at(-1).id; })()`);
+    const heldAcross = async (id, edited) => {
+      await letNoticesGo(a);
+      const was = await a.run(`document.getElementById('${id}').getAttribute('aria-checked')`), [x, y] = await middleOf(`#${id}`);
+      await a.run(`window.ckSwitchClicks = {}`);
+      for (const type of ['mouseMoved', 'mousePressed']) await a.send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 });
+      editServers(edited)();
+      const arrived = await until(() => told([edited]));
+      await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+      await done();
+      return [arrived, await a.run(`window.ckSwitchClicks`), await a.run(`document.getElementById('${id}').getAttribute('aria-checked')`) !== was];
+    };
+    const middleSwitch = rowPart('switch', 'mcp', inFile[21]);
+    same('a switch in the middle pressed and held while a notice arrives, then let go: one click, on that switch', await heldAcross(middleSwitch, inFile[9]), [true, { [middleSwitch]: 1 }, true]);
+    const lowest = await lowestSwitch();
+    same('the lowest switch in view pressed and held while a notice arrives, then let go: one click, on that switch', await heldAcross(lowest, inFile[10]), [true, { [lowest]: 1 }, true]);
+  }
 }
 
 async function pluginUpdatesFlow() {
@@ -8221,6 +8326,16 @@ async function usageFlow() {
     same('a reading that fails: the band says so, the button offers to collect again, and no figure or chip from the reading before stays',
       [await bandText(), (await a.text('#collect-usage'))?.trim(), await a.exists('.ov-used'), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
       ['Usage statistics couldn’t be collected: the tools’ session history couldn’t be read.', 'Collect usage statistics', false, false]);
+    // One collected by itself (the home opened again) that fails opens no band, which would move the list: the status bar says it.
+    await a.click('#usage-line-close');
+    const inspector = await a.main();
+    await inspector.run(`process.mainModule.require('electron').dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [${JSON.stringify(home)}] })`);
+    inspector.close();
+    await a.click('#home-custom');
+    const statusSays = () => a.run(`(said => !said.classList.contains('visually-hidden') && said.dataset.text)(document.querySelector('#announcement'))`);
+    for (let tries = 0; tries < 50 && !/couldn’t be collected/.test(await statusSays() || ''); tries++) await wait(100);
+    same('a reading by itself that fails: the status bar says so, and no band opens above the list', [await statusSays(), await a.exists('#usage-line')],
+      ['Usage statistics couldn’t be collected: the tools’ session history couldn’t be read.', false]);
     await main.restore('usage:read');
     main.close();
   }
@@ -9112,7 +9227,7 @@ async function libraryFlow() {
   check('the pass tells the page of the agent’s edit', await until(() => a.exists('#nav-library .nav-unseen'), 30000), await a.text('#announcement'));
   same('on Skills, the sidebar’s Library has its dot and the Agents segment is marked; the status bar says it', [await a.exists('#library-kind-agents .kind-seg-news'), await a.exists('#library-kind-skills .kind-seg-news'), await a.run(`(said => /review/.test(said.dataset.text ?? '') && !said.classList.contains('visually-hidden'))(document.querySelector('#announcement'))`)], [true, false, true]);
   await a.click('#library-kind-all');
-  check('on All, the agent’s notice is there, naming its kind beside its name, and the dot goes', /review/.test(await a.text('.sync-notices') ?? '') && (await a.text('.sync-notices .row-kind')) === 'agent' && !(await a.exists('#nav-library .nav-unseen')), [await a.text('.sync-notices'), await a.exists('#nav-library .nav-unseen')]);
+  check('on All, the agent’s notice is in the header, naming its kind beside its name, and the dot goes', /review/.test(await noticeInLines(a) ?? '') && (await a.text('#header .header-notice .row-kind')) === 'agent' && !(await a.exists('#nav-library .nav-unseen')), [await noticeInLines(a), await a.exists('#nav-library .nav-unseen')]);
   // A notice's name is a link to its row, which shows it whatever Find says.
   await find(a, 'zzz');
   await a.click('[id^="notice-open-"]');
@@ -9121,7 +9236,7 @@ async function libraryFlow() {
   const spareFile = join(A.claude, 'spare/SKILL.md');
   writeFileSync(spareFile, text('spare', 'Spare, edited by hand.'));
   utimesSync(spareFile, ago(0.0002), ago(0.0002));
-  check('the pass tells the page of spare’s edit', await until(async () => /spare/.test(await a.text('.sync-notices') ?? ''), 30000), await a.text('.bands'));
+  check('the pass tells the page of spare’s edit', await until(async () => /spare/.test(await noticeInLines(a) ?? ''), 30000), await a.text('#header'));
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
   await a.click(`#${rowPart('files', 'skills', 'notes')}`);
   await a.click('.sync-notice [id^="notice-open-"]');
@@ -9171,15 +9286,15 @@ async function libraryFlow() {
   same('the walkthrough opens the skill review’s row on the Library, Find kept since it finds the row by its text, and its details, which ask of its copies, show that text',
     [await b.text('.page-title'), await b.run(`document.querySelector('#find').value`), await b.text('#walkthrough .walk-place'), await opened(b), /gently/.test(await b.text(`${row('skills', 'review')} + .details .details-excerpt`) ?? '')],
     ['Library', 'gently', ' · 1 of 2', [rowPart('', 'skills', 'review')], true]);
-  check('the notice of what Yes took in reaches the Library', await until(() => b.exists('.sync-notice')), await b.text('.bands'));
-  same('the walkthrough asks of the skill review by its kind, its opened row doesn’t ask again, and the notice keeps to a line while it asks',
-    [await b.text('#walkthrough .compare-title'), await b.exists(`${row('skills', 'review')} + .details .compare-choices`), await b.exists('.sync-notices.notices-folded')],
-    ['Which copy of the skill review should both tools use?', false, true]);
+  check('the notice of what Yes took in reaches the Library, in its header', await until(() => b.exists('#notices')), await b.text('#header'));
+  same('the walkthrough asks of the skill review by its kind, its opened row doesn’t ask again, and no notice is among the bands above the list',
+    [await b.text('#walkthrough .compare-title'), await b.exists(`${row('skills', 'review')} + .details .compare-choices`), await b.exists('.bands .sync-notice')],
+    ['Which copy of the skill review should both tools use?', false, false]);
   await pictures(b, 'walkthrough-1-of-2');
-  // At 860×600, the walkthrough's band and the long notice of what Yes took in both end above the status bar.
+  // At 860×600, the walkthrough's band ends above the status bar, the long notice of what Yes took in in the header's 48px.
   await sizeTo(b, 860, 600);
-  const above = await b.run(`(() => { const bar = document.querySelector('#status').getBoundingClientRect().top, notice = document.querySelector('.sync-notice'); return [!!notice, notice ? notice.getBoundingClientRect().bottom <= bar : null, document.querySelector('#walkthrough').getBoundingClientRect().bottom <= bar]; })()`);
-  same('at 860×600, the notice of what Yes took in and the walkthrough’s band end above the status bar', above, [true, true, true]);
+  const above = await b.run(`(() => { const bar = document.querySelector('#status').getBoundingClientRect().top; return [document.querySelector('#header').offsetHeight, document.querySelector('#walkthrough').getBoundingClientRect().bottom <= bar]; })()`);
+  same('at 860×600, the walkthrough’s band ends above the status bar, the header 48px with the notice of what Yes took in', above, [48, true]);
   await fullSize(b);
   await b.click('#walk-skip');
   same('Skip goes on to the agent of the same name, which Find hid: Find let go, its row the one open', [await b.text('#walkthrough .walk-place'), await b.run(`document.querySelector('#find').value`), await opened(b)], [' · 2 of 2', '', [rowPart('', 'agents', 'review')]]);
@@ -9288,12 +9403,12 @@ async function libraryFlow() {
   // were their room not held, the Put in order and change-waiting a click brings would wrap the bar. Each place twice: a plain
   // Off, and one whose removal Claude Code refuses (a problem line, and the change left waiting).
   const T = homeWith('library-toolbar');
-  const toolbarSkills = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta'];
+  const toolbarSkills = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda', 'mu'];
   for (const name of toolbarSkills) skill(T.claude, name);
   const tb = await launch(T.data, [], T.real);
   await tb.click('#nav-overview');
   await tb.click('#setup-yes');
-  check('Yes takes the seven in', await until(() => Object.keys(JSON.parse(readNow(join(T.home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 7));
+  check('Yes takes the twelve in', await until(() => Object.keys(JSON.parse(readNow(join(T.home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 12));
   await done(tb);
   await openKind(tb, 'all');
   const placeOf = () => tb.run(`[Math.round(document.querySelector('[id^="table-library-"]').getBoundingClientRect().top), Math.round(document.querySelector('${row('skills', 'beta')}').getBoundingClientRect().top)]`);
@@ -9336,31 +9451,90 @@ async function libraryFlow() {
     await openAt(oneLine);
     await clickMovesNothing(`at ${oneLine}×600, the narrowest the bar keeps to one line with the sidebar open`, refused);
   }
-  // Seven deleted by hand at once, on All: six notices on show, the seventh past them, and no dot on the open Library, whose
-  // every kind is on show.
+  // ---------- Sync notices live in the header: its two lines, Notices and its card ----------
+  // One skill edited in Claude Code: its notice in the header's lines, counted by Notices and seen. The card that only Notices opens,
+  // from the keyboard too, See change inside its one scroll, and six edited at once while it is open: the card keeps its height.
+  // A click Claude Code refuses keeps the lines with its problem line; two edits arrive meanwhile, the second folding the first
+  // into History: counted and marked, unseen until the result goes, the first never seen and no longer unseen. Twelve deleted by
+  // hand at once: all in the card, the seventh and the twelfth too, and no dot on the open Library, whose every kind is on show.
+  await letNoticesGo(tb);
   await fullSize(tb);
-  for (const name of toolbarSkills) rmSync(join(T.claude, name), { recursive: true });
-  check('seven skills deleted by hand: six notices on show', await until(async () => (await tb.all('.sync-notice')).length === 6, 30000), await tb.text('.bands'));
-  check('and the Library, open on All, has no dot', !(await tb.exists('#nav-library .nav-unseen')), await tb.run(`document.querySelector('#nav-library .nav-unseen')?.title`));
-  // The seventh, not drawn, is said on the last line, and is drawn once one above it is dismissed. The sidebar's dot counts only
-  // the notices not yet drawn (matrix.ts unseenNotices): away from the Library it names the seventh alone, then none.
-  const drawnNow = () => tb.all('.sync-notice .item-name', 'e.textContent');
-  const firstSix = await drawnNow(), seventh = toolbarSkills.filter(name => !firstSix.includes(name));
-  same('the seventh is said on the last line', [seventh.length, await tb.text('.sync-notice:last-child #notices-more')], [1, ' · and 1 more']);
-  if (shots) {
-    for (const [width, height, look] of [[1316, 819, 'light'], [1316, 819, 'dark'], [...SMALLEST, 'light']]) {
-      await sizeTo(tb, width, height); await tb.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
-      await tb.shot(`library-seven-notices-${width}-${look}`);
+  const edit = (...names) => { for (const name of names) writeFileSync(join(T.claude, name, 'SKILL.md'), text(name, `Edited by hand ${Date.now()}.`)); };
+  /** Notices as it is: its count and whether it is marked; null where it isn't drawn. */
+  const control = () => tb.run(`(n => n && [n.querySelector('.chip-count').textContent, !!n.querySelector('.notices-unseen')])(document.querySelector('#notices'))`);
+  const header48 = () => tb.run(`document.querySelector('#header').offsetHeight`);
+  const cardTall = () => tb.run(`Math.round(document.querySelector('#notices-card')?.getBoundingClientRect().height ?? 0)`);
+  const inCard = () => tb.all('#notices-card .sync-notice .item-name', 'e.textContent');
+  const dotSays = () => tb.run(`document.querySelector('#nav-library .nav-unseen')?.title ?? null`);
+  const keyed = async (key, code, text) => { for (const type of ['keyDown', 'keyUp']) await tb.send('Input.dispatchKeyEvent', { type, key, code: key === ' ' ? 'Space' : key, windowsVirtualKeyCode: code, ...(type === 'keyDown' && text ? { text } : {}) }); await tb.settle(); };
+  /** Pictures (with --shots) at 860×528 (the rail), 1316×819 with the sidebar open and as a rail, and 1728×1117, light and dark; `again` brings the state back after the sidebar's toggle, a press outside the card. */
+  const noticePictures = async (name, again = async () => {}) => {
+    if (!shots) return;
+    for (const [width, height, rail] of [[...SMALLEST, true], [1316, 819, false], [1316, 819, true], [1728, 1117, false]]) {
+      await sizeTo(tb, width, height);
+      if (rail !== await tb.run(`document.body.classList.contains('rail')`)) await tb.click('#sidebar-toggle');
+      await again();
+      for (const look of ['light', 'dark']) { await theme(tb, look); await tb.shot(`notices-${name}-${width}${rail && width > SMALLEST[0] ? '-rail' : ''}-${look}`); }
     }
-    await tb.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await fullSize(tb);
+    await theme(tb, 'light'); await sizeTo(tb, ...SMALLEST); await fullSize(tb); await again();
+  };
+  edit('alpha');
+  check('alpha edited in Claude Code: its notice comes to the header’s lines', await until(async () => /alpha was edited in Claude Code/.test(await noticeInLines(tb) ?? ''), 30000), await tb.text('#header'));
+  same('Notices counts it, unmarked: drawn in the lines, it is seen; the header 48px', [await control(), await header48()], [['1', false], 48]);
+  await noticePictures('one-in-lines');
+  await tb.run(`document.getElementById('sidebar-toggle').focus()`);
+  for (let tabs = 0; tabs < 6 && await tb.run(`document.activeElement?.id`) !== 'notices'; tabs++) await keyed('Tab', 9);
+  const keyboard = [await tb.run(`document.activeElement?.id`)];
+  for (const [key, code, typed] of [[' ', 32, ' '], ['Enter', 13, '\r']]) {
+    await keyed(key, code, typed); keyboard.push(await tb.exists('#notices-card'));
+    await keyed('Escape', 27); keyboard.push([await tb.exists('#notices-card'), await tb.run(`document.activeElement?.id`)]);
   }
+  same('Tab reaches Notices; Space and Return open the card; Escape closes it, the focus back on Notices', keyboard, ['notices', true, [false, 'notices'], true, [false, 'notices']]);
+  await openNotices(tb);
+  const oneTall = await cardTall();
+  await noticePictures('card-one', () => openNotices(tb));
+  await tb.click('#notices-card .see-change');
+  check('See change opens the edit in the card', await until(() => tb.exists('#notices-card .change-panel pre')), await tb.text('#notices-card'));
+  same('…inside the card’s one scroll: the edit no scroll of its own, the card as tall', [await tb.run(`(pre => getComputedStyle(pre).overflowY === 'visible' && getComputedStyle(pre).maxHeight === 'none')(document.querySelector('#notices-card .change-panel pre'))`), await cardTall()], [true, oneTall]);
+  edit('beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta');
+  check('six edited at once while the card is open: it lists the six', await until(async () => (await inCard()).length === 6, 30000), await inCard());
+  same('…and keeps its height, Notices counting six', [await cardTall(), (await control())?.[0]], [oneTall, '6']);
+  await noticePictures('card-six', () => openNotices(tb));
+  await tb.click('#notices-card [id^="notice-dismiss-"]');
+  same('a notice’s × in the card dismisses that one alone, the card staying open', [(await inCard()).length, await tb.exists('#notices-card')], [5, true]);
+  await tb.click('#notices-dismiss');
+  same('Dismiss all lets every notice go: no card, no Notices', [await tb.exists('#notices-card'), await tb.exists('#notices')], [false, false]);
+  chmodSync(T.claude, 0o555);
+  await tb.click(`#${rowPart('switch', 'skills', 'beta')}`); await done(tb);
+  same('a click Claude Code refuses: its result and its problem line have the header’s lines', [await tb.exists('#header [data-outcome]'), await tb.exists('#header .problem-line')], [true, true]);
+  edit('gamma');
+  check('an edit meanwhile: Notices counts it, marked, the result keeping the lines', await until(async () => JSON.stringify(await control()) === '["1",true]', 30000), await control());
+  edit('delta');
+  check('a second folds the first into History: Notices names delta', await until(() => tb.run(`/delta/.test(document.querySelector('#notices')?.title ?? '')`), 30000), await tb.run(`document.querySelector('#notices')?.title`));
+  same('…counting one, marked, the result keeping the lines, the header 48px', [await control(), await tb.exists('#header .problem-line'), await noticeInLines(tb), await header48()], [['1', true], true, null, 48]);
+  await noticePictures('with-result');
+  chmodSync(T.claude, 0o755);
   await tb.click('#nav-overview');
-  same('away from the Library, the dot counts and names the one notice not yet drawn', await tb.run(`document.querySelector('#nav-library .nav-unseen')?.title`), `1 automatic change: ${seventh[0]}`);
+  same('away from the Library, the dot counts delta alone: gamma, folded before it was ever seen, is not unseen', await dotSays(), '1 automatic change: delta');
+  await tb.click('#nav-history');
+  const editsInHistory = () => tb.all('.history-row', 'e.querySelector(".history-what strong")?.textContent + ": " + e.textContent.includes("Edited in Claude Code")');
+  check('History has both edits', await until(async () => (rows => ['gamma: true', 'delta: true'].every(entry => rows.includes(entry)))(await editsInHistory())), await editsInHistory());
   await openKind(tb, 'all');
-  await tb.click('[id^="notice-dismiss-"]');
-  same('one dismissed, the seventh is drawn, and no more is said', [(await drawnNow()).includes(seventh[0]), (await drawnNow()).length, await tb.exists('#notices-more')], [true, 6, false]);
+  same('back on the Library, no result: delta’s notice has the lines, and is seen', [/delta was edited/.test(await noticeInLines(tb) ?? ''), await control()], [true, ['1', false]]);
+  if (!(await switchOn(tb, 'skills', 'beta'))) { await tb.click(`#${rowPart('switch', 'skills', 'beta')}`); await done(tb); }
+  await letNoticesGo(tb);
+  for (const name of toolbarSkills) rmSync(join(T.claude, name), { recursive: true, force: true });
+  check('twelve skills deleted by hand at once: Notices counts twelve', await until(async () => (await control())?.[0] === '12', 30000), await control());
+  check('and the Library, open on All, has no dot', !(await tb.exists('#nav-library .nav-unseen')), await dotSays());
   await tb.click('#nav-overview');
-  check('every notice drawn, the Library has no dot', !(await tb.exists('#nav-library .nav-unseen')), await tb.run(`document.querySelector('#nav-library .nav-unseen')?.title`));
+  check('away from the Library, the dot counts the eleven not seen: the newest was drawn in the lines', /^11 automatic changes: /.test(await dotSays() ?? ''), await dotSays());
+  await openKind(tb, 'all');
+  await openNotices(tb);
+  same('the card holds all twelve, the seventh and the twelfth too', [...await inCard()].sort(), [...toolbarSkills].sort());
+  await noticePictures('card-twelve', () => openNotices(tb));
+  await closeNotices(tb);
+  await tb.click('#nav-overview');
+  check('every notice seen in the card: the Library has no dot', !(await tb.exists('#nav-library .nav-unseen')), await dotSays());
   same('no page errors, a click moves no row', tb.pageErrors, []);
   await tb.quit();
 
@@ -9662,8 +9836,6 @@ async function headerResultFlow() {
   check('Yes takes the eleven skills in', await until(() => Object.keys(JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 11));
   await done();
   await openKind(a, 'all');
-  // What Yes took in is said in notices above the list: let go, so the list has its room.
-  for (let tries = 0; tries < 10 && await a.exists('[id^="notice-dismiss-"], #notices-dismiss'); tries++) await a.click('#notices-dismiss, [id^="notice-dismiss-"]');
   const row = name => `.ov-row[data-key="${rowPart('', 'skills', name)}"]`, switchOf = name => `#${rowPart('switch', 'skills', name)}`;
   /** Switches clicked one after another, one run with one result (clicklist.ts runAt). */
   const clickRun = async list => { await a.run(`${JSON.stringify(list.map(switchOf))}.forEach(selector => document.querySelector(selector).click())`); await done(); };
@@ -9710,8 +9882,21 @@ async function headerResultFlow() {
     await theme('light'); await sizeTo(a, width, height);
   };
 
-  // A long success at 860×600: three long names run past the header's two lines; Show all opens the sentence whole.
+  // One card at a time, at 860×600: what Yes took in is counted in the header's Notices, beside a long result. With the result's
+  // card open, Notices opens the notices' card in its place; Escape closes that and nothing else, the focus back on Notices.
   await sizeTo(a, 860, 600);
+  await clickRun(names.slice(0, 3));
+  await pressOn('#problems-show-all');
+  await pressOn('#notices');
+  same('with the result’s card open, Notices opens the notices’ card in its place: one card', [await a.exists('#result-whole'), await a.exists('#notices-card'), await a.run(`document.querySelectorAll('#header .result-whole').length`)], [false, true, 1]);
+  await key('Escape', 27);
+  same('Escape closes it and nothing else: no card, the result folded in its lines, the focus on Notices', [await a.exists('#header .result-whole'), await toggle(), await a.run(`document.activeElement?.id`)], [false, ['Show all', 'false'], 'notices']);
+  await clickRun(names.slice(0, 3));
+  await dismiss();
+  // What Yes took in let go, so the header's lines and room are the results' alone.
+  for (let tries = 0; tries < 10 && await a.exists('[id^="notice-dismiss-"], #notices-dismiss'); tries++) await a.click('#notices-dismiss, [id^="notice-dismiss-"]');
+
+  // A long success at 860×600: three long names run past the header's two lines; Show all opens the sentence whole.
   const quiet = await places(), before = files(), sentence = '#header [data-outcome] .band-text';
   const linesOf = selector => a.run(`(text => Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)))(document.querySelector(${JSON.stringify(selector)}))`);
   await clickRun(names.slice(0, 3));
