@@ -4,7 +4,7 @@
 // (pluginpage.ts). A switch's click waits its turn in the page's list (pluginstate.ts turnPlugin), its row saying how it stands;
 // Update, Update all and the switches under a plugin's What it holds act at once (pluginstate.ts applyPluginOps). Each tool's
 // mark only says what it has.
-import { acting, noteMove, noToolManaged, rerender, saidInStatusBar, showPage, state as app } from './app.ts';
+import { acting, noteMove, noToolManaged, rerender, showPage, state as app } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { button, closeButton, emptyState, h, icon, rereadBand, whyOff, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
@@ -13,7 +13,7 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, shortOf, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { listResult, problemLines, wholeToggle } from './matrix.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
@@ -366,9 +366,9 @@ const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclic
  * happened, with Undo and its × (runLine), then what went wrong (problemBand), with the one × when it stands alone.
  */
 export function pluginsResult(): HTMLElement[] {
-  // A result told here since the last run (every run clears it: pluginstate.ts turnPlugin, act), with no action of the page's own
-  // (Sync once from the menu): said as a list page's result is, with its own reasons (matrix.ts listResult).
-  if (app.outcome?.page === 'plugins' && !app.outcome.act && !saidInStatusBar(app.outcome)) return listResult();
+  // A result of the app's said in the run's place (pluginstate.ts overRun; a new run clears it: turnPlugin), as a list page's
+  // result is, with its own reasons (matrix.ts listResult).
+  if (overRun(app.outcome)) return listResult();
   const lines = lastLines(), run = runLine(lines), problems = problemBand(lines, !run);
   // With no problem line, Show all follows the sentence, for one the header's two lines cut (as matrix.ts listResult).
   if (run && !problems) run.querySelector('.toolbar-result-text')!.after(wholeToggle(market.lastRun ?? app.outcome, 0));
