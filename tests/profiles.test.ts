@@ -11,13 +11,13 @@ import { newItem, type ItemKind } from '../src/library.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { inUse, inUseName, liveItems, switchable, switchPlan, turnsWords, undoPlan, type Libraries } from '../src/profileplan.ts';
+import { homeItems, inUse, inUseName, leftOut, leftOutWords, liveItems, switchable, switchPlan, turnsWords, undoPlan, type Libraries } from '../src/profileplan.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
 import { applyServers, serversView } from '../src/servers.ts';
 import { keepDenies } from '../src/serverstore.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
 import { setDisabled } from '../src/skillswitch.ts';
-import type { Profile } from '../src/types.ts';
+import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, Profile, ThroughPlugin } from '../src/types.ts';
 import { bytes, folderOf, put, sandbox, skillText, type Box, type Tool } from './skillclicks.ts';
 
 // ---------- The rules ----------
@@ -61,6 +61,44 @@ test('The Undo of a switch turns back each item still as the switch left it, dec
   const back = undoPlan(entry, live);
   assert.deepEqual([ids(back.on), ids(back.off)], [['skill:notes'], []]);
   assert.deepEqual(undoPlan({ profile: { toName: 'Old' } }, live), { on: [], off: [] }, 'an entry from before profiles were sets of items has nothing to undo');
+});
+
+/** A home's view as the Profiles page reads it: each kind's rows and library (types.ts LibraryView), the plugins installed whole and those recorded. */
+function viewOf({ rows, library, installed = [], recorded = [] }: { rows: Record<ItemKind, LibraryFacts[]>; library: Libraries; installed?: InstalledPlugin[]; recorded?: string[] }) {
+  const kind = (which: ItemKind) => ({ tools: ['claude-cli', 'pi-cli'], items: rows[which], library: library[which] });
+  return { skills: kind('skill'), mcp: kind('mcp'), agents: kind('agent'), pluginItems: installed, profiles: { profiles: [], plugins: recorded } } as unknown as HomeView;
+}
+/** A row of the Library as the kind's view gives it: `plugin`, a tool with no copy of its own that has it through that plugin. */
+const row = (key: string, plugin?: Partial<Record<HarnessId, ThroughPlugin>>): LibraryFacts => ({ key, name: key, description: '', copies: {}, on: false, except: [], cannot: {}, edited: [], ...(plugin ? { plugin } : {}) });
+
+test('The Profiles page says what the Library lists that no profile can tick: items only found in a tool, and a plugin’s items', () => {
+  // In Central Knot: notes (Claude Code also has it through document-tools, so that plugin's notes is notes' own row), pager,
+  // and papa, which Pi has from the plugin pi-pack. document-tools brings pdf and forms into Claude Code: rows of their own.
+  // Only found in a tool: the skill loose (deleted from Central Knot once, and a tool has it again) and the MCP server docs.
+  const library = libraryOf([['skill', 'notes', true], ['skill', 'pager', false], ['skill', 'papa', true], ['skill', 'loose', true, true]]);
+  library.skill.papa!.source = 'pi-pack-id';
+  const throughDocs = { 'claude-cli': { plugin: 'document-tools', marketplace: 'team-tools' } };
+  const home = viewOf({ library, recorded: ['pi-pack-id'],
+    rows: { skill: [row('notes', throughDocs), row('pager'), row('papa'), row('loose')], mcp: [row('docs')], agent: [] },
+    installed: [{ tool: 'claude-cli', plugin: 'document-tools', marketName: 'team-tools', listed: true, items: ['notes', 'pdf', 'forms'].map(name => ({ kind: 'skill', name, description: '' })) }] });
+  assert.deepEqual(ids(homeItems(home)), ['skill:notes', 'skill:pager'], 'the profile lists what is in Central Knot and no plugin’s');
+  assert.deepEqual(leftOut(home), { skill: { plugin: 3, found: 1 }, mcp: { plugin: 0, found: 1 }, agent: { plugin: 0, found: 0 } });
+  assert.equal(leftOutWords(leftOut(home)), 'Not listed here: 1 skill and 1 MCP server found in your tools that aren’t in Central Knot yet '
+    + '(under Found in the Library, with Add on each that can be taken in); 3 skills from plugins, which a profile doesn’t switch yet.');
+  const none = { plugin: 0, found: 0 };
+  assert.equal(leftOutWords({ skill: { plugin: 0, found: 1 }, mcp: none, agent: none }),
+    'Not listed here: 1 skill found in your tools that isn’t in Central Knot yet (under Found in the Library, with Add if it can be taken in).');
+  assert.equal(leftOutWords({ skill: none, mcp: { plugin: 1, found: 0 }, agent: none }), 'Not listed here: 1 MCP server from a plugin, which a profile doesn’t switch yet.');
+
+  // Everything in Central Knot; gone, deleted, still linked to pi-pack (no row anywhere); and a plugin's item only on a row of the
+  // person's own: nothing left out.
+  const kept = libraryOf([['skill', 'notes', true], ['skill', 'gone', false, true], ['agent', 'writer', false]]);
+  kept.skill.gone!.source = 'pi-pack-id';
+  const all = viewOf({ library: kept, recorded: ['pi-pack-id'],
+    rows: { skill: [row('notes', throughDocs)], mcp: [], agent: [row('writer')] },
+    installed: [{ tool: 'claude-cli', plugin: 'document-tools', marketName: 'team-tools', listed: true, items: [{ kind: 'skill', name: 'notes', description: '' }] }] });
+  assert.deepEqual(ids(homeItems(all)), ['skill:notes', 'agent:writer']);
+  assert.equal(leftOutWords(leftOut(all)), '', 'no line');
 });
 
 // ---------- A switch on real files ----------
