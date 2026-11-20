@@ -6,7 +6,7 @@
 // A plugin's instruction files have no row: no tool reads them (the plugin's page says so once).
 import { pluginTools } from './presence.ts';
 import type { Components, DeclaredHook, HarnessId, Outcome, PluginContents } from './types.ts';
-import { toolList } from './words.ts';
+import { toolList, toolNames } from './words.ts';
 
 const START = 'when a session starts', PROMPT = 'when you send a prompt';
 /**
@@ -19,6 +19,8 @@ const TEXT_EVENTS: Partial<Record<HarnessId, Record<string, string>>> = {
   'copilot-cli': { sessionStart: START, SessionStart: START },
   'codex-cli': { SessionStart: START, UserPromptSubmit: PROMPT },
 };
+/** Whether a hook runs when a session starts, by the event name the tool reads: the one kind Copilot CLI and Codex are known to run (Appendix D). */
+const startsWithSession = (tool: HarnessId, hook: DeclaredHook) => TEXT_EVENTS[tool]?.[hook.event] === START;
 /** Whether a hook can add text to the tool's sessions: one of its events, and a program it starts. What it adds is known only when it runs. */
 export const addsText = (tool: HarnessId, hook: DeclaredHook) => !!hook.launch && Object.hasOwn(TEXT_EVENTS[tool] ?? {}, hook.event);
 /** Copilot CLI runs a prompt hook and takes nothing it prints: its note says so where such a hook has no row. */
@@ -70,6 +72,7 @@ export const componentsFrom = (contents: PluginContents): Components => ({
   skills: contents.skills.length, commands: contents.commands.length, agents: contents.agents.length, hooks: contents.hooks.length > 0,
   mcp: contents.mcpServers.length, mcpRootVariable: contents.mcpUsesPluginRoot, bin: contents.bin,
   hooksIn: pluginTools.filter(tool => contents.hooksByTool[tool]?.length),
+  startHooksIn: pluginTools.filter(tool => contents.hooksByTool[tool]?.some(hook => startsWithSession(tool, hook))),
   sessionTextHooks: pluginTools.filter(tool => contents.hooksByTool[tool]?.some(hook => addsText(tool, hook))),
   skillNames: contents.skills.map(skill => skill.name),
 });
@@ -79,6 +82,9 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
   if (tool !== 'claude-cli' && tool !== 'copilot-cli' && tool !== 'codex-cli') return [];
   const list: Outcome[] = [];
   const add = (present: boolean | number, component: string, result: Outcome['result'], text: string, names?: Outcome['names']) => { if (present) list.push({ component, result, text, ...(names ? { names } : {}) }); };
+  // Copilot CLI's and Codex's Hooks: only start-of-session hooks are known to run there, so a plugin with none of them is unconfirmed.
+  const hooksLine = (known: string) => (components.startHooksIn.includes(tool) ? add(components.hooksIn.includes(tool), 'Hooks', 'limited', `${known}; others may not`)
+    : add(components.hooksIn.includes(tool), 'Hooks', 'unknown', `may not run: not confirmed in ${toolNames[tool]}`));
   if (tool === 'claude-cli') {
     add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'works', 'work as they are');
@@ -90,14 +96,14 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
     add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'limited', 'become skills');
     add(components.agents, 'Agents', 'works', 'get the plugin’s name in front, e.g.', 'agent');
-    add(components.hooksIn.includes(tool), 'Hooks', 'limited', 'start-of-session hooks run; others may not');
+    hooksLine('start-of-session hooks run');
     add(components.sessionTextHooks.includes(tool), 'Session text', 'limited', `is limited: ${sessionTextNote(tool)}`);
     add(components.mcp, 'MCP servers', 'works', 'run unchanged');
   } else if (tool === 'codex-cli') {
     add(components.skills, 'Skills', 'works', 'get the plugin’s name in front, e.g.', 'skill');
     add(components.commands, 'Commands', 'limited', 'are turned into skills when installed');
     add(components.agents, 'Agents', 'ignored', 'are ignored: copied, never offered');
-    add(components.hooksIn.includes(tool), 'Hooks', 'limited', 'start-of-session hooks run after you trust them in Codex; others may not');
+    hooksLine('start-of-session hooks run after you trust them in Codex');
     add(components.sessionTextHooks.includes(tool), 'Session text', 'limited', `waits for trust: ${sessionTextNote(tool)}`);
     add(components.mcp, 'MCP servers', components.mcpRootVariable ? 'fails' : 'unknown', components.mcpRootVariable ? 'won’t start: Codex does not fill in `${CLAUDE_PLUGIN_ROOT}`' : 'may not start: not confirmed in Codex');
   }

@@ -286,6 +286,18 @@ test('“In each tool” gives a tool Hooks and Session text lines only from the
   } finally { await cleanup(); }
 });
 
+test('“In each tool” speaks of start-of-session hooks in Copilot CLI and Codex only for a plugin that has one: a plugin with only Stop hooks is said to be unconfirmed there', async () => {
+  const { root, cleanup } = await box();
+  try {
+    // unified-computer-use's shape: its only hooks at Stop, each calling an MCP tool, read for every tool as its page reads it.
+    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'mcp_tool', server: 'cua', tool: 'stop' }] }] } }));
+    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'unified-computer-use', version: '26.1103.41825' }));
+    const hooksLine = async (tool: HarnessId) => outcomes(tool, componentsFrom(await pluginContents(root, {}, root))).filter(outcome => outcome.component === 'Hooks').map(outcome => `${outcome.result}: ${outcome.text}`);
+    assert.deepEqual([await hooksLine('claude-cli'), await hooksLine('copilot-cli'), await hooksLine('codex-cli')],
+      [['works: run; a hook that fails does not stop the install'], ['unknown: may not run: not confirmed in Copilot CLI'], ['unknown: may not run: not confirmed in Codex']]);
+  } finally { await cleanup(); }
+});
+
 test('The line under a plugin page’s hooks that can add text names each tool that takes text from none of them, and says Codex waits for trust only where Codex takes some', async () => {
   const { root, cleanup } = await box();
   try {

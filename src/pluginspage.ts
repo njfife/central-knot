@@ -12,7 +12,7 @@ import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, shortOf, type PluginOp, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
+import { FIND_FROM, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { listResult, problemLines, wholeToggle } from './matrix.ts';
@@ -77,8 +77,7 @@ const marketLogo = (entry: MarketplaceView) => (entry.bundled?.logo ? h('img.mar
 /** Every marketplace, with how many plugins it lists and how many are installed; the add box below. */
 function marketList(view: PluginsView, shown: MarketplaceView) {
   const item = (entry: MarketplaceView) => {
-    const count = (test: (plugin: PluginView) => boolean) => entry.plugins.filter(test).length;
-    const installedCount = count(plugin => view.tools.some(tool => installed(entry, plugin.name, tool)));
+    const installedCount = installedFrom(view, entry);
     const meta = entry.problem && !entry.plugins.length ? 'Couldn’t be read' : [entry.bundled ? 'Built in' : '', plural(entry.plugins.length, 'plugin'), installedCount ? `${installedCount} installed` : ''].filter(Boolean).join(' · ');
     return h('li', {}, h(`button.market-item${entry === shown ? '.selected' : ''}`, { type: 'button', title: `${marketTitle(entry)} · ${meta}`, 'aria-current': entry === shown ? 'true' : undefined, onclick: () => browse({ source: entry.source, plugin: undefined, tab: 'plugins', find: '', category: undefined }) },
       h('span.market-item-name', {}, marketLogo(entry), marketTitle(entry)), h('span.market-item-meta', {}, meta)));
@@ -162,8 +161,9 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const pluginColumns = view.tools.filter(tool => takesPlugins(tool));
   // Tools whose CLI is missing share one sentence; any other reason is said as it is.
   const noCli = pluginColumns.filter(tool => !view.clis[tool] && !view.desktopOnly?.[tool]);
-  const reasons = [noCli.length > 1 ? `${andList(noCli.map(tool => names[tool]))}: command-line tools not found, so plugins can’t be installed there.` : '',
-    ...pluginColumns.filter(tool => noCli.length < 2 || !noCli.includes(tool)).map(tool => blocked(view, entry, tool) ?? '')].filter(Boolean);
+  // A reason several tools share (a marketplace only Codex reads) is said once.
+  const reasons = [...new Set([noCli.length > 1 ? `${andList(noCli.map(tool => names[tool]))}: command-line tools not found, so plugins can’t be installed there.` : '',
+    ...pluginColumns.filter(tool => noCli.length < 2 || !noCli.includes(tool)).map(tool => blocked(view, entry, tool) ?? '')])].filter(Boolean);
   const someCan = view.canWrite && (pluginColumns.some(tool => !blocked(view, entry, tool)) || view.tools.length > pluginColumns.length);
   // The hint heads the name column, wrapping within it when the column is narrow.
   const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-managed', { role: 'columnheader', 'aria-label': 'On or off' }),
@@ -344,7 +344,10 @@ function undoButton(): HTMLElement | null {
   return undo;
 }
 
-/** What each kind of step an Undo runs does, in Undo's tooltip, before the tools it runs in. */
+/**
+ * What each kind of step an Undo runs does, in Undo's tooltip, before the tools it runs in. A plugin's items in Pi and OpenCode
+ * (items-back) have no words: Central Knot puts them back itself, through no tool's command.
+ */
 const UNDO_WORDS: [PluginOp['action'][], string][] = [[['remove'], 'uninstalls it from'], [['install'], 'reinstalls it in'],
   [['skill-on', 'skill-off', 'part-on', 'part-off', 'plugin-on', 'plugin-off'], 'turns each switch back as it was in']];
 
@@ -355,7 +358,7 @@ function undoTitle(back: PluginOp[]): string {
   const updated = !market.lastRun?.undo && market.lastRun?.done.some(entry => entry.action === 'update' && entry.report.changed);
   // A switch's Undo names its plugin: several plugins' clicks may have run since the page was last read.
   const plugin = !market.lastRun?.undo && market.lastRun?.turn ? ` for ${market.lastRun.turn.plugin}` : '';
-  const said = [`Reverses what changed${plugin}, through each tool’s own command or switch: ${andList(does)}.`, updated ? 'The update itself stays: it can’t be undone.' : ''];
+  const said = [`Reverses what changed${plugin}${does.length ? `, through each tool’s own command or switch: ${andList(does)}` : ''}.`, updated ? 'The update itself stays: it can’t be undone.' : ''];
   return [...said, ...(market.lastRun?.turn?.limits ?? [])].filter(Boolean).join(' ');
 }
 

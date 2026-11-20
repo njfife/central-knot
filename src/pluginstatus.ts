@@ -1,6 +1,7 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
-// it, whether it is installed there, how many plugins a tool has installed (pluginsInstalled), whether it is installed in none
-// (installedNowhere, for Find), and a short summary of what it holds.
+// it, whether it is installed there, how many plugins a tool has installed (pluginsInstalled; for one that takes none, takesItemsOnly)
+// and how many of a marketplace's are installed (installedFrom), whether it is installed in none (installedNowhere, for Find), and
+// a short summary of what it holds.
 import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
@@ -20,6 +21,8 @@ export function pluginsInstalled(home: Pick<HomeView, 'pluginItems' | 'pluginRec
   if (home?.pluginRecordsUnread?.includes(tool)) return { state: 'unknown' };
   return { state: 'read', count: new Set((home?.pluginItems ?? []).filter(install => install.tool === tool).map(install => `${install.plugin}@${install.marketName}`)).size };
 }
+/** Why a tool's plugins are "—" (`unsupported` above), on the Overview and Harnesses (`who`: its name, or "that tool"): a plugin's page puts the plugin's items there (pluginlibrary.ts). */
+export const takesItemsOnly = (who: string) => `${who} takes a plugin’s items, not the plugin`;
 
 /**
  * Whether a marketplace's plugin is installed in no tool managed now, so Find may offer its items as ones the person doesn't
@@ -75,6 +78,8 @@ export const noLongerOffered = (entry: MarketplaceView, plugin: PluginView) => (
 /** A plugin's state in one tool, as last read ("not installed" when the tool has no record of it). */
 export const stateOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): InstallState => entry.states[plugin]?.[tool] ?? { state: 'not-installed' };
 export const installed = (entry: MarketplaceView, plugin: string, tool: HarnessId) => stateOf(entry, plugin, tool).state === 'installed';
+/** How many of a marketplace's plugins are installed in one of the page's tools or more: its row in the marketplaces' list and the add's result say it. */
+export const installedFrom = (view: PluginsView, entry: MarketplaceView) => entry.plugins.filter(plugin => view.tools.some(tool => installed(entry, plugin.name, tool))).length;
 
 /** A plugin in a marketplace. */
 export type MarketPlugin = { entry: MarketplaceView; plugin: PluginView };
