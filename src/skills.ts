@@ -6,8 +6,9 @@
 //   folder, a copy in a folder it reads but Central Knot doesn't own (~/.agents/skills), another tool's folder it reads
 //   (OpenCode reads Claude Code's) while the skill is really there, or a plugin;
 // - why a tool can't be given a skill (cannotTake): a name it reserves, or a shape it won't load (share.ts targetFor);
-// - a tool's own switch for a skill (toolFacts, `loads`): read at each look and never written by a pass. A switch set in a tool,
-//   by a person or by Central Knot before the library, is left as it is and shown as a mark on that tool's line.
+// - a tool's own switch for a skill (toolFacts, `loads`): read at each look and never written by a pass, but for Pi's inclusion of
+//   a copy it puts in or takes out (skillswitch.ts followCopy). A switch set in a tool, by a person or by Central Knot before the
+//   library, is left as it is and shown as a mark on that tool's line.
 //   Three actions write it: clearSwitch, its Undo switchBack, and takeOver, which carries it to the copy it makes (takeOver
 //   is also the one that makes a copy outside Central Knot's its own); and the profiles migration releases one an earlier
 //   profile set, once (profilemigrate.ts).
@@ -31,7 +32,7 @@ import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recover
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
 import { mergeSkill } from './merge.ts';
 import { sourceFacts } from './sources.ts';
-import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
+import { followCopy, isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
 import { harnesses } from './harnesses.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
 import { andList, notManagedHere, throughPlugin, toolName } from './words.ts';
@@ -265,8 +266,13 @@ export const skillKind: Kind<SkillContent, SkillCopy, SkillDisk> = {
     const read = await readCopy(tool, content.directory, '');
     return 'unseen' in read ? undefined : wontLoad(context, tool, item.name, read.skill);
   },
-  remove: async (context, _item, here) => {
-    try { await removeFolder(context, here.directory, here.hash); return 'removed'; }
+  remove: async (context, item, here) => {
+    try {
+      await removeFolder(context, here.directory, here.hash);
+      // Its `+` in Pi goes as it is turned off there; a copy that gives way to another (a shared one) leaves it for that one.
+      if (!wantedIn(item, here.tool)) await letPiFollow(context, here.tool, switchTarget(here), false);
+      return 'removed';
+    }
     catch (error) { if (!errorCode(error)) throw error; return errorCode(error) === 'CK_CHANGED' ? 'changed' : 'failed'; }
   },
   historyAction: libraryAction,
@@ -281,7 +287,10 @@ async function writeSkill(context: ShareContext, item: LibraryItem, tool: Harnes
   const target = here?.directory ?? join(rootOf(context, tool), item.name);
   try {
     if (here) await swapFolder(context, content.directory, target, here.hash);
-    else await placeFolder(context, tool, content.directory, target, await readTree(content.directory));
+    else {
+      await placeFolder(context, tool, content.directory, target, await readTree(content.directory));
+      await letPiFollow(context, tool, { folder: item.name, name: item.name, skillFile: join(target, 'SKILL.md') }, true);
+    }
     return undefined;
   } catch (error) {
     if (!errorCode(error)) throw error;
@@ -289,6 +298,10 @@ async function writeSkill(context: ShareContext, item: LibraryItem, tool: Harnes
     return { stopped: changed ? `${nameOf(tool)}’s copy changed just now, so it stays until the next look.` : `Could not write ${nameOf(tool)}’s copy. ${plainError(error)}` };
   }
 }
+
+/** followCopy once a folder is placed or gone, never failing that write: a `+` that didn't land leaves Pi's mark off (Let Pi load it). */
+const letPiFollow = (context: ShareContext, tool: HarnessId, target: SwitchTarget, placed: boolean) =>
+  followCopy(context, tool, target, placed).catch(error => { if (!errorCode(error)) throw error; });
 
 // ---------- The pass, for skills ----------
 

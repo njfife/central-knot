@@ -1,5 +1,6 @@
 // A tool's own switch for one skill (capability data, Appendix B; ENB-01, ENB-02): the copy stays where it is and keeps
-// receiving updates; the tool just doesn't load it. Central Knot's Off never writes it (Off takes the folder out: library.ts).
+// receiving updates; the tool just doesn't load it. Central Knot's Off never writes it (Off takes the folder out: library.ts),
+// and On and Off write it only for a copy put in Pi or taken out where a pattern in Pi's settings keeps it out (followCopy).
 // It is read for the mark on that tool's line (skills.ts rowFacts), cleared by skills.ts clearSwitch (and set again by its
 // Undo, switchBack), carried to Central Knot's copy by skills.ts takeOver, released once by the profiles migration
 // (profilemigrate.ts), and flipped for a plugin's skill (plugins.ts). Each tool keeps its switch in its own user-wide settings
@@ -11,12 +12,14 @@
 //   Claude Code  settings.json   "skillOverrides": { "<folder>": "off" }   (keyed by folder: Claude names a skill after it)
 //   Copilot CLI  settings.json   "disabledSkills": ["<name>"]              (what `copilot skill disable` writes; by name)
 //   Codex        config.toml     [[skills.config]] path = "<…/SKILL.md>" enabled = false   (by path: a name rule would hit every same-name skill)
-//   Pi           settings.json   "skills": ["-skills/<folder>/SKILL.md"]   (the exact exclusion `pi config` writes)
+//   Pi           settings.json   "skills": ["-skills/<folder>/SKILL.md"]   (the exact exclusion `pi config` writes; where a `!` pattern
+//                                such as "!*" keeps a copy out, "+skills/<folder>/SKILL.md", the exact inclusion it writes, lets it
+//                                in. Read as Pi 1.5.2 reads the list: piOff. An entry that isn't text stops Pi: read as all out)
 //   OpenCode     opencode.json   "permission": { "skill": { "<name>": "deny" } }   (by name, whichever folder holds it; the last
 //                                rule that matches a name decides, so the rule goes last. Measured 2026-11-10 on 1.19.5 and 2.2.5:
 //                                a denied skill is left out of what a new session is sent.)
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, matchesGlob, relative, sep } from 'node:path';
 import { openCodeSettings, toolConfigRoot } from './harnesses.ts';
 import { errorCode, plainError, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { editTomlArray, readJsonc, readTomlTables, setJsonMember, tomlValue, type TomlTable, type TomlValue } from './textedit.ts';
@@ -66,11 +69,32 @@ export async function setDisabled(context: ShareContext, tool: HarnessId, target
   const now = stateIn(context, tool, file.parsed, target);
   if (now.disabled === disabled) return { changed: false };
   if (tool === 'claude-cli' && !disabled) restore ??= (await readKeptOverrides(context))[target.folder];
-  await writeFileChecked(file.path, withSwitch(context, file, target, disabled, restore), file.exists ? file.text : undefined);
-  const after = await readSwitchFile(context, tool);
-  if (!after.parsed || stateIn(context, tool, after.parsed, target).disabled !== disabled) throw failure(`${toolName(tool)}’s settings did not take the change.`);
+  await writeConfirmed(context, file, target, withSwitch(context, file, target, disabled, restore), disabled);
   if (tool === 'claude-cli') await keepOverrides(context, { [target.folder]: disabled ? now.previous : undefined });
   return { changed: true, previous: now.previous };
+}
+
+/** Writes a switch file's new text over the text it read, then reads it back: it must say the copy is `disabled` or not, as asked. */
+async function writeConfirmed(context: ShareContext, file: SwitchFile, target: SwitchTarget, text: string, disabled: boolean) {
+  await writeFileChecked(file.path, text, file.exists ? file.text : undefined);
+  const after = await readSwitchFile(context, file.tool);
+  if (!after.parsed || stateIn(context, file.tool, after.parsed, target).disabled !== disabled) throw failure(`${toolName(file.tool)}’s settings did not take the change.`);
+}
+
+/**
+ * Pi, as the pass puts a copy in its skills folder (`placed`) or takes out one that is off there now (skills.ts writeSkill,
+ * skillKind.remove): piSwitched with the person's own switch for it left alone, written and read back as setDisabled writes.
+ * Other tools, and a file with a problem, are left as they are.
+ */
+export async function followCopy(context: ShareContext, tool: HarnessId, target: SwitchTarget, placed: boolean) {
+  if (tool !== 'pi-cli') return;
+  const file = await readSwitchFile(context, tool);
+  if (file.problem || !file.parsed) return;
+  const skills = list((file.parsed as { json: Record<string, unknown> }).json.skills) as string[];
+  const copy = piCopy(context, target);
+  const next = piSwitched(skills, copy, context.home, placed, false);
+  if (JSON.stringify(next) === JSON.stringify(skills)) return;
+  await writeConfirmed(context, file, target, withSkills(file, next), piOff(next, copy, context.home));
 }
 
 // Claude Code overrides a Disable replaced (say "name-only"), by skill folder. Kept in the store, not only in History (which
@@ -118,6 +142,9 @@ function parse(tool: HarnessId, text: string): ParsedSwitches {
   // OpenCode's `permission` as one word ("allow") has no place for one skill's rule; and a rule after `skill` that covers
   // skills ("*") decides for every skill, so a rule for one would count only once `skill` moved after it, which would make
   // the rules it overrules count again. Both are forms not edited here.
+  // Pi stops at start on an entry of `skills` that isn't text (measured on 1.5.2), so it loads no skill: read so, never edited.
+  const notText = tool === 'pi-cli' && list(json.skills).some(entry => typeof entry !== 'string');
+  if (notText) throw formError('has an entry in skills that isn’t text, so Pi doesn’t start.', { json });
   const permission = tool === 'opencode-cli' && 'permission' in json ? record(json.permission) : {};
   if (!permission) throw formError('sets permission as one word, a form Central Knot doesn’t edit.');
   const keys = Object.keys(permission);
@@ -169,20 +196,55 @@ export function codexSkillSwitches(tables: TomlTable[]): { switches: CodexSkillS
   }
   return { switches: found, inline };
 }
-/** Pi's exact forms for a copy: relative to its agent folder (how `pi config` writes it) and absolute, for the file and its folder. */
-function piForms(target: SwitchTarget, config: string): { written: string; all: Set<string> } {
-  const rel = relative(config, target.skillFile);
-  const inside = !rel.startsWith('..') && !isAbsolute(rel);
-  const file = forwardSlashes(target.skillFile);
-  const forms = [file, file.replace(/\/SKILL\.md$/, ''), ...(inside ? [forwardSlashes(rel), forwardSlashes(rel).replace(/\/SKILL\.md$/, '')] : [])];
-  return { written: inside ? forwardSlashes(rel) : file, all: new Set(forms) };
+/**
+ * How Pi names a copy: `exact`, the paths an exact `+` or `-` matches (absolute, and from its agent folder or, for a shared copy,
+ * ~/.agents; each for SKILL.md and its folder); `named`, those and the two names a `!` pattern is also matched against; `written`,
+ * what Central Knot writes: `pi config`'s form in Pi's own folder, else the absolute path (from ~/.agents it names Pi's own too).
+ */
+type PiCopy = { written: string; exact: Set<string>; named: string[] };
+function piCopy(context: ShareContext, target: SwitchTarget): PiCopy {
+  const inside = (rel: string) => !rel.startsWith('..') && !isAbsolute(rel), file = forwardSlashes(target.skillFile);
+  const own = relative(toolConfigRoot(context, 'pi-cli'), target.skillFile);
+  const rel = [own, relative(join(context.home, '.agents'), target.skillFile)].find(inside);
+  const exact = [file, ...(rel ? [forwardSlashes(rel)] : [])].flatMap(path => [path, path.replace(/\/SKILL\.md$/, '')]);
+  const named = [...exact, 'SKILL.md', basename(dirname(target.skillFile))];
+  return { written: inside(own) ? forwardSlashes(own) : file, exact: new Set(exact), named };
 }
-/** Whether a Pi `skills` entry excludes exactly this copy (`-` or `!` before one of its forms; `./` and `~/` resolved as Pi does). */
-function piExcludes(entry: unknown, forms: Set<string>, home: string): boolean {
-  if (typeof entry !== 'string' || !/^[-!]/.test(entry)) return false;
-  const path = entry.replace(/^[+!-]/, '').replace(/^\.\//, '');
-  return forms.has(path.startsWith('~/') ? forwardSlashes(join(home, path.slice(2))) : isAbsolute(path) ? forwardSlashes(path) : path);
+/** An entry's path after its sign, as Pi reads it: `~/` from the home; for an exact one (`+`, `-`), a leading `./` dropped. */
+const piPath = (entry: string, home: string) => {
+  const path = entry[0] === '!' ? entry.slice(1) : entry.slice(1).replace(/^\.\//, '');
+  return path.startsWith('~/') ? `${forwardSlashes(home)}${path.slice(1)}` : path;
+};
+/**
+ * Whether Pi keeps this copy out, as Pi 1.5.2 does (measured 2026-11-20, capability data Appendix B), wherever each entry stands:
+ * an exact `-` keeps it out; else an exact `+` lets it in; else a matching `!` pattern keeps it out (minimatch, as Pi uses; `!!…`,
+ * Pi's negation, keeps nearly all out). On macOS Node's matchesGlob ignores a wildcard's case, which Pi doesn't: it may read off.
+ */
+function piOff(skills: string[], copy: PiCopy, home: string): boolean {
+  const exact = (sign: string) => skills.some(entry => entry[0] === sign && copy.exact.has(piPath(entry, home)));
+  if (exact('-')) return true;
+  const matches = (entry: string) => entry[1] === '!' || copy.named.some(name => matchesGlob(name, piPath(entry, home)));
+  return !exact('+') && skills.some(entry => entry[0] === '!' && matches(entry));
 }
+/**
+ * Pi's list with this copy let in (`load`) or out, changed as little as does it; no other entry moves, and a pattern never changes.
+ * In: where `own` (Let Pi load it), its exclusions go; then `+` where a pattern still keeps it out and no exclusion of its own does.
+ * Out: its `+` goes where a pattern then keeps it out; else, where `own`, `-`.
+ */
+function piSwitched(skills: string[], copy: PiCopy, home: string, load: boolean, own: boolean): string[] {
+  const its = (signs: string) => (entry: string) => signs.includes(entry[0]) && copy.exact.has(piPath(entry, home));
+  if (load) {
+    const kept = own ? skills.filter(entry => !its('-!')(entry)) : skills;
+    return piOff(kept, copy, home) && !kept.some(its('-!')) ? [...kept, `+${copy.written}`] : kept;
+  }
+  const kept = skills.filter(entry => !its('+')(entry));
+  return piOff(kept, copy, home) ? kept : own ? [...skills, `-${copy.written}`] : skills;
+}
+/** The settings' text with Pi's `skills` list as given (gone when empty), a byte-order mark kept. */
+const withSkills = (file: SwitchFile, skills: string[]) => {
+  const bom = file.text.startsWith('\uFEFF') ? '\uFEFF' : '';
+  return bom + setJsonMember(file.text.slice(bom.length), ['skills'], skills.length ? skills : undefined);
+};
 
 /** Whether an OpenCode pattern (`*` any run of characters, `?` one) is this name. */
 const openCodeMatches = (pattern: string, name: string) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 's').test(name);
@@ -202,8 +264,9 @@ function stateIn(context: ShareContext, tool: HarnessId, parsed: ParsedSwitches,
   if (tool === 'claude-cli') { const value = record(json.skillOverrides)?.[target.folder]; return { disabled: value === 'off', previous: typeof value === 'string' && value !== 'off' ? value : undefined }; }
   if (tool === 'copilot-cli') return { disabled: list(json.disabledSkills).includes(target.name) };
   if (tool === 'opencode-cli') return { disabled: openCodeAction(openCodeRules(json), target.name) === 'deny' };
-  const forms = piForms(target, toolConfigRoot(context, tool)).all;
-  return { disabled: list(json.skills).some(entry => piExcludes(entry, forms, context.home)) };
+  // Pi: an entry that isn't text keeps every skill out (parse).
+  const skills = list(json.skills);
+  return { disabled: skills.some(entry => typeof entry !== 'string') || piOff(skills as string[], piCopy(context, target), context.home) };
 }
 
 /** The file's text with this copy turned off or on. Only the switch changes. */
@@ -244,10 +307,7 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
     const out = own === undefined || inPlace ? text : setJsonMember(text, [...path, target.name], undefined);
     return bom + (target.name in next ? setJsonMember(out, [...path, target.name], (next as Record<string, unknown>)[target.name]) : out);
   }
-  const { written, all } = piForms(target, toolConfigRoot(context, file.tool));
-  // Only this copy's exclusions go; a `+` include the person wrote stays (an exclusion wins over it while disabled).
-  const others = list(json.skills).filter(entry => !piExcludes(entry, all, context.home));
-  return bom + putList('skills', disabled ? [...others, `-${written}`] : others);
+  return withSkills(file, piSwitched(list(json.skills) as string[], piCopy(context, target), context.home, !disabled, true));
 }
 
 /**

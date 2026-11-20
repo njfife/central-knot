@@ -6332,6 +6332,9 @@ async function pluginSwitchFlow() {
   writeMarket(market, 'ck-test-market');
   mkdirSync(join(home, '.claude'), { recursive: true });
   mkdirSync(join(home, '.pi/agent'), { recursive: true });
+  // Pi's settings as in a person's report: a pattern keeps every skill out, and one is let back in by name.
+  const piSettings = join(home, '.pi/agent/settings.json'), hisList = ['!*', '+skills/other-skill/SKILL.md'], piSkills = () => jsonOrNothing(piSettings)?.skills;
+  writeFileSync(piSettings, `${JSON.stringify({ skills: hisList }, null, 2)}\n`);
   const copy = join(home, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0'), triage = join(market, 'plugins/issue-tracker/skills/triage/SKILL.md');
   mkdirSync(join(tools, '.local/bin'), { recursive: true });
   writeFileSync(join(tools, '.local/bin/claude'), `#!/bin/sh
@@ -6396,6 +6399,16 @@ esac
   await openKind(a, 'skills');
   check('triage is one row on Skills, “from the plugin issue-tracker”, and Claude Code has it with the plugin', /from the plugin issue-tracker/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`) ?? '')
     && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'issue-tracker@ck-test-market/triage')}"]`)), await a.text('.page'));
+  // Under his pattern, the copy the On put in Pi is one Pi loads: the inclusion `pi config` writes follows his entries.
+  const offInPi = async () => (await offMarks(a, 'skills', 'triage')).includes('pi-cli');
+  same('under his pattern, On let Pi load triage: the inclusion pi config writes, after his entries as they were, and no off mark for Pi', [piSkills(), await offInPi()], [[...hisList, '+skills/triage/SKILL.md'], false]);
+  // As an earlier Central Knot left it, the copy there with no inclusion: the row says Pi doesn't load it, and Let Pi load it lets it in.
+  writeFileSync(piSettings, `${JSON.stringify({ skills: hisList }, null, 2)}\n`);
+  await a.click('#header-refresh');
+  if ((await a.run(`document.querySelector('#${rowPart('open', 'skills', 'triage')}')?.getAttribute('aria-expanded')`)) !== 'true') await a.click(`#${rowPart('open', 'skills', 'triage')}`);
+  check('with no inclusion, triage is off in Pi: its mark, its line, and Let Pi load it', await offInPi() && /Pi doesn’t load it/.test(await a.text('.details') ?? '') && await a.exists(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`), await a.text('.details'));
+  await a.click(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`);
+  same('Let Pi load it puts the inclusion back after his entries, and the mark is on', [piSkills(), await offInPi()], [[...hisList, '+skills/triage/SKILL.md'], false]);
   await openKind(a, 'mcp');
   check('issues is one row on MCP servers, from the plugin too', /from the plugin issue-tracker/.test(await a.text(`.ov-row[data-key="${rowPart('', 'mcp', 'issues')}"]`) ?? ''), await a.text('.page'));
   await a.click('#nav-plugins');
