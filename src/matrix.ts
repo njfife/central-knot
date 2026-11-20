@@ -1209,13 +1209,13 @@ function visibleNotices(t: Table) {
 /**
  * The table whose notices the header shows, where a list or its empty state is: the table on screen (useTableShown), over every
  * kind on a Library with nothing listed (as its empty state's bands are: emptyList); none on a tool's tab of a kind that tool
- * can't hold, nor with no tool managed. With its shared names, which a notice's words name a kind by (kindWord).
+ * can't hold, nor with no tool managed.
  */
 function noticesTable(): Table | undefined {
   const t = useTableShown(), home = state.home;
   if (!t || !home || noToolManaged() || (t.tool && !home[t.kinds[0]!].tools.some(tool => tool === t.tool))) return undefined;
-  const every = overEveryKind(t), shown = every.kinds.some(kind => rowCount(home, kind)) || pluginsListed() ? t : every;
-  return Object.assign(shown, { shared: sharedNames(shown) });
+  const every = overEveryKind(t);
+  return every.kinds.some(kind => rowCount(home, kind)) || pluginsListed() ? t : every;
 }
 
 /** Which of this news the header shows for the list on screen, in its lines or its card, where it can tell the person where their Undo went. */
@@ -1237,6 +1237,8 @@ export const noticeKindsShown = (): PageKind[] => noticesTable()?.kinds ?? [];
 export function headerNotices(resultShown: boolean): { lines?: HTMLElement; card: boolean; control: HTMLElement } | undefined {
   const t = noticesTable(), list = t ? visibleNotices(t) : [];
   if (!t || !list.length) return undefined;
+  // The names two kinds share, which a notice's words name its kind beside (kindWord).
+  t.shared = sharedNames(t);
   const card = (state.shownWhole as { noticesOf?: string } | undefined)?.noticesOf === cardOf(t);
   const lines = card ? noticesCard(t, list) : resultShown ? undefined : h('div.header-notice', {}, syncNotice(t, list[0]!, false));
   return { lines, card, control: noticesControl(t, list, card) };
@@ -1244,14 +1246,14 @@ export function headerNotices(resultShown: boolean): { lines?: HTMLElement; card
 /** Which list's notices the open card holds (app.ts state.shownWhole): its home's and its table's, so it opens on none other. */
 const cardOf = (t: Table) => `${state.home?.home}\n${tableId(t)}`;
 
-/** Notices: a chip, as the toolbar's are, counting the list's notices and marked while one is unseen; the one way to the card. */
+/** Notices: counting the list's notices as the toolbar's chips count (style.css), marked while one is unseen; the one way to the card. */
 function noticesControl(t: Table, list: Told[], open: boolean) {
   const unseen = list.some(notice => noticeUnseen(notice.history));
-  return h(`button.chip.notices-control${open ? '.chip-on' : ''}`, {
+  return h('button.notices-control', {
     type: 'button', id: 'notices', 'aria-expanded': String(open), 'aria-label': `Notices: ${list.length}${unseen ? ', not all seen' : ''}`,
     title: `${plural(list.length, 'automatic change')}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`,
     onclick: () => { state.shownWhole = open ? undefined : { noticesOf: cardOf(t) }; rerender(); },
-  }, h('span.chip-label', {}, 'Notices'), h('span.chip-count', {}, String(list.length)), unseen ? h('span.notices-unseen') : null);
+  }, 'Notices', h('span.chip-count', {}, String(list.length)), unseen ? h('span.notices-unseen') : null);
 }
 
 /**

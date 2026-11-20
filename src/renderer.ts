@@ -67,8 +67,11 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number | str
 
 const anythingOn = () => !!state.home && anyOn(state.home);
 /** The Library's automatic changes not seen yet (matrix.ts unseenNotices); on the open Library, of the kinds whose notices the header doesn't show (its Notices control marks those). */
-const unseen = (page: Page) => (!state.home || page !== 'library' ? []
-  : heldKinds(state.home).filter(kind => state.page !== 'library' || !noticeKindsShown().includes(kind)).flatMap(unseenNotices));
+const unseen = (page: Page) => {
+  if (!state.home || page !== 'library') return [];
+  const told = state.page === 'library' ? noticeKindsShown() : [];
+  return heldKinds(state.home).filter(kind => !told.includes(kind)).flatMap(unseenNotices);
+};
 /** The dot's tooltip: how many changes it counts, and the first three names. */
 const unseenText = (list: SyncNotice[]) => `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`;
 

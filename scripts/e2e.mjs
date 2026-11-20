@@ -1688,6 +1688,7 @@ async function practiceFlow() {
   await a.run(`document.querySelector('#notices-card .sync-notice[data-kind="edit"] [id^="notice-undo-"]').click()`);
   await a.settle();
   same('Undo makes the version before it current again, everywhere', [readFileSync(standupPath('claude'), 'utf8'), readFileSync(standupPath('copilot'), 'utf8')], [standupBefore, standupBefore]);
+  same('the card closed at its Undo, whose result has the header’s lines', [await a.exists('#notices-card'), /standup/.test(await a.text('#header [data-outcome]') ?? '')], [false, true]);
   // Sorted by last updated, the skill just made current again comes first under On, its row saying when, and the choice holds
   // on the Library’s agents too; sorted by name again, the rows are as before. Nothing else in this run changes the order.
   const onRows = async () => (await sectionsNow(a, 'skills')).find(([role]) => role === 'on')?.[1] ?? [];
@@ -9520,7 +9521,9 @@ async function libraryFlow() {
   const editsInHistory = () => tb.all('.history-row', 'e.querySelector(".history-what strong")?.textContent + ": " + e.textContent.includes("Edited in Claude Code")');
   check('History has both edits', await until(async () => (rows => ['gamma: true', 'delta: true'].every(entry => rows.includes(entry)))(await editsInHistory())), await editsInHistory());
   await openKind(tb, 'all');
-  same('back on the Library, no result: delta’s notice has the lines, and is seen', [/delta was edited/.test(await noticeInLines(tb) ?? ''), await control()], [true, ['1', false]]);
+  same('back on the Library, the click’s problem line still has the lines, delta’s notice unseen', [await tb.exists('#header .problem-line'), await noticeInLines(tb), await control()], [true, null, ['1', true]]);
+  await tb.run(`document.querySelector('#outcome-dismiss, #problems-dismiss')?.click()`); await tb.settle();
+  same('its × closes it: delta’s notice has the lines, and is seen', [/delta was edited/.test(await noticeInLines(tb) ?? ''), await control()], [true, ['1', false]]);
   if (!(await switchOn(tb, 'skills', 'beta'))) { await tb.click(`#${rowPart('switch', 'skills', 'beta')}`); await done(tb); }
   await letNoticesGo(tb);
   for (const name of toolbarSkills) rmSync(join(T.claude, name), { recursive: true, force: true });
