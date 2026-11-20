@@ -1426,11 +1426,15 @@ function catalogRow(t: Table, hit: SearchHit) {
       h('span.row-tag.row-part', { title: `In the plugin ${item.plugin}, in the marketplace ${item.marketName}` }, icon('puzzle', 12, 'tone-faint'), `${item.plugin} · ${item.marketName}`),
       about(hit.excerpt, item.description)));
 }
-/** What main last said of the plugin text (plugintext.ts view): the group's last line, and whether an empty Library offers Find (pluginsListed). Asked once, then followed. */
+/** What main last said of the plugin text (plugintext.ts view): the reading's words on the group's heading (coverageWords), and whether an empty Library offers Find (pluginsListed). Asked once, then followed. */
 let textNow: PluginTextView | undefined;
-/** How much is read while not every listed plugin is (more may show), or that reading is off; none once all are read. */
+/**
+ * How much is read while not every listed plugin is (more may show): "still reading" only while a run goes on (the view's
+ * `reading`, as Settings says it: settingspage.ts textCoverage), else how many are read; or that reading is off; none once all are read.
+ */
 const coverageWords = (text = textNow) => (!text?.of || (text.on && text.read >= text.of) ? undefined
-  : text.on ? `still reading plugins, ${text.read} of ${text.of}: more may show` : `reading plugins is off, ${text.read} of ${text.of} read`);
+  : !text.on ? `reading plugins is off, ${text.read} of ${text.of} read`
+  : text.reading ? `still reading plugins, ${text.read} of ${text.of}: more may show` : `${text.read} of ${plural(text.of, 'plugin')} read: more may show`);
 /** Those words (coverageWords) and the way to its switch on Settings: on the group's heading, or under "Nothing matches". */
 function coverageLine() {
   const words = coverageWords();

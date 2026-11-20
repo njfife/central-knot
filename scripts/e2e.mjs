@@ -7017,10 +7017,10 @@ esac
   };
   await openKind(a, 'all');
   // The index takes the text in at most once every five seconds while it changes (main.ts textChanged), and once at the end.
-  check('the listed plugins are read but slowpoke, whose host refuses, and the index has taken their text in: the group, and its line saying so',
-    await until(async () => { await findText('waybill'); return (await coverage()) === 'still reading plugins, 4 of 5: more may show' && (await groupCount()) === '28'; }, 30000), [await coverage(), await groupCount()]);
+  check('the listed plugins are read but slowpoke, whose host refuses, and the index has taken their text in: the group, and, the reader idle, how many are read',
+    await until(async () => { await findText('waybill'); return (await coverage()) === '4 of 5 plugins read: more may show' && (await groupCount()) === '28'; }, 30000), [await coverage(), await groupCount()]);
   same('the group’s heading says its count is of matches, how to get one, and how much is read, with the way to Settings',
-    [await heading(), await a.exists('[data-section="catalog"] #catalog-settings')], ['In plugins you don’t have28 matches·a name opens its plugin’s page, to install it there·still reading plugins, 4 of 5: more may show·Settings', true]);
+    [await heading(), await a.exists('[data-section="catalog"] #catalog-settings')], ['In plugins you don’t have28 matches·a name opens its plugin’s page, to install it there·4 of 5 plugins read: more may show·Settings', true]);
   // His own results are what they would be with no plugin text: "repair" in one skill of his, "pipeline" in another, both in devkit's.
   await findText('repair pipeline');
   same('"repair pipeline": both his skills still, and devkit’s, which holds both words, in the group', [(await own()).sort(), (await group()).map(([name]) => name)],
@@ -7030,7 +7030,7 @@ esac
   const published = await a.run('window.ckPublished');
   await pictures('own-row-and-group');
   await findText('zzqx');
-  check('nothing found anywhere: Nothing matches, and under it the line on the reading', (await a.text('.empty-title')) === 'Nothing matches' && (await coverage()) === 'still reading plugins, 4 of 5: more may show', [await a.text('.empty-title'), await coverage()]);
+  check('nothing found anywhere: Nothing matches, and under it the line on the reading', (await a.text('.empty-title')) === 'Nothing matches' && (await coverage()) === '4 of 5 plugins read: more may show', [await a.text('.empty-title'), await coverage()]);
   await pictures('nothing-matches', [[860, 600], [1316, 819, false]]);
   // A long item's name in a plugin with a long name; then sixteen rows of his for "ledger", the group below them with an MCP server.
   await findText('quarterly-release-readiness');
