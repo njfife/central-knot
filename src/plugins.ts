@@ -673,7 +673,7 @@ function partsOffIn(tool: PluginTool, text: string, plugin: string, marketplace:
 
 /**
  * Each plugin a tool has installed with what its copy holds, read once per pass or view (`context.reads`): the
- * Library's "Through a plugin" boxes and their "From plugins" rows both ask.
+ * Library's "Through a plugin" boxes and their "Only through a plugin" rows both ask.
  */
 export const installedCopies = (context: PluginContext, tool: PluginTool): Promise<InstalledCopyOf[]> => once(context, `installed-copies:${tool}`, async () => {
   const switches = (await readOrNull(switchFileOf(context, tool))) ?? '';

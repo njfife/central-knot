@@ -1,6 +1,7 @@
 // Pieces the marketplace and plugin pages draw: a plugin's switch and its click's line (clickNote), a tool's mark on the list
-// and its box on the plugin's page, Update, the link to its items in the Library (libraryLink), a README, and "a · b · c" lines. The switch's and a box's click wait their turn
-// (pluginstate.ts turnPlugin); Update acts at once (applyPluginOps). What they say comes from pluginstatus.ts.
+// and its box on the plugin's page, Update, the link to its items in the Library (libraryLink), a README, and "a · b · c"
+// lines. The switch's and a box's click wait their turn (pluginstate.ts turnPlugin); Update acts at once (applyPluginOps).
+// What they say comes from pluginstatus.ts.
 import { acting, state as app } from './app.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import { markdown } from './markdown.ts';

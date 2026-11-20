@@ -271,7 +271,7 @@ if (wanted('library')) {
   await openKind(a, 'all');
   await a.size(1316, 822);
   await waitFor(a, `!!document.querySelector('#chip-unused')`, 20000);
-  for (const theme of ['dark', 'light']) { await a.theme(theme); await shot(a, `his-counts-1316-${theme}`, `His counts at 1316×822 (${theme}): about 150 skills, 9 servers and 47 agents on All, the three chips offered (Copies differ, From plugins, No use seen), the usage button keeping "Update usage".`); }
+  for (const theme of ['dark', 'light']) { await a.theme(theme); await shot(a, `his-counts-1316-${theme}`, `His counts at 1316×822 (${theme}): about 150 skills, 9 servers and 47 agents on All, the two chips offered (Copies differ, No use seen) and From, the usage button keeping "Update usage".`); }
   await a.theme('dark');
   await a.click('#chip-unused');
   await shot(a, 'his-counts-chip-on-1316', 'No use seen on at 1316×822: the chip that is on keeps its word, the kind switch counts what it leaves.');
@@ -1406,7 +1406,7 @@ if (wanted('plugin-items')) {
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
   const toPlugins = async () => { await a.run(`document.querySelector('.ov-section-plugins')?.scrollIntoView({ block: 'center' })`); await wait(150); };
   await openKind(a, 'skills'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.ov-section-plugins')`, 15000);
-  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “Only through a plugin” (the From plugins chip counts every row from a plugin, triage too), each marked “from <plugin>”, with its switch and a mark in each tool that has it (pdf-reader off in Copilot CLI and Codex, issue-tracker’s whole plugin off in Codex); triage is one row with the copy in Pi.');
+  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “Only through a plugin” (From: Any plugin lists every row from a plugin, triage too), each marked “from <plugin>”, with its switch and a mark in each tool that has it (pdf-reader off in Copilot CLI and Codex, issue-tracker’s whole plugin off in Codex); triage is one row with the copy in Pi.');
   await a.theme('light'); await shot(a, 'skills-light', 'The same, light.'); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
     await size(width, height); await toPlugins();
@@ -1478,7 +1478,7 @@ if (wanted('plugin-items')) {
     await shot(a, 'mcp-main-switch', 'Clicked the issues row’s own switch: it is on in Codex, the one tool that has it, with its plugin turned on there for it alone; with Undo.');
     await a.click('#outcome-undo-plugin'); await a.settle();
   }
-  await openKind(a, 'agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code, under “From plugins · installed with their plugin · switched here like any other”.');
+  await openKind(a, 'agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code, under “Only through a plugin · installed with their plugin · switched here like any other”.');
   if (await a.has(`${byId(rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer'))}`)) {
     await a.click(`${byId(rowPart('open', 'agents', 'release-helper@team-tools/release-reviewer'))}`);
     await shot(a, 'agent-open', 'Opened release-reviewer: it opens with where it is on (“On in Claude Code · from the plugin release-helper”), where it is handled, and Claude Code’s line with its switch for this one agent.');
