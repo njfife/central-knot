@@ -166,34 +166,44 @@ const switched = ({ item, copy, on }: CopyTurn): PluginSwitched => ({ id: item.i
 const placedKey = ({ item, copy }: CopyTurn) => ('libraryKey' in copy.target ? `${item.kind}:${copy.target.libraryKey}` : undefined);
 
 /**
- * Turns `turns.on` On and `turns.off` Off: the library's own clicks (each item On or Off, kept out of the tools it is kept out
- * of), with each placed copy's library item in `copies` turned once however many tools it is in, taken only while it is still
- * the plugin's (Change `forPlugin`: the same pass may let go of a copy edited since) and kept out where it is (from `libraries`,
- * as read now); one pass per kind, on those items
- * alone. `told`: History has them in the caller's entry. Then each installed copy in `copies` by its own switch in its tool
- * (installedCopy). Answers what each pass and tool said, the entries the clicks made, and what is as asked after, read back:
- * each library item, and each copy whose write was confirmed (`copies`: a tool's own read after its write, plugins.ts setSkill
- * and setPart; a placed copy's library item read again), and each copy found as asked already (`asAsked`: turned since the plan
- * was read), which is neither. The same pass can turn an item Off again (its copy in a tool was deleted
- * by hand while a removal waited there), which History then says in an entry of its own.
+ * The clicks for the placed copies in `placed` of one kind: each one's library item turned once, however many tools it is in,
+ * kept out where it is (from `libraries`, as read now) and taken only while it is still the plugin's (Change `forPlugin`: the
+ * same pass may let go of a copy edited since); one already as asked (turned since the plan was read) is not clicked (`asAsked`).
+ */
+function placedClicks(kind: ItemKind, placed: CopyTurn[], libraries: Libraries | undefined) {
+  const clicks: Change[] = [], names: string[] = [], asAsked: string[] = [];
+  for (const turn of placed.filter(each => each.item.kind === kind)) {
+    const record = 'libraryKey' in turn.copy.target ? libraries?.[kind][turn.copy.target.libraryKey] : undefined;
+    if (record?.on === turn.on) asAsked.push(placedKey(turn)!);
+    else if (record?.source) { clicks.push({ key: record.key, on: turn.on, except: [...record.except], seenOn: !turn.on, forPlugin: record.source }); names.push(turn.item.name); }
+  }
+  return { clicks, names, asAsked };
+}
+
+/**
+ * Turns `turns.on` On and `turns.off` Off, the library's own clicks (each item On or Off, kept out of the tools it is kept out
+ * of), with the placed copies in `copies` (placedClicks), one pass per kind on those items alone (`told`: History has them in
+ * the caller's entry); then each installed copy in `copies` by its own switch in its tool (installedCopy). Answers what each
+ * pass and tool said, the entries the clicks made, and what is as asked after, read back: each library item (`done`), each copy
+ * whose change was confirmed (`copies`: a tool's own read after its write, plugins.ts setSkill and setPart; a placed copy's
+ * library item read again), and each copy found as asked already (`asAsked`), which is neither. The same pass can turn an item
+ * Off again (its copy in a tool was deleted by hand while a removal waited there), which History then says in an entry of its own.
  */
 async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Turns, told: boolean, copies: CopyTurn[] = [], libraries?: Libraries, plugins = NO_PLUGINS) {
   const results: DestinationResult[] = [], made: string[] = [], placedAsAsked = new Set<string>();
   const placed = [...new Map(copies.flatMap(turn => { const key = placedKey(turn); return key ? [[key, turn] as const] : []; })).values()];
   for (const { kind, pass } of KINDS) {
     const asked = [...turns.on.filter(item => item.kind === kind).map(item => [item, true] as const), ...turns.off.filter(item => item.kind === kind).map(item => [item, false] as const)];
-    const clicks = asked.map(([item, on]): Change => ({ key: item.key, on, except: [...item.except], seenOn: !on })), names = asked.map(([item]) => item.name);
-    for (const { item, copy, on } of placed.filter(turn => turn.item.kind === kind)) {
-      const record = 'libraryKey' in copy.target ? libraries?.[kind][copy.target.libraryKey] : undefined;
-      if (record?.on === on) placedAsAsked.add(placedKey({ item, copy, on })!);
-      else if (record?.source) { clicks.push({ key: record.key, on, except: [...record.except], seenOn: !on, forPlugin: record.source }); names.push(item.name); }
-    }
+    const fromPlugins = placedClicks(kind, placed, libraries);
+    fromPlugins.asAsked.forEach(key => placedAsAsked.add(key));
+    const clicks = [...asked.map(([item, on]): Change => ({ key: item.key, on, except: [...item.except], seenOn: !on })), ...fromPlugins.clicks];
     if (!clicks.length) continue;
     const done = await pass(context, tools, clicks, { only: new Set(clicks.map(each => each.key)), told });
-    results.push(...done.results, ...(done.stopped ? [{ item: names.join(', '), outcome: 'failed' as const, message: done.stopped }] : []));
+    const names = [...asked.map(([item]) => item.name), ...fromPlugins.names].join(', ');
+    results.push(...done.results, ...(done.stopped ? [{ item: names, outcome: 'failed' as const, message: done.stopped }] : []));
     made.push(...(done.made ?? []));
   }
-  const confirmed: CopyTurn[] = [], asAsked: CopyTurn[] = [];
+  const confirmed: CopyTurn[] = [], asAsked = copies.filter(turn => placedAsAsked.has(placedKey(turn) ?? ''));
   for (const turn of copies.filter(each => !placedKey(each))) {
     const { changed, failed } = await installedCopy(turn, plugins);
     if (failed) results.push(failed); else (changed ? confirmed : asAsked).push(turn);
@@ -202,8 +212,7 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
   const now = (item: LiveItem) => records && !records[item.kind][item.key]?.deleted ? records[item.kind][item.key]?.on : undefined;
   const placedNow = ({ item, copy, on }: CopyTurn) => 'libraryKey' in copy.target && records?.[item.kind][copy.target.libraryKey]?.on === on;
   return { results, made, done: { on: turns.on.filter(item => now(item) === true), off: turns.off.filter(item => now(item) === false) },
-    copies: copies.filter(turn => (placedKey(turn) ? !placedAsAsked.has(placedKey(turn)!) && placedNow(turn) : confirmed.includes(turn))),
-    asAsked: [...asAsked, ...copies.filter(turn => placedAsAsked.has(placedKey(turn) ?? ''))] };
+    copies: copies.filter(turn => !asAsked.includes(turn) && (placedKey(turn) ? placedNow(turn) : confirmed.includes(turn))), asAsked };
 }
 
 /**
