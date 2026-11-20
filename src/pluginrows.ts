@@ -1,20 +1,32 @@
-// What plugins installed whole bring, as rows of the Library (no DOM): one row per item of a
-// plugin across every tool that has the plugin. An item the person also has as their own (the same skill, or the plugin's item
-// linked to it in Pi and OpenCode) stays on that row, whose box says "Through a plugin" (types.ts LibraryFacts plugin); one
-// that only shares a name is a row of its own here. These rows are never managed: no sync, no profile, no repo; a box turns the
-// item on or off in that tool (pluginswitch.ts), and the plugin's page is where the plugin itself is handled.
+// What plugins installed whole bring, as rows of the Library (no DOM): one row per item of a plugin across every tool that has
+// the plugin, by the plugin's item's key (pluginItemKey, which profileplan.ts plans a plugin's items by too). An item the person
+// also has as their own (the same skill, or the plugin's item linked to it in Pi and OpenCode) stays on that row, whose box says
+// "Through a plugin" (types.ts LibraryFacts plugin); one that only shares a name is a row of its own here. These rows are never
+// managed: no sync, no profile, no repo; a box turns the item on or off in that tool (pluginswitch.ts), and the plugin's page is
+// where the plugin itself is handled.
 import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, pageNames, toolNames as names } from './words.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, PartKind, PluginItem } from './types.ts';
 import { kindSource } from './itemrow.ts';
+import { itemKey } from './library.ts';
 import { pluginLink } from './sourcelink.ts';
 
 type Page = keyof typeof partOfPage;
 
+/**
+ * A plugin's item's key, one rule for each tool's copy, installed whole (a PluginItem, by its `fileName`) or placed in Pi or
+ * OpenCode (a library item linked to the plugin, by its name, which is its file's: library.ts A SOURCE): `plugin@marketplace/item`,
+ * a skill by its folder's name and an agent by its file's, compared as library keys are (itemKey), an MCP server by its name as
+ * written. Not the name a tool's switch takes (PluginItem `name`). Beside the person's own items' keys: a skill's or agent's holds
+ * no "/". Known miss: a plugin that is one skill is keyed by the plugin's name installed, by its folder's in its marketplace placed.
+ */
+export const pluginItemKey = ({ plugin, marketName }: { plugin: string; marketName: string }, item: Pick<PluginItem, 'kind' | 'name' | 'fileName'>) =>
+  `${plugin}@${marketName}/${item.kind === 'mcp' ? item.name : itemKey(item.fileName ?? item.name)}`;
+
 /** One item of a plugin, by the plugin it comes with, and what each tool's installed copy of that plugin has of it. */
 export interface PluginRow {
-  /** Unique beside the page's own keys: a folder or file name never holds "/". */
+  /** pluginItemKey's. */
   key: string;
   kind: PartKind;
   name: string;
@@ -68,7 +80,7 @@ export function pageRows(home: HomeView, page: Page): PageRows {
   const { facts } = kindSource(home, page);
   const byKey = new Map<string, PluginRow>();
   for (const install of home.pluginItems ?? []) for (const item of install.items.filter(entry => entry.kind === kind)) {
-    const id = `${install.plugin}@${install.marketName}/${kind === 'mcp' ? item.name : item.name.normalize('NFC').toLowerCase()}`;
+    const id = pluginItemKey(install, item);
     const row = byKey.get(id) ?? { key: id, kind, name: item.name, description: '', plugin: install.plugin, marketName: install.marketName, copies: {}, installs: {} };
     row.copies[install.tool] = item;
     // An MCP server reads as the page's own do: "Command · npx -y …", "URL · https://…".

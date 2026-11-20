@@ -56,8 +56,9 @@ export async function readProfileFile(home: string): Promise<{ view: ProfilesVie
   }
 }
 
-/** The home's profiles, for the page and the menus, with the plugins whose items they leave alone (profileplan.ts liveItems). */
-export const readProfiles = async (home: string): Promise<ProfilesView> => ({ ...(await readProfileFile(home)).view, plugins: (await recordedIds(home)).plugins.map(entry => entry.id) });
+/** The home's profiles, for the page and the menus, with the plugins the home records (types.ts ProfilesView `plugins`). */
+export const readProfiles = async (home: string): Promise<ProfilesView> =>
+  ({ ...(await readProfileFile(home)).view, plugins: (await recordedIds(home)).plugins.map(({ id, plugin, marketName }) => ({ id, plugin, marketName })) });
 
 /** Writes the profiles as format 2. */
 export const saveProfiles = (home: string, profiles: Profile[]) =>

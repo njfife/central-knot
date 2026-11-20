@@ -699,8 +699,17 @@ export type PartKind = 'skill' | 'mcp' | 'agent';
 export interface PartRef { kind: PartKind; name: string }
 
 // ---------- What a plugin installed whole brings (pluginitems.ts) ----------
-/** One skill, MCP server or agent inside a tool's installed copy of a plugin, by its real name (the tool calls it `plugin:name`). */
-export interface PluginItem { kind: PartKind; name: string; description: string; /** MCP servers: what it runs or connects to. */ runs?: string }
+/**
+ * One skill, MCP server or agent inside a tool's installed copy of a plugin, by the name the tool loads it by (it calls it
+ * `plugin:name`, and its own switch for the item takes that name). Its key is pluginrows.ts pluginItemKey's.
+ */
+export interface PluginItem { kind: PartKind; name: string; description: string; /** MCP servers: what it runs or connects to. */ runs?: string;
+  /**
+   * Skills and agents: its name in the plugin's files, which Pi and OpenCode name its placed copy by (library.ts A SOURCE, the two
+   * key rules): a skill's folder's (for a plugin that is one skill, SKILL.md at its root, the plugin's name), an agent's file's
+   * without .md (values.ts nameOfFile). An MCP server has none: its name is both.
+   */
+  fileName?: string }
 /** A plugin installed whole in one tool, read from that tool's own records and its copy of the plugin. */
 export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
   /** The whole plugin is turned off in that tool. */ off?: boolean;
@@ -1341,8 +1350,11 @@ export interface Profile { id: string; name: string; items: string[] }
 
 export interface ProfilesView {
   profiles: Profile[];
-  /** The ids of the plugins the home records: an item linked to one is outside profiles (profileplan.ts liveItems). */
-  plugins?: string[];
+  /**
+   * The plugins the home records (pluginrecord.ts PluginEntry): an item linked to one is outside the profiles' own items
+   * (profileplan.ts liveItems), and is that plugin's item (profileplan.ts pluginLive).
+   */
+  plugins?: { id: string; plugin: string; marketName: string }[];
   /** Why profiles can't be read or saved here, if they can't. */
   problem?: string;
 }

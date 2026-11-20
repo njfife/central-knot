@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile, readFile } from 'node:fs/promi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
-import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords } from '../src/pluginrows.ts';
+import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, pluginItemKey, rowCount, toolWords } from '../src/pluginrows.ts';
 import type { PluginContext } from '../src/plugins.ts';
 import { kindSource } from '../src/itemrow.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts } from '../src/types.ts';
@@ -89,6 +89,40 @@ test('Codex: its plugin table turned off, a skill switched off by name, and no a
   } finally { await box.cleanup(); }
 });
 
+test('A plugin’s item has one key whichever tool has it, the same as its copy placed in Pi: a skill by its folder, an agent by its file, a server by its name', async () => {
+  const box = await sandbox();
+  try {
+    // Two copies of demo, in Claude Code and Codex. Its skill's folder is pdf and its SKILL.md names it pdf-reader; its agent
+    // is the file checker.agent.md. solo is one skill, SKILL.md at the plugin's root.
+    for (const folder of [join(box.home, '.claude/plugins/cache/m/demo/1.2.0'), join(box.home, '.codex/plugins/cache/m/demo/1.2.0')]) {
+      await copy(folder);
+      await rm(join(folder, 'skills/hello'), { recursive: true });
+      await put(join(folder, 'skills/pdf/SKILL.md'), '---\nname: pdf-reader\ndescription: Reads PDFs.\n---\nRead.\n');
+    }
+    const solo = join(box.home, '.claude/plugins/cache/m/solo/1.0.0');
+    await put(join(solo, 'SKILL.md'), '---\nname: solo-skill\ndescription: One skill.\n---\nX\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+      'demo@m': [{ scope: 'user', installPath: join(box.home, '.claude/plugins/cache/m/demo/1.2.0'), version: '1.2.0' }],
+      'solo@m': [{ scope: 'user', installPath: solo, version: '1.0.0' }] } }));
+    await put(join(box.home, '.codex/config.toml'), '[plugins."demo@m"]\nenabled = true\n');
+    const read = await readPluginItems(box.context, ['claude-cli', 'codex-cli']);
+    const keys = (tool: HarnessId, plugin: string) => {
+      const install = read.find(found => found.tool === tool && found.plugin === plugin)!;
+      return install.items.map(item => [item.name, pluginItemKey(install, item)]);
+    };
+    // The name stays the one the tool loads it by, which its own switch takes (Codex: demo:pdf-reader); the key is the folder's.
+    assert.deepEqual(keys('claude-cli', 'demo'), [['pdf-reader', 'demo@m/pdf'], ['tracker', 'demo@m/tracker'], ['checker', 'demo@m/checker']]);
+    assert.deepEqual(keys('codex-cli', 'demo'), [['pdf-reader', 'demo@m/pdf'], ['tracker', 'demo@m/tracker']], 'Codex’s copy: the same key (and no agents)');
+    assert.deepEqual(keys('claude-cli', 'solo'), [['solo-skill', 'solo@m/solo']], 'a plugin that is one skill: the plugin’s name');
+    // Pi's copy is a library item linked to demo, named by its folder (library.ts A SOURCE): the same key.
+    assert.equal(pluginItemKey({ plugin: 'demo', marketName: 'm' }, { kind: 'skill', name: 'pdf' }), 'demo@m/pdf');
+    assert.equal(pluginItemKey({ plugin: 'demo', marketName: 'm' }, { kind: 'skill', name: 'PDF' }), 'demo@m/pdf', 'compared as library keys are');
+    // The same plugin from another marketplace is another item; a server keeps its name's case.
+    assert.equal(pluginItemKey({ plugin: 'demo', marketName: 'elsewhere' }, { kind: 'skill', name: 'pdf' }), 'demo@elsewhere/pdf');
+    assert.equal(pluginItemKey({ plugin: 'demo', marketName: 'm' }, { kind: 'mcp', name: 'Tracker' }), 'demo@m/Tracker');
+  } finally { await box.cleanup(); }
+});
+
 test('an installed plugin keeps its hooks as each tool’s installed copy declares them, in that tool’s form, not as its marketplace has them now; a hooks file it can’t read is named', async () => {
   const box = await sandbox();
   try {
@@ -153,6 +187,13 @@ test('a shared skill belongs to a tool that loads it now, even through a link, b
     anotherWay: { 'opencode-cli': 'OpenCode gets it once it is on in Claude Code.' },
   });
   assert.deepEqual((['claude-cli', 'codex-cli', 'opencode-cli'] as const).map(tool => inTool(review, tool)), [true, true, false]);
+});
+
+test('The Library’s row of a plugin’s item is keyed as pluginItemKey keys it, named as the tools load it', () => {
+  const pdf = { kind: 'skill' as const, name: 'pdf-reader', fileName: 'pdf', description: 'Reads PDFs.' };
+  const home = homeOf([], [install('claude-cli', { items: [pdf] }), install('codex-cli', { items: [pdf] })]);
+  const [row, ...more] = pageRows(home, 'skills').rows;
+  assert.deepEqual([row!.key, row!.name, Object.keys(row!.copies), more.length], ['issue-tracker@m/pdf', 'pdf-reader', ['claude-cli', 'codex-cli'], 0]);
 });
 
 test('a personal skill that only shares the name stays its own row beside the plugin’s', () => {
