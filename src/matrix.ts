@@ -835,14 +835,16 @@ function openRow(t: Table, row: ItemRow | PluginRow) {
   const id = idOf(row), view = t.view;
   markOpen(view, view.comparing === id ? undefined : id);
   rerender();
-  // Details that run past the table's bottom are brought into view with their row at its top, so the row's name and the
-  // details' close button are in view too. Docked details sit beside the table and are always in view.
+  // The table moves the least that shows the details: by what runs past its bottom, but never past the row's top (less its
+  // scroll margin), so the row's name stays in view. At once, not gliding: a redraw meanwhile would stop a glide short. Docked
+  // details sit beside the table and are always in view.
   if (view.comparing && underRow(t, id)) requestAnimationFrame(() => {
-    const rowEl = document.querySelector(`.ov-row[data-key="${CSS.escape(id)}"]`);
-    const details = rowEl?.nextElementSibling;
-    const box = rowEl?.closest('.scroll')?.getBoundingClientRect();
-    if (!rowEl || !details || !box) return;
-    if (details.getBoundingClientRect().bottom > box.bottom) rowEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    const rowEl = document.querySelector(`.ov-row[data-key="${CSS.escape(id)}"]`), list = rowEl?.closest('.scroll');
+    const details = rowEl?.nextElementSibling, box = list?.getBoundingClientRect();
+    if (!rowEl || !details || !list || !box) return;
+    const past = details.getBoundingClientRect().bottom - box.bottom;
+    const room = rowEl.getBoundingClientRect().top - box.top - parseFloat(getComputedStyle(rowEl).scrollMarginTop);
+    if (past > 0) list.scrollTop += Math.min(past, room);
   });
 }
 
@@ -1037,6 +1039,9 @@ function listNotices(t: Table) {
       if (link) link.title = `${moved.textContent?.replace(/^Earlier: the undo/, 'The earlier undo').replace(/ is in History\.$/, ' is here too')}.`;
       else lines.at(-1)!.append(moved);
     }
+    // Past the limit, the rest are counted on the last line; each is drawn (and so seen) once one above it is dismissed.
+    const more = shownNotices.length - onScreen.length;
+    if (more) lines.at(-1)!.querySelector('.notice-text')?.append(h('span.tone-faint', { id: 'notices-more' }, ` · and ${more} more`));
     // While the walkthrough asks, each notice keeps to its first line, with the way to see them whole, as a long result folds.
     const whole = walk ? smallAction(noticesWhole ? 'Show less' : 'Show all', 'notices-show-all', () => { noticesWhole = !noticesWhole; rerender(); }) : null;
     bands.push(h(`div.band.sync-notices${walk && !noticesWhole ? '.notices-folded' : ''}`, { role: 'status' }, h('div.sync-notice-lines', {}, lines), whole, dismissNotices(shownNotices)));
@@ -1209,6 +1214,7 @@ function visibleNotices(t: Table) {
   return t.kinds.flatMap(toldNotices).sort((first, second) => second.seq - first.seq).filter(notice => !state.dismissed.has(notice.history));
 }
 
+/** How many notices a table draws, newest first; it counts the rest on the last (listNotices). */
 const noticeLineLimit = 6;
 /** The notices shown whole while first setup's walkthrough folds them (listNotices): this window's, until changed. */
 let noticesWhole = false;
