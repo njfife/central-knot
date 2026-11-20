@@ -268,3 +268,14 @@ test('two skills of his, one with “repair” and one with “pipeline”: “r
   assert.deepEqual([before.sort(), ids()], [['skills-deploy-runbook', 'skills-restore-runbook'], [...before, 'catalog:0']]);
   search.close();
 });
+
+test('his own documents and the catalog’s are two parts: a change on one side builds that side alone, and the other is kept', async () => {
+  const { built, search } = follower();
+  const plugin = catalogDoc(0, 'Ships parcels.');
+  await search.follow('/home', 1, async () => [doc('skills-notes', 'Takes notes.'), plugin]);
+  await search.follow('/home', 2, async () => [doc('skills-notes', 'Takes minutes.'), plugin]);
+  await search.follow('/home', 3, async () => [doc('skills-notes', 'Takes minutes.'), { ...plugin, text: 'Ships boxes.' }]);
+  const ids = (typed: string) => { const answer = search.ask(typed); return answer.ready ? answer.rows.map(row => row.id) : []; };
+  assert.deepEqual([built, ids('minutes'), ids('boxes'), ids('parcels')], [[1, 1, 1, 1], ['skills-notes'], ['catalog:0'], []]);
+  search.close();
+});

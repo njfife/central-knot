@@ -154,7 +154,7 @@ async function read(): Promise<Snapshot[]> {
  * (Plugins after a Refresh or a home switch) passes the id back and uses this read rather than reading the home again.
  */
 let handoff = { id: 0, home: '', snapshots: [] as Snapshot[] };
-/** Word search's one index, which follows each view handed over (syncAndView); the page hears each one published. */
+/** Word search's index (search.ts searchFollower, in two parts), which follows each view handed over (syncAndView); the page hears each one published. */
 const search = searchFollower(tag => send('search:published', tag.home, tag.readId));
 /** The view word search followed last, with its own documents (searchdocs.ts libraryDocs), gathered once for it. */
 let followed: { view: HomeView; own: Promise<SearchDoc[]> } | undefined;

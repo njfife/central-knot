@@ -245,14 +245,17 @@ export function searchFollower(published: (tag: Published) => void, build = buil
       if (current && current.home !== home) { closing(current.parts); current = undefined; }
       const docs = await gather();
       if (mine !== turn) return;
-      const parts: Part[] = [];
+      // The parts as published when this follow began: one it keeps is theirs, so only what it built is closed if it is superseded.
+      const before = current?.parts ?? [], parts: Part[] = [];
       for (const [at, side] of [docs.filter(doc => !doc.catalog), docs.filter(doc => doc.catalog)].entries()) {
-        const digest = createHash('sha256').update(JSON.stringify([...side].sort(byId))).digest('hex'), was = current?.parts[at];
+        // Main's other work goes first between the two parts: one part's last steps and the next one's digest held it 75 ms.
+        if (at) await new Promise(resolve => setImmediate(resolve));
+        const digest = createHash('sha256').update(JSON.stringify([...side].sort(byId))).digest('hex'), was = before[at];
         const index = was?.digest === digest ? was.index : side.length ? await build(side, () => mine === turn) : undefined;
-        if (side.length && !index) { closing(parts, current?.parts); return; }
         parts.push({ digest, index });
+        if (mine !== turn || (side.length && !index)) { closing(parts, before); return; }
       }
-      closing(current?.parts ?? [], parts);
+      closing(before, parts);
       current = { home, readId, parts };
       published({ home, readId });
     },
