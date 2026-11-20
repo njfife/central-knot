@@ -575,6 +575,196 @@ async function backFlow() {
   await a.quit();
 }
 
+/**
+ * Back and Forward put a page back where the person left it (places.ts, a visit's scroll place). On a home with lists long enough to
+ * scroll, at 860×600 and 1316×819: each journey of the step's facts, Back then Forward, the place read before and after to the pixel,
+ * with Find, the chip and the opened row as Back leaves them today. Then at 860×600: two visits to the Library, each to its own place;
+ * a list whose rows went while away (as far as it goes, no error), left again before they are back (the place it was putting back is
+ * kept), and scrolled by the person before they are back (the person's place wins); a skill's Files, whose list is not moved to its
+ * chosen row.
+ */
+async function backPlaceFlow() {
+  const P = homeWith('back-place'), market = join(scratch, 'back-place-market'), away = join(scratch, 'back-place-away');
+  const lines = (count, line) => Array.from({ length: count }, (_, at) => `${line} ${at + 1}.\n`).join('');
+  const numbered = (prefix, count) => Array.from({ length: count }, (_, at) => `${prefix}-${String(at).padStart(2, '0')}`);
+  const samples = numbered('sample', 42);
+  for (const name of samples) skill(P.claude, name, text(name, name === 'sample-16' ? lines(100, 'A line of the long skill') : 'Body.'));
+  writeFileSync(join(P.home, '.claude/CLAUDE.md'), lines(60, 'Follow project convention'));
+  mkdirSync(join(P.home, '.copilot'), { recursive: true });
+  writeFileSync(join(P.home, '.copilot/copilot-instructions.md'), lines(60, 'Follow project convention'));
+  // A folder marketplace of 30 plugins in two categories; pack-16, installed in Claude Code, brings 20 skills to the Library. pack-16's
+  // and pack-17's pages hold those skills and a long README.
+  const plugins = numbered('pack', 30), pluginSkills = Object.fromEntries(numbered('plugin-skill', 20).map(name => [`skills/${name}/SKILL.md`, text(name)]));
+  const put = (path, body) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, body); };
+  for (const name of plugins) put(join(market, 'plugins', name, '.claude-plugin/plugin.json'), JSON.stringify({ name, version: '1.0.0' }));
+  for (const name of ['pack-16', 'pack-17']) {
+    for (const [path, body] of Object.entries(pluginSkills)) put(join(market, 'plugins', name, path), body);
+    put(join(market, 'plugins', name, 'README.md'), `# ${name}\n\n${Array.from({ length: 24 }, (_, at) => `## Part ${at + 1}\n\nWhat this part of the plugin does.\n`).join('\n')}`);
+  }
+  put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'back-place', owner: { name: 'Test team' },
+    plugins: plugins.map((name, at) => ({ name, source: `./plugins/${name}`, version: '1.0.0', description: 'A local example plugin.', category: at < 24 ? 'examples' : 'other' })) }));
+  put(join(P.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'back-place': { source: { source: 'directory', path: market }, installLocation: market } }));
+  writeClaudeInstall(P.home, 'back-place', 'pack-16', '1.0.0', pluginSkills);
+  writeFileSync(join(P.data, 'marketplaces.json'), JSON.stringify([market]));
+  writeFileSync(join(P.data, 'central-knot.log'), '2026-01-01T00:00:00.000Z A line of the log.\n'.repeat(100));
+  const a = await launch(P.data, [], P.real);
+
+  const until = async test => { for (let tries = 0; tries < 50 && !(await test()); tries++) await wait(100); };
+  const placeOf = id => a.run(`Math.round(document.getElementById(${JSON.stringify(id)})?.scrollTop ?? -1)`);
+  /** The place of `id` once it is `want`, or what it is after 3 s: a page still filling is put back once it has its height. */
+  const placeWhen = async (id, want) => { for (let tries = 0; tries < 30 && await placeOf(id) !== want; tries++) await wait(100); return placeOf(id); };
+  /** Writes the place of the list `id` once it rests (stillList): `anchor`'s top `y` px under the list's top, or `y` px down; reads it back. */
+  const scrollTo = async (id, y, anchor) => {
+    await until(() => a.exists(`#${id}`));
+    check(`the list ${id} comes to rest before its place is written`, await stillList(a, id));
+    await a.run(`(() => { const list = document.getElementById(${JSON.stringify(id)}), row = ${anchor ? `list.querySelector(${JSON.stringify(anchor)})` : 'null'};
+      list.scrollTop = row ? list.scrollTop + row.getBoundingClientRect().top - list.getBoundingClientRect().top - ${y} : ${y}; })()`);
+    return placeOf(id);
+  };
+  const readme = async y => { await until(() => a.exists('.plugin-readme')); return scrollTo('plugins-scroll', y); };
+  // Settings, with its log shown only where the page can't scroll without it: Settings opens again without its log, as a new visit.
+  const settings = async y => { const at = await scrollTo('settings-scroll', y); if (at > 0) return at; await a.click('#show-log'); await until(() => a.exists('#log-end')); return scrollTo('settings-scroll', y); };
+  const typeIn = async (id, words) => { await a.run(`(() => { const box = document.getElementById(${JSON.stringify(id)}); box.value = ${JSON.stringify(words)}; box.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle(); };
+  /** The mouse's Back or Forward button over the page. */
+  const mouse = async button => {
+    for (const [type, buttons] of [['mousePressed', button === 'back' ? 8 : 16], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button, buttons, clickCount: 1 });
+    await a.settle();
+  };
+  /** The platform's Back or Forward keys: ⌘[ and ⌘] on a Mac, Alt+← and Alt+→ elsewhere. */
+  const key = async forward => {
+    await a.run('document.activeElement?.blur()');
+    const mac = process.platform === 'darwin', name = mac ? (forward ? ']' : '[') : (forward ? 'ArrowRight' : 'ArrowLeft');
+    for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: name, modifiers: mac ? 4 : 1 });
+    await a.settle();
+  };
+  /** Find's words, the chips pressed and the rows opened: what Back leaves as it is today. */
+  const view = () => a.run(`({ find: document.querySelector('#find, #plugin-find')?.value ?? null, chips: [...document.querySelectorAll('.chip[aria-pressed="true"], .market-chip[aria-pressed="true"]')].map(chip => chip.textContent),
+    opened: [...document.querySelectorAll('.ov-row[aria-expanded="true"]')].map(row => row.dataset.key) })`);
+  let size;
+  /**
+   * One journey: the place written on the page left (list `from`) and on the page reached (list `to`); Back reads the first, then
+   * Forward the second, to the pixel. `viewBack`: what Back leaves of Find, the chip and the opened row, where it isn't as they were.
+   */
+  const journey = async (name, from, write, go, to, writeThere, { back = () => mouse('back'), forward = () => mouse('forward'), viewBack } = {}) => {
+    const left = await write(), seen = await view();
+    await go();
+    const there = await writeThere();
+    await back();
+    const backAt = await placeWhen(from, left), seenBack = await view();
+    await forward();
+    same(`${name} at ${size}: both scrolled; Back to the place left, Find, chip and opened row ${viewBack ? 'let go as today' : 'as they were'}; Forward to the place reached`,
+      [left > 0, there > 0, backAt, seenBack, await placeWhen(to, there)], [true, true, left, viewBack ?? seen, there]);
+  };
+  const library = 'table-library-skills', row = key => `.ov-row[data-key="${rowPart('', 'skills', key)}"]`;
+  const pluginSkill = '[data-key$="/plugin-skill-04"]', pluginSkillOpen = '[id^="open-skills-"][id$="/plugin-skill-04"]', pack17 = '[data-plugin="pack-17"]';
+  for (const [width, height] of [[860, 600], [1316, 819]]) {
+    size = `${width}×${height}`;
+    await sizeTo(a, width, height);
+    // The Library on Skills, Find "skill", From plugins: a plugin's skill opened, and its link to its plugin's page.
+    await openKind(a, 'skills');
+    await typeIn('find', 'skill');
+    if (!(await a.exists('#chip-plugins[aria-pressed="true"]'))) await a.click('#chip-plugins');
+    if (!(await a.exists(`${pluginSkillOpen}[aria-expanded="true"]`))) await a.click(pluginSkillOpen);
+    await journey('the Library → a plugin’s page', library, () => scrollTo(library, 130, pluginSkill), () => a.click('[id^="open-whole-skills-"][id$="/plugin-skill-04"]'), 'plugins-scroll', () => readme(315));
+    // Plugin marketplaces' list, Find "pack" and the examples chip: a plugin's page, by the keys; then back by its breadcrumb.
+    await a.click('#plugin-back');
+    await typeIn('plugin-find', 'pack');
+    if (!(await a.exists('.market-chip[aria-pressed="true"]'))) await a.run(`[...document.querySelectorAll('.market-chip')].find(chip => chip.textContent.includes('examples')).click()`);
+    await a.settle();
+    await journey('Plugin marketplaces’ list → a plugin’s page, by the keys', 'plugins-scroll', () => scrollTo('plugins-scroll', 135, pack17), () => a.click(`${pack17} .plugin-row-open`), 'plugins-scroll', () => readme(318),
+      { back: () => key(false), forward: () => key(true) });
+    await mouse('back');
+    await journey('Plugin marketplaces’ list → a plugin’s page, back by its breadcrumb', 'plugins-scroll', () => scrollTo('plugins-scroll', 137, pack17), () => a.click(`${pack17} .plugin-row-open`), 'plugins-scroll', () => readme(322),
+      { back: () => a.click('#plugin-back') });
+    // Instructions → the plugins' page by the sidebar, pack-17's page open there.
+    await a.click('#nav-instructions');
+    await journey('Instructions → a plugin’s page by the sidebar', 'instructions-scroll', () => scrollTo('instructions-scroll', 300), () => a.click('#nav-plugins'), 'plugins-scroll', () => readme(320));
+    // Claude Code's Skills tab, Find "sample", sample-16 (a long skill) opened → Settings. The tab opened again lets Find and the row go, as today.
+    await a.click('#nav-harnesses');
+    await a.click('#harness-claude-cli');
+    await a.click('#harness-tab-skills');
+    await typeIn('find', 'sample');
+    await a.click(`#${rowPart('open', 'skills', 'sample-16')}`);
+    await journey('Claude Code’s Skills tab → Settings', 'table-skills-claude-cli', () => scrollTo('table-skills-claude-cli', 117, row('sample-16')), () => a.click('#nav-settings'), 'settings-scroll', () => settings(220),
+      { viewBack: { find: '', chips: [], opened: [] } });
+    // The Library on Skills, Find "sample", sample-16 opened → its Files: back by the window's Back, then by the Files view's own.
+    await openKind(a, 'skills');
+    if (await a.exists('#chip-plugins[aria-pressed="true"]')) await a.click('#chip-plugins');
+    await typeIn('find', 'sample');
+    if (!(await a.exists(`#${rowPart('open', 'skills', 'sample-16')}[aria-expanded="true"]`))) await a.click(`#${rowPart('open', 'skills', 'sample-16')}`);
+    const files = `#${rowPart('files', 'skills', 'sample-16')}`;
+    await journey('the Library → a skill’s Files', library, () => scrollTo(library, 116, row('sample-16')), () => a.click(files), 'detail-scroll', () => scrollTo('detail-scroll', 150));
+    await mouse('back');
+    await journey('the Library → a skill’s Files, back by its Back button', library, () => scrollTo(library, 113, row('sample-16')), () => a.click(files), 'detail-scroll', () => scrollTo('detail-scroll', 153),
+      { back: () => a.click('#files-back') });
+    await a.click('#nav-overview');
+    await journey('Overview → the Library', 'overview-scroll', () => scrollTo('overview-scroll', 180), () => a.click('#nav-library'), library, () => scrollTo(library, 400));
+    await a.click('#nav-settings');
+    await journey('Settings → the Library', 'settings-scroll', () => settings(225), () => a.click('#nav-library'), library, () => scrollTo(library, 403));
+  }
+
+  // ---------- One step past ----------
+  await sizeTo(a, 860, 600);
+  await typeIn('find', '');
+  // Two visits to the Library, each scrolled to a place of its own.
+  const first = await scrollTo(library, 300);
+  await a.click('#nav-settings');
+  await a.click('#nav-library');
+  const second = await scrollTo(library, 900);
+  await a.click('#nav-overview');
+  await mouse('back');
+  const secondBack = await placeWhen(library, second);
+  await mouse('back');
+  await mouse('back');
+  same('two visits to the Library, scrolled to two places: Back brings each to its own', [first, second, secondBack, await placeWhen(library, first)], [300, 900, 900, 300]);
+  // The place put back is let go on a move: the Library opened again from the sidebar is a new visit, at its top.
+  await a.click('#nav-settings');
+  await a.click('#nav-library');
+  same('after Back, a new visit to the same page starts at its top', await placeOf(library), 0);
+  // Rows gone while away (read again on Settings): Back shows the list as far down as it now goes, with no error; once they are back,
+  // the place left, the list untouched meanwhile. Left again by Forward before they are back, Back once they are puts back the
+  // place first left, not the one the short list could show. Scrolled by the person before they are back, the person's place stays.
+  const rows = () => a.run(`document.querySelectorAll('.ov-row[data-key^="${rowPart('', 'skills', 'sample-')}"]').length`);
+  const readAgain = async count => { await a.click('#header-refresh'); await until(async () => (await rows()) === count || !(await a.exists(`#${library}`))); };
+  const goAway = () => { mkdirSync(away, { recursive: true }); for (const name of samples.slice(8)) renameSync(join(P.claude, name), join(away, name)); return readAgain(8); };
+  const comeBack = () => { for (const name of samples.slice(8)) renameSync(join(away, name), join(P.claude, name)); return readAgain(42); };
+  const deep = await scrollTo(library, 2400);
+  await a.click('#nav-settings');
+  await goAway();
+  await mouse('back');
+  const end = await a.run(`(list => list.scrollHeight - list.clientHeight)(document.getElementById('${library}'))`);
+  same('Back to a list whose rows went meanwhile: 8 rows left, the list as far down as it goes, no error', [await rows(), deep > end, await placeOf(library), a.pageErrors], [8, true, end, []]);
+  await comeBack();
+  same('its rows back, the list untouched meanwhile: the place left', await placeWhen(library, deep), deep);
+  await a.click('#nav-settings');
+  await goAway();
+  await mouse('back');
+  await mouse('forward');
+  await comeBack();
+  await mouse('back');
+  same('left by Forward before its rows came back, Back once they have: the place first left', await placeWhen(library, deep), deep);
+  await a.click('#nav-settings');
+  await goAway();
+  await mouse('back');
+  const box = await a.run(`(({ left, top, width, height }) => ({ x: left + width / 2, y: top + height / 2 }))(document.getElementById('${library}').getBoundingClientRect())`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -150 });
+  check('the list comes to rest after the person’s scroll', await stillList(a, library));
+  const mine = await placeOf(library);
+  await comeBack();
+  same('a scroll by the person while the list waits for its rows wins: the list stays where they put it', [mine < end, await placeOf(library)], [true, mine]);
+  // A skill's Files with its list scrolled to the end, past the skill shown; another skill chosen there; Back: the list where it was
+  // left, not moved to bring the skill shown into view (matrix.ts revealSelected).
+  await a.click(`#${rowPart('open', 'skills', 'sample-00')}`);
+  await a.click(`#${rowPart('files', 'skills', 'sample-00')}`);
+  const listEnd = await scrollTo('skills-list', 100000);
+  await a.click(`#${rowPart('list', 'skills', 'sample-41')}`);
+  await mouse('back');
+  same('Back to a skill’s Files: the skill shown again, its list where it was left, though the skill is out of view there',
+    [listEnd > 0, await a.text('#skill-detail h2'), await placeWhen('skills-list', listEnd)], [true, 'sample-00', listEnd]);
+  same('no page errors, Back and Forward’s places', a.pageErrors, []);
+  await a.quit();
+}
+
 /** Harnesses: one tool's page manages its items with the same engine as the Library’s skills. */
 async function harnessFlow() {
   // A packaged build starts on this computer's home: the switch puts it on the Practice copy, as a dev build starts.
@@ -820,6 +1010,14 @@ async function fullSize(a) {
   await a.run(`window.dispatchEvent(new Event('resize'))`);
   await a.settle();
 }
+/**
+ * Whether the list `id` came to rest (still for six frames) within 3 s; it is found by its id each frame, as a redraw replaces it. A
+ * row opened with details past the list's bottom glides the list to it (matrix.ts openRow); a scroll place written while it glides
+ * still has the glide's later steps added to it, some after the place was read. A check that writes a scroll place checks this
+ * first, so a list that never rests fails under its own name.
+ */
+const stillList = (a, id) => a.run(`new Promise(done => { const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop, end = Date.now() + 3000; let last = at(), still = 0;
+  const look = () => { still = at() === last ? still + 1 : 0; last = at(); if (still === 6) done(true); else if (Date.now() > end) done(false); else requestAnimationFrame(look); }; requestAnimationFrame(look); })`);
 
 /**
  * One mouse event at the point `at`, as a real mouse sends it: `buttons` 1 while the left button is held, and no button named on a
@@ -8125,14 +8323,6 @@ async function libraryFlow() {
   const find = async (a, text) => { await a.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle(); };
   const pressed = a => a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id.replace('library-kind-', '') ?? null`);
   const opened = a => a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key');
-  /**
-   * Whether the list `id` came to rest (still for six frames) within 3 s; it is found by its id each frame, as a redraw replaces it. A
-   * row opened with details past the list's bottom glides the list to it (matrix.ts openRow); a scroll place written while it glides
-   * still has the glide's later steps added to it, some after the place was read. A check that writes a scroll place checks this
-   * first, so a list that never rests fails under its own name.
-   */
-  const stillList = (a, id) => a.run(`new Promise(done => { const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop, end = Date.now() + 3000; let last = at(), still = 0;
-    const look = () => { still = at() === last ? still + 1 : 0; last = at(); if (still === 6) done(true); else if (Date.now() > end) done(false); else requestAnimationFrame(look); }; requestAnimationFrame(look); })`);
   /** The mouse's Back button, pressed and let go over the page (places.ts listenForTravel). */
   const mouseBack = async a => {
     for (const [type, buttons] of [['mousePressed', 8], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button: 'back', buttons, clickCount: 1 });
@@ -9027,7 +9217,7 @@ const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
-  [backFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
+  [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);

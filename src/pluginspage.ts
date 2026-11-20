@@ -4,7 +4,7 @@
 // (pluginpage.ts). A switch's click waits its turn in the page's list (pluginstate.ts turnPlugin), its row saying how it stands;
 // Update, Update all and the switches under a plugin's What it holds act at once (pluginstate.ts applyPluginOps). Each tool's
 // mark only says what it has.
-import { acting, noToolManaged, rerender, showPage, state as app } from './app.ts';
+import { acting, noteMove, noToolManaged, rerender, showPage, state as app } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { button, closeButton, emptyState, h, icon, rereadBand, whyOff, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
@@ -425,7 +425,7 @@ function toolbar(shown: { entry: MarketplaceView; index: number }) {
   const plugin = openPlugin(shown.entry);
   const left = plugin
     ? h('nav.market-crumbs', { 'aria-label': 'You are here' },
-      h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, icon('arrow-left', 13), marketTitle(shown.entry)),
+      h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => { noteMove('back'); browse({ plugin: undefined }); } }, icon('arrow-left', 13), marketTitle(shown.entry)),
       icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, pluginTitle(plugin)))
     : titleLine(shown.entry);
   // In narrow content the marketplace strip already names it, so a toolbar with only the name isn't drawn (style.css).

@@ -1,4 +1,5 @@
-// Back and Forward in this window: the destination drawn, its visits, and the existing page actions that reopen it.
+// Back and Forward in this window: the destination drawn, its visits, the existing page actions that reopen it, and each visit's
+// scroll place, put back once Back or Forward has drawn it (renderer.ts keeps scroll places only across a redraw of one place).
 // app.ts placeNow is narrower: it names the table where an action's result belongs.
 import { absentKinds, filesSkillAvailable, harnessManaged, harnessTabShown, leaveFiles, takeMove, machine, noToolManaged, rerender, showPage, state } from './app.ts';
 import { goHarness } from './harnesspage.ts';
@@ -27,14 +28,62 @@ export function fullPlace(): Place {
 
 let visits = emptyVisits(), home: string | undefined;
 export let restoring = false;
-export function recordDraw() {
+/** The scroll place on screen as this turn's first draw began: a move this turn leaves it with the visit it leaves. */
+let leaving: Offsets | undefined;
+/**
+ * Each draw: the place drawn, recorded at the end of the turn (a link can draw twice in one click) as a new visit after a move,
+ * as Back to the visit before after a page's own Back control (stepsBackTo), else as a repair of this one. `scrolled`: the draw's
+ * offsets as it began.
+ */
+export function recordDraw(scrolled: Offsets) {
   if (!state.home) return;
-  if (home !== state.home.home) { visits = emptyVisits(); home = state.home.home; }
-  // A link can draw twice in one click. Record the destination at the end of that turn.
+  if (home !== state.home.home) { visits = emptyVisits(); home = state.home.home; puttingBack = undefined; }
+  const onScreen = placeOnScreen(scrolled);
+  if (leaving) return;
+  leaving = onScreen;
   queueMicrotask(() => {
-    const moved = takeMove();
-    if (!heldBy(state.home)) visits = recordPlace(visits, fullPlace(), moved);
+    const moved = takeMove(), from = visits.entries[visits.cursor], left = leaving!;
+    leaving = undefined;
+    if (heldBy(state.home)) return;
+    const place = fullPlace(), back = moved === 'back' ? stepsBackTo(place) : 0;
+    visits = back ? travel(visits, back, available) : recordPlace(visits, place, !!moved);
+    if (!moved || !from || visits.entries[visits.cursor] === from) return;
+    leftAt.set(from, left);
+    putBackPlaceOf(back ? visits.entries[visits.cursor] : undefined);
+    putBack();
   });
+}
+
+/** Each scrolling area's offset, by its id: the areas a redraw keeps where they were (`.scroll[id]`, renderer.ts renderWindow). */
+export type Offsets = Map<string, number>;
+export const offsetsNow = (): Offsets => new Map([...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop]));
+/** Each visit's scroll place as the person left it, by its entry: an entry the list drops takes its place with it. */
+const leftAt = new WeakMap<Place, Offsets>();
+/**
+ * The visit Back or Forward opened, while its place is put back after each draw: the offsets `wanted`, and where the last draw left
+ * each area (`drawn`: as far as it went, while its page was still filling). Let go on a move, and area by area once something else
+ * (the person, a glide) moves one.
+ */
+let puttingBack: { visit: Place; wanted: Offsets; drawn: Offsets } | undefined;
+
+/** Puts back the place `visit` was left at, after each draw from now until it is let go (putBack); with none, lets go. */
+const putBackPlaceOf = (visit?: Place) => { puttingBack = visit && { visit, wanted: new Map(leftAt.get(visit)), drawn: new Map() }; };
+
+/** The scroll place on screen, from the offsets `now`: an area still being put back counts at the offset wanted; one moved since is let go. */
+function placeOnScreen(now: Offsets): Offsets {
+  if (!puttingBack) return now;
+  const { wanted, drawn } = puttingBack;
+  for (const [id, top] of drawn) if (now.has(id) && now.get(id) !== top) { wanted.delete(id); drawn.delete(id); }
+  return new Map([...now, ...wanted]);
+}
+
+/** After a draw, over the offsets it kept: the visit Back or Forward opened, each area at its offset, or as far as it goes yet. */
+export function putBack() {
+  if (!puttingBack || placeKey(fullPlace()) !== placeKey(puttingBack.visit)) return;
+  for (const [id, top] of puttingBack.wanted) {
+    const node = document.getElementById(id);
+    if (node) { node.scrollTop = top; puttingBack.drawn.set(id, node.scrollTop); }
+  }
 }
 
 function available(p: Place): Place {
@@ -61,20 +110,34 @@ function goToPlace(p: Place) {
   if (state.page !== p.page) showPage(p.page);
   if (p.page === 'harnesses') {
     if (p.tool !== state.harness || (p.tool && p.tab !== state.harnessTab)) goHarness(p.tool, p.tab);
-  } else if (p.skill) openFiles(p.skill);
+  } else if (p.skill) openFiles(p.skill, true);
   else if (state.libraryView === 'files') leaveFiles();
 }
 
+/** Back or Forward by `step` visits: the place there opened by the page actions that open it, its scroll place put back (putBack). */
 function traverse(step: number) {
   if (!state.home || heldBy(state.home)) return;
-  const next = travel(visits, step, available);
+  const from = visits.entries[visits.cursor], next = travel(visits, step, available);
   if (next === visits) return;
   const p = next.entries[next.cursor]!;
   if (state.busy && p.page === 'harnesses' && (state.harness !== p.tool || (p.tool && state.harnessTab !== p.tab))) return;
   visits = next;
   if (placeKey(fullPlace()) === placeKey(p)) { traverse(step); return; }
+  if (from) leftAt.set(from, placeOnScreen(offsetsNow()));
+  putBackPlaceOf(p);
   restoring = true;
   try { goToPlace(p); } finally { takeMove(); restoring = false; rerender(); }
+}
+
+/**
+ * Where a page's own Back control (the Files view's Back, a plugin's page's breadcrumb: app.ts noteMove) landed, `place`, is the visit
+ * the person came from (past other skills' Files or other plugins' pages on the way): how many visits back it is; else 0, a visit.
+ */
+function stepsBackTo(place: Place): number {
+  const { entries, cursor } = visits;
+  let at = cursor - 1;
+  while (at > 0 && entries[at]!.page === entries[cursor]?.page && (entries[at]!.skill || entries[at]!.plugin)) at--;
+  return at >= 0 && placeKey(available(entries[at]!)) === placeKey(place) ? at - cursor : 0;
 }
 
 export function listenForTravel() {

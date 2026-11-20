@@ -1381,14 +1381,16 @@ const pluginChipShown = (t: Table) => pluginCount(t) > 0;
 /** Whether the Copies differ chip is drawn: something here differs. A Copies differ filter whose chip is gone falls back to none. */
 const copiesDifferChipShown = (t: Table) => rowsIn(t).some(skill => needsChoice(t, skill));
 
-/** The list a Files view was opened from (the Library's, or a tool's Skills tab: `tool`), and its scroll place. */
-let filesFrom: { top: number; tool?: Tool } = { top: 0 };
-const fromTable = () => (filesFrom.tool ? `table-skills-${filesFrom.tool}` : libraryTableId());
-/** A skill's files and contents: the Library's Files view, from wherever its details were opened. */
-export function openFiles(key: string) {
+/** The list a Files view was opened from: the Library's, or a tool's Skills tab (`tool`). */
+let filesFrom: { tool?: HarnessId } = {};
+/**
+ * A skill's files and contents: the Library's Files view, from wherever its details were opened. `placed`: by Back or Forward,
+ * which put its list's scroll place back (places.ts), so the list is not moved to bring the skill into view (revealSelected).
+ */
+export function openFiles(key: string, placed = false) {
   noteMove();
-  filesFrom = { top: 0, tool: state.page === 'harnesses' ? state.harness : undefined };
-  filesFrom.top = document.getElementById(fromTable())?.scrollTop ?? 0;
+  filesFrom = { tool: state.page === 'harnesses' ? state.harness : undefined };
+  if (placed) revealed = key;
   if (state.page !== 'library') showPage('library');
   state.libraryView = 'files';
   state.item = key;
@@ -1396,14 +1398,16 @@ export function openFiles(key: string) {
 }
 /** The Files view's back button's words: where it leads, the Library or the tool whose Skills tab it was opened from. */
 const backWords = () => (filesFrom.tool ? { label: names[filesFrom.tool], name: `Back to ${names[filesFrom.tool]}’s skills` } : { label: 'Library', name: 'Back to the Library' });
-/** Back from the Files view (its button, or Escape: renderer.ts): the list it was opened from as it was, its segment or tab, Find, chip, open row and scroll place. */
+/**
+ * Back from the Files view (its button, or Escape: renderer.ts): the list it was opened from as it was, its segment or tab, Find,
+ * chip and open row; its scroll place too, where the person came from there, as a Back through the visits (app.ts noteMove).
+ */
 export function backFromFiles() {
-  const { top, tool } = filesFrom;
+  const { tool } = filesFrom;
+  noteMove('back');
   // Back to a tool's Skills tab as harnesspage.ts goHarness sets it (Harnesses opens on its list), its view as it was (Files
   // draws the Library's), its open row counted as opened on this visit, so a copy question stays open.
   if (tool) { showPage('harnesses'); Object.assign(state, { harness: tool, harnessTab: 'skills' }); views.skills.openedOn = state.visit; rerender(); } else leaveFiles();
-  const table = document.getElementById(fromTable());
-  if (table) table.scrollTop = top;
 }
 
 /**
@@ -2222,7 +2226,7 @@ function roomHeld(shown: boolean, draw: (shown: boolean) => HTMLElement) {
 
 // ---------- The Library's Files view ----------
 
-/** The skill whose row was last scrolled into view, so the list moves only when the selection changes. */
+/** The skill whose row was last scrolled into view, or whose list Back or Forward put back as it was (openFiles), so the list moves only when the selection changes. */
 let revealed: string | undefined;
 
 /**

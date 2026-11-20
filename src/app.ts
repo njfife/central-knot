@@ -947,10 +947,12 @@ export function leaveResults(page = state.page) {
   tell(carried);
 }
 
-let moveRequested = false;
-// Functions that move the person mark a visit for the next draw. A read that changes the place leaves it a repair.
-export const noteMove = () => { moveRequested = true; };
-export const takeMove = () => { const moved = moveRequested; moveRequested = false; return moved; };
+let moveRequested: 'visit' | 'back' | undefined;
+// Functions that move the person mark a visit for the next draw. A read that changes the place leaves it a repair. A page's own
+// Back control (matrix.ts backFromFiles, pluginspage.ts's breadcrumb) marks its move `back`, which the moves it makes keep:
+// where it lands on the visit before, places.ts goes Back to that visit instead.
+export const noteMove = (move: 'visit' | 'back' = 'visit') => { if (moveRequested !== 'back') moveRequested = move; };
+export const takeMove = () => { const moved = moveRequested; moveRequested = undefined; return moved; };
 
 export function showPage(page: Page, { repair = false } = {}) {
   if (!repair) noteMove();
@@ -974,7 +976,7 @@ export function showPage(page: Page, { repair = false } = {}) {
 
 export const filesSkillAvailable = (home: HomeView, key?: string) => home.skills.items.some(skill => key === undefined || skill.key === key);
 
-/** Leaves the Library's Files view for its list (its Back button, or Escape: matrix.ts backFromFiles, which puts its scroll back). */
+/** Leaves the Library's Files view for its list (its Back button, or Escape: matrix.ts backFromFiles). */
 export function leaveFiles() {
   noteMove();
   state.libraryView = 'list';
