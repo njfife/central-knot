@@ -1,11 +1,13 @@
 // Profiles: named sets of library items, switched in one click (here, from the status bar, or from the menu bar or tray icon).
-// The list shows each profile and which are in use; the open profile shows every library item (skills, MCP servers, agents) with
-// a box (in the profile or not), whether it is On now, and what a switch would turn On and Off. Ticking only edits the profile;
-// the library changes on Switch. Every rule shown here is profileplan.ts's (switchPlan, inUse), as profiles.ts carries it out.
+// The list shows each profile and which are in use; the open profile shows every library item a profile can tick (skills, MCP
+// servers, agents) with a box (in the profile or not), whether it is On now, and what a switch would turn On and Off, and under
+// Find a line on what the Library lists beside them (a plugin's items, items only found: profileplan.ts leftOut). Ticking only
+// edits the profile; the library changes on Switch. Every rule shown here is profileplan.ts's (switchPlan, inUse), as
+// profiles.ts carries it out.
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { outcomeBand, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
-import { changes, homeItems, inUse, inUseName, namedItems, switchable, switchPlan, turnsWords, type LiveItem, type Turns } from './profileplan.ts';
+import { changes, homeItems, inUse, inUseName, leftOut, leftOutWords, namedItems, switchable, switchPlan, turnsWords, type LiveItem, type Turns } from './profileplan.ts';
 import type { ItemKind } from './library.ts';
 import { plural } from './model.ts';
 import type { Profile } from './types.ts';
@@ -120,6 +122,12 @@ function findBar(shown: number, total: number, onSwitch: boolean) {
     h('div.toolbar-end', {}, h('span.pf-save-note', {}, onSwitch ? 'Ticks save at once · items change on Switch' : 'Ticks save at once'), find ? h('span.result-count', {}, `${shown} of ${total}`) : null));
 }
 
+/** Under Find, only while the Library lists items no profile can tick: how many, and why (profileplan.ts leftOut). */
+function leftOutBand() {
+  const said = leftOutWords(leftOut(state.home!));
+  return said ? h('div.band.band-help', { role: 'note', id: 'profile-left-out' }, icon('info', 14, 'tone-muted'), h('span.band-text', {}, said)) : null;
+}
+
 const matches = (item: LiveItem) => !find || `${item.name} ${descriptionOf(item)}`.toLowerCase().includes(find.toLowerCase());
 
 /** Whether a mouse button or finger is down right now (afterClick waits for its click). */
@@ -209,7 +217,7 @@ function profileDetail(profile: Profile) {
     !switchable(profile, all) ? h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'), h('span.band-text', {}, `Nothing is in ${profile.name} yet. Tick at least one item to switch to it, or start from what is on now.`),
       button({ variant: 'primary', size: 'small', label: 'Start from what’s on now', id: 'profile-from-now', disabled: !canEditProfiles(), attrs: { title: 'Tick every skill, MCP server and agent that is on now' },
         onclick: () => void saveProfileDef({ id: profile.id, items: all.filter(item => item.on).map(item => item.id) }, `${profile.name} now has what is on.`) })) : null,
-    findBar(shown.length, all.length, !!primary),
+    findBar(shown.length, all.length, !!primary), leftOutBand(),
     h('div.scroll.pf-scroll', { id: 'profile-scroll' }, shown.length ? table(profile, shown, turns, isInUse) : h('p.pf-none', {}, find ? `Nothing matches “${find}”.` : 'Central Knot has no skills, MCP servers or agents yet.')));
 }
 

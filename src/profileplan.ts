@@ -3,12 +3,16 @@
 // a profile is in use exactly while that would change nothing, so which one is in use is worked out, never stored (inUse);
 // and a switch's Undo turns back each item still as the switch left it (undoPlan). An id that names no live library item
 // (one only found in a tool, one a plugin brings, one deleted) is skipped by all three and stays in the profile; so is an item
-// linked to a plugin the home records (library.ts A PLUGIN), which follows its plugin's switch alone (liveItems).
+// linked to a plugin the home records (library.ts A PLUGIN), which follows its plugin's switch alone (liveItems). What the
+// Library lists that no profile can tick, a plugin's items and items only found in a tool, is counted for the page (leftOut).
 // Read by profiles.ts (which carries a switch out), profilemigrate.ts, the Profiles page, History's page and the menus
 // (main.ts), so each says the same. The profiles file and the switch itself are profiles.ts's.
 import type { ItemKind, LibraryItem } from './library.ts';
+import { placeOf } from './libraryrow.ts';
 import { plural } from './model.ts';
-import { andList } from './words.ts';
+import { pageRows } from './pluginrows.ts';
+import { pageOfPart } from './pluginstatus.ts';
+import { andList, kindNouns } from './words.ts';
 import type { HistoryEvent, HomeView, Profile } from './types.ts';
 
 /** What every screen calls the state where no profile is in use. */
@@ -23,18 +27,56 @@ export interface LiveItem { id: string; kind: ItemKind; key: string; name: strin
 /** Each kind's items as the library holds them, deleted ones too (types.ts LibraryView `library`, or a kind's record). */
 export type Libraries = Record<ItemKind, Record<string, LibraryItem>>;
 
+const KINDS = ['skill', 'mcp', 'agent'] as const;
+/** Whether a library item is linked to a plugin the home records (`plugins`: their ids), so it follows that plugin's switch. */
+const linkedToPlugin = (item: LibraryItem, plugins: ReadonlySet<string>) => !!item.source && plugins.has(item.source);
+
 /**
  * Every live library item that profiles act on, skills first, then MCP servers, then agents: all but those linked to a plugin
  * (`plugins`: the ids of the plugins the home records), which a switch never turns On or Off and no profile counts.
  */
 export function liveItems(libraries: Libraries, plugins: ReadonlySet<string>): LiveItem[] {
-  return (['skill', 'mcp', 'agent'] as const).flatMap(kind => Object.values(libraries[kind]).filter(item => !item.deleted && !(item.source && plugins.has(item.source)))
+  return KINDS.flatMap(kind => Object.values(libraries[kind]).filter(item => !item.deleted && !linkedToPlugin(item, plugins))
     .map(({ key, name, on, except }) => ({ id: itemId(kind, key), kind, key, name, on, except })));
 }
 
 /** A home view's live items that profiles act on (each kind's `library` in types.ts HomeView), as the page and the menus read them. */
 export const homeItems = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 'profiles'>) =>
   liveItems({ skill: home.skills.library, mcp: home.mcp.library, agent: home.agents.library }, new Set(home.profiles.plugins));
+
+/** Of one kind, how many of the Library's rows no profile lists, by why. */
+export interface LeftOut { plugin: number; found: number }
+
+/**
+ * What the Library lists that no profile can tick, by kind: a plugin's items (`plugin`: those it brings into a tool it is
+ * installed in, rows of their own, pluginrows.ts pageRows; and those linked to it, which liveItems skips), and items found in a
+ * tool, not in Central Knot yet (`found`: libraryrow.ts placeOf). A deleted item is in neither list.
+ */
+export function leftOut(home: HomeView): Record<ItemKind, LeftOut> {
+  const plugins = new Set(home.profiles.plugins), count = (kind: ItemKind) => {
+    const page = pageOfPart[kind], { items, library } = home[page];
+    return { plugin: pageRows(home, page).rows.length + Object.values(library).filter(item => !item.deleted && linkedToPlugin(item, plugins)).length,
+      found: items.filter(row => placeOf(library[row.key]) === 'found').length };
+  };
+  return { skill: count('skill'), mcp: count('mcp'), agent: count('agent') };
+}
+
+/**
+ * The Profiles page's line on what its list leaves out, with leftOut's counts: what is found and where the Library shows it
+ * (its Found heading, whose rows have Add, turned off on a row that can't be taken in: matrix.ts addButton), then how many of a
+ * plugin's items are not listed, in a clause of its own; '' when it leaves nothing out.
+ */
+export function leftOutWords(counts: Record<ItemKind, LeftOut>): string {
+  const counted = (why: keyof LeftOut) => andList(KINDS.filter(kind => counts[kind][why]).map(kind => {
+    const nouns = kindNouns[pageOfPart[kind]];
+    return plural(counts[kind][why], nouns.one, nouns.many);
+  }));
+  const one = (why: keyof LeftOut) => KINDS.reduce((sum, kind) => sum + counts[kind][why], 0) === 1;
+  const parts = [counted('found') && `${counted('found')} found in your tools that ${one('found') ? 'isn’t' : 'aren’t'} in Central Knot yet `
+    + `(under Found in the Library, with Add ${one('found') ? 'if it' : 'on each that'} can be taken in)`,
+    counted('plugin') && `${counted('plugin')} from ${one('plugin') ? 'a plugin' : 'plugins'}, which a profile doesn’t switch yet`].filter(Boolean);
+  return parts.length ? `Not listed here: ${parts.join('; ')}.` : '';
+}
 
 /** What a switch, or its Undo, changes: the items it turns On, and those it turns Off. */
 export interface Turns { on: LiveItem[]; off: LiveItem[] }

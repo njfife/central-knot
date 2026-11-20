@@ -1,7 +1,7 @@
 // The page's entry: the window's frame around the page (the sidebar, the header, the status bar and the Sync switch), which page
 // draws (renderPage: while another build holds this one, the held screen of otherbuildview.ts instead of every page, with the
-// sidebar's update control kept), and drawing again on a change. On a list page the last result is in the header's own two
-// lines, the whole of it only on Show all (resultHere says the rule). A redraw keeps what is selected, the scroll places and the
+// sidebar's update control kept), and drawing again on a change. On a list page the last result and the sync notices are in the
+// header's own 48px, each whole only in the card that hangs from it (resultHere says the rule). A redraw keeps what is selected, the scroll places and the
 // focus (render), Back and Forward put back a visit's scroll places (places.ts), and a press on a control it replaces still counts
 // (dom.ts keepClicksAcrossRedraws). The page's state and actions are app.ts's; each page is drawn by its own module (pages.ts and
 // the *page.ts modules, matrix.ts for the item tables).
@@ -17,7 +17,7 @@ import { libraryPage } from './pages.ts';
 import { overviewPage } from './overview.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage, pluginsResult } from './pluginspage.ts';
-import { backFromFiles, kindsShown, listResult, resultInHeader, unseenNotices } from './matrix.ts';
+import { backFromFiles, headerNotices, listResult, noticeKindsShown, resultInHeader, unseenNotices } from './matrix.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
@@ -61,14 +61,17 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number | str
     type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': countTitle ? `${label}: ${countTitle}` : label, title: label,
     onclick: () => showPage(page),
   }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 || quiet ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true', title: countTitle }, String(count)),
-    // A change sync made on its own shows as a dot on its page until that notice is painted (seen) or dismissed.
+    // A change sync made on its own shows as a dot on its page until that notice is seen (matrix.ts noticeUnseen).
     news.length ? h('span.nav-unseen', { title: unseenText(news) }) : null);
 }
 
 const anythingOn = () => !!state.home && anyOn(state.home);
-/** The Library's automatic changes not painted yet (matrix.ts unseenNotices); on the open Library, of the kinds not on show (a segment of another kind hides theirs). */
-const unseen = (page: Page) => (!state.home || page !== 'library' ? []
-  : heldKinds(state.home).filter(kind => state.page !== 'library' || !kindsShown().includes(kind)).flatMap(unseenNotices));
+/** The Library's automatic changes not seen yet (matrix.ts unseenNotices); on the open Library, of the kinds whose notices the header doesn't show (its Notices control marks those). */
+const unseen = (page: Page) => {
+  if (!state.home || page !== 'library') return [];
+  const told = state.page === 'library' ? noticeKindsShown() : [];
+  return heldKinds(state.home).filter(kind => !told.includes(kind)).flatMap(unseenNotices);
+};
 /** The dot's tooltip: how many changes it counts, and the first three names. */
 const unseenText = (list: SyncNotice[]) => `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`;
 
@@ -216,36 +219,56 @@ function renderStatus() {
 }
 
 /**
- * A list page's last result (matrix.ts resultInHeader), and its one rule: it lives in the header's own 48px, two lines at most,
- * so it never lies over anything by itself and nothing under it moves, whether it succeeded or not. With problem lines, its
- * sentence then the first of them, each on one line; without, its sentence in two (style.css .header-result); either cut where
- * it runs past them, with Show all (matrix.ts wholeToggle). Show all opens the whole of it as a card hanging from the header
- * over the page (.result-whole), which closes like a menu: on Show less, ×, Escape, or a press that begins outside it
- * (foldResult), and keeps its scroll through a redraw by its id (scrolledNow). A newer result shows folded; a result no longer drawn lets
- * its card go, so none opens again by itself.
+ * The header's rule on a list page: what a click did (its result: matrix.ts resultInHeader) and what sync changed by itself (the
+ * sync notices: matrix.ts headerNotices) live in the header's own 48px, so neither lies over anything by itself nor moves anything
+ * under it, whatever arrives. Its two lines hold the result while there is one on show, however long it stays: with problem lines,
+ * its sentence then the first of them, each on one line; without, its sentence in two (style.css .header-result); either cut where
+ * it runs past them, with Show all (matrix.ts wholeToggle). With no result, they hold the newest notice, said as an automatic change,
+ * its sentence cut where it runs past them, with its × (style.css .header-notice). Beside them, the Notices control counts the
+ * notices, marked while one is unseen; a notice arriving while a result is on show is told there alone, the result keeping the
+ * lines until it fades, is closed or a newer result takes its place. A card hangs from the header over the page, one at a time
+ * (state.shownWhole says which): the result whole, from Show all, or every notice, from Notices or the notice in the lines
+ * (matrix.ts noticesCard). A card closes like a menu: on Show less or Notices again, its ×, Escape, or a press that begins outside
+ * it (foldResult), and keeps its scroll through a redraw by its id (scrolledNow). A newer result shows folded; a card whose result
+ * or notices are no longer drawn, or whose place is left, goes, so none opens again by itself.
  */
 function resultHere() {
   const parts = state.home && !heldBy(state.home) && resultInHeader() ? (state.page === 'plugins' ? pluginsResult() : listResult()) : [];
   const whole = parts.some(part => part.querySelector('#problems-show-all[aria-expanded="true"]'));
-  if (!whole) state.shownWhole = undefined;
-  return parts.length ? [h(`div.header-result${whole ? '.result-whole' : ''}`, { id: whole ? 'result-whole' : undefined }, parts)] : [];
+  const notices = state.home && !heldBy(state.home) ? headerNotices(parts.length > 0) : undefined;
+  if (!whole && !notices?.card) state.shownWhole = undefined;
+  const result = parts.length ? h(`div.header-result${whole ? '.result-whole' : ''}`, { id: whole ? 'result-whole' : undefined }, parts) : null;
+  return [notices?.card ? notices.lines : result ?? notices?.lines, notices?.control].filter((part): part is HTMLElement => !!part);
 }
-/** Folds the card on screen into the header's two lines, answering whether there was one. The redraw waits, so a click that folds it still does its own work. */
-function foldResult(): boolean {
-  if (!document.querySelector('#header .result-whole')) return false;
+/**
+ * Folds the card on screen into the header's two lines, answering whether there was one. The redraw waits, so a click that folds it
+ * still does its own work. The notices' card folded from within (a notice's way off the page, Escape) gives the focus back to Notices.
+ */
+function foldResult(fromWithin = false): boolean {
+  const card = document.querySelector('#header .result-whole');
+  if (!card) return false;
   state.shownWhole = undefined;
+  if (fromWithin && card.id === 'notices-card') document.getElementById('notices')?.focus({ preventScroll: true });
   setTimeout(rerender);
   return true;
 }
 // A press that began in the card and is let go outside it (a selection dragged out) is no press outside: the card stays. A
-// click from the keyboard (detail 0) has no press.
-const inCard = (event: Event) => !!(event.target as Element).closest('#header .header-result');
-let pressedInCard = false;
+// click from the keyboard (detail 0) has no press. In the notices' card, a notice's way off the page (History, its name's link to
+// its row) closes it; every other action stays on this page and keeps it. The second click of a double click begun there, or on the
+// notice in the lines, which opens the card, does nothing, wherever it lands: the first may have put something else under it (the
+// card's top line, or a notice done leaving the list, which grows shorter).
+const inCard = (event: Event) => !!(event.target as Element).closest('#header :is(.header-result, .notices-card)');
+const leavesCard = (event: Event) => !!(event.target as Element).closest('#notices-card :is([id^="notice-history-"], [id^="notice-open-"])');
+let pressedInCard = false, clickedInNotices = false;
 document.addEventListener('pointerdown', event => { pressedInCard = inCard(event); }, true);
-document.addEventListener('click', event => { if (!(event.detail && pressedInCard) && !inCard(event)) foldResult(); }, true);
-// Escape with the card open folds it and does nothing else, before any other Escape is heard: a find box, or a search field's own
+document.addEventListener('click', event => {
+  if (event.detail > 1 && clickedInNotices) { event.stopImmediatePropagation(); event.preventDefault(); return; }
+  clickedInNotices = !!(event.target as Element).closest('#notices-card, #header .header-notice');
+  if (leavesCard(event)) foldResult(true); else if (!(event.detail && pressedInCard) && !inCard(event)) foldResult();
+}, true);
+// Escape with a card open folds it and does nothing else, before any other Escape is heard: a find box, or a search field's own
 // clearing, keeps its words.
-window.addEventListener('keydown', event => { if (event.key === 'Escape' && foldResult()) { event.stopPropagation(); event.preventDefault(); } }, true);
+window.addEventListener('keydown', event => { if (event.key === 'Escape' && foldResult(true)) { event.stopPropagation(); event.preventDefault(); } }, true);
 
 // Laid out, and at each resize: a Show all drawn for a cut shows where the header cuts the sentence or a problem line.
 const cut = (text: Element) => text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight;
@@ -276,7 +299,7 @@ function renderWindow() {
   const { rail } = applyLayout();
   renderHeader(rail);
   drawPage(renderPage);
-  // After the page, which marks the notices it paints seen: the sidebar's dot is for those it didn't.
+  // After the header, which marks the notices it draws seen: the sidebar's dot is for those it didn't.
   renderSidebar();
   recordDraw(visitOffsets);
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
@@ -328,7 +351,7 @@ document.addEventListener('keydown', event => {
     if (find) { event.preventDefault(); find.focus(); }
   }
   // Escape leaves the Files and contents view for the table, except in a text box, where it clears the box (matrix.ts); with a
-  // result's card open it only folds it (foldResult, above).
+  // card open it only folds it (foldResult, above).
   if (event.key === 'Escape' && !typing && state.page === 'library' && state.libraryView === 'files') backFromFiles();
 });
 
