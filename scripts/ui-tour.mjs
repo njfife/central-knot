@@ -173,6 +173,11 @@ const middleOf = selector => a.run(`(() => { const box = document.querySelector(
 /** Keyboard focus on an element, with its focus ring (as a Tab press gives it). */
 const focusOn = selector => a.run(`document.querySelector('${selector}')?.focus({ focusVisible: true })`);
 const refresh = async () => { await a.click('#header-refresh'); await a.settle(); };
+/** Waits until the header's Notices names `name` (its tooltip names the first three it counts): a sync notice reached the page. */
+const noticeFor = name => waitFor(a, `(document.querySelector('#notices')?.title ?? '').includes(${JSON.stringify(name)})`, 15000);
+/** Opens the header's card of sync notices (Notices), where each notice's actions are; `closeNotices` closes it by its ×. */
+const openNotices = async () => { if (!(await a.has('#notices-card'))) { await a.click('#notices'); await a.settle(); } };
+const closeNotices = async () => { if (await a.has('#notices-close')) { await a.click('#notices-close'); await a.settle(); } };
 /** A row's details, opened or closed whichever way they are now. */
 const isOpen = (kind, key) => a.has(`.ov-row[data-key="${rowPart('', kind, key)}"][aria-expanded="true"]`);
 const openRow = async (kind, key) => { if (!(await isOpen(kind, key))) { await a.click(byId(rowPart('open', kind, key))); await a.settle(); } };
@@ -364,11 +369,18 @@ if (wanted('skills')) {
   // An edit made in a tool becomes the current version and reaches the others; its notice offers Undo.
   writeFileSync(join(folderIn('codex', 'standup'), 'SKILL.md'), `${readFileSync(join(folderIn('codex', 'standup'), 'SKILL.md'), 'utf8')}\nEdited in Codex.\n`);
   await refresh();
-  await atEverySize('edit-notice', 'Outside the app, standup’s SKILL.md was edited in Codex, then Refresh: the edit is the current version now, in Claude Code and Copilot CLI too; the notice offers Undo', false, '.sync-notices');
+  await noticeFor('standup');
+  await atEverySize('edit-notice', 'Outside the app, standup’s SKILL.md was edited in Codex, then Refresh: the header says, as an automatic change, that the edit is the current version now, in Claude Code and Copilot CLI too');
+  await openNotices();
+  await atEverySize('edit-notice-card', 'Opened Notices: the card, where the notice offers See change, Undo and History');
+  await closeNotices();
   // A folder deleted by hand turns the skill off everywhere; Central Knot keeps it, and the notice offers Turn it on.
   rmSync(folderIn('copilot', 'release-notes'), { recursive: true, force: true });
   await refresh(); await wait(2300); await refresh();
-  await atEverySize('deleted-by-hand', 'Outside the app, release-notes’s folder was deleted in Copilot CLI, then Refresh (twice, past the settle window): it is off everywhere, kept in Central Knot; the notice offers Turn it on', true, '.sync-notices');
+  await noticeFor('release-notes');
+  await openNotices();
+  await atEverySize('deleted-by-hand', 'Outside the app, release-notes’s folder was deleted in Copilot CLI, then Refresh (twice, past the settle window): it is off everywhere, kept in Central Knot; opened, Notices’ card says so and offers Turn it on', true);
+  await closeNotices();
   await a.click(`#${rowPart('switch', 'skills', 'release-notes')}`); await switchOn('skills', 'release-notes');
   // Found skills that can't go everywhere: a folder that can't be copied as it is, and a name Copilot CLI won't load.
   putSkill('claude', 'has-link', 'A skill with a link inside.');
@@ -424,8 +436,8 @@ if (wanted('sync')) {
   await openKind(a, 'skills');
   await turnOnRow('skills', 'standup');
   edit(join(practice, '.codex/skills/standup/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex.\n'));
-  await waitFor(a, `document.body.innerText.includes('Codex')&&!!document.querySelector('.sync-notice')`);
-  await shot(a, 'edit-spread-notice', 'Outside the app, a line was added to standup\'s SKILL.md in Codex. A few seconds later, without clicking anything: the notice.');
+  await noticeFor('standup');
+  await shot(a, 'edit-spread-notice', 'Outside the app, a line was added to standup\'s SKILL.md in Codex. A few seconds later, without clicking anything: the notice, counted by Notices in the header.');
   await a.click('#nav-history'); await shot(a, 'history-with-edit', 'Clicked "History".');
   const undo = await a.run(`document.querySelector('.history-row button[id^="history-"]')?.id ?? ''`);
   if (undo) { await a.click(`#${undo}`); await shot(a, 'history-undone', 'Clicked "Undo" on that edit.'); }
@@ -436,10 +448,13 @@ if (wanted('sync')) {
   if (await a.has('#sync-now')) { await a.click('#sync-now'); await shot(a, 'sync-now', 'Clicked "Sync now".'); }
   await a.click('#sync-switch');
   rmSync(join(practice, '.copilot/skills/standup'), { recursive: true, force: true });
-  await waitFor(a, `[...document.querySelectorAll('.sync-notice')].some(e => /deleted/.test(e.textContent))`, 10000);
-  await shot(a, 'deletion-notice', 'Sync back on. Outside the app, the standup folder was deleted in Copilot. A few seconds later.');
-  const restore = await a.run(`document.querySelector('[id^="notice-restore-"]')?.id ?? ''`);
-  if (restore) { await a.click(`#${restore}`); await shot(a, 'restored', 'Clicked "Restore" in the notice.'); }
+  await noticeFor('standup');
+  await openNotices();
+  await waitFor(a, `[...document.querySelectorAll('#notices-card .sync-notice')].some(e => /deleted/.test(e.textContent))`, 10000);
+  await shot(a, 'deletion-notice', 'Sync back on. Outside the app, the standup folder was deleted in Copilot. A few seconds later, Notices opened: the card.');
+  const restore = await a.run(`document.querySelector('#notices-card [id^="notice-restore-"]')?.id ?? ''`);
+  if (restore) { await a.click(`#${restore}`); await shot(a, 'restored', 'Clicked "Turn it on" in the notice.'); }
+  await closeNotices();
 }
 
 // ---------- MCP servers ----------
@@ -489,7 +504,11 @@ if (wanted('mcp')) {
   // An edit made in a tool becomes the current version; its versions list says where each came from, and Read shows one.
   edit(settings.codex, text => text.replace('url = "https://docs.example.test/mcp"', 'url = "https://docs.example.test/mcp/v2"'));
   await refresh();
-  await atEverySize('edit-notice', 'Outside the app, docs’s URL was edited in Codex, then Refresh: the edit is the current version, in Copilot CLI and Claude Code too; the notice offers Undo', false, '.sync-notices');
+  await noticeFor('docs');
+  await atEverySize('edit-notice', 'Outside the app, docs’s URL was edited in Codex, then Refresh: the header says, as an automatic change, that the edit is the current version, in Copilot CLI and Claude Code too');
+  await openNotices();
+  await atEverySize('edit-notice-card', 'Opened Notices: the card, where the notice offers Undo and History');
+  await closeNotices();
   await openRow('mcp', 'docs');
   await atEverySize('versions', 'Opened docs: its versions, edited in Codex (current) and found in Claude Code, each with what changed ("URL changed")', true, '.version-row');
   await a.click(`#${rowPart('version-read', 'mcp', 'docs', '1')}`);
@@ -500,9 +519,12 @@ if (wanted('mcp')) {
   // What `codex mcp remove docs` leaves: docs turns off, its entry leaving every tool; Central Knot keeps it, and the notice offers Turn it on.
   edit(settings.codex, text => text.replace(/\n?\[mcp_servers\.docs\][^[]*/, '\n'));
   await refresh(); await wait(2300); await refresh();
-  await atEverySize('deleted-by-hand', 'Outside the app, docs was removed from Codex’s settings (as `codex mcp remove docs` does), then Refresh past the settle window: it is off and taken out of Copilot CLI and Claude Code, kept in Central Knot; the notice offers Turn it on', true, '.sync-notices');
-  const restore = await a.run(`document.querySelector('[id^="notice-restore-"]')?.id ?? ''`);
+  await noticeFor('docs');
+  await openNotices();
+  await atEverySize('deleted-by-hand', 'Outside the app, docs was removed from Codex’s settings (as `codex mcp remove docs` does), then Refresh past the settle window: it is off and taken out of Copilot CLI and Claude Code, kept in Central Knot; opened, Notices’ card says so and offers Turn it on', true);
+  const restore = await a.run(`document.querySelector('#notices-card [id^="notice-restore-"]')?.id ?? ''`);
   if (restore) { await a.click(`#${restore}`); await a.settle(); }
+  await closeNotices();
   // A server a tool can't hold (SSE, in Codex), and a server whose copies differ (the copy question).
   edit(settings.claude, text => { const config = JSON.parse(text); config.mcpServers.live = { type: 'sse', url: 'https://live.example.test/sse' }; return JSON.stringify(config, null, 2); });
   edit(settings.copilot, text => { const config = JSON.parse(text); config.mcpServers.search = { type: 'local', command: 'search-mcp', args: ['--index', 'copilot'], tools: ['*'] }; return JSON.stringify(config, null, 2); });
@@ -556,8 +578,10 @@ if (wanted('agents')) {
 
   // Edits made in a harness: each becomes the current version. Several make the versions list long enough to fold.
   edit(reviewer('codex'), text => text.replace('description = "', 'description = "Checks tests too. '));
-  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
-  await shot(a, 'agents-edit-notice', 'Outside the app, code-reviewer was edited in Codex, then Refresh was clicked: the notice says the edit is its current version now, in the other tools too, with Undo.');
+  await a.click('#header-refresh'); await noticeFor('code-reviewer');
+  await openNotices();
+  await shot(a, 'agents-edit-notice', 'Outside the app, code-reviewer was edited in Codex, then Refresh was clicked; Notices opened: the notice says the edit is its current version now, in the other tools too, with Undo.');
+  await closeNotices();
   for (const [tool, change] of [['claude', text => text.replace(/(description: )/, '$1Names risky changes. ')], ['copilot', text => text.replace('Keep it short.', 'Keep it short. Ask for tests.')],
     ['codex', text => text.replace(/(description = ")/, '$1Keeps comments short. ')], ['claude', text => text.replace(/^(name: )code-reviewer$/m, '$1code-reviewer').replace('Read the change', 'Read the whole change')]]) {
     edit(reviewer(tool), change);
@@ -1652,7 +1676,7 @@ async function editMcpOutside() {
   await openKind(a, 'mcp');
   if (await a.has(`#${rowPart('add', 'mcp', 'files')}`)) { await a.click(`#${rowPart('add', 'mcp', 'files')}`); await a.settle(); }
   edit(join(practice, '.copilot/mcp-config.json'), text => (text.includes('"npx-edited"') ? text.replace('"npx-edited"', '"npx"') : text.replace('"command": "npx"', '"command": "npx-edited"')));
-  await waitFor(a, `!!document.querySelector('.sync-notice')`, 10000);
+  await noticeFor('files');
 }
 
 if (wanted('sizes')) {
@@ -2653,7 +2677,7 @@ if (wanted('sources')) {
   const deslopInClaude = join(practice, '.claude/skills/deslop/SKILL.md');
   await openKind(a, 'skills');
   writeFileSync(deslopInClaude, readFileSync(deslopInClaude, 'utf8').replace('Keep the author’s voice.', 'Keep the author’s voice, and their jokes.'));
-  await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
+  await noticeFor('deslop');
   deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice and their dialect.') }, 'Keep the dialect');
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
@@ -2674,7 +2698,7 @@ if (wanted('sources')) {
   // A line added in Claude Code, and the source's description changed: lines apart, so Merge puts them together.
   writeFileSync(deslopInClaude, `${readFileSync(deslopInClaude, 'utf8')}\nSay what you changed, in one line.\n`);
   await openKind(a, 'skills');
-  await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
+  await noticeFor('deslop');
   deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice and their dialect.').replace('Find and remove the patterns', 'Find and take out the patterns') }, 'Reword the description');
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
@@ -2752,7 +2776,7 @@ if (wanted('source-agents')) {
   await turnOnRow('agents', 'reviewer'); await switchOn('agents', 'reviewer');
   const inClaude = join(practice, '.claude/agents/reviewer.md');
   writeFileSync(inClaude, readFileSync(inClaude, 'utf8').replace('Say where you were lost.', 'Say where you were lost, and why.'));
-  await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
+  await noticeFor('reviewer');
   commit({ 'agents/reviewer.md': reviewer('Read the change as a newcomer would.\nSay where you were lost.', 'Reviews a change for what a newcomer would trip on.') }, 'Reword the description');
   await checkNow();
   await atEverySize('agent-waiting', 'reviewer was turned On, edited in Claude Code, and its description changed at the source; clicked Check now: the band says reviewer changed at the source and yours stays current, and what Merge, Replace and Keep mine do; reviewer’s line, under a warning mark, says the same and ends with Merge, Replace and Keep mine', true, '.source-row');
@@ -2802,7 +2826,7 @@ if (wanted('source-servers')) {
   await atEverySize('server-updated-row', 'On MCP servers, relay’s row: on in every tool, Claude Code’s with the update too', false, `.ov-row[data-key="${rowPart('', 'mcp', 'relay')}"]`, 'start');
   const inCopilot = join(practice, '.copilot/mcp-config.json');
   edit(inCopilot, text => { const parsed = JSON.parse(text); parsed.mcpServers.relay.env.RELAY_REGION = 'east'; return JSON.stringify(parsed, null, 2); });
-  await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
+  await noticeFor('relay');
   commit({ '.mcp.json': servers({ relay: relay('warn'), 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Log less');
   await checkNow();
   await atEverySize('server-waiting', 'relay’s RELAY_REGION was edited in Copilot CLI, and its RELAY_LOG changed at the source; clicked Check now: the band says relay changed at the source and yours stays current, and what Merge, Replace and Keep mine do; relay’s line, under a warning mark, says the same and ends with Merge, Replace and Keep mine', true, '.source-row');
@@ -2896,8 +2920,8 @@ if (wanted('plugin-library')) {
   rmSync(join(market, 'plugins/issue-tracker/skills/triage'), { recursive: true, force: true });
   await refresh(); await waitFor(a, `!!document.querySelector('#pupdate-0-issue-tracker')`, 15000);
   await a.click('#pupdate-0-issue-tracker'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
-  await openKind(a, 'skills'); await waitFor(a, `!!document.querySelector('.sync-notice[data-kind="dropped"]')`, 15000);
-  await atEverySize('dropped-notice', 'Update read issue-tracker, which no longer has triage: on Skills the notice says triage: the plugin issue-tracker no longer has it, so it is off, Central Knot keeps it, with Turn it on (as your own) and History', true, '.sync-notice[data-kind="dropped"]');
+  await openKind(a, 'skills'); await noticeFor('triage'); await openNotices();
+  await atEverySize('dropped-notice', 'Update read issue-tracker, which no longer has triage: on Skills, Notices opened, the notice says triage: the plugin issue-tracker no longer has it, so it is off, Central Knot keeps it, with Turn it on (as your own) and History', true, '.sync-notice[data-kind="dropped"]');
   await a.click('#nav-plugins');
   writeFileSync(join(market, 'plugins/issue-tracker/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp', '--v2'] } } }));
   await refresh(); await waitFor(a, `/An update is ready/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
@@ -2910,9 +2934,12 @@ if (wanted('plugin-library')) {
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#pswitch-page-0-document-tools')`, 15000);
   await a.click('#pswitch-page-0-document-tools'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   edit(join(practice, '.pi/agent/skills/pdf-reader/SKILL.md'), text => `${text}\nMy own way of reading PDFs.\n`);
-  await refresh(); await openKind(a, 'skills'); await waitFor(a, `!!document.querySelector('.sync-notice[data-kind="let-go"]')`, 15000);
+  await refresh(); await openKind(a, 'skills'); await noticeFor('pdf-reader');
   await openRow('skills', 'pdf-reader');
-  await atEverySize('let-go-row', 'pdf-reader was edited in Pi: on Skills the notice says it is your own now, no longer following the plugin document-tools, that it stays in the tools that have it and its row lets it into the others; its row says Pi only, with no “from the plugin”, and its versions keep the plugin’s', true, `.ov-row[data-key="${rowPart('', 'skills', 'pdf-reader')}"]`, 'start');
+  await atEverySize('let-go-row', 'pdf-reader was edited in Pi: on Skills its row says Pi only, with no “from the plugin”, and its versions keep the plugin’s', true, `.ov-row[data-key="${rowPart('', 'skills', 'pdf-reader')}"]`, 'start');
+  await openNotices();
+  await atEverySize('let-go-notice', 'Opened Notices: the notice says pdf-reader is your own now, no longer following the plugin document-tools, that it stays in the tools that have it and its row lets it into the others', false, '.sync-notice[data-kind="let-go"]');
+  await closeNotices();
   await openRow('skills', 'spreadsheet'); await a.click(`#${rowPart('delete', 'skills', 'spreadsheet')}`); await a.click(`#${rowPart('delete-confirm', 'skills', 'spreadsheet')}`); await a.settle();
   await a.click('#nav-plugins'); await refresh(); await waitFor(a, `/you deleted it/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
   await atEverySize('own-and-deleted', 'document-tools’ page: Its items lists skill charts (plain: on in Pi), skill pdf-reader “Not brought in: you have your own”, and skill spreadsheet, deleted from Central Knot, “Deleted here: tick to bring it back”', true, '.plugin-items-section');
