@@ -1618,6 +1618,9 @@ async function practiceFlow() {
     (await a.text('.empty-body'))?.includes(`from the status bar or from the ${trayIcon},`), await a.text('.empty-body'));
   await newProfile(a, 'Incident');
   same('an empty profile offers no switch: it would turn everything off', [await a.exists('#profile-switch'), await a.exists('#profile-from-now')], [false, true]);
+  same('the profile lists the four skills, and under Find says what the Library lists beside them: the servers and agents only found',
+    [(await a.all('.pf-row[data-item]', 'e.dataset.item')).sort(), await a.text('#profile-left-out .band-text')], [['skill:notes', 'skill:release-notes', 'skill:review', 'skill:standup'],
+      'Not listed here: 2 MCP servers and 2 agents found in your tools that aren’t in Central Knot yet (Add them in the Library).']);
   await a.click('#pf-skill\\:notes');
   same('ticking only edits the profile', allFolders(), allOn);
   await sizeTo(a, ...SMALLEST);
