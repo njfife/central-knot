@@ -2714,7 +2714,8 @@ if (wanted('sources')) {
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await atEverySize('check-failed', 'The repository was taken away; clicked Check now: the band says why it couldn’t be read, and the row says it too, under the last read it keeps; what came from it stays as it is', false, '.source-row');
   await a.size(860, 560);
-  await a.click('.source-row .source-actions button.ghost');
+  // By its id: since #197 the row's first ghost button is "Show in the Library", which leaves the page.
+  await a.click('.source-row .source-actions [id^="source-remove-"]');
   await shot(a, 'remove-asked-860', 'Clicked Remove… at 860×560: the question in place, that its skills and agents stay in Central Knot as they are, On or Off, with their versions, with Remove and Cancel');
   await a.size(1280, 800);
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
