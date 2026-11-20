@@ -583,8 +583,6 @@ const queueOff = (stops: boolean) => stops || !!state.busy;
 export const problemsBand = (problems: DestinationResult[]) => h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
   h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (problems.length > 4 ? ` · and ${problems.length - 4} more` : '')));
 
-/** Names shown as names, so a server called "files" does not read as a word in the sentence. */
-
 /** Where an item's details are drawn: under its row, docked beside the table, or in the Library's Files view. */
 type Placement = 'row' | 'dock' | 'files';
 
@@ -1162,17 +1160,17 @@ const keptNotices = new Map<PageKind, Map<string, Told>>();
 const foldedNotices = new Map<PageKind, Set<string>>();
 const keptSync = new Map<PageKind, boolean>();
 /**
- * Each notice's place in the order of arrival, given the first time the page meets it: as the view that brings it is taken (app.ts
- * setHome), or a click's result (toldNotices). The newest is the last to arrive, whatever its kind or the page open then.
+ * Each notice's place in the order of arrival, given as the page receives it: the view that brings it taken (app.ts setHome), or
+ * the answer of the pass a click ran (app.ts received). The newest is the last to arrive, whatever its kind or the page open then.
  */
 const arrivals = new Map<string, number>();
 export const noticeArrived = (id: string) => { if (!arrivals.has(id)) arrivals.set(id, arrivals.size); return arrivals.get(id)!; };
 /**
  * Whether `newer` tells of a later save of the item `older` tells of a save of (an edit, competing edits or a deletion by hand,
- * types.ts ItemNotice), and takes its place: one active notice per item's saves, so an Undo undoes its own, every save in History.
- * A plugin's notice of an item (its own now, or dropped) stays beside it.
+ * types.ts ItemNotice), later by the order they arrived in, and takes its place: one active notice per item's saves, so an Undo
+ * undoes its own, every save in History. A plugin's notice of an item (its own now, or dropped) stays beside it.
  */
-export const supersedes = (newer: SyncNotice, older: SyncNotice) => newer.history !== older.history && 'winner' in newer && 'winner' in older && newer.key === older.key;
+export const supersedes = (newer: SyncNotice, older: SyncNotice) => 'winner' in newer && 'winner' in older && newer.key === older.key && noticeArrived(newer.history) > noticeArrived(older.history);
 /** One kind's notices, kept or folded as the header shows them; `cardOpen`, the card is open on them. */
 function toldNotices(kind: PageKind, cardOpen: boolean): Told[] {
   if (!state.home) return [];
@@ -1192,6 +1190,8 @@ function toldNotices(kind: PageKind, cardOpen: boolean): Told[] {
   keptSync.set(kind, state.home.syncOn);
   // The wording is fixed when the notice first shows: a Sync once stays "Synced once" after sync is turned on.
   for (const notice of news) {
+    // Of two saves of one item, the later to arrive is the one kept, whichever the list meets first.
+    if ([...kept.values()].some(told => supersedes(told, notice))) { folded.add(keyOf(notice)); continue; }
     for (const [key, told] of kept) if (supersedes(notice, told)) retire(key);
     kept.set(keyOf(notice), { ...notice, of: kind, once: !state.home.syncOn, arrived: noticeArrived(keyOf(notice)) });
   }
@@ -1273,7 +1273,8 @@ function noticesControl(list: Told[], open: boolean, openCard: () => void) {
 /**
  * Every notice whole, each with its actions (See change, Undo or Turn it on, History, Turn sync on), under a top line with their
  * count, Dismiss all and the card's ×: the card hanging from the header that Notices or the notice in the lines opens, as tall as
- * its notices up to the window's height less 120px, past which they scroll in it (style.css .notices-card). An action that stays
+ * its notices up to the window's height less 120px, past which they scroll in it (style.css .notices-card); it grows with an arrival
+ * rather than keep a height it opened at, which would hide the arrival in a small scrolling box. An action that stays
  * on this page leaves it open, its notice leaving the list once done; one that leaves the page (History, a name's link) closes it,
  * as do its ×, Escape and a press outside (renderer.ts foldResult). Empty, it goes.
  */

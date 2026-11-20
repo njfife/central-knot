@@ -254,15 +254,16 @@ function foldResult(fromWithin = false): boolean {
 }
 // A press that began in the card and is let go outside it (a selection dragged out) is no press outside: the card stays. A
 // click from the keyboard (detail 0) has no press. In the notices' card, a notice's way off the page (History, its name's link to
-// its row) closes it; every other action stays on this page and keeps it. The second click of a double click begun there does
-// nothing, wherever it lands: the first may have moved what lay under it (a notice done leaves the list, which grows shorter).
+// its row) closes it; every other action stays on this page and keeps it. The second click of a double click begun there, or on the
+// notice in the lines, which opens the card, does nothing, wherever it lands: the first may have put something else under it (the
+// card's top line, or a notice done leaving the list, which grows shorter).
 const inCard = (event: Event) => !!(event.target as Element).closest('#header :is(.header-result, .notices-card)');
 const leavesCard = (event: Event) => !!(event.target as Element).closest('#notices-card :is([id^="notice-history-"], [id^="notice-open-"])');
 let pressedInCard = false, clickedInNotices = false;
 document.addEventListener('pointerdown', event => { pressedInCard = inCard(event); }, true);
 document.addEventListener('click', event => {
   if (event.detail > 1 && clickedInNotices) { event.stopImmediatePropagation(); event.preventDefault(); return; }
-  clickedInNotices = !!(event.target as Element).closest('#notices-card');
+  clickedInNotices = !!(event.target as Element).closest('#notices-card, #header .header-notice');
   if (leavesCard(event)) foldResult(true); else if (!(event.detail && pressedInCard) && !inCard(event)) foldResult();
 }, true);
 // Escape with a card open folds it and does nothing else, before any other Escape is heard: a find box, or a search field's own

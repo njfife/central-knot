@@ -9586,6 +9586,17 @@ async function libraryFlow() {
   await closeNotices(tb);
   edit('beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta');
   check('six edited at once, the card closed: Notices counts six, the three before folded into History', await until(async () => (await control())?.[0] === '6', 30000), await control());
+  // A double click on the end of "Automatic change:" in the lines, at 1316 with the sidebar open: the first opens the card; the
+  // second, landing where its top line's Dismiss all now is, does nothing.
+  await sizeTo(tb, 1316, 819);
+  if (await tb.run(`document.body.classList.contains('rail')`)) await tb.click('#sidebar-toggle');
+  const lineAt = await tb.run(`(box => ({ x: Math.round(box.right - 8), y: Math.round(box.top + 4) }))(document.querySelector('#header .header-notice .notice-source').getBoundingClientRect())`);
+  await mouse(tb, 'mouseMoved', lineAt, 0); await mouse(tb, 'mousePressed', lineAt, 1); await mouse(tb, 'mouseReleased', lineAt, 0);
+  await wait(120);
+  for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await tb.send('Input.dispatchMouseEvent', { type, x: lineAt.x, y: lineAt.y, button: 'left', buttons, clickCount: 2 });
+  await tb.settle();
+  same('a double click on the notice in the lines opens the card, and every notice is still there', [await tb.exists('#notices-card'), (await control())?.[0], (await inCard()).length], [true, '6', 6]);
+  await fullSize(tb);
   await openNotices(tb);
   same('Dismiss all is in the card’s top line, beside the count', await tb.text('#notices-card .notices-head #notices-dismiss'), 'Dismiss all');
   await noticePictures('card-six', () => openNotices(tb));
@@ -9660,6 +9671,35 @@ async function libraryFlow() {
   check('History has both saves', await until(async () => (await editsInHistory()).filter(entry => entry === 'iota: true').length >= 2), await editsInHistory());
   await openKind(tb, 'all');
   await letNoticesGo(tb);
+  // mu's first save read by a click's pass (lambda's switch, main's queue held so the click's pass is first), the Library put on
+  // Agents meanwhile; its second save read in the background. Back on All the list meets the later save's notice first: it is the
+  // active one all the same, its Undo going back one save, and History keeps both (a development run: it reaches main).
+  if (tb.inspect) {
+    const muFile = join(T.claude, 'mu/SKILL.md'), save = words => { writeFileSync(muFile, text('mu', words)); utimesSync(muFile, ago(0.0002), ago(0.0002)); return text('mu', words); };
+    const inspector = await tb.main(), held = await holdQueue(inspector, tb);
+    let muFirst;
+    try {
+      await tb.run(`document.getElementById('${rowPart('switch', 'skills', 'lambda')}').click()`);
+      muFirst = save('First save, read by a click’s pass.');
+      await tb.run(`document.getElementById('library-kind-agents').click()`);
+    } finally { await held.release(); inspector.close(); }
+    await done(tb);
+    check('the click’s pass took mu’s first save to Copilot CLI', await until(() => copilotSays('mu') === muFirst, 30000), copilotSays('mu'));
+    const muSecond = save('Second save, read in the background.');
+    check('mu’s second save reaches Copilot CLI, the Library on Agents', await until(() => copilotSays('mu') === muSecond, 30000), copilotSays('mu'));
+    check('…and the page has read it: the dot names mu', await until(async () => /\bmu\b/.test(await dotSays() ?? ''), 30000), await dotSays());
+    await tb.click('#library-kind-all');
+    await openNotices(tb);
+    same('back on All, the card has one notice for mu', (await inCard()).filter(name => name === 'mu').length, 1);
+    await tb.run(`[...document.querySelectorAll('#notices-card .sync-notice')].find(notice => notice.querySelector('.item-name')?.textContent === 'mu')?.querySelector('[id^="notice-undo-"]')?.click()`);
+    await done(tb);
+    same('its Undo goes back one save: both tools have the first', [readNow(muFile), copilotSays('mu')], [muFirst, muFirst]);
+    await tb.click('#nav-history');
+    check('History has both saves of mu', await until(async () => (await editsInHistory()).filter(entry => entry === 'mu: true').length >= 2), await editsInHistory());
+    await openKind(tb, 'all');
+    if (!(await switchOn(tb, 'skills', 'lambda'))) { await tb.click(`#${rowPart('switch', 'skills', 'lambda')}`); await done(tb); }
+    await letNoticesGo(tb);
+  }
   // Away, the agent edited, then a skill: back on All, the skill's notice is the newest, in the lines and first in the card, though
   // the Library lists skills before agents.
   await tb.click('#nav-overview');
