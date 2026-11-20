@@ -177,6 +177,10 @@ test('A draft changes only the tools ticked for the base, leaves a copy edited i
 
 test('A tool that fails, answers out of form, takes too long or is stopped gives no draft, says why in its own words, and leaves nothing behind', async () => {
   const box = await sandbox();
+  // writeDraft makes its scratch folder in os.tmpdir(), which on macOS and Linux follows TMPDIR: here, this test's own folder,
+  // so the last check sees only what these drafts left, not a folder another run left or is using in the shared one.
+  const shared = process.env.TMPDIR;
+  process.env.TMPDIR = box.base;
   try {
     await writeFile(box.file('.claude/CLAUDE.md'), 'Be brief.\n');
     const sources = await draftSources(box.context, await box.snapshots());
@@ -199,8 +203,11 @@ test('A tool that fails, answers out of form, takes too long or is stopped gives
     // Nothing to sort: no tool is run at all.
     assert.equal((await writeDraft({ base: '', baseHash: '', files: [] }, 'claude-cli', join(box.base, 'not-there'), { shown: '' })).stopped, 'No tool’s file has instructions of its own, so there is nothing to draft from.');
     assert.equal(await readFile(box.file('.claude/CLAUDE.md'), 'utf8'), 'Be brief.\n');
-    assert.deepEqual((await readdir(tmpdir())).filter(name => name.startsWith('central-knot-draft-')), []);
-  } finally { await box.cleanup(); }
+    assert.deepEqual((await readdir(box.base)).filter(name => name.startsWith('central-knot-draft-')), []);
+  } finally {
+    if (shared === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = shared;
+    await box.cleanup();
+  }
 });
 
 test('The tools that can write a draft are those with a CLI on this computer', async () => {
