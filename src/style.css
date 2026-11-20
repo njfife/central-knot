@@ -1289,8 +1289,12 @@ span.ins-confirm { margin-top: 0; }
 .plugin-row-about { flex: 0 1 auto; min-width: 0; font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-sep { flex: none; margin: 0 8px; color: var(--ink-faint); }
 .plugin-row-holds { flex: 0 0 auto; max-width: 100%; font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Its items in the Library (pluginparts.ts libraryLink), last on the line: the words before it shorten, never the link. */
-.plugin-row-library { flex: none; padding: 0 4px; font-size: 11.5px; }
+/* Its items in the Library (pluginparts.ts libraryLink), last on the line. Short of room, the description gives way first, then
+   what it holds, each ending in "…"; the link keeps its words until the line is narrower than they are, then it too ends in
+   "…", keeping the room of the two "·" before it (its whole words are its title). In a narrow table its "·" stays. */
+.plugin-row-line:has(> .plugin-row-library) > .plugin-row-about { flex-shrink: 100; }
+.plugin-row-line:has(> .plugin-row-library) > :is(.plugin-row-holds, .plugin-row-left) { flex-shrink: 1; min-width: 0; }
+.plugin-row-library { flex: none; max-width: calc(100% - 40px); padding: 0 4px; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
 .plugin-row-go { display: grid; place-items: center; }
 /* A tool behind the marketplace: the note, then Update for every such tool, wrapping under it when the name column is narrow. */
 .plugin-row-update { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; min-width: 0; }
@@ -1309,6 +1313,7 @@ span.ins-confirm { margin-top: 0; }
 .hint-short { display: none; }
 @container table (width < 700px) {
   .plugin-row-about, .plugin-row-sep, .hint-long { display: none; }
+  .plugin-row-sep:has(+ .plugin-row-library) { display: inline; }
   .hint-short { display: inline; }
 }
 .cannot-dash { font-weight: 700; color: var(--ink-soft); }

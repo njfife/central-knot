@@ -28,7 +28,7 @@ export function libraryLink(entry: MarketplaceView, plugin: PluginView, id: stri
   if (!app.home || !pluginsHere(app.home).has(from)) return null;
   const go = (event: Event) => { event.stopPropagation(); openKind('all', { from }); };
   return look === 'page' ? button({ variant: 'link', size: 'micro', label: 'Its items in the Library', id, onclick: go })
-    : h('button.text-action.plugin-row-library', { type: 'button', id, onclick: go }, 'Its items in the Library');
+    : h('button.text-action.plugin-row-library', { type: 'button', id, title: 'Its items in the Library', onclick: go }, 'Its items in the Library');
 }
 
 /** What a plugin holds, as far as known: the catalog's counts, or its files once read (a plugin kept elsewhere). */

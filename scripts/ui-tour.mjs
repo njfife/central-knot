@@ -2958,7 +2958,7 @@ if (wanted('parts-migration')) {
   await addMarketplace(a, market);
   await refresh();
   await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`, 20000);
-  await a.click('#popen-0-document-tools'); await waitFor(a, `/Its items/.test(document.querySelector('.plugin-page')?.textContent ?? '')`, 15000);
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-items-section')`, 15000);
   await atEverySize('migrated-page', 'One look after the upgrade: document-tools’ parts are its items. Its items lists skill pdf-reader, edited in Pi, “Not brought in: you have your own”, and skill spreadsheet, left out of Pi, kept out there; Pi’s line counts its items on', true, '.plugin-items-section', 'start');
   await openKind(a, 'skills'); await openRow('skills', 'triage');
   await atEverySize('migrated-row', 'On Skills, triage, a part in Pi before, is an item “from the plugin issue-tracker”, on in Pi, opened: its tools’ lines and the line saying it follows the plugin', true, `.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`, 'start');

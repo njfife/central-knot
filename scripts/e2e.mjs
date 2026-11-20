@@ -2400,7 +2400,7 @@ async function practiceFlow() {
   await a.click('#nav-plugins');
   if (await a.exists('#plugin-back')) await a.click('#plugin-back');
   await a.click('#popen-0-issue-tracker');
-  for (let tries = 0; tries < 50 && !/Its items/.test(await a.text('.plugin-page') ?? ''); tries++) await wait(100);
+  for (let tries = 0; tries < 50 && !(await a.exists('.plugin-items-section')); tries++) await wait(100);
   check('issue-tracker’s page lists its items, recorded by the move', /Its items[\s\S]*skill triage[\s\S]*MCP server issues/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-page'));
   await openKind(a, 'skills');
   // Claude Code has the plugin itself: on Skills its mark says the skill comes through it (never "No copy" or "Can't load
@@ -2563,7 +2563,7 @@ async function practiceFlow() {
   check('pdf-reader, edited in Pi before the move, is his own now, said once', /pdf-reader is your own now/.test(await a.text('.bands') ?? '') && !/from the plugin/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'pdf-reader')}"]`) ?? ''), [await a.text('.bands'), await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'pdf-reader')}"]`)]);
   await a.click('#nav-plugins');
   if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-document-tools');
-  for (let tries = 0; tries < 50 && !/Its items/.test(await a.text('.plugin-page') ?? ''); tries++) await wait(100);
+  for (let tries = 0; tries < 50 && !(await a.exists('.plugin-items-section')); tries++) await wait(100);
   const migrated = await a.text('.plugin-items-section') ?? '';
   check('the migrated plugin’s page lists Its items: pdf-reader his own, spreadsheet kept out of Pi', /skill pdf-reader\s*Not brought in: you have your own/.test(migrated) && /skill spreadsheet/.test(migrated), migrated);
   await fitsAtMinimum(a, 'a migrated plugin’s page, with Its items');
@@ -4308,7 +4308,7 @@ async function openCodeFlow() {
   }
   await p.click('#nav-plugins');
   await p.click('[id^="popen-"][id$="-issue-tracker"]');
-  for (let tries = 0; tries < 40 && !/Its items/.test(await p.text('.plugin-page') ?? ''); tries++) await wait(100);
+  for (let tries = 0; tries < 40 && !(await p.exists('.plugin-items-section')); tries++) await wait(100);
   await fitsAtMinimum(p, 'a plugin’s page with five tools');
   await pictures(p, 'opencode-five-plugin-page');
   same('no page errors, OpenCode in the Practice copy', p.pageErrors, []);
@@ -6088,7 +6088,7 @@ esac
   check('issues is one row on MCP servers, from the plugin too', /from the plugin issue-tracker/.test(await a.text(`.ov-row[data-key="${rowPart('', 'mcp', 'issues')}"]`) ?? ''), await a.text('.page'));
   await a.click('#nav-plugins');
   if (!(await a.exists('.plugin-items-section'))) await a.click('#popen-0-issue-tracker');
-  for (let tries = 0; tries < 50 && !/Its items/.test(await a.text('.plugin-page') ?? ''); tries++) await wait(100);
+  for (let tries = 0; tries < 50 && !(await a.exists('.plugin-items-section')); tries++) await wait(100);
   check('its page lists its items for Pi', /Its items[\s\S]*skill triage[\s\S]*MCP server issues/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-page'));
   // Changed in Pi, triage is let go: the person's own from then on, said once on Skills; an update of the plugin's issues still follows.
   writeFileSync(join(home, '.pi/agent/skills/triage/SKILL.md'), `${readFileSync(join(home, '.pi/agent/skills/triage/SKILL.md'), 'utf8')}\nMine.\n`);
