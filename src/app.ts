@@ -1747,10 +1747,12 @@ export const profileState = {
 };
 
 /** What a switch or its Undo did, as its band says it: what it turned On and Off, and what could not change. */
-function turnedOutcome(page: Page, lead: string, turned: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'>, results: DestinationResult[], act?: Outcome['act']) {
+function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']>, results: DestinationResult[], act?: Outcome['act']) {
   const leftSaid = turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : '';
+  // An Undo's plugin copies changed since the switch (profiles.ts undoSwitch), left as they are.
+  const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}, changed since the switch: ${andList(turned.since)}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
-  tell({ page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0, act });
+  tell({ page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0 || !!turned.since?.length, act });
 }
 
 /** What a switch did, with Undo switch (from the page or, next time the window shows, the menu bar). */

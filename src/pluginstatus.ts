@@ -213,13 +213,16 @@ export const partWords: Record<PartKind, [string, string]> = { skill: ['skill', 
 /** "version 1.2", or nothing when the catalog gave none. */
 export const versionWord = (version?: string) => (version ? `version ${version}` : '');
 
+/** That a tool has no switch for one item of a plugin of this kind, in the words the plugin's page and the Profiles page both say it in. */
+export const noSingleSwitch = (tool: HarnessId, kind: PartKind) => `${names[tool]} has no switch for a single ${partWords[kind][0]} of a plugin`;
+
 /**
  * Tools with no switch for one skill of a plugin, and why (ENB-06). Claude Code's skillOverrides leave plugin skills alone,
  * so only the whole plugin turns off there; a deny rule only fails the call and is not Disable. Codex keeps the switch in
  * config.toml (`[[skills.config]]` by name, which outlives an update) and Copilot CLI behind its own `skill disable`.
  */
 export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
-  'claude-cli': 'Claude Code has no switch for a single skill of a plugin: only the whole plugin turns off there.',
+  'claude-cli': `${noSingleSwitch('claude-cli', 'skill')}: only the whole plugin turns off there.`,
 };
 
 /**

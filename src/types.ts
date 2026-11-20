@@ -420,7 +420,7 @@ export interface Change {
   forPlugin?: string;
 }
 
-export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, and what is not as it asked. */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'>; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, and what is not as it asked; and the plugins' items' copies it left because they were changed since, or are no longer the plugin's (`since`: "pdf-reader in Codex"). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'> & { since?: string[] }; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
  * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
@@ -553,10 +553,12 @@ export interface HistoryEvent {
   tookOver?: TookOver;
   /**
    * 'profile': a profile switch (`toName`: the profile, by its name then), or the profiles migration's one entry (`migrated`,
-   * `toName` the profile last switched to before it, written when it turns something Off): the library items it turned On and Off. Its Undo turns back each item still as it left it (profileplan.ts undoPlan). An entry from before profiles
-   * were sets of items has neither `on` nor `off`: it is past.
+   * `toName` the profile last switched to before it, written when it turns something Off): the library items it turned On and
+   * Off, and a switch's plugins' items' copies it turned (`plugins`: written as planned before the switch, then as each tool
+   * confirmed). Its Undo turns back each item and copy still as it left it (profileplan.ts undoPlan, pluginUndo). An entry from
+   * before profiles were sets of items has neither `on` nor `off`: it is past.
    */
-  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; migrated?: true };
+  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; migrated?: true };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
   /** 'added', from before the library: copies for tools a synced item synced to again. */
@@ -1345,9 +1347,10 @@ export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the
 // ---------- Profiles ----------
 
 /**
- * A named set of library items to have On (profileplan.ts): `skill:<key>`, `agent:<key>` and `mcp:<key>`, and plugins' items as
- * `plugin:<kind>:<key>` (profileplan.ts pluginItemId), which no switch acts on yet. Switching to it turns those library items On
- * and every other library item Off; nothing else is kept about it, and which profile is in use is worked out.
+ * A named set of items to have on (profileplan.ts): library items as `skill:<key>`, `agent:<key>` and `mcp:<key>`, and plugins'
+ * items as `plugin:<kind>:<key>` (profileplan.ts pluginItemId). Switching to it turns those library items On and every other Off,
+ * and each plugin's item on or off in each tool that can switch that one item; nothing else is kept about it, and which profile
+ * is in use is worked out.
  */
 export interface Profile { id: string; name: string; items: string[] }
 
@@ -1372,8 +1375,16 @@ export interface ProfileEdit { id?: string; name?: string; items?: string[]; res
 export interface SwitchedItem { id: string; name: string }
 
 /**
+ * One copy of a plugin's item a profile switch turned, as History keeps it: the item's id (profileplan.ts pluginItemId) and its
+ * name then, the tool, and what the switch turned it to (`on`); it was the other before. A copy placed in Pi and OpenCode is its
+ * library item turned once, kept as one of these for each tool it is in.
+ */
+export interface PluginSwitched { id: string; name: string; tool: HarnessId; on: boolean }
+
+/**
  * What a switch did: the profile's name, the items it turned On and Off and those not as it asked once its passes ran (`left`:
- * one turned Off again because a copy was deleted by hand; History says so), by name; and what could not be done in a tool
- * (`results`). `event`: its History entry; none when nothing changed.
+ * one turned Off again because a copy was deleted by hand; History says so), by name, a plugin's item once however many tools it
+ * was turned in; and what could not be done in a tool (`results`: a plugin item's copy held or failed there too). `event`: its
+ * History entry; none when nothing changed.
  */
 export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; view?: HomeView }
