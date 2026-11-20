@@ -4,7 +4,8 @@
 // rows open, switches take clicks), and the background refresh waits: the home is read once when the list is empty and anything
 // owes it a read (app.ts readHomeOnce). A run of clicks, said once with one Undo, is decided here for both routes (runAt): a click
 // joins the run on its place while that run still has a click waiting or running, or within FADE_MS after its last click ended,
-// unless something ended it (endRun: its result's ×, its Undo or any other action, another page or tool's page, another home).
+// unless something ended it (endRun: its result's ×, its Undo or any other action, another home; another page or tool's page
+// once the list's clicks are carried out: app.ts leaveResults).
 // Here: the list, the runs, a click's place in them, taking a waiting click back, and the state a row's switch is drawn in
 // meanwhile (wantedOn). Each route keeps its own work, its row while its click waits (the item lists draw the new state; Plugins
 // say "Waiting to…": pluginparts.ts clickNote) and its result with its Undo (app.ts sayRun; pluginstate.ts market.lastRun).

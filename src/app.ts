@@ -959,8 +959,9 @@ export function closeResult() { endRun(); state.outcome = undefined; state.skill
  * A home switch's result survives one move, since switching is often followed by a click elsewhere; `page` is where it lands.
  */
 export function leaveResults(page = state.page) {
-  // Another page, or another tool's page, ends the run of clicks (clicklist.ts).
-  endRun();
+  // Another page, or another tool's page, ends the run of clicks (clicklist.ts) once they are carried out. A run still being
+  // carried out goes on, whatever page is open meanwhile, and is said whole where its result belongs (sayRun).
+  if (!clickList.running) endRun();
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   state.skillsResult = undefined; state.mcpResult = undefined; state.agentsResult = undefined;
   tell(carried);
