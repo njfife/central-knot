@@ -1046,6 +1046,22 @@ const ROW_PIECES_CUT = `(() => {
   return out;
 })()`;
 
+/**
+ * A box that scrolls by itself (`selector`: its first on the page), scrolled `by` px (sideways with `sideways`), then the page
+ * drawn again by `redraw` (a click elsewhere, Refresh, a background read): [whether the page was drawn again, where the box is
+ * now], [true, by] when the redraw kept its place (renderer.ts scrolledNow). While it is read the box is held to 60 px (wide,
+ * with `sideways`), so it scrolls whatever the flow's text and the window's size.
+ */
+async function placeThroughRedraw(a, selector, redraw, { by = 40, sideways = false } = {}) {
+  const box = `document.querySelector(${JSON.stringify(selector)})`, axis = sideways ? 'scrollLeft' : 'scrollTop';
+  const short = `${selector} { ${sideways ? 'max-width' : 'max-height'}: 60px !important; overflow: auto !important; }`;
+  await a.run(`(sheet => { window.ckShort = sheet.insertRule(${JSON.stringify(short)}, sheet.cssRules.length); ${box}.${axis} = ${by}; document.querySelector('#header > *').ckDrawn = true; })(document.styleSheets[0])`);
+  await redraw();
+  const after = await a.run(`[!document.querySelector('#header > *').ckDrawn, ${box}?.${axis} ?? null]`);
+  await a.run(`document.styleSheets[0].deleteRule(window.ckShort)`);
+  return after;
+}
+
 /** Sizes the page to width × height, and lets the app hear the resize. A real window that size leaves its page shorter (SMALLEST). */
 async function sizeTo(a, width, height) {
   await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -1347,6 +1363,7 @@ async function agentCopiesUnderTheList(a, practice) {
   ]);
   await a.click(`#${rowPart('diff', 'agents', 'changelog')}`);
   check('Read every copy opens each of the three prompts in full', (await a.all('.compare-copies .content', 'e.textContent')).length === 3, await a.text('.details-differs'));
+  same('scrolled, the three copies stay where they were when a click elsewhere draws the page again', await placeThroughRedraw(a, '.compare-copies', () => a.click('#library-kind-agents')), [true, 40]);
   for (const [width, height, shape, copies] of [[1280, 800, 'under', 'one under the other'], [1728, 1117, 'beside', 'one under the other'], [2560, 1440, 'beside', 'beside each other']]) {
     await sizeTo(a, width, height);
     same(`at ${width}×${height} an agent’s three copies in full are under the list and as wide as it, ${copies}, the list ${shape} the question`,
@@ -1602,6 +1619,9 @@ async function practiceFlow() {
   same('an empty profile offers no switch: it would turn everything off', [await a.exists('#profile-switch'), await a.exists('#profile-from-now')], [false, true]);
   await a.click('#pf-skill\\:notes');
   same('ticking only edits the profile', allFolders(), allOn);
+  await sizeTo(a, ...SMALLEST);
+  same('in a narrow window, where Profiles scrolls as one, it stays where it was through Refresh', await placeThroughRedraw(a, '.profiles-split', () => a.click('#header-refresh')), [true, 40]);
+  await fullSize(a);
   const stateShown = key => a.text(`.pf-row[data-item="skill:${key}"] .pf-state`);
   same('before the click the page says what switching turns off, row by row and in the header', [await stateShown('notes'), await stateShown('standup'), await a.text('.profile-header p')], ['Stays on', 'Turns off', 'Switching turns 3 items off']);
   await a.click('#profile-switch');
@@ -2156,12 +2176,15 @@ async function practiceFlow() {
   same('and marks what differs from the current version: the words only the current one has are struck through', await a.all('.version-read .change-gone', 'e.textContent'), ['Edited in Codex.']);
   same('Read is headed by what differs from the current version', await a.text('.version-read-legend strong'), 'Differs from current in: description');
   check('the prompt reads upright', await a.run(`getComputedStyle(document.querySelector('.version-read-block')).fontStyle`) === 'normal');
+  same('scrolled, the version read stays where it was through Refresh', await placeThroughRedraw(a, '.version-read-block', () => a.click('#header-refresh')), [true, 40]);
+  same('and Read on another version shows that one from its top', await placeThroughRedraw(a, '.version-read-block', () => a.click(`#${rowPart('version-read', 'agents', 'code-reviewer', '0')}`)), [true, 0]);
+  await a.click(`#${rowPart('version-read', 'agents', 'code-reviewer', '1')}`);
   for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) {
     await sizeTo(a, width, height);
     same(`nothing is cut off at ${width}×${height} with an agent’s row open on its versions, one being read`, await a.run(CUT_OFF), []);
   }
   await fullSize(a);
-  await a.click(`#${rowPart('version-current', 'agents', 'code-reviewer', '1')}`);
+  same('Make current on the version read puts the other in its place in the list, shown from its top', await placeThroughRedraw(a, '.version-read-block', () => a.click(`#${rowPart('version-current', 'agents', 'code-reviewer', '1')}`)), [true, 0]);
   for (let tries = 0; tries < 30 && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'); tries++) await wait(100);
   same('Make current writes the earlier version to every harness, each file as it was', reviewerNow(), taken);
   same('it is the current version, first, naming the one it went back to, into which that one is folded (one row per content)', [(await versionsShown()).length, /^back to: found in Claude Code, .*Current$/.test((await versionsShown())[0])], [2, true]);
@@ -2246,6 +2269,7 @@ async function practiceFlow() {
   await a.click(reviewEl('pfile', 'skills'));
   for (let tries = 0; tries < 40 && !(await fileShown())?.includes('The skill’s steps.'); tries++) await wait(100);
   check('a plugin’s skill named review shows its SKILL.md', (await fileShown())?.includes('The skill’s steps.'), await a.text('.details-plugin'));
+  same('scrolled, its SKILL.md stays where it was when a click elsewhere draws the page again', await placeThroughRedraw(a, '.details-plugin .plugin-file', () => a.click('#library-kind-skills')), [true, 40]);
   // The plugin updated while the file is shown: Refresh shows the file as installed now.
   writeClaudeInstall(practice, 'ck-outside', 'same-names', '0.2.0', {
     'skills/review/SKILL.md': '---\nname: review\ndescription: The skill named review.\n---\n\nThe skill’s steps, version two.\n',
@@ -2368,6 +2392,7 @@ async function practiceFlow() {
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-title-line')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  same('scrolled, the marketplaces’ list stays where it was through Refresh', await placeThroughRedraw(a, '.market-list', () => a.click('#header-refresh')), [true, 40]);
   await a.send('Emulation.setDeviceMetricsOverride', { width: SMALLEST[0], height: SMALLEST[1], deviceScaleFactor: 1, mobile: false });
   // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
   // The scroller is held short for the measurement, so the five-plugin fixture scrolls far enough at any layout.
@@ -2540,6 +2565,8 @@ async function practiceFlow() {
   await a.click('#market-tab-about');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme-body')); tries++) await wait(100);
   check('About shows the README, with its HTML dropped and its link kept', (await a.text('.plugin-readme-body')).includes('What is inside') && !(await a.text('.plugin-readme-body')).includes('<p') && await a.exists('.plugin-readme-body .md-link'), await a.text('.plugin-readme-body'));
+  same('scrolled sideways, the README’s code block and table stay where they were when a click on About draws the page again',
+    [await placeThroughRedraw(a, '.plugin-readme-body .md pre', () => a.click('#market-tab-about'), { sideways: true }), await placeThroughRedraw(a, '.plugin-readme-body .md-table', () => a.click('#market-tab-about'), { sideways: true })], [[true, 40], [true, 40]]);
   await a.click('#market-tab-plugins');
   check('a row shows the version offered, and a tool that has another', /2\.0\.0/.test(await a.text('[data-plugin="issue-tracker"] .plugin-row-version')) && /Claude Code has\s1\.9\.0/.test(await a.text('[data-plugin="issue-tracker"] .plugin-version-differs')), await a.text('[data-plugin="issue-tracker"]'));
   await a.click('#popen-0-issue-tracker');
@@ -2863,8 +2890,10 @@ async function practiceFlow() {
   check('a tool with no file says so, and its one action names it', (await a.text('#ins-head-copilot-cli')).includes('No file yet') && (await a.text('#ins-edit-copilot-cli')) === 'Add instructions for Copilot CLI', await a.text('#ins-head-copilot-cli'));
   await a.click('#ins-edit-claude-cli');
   await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value = area.value + '- Edited in Central Knot.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  same('scrolled, the editor’s text stays where it was when the focus has left it and Refresh draws the page again', await placeThroughRedraw(a, '#ins-text-claude-cli', async () => { await a.run('document.activeElement.blur()'); await a.click('#header-refresh'); }), [true, 40]);
   await a.click('#ins-review-claude-cli');
   check('the change is shown before saving', (await a.text('.ins-diff .ins-added')).includes('- Edited in Central Knot.') && (await a.text('.ins-review-title')).includes('1 line added'), await a.text('.ins-editor'));
+  same('scrolled, the changes stay where they were through Refresh', await placeThroughRedraw(a, '.ins-diff', () => a.click('#header-refresh')), [true, 40]);
   await a.click('#ins-save-claude-cli');
   await wait(400);
   check('Save writes CLAUDE.md', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('- Edited in Central Knot.'));
@@ -5897,6 +5926,14 @@ async function draftFlow() {
   const a = await launch(data, [], realHome);
   const says = async selector => (await a.text(selector)) ?? '';
   const untilThere = async selector => { for (let tries = 0; tries < 80 && !(await a.exists(selector)); tries++) await wait(100); return a.exists(selector); };
+  // A change outside, read in the background: a skill folder written into the home until the page is drawn again (the mark
+  // placeThroughRedraw leaves on the header), then taken away.
+  const readInBackground = async () => {
+    const folder = join(home, '.claude/skills/read-in-the-background');
+    mkdirSync(folder, { recursive: true }); writeFileSync(join(folder, 'SKILL.md'), text('read-in-the-background'));
+    for (let tries = 0; tries < 50 && !(await a.run(`!document.querySelector('#header > *').ckDrawn`)); tries++) await wait(100);
+    rmSync(folder, { recursive: true, force: true });
+  };
   const typeModel = name => a.run(`(() => { const box = document.querySelector('#base-draft-model'); box.value = ${JSON.stringify(name)}; box.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const argsSent = () => readNow(ran).trim().split('\n');
   // In view within a pixel: scroll positions are whole pixels, layout is not.
@@ -6017,6 +6054,11 @@ async function draftFlow() {
   for (const clickCount of [1, 2]) for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: word.x + 12, y: word.y, button: 'left', buttons, clickCount });
   await a.settle();
   same('a double-click on a word selects it, in the editor its first click opened', await a.run(`(() => { const area = document.activeElement; return [area.id, area.value.slice(area.selectionStart, area.selectionEnd)]; })()`), ['ins-text-codex-cli', 'last']);
+  same('scrolled, the focused editor stays where it was when a change outside is read in the background', await placeThroughRedraw(a, '#ins-text-codex-cli', readInBackground), [true, 40]);
+  same('and with nothing typed, its file replaced outside and read again shows the new text from its top', await placeThroughRedraw(a, '#ins-text-codex-cli', async () => {
+    writeFileSync(agentsMd, Array.from({ length: 30 }, (_, line) => `Replaced outside, line ${line + 1}.`).join('\n'));
+    await a.click('#header-refresh');
+  }), [true, 0]);
   await a.press('Escape');
   writeFileSync(agentsMd, codex0);
   await a.click('#header-refresh'); await openKind(a, 'skills'); await a.click('#nav-instructions');
@@ -6038,6 +6080,7 @@ async function draftFlow() {
     && (await a.run(`getComputedStyle(document.querySelector('#base-draft-prompt')).userSelect`)) === 'text', shown);
   check('the tools’ texts stay on the page under it, as they were', (await says('[aria-label="Claude Code instructions"] pre.ins-preview')) === claude0.trimEnd() && !(await a.exists('#base-head .ins-actions')), await says('#base-card'));
   await a.shot('draft-panel');
+  same('scrolled, the prompt stays where it was when a change outside is read in the background', await placeThroughRedraw(a, '#base-draft-prompt', readInBackground), [true, 40]);
   for (const [width, height] of [[860, 600], [1280, 800], [1728, 1080], [2560, 1440]]) {
     await sizeTo(a, width, height); same(`nothing cut off in the draft panel at ${width}×${height}`, await a.run(CUT_OFF), []); await a.shot(`draft-panel-${width}`);
   }

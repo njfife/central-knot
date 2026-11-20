@@ -59,9 +59,9 @@ export function versionsList(versions: InstructionFile['versions'], restore: { i
 /** Says which side of a difference is which, above it. */
 export const legend = (removed: string | undefined, added: string) => h('p.base-legend', {}, removed ? h('span.base-legend-removed', {}, `− ${removed}`) : null, h('span.base-legend-added', {}, `+ ${added}`));
 
-/** A line diff with changed words tinted, long unchanged runs folded until `showAll`. */
-export function diffView(diff: { kind: 'same' | 'added' | 'removed'; text: string }[], full: boolean, showAll: () => void, label = 'Changes') {
-  return h('pre.ins-diff', { tabindex: '0', 'aria-label': label }, folded(diff, full).map(line => line.kind === 'fold'
+/** A line diff with changed words tinted, long unchanged runs folded until `showAll`; `id` keeps its scroll through a redraw. */
+export function diffView(id: string, diff: { kind: 'same' | 'added' | 'removed'; text: string }[], full: boolean, showAll: () => void, label = 'Changes') {
+  return h('pre.ins-diff', { id, tabindex: '0', 'aria-label': label }, folded(diff, full).map(line => line.kind === 'fold'
     ? h('button.ins-fold', { type: 'button', onclick: showAll }, `… ${plural(line.count, 'unchanged line')} · show`)
     : h(`span.ins-line.ins-${line.kind}`, {},
       h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''),

@@ -1,7 +1,7 @@
 // Back and Forward in this window: the destination drawn, its visits, the existing page actions that reopen it, and each visit's
-// scroll place, put back once Back or Forward has drawn it. renderer.ts copies each scrolling area's offset by its id across every
-// draw, to whichever page draws that id next, moves included; a move to a page that starts at its top resets the area itself
-// (pluginstate.ts browse, harnesspage.ts goHarness, app.ts selectItem), as does a choice of which rows an item list holds (matrix.ts listFromTop).
+// scroll place, put back once Back or Forward has drawn it. renderer.ts copies each scrolled element's offset by its id across
+// every draw (scrolledNow), to whichever page draws that id next, moves included; a move to a page that starts at its top resets
+// the area itself (pluginstate.ts browse, harnesspage.ts goHarness, app.ts selectItem), as does a choice of which rows an item list holds (matrix.ts listFromTop).
 // app.ts placeNow is narrower: it names the table where an action's result belongs.
 import { absentKinds, filesSkillAvailable, harnessManaged, harnessTabShown, leaveFiles, takeMove, machine, noToolManaged, rerender, showPage, state } from './app.ts';
 import { goHarness } from './harnesspage.ts';
@@ -56,7 +56,7 @@ export function recordDraw(scrolled: Offsets) {
   });
 }
 
-/** Each scrolling area's offset, by its id: the areas a redraw keeps where they were (`.scroll[id]`, renderer.ts renderWindow). */
+/** Each of the page's scroll areas' offset (`.scroll[id]`), by its id: what a visit's place is made of. */
 export type Offsets = Map<string, number>;
 export const offsetsNow = (): Offsets => new Map([...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop]));
 /** Each visit's scroll place as the person left it, by its entry: an entry the list drops takes its place with it. */

@@ -222,14 +222,14 @@ function renderStatus() {
  * sentence then the first of them, each on one line; without, its sentence in two (style.css .header-result); either cut where
  * it runs past them, with Show all (matrix.ts wholeToggle). Show all opens the whole of it as a card hanging from the header
  * over the page (.result-whole), which closes like a menu: on Show less, ×, Escape, or a press that begins outside it
- * (foldResult), and keeps its scroll through a redraw (renderWindow). A newer result shows folded; a result no longer drawn lets
+ * (foldResult), and keeps its scroll through a redraw by its id (scrolledNow). A newer result shows folded; a result no longer drawn lets
  * its card go, so none opens again by itself.
  */
 function resultHere() {
   const parts = state.home && !heldBy(state.home) && resultInHeader() ? (state.page === 'plugins' ? pluginsResult() : listResult()) : [];
   const whole = parts.some(part => part.querySelector('#problems-show-all[aria-expanded="true"]'));
   if (!whole) state.shownWhole = undefined;
-  return parts.length ? [h(`div.header-result${whole ? '.result-whole' : ''}`, {}, parts)] : [];
+  return parts.length ? [h(`div.header-result${whole ? '.result-whole' : ''}`, { id: whole ? 'result-whole' : undefined }, parts)] : [];
 }
 /** Folds the card on screen into the header's two lines, answering whether there was one. The redraw waits, so a click that folds it still does its own work. */
 function foldResult(): boolean {
@@ -260,29 +260,39 @@ function render() {
   if (!restoring) keepingFocus(renderWindow);
 }
 
+/**
+ * The redraw's one rule for scroll places: every element with an id that is scrolled, either way, as the redraw begins (a page's
+ * scroll area, a box inside it, the result's card, a text field) is put back where it was when the redraw draws that id again,
+ * a text field only when it holds the same text. A box's id names what it shows (an item's copies, a version, a plugin's file, a
+ * README as drawn), so other content starts at its top. Back and Forward keep a rule of their own (places.ts), as a visit's place
+ * is stored and outlives moves, while a box's lasts only while its content is drawn.
+ */
+const scrolledNow = () => [...document.querySelectorAll<HTMLElement>('[id]')].filter(node => node.scrollTop || node.scrollLeft)
+  .map(node => ({ id: node.id, top: node.scrollTop, left: node.scrollLeft, text: fieldText(node) }));
+const fieldText = (node: Element) => (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement ? node.value : undefined);
+
 function renderWindow() {
-  const scrolled = offsetsNow();
-  const cardScrolled = document.querySelector('#header .result-whole')?.scrollTop ?? 0;
+  const visitOffsets = offsetsNow(), kept = scrolledNow();
   const selected = keepSelection();
   const { rail } = applyLayout();
   renderHeader(rail);
   drawPage(renderPage);
   // After the page, which marks the notices it paints seen: the sidebar's dot is for those it didn't.
   renderSidebar();
-  recordDraw(scrolled);
+  recordDraw(visitOffsets);
   // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
   runAfterLayout();
   renderStatus();
   fitBars();
-  // What was selected (a field's own scroll with it), then the scroll places, each where it was, and over them the place of a
-  // visit Back or Forward opened (places.ts putBack), and the result's card, open before and after, scrolled as it was (no visit
-  // keeps its place); keepingFocus puts the focus back after, without scrolling to it (dom.ts keepSelection neither focuses nor
-  // scrolls the page).
+  // What was selected, then the scroll places, each where it was (scrolledNow), and over them the place of a visit Back or Forward
+  // opened (places.ts putBack); keepingFocus puts the focus back after, without scrolling to it (dom.ts keepSelection neither
+  // focuses nor scrolls).
   selected();
-  for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
+  for (const { id, top, left, text } of kept) {
+    const node = document.getElementById(id);
+    if (node && fieldText(node) === text) Object.assign(node, { scrollTop: top, scrollLeft: left });
+  }
   putBack();
-  const card = document.querySelector('#header .result-whole');
-  if (card) card.scrollTop = cardScrolled;
   if (state.home) document.body.dataset.ready = 'true';
 }
 

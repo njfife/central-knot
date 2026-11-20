@@ -167,7 +167,7 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
   const file = row.kind === 'skill' ? 'SKILL.md' : 'agent file';
   // The file shows right under the link that shows it, below the tools' lines, as in the Files view: the switches stay in view.
   const fileShown = !shown ? null : !copies?.length ? h('p.details-limits', {}, copies ? 'Its file couldn’t be read.' : 'Reading…')
-    : h('div.plugin-file', {}, fileBlocks(elId('pfile', row, 'text'), file, copies, holders => `${file} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: copies.length > 1 }));
+    : h('div.plugin-file', { id: elId('pfile', row, 'shown') }, fileBlocks(elId('pfile', row, 'text'), file, copies, holders => `${file} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: copies.length > 1 }));
   return h(`div.compare.details.details-plugin.details-grid${placement === 'row' ? '' : '.details-bare'}`, { role: 'region', 'aria-label': `Details for ${row.name}` },
     h('div.details-head', {},
       h('p.details-status', {}, pluginStatus(t, row)),
@@ -782,7 +782,7 @@ function compareChoices(t: Table, skill: ItemRow, inFiles = false, then?: () => 
   const read = inFiles ? null : lib.files ? smallAction(every, elId(`${prefix}diff`, skill), () => openFiles(skill.key), '.compare-read')
     : lib.words.body ? smallAction(view.reading === id ? 'Hide the copies' : every, elId(`${prefix}diff`, skill), () => { view.reading = view.reading === id ? undefined : id; rerender(); }, '.compare-read') : null;
   const bodies = lib.words.body && view.reading === id
-    ? h('div.compare-copies', {}, fileBlocks(elId(`${prefix}body`, skill), lib.words.body, compared.map(tool => ({ tool, text: versions[tool]?.body ?? '' })), holders => `${lib.words.body} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
+    ? h('div.compare-copies', { id: elId(`${prefix}copies`, skill) }, fileBlocks(elId(`${prefix}body`, skill), lib.words.body, compared.map(tool => ({ tool, text: versions[tool]?.body ?? '' })), holders => `${lib.words.body} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
     : null;
   return h('div.compare-block', {},
     h('p.compare-title', {}, icon('circle-question-mark', 14, 'tone-warning'), h('span', {}, 'Which copy of ', prefix ? `the ${lib.words.item} ` : '', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
@@ -1164,7 +1164,7 @@ export function changePanel(eventId: string) {
   const diff = lineDiff(found.before, found.after);
   const added = diff.filter(line => line.kind === 'added').length, removed = diff.filter(line => line.kind === 'removed').length;
   const counts = [added ? `${added} ${added === 1 ? 'line' : 'lines'} added` : '', removed ? `${removed} ${removed === 1 ? 'line' : 'lines'} removed` : ''].filter(Boolean).join(', ') || 'no line changed';
-  return h('div.change-panel', {}, h('p.change-caption', {}, `The edit: ${counts}. Undo puts the earlier version back in every tool it syncs to.`), h('pre.ins-diff', { tabindex: '0', 'aria-label': 'What the edit changed' }, folded(diff, false).map(line => line.kind === 'fold'
+  return h('div.change-panel', {}, h('p.change-caption', {}, `The edit: ${counts}. Undo puts the earlier version back in every tool it syncs to.`), h('pre.ins-diff', { id: `change-${eventId}`, tabindex: '0', 'aria-label': 'What the edit changed' }, folded(diff, false).map(line => line.kind === 'fold'
     ? h('span.ins-fold-static', {}, `… ${line.count} unchanged ${line.count === 1 ? 'line' : 'lines'}\n`)
     : h(`span.ins-line.ins-${line.kind}`, {}, h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''), h('span.ins-code', {}, `${line.text}\n`)))));
 }
