@@ -220,7 +220,7 @@ function reviewView(files: InstructionFile[], edit: BaseEdit): Stage {
     edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${edit.conflict} This review now shows things as they are.`)) : null,
     staleNote(edit),
     // A first base has nothing to compare with: it is shown as it is. A changed one shows what changes.
-    edit.text === before ? null : before.trim() ? [legend('the base now', 'the base after saving'), diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }, 'Changes to the base instructions')]
+    edit.text === before ? null : before.trim() ? [legend('the base now', 'the base after saving'), diffView('base-changes', diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }, 'Changes to the base instructions')]
       : [h('h3.base-subhead', {}, 'The base, for every tool'), ...previewBlock(edit.text, 'base-new', 'The base instructions', 'base-new-more')],
     plans.length > 1 || (plans.length && edit.text !== before) ? h('h3.base-subhead', {}, 'Each file') : plans.length ? null : h('p.ins-empty', {}, 'No tool is chosen, so no file changes. The base instructions are kept here for later.'),
     h('ul.plain-list.base-plan', {}, plans.map(({ file, plan }) => {
@@ -229,7 +229,7 @@ function reviewView(files: InstructionFile[], edit: BaseEdit): Stage {
       return h('li.base-plan-row', {},
         h('div.base-plan-line', {}, readers(file).map(tool => brandMark(tool, 14)), h('strong', {}, readerNames(file)), h('span.base-file', {}, fileName(file.path)), h('span.base-plan-says', {}, plan!.says),
           changes ? button({ variant: 'link', size: 'micro', label: shown.has(key) ? 'Hide changes' : 'Show changes', id: `base-${key}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) }) : null),
-        changes && shown.has(key) ? [legend(`${fileName(file.path)} now`, 'after saving'), diffView(lineDiff(file.text, plan!.next), shown.has(`${key}-all`), () => { shown.add(`${key}-all`); rerender(); }, `Changes to ${fileName(file.path)}`)] : null,
+        changes && shown.has(key) ? [legend(`${fileName(file.path)} now`, 'after saving'), diffView(`base-${key}-changes`, lineDiff(file.text, plan!.next), shown.has(`${key}-all`), () => { shown.add(`${key}-all`); rerender(); }, `Changes to ${fileName(file.path)}`)] : null,
         plan!.keeps?.trim() ? previewBlock(plan!.keeps, `keeps-${file.tool}`, `What ${fileName(file.path)} keeps of its own`, `base-keeps-more-${file.tool}`) : null,
         changes ? notCarried(file, edit) : null);
     })));
@@ -309,7 +309,7 @@ function toolRow(file: InstructionFile, locked: boolean, lockAttrs: Record<strin
       h('p.base-explain', {}, `Its copy of the base was changed outside Central Knot, so ${name} was left as it is.`),
       h('p.base-explain', {}, `Either choice below shows the change first, keeps the replaced text under Earlier versions, and can be undone.`),
       shown.has(key) ? [legend('the base', `${name}’s copy`),
-        diffView(lineDiff(state.base!.text, base.copy ?? ''), true, () => {}, `${name}’s copy compared with the base`)] : null,
+        diffView(`base-copy-changes-${file.tool}`, lineDiff(state.base!.text, base.copy ?? ''), true, () => {}, `${name}’s copy compared with the base`)] : null,
       h('div.ins-actions', {},
         button({ variant: 'link', size: 'micro', label: shown.has(key) ? 'Hide the difference' : 'See the difference', id: `base-diff-${file.tool}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) }),
         // An emptied copy can't be the base (an empty base shares nothing): only putting the base back is offered.

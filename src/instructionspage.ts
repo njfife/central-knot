@@ -77,7 +77,7 @@ function editor(file: InstructionFile): Stage {
         empties ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `This leaves ${name} empty. ${toolNames[file.tool]} will start sessions with no instructions from it.`)) : null,
         edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${name} changed outside Central Knot. Your draft is kept; this review now compares it with the file as it is now.`)) : null,
         legend(`${name} now`, edit.restoring && !edit.takeOut ? 'the earlier version' : 'after saving'),
-        diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); })),
+        diffView(`ins-changes-${file.tool}`, diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); })),
       baseStrip(file, 'Finish or cancel this edit first.')],
     };
   }

@@ -259,16 +259,17 @@ function inlineNodes(content: Inline[], open: (url: string) => void): (HTMLEleme
   });
 }
 
-/** Elements for the blocks. Headings drop two levels, so a README's title never outranks the page's own headings. */
-function blockNodes(blocks: Block[], open: (url: string) => void): HTMLElement[] {
+/** Elements for the blocks. Headings drop two levels, so a README's title never outranks the page's own headings. A code block
+ *  and a table, which scroll sideways, take an id from `id`. */
+function blockNodes(blocks: Block[], open: (url: string) => void, id: () => string): HTMLElement[] {
   return blocks.map(block => {
     switch (block.kind) {
       case 'heading': return h(`h${Math.min(6, block.level + 2)}`, {}, ...inlineNodes(block.content, open));
       case 'paragraph': return h('p', {}, ...inlineNodes(block.content, open));
       case 'list': return h(block.ordered ? 'ol' : 'ul', block.start ? { start: String(block.start) } : {}, block.items.map(item => h('li', {}, ...inlineNodes(item, open))));
-      case 'code': return h('pre', {}, h('code', {}, block.text));
-      case 'quote': return h('blockquote', {}, blockNodes(block.blocks, open));
-      case 'table': return h('div.md-table', {}, h('table', {}, h('thead', {}, h('tr', {}, block.head.map(cell => h('th', {}, ...inlineNodes(cell, open))))),
+      case 'code': return h('pre', { id: id() }, h('code', {}, block.text));
+      case 'quote': return h('blockquote', {}, blockNodes(block.blocks, open, id));
+      case 'table': return h('div.md-table', { id: id() }, h('table', {}, h('thead', {}, h('tr', {}, block.head.map(cell => h('th', {}, ...inlineNodes(cell, open))))),
         h('tbody', {}, block.rows.map(row => h('tr', {}, row.map(cell => h('td', {}, ...inlineNodes(cell, open))))))));
       case 'rule': return h('hr');
     }
@@ -278,7 +279,13 @@ function blockNodes(blocks: Block[], open: (url: string) => void): HTMLElement[]
 /** One line of text as elements, its `code` spans (a command to type) and links rendered as in a README. */
 export const inlineMarkdown = (text: string, open: (url: string) => void) => inlineNodes(parseInline(text), open);
 
-/** A README as elements, built from text nodes only. */
+/** How many READMEs have been drawn: each drawing's blocks get ids of its own (`md3-2`), so another README's start at their
+ *  start. pluginparts.ts readme shows an unchanged text's drawing again, ids and all. */
+let drawings = 0;
+
+/** A README as elements, built from text nodes only; a redraw keeps its blocks' scroll by their ids (renderer.ts scrolledNow). */
 export function markdown(source: string, open: (url: string) => void, options: MarkdownOptions = {}): HTMLElement {
-  return h('div.md', {}, blockNodes(trimRepeats(parseMarkdown(source), options), open));
+  const drawing = ++drawings;
+  let blocks = 0;
+  return h('div.md', {}, blockNodes(trimRepeats(parseMarkdown(source), options), open, () => `md${drawing}-${++blocks}`));
 }

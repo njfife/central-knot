@@ -83,7 +83,7 @@ function marketList(view: PluginsView, shown: MarketplaceView) {
     return h('li', {}, h(`button.market-item${entry === shown ? '.selected' : ''}`, { type: 'button', title: `${marketTitle(entry)} · ${meta}`, 'aria-current': entry === shown ? 'true' : undefined, onclick: () => browse({ source: entry.source, plugin: undefined, tab: 'plugins', find: '', category: undefined }) },
       h('span.market-item-name', {}, marketLogo(entry), marketTitle(entry)), h('span.market-item-meta', {}, meta)));
   };
-  return h('nav.market-list', { 'aria-label': 'Marketplaces' },
+  return h('nav.market-list', { id: 'market-list', 'aria-label': 'Marketplaces' },
     h('h2.market-list-title', {}, 'Marketplaces'), h('ul', {}, view.marketplaces.map(item)), suggestions(view), addBox(false), market.addOpen ? toSources() : null);
 }
 

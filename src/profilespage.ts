@@ -232,7 +232,7 @@ export function profilesPage(): HTMLElement {
   }
   const open = openProfile();
   return h('div.page.profiles-page', {}, bands.length ? h('div.bands', {}, bands) : null,
-    h('div.page.split.profiles-split', {}, listColumn(open), open ? profileDetail(open) : h('div.detail-column')));
+    h('div.page.split.profiles-split', { id: 'profiles-split' }, listColumn(open), open ? profileDetail(open) : h('div.detail-column')));
 }
 
 /** Arrow keys, Home and End move between the menu's items; Escape closes it; Tab closes it once focus has moved on. */

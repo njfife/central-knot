@@ -179,19 +179,19 @@ export const pressWasDrag = (text: Element): boolean => released?.id === text.id
 
 /**
  * A redraw keeps what is selected, as it keeps the scroll places and the focus (renderer.ts render), and is the one place that
- * does: the focused text field's caret, selection and own scroll (both ways), when the field is drawn again holding the same
- * value; else a selection inside one text (a `pre` with an id), its direction kept, when that text is drawn again the same.
+ * does: the focused text field's caret and selection, when the field is drawn again holding the same value (its scroll is kept
+ * as every scrolled element's is: renderer.ts scrolledNow); else a selection inside one text (a `pre` with an id), its direction
+ * kept, when that text is drawn again the same.
  * Returns what puts it back, which neither focuses nor scrolls the page.
  */
 export function keepSelection(): () => void {
   const field = document.activeElement;
   if ((field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement) && field.id && typeof field.selectionStart === 'number') {
-    const { id, value, selectionStart, selectionEnd, selectionDirection, scrollTop, scrollLeft } = field;
+    const { id, value, selectionStart, selectionEnd, selectionDirection } = field;
     return () => {
       const again = document.getElementById(id);
       if (!(again instanceof HTMLTextAreaElement || again instanceof HTMLInputElement) || again.value !== value) return;
       again.setSelectionRange(selectionStart, selectionEnd, selectionDirection ?? undefined);
-      again.scrollTop = scrollTop; again.scrollLeft = scrollLeft;
     };
   }
   const chosen = getSelection(), holder = (node: Node | null | undefined) => (node instanceof Element ? node : node?.parentElement)?.closest('pre[id]');
