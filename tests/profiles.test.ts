@@ -11,7 +11,7 @@ import { newItem, type ItemKind } from '../src/library.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { homeItems, inUse, inUseName, leftOut, leftOutWords, liveItems, switchable, switchPlan, turnsWords, undoPlan, type Libraries } from '../src/profileplan.ts';
+import { homeItems, inUse, inUseName, leftOut, leftOutWords, liveItems, pluginItemsAgree, pluginLive, pluginPlan, switchable, switchPlan, turnsWords, undoPlan, type Libraries } from '../src/profileplan.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
 import { applyServers, serversView } from '../src/servers.ts';
 import { keepDenies } from '../src/serverstore.ts';
@@ -63,9 +63,11 @@ test('The Undo of a switch turns back each item still as the switch left it, dec
   assert.deepEqual(undoPlan({ profile: { toName: 'Old' } }, live), { on: [], off: [] }, 'an entry from before profiles were sets of items has nothing to undo');
 });
 
+/** A plugin as the home records it (pluginrecord.ts PluginEntry), as the view carries it. */
+type Recorded = { id: string; plugin: string; marketName: string; on: boolean };
 /** A home's view as the Profiles page reads it: each kind's rows and library (types.ts LibraryView), the plugins installed whole and those recorded. */
-function viewOf({ rows, library, installed = [], recorded = [] }: { rows: Record<ItemKind, LibraryFacts[]>; library: Libraries; installed?: InstalledPlugin[]; recorded?: string[] }) {
-  const kind = (which: ItemKind) => ({ tools: ['claude-cli', 'pi-cli'], items: rows[which], library: library[which] });
+function viewOf({ rows, library, installed = [], recorded = [], tools = ['claude-cli', 'pi-cli'] }: { rows: Record<ItemKind, LibraryFacts[]>; library: Libraries; installed?: InstalledPlugin[]; recorded?: Recorded[]; tools?: HarnessId[] }) {
+  const kind = (which: ItemKind) => ({ tools, items: rows[which], library: library[which] });
   return { skills: kind('skill'), mcp: kind('mcp'), agents: kind('agent'), pluginItems: installed, profiles: { profiles: [], plugins: recorded } } as unknown as HomeView;
 }
 /** A row of the Library as the kind's view gives it: `plugin`, a tool with no copy of its own that has it through that plugin. */
@@ -78,7 +80,7 @@ test('The Profiles page says what the Library lists that no profile can tick: it
   const library = libraryOf([['skill', 'notes', true], ['skill', 'pager', false], ['skill', 'papa', true], ['skill', 'loose', true, true]]);
   library.skill.papa!.source = 'pi-pack-id';
   const throughDocs = { 'claude-cli': { plugin: 'document-tools', marketplace: 'team-tools' } };
-  const home = viewOf({ library, recorded: ['pi-pack-id'],
+  const home = viewOf({ library, recorded: [{ id: 'pi-pack-id', plugin: 'pi-pack', marketName: 'team-tools', on: true }],
     rows: { skill: [row('notes', throughDocs), row('pager'), row('papa'), row('loose')], mcp: [row('docs')], agent: [] },
     installed: [{ tool: 'claude-cli', plugin: 'document-tools', marketName: 'team-tools', listed: true, items: ['notes', 'pdf', 'forms'].map(name => ({ kind: 'skill', name, description: '' })) }] });
   assert.deepEqual(ids(homeItems(home)), ['skill:notes', 'skill:pager'], 'the profile lists what is in Central Knot and no plugin’s');
@@ -94,11 +96,140 @@ test('The Profiles page says what the Library lists that no profile can tick: it
   // person's own: nothing left out.
   const kept = libraryOf([['skill', 'notes', true], ['skill', 'gone', false, true], ['agent', 'writer', false]]);
   kept.skill.gone!.source = 'pi-pack-id';
-  const all = viewOf({ library: kept, recorded: ['pi-pack-id'],
+  const all = viewOf({ library: kept, recorded: [{ id: 'pi-pack-id', plugin: 'pi-pack', marketName: 'team-tools', on: true }],
     rows: { skill: [row('notes', throughDocs)], mcp: [], agent: [row('writer')] },
     installed: [{ tool: 'claude-cli', plugin: 'document-tools', marketName: 'team-tools', listed: true, items: [{ kind: 'skill', name: 'notes', description: '' }] }] });
   assert.deepEqual(ids(homeItems(all)), ['skill:notes', 'agent:writer']);
   assert.equal(leftOutWords(leftOut(all)), '', 'no line');
+});
+
+// ---------- A plugin's items: what a switch will change, tool by tool ----------
+// document-tools from the marketplace team-tools brings the skills pdf-reader and spreadsheet (each in a folder of its name).
+// Claude Code has no switch for one skill of a plugin; Codex has one; Pi takes no plugins, so it has the plugin's items placed,
+// as library items linked to the plugin.
+
+const DOCS: Recorded = { id: 'docs-id', plugin: 'document-tools', marketName: 'team-tools', on: true };
+const pdfId = 'plugin:skill:document-tools@team-tools/pdf-reader', sheetId = 'plugin:skill:document-tools@team-tools/spreadsheet';
+const skill = (name: string) => ({ kind: 'skill' as const, name, keyName: name, description: '' });
+/** document-tools as one tool has it installed. */
+const docsIn = (tool: HarnessId, extra: Partial<InstalledPlugin> = {}): InstalledPlugin =>
+  ({ tool, plugin: 'document-tools', marketName: 'team-tools', listed: true, items: [skill('pdf-reader'), skill('spreadsheet')], ...extra });
+/**
+ * A home with Claude Code, Copilot CLI, Codex and Pi: `installed`, each tool's install of document-tools; `placed`, its skills in
+ * Pi (linked to it unless `source` says otherwise); `own`, the person's own items; `mcp`, the MCP servers' rows of the Library;
+ * `docs`, what the home records of document-tools beside DOCS.
+ */
+function docsHome(installed: InstalledPlugin[], placed: { key: string; on: boolean; except?: HarnessId[]; source?: string }[] = [], own: [ItemKind, string, boolean][] = [], mcp: LibraryFacts[] = [], docs: Partial<Recorded> = {}) {
+  const library = libraryOf([...own, ...placed.map(({ key, on }): [ItemKind, string, boolean] => ['skill', key, on])]);
+  for (const { key, except = [], ...item } of placed) Object.assign(library.skill[key]!, { except, source: 'source' in item ? item.source : DOCS.id });
+  return viewOf({ library, recorded: [{ ...DOCS, ...docs }], installed, tools: ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'], rows: { skill: [], mcp, agent: [] } });
+}
+/** Each plugin item's copies, one word list per tool: "codex-cli on", or with how a switch meets it where that isn't its own switch. */
+const copiesIn = (home: HomeView) => Object.fromEntries(pluginLive(home).map(item => [item.id, item.copies.map(copy => `${copy.tool} ${copy.on ? 'on' : 'off'}${copy.way === 'switch' ? '' : ` ${copy.way}`}`)]));
+
+test('His case: a plugin’s skill in Claude Code, Codex and Pi turns off in Codex and Pi for a profile that leaves it out, stays on in Claude Code, and comes back for one that has it', () => {
+  const work = profile('Work', [pdfId, sheetId]), other = profile('Other', [sheetId]);
+  const before = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [{ key: 'pdf-reader', on: true }, { key: 'spreadsheet', on: true }]);
+  assert.deepEqual(copiesIn(before)[pdfId], ['claude-cli on stays', 'codex-cli on', 'pi-cli on'], 'one item, whichever way each tool has it');
+  assert.deepEqual([pluginItemsAgree(work, pluginLive(before)), pluginItemsAgree(other, pluginLive(before))], [true, false]);
+  assert.deepEqual(pluginPlan(other, pluginLive(before)), [{ id: pdfId, on: false, turn: ['codex-cli', 'pi-cli'], held: [] }]);
+  // What a switch acts on in each: the copy installed whole, as the Library's switch takes it (pluginswitch.ts); Pi's library item.
+  assert.deepEqual(pluginLive(before).find(item => item.id === pdfId)!.copies.map(({ target }) => ('libraryKey' in target ? target : [target.tool, target.name])),
+    [['claude-cli', 'pdf-reader'], ['codex-cli', 'pdf-reader'], { libraryKey: 'pdf-reader' }]);
+  // As that switch leaves it: off by Codex's own switch, Pi's copy out (its library item Off), on in Claude Code.
+  const after = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { skillsOff: ['pdf-reader'] })], [{ key: 'pdf-reader', on: false }, { key: 'spreadsheet', on: true }]);
+  assert.deepEqual(copiesIn(after)[pdfId], ['claude-cli on stays', 'codex-cli off', 'pi-cli off']);
+  assert.deepEqual([pluginItemsAgree(work, pluginLive(after)), pluginItemsAgree(other, pluginLive(after))], [false, true], 'Other agrees with Claude Code’s copy on');
+  assert.deepEqual(pluginPlan(work, pluginLive(after)), [{ id: pdfId, on: true, turn: ['codex-cli', 'pi-cli'], held: [] }]);
+  // A profile still lists only the person's own items: the plugin's are planned here and switched by nothing yet.
+  assert.deepEqual(ids(homeItems(after)), []);
+});
+
+test('A profile that leaves out one skill of a plugin turns that one alone: its sibling, and the plugin, are left as they are in every tool', () => {
+  const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [{ key: 'pdf-reader', on: true }, { key: 'spreadsheet', on: true }]);
+  assert.deepEqual(pluginPlan(profile('Sheets', [sheetId]), pluginLive(home)), [{ id: pdfId, on: false, turn: ['codex-cli', 'pi-cli'], held: [] }]);
+});
+
+test('A copy Pi edited, let go of its plugin, is the person’s own item: the plugin’s id goes dormant there, and his own is another id', () => {
+  // The pass let pdf-reader go when Pi's copy was edited (library.ts A PLUGIN, let go): it is linked to nothing now.
+  const work = profile('Work', [pdfId]);
+  const piOnly = docsHome([], [{ key: 'pdf-reader', on: true, source: undefined }]);
+  assert.deepEqual([pluginLive(piOnly), ids(homeItems(piOnly))], [[], ['skill:pdf-reader']]);
+  assert.deepEqual([pluginPlan(work, pluginLive(piOnly)), pluginItemsAgree(work, pluginLive(piOnly))], [[], true], 'dormant: nothing to plan, nothing against it');
+  // Where Codex still has the plugin installed, the plugin's item is Codex's alone.
+  assert.deepEqual(copiesIn(docsHome([docsIn('codex-cli')], [{ key: 'pdf-reader', on: true, source: undefined }]))[pdfId], ['codex-cli on']);
+});
+
+test('A plugin’s item has an id of its own form, `plugin:` before its kind, which no item of the person’s own can have, whatever its name holds', () => {
+  // His own server is named, letter for letter, as document-tools' issues is keyed.
+  const home = docsHome([docsIn('codex-cli', { items: [{ kind: 'mcp', name: 'issues', description: '' }] })], [], [['mcp', 'document-tools@team-tools/issues', true]]);
+  assert.deepEqual([ids(homeItems(home)), pluginLive(home).map(item => item.id)], [['mcp:document-tools@team-tools/issues'], ['plugin:mcp:document-tools@team-tools/issues']]);
+});
+
+test('Copilot CLI turns a server off by its bare name: a plugin’s server named exactly as another server there, the person’s own or another plugin’s, is held, and the other tools switch it', () => {
+  const issues = { kind: 'mcp' as const, name: 'issues', description: '' }, issuesId = 'plugin:mcp:document-tools@team-tools/issues';
+  const installs = [docsIn('copilot-cli', { items: [issues] }), docsIn('codex-cli', { items: [issues] })];
+  /** The person's own server in Copilot CLI, spelled as its file has it (types.ts ToolCopy `folder`). */
+  const mine = (spelled: string) => ({ ...row('issues'), copies: { 'copilot-cli': { folder: spelled } } }) as unknown as LibraryFacts;
+  const quiet = profile('Quiet', ['mcp:issues']), plan = (home: HomeView) => pluginPlan(quiet, pluginLive(home)).map(each => [each.id, each.turn, each.held.map(held => `${held.tool}: ${held.why}`)]);
+  assert.deepEqual(plan(docsHome(installs, [], [['mcp', 'issues', true]], [mine('issues')])),
+    [[issuesId, ['codex-cli'], ['copilot-cli: Copilot CLI turns a server off by its name alone, and a server of your own there is named “issues” too.']]]);
+  // Another plugin's server of that name there: both plugins' are held in Copilot CLI.
+  const tracker: InstalledPlugin = { tool: 'copilot-cli', plugin: 'tracker', marketName: 'team-tools', listed: true, items: [issues] };
+  assert.deepEqual(plan(docsHome([...installs, tracker])), [
+    [issuesId, ['codex-cli'], ['copilot-cli: Copilot CLI turns a server off by its name alone, and tracker there has a server named “issues” too.']],
+    ['plugin:mcp:tracker@team-tools/issues', [], ['copilot-cli: Copilot CLI turns a server off by its name alone, and document-tools there has a server named “issues” too.']],
+  ]);
+  // It goes by the exact spelling (mcpswitch.ts): his own Issues is another name there, so the plugin's issues switches there too.
+  assert.deepEqual(plan(docsHome(installs, [], [['mcp', 'issues', true]], [mine('Issues')])), [[issuesId, ['copilot-cli', 'codex-cli'], []]]);
+});
+
+test('A plugin that is one skill at its root is one item installed and placed, though Pi has it under its folder’s name; not when the plugin has more than one skill placed', () => {
+  // Claude Code read document-tools as one skill, SKILL.md at its root; Pi has it from the marketplace, named by its folder, bundle.
+  const root = docsIn('claude-cli', { items: [{ kind: 'skill', name: 'docs-skill', keyName: 'document-tools', root: true, description: '' }] });
+  const rootId = 'plugin:skill:document-tools@team-tools/document-tools';
+  assert.deepEqual(copiesIn(docsHome([root], [{ key: 'bundle', on: true }])), { [rootId]: ['claude-cli on stays', 'pi-cli on'] });
+  // Two skills placed are not that one skill (the marketplace's version is not the one installed): each keeps its own key.
+  assert.deepEqual(Object.keys(copiesIn(docsHome([root], [{ key: 'bundle', on: true }, { key: 'forms', on: true }]))).sort(),
+    [rootId, 'plugin:skill:document-tools@team-tools/bundle', 'plugin:skill:document-tools@team-tools/forms'].sort());
+});
+
+test('A copy placed in Pi is held while its plugin is Off on Plugins: a profile never turns on what the plugin’s Off turned off', () => {
+  const off = docsHome([], [{ key: 'pdf-reader', on: false }, { key: 'spreadsheet', on: false }], [], [], { on: false });
+  assert.deepEqual(copiesIn(off)[pdfId], ['pi-cli off held']);
+  assert.deepEqual(pluginPlan(profile('Docs', [pdfId]), pluginLive(off)), [{ id: pdfId, on: true, turn: [], held: [{ tool: 'pi-cli', why: 'The whole plugin document-tools is off in Pi.' }] }]);
+  assert.equal(pluginItemsAgree(profile('Empty', []), pluginLive(off)), true);
+});
+
+test('After an update drops a plugin’s skill and brings another, a profile still plans: the dropped one dormant, the new one turned off as one it leaves out', () => {
+  const work = profile('Work', [pdfId, sheetId]), home = docsHome([docsIn('codex-cli', { items: [skill('spreadsheet'), skill('forms')] })]);
+  assert.deepEqual(pluginPlan(work, pluginLive(home)), [{ id: 'plugin:skill:document-tools@team-tools/forms', on: false, turn: ['codex-cli'], held: [] }]);
+  assert.equal(pluginItemsAgree(work, pluginLive(home)), false, 'not in use until switched again');
+});
+
+test('With the whole plugin off in Codex a switch changes nothing there: its items count as off, held for a profile that has them, agreeing with one that leaves them out', () => {
+  const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { off: true })]);
+  assert.deepEqual(copiesIn(home)[pdfId], ['claude-cli on stays', 'codex-cli off held']);
+  const off = { tool: 'codex-cli', why: 'The whole plugin document-tools is off in Codex.' };
+  assert.deepEqual(pluginPlan(profile('Docs', [pdfId, sheetId]), pluginLive(home)), [{ id: pdfId, on: true, turn: [], held: [off] }, { id: sheetId, on: true, turn: [], held: [off] }]);
+  assert.equal(pluginItemsAgree(profile('Empty', []), pluginLive(home)), true);
+});
+
+test('Which tools a profile switches a plugin’s item in: each with a switch for that one item; Pi and OpenCode where it isn’t kept out, Off too; one whose switch can’t be written held', () => {
+  const agent = { kind: 'agent' as const, name: 'reviewer', keyName: 'reviewer', description: '' };
+  const home = docsHome([docsIn('claude-cli', { items: [agent] }), docsIn('copilot-cli', { items: [agent] }), docsIn('codex-cli', { switchesHeld: 'Codex’s config.toml writes skills.config as a value.' })],
+    [{ key: 'pdf-reader', on: false, except: [] }, { key: 'spreadsheet', on: true, except: ['pi-cli'] }, { key: 'forms', on: true }]);
+  // forms is deleted, still linked to the plugin (library.ts A PLUGIN: a name of its own he deleted): in no tool.
+  home.skills.library.forms!.deleted = { at: '' };
+  assert.deepEqual(copiesIn(home), {
+    'plugin:agent:document-tools@team-tools/reviewer': ['claude-cli on', 'copilot-cli on stays'],
+    [pdfId]: ['codex-cli on held', 'pi-cli off'],
+    [sheetId]: ['codex-cli on held'],
+  });
+  assert.deepEqual(pluginPlan(profile('Sheets', [sheetId]), pluginLive(home)).map(each => [each.id, each.turn, each.held.map(held => held.why)]), [
+    ['plugin:agent:document-tools@team-tools/reviewer', ['claude-cli'], []],
+    [pdfId, [], ['Codex’s config.toml writes skills.config as a value.']],
+  ]);
 });
 
 // ---------- A switch on real files ----------
@@ -248,9 +379,10 @@ test('Profiles save only the fields given, a deleted one comes back with its id,
   const { box, made, profiles } = await home();
   try {
     const dev = await made('Development', ['skill:dev']);
-    await saveProfile(box.context, { id: dev, items: ['skill:dev', 'agent:writer', 'nonsense', 'tool:x'] });
+    // A plugin's item is kept by its own form, `plugin:` before its kind (profileplan.ts pluginItemId); a plugin of no kind is not.
+    await saveProfile(box.context, { id: dev, items: ['skill:dev', 'agent:writer', 'plugin:skill:document-tools@team-tools/pdf', 'plugin:tool:x', 'nonsense', 'tool:x'] });
     await saveProfile(box.context, { id: dev, name: '  Dev   work ' });
-    assert.deepEqual(await profiles(), [{ id: dev, name: 'Dev work', items: ['skill:dev', 'agent:writer'] }]);
+    assert.deepEqual(await profiles(), [{ id: dev, name: 'Dev work', items: ['skill:dev', 'agent:writer', 'plugin:skill:document-tools@team-tools/pdf'] }]);
     assert.equal((await saveProfile(box.context, { name: 'dev WORK' })).problem, 'There is already a profile called “dev WORK”.');
     const before = await live(box);
     await switchProfile(box.context, box.tools, dev);
