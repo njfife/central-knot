@@ -3,10 +3,6 @@ on:
   push:
     branches: [next]
   workflow_dispatch:
-    inputs:
-      e2e-groups-at-once:
-        description: End-to-end groups run at once, an app window each (empty for scripts/mac-run.mjs's two)
-        required: false
 permissions:
   contents: read
 # One runner: a newer push to the same branch replaces the run it made out of date.
@@ -40,9 +36,9 @@ jobs:
     # Unless the job above found the tree tested; also when it did not run (a run asked for by hand) or could not say.
     if: ${{ !cancelled() && !needs.tested.outputs.run }}
     runs-on: [self-hosted, macOS, ARM64, ck-mac]
-    # Run 44880740815 (2026-11-21) took 20 minutes with four end-to-end groups at once; its groups' times make about 33 with two
-    # at once (the end of scripts/mac-run.mjs's output gives each part's time). Then the guard may wait 10 minutes first.
-    timeout-minutes: 50
+    # A run of PR #152 took about 9 minutes (2026-11-17): about 3 for its first phase, 6 for the end-to-end checks (the end of
+    # scripts/mac-run.mjs's output gives each part's time). The limit leaves room for a slow one.
+    timeout-minutes: 30
     env:
       # This run's temporary folder, under /private/tmp, which Spotlight doesn't index; the last step removes it however the run
       # ends. Each script makes its own folder inside it and hands the apps it opens their own (scripts/scratch.mjs).
@@ -62,8 +58,6 @@ jobs:
       # Every check, in two phases: scripts/mac-run.mjs says what runs beside what and why, and ends with each part's time. exec:
       # the runner's stop (a newer push cancels this run) reaches the script itself, which sends it on to every part.
       - run: exec node scripts/mac-run.mjs
-        env:
-          CK_E2E_GROUPS_AT_ONCE: ${{ inputs.e2e-groups-at-once }}
       # The light tour's pictures: gh run download <run> -n light-tour.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
