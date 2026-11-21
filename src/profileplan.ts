@@ -14,7 +14,7 @@
 // - `inUse` holds while a switch changes and holds nothing (never stored); `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`)
 //   gives the header and menu line; `undoPlan`, `pluginUndo` and `copilotUndo` revert items still as left, never re-disabling a
 //   Copilot CLI name a server of his uses now (`onAfterUndo`, `copilotHasYours`), and `undoOffered` (`undoInHome`) is the one rule
-//   both History and the header ask. `itemRowState` is the one source for a library item's Now column and row tooltip. Dormant ids
+//   both History and the header ask. `itemRowState` words a library item's live state for its row tooltip (`profilespage.ts`; `switchPlan` puts any `copilotOff` item under Turns on or Turns off, so the Now column only sees on/off). Dormant ids
 //   stay skipped; plugin-linked library items belong to `pluginLive` (`pluginItemKey`), not `liveItems`; found-only rows no
 //   profile can tick are counted by `leftOut`.
 import { itemKey, type ItemKind, type LibraryItem } from './library.ts';
@@ -316,9 +316,9 @@ export function pluginRowState(profile: Pick<Profile, 'items' | 'switchesPluginI
   return switched.some(copy => copy.on) ? 'Off · on in Copilot CLI' : 'Off';
 }
 
-/** What the Now column and a row's tooltip say for a live library item's state now (profilespage.ts). */
-export const itemRowState = (item: Pick<LiveItem, 'on' | 'copilotOff'>): 'On' | 'Off' | 'Off in Copilot CLI' =>
-  (!item.on ? 'Off' : item.copilotOff ? 'Off in Copilot CLI' : 'On');
+/** What a library item's row tooltip says for its state now (`profilespage.ts`; `switchPlan` puts any `copilotOff` item under Turns on or Turns off, so the Now column never sees it). */
+export const itemRowState = (item: Pick<LiveItem, 'on' | 'copilotOff'>): 'on' | 'off' | 'off in Copilot CLI' =>
+  (!item.on ? 'off' : item.copilotOff ? 'off in Copilot CLI' : 'on');
 
 /**
  * Why a switch to a profile can't turn what it holds (pluginPlan `held`), in the words the page's header and a menu's refusal

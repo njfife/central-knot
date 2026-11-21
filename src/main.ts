@@ -472,6 +472,7 @@ function switchFromMenu(id: string) {
     const tools = await toolsNow(), result = await switchProfile(context(), tools, id, pluginSide(tools));
     if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
     pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
+    // Return true so fromTray knows the fresh view already reached the page and skips the redundant sync:changed reread.
     if (result.event && window && !window.isDestroyed()) { window.webContents.send('profile:switched', { ...result, view: await syncThenView() }); return true; }
     await refreshMenus(tools);
   });

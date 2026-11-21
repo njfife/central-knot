@@ -72,13 +72,11 @@ function listColumn(open: Profile | undefined) {
 
 // ---------- The open profile ----------
 
-const lowerFirst = (text: string) => text.replace(/^./, first => first.toLowerCase());
 /** What a switch would do to one item, in a word or two, and whether it changes: the row's last column. */
 function stateOf(item: LiveItem, turns: Turns, isInUse: boolean): { said: string; changes: boolean } {
   if (turns.on.includes(item)) return { said: 'Turns on', changes: true };
   if (turns.off.includes(item)) return { said: 'Turns off', changes: true };
-  const now = itemRowState(item);
-  return { said: isInUse ? now : `Stays ${lowerFirst(now)}`, changes: false };
+  return { said: isInUse ? (item.on ? 'On' : 'Off') : item.on ? 'Stays on' : 'Stays off', changes: false };
 }
 
 /**
@@ -95,7 +93,7 @@ const kindWords: Record<ItemKind, { one: string; many: string; title: string }> 
 /** One item's row: its tick box, name and description, and what a switch does to it. */
 function itemRow(profile: Profile, item: LiveItem, turns: Turns, isInUse: boolean) {
   const included = profile.items.includes(item.id), description = descriptionOf(item), { said, changes: moves } = stateOf(item, turns, isInUse);
-  const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on. Click to leave it out.` : `Not in ${profile.name}: switching to it turns ${item.name} off. Click to put it in.`} ${item.name} is ${lowerFirst(itemRowState(item))} now.`;
+  const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on. Click to leave it out.` : `Not in ${profile.name}: switching to it turns ${item.name} off. Click to put it in.`} ${item.name} is ${itemRowState(item)} now.`;
   return h(`div.pf-row${included ? '.pf-included' : ''}`, { role: 'row', 'data-item': item.id },
     h('span.pf-name', { role: 'cell' },
       tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${kindWords[item.kind].one}) in ${profile.name}`, help,

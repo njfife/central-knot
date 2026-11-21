@@ -4,12 +4,12 @@
 // on the same code, a background notice taken during a click or a home read, and when the rows a click pins are let go (app.ts pinnedRows, drawPage).
 import { mock, test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Change, HarnessId, HomeView, ItemNotice, PassResult, PluginTurn, PluginTurnResult, PluginsView } from '../src/types.ts';
+import type { Change, HarnessId, HomeView, ItemNotice, PassResult, PluginTurn, PluginTurnResult, PluginsView, ProfileSwitchResult } from '../src/types.ts';
 import type { PageKind } from '../src/app.ts';
 
 /** Main, as the page sees it: each switch click waits until the test answers it; every other call is counted. */
 const main = {
-  sent: [] as string[], reads: { plugins: 0, home: 0 },
+  sent: [] as string[], reads: { plugins: 0, home: 0 }, followUps: { repo: 0, sources: 0 },
   /** The History entries an Undo asked main to put back, in the order asked. */
   restored: [] as string[],
   answers: [] as ((result: PluginTurnResult) => void)[],
@@ -17,6 +17,9 @@ const main = {
   passes: [] as ((result: PassResult) => void)[],
   pass(result: PassResult) { this.passes.shift()!(result); return settled(); },
   syncChanged: () => {},
+  profileSwitched: (_result: ProfileSwitchResult) => {},
+  windowShown: () => {},
+  visibilityChange: () => {},
   /** Run as the home is read: a click made meanwhile, say. */
   duringHomeRead: undefined as (() => void) | undefined,
   answer(result: PluginTurnResult = { done: [] }) { this.answers.shift()!(result); return settled(); },
@@ -31,10 +34,14 @@ const api = {
   restore: async (id: string) => { main.restored.push(id); return { results: [] }; },
   plugins: async () => { main.reads.plugins++; return view; },
   refresh: async (): Promise<HomeView | null> => { main.reads.home++; main.duringHomeRead?.(); return null; },
+  repo: async () => { main.followUps.repo++; return null; },
+  sources: async () => { main.followUps.sources++; return null; },
   setPluginSkill: async () => ({ reports: [report('skill-off', 'Turned off.')] }),
   selectHome: async (): Promise<HomeView | null> => null,
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
   onSyncChanged: (listener: () => void) => { main.syncChanged = listener; },
+  onProfileSwitched: (listener: (result: ProfileSwitchResult) => void) => { main.profileSwitched = listener; },
+  onWindowShown: (listener: () => void) => { main.windowShown = listener; },
   syncNow: async (_home: string): Promise<unknown> => null,
   // A home's usage, read as it opens (app.ts collectUsage): none here; one that failed would be said in the status bar.
   readUsage: async () => ({ at: '2026-11-20T00:00:00.000Z', tools: [] }),
@@ -47,14 +54,14 @@ const textOf = (node: any): string => (typeof node === 'string' ? node : (node?.
 const announcement = element();
 Object.assign(globalThis, {
   window: { centralKnot: new Proxy(api, { get: (known, name) => (known as Record<string | symbol, unknown>)[name] ?? (() => Promise.resolve(null)) }), addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }) },
-  document: { body: element(), documentElement: element(), activeElement: null, hasFocus: () => true, getElementById: (id: string) => id === 'announcement' ? announcement : element(), querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, createElement: element, createTextNode: element },
+  document: { body: element(), documentElement: element(), activeElement: null, hidden: false, hasFocus: () => true, getElementById: (id: string) => id === 'announcement' ? announcement : element(), querySelector: () => null, querySelectorAll: () => [], addEventListener(name: string, fn: () => void) { if (name === 'visibilitychange') main.visibilityChange = fn; }, createElement: element, createTextNode: element },
   ResizeObserver: class { observe() {} disconnect() {} },
 });
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
 const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, whyKindReadOnly, whyReadOnly,
-  loadHome, problemKey, queueClick, readAgain, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
+  loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
@@ -85,7 +92,8 @@ function start() {
   drop(() => true);
   endRun();
   resetMarket();
-  Object.assign(main, { sent: [], restored: [], reads: { plugins: 0, home: 0 }, answers: [], duringHomeRead: undefined });
+  Object.assign(main, { sent: [], restored: [], reads: { plugins: 0, home: 0 }, followUps: { repo: 0, sources: 0 }, answers: [], duringHomeRead: undefined });
+  (document as unknown as { hidden: boolean }).hidden = false;
   const none = { tools: [], items: [], notices: [], library: {} };
   app.home = { home: '/home', sync: { managed: [], gate: { state: 'open' } }, skills: none, mcp: none, agents: none } as unknown as typeof app.home;
   Object.assign(app, { page: 'plugins', outcome: undefined, libraryKind: 'all' });
@@ -1179,4 +1187,117 @@ for (const stale of [false, true]) test(`a plugin link left during a read return
   await settled();
   const { source, plugin } = fullPlace();
   assert.deepEqual([source, plugin], ['/beta', 'gamma']);
+});
+
+test('A refused profile Undo says that nothing was undone, naming the profile, without doubling it on a gate refusal', async t => {
+  start();
+  homeWith(t, []);
+  const profileEvent = { id: 'sw-1', kind: 'profile', item: 'PluginOnly', at: '2026-11-21T00:00:00.000Z',
+    profile: { toName: 'PluginOnly', on: [], off: [], copilotCleared: [{ id: 'mcp:issues', name: 'issues', server: 'issues' }] } };
+  t.mock.method(api, 'history', async () => ({ events: [profileEvent], days: 30 }));
+  app.page = 'profiles';
+  t.mock.method(api, 'restore', async () => ({
+    stopped: 'Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.',
+    results: [], harnessWrites: 0,
+  }));
+  await restoreEvent('sw-1');
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.refused, app.outcome?.history],
+    ['Undo switch to PluginOnly: nothing was undone. Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.', true, true, true]);
+  t.mock.method(api, 'restore', async () => ({ stopped: 'Automatic sync is paused. Nothing was undone.', results: [], harnessWrites: 0 }));
+  await restoreEvent('sw-1');
+  assert.equal(app.outcome?.text, 'Undo switch to PluginOnly: nothing was undone. Automatic sync is paused.');
+});
+
+test('A menu-bar profile switch waits while the page is busy, then lands its view, result and follow-ups once the action ends', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  const afterView = { ...app.home!, label: 'AfterMenu', profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+  const switchResult: ProfileSwitchResult = { name: 'Focus', on: ['notes'], off: [], left: [], results: [], event: 'sw-menu',
+    profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] }, view: afterView };
+  flip('notes', false);
+  await settled();
+  try {
+    assert.ok(acting());
+    main.profileSwitched(switchResult);
+    await settled();
+    assert.notEqual(app.home?.label, 'AfterMenu');
+    assert.equal(app.outcome?.text, undefined);
+    app.page = 'sources';
+    await main.pass(did('notes'));
+    await settled();
+    assert.deepEqual([app.home?.label, app.outcome?.text, main.followUps.sources], ['AfterMenu', 'Switched to Focus: 1 item turned on.', 1]);
+  } finally { while (main.passes.length) await main.pass(did('notes')); }
+});
+
+test('A menu-bar profile switch whose view brings a fresh sync notice announces “Sync changed” while keeping the switch’s result', async t => {
+  const home = backgroundWhileReading(t);
+  const notice: ItemNotice = { kind: 'deleted-by-hand', key: 'notes', item: 'notes', history: 'menu-deletion',
+    winner: 'copilot-cli', losers: [], orderProved: true };
+  const withNotice = { ...home, skills: { ...home.skills, notices: [notice] }, mcp: { ...home.mcp, library: {} }, agents: { ...home.agents, library: {} },
+    profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+  main.profileSwitched({ name: 'Focus', on: ['notes'], off: [], left: [], results: [], event: 'sw-notice',
+    profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] }, view: withNotice });
+  await settled();
+  assert.deepEqual([app.said.text, app.said.notices, app.outcome?.text],
+    ['Sync changed notes.', ['menu-deletion'], 'Switched to Focus: 1 item turned on.']);
+});
+
+test('A result that lands while the window is hidden does not fade until the window shows again', async t => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    onLibrary();
+    homeWith(t, [{ kind: 'skills', key: 'notes' }]);
+    const afterView = { ...app.home!, profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+    (document as unknown as { hidden: boolean }).hidden = true;
+    main.visibilityChange();
+    main.profileSwitched({ name: 'Focus', on: ['notes'], off: [], left: [], results: [], event: 'sw-hidden',
+      profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] }, view: afterView });
+    await settled();
+    mock.timers.tick(60_000);
+    assert.equal(app.outcome?.text, 'Switched to Focus: 1 item turned on.');
+    (document as unknown as { hidden: boolean }).hidden = false;
+    main.visibilityChange();
+    mock.timers.tick(7999);
+    assert.equal(app.outcome?.text, 'Switched to Focus: 1 item turned on.');
+    mock.timers.tick(1);
+    assert.equal(app.outcome?.text, undefined);
+  } finally {
+    (document as unknown as { hidden: boolean }).hidden = false;
+    mock.timers.reset();
+  }
+});
+
+test('A clean profile Undo confirmation fades on Profiles as other Undo confirmations do; a warning, refusal or switch result stays', async t => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    start();
+    homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+    const outcome = () => app.outcome;
+    const sw = { id: 'sw-2', kind: 'profile', item: 'Focus', at: '2026-11-21T00:00:00.000Z',
+      profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] } };
+    t.mock.method(api, 'history', async () => ({ events: [sw], days: 30 }));
+    app.page = 'profiles';
+    t.mock.method(api, 'restore', async () => ({ results: [], harnessWrites: 1, switched: { on: [], off: ['notes'], left: [] } }));
+    await restoreEvent('sw-2');
+    assert.deepEqual([outcome()?.text, outcome()?.fade], ['Undone: 1 item turned off.', true]);
+    mock.timers.tick(7999);
+    assert.equal(outcome()?.text, 'Undone: 1 item turned off.');
+    mock.timers.tick(1);
+    assert.equal(outcome(), undefined);
+    t.mock.method(api, 'restore', async () => ({ results: [], harnessWrites: 0, switched: { on: [], off: ['notes'], left: ['standup'] } }));
+    await restoreEvent('sw-2');
+    mock.timers.tick(60_000);
+    assert.equal(outcome()?.warn, true);
+    assert.match(outcome()?.text ?? '', /^Undone:/);
+    t.mock.method(api, 'restore', async () => ({ stopped: 'Automatic sync is paused. Nothing was undone.', results: [], harnessWrites: 0 }));
+    await restoreEvent('sw-2');
+    mock.timers.tick(60_000);
+    assert.equal(outcome()?.refused, true);
+    const afterView = { ...app.home!, profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+    main.profileSwitched({ name: 'Focus', on: ['notes'], off: [], left: [], results: [], event: 'sw-2',
+      profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] }, view: afterView });
+    await settled();
+    mock.timers.tick(60_000);
+    assert.deepEqual([outcome()?.text, outcome()?.act?.label], ['Switched to Focus: 1 item turned on.', 'Undo switch']);
+  } finally { mock.timers.reset(); }
 });

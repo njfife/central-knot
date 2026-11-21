@@ -1857,7 +1857,7 @@ test('Copilot shared name short 4: one withCopilotOff & copilotServerName helper
   } finally { await box.cleanup(); }
 });
 
-test('A profile switch returns its settled History profile payload so the header asks the same Undo rule as History without rereading', async () => {
+test('A profile switch returns the settled History profile payload, and undoOffered agrees on the result and History entry', async () => {
   const { box, made } = await pluginHome({ copilot: true });
   try {
     await takeInCopilotServer(box);
@@ -1880,6 +1880,16 @@ test('A profile switch returns its settled History profile payload so the header
     assert.equal(undoOffered(cleared, afterCleared), false);
     assert.equal(undoOffered(entry, afterCleared), false);
     assert.deepEqual(undoInHome(cleared, afterCleared), { on: [], off: [] });
+    // Failed orphan Copilot CLI clear: settleEntry drops copilotCleared from History and returns that exact payload (no drift).
+    await writeFile(settingsPath, `${JSON.stringify({ ...JSON.parse((await text(box, '.copilot/settings.json'))!), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+    await chmod(join(box.home, '.copilot'), 0o555);
+    try {
+      const failedClear = await switchProfile(box.context, box.tools, mineId, (await sideNow(box)).side);
+      const failedEntry = (await history(box)).find(each => each.id === failedClear.event)!;
+      assert.equal(failedEntry.profile?.copilotCleared, undefined);
+      assert.deepEqual(failedClear.profile, failedEntry.profile);
+      assert.equal(undoOffered(failedClear, await homeNow()), false);
+    } finally { await chmod(join(box.home, '.copilot'), 0o755); }
     // Worked example 2: two items turned on + orphan clear -> undoOffered is true (2 items), and undoSwitch turns them back while leaving the off-switch off.
     await put(box, 'claude-cli', { 'SKILL.md': skillText('Notes.', 'notes') }, [], 'notes');
     await put(box, 'claude-cli', { 'SKILL.md': skillText('Standup.', 'standup') }, [], 'standup');
@@ -1897,12 +1907,22 @@ test('A profile switch returns its settled History profile payload so the header
     const undone = await undoSwitch(box.context, box.tools, withTwo.event!, (await sideNow(box)).side);
     assert.deepEqual([undone.stopped, undone.switched?.off.sort(), undone.switched?.settingsChanged],
       [undefined, ['notes', 'standup'], ['Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.']]);
+    // When settleEntry finds no History entry (e.g. removed mid-switch), switchProfile returns what settleEntry returned (undefined) instead of rebuilding a separate payload.
+    const { side } = await sideNow(box);
+    const pruneMidSwitch: PluginSide = {
+      live: () => side.live(),
+      run: async ops => { await rm(join(box.home, '.central-knot/history.json'), { force: true }); return ops.map(op => ({ ...op, report: { tool: op.tool, outcome: 'failed' as const, changed: false, message: 'failed', runs: [] } })); },
+    };
+    const emptyId = await made('EmptyAfterPrune', []);
+    const pruned = await switchProfile(box.context, box.tools, emptyId, pruneMidSwitch);
+    assert.equal(pruned.profile, undefined);
+    assert.equal(pruned.profile, (await history(box)).find(each => each.id === pruned.event)?.profile);
   } finally { await box.cleanup(); }
 });
 
-test('A library item’s Now column and row tooltip share one source (itemRowState): an off-switch standing in Copilot CLI is never called On', () => {
-  assert.equal(itemRowState({ on: true }), 'On');
-  assert.equal(itemRowState({ on: false }), 'Off');
-  assert.equal(itemRowState({ on: false, copilotOff: 'github' }), 'Off');
-  assert.equal(itemRowState({ on: true, copilotOff: 'github' }), 'Off in Copilot CLI');
+test('A library item’s row tooltip words (itemRowState): an off-switch standing in Copilot CLI is never called on', () => {
+  assert.equal(itemRowState({ on: true }), 'on');
+  assert.equal(itemRowState({ on: false }), 'off');
+  assert.equal(itemRowState({ on: false, copilotOff: 'github' }), 'off');
+  assert.equal(itemRowState({ on: true, copilotOff: 'github' }), 'off in Copilot CLI');
 });

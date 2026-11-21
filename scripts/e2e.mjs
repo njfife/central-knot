@@ -12020,7 +12020,7 @@ async function profilePluginsFlow() {
   // Add a server of his own under that exact name by hand in Copilot CLI before clicking Undo switch.
   writeFileSync(oldCopilotMcp, `${JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'hand', tools: ['*'] } } }, null, 2)}\n`);
   await b.click('#outcome-undo'); await bDone();
-  const refusalReason = 'Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.';
+  const refusalReason = 'Undo switch to PluginOnly: nothing was undone. Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.';
   same('worked example 4: refused Undo says its reason in the header’s result with History, leaving the off-switch off',
     [await b.text('.band-done .band-text'), await b.exists('.band-done svg.tone-warning'), await b.text('.band-done #outcome-history'),
       JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, JSON.parse(readNow(oldCopilotMcp)).mcpServers.issues?.command],
