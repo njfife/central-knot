@@ -578,6 +578,23 @@ test('Pi’s own copy gone since, the plugin Off and On again: kept out of Pi, s
   } finally { await box.cleanup(); }
 });
 
+test('A skill made now beside Pi’s own of that name is said as Pi’s own; the plugin’s server of the same name, kept out of Pi since, is said as kept out', async () => {
+  const box = await notesOnly();
+  try {
+    // First kit's server notes alone, while Pi has its own: made, kept out of Pi. Pi's own then goes, and the plugin is turned Off.
+    await rm(join(box.kit, 'skills'), { recursive: true });
+    await put(join(box.kit, '.mcp.json'), JSON.stringify({ mcpServers: { notes: { command: 'npx', args: ['notes'] } } }));
+    await put(box.pi('mcp.json'), JSON.stringify({ mcpServers: { notes: { command: 'mine' } } }));
+    await box.turn('on');
+    await put(box.pi('mcp.json'), JSON.stringify({ mcpServers: {} }));
+    await box.turn('off');
+    // Then kit brings a skill notes too, and Pi has a skill of its own by that name: the On makes the skill now, the server it made before.
+    await put(join(box.kit, 'skills/notes/SKILL.md'), skill('notes'));
+    await put(box.pi('skills/notes/SKILL.md'), skill('notes', 'mine'));
+    assert.deepEqual((await box.piSays(await box.turn('on'))).report, [`held: ${LEAD} ${OWN} notes is kept out of Pi: tick to let it in, unless Pi has its own by that name.`]);
+  } finally { await box.cleanup(); }
+});
+
 test('His own skill of that name already in Central Knot: the plugin’s isn’t brought in; Its items lists it, and the report and its box, off, say he keeps his', async () => {
   const box = await notesOnly();
   try {

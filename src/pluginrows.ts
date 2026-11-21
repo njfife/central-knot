@@ -15,7 +15,10 @@ type Page = keyof typeof partOfPage;
 
 /** One item of a plugin, by the plugin it comes with, and what each tool's installed copy of that plugin has of it. */
 export interface PluginRow {
-  /** Unique beside the page's own keys: a folder or file name never holds "/". */
+  /**
+   * Unique beside the page's own keys: a folder or file name never holds "/". Not across kinds: a plugin's skill and MCP
+   * server of one name share it, so a row is known by its kind and key (itemrow.ts rowId).
+   */
   key: string;
   kind: PartKind;
   name: string;

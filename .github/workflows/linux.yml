@@ -1,9 +1,11 @@
 name: Linux package
-# The Linux checks, for the Linux plan's steps (AGENTS.md, "Checking a change"): never a required check for a Mac change, and
-# nothing here is released or uploaded but the light tour's pictures.
+# The Linux checks, split into jobs side by side: one unit job (npm test), four end-to-end jobs (each packages its AppImage
+# and runs one group of scripts/e2e.mjs; the marked group also runs the smoke test and light tour), and one final job (`linux`)
+# green only if every job passed. Nothing is released or uploaded but the light tour's pictures.
+# Triggered on next, ci/** branches, and workflow_dispatch; never a required check for a Mac change yet (AGENTS.md).
 on:
   push:
-    branches: [next]
+    branches: [next, 'ci/**']
   workflow_dispatch:
 permissions:
   contents: read
@@ -12,11 +14,28 @@ concurrency:
   group: linux-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  linux:
+  unit:
     runs-on: ubuntu-latest
-    # A green run of 2026-11-19 took about 19 minutes: the end-to-end checks 14½ (their four groups one after another), the unit
-    # tests 3½, the rest a minute, though apt alone has taken 1½. The limit leaves room for a slow one, as mac.yml's does.
-    timeout-minutes: 30
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+        include:
+          - group: 4
+            tour: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -24,19 +43,34 @@ jobs:
           node-version: '24'
           cache: npm
       # A display for the app (Xvfb), FUSE for the AppImage to mount itself, and mksquashfs to make it.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb fuse3 squashfs-tools
+      - run: dpkg -s xvfb fuse3 squashfs-tools >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb fuse3 squashfs-tools)
       - run: npm ci
-      - run: npm test
+      # Packaging in each e2e job (~13s) beats a separate package job + AppImage artifact hand-off (~61s before e2e can start).
       - run: npm run package:linux
+      # Smoke test and light tour ride on group 4 (the shortest group by ~2½ minutes): no extra runner and zero critical-path cost.
       # Every launch passes --no-sandbox: Ubuntu 24.04 and later keep Chromium's sandbox from the user namespaces it needs.
-      - run: xvfb-run -a release/Central-Knot-*-linux-x86_64.AppImage --smoke-test --no-sandbox
+      - if: matrix.tour
+        run: xvfb-run -a release/Central-Knot-*-linux-x86_64.AppImage --smoke-test --no-sandbox
       # The light tour: the packaged app opens and so does each page, one picture each (gh run download <run> -n light-tour).
-      - run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/ui-tour.mjs light-tour --no-sandbox
+      - if: matrix.tour
+        run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/ui-tour.mjs light-tour --no-sandbox
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always()
+        if: (!cancelled()) && matrix.tour
         with:
           name: light-tour
           path: light-tour
           if-no-files-found: ignore
           retention-days: 7
-      - run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/e2e.mjs --no-sandbox
+      - run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/e2e.mjs --group ${{ matrix.group }}/${{ strategy.job-total }} --no-sandbox
+
+  linux:
+    needs: [unit, e2e]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ needs.unit.result }} ${{ needs.e2e.result }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do [ "$result" = success ] || exit 1; done
