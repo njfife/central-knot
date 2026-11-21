@@ -180,7 +180,7 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
     // What putting its items in or taking them out also changed in a tool's own settings (pluginlibrary.ts reportIn's notes) follows.
     const noted = (outcome: ActionReport['outcome']) => itemRuns(outcome, true).flatMap(entry => entry.report.notes ?? []).map(note => `; ${note.replace(/\.$/, '')}`).join('');
     const itemGroups: Group[] = [[items('installed', true), undo ? 'its items as they were in' : 'its items put in', noted('installed')], [items('uninstalled', true), undo ? 'its items as they were, out of' : 'its items taken out of', noted('uninstalled')],
-      [items('updated', true), 'its items updated in'], [items('installed', false), 'its items already in'], [items('uninstalled', false), 'its items already out of'], [items('updated', false), 'its items already up to date in']];
+      [items('updated', true), 'its items updated in', noted('updated')], [items('installed', false), 'its items already in'], [items('uninstalled', false), 'its items already out of'], [items('updated', false), 'its items already up to date in']];
     const groups: Group[] = item
       ? [[tools(off, true), undo ? `${item} off again in` : `${item} turned off in`], [tools(on, true), undo ? `${item} back on in` : `${item} turned on in`],
         [tools(off, false), `${item} already off in`], [tools(on, false), `${item} already on in`]]

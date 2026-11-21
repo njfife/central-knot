@@ -152,3 +152,9 @@ test('What a run left undone is counted by marketplace and name, a plugin that f
   assert.deepEqual(shortOf(resultLines(ran), unreachedOps(ops, ran)), { names: ['kit', 'later'], of: 2 });
   assert.deepEqual(shortOf([line('one', 'done', true)]), { names: [], of: 1 });
 });
+
+test('A plugin’s Update that also changed a tool’s own settings with its items says so after them', () => {
+  const said = '+skills/maps/SKILL.md added to Pi’s skills list (settings.json), where a pattern keeps skills out.';
+  const updated: PluginDone = { ...op('maps', 'pi-cli', 'update-items'), report: { tool: 'pi-cli', outcome: 'updated', message: '', runs: [], changed: true, notes: [said] } };
+  assert.equal(resultLines([updated])[0]?.text, 'its items updated in Pi; +skills/maps/SKILL.md added to Pi’s skills list (settings.json), where a pattern keeps skills out');
+});

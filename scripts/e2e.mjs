@@ -1319,6 +1319,27 @@ async function agentInPi(a, practice) {
   for (let tries = 0; tries < 30 && await cellState(a, 'agents', 'code-reviewer', 'pi-cli') !== 'current'; tries++) await wait(100);
   await a.click(`#${rowPart('open', 'agents', 'code-reviewer')}`);
   same('its row has a Pi mark and a Pi line with its switch', [await cellState(a, 'agents', 'code-reviewer', 'pi-cli'), await a.exists(`#${rowPart('enable', 'agents', 'code-reviewer', 'pi-cli')}`)], ['current', true]);
+  // His Pi list keeping every skill out, the agent put there before any inclusion was written: its Pi line says Pi doesn't load
+  // it, and Let Pi load it lets it in, as a skill's does; its Undo takes the inclusion out again.
+  const piSettings = join(practice, '.pi/agent/settings.json'), piList = () => jsonOrNothing(piSettings)?.skills;
+  const opened = async () => { if (await a.run(`document.querySelector('#${rowPart('open', 'agents', 'code-reviewer')}')?.getAttribute('aria-expanded')`) !== 'true') await a.click(`#${rowPart('open', 'agents', 'code-reviewer')}`); };
+  // Pi joined just now: once the skills are in it, his pattern comes, so nothing the joining puts in gets an inclusion.
+  await openKind(a, 'skills');
+  await piCaughtUp(a);
+  await openKind(a, 'agents');
+  writeFileSync(piSettings, '{ "skills": ["!*"] }\n');
+  await a.click('#header-refresh');
+  await opened();
+  const letPi = `#${rowPart('clear-switch', 'agents', 'code-reviewer', 'pi-cli')}`;
+  check('under his !*, the agent’s Pi line says Pi doesn’t load it, with Let Pi load it', /switched off in Pi’s own settings: Pi doesn’t load it\./.test(await a.text('.details') ?? '') && await a.exists(letPi), await a.text('.details'));
+  const before = piList();
+  await a.click(letPi);
+  same('Let Pi load it adds the agent’s file to his Pi list, and nothing else', piList(), [...before, '+skills/code-reviewer.md']);
+  await a.click('#outcome-undo');
+  same('its Undo takes that out again', piList(), before);
+  rmSync(piSettings);
+  await a.click('#header-refresh');
+  await opened();
   const note = (await a.text(`#${rowPart('as-skill', 'agents', 'code-reviewer')}`) ?? '').trim();
   check('the opened row says once what Pi gets, and that deleting its file there turns the agent off everywhere',
     /^Pi holds no agents of its own, so there an agent is a skill[\s\S]*no isolated context of its own, tool restrictions and model selection[\s\S]*Deleting that file in Pi turns the agent off in every tool/.test(note), note);
@@ -6602,6 +6623,14 @@ esac
   await a.click('#nav-plugins');
   same('each row shows its switch On, its marks, and its own result', [await switchIs('#pswitch-0-release-helper'), await switchIs('#pswitch-0-starter-skills'), await marks('release-helper'), await marks('starter-skills'), await rowSays('release-helper'), await rowSays('starter-skills')],
     ['true', 'true', ['installed', 'items'], ['installed', 'items'], 'ended', 'ended']);
+  // A profile switch that takes a skill out of Pi says what it took out of his Pi list, in its result.
+  await a.click('#nav-profiles');
+  await newProfile(a, 'Only kept');
+  await a.click('#pf-skill\\:kept-note');
+  await a.click('#profile-switch');
+  await done();
+  const switchSaid = `${await a.text('#header') ?? ''} ${await a.text('.bands') ?? ''}`;
+  check('a profile switch says what it took out of his Pi list', /Switched to Only kept: [\s\S]*\+skills\/open-note\/SKILL\.md taken out of Pi’s skills list \(settings\.json\) with its copy\./.test(switchSaid), switchSaid);
   // History's entry for the On says what it added to his Pi list.
   await a.click('#nav-history');
   for (let tries = 0; tries < 50 && !/added to Pi’s skills list/.test(await a.text('.page') ?? ''); tries++) await wait(100);

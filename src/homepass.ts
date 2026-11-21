@@ -157,6 +157,8 @@ export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stoppe
         const tools = [...new Set(copies.flatMap(copy => copy.harness && copy.outcome === outcome ? [copy.harness] : []))];
         if (tools.length) parts.push(outcome === 'removed' ? `Removed ${label} from ${toolList(tools)}.` : `Copied ${label} to ${toolList(tools)}.`);
       }
+      // What a copy's write or removal also changed in a tool's own settings (Pi's list: librarypass.ts Kind.follow).
+      parts.push(...new Set(copies.flatMap(copy => (copy.settingsChanged ? [copy.settingsChanged] : []))));
       for (const copy of new Map(copies.map(copy => [copy.harness, copy])).values()) {
         if (copy.outcome !== 'held' && copy.outcome !== 'failed') continue;
         refusals.push([label, `${copy.harness ? ` (${toolName(copy.harness)})` : ''}: ${copy.message}`]);

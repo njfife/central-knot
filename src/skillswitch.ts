@@ -66,18 +66,18 @@ export function isDisabled(context: ShareContext, file: SwitchFile, target: Swit
  * Turns one tool's copy of a skill off or on, then reads the file back to confirm. Writes only over the text it read (a save
  * made meanwhile is never overwritten) and only when something changes. `restore`: what the switch held before the change this
  * one undoes: Claude Code's override before a Disable (say "name-only"), put back by Enable instead of no override (without
- * it, Enable puts back the value kept for that folder); Pi's exact exclusions an Enable took out (`removed`), put back by Disable.
+ * it, Enable puts back the value kept for that folder); what an Enable changed in Pi's list (`edit`), which its Undo takes back.
  * Returns whether it changed, and those earlier values. Throws an error whose message says why (see switchFailure).
  */
-export async function setDisabled(context: ShareContext, tool: HarnessId, target: SwitchTarget, disabled: boolean, restore?: string | string[]): Promise<{ changed: boolean; previous?: string; removed?: string[] }> {
+export async function setDisabled(context: ShareContext, tool: HarnessId, target: SwitchTarget, disabled: boolean, restore?: string | PiEdit): Promise<{ changed: boolean; previous?: string; edit?: PiEdit }> {
   const file = await readSwitchFile(context, tool);
   if (file.problem || !file.parsed) throw failure(problemText(file.problem!));
   const now = stateIn(context, tool, file.parsed, target);
   if (now.disabled === disabled) return { changed: false };
   if (tool === 'pi-cli') {
-    const next = piSwitched(piList(file), piCopy(context, target), context.home, !disabled, 'switch', [restore ?? []].flat());
+    const next = piSwitched(piList(file), piCopy(context, target), context.home, !disabled, 'switch', typeof restore === 'object' ? restore : undefined);
     await writeConfirmed(context, file, target, withSkills(file, next.skills), disabled);
-    return { changed: true, removed: next.removed };
+    return { changed: true, edit: next.edit };
   }
   if (tool === 'claude-cli' && !disabled) restore ??= (await readKeptOverrides(context))[target.folder];
   await writeConfirmed(context, file, target, withSwitch(context, file, target, disabled, restore as string | undefined), disabled);
@@ -100,12 +100,11 @@ async function writeConfirmed(context: ShareContext, file: SwitchFile, target: S
 export async function followCopy(context: ShareContext, tool: HarnessId, target: SwitchTarget, placed: boolean): Promise<Followed | undefined> {
   const file = tool === 'pi-cli' ? await readSwitchFile(context, tool) : undefined;
   if (!file?.parsed || file.problem) return undefined;
-  const skills = piList(file), copy = piCopy(context, target), next = piSwitched(skills, copy, context.home, placed, 'pass').skills;
+  const copy = piCopy(context, target), { skills: next, edit } = piSwitched(piList(file), copy, context.home, placed, 'pass');
   const off: Followed = placed && piOff(next, copy, context.home) ? { off: true } : {};
-  if (next.length === skills.length) return off;
-  const entry = placed ? next.at(-1) : skills.find(each => !next.includes(each));
+  if (!edit.added.length && !edit.removed.length) return off;
   await writeConfirmed(context, file, target, withSkills(file, next), piOff(next, copy, context.home));
-  return { ...off, changed: `${entry} ${placed ? 'added to Pi’s skills list (settings.json), where a pattern keeps skills out' : 'taken out of Pi’s skills list (settings.json) with its copy'}.` };
+  return { ...off, changed: piListWords(edit, placed ? ', where a pattern keeps skills out' : ' with its copy') };
 }
 
 // Claude Code overrides a Disable replaced (say "name-only"), by skill folder. Kept in the store, not only in History (which
@@ -239,22 +238,26 @@ function piOff(skills: string[], copy: PiCopy, home: string): boolean {
   if (exact('-')) return true;
   return !exact('+') && skills.some(entry => entry[0] === '!' && copy.named.some(name => minimatch(name, piPath(entry, home))));
 }
+/** What one write changed in Pi's list: the entries it added, and those it took out. */
+export type PiEdit = { added: string[]; removed: string[] };
+/** An edit of Pi's list in words, each entry as it stands there (`why`: said after each): for a result, History and a notice. */
+export const piListWords = (edit: PiEdit, why = '') =>
+  [...edit.added.map(entry => `${entry} added to`), ...edit.removed.map(entry => `${entry} taken out of`)].map(said => `${said} Pi’s skills list (settings.json)${why}.`).join(' ');
 /**
- * Pi's list with this copy let in (`load`) or kept out. His entries are his: Central Knot adds and takes out only its own `+` and
- * `-` for the copy (in `written`, or the absolute path, which names it alone), never a `!` pattern, an entry in another form, or
- * one for another copy. In a pass (`'pass'`) it changes nothing where his exact `-` decides. Let Pi load it (`'switch'`) takes out
- * his exact `-` for the copy too, since a `-` wins over any `+`, and answers it (`removed`) for its Undo to put back (`back`).
+ * Pi's list with this copy let in (`load`) or kept out, and the edit that is (`edit`). His entries are his: Central Knot adds and
+ * takes out only its own `+` and `-` for the copy (in `written`, or the absolute path, which names it alone), never a `!` pattern,
+ * an entry in another form, or one for another copy. In a pass (`'pass'`) it changes nothing where his exact `-` decides. Let Pi
+ * load it (`'switch'`) takes out his exact `-` for the copy too, since a `-` wins over any `+`; its Undo takes back that edit
+ * exactly (`undo`): what the click added goes, what it took out comes back.
  */
-function piSwitched(skills: string[], copy: PiCopy, home: string, load: boolean, by: 'pass' | 'switch', back: string[] = []): { skills: string[]; removed: string[] } {
+function piSwitched(skills: string[], copy: PiCopy, home: string, load: boolean, by: 'pass' | 'switch', undo?: PiEdit): { skills: string[]; edit: PiEdit } {
   const minus = (entry: string) => entry[0] === '-' && copy.exact.has(piPath(entry, home));
-  if (by === 'pass' && skills.some(minus)) return { skills, removed: [] };
-  if (load) {
-    const kept = skills.filter(entry => !minus(entry));
-    return { skills: piOff(kept, copy, home) ? [...kept, `+${copy.written}`] : kept, removed: skills.filter(minus) };
-  }
-  // Out: its `+` goes where that alone keeps it out (a pattern does); else, by the switch, its `-` comes, his entries all kept.
-  const kept = [...skills.filter(entry => entry !== `+${copy.written}` && entry !== `+${copy.file}`), ...back];
-  return { skills: piOff(kept, copy, home) ? kept : by === 'switch' ? [...skills, ...back, `-${copy.written}`] : skills, removed: [] };
+  const changed = (next: string[]) => ({ skills: next, edit: { added: next.filter(entry => !skills.includes(entry)), removed: skills.filter(entry => !next.includes(entry)) } });
+  if (by === 'pass' && skills.some(minus)) return changed(skills);
+  if (load) { const kept = skills.filter(entry => !minus(entry)); return changed(piOff(kept, copy, home) ? [...kept, `+${copy.written}`] : kept); }
+  // Out: its own `+` goes where that alone keeps it out (a pattern does); else, by the switch, its `-` comes, his entries all kept.
+  const kept = undo ? [...skills.filter(entry => !undo.added.includes(entry)), ...undo.removed] : skills.filter(entry => entry !== `+${copy.written}` && entry !== `+${copy.file}`);
+  return changed(piOff(kept, copy, home) ? kept : by === 'switch' ? [...(undo ? kept : skills), `-${copy.written}`] : skills);
 }
 /** The settings' text with Pi's `skills` list as given (gone when empty), a byte-order mark kept. */
 const withSkills = (file: SwitchFile, skills: string[]) => {

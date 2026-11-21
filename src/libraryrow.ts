@@ -54,6 +54,8 @@ export interface RowWords {
   switchedOff?: { line(where: string): string; tag: string };
 }
 
+/** A skill's, or an agent's in Pi (a skill there), that the tool's own switch keeps out: the opened row's Let … load it clears it. */
+const notLoaded = { line: (where: string) => `${where} doesn’t load it.`, tag: 'The opened row can clear it.' };
 /**
  * Each kind on the library, in its words, keyed by the page's name for it (app.ts PageKind); the one place they are written
  * (agents.ts takes its Kind's from here). Every other place a kind is wired in is in librarypass.ts's recipe.
@@ -63,13 +65,14 @@ export const libraryWords = {
     item: kindNouns.agents.one, an: kindNouns.agents.a, many: kindNouns.agents.many, copy: 'file', body: 'Prompt',
     shared: 'Name, description and prompt are the same in every tool; other settings stay in each tool’s file.',
     own: names => `Its own settings stay in its file: ${andList([...names])}.`,
+    switchedOff: notLoaded,
   },
   skills: {
     item: kindNouns.skills.one, an: kindNouns.skills.a, many: kindNouns.skills.many, copy: 'folder',
     shared: 'Every tool it is on in gets the same folder: every file as it is, and its scripts still runnable.',
     // A skill's folder is the same in every tool: no part of it stays one tool's own.
     own: () => '',
-    switchedOff: { line: where => `${where} doesn’t load it.`, tag: 'The opened row can clear it.' },
+    switchedOff: notLoaded,
   },
   mcp: {
     item: kindNouns.mcp.one, an: kindNouns.mcp.a, many: kindNouns.mcp.many, copy: 'entry',

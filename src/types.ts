@@ -115,7 +115,7 @@ export interface DesktopApi {
   refresh(asked?: boolean): Promise<HomeView | null>;
   applySkills(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
   /** Clears a tool's own switch that turns a skill off there (skills.ts clearSwitch). `resume`: as a click's (app.ts clickResumes). */
-  clearSkillSwitch(key: string, tool: HarnessId, resume: boolean, home: string): Promise<PassResult>;
+  clearSkillSwitch(key: string, tool: HarnessId, resume: boolean, home: string, of?: 'skill' | 'agent'): Promise<PassResult>;
   /** Makes a copy outside Central Knot's own (a link, a copy in ~/.agents/skills) Central Knot's (skills.ts takeOver). `resume`: as a click's. */
   takeOverSkill(key: string, tool: HarnessId, resume: boolean, home: string): Promise<PassResult>;
   /** One version of a skill: its SKILL.md and the names of its other files (skills.ts skillVersion). */
@@ -343,7 +343,7 @@ export interface SwitchTarget { folder: string; name: string; /** Absolute path 
  * One switch a 'switched' History event changed: which way, and for a skill the entry it named and a Claude Code override it
  * replaced ("name-only"). An MCP server's switch goes by the server's name (the event's item), so it has no `target`.
  */
-export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: SwitchTarget; before?: string; /** Pi: his exact exclusions of the copy this Enable took out (a `-` wins over any `+`), put back by its Undo. */ exclusions?: string[] }
+export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: SwitchTarget; before?: string; /** Pi: what this Enable changed in its list (skillswitch.ts PiEdit: his exact `-` taken out, a `+` added), which its Undo takes back exactly. */ listEdit?: { added: string[]; removed: string[] } }
 
 /**
  * What is true of the open home as a whole, which every page reads: the tools Central Knot manages, where each keeps its
@@ -1380,4 +1380,4 @@ export interface SwitchedItem { id: string; name: string }
  * one turned Off again because a copy was deleted by hand; History says so), by name; and what could not be done in a tool
  * (`results`). `event`: its History entry; none when nothing changed.
  */
-export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; view?: HomeView }
+export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[] }

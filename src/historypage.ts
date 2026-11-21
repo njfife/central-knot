@@ -22,11 +22,7 @@ const itemOf = (event: HistoryEvent) => { const entry = libraryEntry(event); ret
 /** A take-over's entry names the copy's path as the page shows paths (from ~, or "…" inside another home). */
 const pathsShown = (event: HistoryEvent): HistoryEvent => (event.kind === 'took-over' ? { ...event, losers: event.losers.map(copy => (copy.path ? { ...copy, path: shownPath(copy.path) } : copy)) } : event);
 /** A library item's entry in its kind's words (historyactions.ts librarySentence). */
-const said = (event: HistoryEvent) => {
-  const entry = libraryEntry(event), words = entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event));
-  // What the pass changed in a tool's settings with the copies (Pi's skills list) follows the entry's sentence.
-  return words && event.settingsChanged ? { ...words, text: `${words.text} ${event.settingsChanged.join(' ')}` } : words;
-};
+const said = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event)); };
 /** Whether the entry is another's Undo: that one's `undoneBy` names it. */
 const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 
@@ -178,7 +174,8 @@ export function historyPage() {
   // A refused Undo made here is a warning band, as on the other pages; other results here are in the status bar.
   const refused = state.outcome?.page === 'history' && state.outcome.warn ? outcomeBand() : null;
   return h('div.page', {}, reread || refused ? h('div.bands', {}, reread, refused) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
-    const about = describe(event);
+    // What it also changed in a tool's own settings (Pi's skills list: HistoryEvent settingsChanged) follows its words.
+    const about = (said => (event.settingsChanged ? { ...said, text: `${said.text} ${event.settingsChanged.join(' ')}` } : said))(describe(event));
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;

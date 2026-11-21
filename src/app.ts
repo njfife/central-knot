@@ -1138,13 +1138,13 @@ function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, swit
  * outside Central Knot's taken over. What it did is said in the band, with no Undo there: Take over has none (the band and its
  * History entry say so); a cleared switch's Undo is its History entry's action (skills.ts switchBack).
  */
-export const skillAction = (action: 'clear-switch' | 'take-over', key: string, tool: HarnessId, name: string) =>
+export const skillAction = (action: 'clear-switch' | 'take-over', key: string, tool: HarnessId, name: string, kind: 'skills' | 'agents' = 'skills') =>
   busy(action === 'take-over' ? 'Taking it over…' : 'Clearing the switch…', async page => {
-    const home = state.home!;
-    const result = received(await (action === 'take-over' ? api().takeOverSkill(key, tool, clickResumes(home), home.home) : api().clearSkillSwitch(key, tool, clickResumes(home), home.home)));
+    const home = state.home!, of = kind === 'agents' ? 'agent' : 'skill';
+    const result = received(await (action === 'take-over' ? api().takeOverSkill(key, tool, clickResumes(home), home.home) : api().clearSkillSwitch(key, tool, clickResumes(home), home.home, of)));
     setHome(await api().refresh());
-    keepOwn([{ kind: 'skills', results: result.results, notices: result.notices }]);
-    const row = { kind: 'skills' as const, key };
+    keepOwn([{ kind, results: result.results, notices: result.notices }]);
+    const row = { kind, key };
     if (result.stopped) { tell({ page, item: name, rows: [row], text: result.stopped, warn: true, band: true }); return; }
     // Letting a tool load it again has an Undo (its History entry's: the switch set again); a take-over has none, and says so.
     const said = `${name}: ${result.results[0]?.message ?? 'done.'}${action === 'take-over' ? ' This has no Undo.' : ''}`;
@@ -1749,8 +1749,8 @@ export const profileState = {
 };
 
 /** What a switch or its Undo did, as its band says it: what it turned On and Off, and what could not change. */
-function turnedOutcome(page: Page, lead: string, turned: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'>, results: DestinationResult[], act?: Outcome['act']) {
-  const leftSaid = turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : '';
+function turnedOutcome(page: Page, lead: string, turned: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'settingsChanged'>, results: DestinationResult[], act?: Outcome['act']) {
+  const leftSaid = `${turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : ''}${(turned.settingsChanged ?? []).map(said => ` ${said}`).join('')}`;
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
   tell({ page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0, act });
 }

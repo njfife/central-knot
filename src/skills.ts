@@ -32,7 +32,8 @@ import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recover
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
 import { mergeSkill } from './merge.ts';
 import { sourceFacts } from './sources.ts';
-import { followCopy, isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
+import { followCopy, isDisabled, piListWords, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type PiEdit, type SwitchFile } from './skillswitch.ts';
+import { agentInPi, agentKind, applyAgents } from './agents.ts';
 import { harnesses } from './harnesses.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
 import { andList, notManagedHere, throughPlugin, toolName } from './words.ts';
@@ -342,15 +343,15 @@ async function switchBack(context: ShareContext, tools: HarnessId[], past: Histo
   if (!entries.length) return { stopped: away.map(entry => notManagedHere(entry.tool)).join(' '), results: [], writes: 0 };
   const already = await Promise.all(entries.map(async ({ tool, target }) => isDisabled(context, await readSwitchFile(context, tool), target!)));
   if (already.every(Boolean)) return { stopped: `${andList(entries.map(entry => toolName(entry.tool)))}’s own switch has it off already. Nothing was changed.`, results: [], writes: 0 };
-  const { problem } = await skillKind.open(context);
+  const { problem } = await (past.of === 'agent' ? agentKind : skillKind).open(context);
   if (problem) return { stopped: problem, results: [], writes: 0 };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0 };
-  for (const { tool, target, exclusions } of entries) {
-    try { await setDisabled(context, tool, target!, true, exclusions); }
+  for (const { tool, target, listEdit } of entries) {
+    try { await setDisabled(context, tool, target!, true, listEdit); }
     catch (error) { return { stopped: `Could not set ${toolName(tool)}’s switch: ${switchFailure(error)}`, results: [], writes: 0 }; }
   }
-  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: past.key, of: 'skill', item: past.item, kind: 'switched', cause: 'switch', switched: entries.map(entry => ({ ...entry, disabled: true })), losers: [], orderProved: true };
+  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: past.key, of: past.of, item: past.item, kind: 'switched', cause: 'switch', switched: entries.map(({ listEdit: _edit, ...entry }) => ({ ...entry, disabled: true })), losers: [], orderProved: true };
   const history = await readHistory(context);
   for (const entry of history) if (entry.id === past.id) entry.undoneBy = event.id;
   await replaceHistory(context, [...history, event]);
@@ -363,29 +364,27 @@ async function switchBack(context: ShareContext, tools: HarnessId[], past: Histo
 
 /**
  * Clears a tool's own switch that turns a skill off there (the mark on its line), whoever set it, for a skill in Central Knot
- * or one found in a tool. The switch goes back to what it was before it was set where the tool kept that (Claude Code's
- * override); History's `switched` entry says so, and its Undo sets the switch again (switchBack). Ends with a pass on the skill.
- * Its own refusals first; then the skills record's own stop and the gate (share.ts libraryGate), entered only to write, so
+ * or one found in a tool; or Pi's for an agent there (`of`: Pi takes an agent as a skill, agents.ts agentInPi). The switch goes
+ * back to what it was before it was set where the tool kept that (Claude Code's override); History's `switched` entry says so,
+ * with what it changed in Pi's list, and its Undo sets the switch again (switchBack). Ends with a pass on the item.
+ * Its own refusals first; then the kind's record's own stop and the gate (share.ts libraryGate), entered only to write, so
  * nothing is written before either is known. `resume`: the click is a Resume.
  */
-export async function clearSwitch(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId, resume = false): Promise<PassResult> {
+export async function clearSwitch(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId, resume = false, of: 'skill' | 'agent' = 'skill'): Promise<PassResult> {
   const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0 });
   if (!tools.includes(tool)) return stop(`${toolName(tool)} isn’t managed here now. Nothing was changed.`);
-  const { look, live, problem } = await lookFor(skillKind, context, tools);
-  // A skill in Central Knot, or one found in a tool: either can have a tool's switch set.
-  const name = live.find(entry => entry.key === key)?.name ?? foundCopies(look, key, [])[0]?.name ?? key;
-  const target = loadTarget(look, key, name, tool);
-  if (!target || !isDisabled(context, look.disk.switches.get(tool)!, target)) return stop(`${toolName(tool)}’s own switch doesn’t turn ${name} off any more. Nothing was changed.`);
+  const { name, target, problem } = of === 'agent' ? await agentInPi(context, tools, key, tool) : await skillLoads(context, tools, key, tool);
+  if (!target || !isDisabled(context, await readSwitchFile(context, tool), target)) return stop(`${toolName(tool)}’s own switch doesn’t turn ${name} off any more. Nothing was changed.`);
   if (problem) return stop(problem);
   const gate = await libraryGate(context, { start: true, resume });
   if ('refused' in gate) return stop(gate.refused);
-  let exclusions: string[] | undefined;
-  try { exclusions = (await setDisabled(context, tool, target, false, await overrideBefore(context, key, tool, target))).removed; }
+  let listEdit: PiEdit | undefined;
+  try { listEdit = (await setDisabled(context, tool, target, false, await overrideBefore(context, key, tool, target))).edit; }
   catch (error) { return stop(`Could not clear ${toolName(tool)}’s switch: ${switchFailure(error)}`); }
-  const switched = { tool, disabled: false, target, ...(exclusions?.length ? { exclusions } : {}) };
-  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, of: 'skill', item: name, kind: 'switched', switched: [switched], losers: [], orderProved: true };
+  const switched = { tool, disabled: false, target, ...(listEdit ? { listEdit } : {}) };
+  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: of === 'agent' ? `agent:${key}` : key, of, item: name, kind: 'switched', switched: [switched], losers: [], orderProved: true };
   await appendHistory(context, [event]);
-  const done = await applySkills(context, tools, [], { only: new Set([key]) });
+  const done = await (of === 'agent' ? applyAgents : applySkills)(context, tools, [], { only: new Set([key]) });
   const cleared: DestinationResult = { item: name, harness: tool, outcome: 'switched', disabled: false, message: `${toolName(tool)} loads it again from its next session.` };
   return { ...done, results: [cleared, ...done.results], made: [event.id] };
 }
@@ -436,14 +435,17 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, of: 'skill', item: item.name, kind: 'took-over', losers: [loser], orderProved: true };
   await appendHistory(context, [event]);
   const done = await applySkills(context, tools, [], { only: new Set([key]) });
-  // Central Knot's copy is off where the copy it replaced was: a switch that goes by the file's path names the new one.
+  // Central Knot's copy is off where the copy it replaced was: a switch that goes by the file's path names the new one. The
+  // old copy's own entry stays as he wrote it (its folder is gone, so it names nothing); what Pi's list gains is said.
+  const listSaid: string[] = [];
   for (const { tool: each, target } of heldOff) {
-    await setDisabled(context, each, target, false);
-    await setDisabled(context, each, { ...target, folder: item.name, skillFile: join(rootOf(context, each), item.name, 'SKILL.md') }, true);
+    const { edit } = await setDisabled(context, each, { ...target, folder: item.name, skillFile: join(rootOf(context, each), item.name, 'SKILL.md') }, true);
+    if (edit) listSaid.push(piListWords(edit));
   }
+  if (listSaid.length) { event.settingsChanged = listSaid; await replaceHistory(context, (await readHistory(context)).map(each => (each.id === event.id ? event : each))); }
   const said = way.take === 'link' ? `Replaced the link in ${toolName(tool)}’s skills folder with Central Knot’s copy.`
     : `Removed the copy at ${pathWords(context, way.path)}; other apps that read that folder won’t find it there.`;
-  return { ...done, results: [{ item: item.name, harness: tool, outcome: 'written', message: `${said}${keep ? ' It is kept as a version.' : ''}` }, ...done.results], made: [event.id] };
+  return { ...done, results: [{ item: item.name, harness: tool, outcome: 'written', message: [`${said}${keep ? ' It is kept as a version.' : ''}`, ...listSaid].join(' ') }, ...done.results], made: [event.id] };
 }
 
 /** Takes over one copy (takeOver): the version first (library.ts keepVersion), then only the link or the shared copy goes. Why not, if it couldn't. */
@@ -491,6 +493,12 @@ function loadTarget(look: SkillLook, key: string, name: string, tool: HarnessId)
   const disk = look.disk, source = disk.readsFrom[tool];
   const copy = disk.byKey.get(key)?.[tool] ?? disk.outside.get(key)?.[tool] ?? (source ? disk.byKey.get(key)?.[source] : undefined);
   return copy && switchTarget(copy);
+}
+/** The skill a tool's switch is cleared for (clearSwitch): its name, in Central Knot or found in a tool, and the copy the tool loads. */
+async function skillLoads(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId) {
+  const { look, live, problem } = await lookFor(skillKind, context, tools);
+  const name = live.find(entry => entry.key === key)?.name ?? foundCopies(look, key, [])[0]?.name ?? key;
+  return { name, target: loadTarget(look, key, name, tool), problem };
 }
 /** How a tool's own switch names one copy of a skill. */
 const switchTarget = (copy: SkillCopy): SwitchTarget => ({ folder: copy.name, name: copy.skill.name, skillFile: join(copy.directory, 'SKILL.md') });
