@@ -6824,10 +6824,14 @@ async function rootSkillPage() {
   const pins = [commit('First root text.'), commit('Second root text.')], url = 'https://root.example.test/repo.git';
   const list = sha => { mkdirSync(join(market, '.claude-plugin'), { recursive: true }); writeFileSync(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ck-root-market', plugins: [{ name: 'root-fixture', source: { source: 'url', url, sha } }] })); };
   list(pins[0]);
-  mkdirSync(join(home, '.pi/agent'), { recursive: true });
+  for (const folder of ['.pi/agent', '.claude']) mkdirSync(join(home, folder), { recursive: true });
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
-  const a = await launch(data, [], join(scratch, 'root-app-home'), { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${repo}.insteadOf`, GIT_CONFIG_VALUE_0: url });
+  // Claude Code is here too (Pi alone has no Plugins page): a stand-in that only says its version, so any other call fails.
+  const tools = join(scratch, 'tools-root');
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/claude'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0\nexit 9\n', { mode: 0o755 });
+  const a = await launch(data, [], tools, { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${repo}.insteadOf`, GIT_CONFIG_VALUE_0: url });
   const busy = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   const seen = async () => [readdirSync(join(home, '.pi/agent/skills')).sort(), await a.run(`[...document.querySelectorAll('.plugin-items-list [data-key]')].map(row => row.dataset.key)`),
     readFileSync(join(home, '.pi/agent/skills/root-fixture/SKILL.md'), 'utf8').trim().split('\n').at(-1)];
