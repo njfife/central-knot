@@ -21,6 +21,8 @@ jobs:
   mac:
     # Apple silicon, 3 cores and 7 GB. A fresh machine: nothing left running by an earlier run to stop first, as mac.yml does.
     runs-on: macos-15
+    # Two runs of 2026-11-21 took about 19 minutes, four groups at once: the unit tests 8 to 9 beside the packaging (the first
+    # phase's longest part here, 3½ on the owner's Mac), the end-to-end checks 10. The limit leaves room for fewer at once.
     timeout-minutes: 45
     env:
       # Temporary folders, test homes and mounted disk images under /private/tmp, as on the owner's Mac.
@@ -35,14 +37,20 @@ jobs:
           node-version: '24'
           cache: npm
       # The Electron zip that npm ci and the packaging both take from Electron's download cache, kept between runs for each
-      # Electron version.
+      # Electron version: saved as soon as npm ci has downloaded it, so a red run keeps it too.
       - id: electron
         run: echo "version=$(node -p "require('./package.json').devDependencies.electron")" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      - id: electron-zip
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/Library/Caches/electron
           key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
       - run: npm ci
+      - if: steps.electron-zip.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/Library/Caches/electron
+          key: ${{ steps.electron-zip.outputs.cache-primary-key }}
       # exec: a stop (a newer push cancels this run) reaches the script itself, which sends it on to every part.
       - run: exec node scripts/mac-run.mjs
       # The light tour's pictures: gh run download <run> -R njfife/central-knot -n light-tour.
