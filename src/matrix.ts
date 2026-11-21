@@ -28,7 +28,7 @@ import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, gro
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
-import { homeItems, inUse, itemId } from './profileplan.ts';
+import { homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
@@ -69,7 +69,7 @@ export function openPlugin({ source, plugin, marketplace }: { source?: string; p
 }
 
 /** The one mark of a plugin's item on its row: the plugin's glyph and "from <plugin>"; its title says which. */
-const pluginTag = (plugin: string, title: string) => h('span.row-tag.row-part', { title }, icon('puzzle', 12, 'tone-faint'), `from ${plugin}`);
+export const pluginTag = (plugin: string, title: string) => h('span.row-tag.row-part', { title }, icon('puzzle', 12, 'tone-faint'), `from ${plugin}`);
 
 // ---------- What a plugin installed whole brings (pluginrows.ts) ----------
 /** A table's plugin rows for the home on screen, every kind's together by name (itemrow.ts byName), and the installs whose copy couldn't be read, once each. */
@@ -2190,8 +2190,8 @@ function unusedBand(t: Table, shown: ItemRow[]) {
     const list = read.tools.filter(each => toolsFor(t, kind).includes(each.tool) && each.sessions && !each.unread && each.tells[partOfPage[kind]] === how).map(each => each.tool);
     return list.length ? `${toolsInWords(list)} ${list.length === 1 ? 'doesn’t' : 'don’t'}${word} record which ${kindNouns[kind].one} was used.` : '';
   }).filter(Boolean).join(' ');
-  const live = homeItems(home), ids = new Set(off.map(skill => itemId(partOfPage[skill.kind], skill.key))), before = inUse(home.profiles.profiles, live);
-  const ending = before.filter(profile => !inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item))).includes(profile));
+  const live = homeItems(home), plugins = pluginLive(home), ids = new Set(off.map(skill => itemId(partOfPage[skill.kind], skill.key))), before = inUse(home.profiles.profiles, live, plugins);
+  const ending = before.filter(profile => !inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item)), plugins).includes(profile));
   const lead = [`${counted(shown)} with no use seen in the last ${USAGE_DAYS} days.`,
     off.length ? 'Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on.' : '',
     kept.length ? `${counted(kept)} from a plugin skipped: turn each off on its own row.` : '',

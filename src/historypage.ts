@@ -89,6 +89,7 @@ function pulledBase(event: HistoryEvent, tools: string): { glyph: IconName; text
  */
 function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const was = event.profile!, glyph: IconName = 'sliders-horizontal';
+  if (was.undoOf) return { glyph, text: `Undid the switch to ${was.toName}: ${turnsWords(entryTurns(was), 'did') || 'nothing changed'}.` };
   if (!was.on && !was.off) return { glyph, text: `Switched to ${was.toName ?? NO_PROFILE} with each tool’s own switches, before profiles were sets of items.` };
   const action = state.home && changes(undoNow(event)) ? 'Undo' : undefined;
   if (was.migrated) {

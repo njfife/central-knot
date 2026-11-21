@@ -13,7 +13,7 @@ import { readHistory } from '../src/history.ts';
 import { libraryAction, librarySentence } from '../src/historyactions.ts';
 import { libraryWords, rowClicks, sentences, statusLine } from '../src/libraryrow.ts';
 import { inUse, liveItems } from '../src/profileplan.ts';
-import { readLibraries, readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
+import { NO_PLUGINS, readLibraries, readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
 import { applyServers, serversView } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
 import { readRecord, readTree, syncGate, type ShareContext } from '../src/share.ts';
@@ -321,12 +321,12 @@ test('A profile in use when the rule takes an item in: its name drops, nothing e
     await applySkills(box.context, tools, [add((await views(box)).skills, 'notes')]);
     const { id } = await saveProfile(box.context, { name: 'Work', items: ['skill:notes'] });
     const live = async () => { const read = await readLibraries(box.context); return 'libraries' in read ? liveItems(read.libraries, read.plugins) : []; };
-    assert.deepEqual(inUse((await readProfiles(box.home)).profiles, await live()).map(profile => profile.name), ['Work']);
+    assert.deepEqual(inUse((await readProfiles(box.home)).profiles, await live(), []).map(profile => profile.name), ['Work']);
     await putSkill(box, 'codex-cli', 'tidy');
     await turnOn(box);
     await background(box);
-    assert.deepEqual([inUse((await readProfiles(box.home)).profiles, await live()), placeIn((await views(box)).skills, 'notes')], [[], 'on']);
-    await switchProfile(box.context, tools, id!);
+    assert.deepEqual([inUse((await readProfiles(box.home)).profiles, await live(), []), placeIn((await views(box)).skills, 'notes')], [[], 'on']);
+    await switchProfile(box.context, tools, id!, NO_PLUGINS);
     const view = (await views(box)).skills;
     assert.deepEqual([placeIn(view, 'tidy'), placeIn(view, 'notes'), await skillIn(box, 'codex-cli', 'tidy')], ['off', 'on', undefined]);
   } finally { await box.cleanup(); }

@@ -420,7 +420,7 @@ export interface Change {
   forPlugin?: string;
 }
 
-export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, and what is not as it asked; and the plugins' items' copies it left because they were changed since, or are no longer the plugin's (`since`: "pdf-reader in Codex"). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'> & { since?: string[] }; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, and what is not as it asked; and each plugin item's copy it left, with why (`since`: "pdf-reader in Codex, changed since the switch"). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'> & { since?: string[] }; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
  * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
@@ -557,10 +557,11 @@ export interface HistoryEvent {
    * 'profile': a profile switch (`toName`: the profile, by its name then), or the profiles migration's one entry (`migrated`,
    * `toName` the profile last switched to before it, written when it turns something Off): the library items it turned On and
    * Off, and a switch's plugins' items' copies it turned (`plugins`: written as planned before the switch, then as each tool
-   * confirmed). Its Undo turns back each item and copy still as it left it (profileplan.ts undoPlan, pluginUndo). An entry from
-   * before profiles were sets of items has neither `on` nor `off`: it is past.
+   * confirmed). Its Undo turns back each item and copy still as it left it (profileplan.ts undoPlan, pluginUndo), the copies told
+   * in an entry of the Undo's own (`undoOf`: the switch's entry; `plugins`: what it turned them back to), which has no Undo. An
+   * entry from before profiles were sets of items has neither `on` nor `off`: it is past.
    */
-  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; migrated?: true };
+  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; migrated?: true; undoOf?: string };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
   /** What the pass changed in a tool's own settings with the copies, in words (librarypass.ts Kind.follow): Pi's skills list. */

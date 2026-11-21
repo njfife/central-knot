@@ -991,6 +991,7 @@ const pluginSide = (tools: HarnessId[]): PluginSide => ({ live: async () => {
 }, run: async ops => {
   const markets = carriedMarket, home = current?.home;
   if (!markets || !home) return [];
+  // No setWhole is given, so a whole plugin's step fails for its tool (pluginplan.ts runPlan); no install or uninstall runs either.
   const never = async (tools: HarnessId[]) => ({ reports: failedFor(tools, 'A profile never installs or uninstalls a plugin.') });
   return (await runPlan(ops, { install: (...args) => never(args[3]), uninstall: (...args) => never([args[3]]), setSkill: markets.setSkill, setPart: markets.setPart }, home)).done;
 } });

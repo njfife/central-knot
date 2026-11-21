@@ -9,7 +9,7 @@ import { openCodeSettings } from './harnesses.ts';
 import { readJsonc, readTomlTables } from './textedit.ts';
 import { nameOfFile, record, text } from './values.ts';
 import { installedCopies, installedPlugins, registeredMarketplaces, type PluginContext } from './plugins.ts';
-import { samePart } from './pluginstatus.ts';
+import { loadsKind, samePart } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import type { DeclaredHook, HarnessId, InstalledPlugin, InstructionFile, NamedPart, PartKind, PluginItem } from './types.ts';
 
@@ -37,7 +37,7 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
       const items: PluginItem[] = [
         ...contents.skills.map(file('skill')),
         ...contents.mcpServers.map(server => ({ kind: 'mcp' as const, name: server.name, description: '', runs: server.runs })),
-        ...(tool === 'codex-cli' ? [] : contents.agents.map(file('agent'))),
+        ...(loadsKind(tool, 'agent') ? contents.agents.map(file('agent')) : []),
       ];
       const skillsOff = (state.skillsOff ?? []).map(entry => entry.skill);
       const skillsHeld = Object.fromEntries((state.skillsOff ?? []).flatMap(entry => (entry.held ? [[entry.skill, entry.held]] : [])));

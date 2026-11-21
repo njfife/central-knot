@@ -14,7 +14,7 @@ import { applyBase, baseView, instructionsView, saveInstruction, undoBase } from
 import type { LibraryItem } from '../src/library.ts';
 import { libraryAction, librarySentence } from '../src/historyactions.ts';
 import { libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
-import { saveProfile, switchProfile } from '../src/profiles.ts';
+import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import { setDisabled } from '../src/skillswitch.ts';
 import { applyServers, serversView } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
@@ -322,7 +322,7 @@ test('With a tool left out, nothing Central Knot does writes there: a skill turn
     assert.match((await takeOver(b.context, tools, 'notes', 'codex-cli')).stopped ?? '', /^Codex isn’t managed here now\./);
     // A profile switch that turns notes Off and back.
     const made = await saveProfile(b.context, { name: 'Bare', items: [] });
-    const switched = await switchProfile(b.context, tools, made.id!);
+    const switched = await switchProfile(b.context, tools, made.id!, NO_PLUGINS);
     assert.equal(switched.stopped, undefined);
     assert.deepEqual(await codex(), untouched, 'a profile switch');
     // An instruction file: a save in Codex is refused, and the base goes to the managed tools only.

@@ -11242,7 +11242,7 @@ async function profilePluginsFlow() {
   writeFileSync(config, codexBefore);
   mkdirSync(join(home, '.pi/agent'), { recursive: true });
   mkdirSync(join(tools, '.local/bin'), { recursive: true });
-  for (const [name, output] of [['claude', '2.1.322 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) {
+  for (const [name, output] of [['claude', '2.1.322 (Claude Code)'], ['codex', 'codex-cli 0.142.3'], ['copilot', 'GitHub Copilot CLI 1.0.107.']]) {
     writeFileSync(join(tools, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`, { mode: 0o755 });
   }
   mkdirSync(data, { recursive: true });
@@ -11275,19 +11275,22 @@ async function profilePluginsFlow() {
   check('Pi’s box puts its items in Pi; Claude Code and Codex have it installed', !!piTriage() && (readNow(join(home, '.pi/agent/mcp.json')) ?? '').includes('issues'), await a.text('#plugins-result'));
   const before = files();
 
-  // Ticked: each item is a row of its kind, from its plugin, and Claude Code's limit is said on the skill's row.
+  // Ticked: each item is a row of its kind, from its plugin, and Claude Code's limit is said once, at the head of Skills.
   await a.click('#nav-profiles');
   await newProfile(a, 'Work');
   for (const id of [triageId, issuesId]) { await a.click(byId(`pf-${id}`)); await done(); }
   same('a plugin’s skill and server are rows with their boxes, from their plugin, and ticking saves them', [await a.all('.pf-row[data-item]', 'e.dataset.item'), await a.text(`${row(triageId)} .row-tag`),
     JSON.parse(readFileSync(join(home, '.central-knot/profiles.json'), 'utf8')).profiles.find(each => each.name === 'Work')?.items], [[triageId, issuesId], 'from issue-tracker', [triageId, issuesId]]);
-  same('the skill’s row says Claude Code keeps it on, in the plugin page’s words; the server’s row says nothing: every tool switches it',
-    [await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.all(`${row(issuesId)} .pf-note`, 'e.textContent')], [['Stays on: Claude Code has no switch for a single skill of a plugin.'], []]);
+  same('the head of Skills says once that Claude Code keeps a plugin’s skills on, in the plugin page’s words; a ticked row says nothing of it',
+    [await a.text('#pf-note-skill'), await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text(`${row(triageId)} .pf-state`), await a.exists('#pf-note-mcp')],
+    ['Claude Code has no switch for a single skill of a plugin, so a plugin’s skills stay on there.', [], 'On', false]);
   check('no line says a profile doesn’t switch a plugin’s items yet', !(await a.exists('#profile-left-out')), await a.text('#profile-left-out'));
   same('with everything on, Work is in use', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p')], ['Work', 'In use · 2 items on']);
   await newProfile(a, 'Quiet');
   await a.click(byId(`pf-${issuesId}`)); await done();
-  same('before the click: Quiet turns triage off, said on its row and in the header', [await a.text(`${row(triageId)} .pf-state`), await a.text(`${row(issuesId)} .pf-state`), await a.text('.profile-header p')], ['Turns off', 'Stays on', 'Switching turns 1 item off']);
+  same('before the click: Quiet turns triage off where it can, and says where it stays on; issues has no change', [await a.run(`document.querySelector('${row(triageId)} .pf-state').dataset.state`),
+    await a.text(`${row(triageId)} .pf-state-also`), await a.run(`document.querySelector('${row(triageId)} .pf-state').title`), await a.text(`${row(issuesId)} .pf-state`), await a.text('.profile-header p')],
+    ['Turns off in Codex and Pi', 'stays on in Claude Code', 'Claude Code has no switch for a single skill of a plugin.', 'No change', 'Switching turns 1 item off']);
   await pictures('profile-plugin-rows');
 
   // The switch: Codex's own rule for triage alone, Pi's copy out, Claude Code untouched; one History entry, with Undo.
@@ -11296,7 +11299,7 @@ async function profilePluginsFlow() {
   check('before the switch, Pi has its copy of triage', !!before.pi);
   same('Codex’s rule turns triage alone off, the plugin left on; Pi’s copy is out; Claude Code’s settings are as they were', files(),
     { codex: `${codexBefore}\n[[skills.config]]\nname = "issue-tracker:triage"\nenabled = false\n`, claude: before.claude, pi: undefined });
-  same('Quiet is in use, said with what it can switch', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p'), await a.text(`${row(triageId)} .pf-state`)], ['Quiet', 'In use · 1 item on, the other 1 off wherever they can be switched', 'Off']);
+  same('Quiet is in use, said with what it can switch', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p'), await a.text(`${row(triageId)} .pf-state`)], ['Quiet', 'In use · 1 item on, the other 1 off wherever they can be switched', 'Offstays on in Claude Code']);
   check('the result says what it turned off, with Undo switch', /^Switched to Quiet: 1 item turned off\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   if (a.inspect) {
     const menu = await mainHelpers(a.inspect);
@@ -11328,21 +11331,60 @@ async function profilePluginsFlow() {
   // The menu helper clicks every menu object still alive with that label, older ones too: each switch after the first plans from the
   // home as the one before left it (main.ts pluginSide), finds nothing to change, and writes no entry.
   await a.click('#nav-history');
-  same('History has one entry per switch, newest first, each saying what it did', await a.all('.history-row[data-kind="profile"] .history-about', 'e.textContent'),
-    ['Switched to Work: 1 item turned on.', 'Switched to Quiet: 1 item turned off.', 'Switched to Quiet: 1 item turned off.']);
+  same('History has one entry per switch and one for the Undo, newest first, each saying what it did, the switch it undid marked Undone',
+    [await a.all('.history-row[data-kind="profile"] .history-about', 'e.textContent'), await a.all('.history-row[data-kind="profile"] .history-done', 'e.textContent')],
+    [['Switched to Work: 1 item turned on.', 'Switched to Quiet: 1 item turned off.', 'Undid the switch to Quiet: 1 item turned on.', 'Switched to Quiet: 1 item turned off.'], ['Undone']]);
 
   // The whole plugin off in Codex: a switch can't turn its items on there, so the rows say so, with the way to its page.
   writeFileSync(config, readNow(config).replace('enabled = true', 'enabled = false'));
   await a.click('#nav-profiles');
   await a.click('#header-refresh');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Work')).click()`); await a.settle();
-  same('with the plugin off in Codex, the rows say so and Work is not in use, with nothing a switch can turn',
-    [await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text('.profile-header p'), await a.exists('#profile-switch'), (await a.text('#status-profile'))?.trim()],
-    [['Stays on: Claude Code has no switch for a single skill of a plugin.', 'Off in Codex: its plugin is off there. Open its plugin'], 'Not in use · what differs can’t be switched from here', false, 'No profile']);
+  const cause = 'issue-tracker is off in Codex, so 2 of its items can’t be switched from here';
+  same('with the plugin off in Codex, the rows say so, and the header says why Work is not in use, with the way to the plugin instead of Switch',
+    [await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text('.profile-header p'), await a.exists('#profile-switch'), await a.exists('#profile-open-plugin'), await a.exists(byId(`pf-plugin-${triageId}-codex-cli`)), (await a.text('#status-profile'))?.trim()],
+    [['Off in Codex: its plugin is off there. Open its plugin'], `Not in use · ${cause}`, false, true, true, 'No profile']);
   await pictures('profile-plugin-off');
-  await a.click(byId(`pf-plugin-${triageId}-codex-cli`));
+  // Chosen from the status bar's menu, it is refused in the same words.
+  await a.click('#status-profile');
+  await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Work')).click()`);
+  await done();
+  same('chosen from the status bar, Work is refused, and the status bar says why', await a.run(`document.querySelector('#announcement').dataset.text`), `${cause}. Nothing was switched.`);
+  await a.click('#profile-open-plugin');
   for (let tries = 0; tries < 50 && !(await a.exists('#plugin-back')); tries++) await wait(100);
   check('Open its plugin opens issue-tracker’s page on Plugins', await a.exists('#plugin-back') && /issue-tracker/.test(await a.text('.plugin-page') ?? ''), await a.text('.page-title'));
+
+  // His own skill beside the plugin's rows, a plugin's skill with a long name, In use; then a plugin's server Copilot CLI can't
+  // switch (a server of his own has its name) and a plugin whose copy Copilot CLI can't read: four pictures at his window, and the
+  // long name at the narrowest.
+  writeFileSync(config, readNow(config).replace('enabled = false', 'enabled = true'));
+  const long = 'summarize-incident-timeline-for-the-weekly-review', md = (name, what) => `---\nname: ${name}\ndescription: ${what}\n---\n\n${what}\n`;
+  for (const copy of [join(home, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0'), codexCopy]) { mkdirSync(join(copy, 'skills', long), { recursive: true }); writeFileSync(join(copy, 'skills', long, 'SKILL.md'), md(long, 'Summarizes an incident.')); }
+  mkdirSync(join(home, '.claude/skills/notes'), { recursive: true });
+  writeFileSync(join(home, '.claude/skills/notes/SKILL.md'), md('notes', 'Takes notes.'));
+  await a.click('#nav-profiles');
+  await a.click('#header-refresh');
+  same('his own notes taken in', (await a.run(`window.centralKnot.applySkills([{ key: 'notes', on: true, except: [] }], false, ${JSON.stringify(home)}).then(result => result.stopped ?? 'ok')`)), 'ok');
+  await a.click('#header-refresh');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Work')).click()`); await a.settle();
+  for (const id of ['skill:notes', `plugin:skill:issue-tracker@ck-test-market/${long}`]) { await a.click(byId(`pf-${id}`)); await done(); }
+  same('his own notes and the plugin’s skills are rows of Skills together, and Work, with them ticked, is in use', [await a.all('.pf-row[data-item^="skill:"], .pf-row[data-item^="plugin:skill:"]', 'e.dataset.item'), (await a.text('.profile-header p'))?.startsWith('In use · 4 items on')],
+    [['skill:notes', `plugin:skill:issue-tracker@ck-test-market/${long}`, triageId], true]);
+  const picture = async (name, width, height) => { if (!shots) return; await sizeTo(a, width, height); await a.shot(name); await fullSize(a); };
+  await picture('profile-plugin-in-use', 1316, 819);
+  await picture('profile-plugin-long-name', ...SMALLEST);
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Quiet')).click()`); await a.settle();
+  await picture('profile-plugin-own-rows', 1316, 819);
+  const copilotCopy = join(home, '.copilot/installed-plugins/ck-test-market/issue-tracker');
+  for (const [path, text] of [['skills/triage/SKILL.md', triage], ['.mcp.json', servers]]) { mkdirSync(dirname(join(copilotCopy, path)), { recursive: true }); writeFileSync(join(copilotCopy, path), text); }
+  writeClaudeInstall(home, 'ck-test-market', 'document-tools', '1.2.0', { 'skills/pdf/SKILL.md': md('pdf', 'Reads PDFs.') });
+  writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'issue-tracker', marketplace: 'ck-test-market', version: '2.0.0', cache_path: copilotCopy, enabled: true },
+    { name: 'document-tools', marketplace: 'ck-test-market', version: '1.2.0', cache_path: join(home, '.copilot/installed-plugins/ck-test-market/gone'), enabled: true }] }));
+  writeFileSync(join(home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { issues: { command: 'mine' } } }));
+  await a.click('#header-refresh');
+  same('Copilot CLI’s issues is held on its row, and its copy of document-tools not known on pdf’s', [await a.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await a.all(`${row('plugin:skill:document-tools@ck-test-market/pdf')} .pf-note`, 'e.textContent')],
+    [['Stays on in Copilot CLI: Copilot CLI turns a server off by its name alone, and a server of your own there is named “issues” too.'], ['Not known in Copilot CLI: its copy couldn’t be read.']]);
+  await picture('profile-plugin-held-unread', 1316, 819);
   same('no page errors', a.pageErrors, []);
   await a.quit();
 }

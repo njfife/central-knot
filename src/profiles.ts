@@ -2,11 +2,11 @@
 // switch changes, which profile is in use, what its Undo turns back) are profileplan.ts's. A switch is the library's own clicks,
 // Turn on and Turn off, made together in one pass per kind (skills.ts applySkills, servers.ts applyServers, agents.ts
 // applyAgents), and for a plugin's items each copy's own switch: an installed copy's in its tool (pluginswitch.ts click, run
-// through the main process: PluginSide), a copy placed in Pi or OpenCode by its library item's On or Off in the same pass; all of
-// it told to History in one entry of its own, written first (librarypass.ts PassOptions told) and then left holding only the
-// plugin copies each tool confirmed. Its Undo is each library item's own Turn on or Turn off, each with its own entry, and each
-// plugin copy's own switch back, with none. Nothing per tool is kept here but that entry, and which profile is in use is never
-// stored. A file from before profiles were sets of items (format 1) is read here for the page and moved once by
+// through the main process: PluginSide), a copy placed in Pi or OpenCode by its library item's On or Off in a pass of its own;
+// all of it told to History in one entry of its own, written first (librarypass.ts PassOptions told) and then left holding only
+// the plugin copies each tool confirmed. Its Undo is each library item's own Turn on or Turn off, each with its own entry, and
+// each plugin copy's own switch back, all told in one entry of the Undo's own, which marks the switch's entry undone. Nothing per
+// tool is kept here but those entries, and which profile is in use is never stored. A file from before profiles were sets of items (format 1) is read here for the page and moved once by
 // profilemigrate.ts.
 //
 //   profiles.json   { formatVersion: 2, profiles: [{ id, name, items: ['skill:notes', 'mcp:docs', 'agent:writer'] }] }
@@ -20,13 +20,14 @@ import { itemKey, type ItemKind } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
 import { succeeded, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { click } from './pluginswitch.ts';
-import { changes, liveItems, pluginPlan, pluginUndo, switchPlan, undoPlan, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { changes, heldWords, liveItems, pluginPlan, pluginUndo, switchPlan, undoPlan, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
 import { applyServers, serverKind } from './servers.ts';
 import { errorCode, libraryGate, storeDirectory, writeDurably, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
 import { recordedIds } from './sourcestore.ts';
+import { groupBy } from './model.ts';
 import { strings } from './values.ts';
-import { toolNames } from './words.ts';
+import { andList, toolNames } from './words.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, PassResult, PluginSwitched, Profile, ProfileEdit, ProfileSwitchResult, ProfilesView } from './types.ts';
 
 // ---------- The profiles file ----------
@@ -147,8 +148,8 @@ export async function liveNow(context: ShareContext): Promise<LiveItem[]> {
  * setPart).
  */
 export interface PluginSide { live: () => Promise<PluginLive[]>; run: (ops: PluginOp[]) => Promise<PluginDone[]> }
-/** A home read with no plugins' items: what a switch meets when its caller gives none. */
-const NO_PLUGINS: PluginSide = { live: async () => [], run: async () => [] };
+/** A home read with no plugins' items, for a caller whose home has none (tests of the library's part alone). */
+export const NO_PLUGINS: PluginSide = { live: async () => [], run: async () => [] };
 
 /** The copies a plugin plan turns (pluginPlan `turn`), each toward what the profile has. */
 const copiesTurned = (plan: PluginTurn[], live: PluginLive[]): CopyTurn[] => plan.flatMap(turn => {
@@ -166,60 +167,66 @@ const switched = ({ item, copy, on }: CopyTurn): PluginSwitched => ({ id: item.i
 const placedKey = ({ item, copy }: CopyTurn) => ('libraryKey' in copy.target ? `${item.kind}:${copy.target.libraryKey}` : undefined);
 
 /**
- * The clicks for the placed copies in `placed` of one kind: each one's library item turned once, however many tools it is in,
- * kept out where it is (from `libraries`, as read now) and taken only while it is still the plugin's (Change `forPlugin`: the
- * same pass may let go of a copy edited since); one already as asked (turned since the plan was read) is not clicked (`asAsked`).
+ * The clicks for the placed copies in `copies` of one kind, one for each library item however many of its tools are turned,
+ * taken only while it is still the plugin's (Change `forPlugin`: the same pass may let go of a copy edited since). Turned off
+ * in some of the tools it is in now and not others (an Undo, after it was let into another tool), it stays On and is kept out
+ * of those it is turned off in; else it is turned On or Off, kept out where it is (`libraries`, as read now).
  */
-function placedClicks(kind: ItemKind, placed: CopyTurn[], libraries: Libraries | undefined) {
-  const clicks: Change[] = [], names: string[] = [], asAsked: string[] = [];
-  for (const turn of placed.filter(each => each.item.kind === kind)) {
-    const record = 'libraryKey' in turn.copy.target ? libraries?.[kind][turn.copy.target.libraryKey] : undefined;
-    if (record?.on === turn.on) asAsked.push(placedKey(turn)!);
-    else if (record?.source) { clicks.push({ key: record.key, on: turn.on, except: [...record.except], seenOn: !turn.on, forPlugin: record.source }); names.push(turn.item.name); }
-  }
-  return { clicks, names, asAsked };
+function placedClicks(kind: ItemKind, copies: CopyTurn[], libraries: Libraries): Change[] {
+  return [...groupBy(copies.filter(turn => turn.item.kind === kind && placedKey(turn)), turn => placedKey(turn)!).values()].flatMap(turns => {
+    const { item, copy, on } = turns[0]!, record = 'libraryKey' in copy.target ? libraries[kind][copy.target.libraryKey] : undefined;
+    if (!record?.source) return [];
+    const turned = turns.map(turn => turn.copy.tool);
+    const stays = !on && item.copies.some(other => 'libraryKey' in other.target && other.on && !other.gone && !turned.includes(other.tool));
+    return [stays ? { key: record.key, on: true, except: [...new Set([...record.except, ...turned])], seenOn: true, forPlugin: record.source }
+      : { key: record.key, on, except: [...record.except], seenOn: !on, forPlugin: record.source }];
+  });
 }
 
 /**
- * Turns `turns.on` On and `turns.off` Off, the library's own clicks (each item On or Off, kept out of the tools it is kept out
- * of), with the placed copies in `copies` (placedClicks), one pass per kind on those items alone (`told`: History has them in
- * the caller's entry); then each installed copy in `copies` by its own switch in its tool (installedCopy). Answers what each
- * pass and tool said, the entries the clicks made, and what is as asked after, read back: each library item (`done`), each copy
- * whose change was confirmed (`copies`: a tool's own read after its write, plugins.ts setSkill and setPart; a placed copy's
- * library item read again), and each copy found as asked already (`asAsked`), which is neither. The same pass can turn an item
- * Off again (its copy in a tool was deleted by hand while a removal waited there), which History then says in an entry of its own.
+ * Turns `turns.on` On and `turns.off` Off, the library's own clicks, one pass per kind (`told`: History has them in the caller's
+ * entry); then the placed copies in `copies`, one pass per kind of their own whose entry is always the caller's (placedClicks);
+ * then each installed copy by its own switch in its tool (installedCopy). Answers what each pass and tool said, the entries the
+ * library items' clicks made, what is as asked after, read back: each library item (`done`), each copy whose change its tool
+ * confirmed (`copies`: a placed copy by its library item read again and that tool's own result in its pass), and the placed
+ * copies whose library item is no longer the plugin's (`letGo`: edited by hand since), and each installed copy its tool found as
+ * asked already (`asAsked`), which are neither turned nor failed.
  */
-async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Turns, told: boolean, copies: CopyTurn[] = [], libraries?: Libraries, plugins = NO_PLUGINS) {
-  const results: DestinationResult[] = [], made: string[] = [], placedAsAsked = new Set<string>();
-  const placed = [...new Map(copies.flatMap(turn => { const key = placedKey(turn); return key ? [[key, turn] as const] : []; })).values()];
+async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Turns, told: boolean, copies: CopyTurn[], libraries: Libraries, plugins: PluginSide) {
+  const results: DestinationResult[] = [], made: string[] = [], placedResults: DestinationResult[] = [];
   for (const { kind, pass } of KINDS) {
     const asked = [...turns.on.filter(item => item.kind === kind).map(item => [item, true] as const), ...turns.off.filter(item => item.kind === kind).map(item => [item, false] as const)];
-    const fromPlugins = placedClicks(kind, placed, libraries);
-    fromPlugins.asAsked.forEach(key => placedAsAsked.add(key));
-    const clicks = [...asked.map(([item, on]): Change => ({ key: item.key, on, except: [...item.except], seenOn: !on })), ...fromPlugins.clicks];
-    if (!clicks.length) continue;
-    const done = await pass(context, tools, clicks, { only: new Set(clicks.map(each => each.key)), told });
-    const names = [...asked.map(([item]) => item.name), ...fromPlugins.names].join(', ');
-    results.push(...done.results, ...(done.stopped ? [{ item: names, outcome: 'failed' as const, message: done.stopped }] : []));
-    made.push(...(done.made ?? []));
+    const clicks = asked.map(([item, on]): Change => ({ key: item.key, on, except: [...item.except], seenOn: !on }));
+    for (const [list, mine, toldHere] of [[clicks, false, told], [placedClicks(kind, copies, libraries), true, true]] as const) {
+      if (!list.length) continue;
+      const done = await pass(context, tools, list, { only: new Set(list.map(each => each.key)), told: toldHere });
+      const names = list.map(click => libraries[kind][click.key]?.name ?? click.key).join(', ');
+      results.push(...done.results, ...(done.stopped ? [{ item: names, outcome: 'failed' as const, message: done.stopped }] : []));
+      if (mine) placedResults.push(...done.results); else made.push(...(done.made ?? []));
+    }
   }
-  const confirmed: CopyTurn[] = [], asAsked = copies.filter(turn => placedAsAsked.has(placedKey(turn) ?? ''));
+  const confirmed: CopyTurn[] = [], asAsked: CopyTurn[] = [];
   for (const turn of copies.filter(each => !placedKey(each))) {
     const { changed, failed } = await installedCopy(turn, plugins);
     if (failed) results.push(failed); else (changed ? confirmed : asAsked).push(turn);
   }
   const after = await readLibraries(context), records = 'stop' in after ? undefined : after.libraries;
   const now = (item: LiveItem) => records && !records[item.kind][item.key]?.deleted ? records[item.kind][item.key]?.on : undefined;
-  const placedNow = ({ item, copy, on }: CopyTurn) => 'libraryKey' in copy.target && records?.[item.kind][copy.target.libraryKey]?.on === on;
+  const recordOf = ({ item, copy }: CopyTurn) => ('libraryKey' in copy.target ? records?.[item.kind][copy.target.libraryKey] : undefined);
+  const letGo = copies.filter(turn => placedKey(turn) && recordOf(turn)?.source !== libraries[turn.item.kind][(turn.copy.target as { libraryKey: string }).libraryKey]?.source);
+  const placedDone = (turn: CopyTurn) => {
+    const record = recordOf(turn), wanted = !!record?.on && !record.except.includes(turn.copy.tool);
+    return wanted === turn.on && !letGo.includes(turn) && !placedResults.some(result => result.item === record?.name && result.harness === turn.copy.tool && (result.outcome === 'failed' || result.outcome === 'held'));
+  };
   return { results, made, done: { on: turns.on.filter(item => now(item) === true), off: turns.off.filter(item => now(item) === false) },
-    copies: copies.filter(turn => !asAsked.includes(turn) && (placedKey(turn) ? placedNow(turn) : confirmed.includes(turn))), asAsked };
+    copies: copies.filter(turn => (placedKey(turn) ? placedDone(turn) : confirmed.includes(turn))), letGo, asAsked };
 }
 
 /**
  * One installed copy turned by its own switch in its tool, run by the main process: the one step pluginswitch.ts click makes for
  * it, never a whole plugin's, since a copy a plan turns has its plugin on there and a switch of its own that can be written
- * (profileplan.ts installedWay). Answers whether the tool confirmed a change (`changed`; not when it was as asked already, turned
- * since the plan was read), or what went wrong (`failed`).
+ * (profileplan.ts installedWay). Answers whether the tool confirmed a change (`changed`; not when it was as asked already), or
+ * what went wrong (`failed`).
  */
 async function installedCopy({ item, copy, on }: CopyTurn, plugins: PluginSide): Promise<{ changed: boolean; failed?: DestinationResult }> {
   const draft: PluginDraft = new Map();
@@ -234,7 +241,7 @@ const SWITCH_KEY = 'profiles:switch';
 const named = (items: LiveItem[]) => items.map(({ id, name }) => ({ id, name }));
 const stopped = (why: string): ProfileSwitchResult => ({ stopped: why, on: [], off: [], left: [], results: [] });
 
-/** A profile entry (types.ts HistoryEvent `profile`): a switch's, or the migration's (profilemigrate.ts). `item`: the profile's name. */
+/** A profile entry (types.ts HistoryEvent `profile`): a switch's, its Undo's, or the migration's (profilemigrate.ts). `item`: the profile's name. */
 export const profileEvent = (context: ShareContext, item: string, profile: NonNullable<HistoryEvent['profile']>): HistoryEvent =>
   ({ id: randomUUID(), at: new Date(clock(context)).toISOString(), key: SWITCH_KEY, item, kind: 'profile', losers: [], orderProved: true, profile });
 
@@ -243,7 +250,7 @@ export const profileEvent = (context: ShareContext, item: string, profile: NonNu
  * `copies`, those `confirmed`) and those that are not (`left`), by name, a plugin's item once however many tools it was turned
  * in (one turned in one tool and not in another is in both lists); and what could not be done in a tool this time.
  */
-function outcome(turns: Turns, done: Turns, results: DestinationResult[], copies: CopyTurn[] = [], confirmed: CopyTurn[] = []) {
+function outcome(turns: Turns, done: Turns, results: DestinationResult[], copies: CopyTurn[], confirmed: CopyTurn[]) {
   const names = (items: LiveItem[]) => items.map(item => item.name);
   const itemNames = (list: CopyTurn[]) => [...new Map(list.map(turn => [turn.item.id, turn.item.name])).values()];
   const left = [...turns.on, ...turns.off].filter(item => !done.on.includes(item) && !done.off.includes(item));
@@ -252,8 +259,8 @@ function outcome(turns: Turns, done: Turns, results: DestinationResult[], copies
 }
 
 /**
- * A switch's entry once its passes ran: holding only the plugin copies their tools confirmed (types.ts HistoryEvent profile
- * `plugins`: a write that failed is no part of its Undo), and what its passes changed in a tool's own settings (`settingsChanged`).
+ * A switch's or an Undo's entry once its passes ran: holding only the plugin copies their tools confirmed (types.ts HistoryEvent
+ * profile `plugins`: a write that failed is no part of its Undo), and what its passes changed in a tool's own settings.
  */
 async function settleEntry(context: ShareContext, eventId: string, confirmed: CopyTurn[], settingsChanged: string[]) {
   const history = await readHistory(context), entry = history.find(each => each.id === eventId);
@@ -267,11 +274,12 @@ async function settleEntry(context: ShareContext, eventId: string, confirmed: Co
 
 /**
  * Switches to a profile: each library item it names On, every other Off (profileplan.ts switchPlan), and each plugin's item
- * turned, copy by copy, as profileplan.ts pluginPlan says (`plugins`: what the main process gives of them; with none, a switch
- * meets none), told to History in one entry written before anything changes. A copy pluginPlan holds is said in the result,
- * and the other tools' are turned all the same. Nothing to turn: no entry, and the gate is not entered (no record made).
+ * turned, copy by copy, as profileplan.ts pluginPlan says (`plugins`: what the main process gives of them), told to History in
+ * one entry written before anything changes. A copy pluginPlan holds is said in the result, and the other tools' are turned all
+ * the same. Nothing to turn: no entry, and the gate is not entered (no record made); when something is held, refused with why
+ * (profileplan.ts heldWords).
  */
-export async function switchProfile(context: ShareContext, tools: HarnessId[], id: string, plugins = NO_PLUGINS): Promise<ProfileSwitchResult> {
+export async function switchProfile(context: ShareContext, tools: HarnessId[], id: string, plugins: PluginSide): Promise<ProfileSwitchResult> {
   const opened = await openProfiles(context);
   if ('stop' in opened) return stopped(opened.stop);
   const profile = opened.profiles.find(each => each.id === id);
@@ -280,7 +288,7 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   if ('stop' in read) return stopped(read.stop);
   const turns = switchPlan(profile, liveItems(read.libraries, read.plugins));
   const live = await plugins.live(), plan = pluginPlan(profile, live), copies = copiesTurned(plan, live), held = heldResults(plan, live);
-  if (!changes(turns) && !copies.length) return { name: profile.name, on: [], off: [], left: [], results: held };
+  if (!changes(turns) && !copies.length) return held.length ? stopped(`${heldWords(plan, live).text}. Nothing was switched.`) : { name: profile.name, on: [], off: [], left: [], results: [] };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
   const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off), ...(copies.length ? { plugins: copies.map(switched) } : {}) });
@@ -296,27 +304,34 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
 /**
  * Undo of a profile entry (a switch's, or the migration's): each library item it turned On that is still On is turned Off, each
  * it turned Off that is still Off is turned On (profileplan.ts undoPlan), by the items' own clicks, each with its own History
- * entry; each plugin copy it turned that is still as it left it and still the plugin's goes back by its own switch, with no
- * entry, and each other is said (`switched.since`: profileplan.ts pluginUndo). The profile entry is marked undone once a library
- * item's click made an entry. No copies are given back. An entry from before profiles were sets of items has nothing to undo.
+ * entry; each plugin copy it turned that is still as it left it goes back by its own switch, all of them told in one entry of
+ * the Undo's own, written first (`undoOf`), and each copy left is named, with why (`switched.since`). The switch's entry is
+ * marked undone by the Undo's entry, or where it turned back no plugin copy, by its first library item's. No copies are given
+ * back. An entry from before profiles were sets of items, and an Undo's own, have nothing to undo.
  */
-export async function undoSwitch(context: ShareContext, tools: HarnessId[], eventId: string, plugins = NO_PLUGINS): Promise<ApplyResult> {
+export async function undoSwitch(context: ShareContext, tools: HarnessId[], eventId: string, plugins: PluginSide): Promise<ApplyResult> {
   const stop = (why: string): ApplyResult => ({ stopped: why, results: [], harnessWrites: 0 });
   const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (!past?.profile?.on || past.undoneBy) return stop('That switch has nothing to undo.');
   const read = await readLibraries(context);
   if ('stop' in read) return stop(read.stop);
-  const turns = undoPlan(past, liveItems(read.libraries, read.plugins)), { back, left: since } = pluginUndo(past, await plugins.live());
+  const turns = undoPlan(past, liveItems(read.libraries, read.plugins)), { back, left } = pluginUndo(past, await plugins.live());
   if (!changes(turns) && !back.length) return stop('Nothing to undo: each item that switch changed was changed again since.');
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);
-  const { results, made, done, copies, asAsked } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins);
-  if (made.length) {
+  const undo = back.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, plugins: back.map(switched) }) : undefined;
+  if (undo) await appendHistory(context, [undo]);
+  const { results, made, done, copies, letGo, asAsked } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins);
+  if (undo && copies.length < back.length) await settleEntry(context, undo.id, copies, []);
+  const by = (undo && copies.length ? undo.id : undefined) ?? made[0];
+  if (by) {
     const now = await readHistory(context), entry = now.find(each => each.id === eventId);
-    if (entry) { entry.undoneBy = made[0]; await replaceHistory(context, now); }
+    if (entry) { entry.undoneBy = by; await replaceHistory(context, now); }
   }
-  const { results: notDone, ...switchedBack } = outcome(turns, done, results, back.filter(turn => !asAsked.includes(turn)), copies);
-  const changedSince = since.map(copy => `${copy.name} in ${toolNames[copy.tool]}`);
-  return { results: notDone, harnessWrites: changes(done) + copies.length, made, switched: { ...switchedBack, ...(changedSince.length ? { since: changedSince } : {}) } };
+  const { results: notDone, ...switchedBack } = outcome(turns, done, results, back.filter(turn => !asAsked.includes(turn) && !letGo.includes(turn)), copies);
+  // Each copy left, as "pdf-reader in Pi, deleted by hand since"; one let go as his own by the Undo's own pass with its tools together.
+  const since = [...left.map(({ copy, why }) => `${copy.name} in ${toolNames[copy.tool]}, ${why}`),
+    ...[...groupBy(letGo, turn => turn.item.id).values()].map(list => `${list[0]!.item.name} in ${andList(list.map(turn => toolNames[turn.copy.tool]))}, edited by hand since, so it is your own now`)];
+  return { results: notDone, harnessWrites: changes(done) + copies.length, made, switched: { ...switchedBack, ...(since.length ? { since } : {}) } };
 }
