@@ -1,4 +1,4 @@
-// The Mac run: every check of a change, as `.github/workflows/mac.yml` runs it after `npm ci`, in the order `phases` gives
+// The Mac run: every check of a change, as `.github/workflows/mac.yml` and `.github/workflows/mac-hosted.yml` run it after `npm ci`, in the order `phases` gives
 // with its reasons. Each part's output prints as one block when it has closed (folded when the part passed), then a table of
 // every part's result and time, and one line for each part that failed, quoting what failed when its output says. Exit code:
 // 0 when every part passed; 1 when a part failed (the parts it kept from running are "not run"); 130 when the run was stopped
@@ -36,9 +36,9 @@ const phases = [
       { name: 'alpha check', command: 'node scripts/alpha-check.mjs' },
     ],
   ],
-  // The end-to-end checks against the packaged app, with nothing beside them: four copies of the script at once, each running
-  // one group of its flows (scripts/e2e.mjs runGroups).
-  [[{ name: 'e2e', command: 'npm run e2e', env: { CK_E2E_GROUPS_AT_ONCE: '4' } }]],
+  // The end-to-end checks against the packaged app, with nothing beside them: four copies of the script at once (or as many as
+  // CK_E2E_GROUPS_AT_ONCE says, which only mac-hosted.yml sets), each running one group of its flows (scripts/e2e.mjs runGroups).
+  [[{ name: 'e2e', command: 'npm run e2e', env: { CK_E2E_GROUPS_AT_ONCE: process.env.CK_E2E_GROUPS_AT_ONCE || '4' } }]],
 ];
 
 const root = resolve(import.meta.dirname, '..');

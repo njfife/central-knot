@@ -20,6 +20,7 @@ import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { managedNow } from '../src/share.ts';
 import { writesRealHome } from '../src/machine.ts';
+import { executableCandidates } from '../src/platform.ts';
 import { STANDARD_BUILD } from '../src/values.ts';
 import { applySkills } from '../src/skills.ts';
 
@@ -682,6 +683,8 @@ async function backPlaceFlow() {
     await back();
     const backAt = await placeWhen(from, left), seenBack = await view();
     await forward();
+    // A plugin's page loads its marketplace and README asynchronously outside busy(); wait for the README before reading its scroll place.
+    if (to === 'plugins-scroll') await until(() => a.exists('.plugin-readme'));
     same(`${name} at ${size}: both scrolled; Back to the place left, Find, chip and opened row ${viewBack ? 'let go as today' : 'as they were'}; Forward to the place reached`,
       [left > 0, there > 0, backAt, seenBack, await placeWhen(to, there)], [true, true, left, viewBack ?? seen, there]);
   };
@@ -1102,6 +1105,11 @@ async function fullSize(a) {
 async function chooseFrom(a, value) {
   await a.run(`(select => { select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-from'))`);
   await a.settle();
+}
+/** Opens History via `trigger` and polls until `ready()` holds (bounded by `ms`): loadHistory() runs outside busy(). */
+async function openHistory(a, trigger, ready, ms = 10000) {
+  await a.click(trigger);
+  for (let end = Date.now() + ms; Date.now() < end && !(await ready()); ) await wait(100);
 }
 /**
  * Whether the list `id` came to rest within 3 s: six unchanged animation frames, or still where it last stood for 200 ms when the
@@ -2483,8 +2491,11 @@ async function practiceFlow() {
   await a.click('#add-marketplace');
   for (let tries = 0; tries < 50 && !/already/.test(await addSaid()); tries++) await wait(100);
   same('added again, it is on this page already, with its plugin installed counted', await addSaid(), 'Marketplace already on this page: 5 plugins, 1 installed (ck-test-market).');
+  // .market-list is a vertical list from #main >= 880 px (style.css) and a sideways strip below it; test both.
+  await sizeTo(a, 1280, 800);
   same('scrolled, the marketplaces’ list stays where it was through Refresh', await placeThroughRedraw(a, '.market-list', () => a.click('#header-refresh')), [true, 40]);
-  await a.send('Emulation.setDeviceMetricsOverride', { width: SMALLEST[0], height: SMALLEST[1], deviceScaleFactor: 1, mobile: false });
+  await sizeTo(a, ...SMALLEST);
+  same('and folded into its narrow strip, scrolled sideways through Refresh', await placeThroughRedraw(a, '.market-list', () => a.click('#header-refresh'), { sideways: true }), [true, 40]);
   // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
   // The scroller is held short for the measurement, so the five-plugin fixture scrolls far enough at any layout.
   const pinned = await a.run(`(() => {
@@ -4282,7 +4293,8 @@ async function updateFlow() {
     await fitsBothWays('Update available');
     await typeDraft();
     await a.click('#update-control');
-    for (let i = 0; i < 40 && !/^Downloading… \d+%$/.test((await control()).label); i++) await wait(100);
+    // Wait for a non-zero progress chunk: updateflow.ts emits 0% before newest() and download() begin sending bytes.
+    for (let i = 0; i < 40 && !/^Downloading… [1-9]\d*%$/.test((await control()).label); i++) await wait(100);
     same('while downloading, the icon is ringed by the progress', await a.run(`Number(document.querySelector('#update-control .update-glyph.with-progress')?.style.getPropertyValue('--progress')) > 0`), true);
     same('nor while downloading', [await sidebarFit(), await crowding()], [[], []]);
     await reaches('held');
@@ -5941,9 +5953,9 @@ async function firstSetupFlow() {
     check('a large Sync once shows two successful items, counts the rest and offers their History',
       (words?.match(/Took in guide-/g) ?? []).length === 2 && /took in 6 more items/i.test(words)
       && await d.exists('#outcome-history'), words);
-    await d.click('#outcome-history');
-    const guides = (await d.all('.history-row[data-kind="on"] .history-what strong')).filter(name => name.startsWith('guide-'));
-    same('History lists all eight guides, including the six folded into the count', new Set(guides).size, 8);
+    const guidesOf = async () => (await d.all('.history-row[data-kind="on"] .history-what strong')).filter(name => name.startsWith('guide-'));
+    await openHistory(d, '#outcome-history', async () => new Set(await guidesOf()).size >= 8);
+    same('History lists all eight guides, including the six folded into the count', new Set(await guidesOf()).size, 8);
     // On the Overview, its band says the same: the sentence, then each refusal on a line of its own.
     await d.click('#nav-overview');
     await d.click('#overview-sync-now');
@@ -6041,9 +6053,10 @@ async function crashFlow() {
   execChmod();
   rmSync(HOME, { recursive: true, force: true });
   mkdirSync(COPILOT, { recursive: true });
-  // Claude Code and Copilot CLI are here by their CLIs: on the Mac runner, the real ones installed outside any home; elsewhere
-  // (no tool installed there) the home's own stand-ins.
-  if (process.platform !== 'darwin') toolClis(HOME);
+  // Claude Code and Copilot CLI are here by their CLIs: on a Mac that has them installed outside any home (the owner's
+  // runner), the real ones; elsewhere (Linux, or a Mac without them, as GitHub's own are) the home's own stand-ins.
+  const installed = binary => executableCandidates(HOME, '', binary).some(path => existsSync(path));
+  if (process.platform !== 'darwin' || !installed('claude') || !installed('copilot')) toolClis(HOME);
   const expected = {};
   for (let number = 0; number < 40; number++) {
     const directory = skill(CLAUDE, `bulk-${number}`);
@@ -6082,8 +6095,13 @@ async function crashFlow() {
   const a = await launch(join(scratch, 'crash-data'));
   await a.click('#home-actual');
   await openKind(a, 'skills');
-  // Opening catches up every skill on record; the ones a kill left found are turned on, each.
-  for (const key of await rowKeys(a, 'skills')) if (key.startsWith('bulk-') && await a.exists(`#${rowPart('add', 'skills', key)}`)) await a.click(`#${rowPart('add', 'skills', key)}`);
+  // Opening catches up every skill on record; the ones a kill left found are turned on: the first via its Add button, the
+  // rest in one applySkills pass (on hosted macOS 15 even at 2 groups, repeated Add clicks re-hashing 40×60 files hit 17.6 s
+  // then >30 s). This still proves one post-crash UI Add and all 40 final copies, but not repeated per-row UI Adds/redraws.
+  const leftFound = [];
+  for (const key of await rowKeys(a, 'skills')) if (key.startsWith('bulk-') && await a.exists(`#${rowPart('add', 'skills', key)}`)) leftFound.push(key);
+  if (leftFound.length) await a.click(`#${rowPart('add', 'skills', leftFound[0])}`);
+  if (leftFound.length > 1) await a.run(`window.centralKnot.applySkills(${JSON.stringify(leftFound.slice(1).map(key => ({ key, on: true, except: [] })))}, false, document.querySelector('.status-home').title)`);
   console.log(`crash finish: ${onRecord} of 40 on record before opening, caught up on open; the rest turned on again`);
   same('after crashes, opening again completes every copy', readdirSync(COPILOT).filter(name => name.startsWith('bulk-')).length, 40);
   for (const name of Object.keys(expected)) same(`final ${name} bytes`, tree(join(COPILOT, name)), expected[name]);
@@ -7777,9 +7795,10 @@ async function pluginTextFlow() {
   for (const args of [['init', '--quiet', '--initial-branch=main'], ['add', '-A'], ['-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', 'commit', '--quiet', '-m', 'spark'], ['config', 'uploadpack.allowFilter', 'true']]) spawnSync('git', ['-C', spark, ...args]);
   a = await launch(data, [], real, { CK_PLUGIN_TEXT: 'on', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
   await toSettings();
-  check('launched again, the fifth is read too', await saying(/^Read 5 of 5 plugins\.$/) && kept().some(entry => entry.plugin === 'spark' && entry.items.some(item => item.name === 'spark-app')), [await said(), kept().map(entry => entry.plugin)]);
-  // This home has nothing of its own: with a marketplace listed, the Library still offers Find, which finds what is read.
   const until = async (test, ms) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+  // plugintext.ts updates Settings (show) before run() finishes save() to plugin-text.json; wait for the saved fifth entry too.
+  check('launched again, the fifth is read too', await saying(/^Read 5 of 5 plugins\.$/) && await until(() => kept().some(entry => entry.plugin === 'spark' && entry.items.some(item => item.name === 'spark-app')), 10000), [await said(), kept().map(entry => entry.plugin)]);
+  // This home has nothing of its own: with a marketplace listed, the Library still offers Find, which finds what is read.
   await a.click('#nav-library');
   check('with nothing of any kind, on All, the Library’s own empty words, under Find', await until(() => a.exists('#find'), 10000) && (await a.text('.empty-title')) === 'Nothing in the Library yet', await a.text('.empty-title'));
   check('a Library with nothing yet offers Find, and finds spark-app in the plugin not installed, and no line once all are read', await until(async () => {
@@ -9415,6 +9434,8 @@ async function searchFlow() {
   await b.click('#setup-yes');
   check('Synchronize everything takes the made-up home in', await until(() => !!jsonOrNothing(join(S.home, '.central-knot/skills.json'))?.items?.['release-checklist']));
   await openKind(b, 'all');
+  // Yes's background pass writes skills.json before its sync:changed refresh updates the page from Add to switch; wait for the switch.
+  await until(() => b.exists(`#${rowPart('switch', 'skills', 'archive-notes')}`));
   await b.click(`#${rowPart('switch', 'skills', 'archive-notes')}`);
   await done();
   await b.run(`(window.ckPublished = [], window.centralKnot.onSearchPublished((home, readId) => window.ckPublished.push(readId)), true)`);
@@ -10102,7 +10123,10 @@ async function libraryFlow() {
   await find(c, 'triage');
   if (await c.exists('#chip-attention')) await c.click('#chip-attention');
   await c.click('#nav-plugins');
+  // Plugins loads its marketplaces asynchronously outside busy() (app.ts loadPageData); wait for the list or open plugin page.
+  await until(() => c.exists('#plugin-back, [id^="popen-"][id$="-issue-tracker"]'));
   if (await c.exists('#plugin-back')) await c.click('#plugin-back');
+  await until(() => c.exists('[id^="popen-"][id$="-issue-tracker"]'));
   await c.click('[id^="popen-"][id$="-issue-tracker"]');
   check('the plugin’s page lists its items', await until(() => c.exists('.plugin-part-link')), await c.text('.plugin-page'));
   await c.click('.plugin-part-link');
@@ -10181,6 +10205,8 @@ async function libraryFlow() {
   check('Yes takes the twelve in', await until(() => Object.keys(JSON.parse(readNow(join(T.home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 12));
   await done(tb);
   await openKind(tb, 'all');
+  // Yes's background pass writes skills.json before its sync:changed refresh updates the page from Add to switch; wait for the switch.
+  await until(() => tb.exists(`#${rowPart('switch', 'skills', 'beta')}`));
   const placeOf = () => tb.run(`[Math.round(document.querySelector('[id^="table-library-"]').getBoundingClientRect().top), Math.round(document.querySelector('${row('skills', 'beta')}').getBoundingClientRect().top)]`);
   const clickMovesNothing = async (where, refused) => {
     const before = await placeOf();
@@ -10262,6 +10288,8 @@ async function libraryFlow() {
     }
     await theme(tb, 'light'); await sizeTo(tb, ...SMALLEST); await fullSize(tb); await again();
   };
+  // Hosted macOS runs with Reduce Motion on, where style.css intentionally suppresses animations; emulate no-preference to test the arrival mark.
+  await tb.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   edit('alpha');
   check('alpha edited in Claude Code: its notice comes to the header’s lines', await until(async () => /alpha was edited in Claude Code/.test(await noticeInLines(tb) ?? ''), 30000), await tb.text('#header'));
   // It comes with a stronger fill that settles once into the line's own: each redraw carries it on from where it was, never from
@@ -10269,8 +10297,9 @@ async function libraryFlow() {
   const arriving = () => tb.run(`(line => line && line.getAnimations().map(each => [each.animationName, Math.round(each.effect.getComputedTiming().progress * 100)]))(document.querySelector('#header .header-notice'))`);
   const came = await arriving();
   if (shots) await tb.shot('notices-arriving-full-light');
-  await wait(600);
-  for (let twice = 0; twice < 2; twice++) await tb.click('#sidebar-toggle');
+  await wait(500);
+  // Two synchronous redraws (no 180 ms settle() between clicks) so the 2.4 s arrival stays active while carried through them under load.
+  await tb.run(`for (let twice = 0; twice < 2; twice++) document.getElementById('sidebar-toggle').click()`);
   const carried = await arriving();
   await wait(2600);
   same('a notice come to the lines is marked as it comes, the mark carried on through two redraws, not started again, then rests',
@@ -10301,6 +10330,7 @@ async function libraryFlow() {
       [away, back[0], back[1]?.[0], back[1]?.[1] < 50], [[true, ['1', true]], ['1', false], 'notice-arrives', true]);
     await wait(2600);
   }
+  await tb.send('Emulation.setEmulatedMedia', { features: [] });
   same('said as an automatic change, with no result’s check; Notices counts it, unmarked: drawn in the lines, it is seen; the header 48px',
     [(await noticeInLines(tb))?.startsWith('Automatic change'), await tb.run(`document.querySelector('#header .header-notice .sync-notice')?.firstElementChild?.className`), await control(), await header48()], [true, 'notice-source', ['1', false], 48]);
   same('Notices is a button when closed: a border as Refresh has, its count on a fill of its own', await tb.run(`(([control, refresh, count]) => [getComputedStyle(control).borderTopColor === getComputedStyle(refresh).borderTopColor, getComputedStyle(control).borderTopWidth, !!count && getComputedStyle(count).backgroundColor !== 'rgba(0, 0, 0, 0)'])(['#notices', '#header-refresh', '#notices .notices-count'].map(id => document.querySelector(id)))`), [true, '1px', true]);
@@ -11377,6 +11407,8 @@ async function headerResultFlow() {
   check('Yes takes the eleven skills in', await until(() => Object.keys(JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 11));
   await done();
   await openKind(a, 'all');
+  // Yes's background pass writes skills.json before its sync:changed refresh updates the page from Add to switch; wait for the switches.
+  await until(() => a.exists(`#${rowPart('switch', 'skills', names[0])}`));
   const row = name => `.ov-row[data-key="${rowPart('', 'skills', name)}"]`, switchOf = name => `#${rowPart('switch', 'skills', name)}`;
   /** Switches clicked one after another, one run with one result (clicklist.ts runAt). */
   const clickRun = async list => { await a.run(`${JSON.stringify(list.map(switchOf))}.forEach(selector => document.querySelector(selector).click())`); await done(); };
@@ -11871,7 +11903,7 @@ async function fromFlow() {
 
   // ---------- One home: two marketplaces with a plugin called review each, a source, the person's own ----------
   const H = homeWith('from-home');
-  // Each marketplace lists review; market-one also twenty plugins installed nowhere, before it by name, so its list scrolls.
+  // Each marketplace lists review; market-one also twenty plugins installed nowhere, so its list scrolls.
   const listedOnly = name => (name === 'market-one' ? Array.from({ length: 20 }, (_, at) => ({ name: `aide-${String(at + 1).padStart(2, '0')}`, source: './plugins/aide', description: 'Listed only.' })) : []);
   const market = (name, files) => { const dir = join(scratch, `from-${name}`); put(dir, { '.claude-plugin/marketplace.json': JSON.stringify({ name, owner: { name: 'Team' }, plugins: [...listedOnly(name), { name: 'review', source: './plugins/review', description: `Review, from ${name}.` }] }), 'plugins/aide/README.md': '# aide\n', ...Object.fromEntries(Object.entries(files).map(([path, text]) => [`plugins/review/${path}`, text])) }); return dir; };
   const one = { 'skills/shared/SKILL.md': md('shared', 'skill', 'Check the ledger.'), 'skills/lint/SKILL.md': md('lint', 'skill', 'Lint the ledger.') };
@@ -11965,9 +11997,10 @@ async function fromFlow() {
   await until(() => a.exists('.market-item'));
   await a.run(`[...document.querySelectorAll('.market-item')].find(item => item.textContent.includes('market-one'))?.click()`);
   await until(() => a.exists('.plugin-row-library'));
-  // The list scrolled to review's row (once it rests: stillList), its place kept by the visit Back returns to (places.ts).
+  // The list scrolled so review (which sorts first as installed: pluginstate.ts shownPlugins) sits just under the sticky header,
+  // leaving the list scrolled wherever it overflows; its place kept by the visit Back returns to (places.ts).
   for (let tries = 0; tries < 4 && !(await stillList(a, 'plugins-scroll')); tries++);
-  const listAt = await a.run(`(list => { list.scrollTop += list.querySelector('[data-plugin="review"]').getBoundingClientRect().top - list.getBoundingClientRect().top - 120; return Math.round(list.scrollTop); })(document.getElementById('plugins-scroll'))`);
+  const listAt = await a.run(`(list => { const head = list.querySelector('.ov-head')?.getBoundingClientRect().height ?? 0; list.scrollTop += list.querySelector('[data-plugin="review"]').getBoundingClientRect().top - list.getBoundingClientRect().top - head - 4; return Math.round(list.scrollTop); })(document.getElementById('plugins-scroll'))`);
   const link = await a.run(`document.querySelector('[data-plugin="review"] .plugin-row-library')?.id`);
   await a.click(`#${link}`);
   same('Its items in the Library: the Library on All, From that review, Find and the chip let go, no row open',
@@ -12446,7 +12479,7 @@ async function profilePluginsFlow() {
   }
   // The menu helper clicks every menu object still alive with that label, older ones too: each switch after the first plans from the
   // home as the one before left it (main.ts pluginSide), finds nothing to change, and writes no entry.
-  await a.click('#nav-history');
+  await openHistory(a, '#nav-history', async () => (await a.all('.history-row[data-kind="profile"] .history-about')).length >= 4);
   same('History has one entry per switch and one for the Undo, newest first, each saying what it did, the switch it undid marked Undone',
     [await a.all('.history-row[data-kind="profile"] .history-about', 'e.textContent'), await a.all('.history-row[data-kind="profile"] .history-done', 'e.textContent')],
     [['Switched to Work: 1 item turned on.', 'Switched to Quiet: 1 item turned off.', 'Undid the switch to Quiet: 1 item turned on.', 'Switched to Quiet: 1 item turned off.'], ['Undone']]);
