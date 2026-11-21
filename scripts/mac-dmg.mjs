@@ -11,32 +11,32 @@ import { downloadName } from '../src/updates.ts';
 const customIconFlag = '0000000000000000040000000000000000000000000000000000000000000000';
 
 const run = (command, args, options) => execFileSync(command, args, { stdio: ['ignore', 'ignore', 'inherit'], ...options });
-// hdiutil is taken from PATH (/usr/bin on every Mac), so a test can stand one in (tests/macdmg.test.ts).
-// macOS can still be holding an image it was just handed ("Resource busy"); a moment later it mounts. Returns the device the
-// image is attached as: the whole disk, which hdiutil names first ("/dev/disk5  GUID_partition_scheme").
-const attach = (image, mount, flags) => {
-  let said;
-  for (let tries = 1; said === undefined; tries++) {
-    try { said = run('hdiutil', ['attach', image, '-nobrowse', '-noautoopen', '-mountpoint', mount, ...flags], { stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8' }); }
-    catch (error) { if (tries === 3) throw error; run('/bin/sleep', ['2']); }
-  }
-  const device = /^\/dev\/disk\d+(?=\s)/m.exec(said)?.[0];
-  if (!device) throw new Error(`hdiutil attached ${image} and named no disk:\n${said}`);
-  return device;
-};
-// Detached by its device, not its mount: a first try can unmount the volume and still be refused the eject, as a disk that
-// Spotlight or a scan has just looked at is ("Resource busy"), and by the next try the mount's path is gone. Busy is tried
-// again, forced, a second later, five tries in all; a disk no longer there ("No such file or directory") is detached.
-const detach = device => {
+// hdiutil is taken from PATH (/usr/bin on every Mac), so a test can stand one in (tests/macdmg.test.ts). macOS can still be
+// holding a disk it was just handed, or one that Spotlight or a scan has just looked at ("Resource busy"); a moment later it
+// is free. So a call that meets one is tried again a second later, five tries in all (`again`: the arguments of each later
+// try), and says so in the log; any other failure is thrown at once.
+const hdiutil = (args, { again = args, stdout = 'ignore' } = {}) => {
   for (let tries = 1; ; tries++) {
-    try { return run('hdiutil', ['detach', device, ...(tries > 1 ? ['-force'] : [])], { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' }); }
+    try { return run('hdiutil', tries === 1 ? args : again, { stdio: ['ignore', stdout, 'pipe'], encoding: 'utf8' }); }
     catch (error) {
-      if (/No such file or directory/.test(error.stderr)) return;
       if (tries === 5 || !/Resource busy/.test(error.stderr)) throw error;
       process.stderr.write(error.stderr);
       run('/bin/sleep', ['1']);
     }
   }
+};
+// Returns the device the image is attached as: the whole disk, which hdiutil names first ("/dev/disk5  GUID_partition_scheme").
+const attach = (image, mount, flags) => {
+  const said = hdiutil(['attach', image, '-nobrowse', '-noautoopen', '-mountpoint', mount, ...flags], { stdout: 'pipe' });
+  const device = /^\/dev\/disk\d+(?=\s)/m.exec(said)?.[0];
+  if (!device) throw new Error(`hdiutil attached ${image} and named no disk:\n${said}`);
+  return device;
+};
+// Detached by its device, not its mount: a first try can unmount the volume and still be refused the eject, and by the next
+// try the mount's path is gone. A later try is forced; a disk no longer there ("No such file or directory") is detached.
+const detach = device => {
+  try { hdiutil(['detach', device], { again: ['detach', device, '-force'] }); }
+  catch (error) { if (!/No such file or directory/.test(error.stderr)) throw error; }
 };
 /** Attaches `image` at `mount` for `use`, and detaches it after, however `use` ends. Returns what `use` returns. */
 export function whileAttached(image, mount, flags, use) {
@@ -66,13 +66,13 @@ export function buildDmg({ bundle, dmg, name, identity, notaryProfile }) {
     // Built writable first: the disk's own icon flag can only be set on the mounted volume.
     const writable = join(work, 'writable.dmg');
     const mount = join(work, 'volume');
-    run('hdiutil', ['create', '-volname', volumeName, '-srcfolder', stage, '-fs', 'HFS+', '-format', 'UDRW', writable]);
+    hdiutil(['create', '-volname', volumeName, '-srcfolder', stage, '-fs', 'HFS+', '-format', 'UDRW', writable]);
     whileAttached(writable, mount, [], () => {
       run('/usr/bin/xattr', ['-wx', 'com.apple.FinderInfo', customIconFlag, mount]);
       rmSync(join(mount, '.fseventsd'), { recursive: true, force: true });
     });
     rmSync(dmg, { force: true });
-    run('hdiutil', ['convert', writable, '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-o', dmg]);
+    hdiutil(['convert', writable, '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-o', dmg]);
 
     // Signed and notarized in its own right, so the download itself opens with no warning, also offline.
     if (identity) run('/usr/bin/codesign', ['--sign', identity, '--timestamp', dmg]);
