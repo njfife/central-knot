@@ -22,7 +22,7 @@ import { originWords, theVersion, wantedIn, type LibraryItem, type Plan, type Ta
 import { clockTimesApart, dayAndTime } from './model.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, TakenInNotice } from './types.ts';
-import { andList, kindNouns, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
+import { andList, deletedIn, kindNouns, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
 
 // ---------- What a kind supplies ----------
 
@@ -364,8 +364,8 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   if (place === 'off') return [`Off · ${offPlace(row, item, tools, leftOut)}.`,
     ...otherReadLines(row, tools), `Turn it on to put it in every tool.${ownSaid}`].join(' ');
   // A copy deleted by hand turns the item Off at the next pass: that is what it is about to be.
-  const deletedIn = row.plan?.turnedOffBy;
-  if (deletedIn) return `On · its copy was deleted in ${toolName(deletedIn)}, so it turns off when sync runs. Central Knot keeps it.`;
+  const deletedBy = row.plan?.turnedOffBy;
+  if (deletedBy) return `On · its copy was deleted in ${deletedIn(deletedBy, row.plan?.sharedWay)}, so it turns off when sync runs. Central Knot keeps it.`;
   // A harness holding the current version that only waits for an edit made elsewhere has it on.
   const waitsForEdit = (tool: string) => row.hashes?.[tool] === item!.hash;
   const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot');
@@ -499,7 +499,10 @@ export function sentences(words: RowWords) {
         const gone = inLib!.on ? `the ${noun} is kept out of this tool` : `the ${noun} is off`;
         return `Edited in ${where}. When sync runs it becomes the current version${reaches}, then its copy here is removed: ${gone}.`;
       }
-      case 'deleted-by-hand': return `Its copy was deleted in ${where}. When sync runs, the ${noun} turns off; Central Knot keeps it.`;
+      case 'deleted-by-hand': {
+        const place = row.plan?.sharedWay === 'copy' ? deletedIn(tool, 'copy') : where;
+        return `Its copy was deleted in ${place}. When sync runs, the ${noun} turns off; Central Knot keeps it.`;
+      }
       case 'leaving': {
         const kept = row.plan?.keep.some(entry => entry.harness === tool);
         return kept ? 'Has a copy Central Knot doesn’t have yet. When sync runs it is kept as a version, then removed.' : 'Its copy is removed when sync runs. Central Knot keeps it.';
@@ -590,7 +593,8 @@ export function sentences(words: RowWords) {
    * taken in (the latest, where times prove it), or a copy deleted by hand that turned the item off. `action`: the notice's button, which runs its History entry's
    * own action (historyactions.ts); `help`: what that does.
    */
-  function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved' | 'settingsChanged'> | PluginItemNotice): { text: string; action?: 'undo' | 'turn-on'; help: string } {
+  function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved' | 'sharedWay' | 'stillRead' | 'settingsChanged'> | PluginItemNotice)
+    : { text: string; action?: 'undo' | 'turn-on'; help: string } {
     // A plugin's item (library.ts A PLUGIN): let go as the person's own, said with no button (History has the entry), or dropped.
     if ('link' in notice) return notice.kind === 'let-go' ? { text: `${notice.item} is your own now: you changed it here, so it no longer follows ${linkLabel(notice.link)}. It stays in the tools that have it; its row lets it into the others.`, help: '' }
       : { text: `${notice.item}: ${linkLabel(notice.link)} no longer has it, so it is off. Central Knot keeps it.`, action: 'turn-on', help: `Put ${notice.item} back in every tool, as your own: it no longer follows the plugin` };
@@ -598,8 +602,15 @@ export function sentences(words: RowWords) {
     const earlier = `Make the version from before ${who}’s edit current again, in every tool ${name} is on in`;
     if (notice.kind === 'deleted-by-hand') {
       // The tools it was taken out of.
-      const text = `${name} was deleted in ${who}, so it is off${others ? ` and was taken out of ${others}` : ''}. Central Knot keeps it.${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''}`;
-      return { text, action: 'turn-on', help: `Put ${name} back in every tool, each ${copy} as it was` };
+      const place = deletedIn(notice.winner, notice.sharedWay), readers = notice.stillRead ?? [];
+      const still = readers.length ? ` ${andList(readers.map(toolName))} still ${readers.length === 1 ? 'reads' : 'read'} it another way.` : '';
+      const changed = notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : '';
+      const text = `${name} was deleted in ${place}, so it is off${others ? ` and was taken out of ${others}` : ''}.${still} Central Knot keeps it.${changed}`;
+      // What it had through the shared folder isn't put back: each tool gets Central Knot's own copy (library.ts THE SHARED FOLDER).
+      const help = notice.sharedWay === 'link' ? `Put ${name} in ${who} as Central Knot’s own ${copy}; the tools that read the shared copy still have it`
+        : notice.sharedWay ? `Put ${name} in every tool as Central Knot’s own ${copy}, in place of a link that leads nowhere`
+        : `Put ${name} back in every tool, each ${copy} as it was`;
+      return { text, action: 'turn-on', help };
     }
     if (notice.kind === 'conflict') {
       const chosen = notice.orderProved ? `${who}’s edit is the latest, so it is the current version` : `${who}’s edit is the current version, though ${noTimeTells}`;

@@ -446,6 +446,13 @@ export interface ItemNotice {
   orderProved: boolean;
   /** The History event to Undo or Restore from. */
   history: string;
+  /**
+   * 'deleted-by-hand', where `winner` had it only through the shared skills folder: its copy there (`copy`) or its link to it
+   * (`link`) was deleted (library.ts THE SHARED FOLDER).
+   */
+  sharedWay?: 'copy' | 'link';
+  /** 'deleted-by-hand': the tools that still read the shared copy (after only a link to it was deleted). */
+  stillRead?: HarnessId[];
   /** As its History entry's (HistoryEvent settingsChanged). */
   settingsChanged?: string[];
 }
@@ -566,6 +573,8 @@ export interface HistoryEvent {
   /** 'added', from before the library: copies for tools a synced item synced to again. */
   rejoined?: boolean;
   winner?: { tool: HarnessId; hash: string };
+  /** 'off', `deleted-by-hand`: as types.ts ItemNotice `sharedWay` says it. */
+  sharedWay?: 'copy' | 'link';
   /** As `kind` says: the harnesses written or removed, each with what it held; content that gave way; or the copy taken over. */
   losers: { tool: HarnessId; hash: string;
     /** 'took-over': the copy taken over was outside the tool's own folder (in ~/.agents/skills), at this path. */ path?: string;

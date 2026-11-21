@@ -1,8 +1,8 @@
 // Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns; the
 // rows of one result, of one kind or several: rowNouns, rowNames), the names of the pages called otherwise on screen
-// (pageNames), "Turn it on" (turnIt), "a, b and c" lists, and a few sentences more than one module says (a tool left out or not
-// managed, through a plugin). A page's own words are its module's; a library row's are libraryrow.ts libraryWords, a History
-// entry's historyactions.ts and historypage.ts.
+// (pageNames), "Turn it on" (turnIt), where a copy was deleted (deletedIn), "a, b and c" lists, and a few sentences more than
+// one module says (a tool left out or not managed, through a plugin). A page's own words are its module's; a library row's are
+// libraryrow.ts libraryWords, a History entry's historyactions.ts and historypage.ts.
 import type { HomeKind } from './presence.ts';
 import type { NamedRow } from './itemrow.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
@@ -21,6 +21,11 @@ export const byToolOrder = (first: HarnessId, second: HarnessId) => TOOL_ORDER.i
 
 /** A tool's display name from an id that may come from a file or a report (an unknown id is shown as it is). */
 export const toolName = (tool: string) => (toolNames as Record<string, string>)[tool] ?? tool;
+/**
+ * Where a copy deleted by hand was, after "deleted in": the tool's own folder (its copy, or a link there), by the tool's name, or
+ * the shared skills folder it read (`sharedWay` `copy`: library.ts THE SHARED FOLDER).
+ */
+export const deletedIn = (tool: string, sharedWay?: 'copy' | 'link') => (sharedWay === 'copy' ? 'the shared folder' : toolName(tool));
 
 /**
  * A program and its arguments as one line: each argument as written, one with a space in it (or an empty one) in double quotes so it

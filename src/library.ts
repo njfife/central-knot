@@ -35,6 +35,9 @@
 //   On                  H changed and L moved on                   the latest wins; the other is kept as a version
 //   On                  a copy, no A                               kept as a version, then L is written
 //   On                  no copy, after A                           it was deleted by hand: the item turns Off everywhere
+//   On                  no copy, where it had the item only        the same, though no A: its copy there, or its link to it,
+//                       through the shared folder (THE SHARED      was deleted by hand
+//                       FOLDER, below)
 //   Off, or kept out    H = A, or H = L                            removed
 //   Off, or kept out    H changed, L = A                           H becomes the current version, then it is removed
 //   Off, or kept out    H changed and L moved on                   the latest wins, the other is kept as a version; then removed
@@ -42,7 +45,8 @@
 //   Off, or kept out    no copy, after A                           nothing is applied there any more (forgotten)
 //   either              held: it can't be given the item           nothing (its mark says why)
 //   either              held: it has the item another way          nothing of Central Knot's goes there, and A is let go: when
-//                                                                  the other way ends, L is written, never read as a deletion
+//                                                                  the other way ends (a plugin uninstalled, say), L is written,
+//                                                                  never read as a deletion; the shared folder's is the row above
 //   either              a copy of its own, and it has the item     as Off there: Central Knot's copy (A) is removed, so the
 //                       another way too                            item is never loaded twice (an edit in it taken in first);
 //                                                                  a copy with no A is left alone, and its line says both ways
@@ -71,6 +75,19 @@
 // `anotherWay` (the table's last row), and the harness is decided as one the item isn't wanted in (wantedHere).
 //
 // An item linked to a plugin (A PLUGIN, below), in a tool with the plugin's own installer, is held first by plugins.ts pluginHolds.
+//
+// THE SHARED FOLDER (skills only: ~/.agents/skills, which several tools read and Central Knot never writes). A harness that has
+// the item only through it, its copy there or a link in its own folder to one, holds nothing of Central Knot's, so A can't say it
+// had the item. The item keeps that instead (`throughShared`: by harness, its folder there), noted by carryOut from the plan in
+// the pass that sees it so, or that removes the harness's own copy as one too many; kept while that harness can't be seen for
+// sure; let go when it has a copy of its own, has the item another way (a plugin's), can't take it, isn't wanted there or isn't
+// managed, when its folder is made again or it is managed again (librarypass.ts guardFolders, cameBack), and by Take over of that
+// folder (skills.ts runTakeOver). With it, no copy there now is the table's deletion by hand, settled as any (librarypass.ts
+// copyIn); the kind says how (`sharedWay`: `copy`, its folder there gone, said "in the shared folder"; `link`, its link gone).
+// While the shared folder can't be vouched for, nothing is concluded from it and nothing is written because of it: it is missing
+// where it held skills, can't be listed, or lists none of the folders the record names (skills.ts sharedListing). Then a harness
+// that may have had the item through it (it reads that folder, holds a link that leads nowhere, or had it so) is unseen: nothing
+// turns Off, and nothing is written there, a new item's first copy included, until the folder is back. The problems say it once.
 //
 // Other marks a harness's line can carry are a kind's own, worked out at each look from what it read and never stored, and
 // they change nothing a pass does: for skills, a tool's own switch that turns the skill off there (skills.ts toolFacts, `loads`).
@@ -259,9 +276,9 @@
 //   file is written over or removed. A crash in between leaves a version too many, never a content too few, and the next
 //   pass finds H = A and finishes the write or the removal.
 //
-// Nothing else is stored. Whether a harness can't hold the item or has it another way is a `held` copy, worked out at each
-// look with its reason and shown as that harness's mark. A library item never waits for a choice: the copy question exists
-// only when a found item whose copies differ is taken in.
+// Nothing else is stored but `throughShared` (THE SHARED FOLDER). Whether a harness can't hold the item or has it another way
+// is a `held` copy, worked out at each look with its reason and shown as that harness's mark. A library item never waits for a
+// choice: the copy question exists only when a found item whose copies differ is taken in.
 //
 // Skills, agents and MCP servers are on it. A harness's own part (`own`) is kept by its text's hash: an agent's whole file, an
 // MCP entry's own fields (a fragment of a settings file the harness shares with other things); a skill has none, its whole
@@ -353,6 +370,8 @@ export interface LibraryItem {
   applied: Partial<Record<HarnessId, string>>;
   /** Each harness's own part as a pass last saw or wrote it, by the name the kind's store keeps it under. Stays after Off, for the next On. */
   own: Partial<Record<HarnessId, string>>;
+  /** The harnesses it is wanted in that have it only through the shared skills folder, each with its folder's name there (THE SHARED FOLDER). */
+  throughShared?: Partial<Record<HarnessId, string>>;
   /** Deleted from Central Knot (a tombstone): in no harness, and a copy that turns up is found, never taken in by itself. */
   deleted?: { at: string };
   /** The source it is linked to (sources.ts SourceRecord `id`): linked only while that source is recorded (the header's A SOURCE). */
@@ -378,6 +397,7 @@ export function isLibraryItem(value: unknown): value is LibraryItem {
   const version = (entry: Partial<Version> | null) => text(entry?.hash) && text(entry?.at) && text(entry?.from?.how);
   return !!item && typeof item === 'object' && text(item.key) && text(item.name) && typeof item.on === 'boolean' && text(item.hash)
     && Array.isArray(item.versions) && item.versions.every(version) && Array.isArray(item.except) && texts(item.applied) && texts(item.own)
+    && (item.throughShared === undefined || texts(item.throughShared))
     && (item.deleted === undefined || text(item.deleted?.at)) && (item.source === undefined || text(item.source)) && (item.seen === undefined || text(item.seen));
 }
 
@@ -436,10 +456,12 @@ export const theVersion = (from: Origin) => `the version ${from.how === 'was-in'
  * H: what a harness holds of an item now. `at`: when its copy was last changed (ms); absent for a copy with no time of its
  * own (an MCP entry, whose time is its whole file's), which "latest" can't order (latestEdit). Nothing of Central Knot's
  * happens in a harness whose copy is `unseen` (it can't be seen for sure) or `held` (it can't be given the item; with
- * `anotherWay`, it has the item another way: the header says which is which), and `why` says it on the page.
+ * `anotherWay`, it has the item another way: the header says which is which), and `why` says it on the page. THE SHARED FOLDER:
+ * `throughShared`, the other way is that folder, at its folder there; `sharedWay`, it had it so and that folder (`copy`) or its
+ * link to it (`link`) was deleted by hand.
  */
-export type HarnessCopy = { is: 'present'; hash: string; at?: number; anotherWay?: string } | { is: 'absent' } | { is: 'unseen'; why: string }
-  | { is: 'held'; why: string; anotherWay?: true };
+export type HarnessCopy = { is: 'present'; hash: string; at?: number; anotherWay?: string; throughShared?: string }
+  | { is: 'absent'; sharedWay?: 'copy' | 'link' } | { is: 'unseen'; why: string } | { is: 'held'; why: string; anotherWay?: true; throughShared?: string };
 
 /**
  * Whether the item should be in this harness's own folder: wanted there (wantedIn), and the harness doesn't have it another
@@ -467,7 +489,7 @@ export function decide(wanted: boolean, current: string, copy: HarnessCopy, appl
     if (copy.hash === applied || copy.hash === current) return 'remove';
     return applied === current ? 'take-in' : 'latest-wins';
   }
-  if (copy.is === 'absent') return applied === undefined ? 'write' : 'turn-off';
+  if (copy.is === 'absent') return applied === undefined && !copy.sharedWay ? 'write' : 'turn-off';
   if (copy.hash === current) return 'nothing';
   if (applied === undefined) return 'keep-then-write';
   if (copy.hash === applied) return 'write';
@@ -486,6 +508,10 @@ export interface Plan {
   orderProved: boolean;
   /** The item turns Off: the harness where its copy was deleted by hand. */
   turnedOffBy?: HarnessId;
+  /** It had the item only through the shared folder, and its copy there or its link to it went (HarnessCopy `sharedWay`), as History and the notice say. */
+  sharedWay?: 'copy' | 'link';
+  /** What carryOut keeps as LibraryItem throughShared, where any harness has it so (THE SHARED FOLDER). */
+  throughShared?: Partial<Record<HarnessId, string>>;
   /** Copies to keep as versions before they are written over or removed, each with where it came from. */
   keep: { harness: HarnessId; from: Origin }[];
   /** Harnesses the current version is written to. */
@@ -532,6 +558,15 @@ export function plan(item: LibraryItem, copies: Copies): Plan {
     else if (does === 'own-copy') made.ownCopy.push(harness);
     else if (does === 'nothing' && copy.is === 'present' && copy.hash === after.hash && wanted) made.current.push(harness);
   }
+  const gone = turnedOffBy && copies[turnedOffBy];
+  if (gone?.is === 'absent' && gone.sharedWay) made.sharedWay = gone.sharedWay;
+  // Had through the shared folder: seen so now (its own copy beside removed as one too many), or kept while it can't be seen for
+  // sure; nothing where the item isn't wanted.
+  const through = harnesses.flatMap(harness => { const copy = copies[harness]!;
+    const now = copy.is === 'held' || (copy.is === 'present' && made.remove.includes(harness)) ? copy.throughShared : undefined;
+    const folder = copy.is === 'unseen' ? item.throughShared?.[harness] : now;
+    return folder && wantedIn(after, harness) ? [[harness, folder] as const] : []; });
+  if (through.length) made.throughShared = Object.fromEntries(through);
   return made;
 }
 
@@ -894,6 +929,7 @@ export async function carryOut<Content>(item: LibraryItem, made: Plan, hands: Ha
   await hands.keepOwn();
   for (const harness of made.current) item.applied[harness] = item.hash;
   for (const harness of made.forget) delete item.applied[harness];
+  if (made.throughShared) item.throughShared = made.throughShared; else delete item.throughShared;
   await hands.save();
   const held: HarnessId[] = [];
   for (const harness of made.write) if (await hands.write(harness)) item.applied[harness] = item.hash; else held.push(harness);
