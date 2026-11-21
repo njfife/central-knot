@@ -11994,14 +11994,14 @@ async function sameNamePluginFlow() {
   // The server's switch: the server off in Codex and Copilot CLI, the skill on in both; the result is the server's row's; Undo.
   await a.click(serverSwitch); await done();
   same('a click on the server’s switch turns the server off in Codex and Copilot CLI, and leaves the skill on in both', [offIn(), await switchOn(a, 'mcp', key), await switchOn(a, 'skills', key)], [serverOff, false, true]);
-  same('its result says issues is off in both tools', await said(), 'issues is off in Copilot CLI and Codex.');
+  same('its result names the server by its kind, as a skill on All has its name', await said(), 'issues (MCP server) is off in Copilot CLI and Codex.');
   const afterServer = files();
   await watchFlashes();
   await a.click('#outcome-undo-plugin'); await done();
   same('its Undo leaves each tool’s file as before the click, and flashes the row the click named: the server’s, not the skill’s', [files(), await flashed()], [before, [rowPart('', 'mcp', key)]]);
   // The skill's switch: the skill, not the server.
   await a.click(skillSwitch); await done();
-  same('a click on the skill’s switch turns the skill off in Codex and Copilot CLI, and leaves the server on in both', [offIn(), await switchOn(a, 'skills', key), await switchOn(a, 'mcp', key)], [skillOff, false, true]);
+  same('a click on the skill’s switch turns the skill off in Codex and Copilot CLI, and leaves the server on in both; its result names the skill by its kind', [offIn(), await switchOn(a, 'skills', key), await switchOn(a, 'mcp', key), await said()], [skillOff, false, true, 'issues (skill) is off in Copilot CLI and Codex.']);
   await a.click('#outcome-undo-plugin'); await done();
   same('its Undo leaves each tool’s file as before the click', files(), before);
   // The Library's MCP servers lists the server alone: its switch turns the server, as on All.
