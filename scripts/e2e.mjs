@@ -11951,10 +11951,105 @@ async function profilePluginsFlow() {
   await b.quit();
 }
 
+/**
+ * A plugin with a skill and an MCP server of one name: docs's skill issues and server issues, installed in Codex and Copilot
+ * CLI, each of which has a switch for one skill and one server of a plugin (their records written here; Codex's CLI answers
+ * --version alone, Copilot CLI's turns a skill in its settings as its `copilot skill` does). On the Library's All both are rows,
+ * with the one key docs@ck-test-market/issues (pluginrows.ts PluginRow): each row's switch turns its own item and nothing of the
+ * other's, its row named in the result, with one Undo (matrix.ts pluginRowSwitch finds its row again by kind and key); two quick
+ * clicks, one on each, turn each its own; and a profile that ticks one and not the other leaves each tool's file as it says.
+ */
+async function sameNamePluginFlow() {
+  const home = join(scratch, 'home-same-name'), data = join(scratch, 'same-name-data'), market = join(scratch, 'market-same-name'), tools = join(scratch, 'tools-same-name');
+  writeMarket(market, 'ck-test-market');
+  const parts = { 'skills/issues/SKILL.md': text('issues'), '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', 'issues-mcp'] } } }),
+    '.codex-plugin/plugin.json': JSON.stringify({ name: 'docs', version: '1.0.0', skills: './skills', mcpServers: './.mcp.json' }) };
+  const copilotCopy = join(home, '.copilot/installed-plugins/ck-test-market/docs');
+  for (const copy of [join(home, '.codex/plugins/cache/ck-test-market/docs/1.0.0'), copilotCopy]) for (const [path, body] of Object.entries(parts)) { mkdirSync(dirname(join(copy, path)), { recursive: true }); writeFileSync(join(copy, path), body); }
+  const codexConfig = join(home, '.codex/config.toml'), copilotSettings = join(home, '.copilot/settings.json');
+  writeFileSync(codexConfig, `[marketplaces.ck-test-market]\nsource = "${market}"\n\n[plugins."docs@ck-test-market"]\nenabled = true\n`);
+  writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'docs', marketplace: 'ck-test-market', version: '1.0.0', cache_path: copilotCopy, enabled: true }] }));
+  writeFileSync(copilotSettings, `${JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: market } } } }, null, 2)}\n`);
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.142.3" && exit 0\nexit 9\n', { mode: 0o755 });
+  // Copilot CLI's skill switch takes a second while $HOME/slow is there: a click made meanwhile waits its turn.
+  writeFileSync(join(tools, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\n[ "$1" = "skill" ] && [ -f "$HOME/slow" ] && sleep 1\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="skill"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`, { mode: 0o755 });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  // Each tool's file, and which of the two items each has off, Codex's then Copilot CLI's.
+  const files = () => ({ codex: readNow(codexConfig), copilot: readNow(copilotSettings) });
+  const offIn = () => {
+    const codex = readNow(codexConfig), copilot = jsonOrNothing(copilotSettings) ?? {};
+    return { skill: [codex.includes('name = "docs:issues"\nenabled = false'), (copilot.disabledSkills ?? []).includes('docs:issues')],
+      server: [codex.includes('[plugins."docs@ck-test-market".mcp_servers.issues]\nenabled = false'), (copilot.disabledMcpServers ?? []).includes('issues')] };
+  };
+  const bothOn = { skill: [false, false], server: [false, false] }, serverOff = { skill: [false, false], server: [true, true] }, skillOff = { skill: [true, true], server: [false, false] };
+  const key = 'docs@ck-test-market/issues', [skillSwitch, serverSwitch] = ['skills', 'mcp'].map(kind => byId(rowPart('switch', kind, key)));
+  const a = await launch(data, [], tools);
+  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const said = () => a.text('#header [data-outcome] .band-text');
+  // The rows the result of a click's Undo flashes: the rows its click named (app.ts sayDone).
+  const watchFlashes = () => a.run(`window.flashedRows = []; window.flashWatch?.disconnect(); window.flashWatch = new MutationObserver(() => { for (const row of document.querySelectorAll('.ov-row.row-flash')) if (!flashedRows.includes(row.dataset.key)) flashedRows.push(row.dataset.key); }); flashWatch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })`);
+  const flashed = async () => { for (let tries = 0; tries < 30 && !(await a.run('window.flashedRows')).length; tries++) await wait(100); return a.run('window.flashedRows'); };
+  await openKind(a, 'all');
+  for (let tries = 0; tries < 60 && !(await a.exists(serverSwitch)); tries++) await wait(100);
+  const before = files();
+  same('on the Library’s All, docs’s skill and server named issues are two rows, both on, and neither is off in any tool', [await switchOn(a, 'skills', key), await switchOn(a, 'mcp', key), offIn()], [true, true, bothOn]);
+
+  // The server's switch: the server off in Codex and Copilot CLI, the skill on in both; the result is the server's row's; Undo.
+  await a.click(serverSwitch); await done();
+  same('a click on the server’s switch turns the server off in Codex and Copilot CLI, and leaves the skill on in both', [offIn(), await switchOn(a, 'mcp', key), await switchOn(a, 'skills', key)], [serverOff, false, true]);
+  same('its result names the server by its kind, as a skill on All has its name', await said(), 'issues (MCP server) is off in Copilot CLI and Codex.');
+  const afterServer = files();
+  await watchFlashes();
+  await a.click('#outcome-undo-plugin'); await done();
+  same('its Undo leaves each tool’s file as before the click, and flashes the row the click named: the server’s, not the skill’s', [files(), await flashed()], [before, [rowPart('', 'mcp', key)]]);
+  // The skill's switch: the skill, not the server.
+  await a.click(skillSwitch); await done();
+  same('a click on the skill’s switch turns the skill off in Codex and Copilot CLI, and leaves the server on in both; its result names the skill by its kind', [offIn(), await switchOn(a, 'skills', key), await switchOn(a, 'mcp', key), await said()], [skillOff, false, true, 'issues (skill) is off in Copilot CLI and Codex.']);
+  await a.click('#outcome-undo-plugin'); await done();
+  same('its Undo leaves each tool’s file as before the click', files(), before);
+  // The Library's MCP servers lists the server alone: its switch turns the server, as on All.
+  await openKind(a, 'mcp');
+  await a.click(serverSwitch); await done();
+  const onMcpPage = offIn();
+  await a.click('#outcome-undo-plugin'); await done();
+  same('on the Library’s MCP servers, the server’s switch turns the server off and leaves the skill on, and its Undo puts each file back', [onMcpPage, files()], [serverOff, before]);
+
+  // Two quick clicks on All, the skill's then the server's while the first still runs (Copilot CLI's skill switch takes a second):
+  // each turns its own; the run's one Undo puts each file back.
+  await openKind(a, 'all');
+  writeFileSync(join(home, 'slow'), '');
+  await a.run(`document.querySelector(${JSON.stringify(skillSwitch)}).click()`); await wait(150);
+  await a.run(`document.querySelector(${JSON.stringify(serverSwitch)}).click()`);
+  await done();
+  rmSync(join(home, 'slow'));
+  same('two quick clicks, the skill’s then the server’s: each turns its own off in both tools, and the run names both by kind', [offIn(), await said()],
+    [{ skill: [true, true], server: [true, true] }, '2 items are off: issues (skill) and issues (MCP server).']);
+  await a.click('#outcome-undo'); await done();
+  same('the run’s one Undo leaves each tool’s file as before the two clicks', files(), before);
+
+  // Profiles: one that ticks the skill and not the server, then one the other way; each tool's file as the profile says.
+  await a.click('#nav-profiles');
+  await newProfile(a, 'Skill only');
+  await a.click(byId(`pf-plugin:skill:${key}`)); await done();
+  await a.click('#profile-switch'); await done();
+  same('switching to Skill only turns the plugin’s server issues off in Codex and Copilot CLI, and leaves its skill issues on', offIn(), serverOff);
+  const skillOnly = files();
+  await newProfile(a, 'Server only');
+  await a.click(byId(`pf-plugin:mcp:${key}`)); await done();
+  await a.click('#profile-switch'); await done();
+  same('switching to Server only turns the plugin’s skill issues off in Codex and Copilot CLI, and its server issues back on', offIn(), skillOff);
+  await a.click('#outcome-undo'); await done();
+  same('Undo switch puts each tool’s file back as Skill only left it', files(), skillOnly);
+  same('no page errors', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
   [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
