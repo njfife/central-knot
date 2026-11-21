@@ -252,7 +252,7 @@ function choosePluginsBand(profile: Profile) {
     h('span.band-text', {}, 'This profile leaves plugin items as they are, so they aren’t listed. Choosing them is for good: they are listed unticked, and from the next switch the ones left unticked turn off wherever they can be switched.'),
     button({ variant: 'outline', size: 'small', label: 'Choose plugin items for this profile', id: 'profile-choose-plugins', disabled: !canEditProfiles(),
       attrs: { title: `Lists plugin items for ${profile.name}, none ticked. This can’t be taken back. Only the profile changes now; tools change on Switch.` },
-      onclick: () => void saveProfileDef({ id: profile.id, switchesPluginItems: true }, `${profile.name} now switches plugin items for good; this can’t be taken back. Tick the ones you want on before switching.`, true) }));
+      onclick: () => void saveProfileDef({ id: profile.id, switchesPluginItems: true }, `${profile.name} now switches plugin items for good. Tick the ones you want on before switching.`, true) }));
 }
 
 /** Delete's confirmation: deleting a profile changes nothing in Central Knot or the tools, and Undo makes it again. */

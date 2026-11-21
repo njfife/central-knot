@@ -255,17 +255,18 @@ function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linke
 
 /**
  * Why each of a plugin's items is not on in a tool with no installer, the one place the run's report and the page ask (both say
- * it by pluginstatus.ts notInWhy): a name of its `lines` not brought in (his own, another source's, unreadable) or deleted, and
- * each item `linked` to it not wanted there: off on its own row, or kept out of it (`own`: the tool has a copy of its own of that
- * kind and name, never written over).
+ * it by pluginstatus.ts notInWhy): a name of its `lines` not brought in (his own, another source's, unreadable) or deleted,
+ * each item `linked` to it not wanted there (off on its own row, or kept out: `own` when the tool has its own copy, never
+ * written over), and each `linked` item wanted there held out by his copy in the shared skills folder (`shared`).
  */
 type Out = { name: string; kind: ItemKind; out: ItemOut };
+/** Whether a linked item wanted in `tool` is held out there by his copy in the shared skills folder (librarypass.ts copiesOf). */
 const heldByShared = (looks: KindLooks, tool: HarnessId) => (item: LibraryItem, kind: ItemKind) => { const copy = copiesOf(looks.find(each => each.kind.kind.kind === kind)!.look, item)[tool]; return copy?.is === 'held' && !!copy.throughShared; };
-function outsIn(tool: HarnessId, lines: PluginItemLine[], linked: Linked[], own: (item: LibraryItem, kind: ItemKind) => boolean, shared?: (item: LibraryItem, kind: ItemKind) => boolean): Out[] {
+function outsIn(tool: HarnessId, lines: PluginItemLine[], linked: Linked[], own: (item: LibraryItem, kind: ItemKind) => boolean, shared: (item: LibraryItem, kind: ItemKind) => boolean): Out[] {
   return [...lines.flatMap(({ name, kind, state, why }): Out[] => (state === 'deleted' ? [{ name, kind, out: 'deleted' }]
     : state === 'not-brought' ? [{ name, kind, out: why === YOURS ? 'yours' : why === ANOTHER ? 'another' : { cannot: why! } }] : [])),
   ...linked.filter(({ item }) => !wantedIn(item, tool)).map(({ kind, item }): Out => ({ name: item.name, kind, out: !item.on ? 'off' : own(item, kind) ? 'own' : 'kept' })),
-  ...(shared ? linked.filter(({ item, kind }) => wantedIn(item, tool) && shared(item, kind)).map(({ kind, item }): Out => ({ name: item.name, kind, out: 'shared' })) : [])];
+  ...linked.filter(({ item, kind }) => wantedIn(item, tool) && shared(item, kind)).map(({ kind, item }): Out => ({ name: item.name, kind, out: 'shared' }))];
 }
 const wroteIn = (results: Passed[], tool: HarnessId) => results.some(({ result }) => result.results.some(each => each.harness === tool && (each.outcome === 'written' || each.outcome === 'removed')));
 const reloadsIn = (results: Passed[], tool: HarnessId) => results.flatMap(({ result }) => result.reloads.filter(each => each.tool === tool));

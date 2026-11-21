@@ -175,7 +175,7 @@ export function clickWords(item: PluginItemAt): string {
   const on = onNow(item);
   // What else of the plugin is on there now: what its own switch already keeps off neither goes with it nor comes back with it.
   const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
-  const byName = (onNow: boolean) => (item.kind === 'mcp' && item.tool === 'copilot-cli' ? ` ${copilotByName(item.name, onNow)}` : '');
+  const byName = (turnsOn: boolean) => (item.kind === 'mcp' && item.tool === 'copilot-cli' ? ` ${copilotByName(item.name, turnsOn)}` : '');
   if (on && ownSwitch(item)) return `Click to turn it off in ${tool}.${byName(false)}`;
   if (on) return `${tool} has no switch for one ${partWords[item.kind][0]} of a plugin. Click to turn the whole plugin ${plugin} off in ${tool}${rest.length ? `, with its ${counted(rest)}` : ''}.`;
   if (!item.install.off) return `Click to turn it on in ${tool}.${byName(true)}`;

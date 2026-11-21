@@ -626,10 +626,11 @@ test('Pi has a found copy of one of the plugin’s skills (not in Central Knot) 
     // With his own Library item (On, and Off): stays in yours, never duplicated in heldOut.
     await put(box.pi('skills/review/SKILL.md'), skill('review', 'mine edited'));
     await applySkills(box.share, box.tools, []);
+    const afterLibOn = (await box.view()).items!.kit!;
+    assert.deepEqual([afterLibOn.heldOut?.['pi-cli'], afterLibOn.yours?.['pi-cli']], [[OWN], [{ kind: 'skill', key: 'review', name: 'review' }]]);
     await applySkills(box.share, box.tools, [{ key: 'review', on: false, except: [] }]);
-    const afterLib = (await box.view()).items!.kit!;
-    assert.deepEqual(afterLib.heldOut?.['pi-cli'], [OWN]);
-    assert.deepEqual(afterLib.yours?.['pi-cli'], [{ kind: 'skill', key: 'review', name: 'review' }]);
+    const afterLibOff = (await box.view()).items!.kit!;
+    assert.deepEqual([afterLibOff.heldOut?.['pi-cli'], afterLibOff.yours?.['pi-cli']], [[OWN], [{ kind: 'skill', key: 'review', name: 'review' }]]);
   } finally { await box.cleanup(); }
   // With no item on in Pi: notIn carries OUT.own, heldOut does not duplicate it.
   const solo = await notesOnly();
