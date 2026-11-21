@@ -145,15 +145,22 @@ export async function findOtherApps(home: string): Promise<OtherApp[]> {
  * desktop's Codex), with that app. That copy never counts as a CLI install (CD §3).
  */
 export async function findBinary(tool: HarnessId, home: string, searchPath: string): Promise<{ binary: string; app?: DesktopApp } | undefined> {
-  const cli = await findCli(tool, home, searchPath);
-  if (cli) return { binary: cli };
+  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary)) {
+    if (await runnable(candidate)) return { binary: candidate };
+  }
   const app = await findApp(appCandidates(home, harnesses[tool].binary));
   return app?.binary ? { binary: app.binary, app } : undefined;
 }
 
-/** The tool's own CLI here, the first of findBinary's candidates that runs; never a desktop app's copy. */
+/**
+ * The tool's own command line here, never a desktop app's copy: the first of findBinary's candidates that runs and, its links
+ * followed, is not inside an `.app` bundle (a PATH folder in one, or a link into one, is passed over for the next). For the MCP
+ * sign-in check (mcpsigninrun.ts), which reports what the command line says; the plugin runs keep findBinary's own rule.
+ */
 export async function findCli(tool: HarnessId, home: string, searchPath: string): Promise<string | undefined> {
-  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary)) if (await runnable(candidate)) return candidate;
+  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary)) {
+    if (await runnable(candidate) && !/\.app\//.test(await realpath(candidate))) return candidate;
+  }
   return undefined;
 }
 

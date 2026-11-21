@@ -1,0 +1,6 @@
+Checking MCP server health…
+
+foo: http://127.0.0.1:48161/mcp (HTTP) - ✔ Connected
+O'Reilly: http://127.0.0.1:48162/mcp (HTTP) - ! Needs authentication
+with space: http://127.0.0.1:48162/mcp (HTTP) - ! Needs authentication
+foo: bar: http://127.0.0.1:48162/mcp (HTTP) - ! Needs authentication

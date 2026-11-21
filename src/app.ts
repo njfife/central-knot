@@ -36,7 +36,7 @@ import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
-import type { SigninChecks } from './mcpsigninpage.ts';
+import { followView, type SigninChecks } from './mcpsignin.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -301,6 +301,8 @@ export function setHome(view: HomeView | null | undefined, { reload = true, say,
   // Each notice's place in the order of arrival is given as its view is taken: the newest is the last to arrive, of any kind.
   for (const [, notices] of noticesByKind(view)) for (const notice of notices) noticeArrived(notice.history);
   state.home = keepUnshown(state.home, view);
+  // A cell an MCP sign-in check was asked about that this view shows gone, switched off or as another copy is held for no more.
+  followView(state.mcpSignin, view);
   if (news && !acting()) sayBackgroundNews();
   // A closed background problem stays closed while reads report it, and is forgotten once one doesn't (matrix.ts listResult).
   for (const key of state.dismissed) if (key.startsWith('problem:') && !view.sync.caughtUp.some(entry => problemKey(entry) === key)) state.dismissed.delete(key);
@@ -934,7 +936,8 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
 
 /** When the open page's kind is no longer in this home (its last tool went; the Library's, every kind it lists), the Overview opens instead. */
 function leaveAbsentPage() {
-  const gone = state.page === 'library' ? (state.home && !heldKinds(state.home).length ? KINDS : []) : absentKinds().filter(kind => kind === state.page);
+  // MCP sign-in is about MCP servers, as the Library's MCP segment is.
+  const gone = state.page === 'library' ? (state.home && !heldKinds(state.home).length ? KINDS : []) : absentKinds().filter(kind => kind === (state.page === 'mcpsignin' ? 'mcp' : state.page));
   if (!gone.length) return;
   // What the status bar said (a Refresh's summary, say) stays, with the reason the page moved.
   const said = state.said.text;
