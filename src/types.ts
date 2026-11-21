@@ -206,6 +206,8 @@ export interface DesktopApi {
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
   /** Reads which skills, agents and MCP servers the tools' session history shows were used (usage.ts readUsage), when the page collects usage (app.ts collectUsage); null for another home than the open one. */
   readUsage(home: string): Promise<UsageReading | null>;
+  /** Runs one tool's own MCP list command for the open home and reads its answer of the servers `names` (mcpsigninrun.ts checkSignin); null for another home, or a tool with no such command. */
+  checkSignin(tool: HarnessId, home: string, names: string[]): Promise<SigninAnswer | null>;
   /**
    * Word search over what the Library holds and the items of listed plugins installed in no managed tool (search.ts), answered
    * beside main's queue from the index last published; `shown`: how many of those plugins' items the page draws (search.ts drawnAtOnce).
@@ -936,6 +938,10 @@ export interface ToolUsage {
   /** Its session files that are there and couldn't be read: skipped, the rest counted. */
   skipped?: number;
 }
+/** What a tool's own MCP list command said of one server (mcpsignin.ts readAnswer). `connected`: it answered, which Claude Code, Pi and OpenCode say without telling a sign-in from none needed. `unread`: its line, in a state the reader doesn't know. */
+export type SigninSaid = { is: 'no-sign-in' | 'signed-in' | 'connected' | 'needs-sign-in' | 'not-known' } | { is: 'unreachable'; why: string } | { is: 'unread'; line: string };
+/** One tool's MCP sign-in check: what it said of each server, by its own name for it; or that it couldn't be run or didn't end in time; or the first line of an answer in a shape not known. */
+export type SigninAnswer = { servers: Record<string, SigninSaid> } | { failed: 'missing' | 'timeout' } | { unreadable: string };
 /** One reading of a home's session history, made when the page collects usage (app.ts collectUsage): when, and every tool's. */
 export interface UsageReading { at: string; tools: ToolUsage[] }
 

@@ -152,6 +152,18 @@ export async function findBinary(tool: HarnessId, home: string, searchPath: stri
   return app?.binary ? { binary: app.binary, app } : undefined;
 }
 
+/**
+ * The tool's own command line here, never a desktop app's copy: the first of findBinary's candidates that runs and, its links
+ * followed, is not inside an `.app` bundle (a PATH folder in one, or a link into one, is passed over for the next). For the MCP
+ * sign-in check (mcpsigninrun.ts), which reports what the command line says; the plugin runs keep findBinary's own rule.
+ */
+export async function findCli(tool: HarnessId, home: string, searchPath: string): Promise<string | undefined> {
+  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary)) {
+    if (await runnable(candidate) && !/\.app\//.test(await realpath(candidate))) return candidate;
+  }
+  return undefined;
+}
+
 const OPENING = /^﻿?---[ \t]*\r?\n/;
 const FRONTMATTER = /^﻿?---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 /** A Markdown file's body: what follows its frontmatter, when it has one. */

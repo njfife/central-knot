@@ -209,6 +209,8 @@ export function samePart(first: PartRef, second: PartRef): boolean {
 /** Which page lists each kind of part, and the kind each page lists. */
 export const pageOfPart = { skill: 'skills', mcp: 'mcp', agent: 'agents' } as const;
 export const partOfPage = { skills: 'skill', mcp: 'mcp', agents: 'agent' } as const;
+/** The name Claude Code gives a plugin's MCP server: its denied list (partswitch.ts) and its `mcp list` (mcpsignin.ts) go by it. */
+export const claudeServerName = (plugin: string, server: string) => `plugin:${plugin}:${server}`;
 
 /** Each kind of part in words: [one, several]. */
 export const partWords: Record<PartKind, [string, string]> = { skill: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agent: ['agent', 'agents'] };
