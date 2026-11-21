@@ -912,39 +912,38 @@ test('Codex: turning skills back on in a fresh process keeps his commented block
   } finally { await box.cleanup(); }
 });
 
-test('Codex: a path block gets a name-only rule on Off, and fresh On after an update restores his old-version path block', async () => {
+test('Codex: a path block gets a name-only rule on Off; after an update, fresh On drops the name rule and leaves old-version blocks untouched', async () => {
   const { box, copy, original, config, switchTo } = await codexHome();
   try {
-    const byPath = `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = true\n`;
-    await writeFile(config, byPath);
+    const older090 = join(box.home, '.codex/plugins/cache/ck-test-market/full/0.9.0');
+    await put(join(older090, 'skills/two/SKILL.md'), '---\nname: second\ndescription: Old.\n---\nB\n');
+    const dormant090 = `\n[[skills.config]]\n# dormant 0.9.0 block\npath = ${tomlValue(join(older090, 'skills/two/SKILL.md'))}\nenabled = false\n`;
+    const alreadyFalseV1 = `\n[[skills.config]]\n# already false before any click\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n`;
+    const otherSkillV1 = `\n[[skills.config]]\n# another skill\npath = ${tomlValue(join(copy, 'skills/one/SKILL.md'))}\nenabled = false\n`;
+    const hisV1Path = (enabled: boolean) => `\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = ${enabled}\n`;
+    const start = `${original}${dormant090}${alreadyFalseV1}${otherSkillV1}${hisV1Path(true)}`;
+    await writeFile(config, start);
     await switchTo('second', false);
-    assert.equal(await readFile(config, 'utf8'),
-      `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
-    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'second' }]);
+    const afterOff = `${original}${dormant090}${alreadyFalseV1}${otherSkillV1}${hisV1Path(false)}\n[[skills.config]]\nname = "full:second"\nenabled = false\n`;
+    assert.equal(await readFile(config, 'utf8'), afterOff);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'second' }, { skill: 'one' }]);
     // A plugin update to 2.0.0 leaves the 1.0.0 path pointing at an older copy; the appended name-only rule keeps the skill off.
     const newer = join(box.home, '.codex/plugins/cache/ck-test-market/full/2.0.0');
     await put(join(newer, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nB\n');
     await put(join(newer, 'skills/two/SKILL.md'), '---\nname: second\ndescription: Named apart from its folder.\n---\nB\n');
     assert.deepEqual(await installState(box.context, 'codex-cli', 'ck-test-market', 'full'), { state: 'installed', path: newer, version: '2.0.0', skills: ['one', 'second'], skillsOff: [{ skill: 'second' }] });
-    // Turning back on in a fresh process after the update sets his 1.0.0 path block true again and drops the bare name block: byte for byte.
+    // Accepted limit: after Off, an update and a restart, On drops the app's name rule and leaves every old-version block as it stands.
+    switchCodexFresh(box.context, 'second', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}${dormant090}${alreadyFalseV1}${otherSkillV1}${hisV1Path(false)}`);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
+    // Without an update (1.0.0 still active), fresh On sets his active path block true in place and drops the bare name block: byte for byte.
+    await rm(newer, { recursive: true });
+    await rm(older090, { recursive: true });
+    const byPath = `${original}${hisV1Path(true)}`;
+    await writeFile(config, byPath);
+    await switchTo('second', false);
     switchCodexFresh(box.context, 'second', true);
     assert.equal(await readFile(config, 'utf8'), byPath);
-    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
-    // Also when the update removed 1.0.0 on disk (same skill path exists in 2.0.0), while another skill's old-version false block stays untouched.
-    const otherSkillOld = `\n[[skills.config]]\n# keep one off\npath = ${tomlValue(join(copy, 'skills/one/SKILL.md'))}\nenabled = false\n`;
-    await writeFile(config, `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n${otherSkillOld}\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
-    await rm(copy, { recursive: true });
-    switchCodexFresh(box.context, 'second', true);
-    assert.equal(await readFile(config, 'utf8'), `${byPath}${otherSkillOld}`);
-    // When 1.0.0 is gone and 2.0.0 has no SKILL.md at that relative path, the old-version block cannot be told surely and is left alone;
-    // an old-version block for another plugin or one carrying both name and path is also left alone.
-    const untouchedOld = `${original}\n[[skills.config]]\n# moved in 2.0.0\npath = ${tomlValue(join(copy, 'skills/legacy/SKILL.md'))}\nenabled = false\n\n[[skills.config]]\n# other plugin\npath = ${tomlValue(join(box.home, '.codex/plugins/cache/ck-test-market/other/1.0.0/skills/two/SKILL.md'))}\nenabled = false\n\n[[skills.config]]\n# both keys on old path\nname = "full:second"\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n`;
-    await writeFile(config, `${untouchedOld}\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
-    switchCodexFresh(box.context, 'second', true);
-    assert.equal(await readFile(config, 'utf8'), untouchedOld);
-    await rm(newer, { recursive: true });
-    await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nB\n');
-    await put(join(copy, 'skills/two/SKILL.md'), '---\nname: second\ndescription: Named apart from its folder.\n---\nB\n');
     // Another key besides name/path and enabled keeps the block (name-only, so no extra block is appended on Off).
     const extraKey = `${original}\n[[skills.config]]\nname = "full:one"\nnote = "team default"\nenabled = true\n`;
     await writeFile(config, extraKey);
@@ -965,6 +964,24 @@ test('Codex: a path block gets a name-only rule on Off, and fresh On after an up
     await writeFile(config, hashed);
     assert.equal((await switchTo('hashed', true)).outcome, 'skill-on');
     assert.equal(await readFile(config, 'utf8'), original);
+  } finally { await box.cleanup(); }
+});
+
+test('Codex: when an update removes 1.0.0 and reuses another skill’s folder, fresh On never changes another skill’s old-version rule', async () => {
+  const { box, copy, original, config, switchTo } = await codexHome();
+  try {
+    const oneOff = `\n[[skills.config]]\n# keep one off\npath = ${tomlValue(join(copy, 'skills/one/SKILL.md'))}\nenabled = false\n`;
+    const twoBlock = (enabled: boolean) => `\n[[skills.config]]\n# keep second\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = ${enabled}\n`;
+    await writeFile(config, `${original}${oneOff}${twoBlock(true)}`);
+    await switchTo('second', false);
+    // Update removes 1.0.0 and installs 2.0.0 with `second` placed in the `skills/one` folder that belonged to `one` in 1.0.0.
+    await rm(copy, { recursive: true });
+    const newer = join(box.home, '.codex/plugins/cache/ck-test-market/full/2.0.0');
+    await put(join(newer, 'skills/one/SKILL.md'), '---\nname: second\ndescription: Reused folder.\n---\nB\n');
+    await put(join(newer, 'skills/two/SKILL.md'), '---\nname: one\ndescription: Swapped.\n---\nB\n');
+    switchCodexFresh(box.context, 'second', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}${oneOff}${twoBlock(false)}`);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
   } finally { await box.cleanup(); }
 });
 
