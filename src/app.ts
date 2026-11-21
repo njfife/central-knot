@@ -1110,7 +1110,9 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
  */
 function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult) {
   const entry = libraryEntry(past)!, rows = [entry];
-  if (result.stopped) { tell({ page, item: past.item, rows, text: `${past.item}: ${result.stopped}`, warn: true, history: true, refused: true }); return; }
+  // Refused whole (it waits for the shared skills folder, say: librarypass.ts click), it is said as a stop: nothing was done.
+  const refused = result.stopped ?? (result.made?.length ? undefined : result.results.find(heldWhole)?.message);
+  if (refused) { tell({ page, item: past.item, rows, text: `${past.item}: ${refused}`, warn: true, history: true, refused: true }); return; }
   const view = state.home?.[entry.kind];
   const made = state.history.data?.find(event => event.id === past.undoneBy);
   const item = view?.library[entry.key];
