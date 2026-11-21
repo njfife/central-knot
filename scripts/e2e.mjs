@@ -11513,7 +11513,7 @@ async function profilePluginsFlow() {
   const trackerRow = row('plugin:mcp:issue-tracker@ck-test-market/tracker');
   same('Copilot CLI’s found tracker shows the shared-name note on unticked tracker (not on ticked issues), and document-tools’s unread copy shows not known on pdf',
     [await a.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await a.all(`${trackerRow} .pf-note`, 'e.textContent'), await a.all(`${row('plugin:skill:document-tools@ck-test-market/pdf')} .pf-note`, 'e.textContent')],
-    [[], ['Stays on in Copilot CLI: it uses the plugin’s “tracker” while yours has the same name there.'], ['Not known in Copilot CLI: its copy couldn’t be read.']]);
+    [[], ['Stays on in Copilot CLI, which runs the plugin’s “tracker” instead of yours (same name).'], ['Not known in Copilot CLI: its copy couldn’t be read.']]);
   await picture('profile-plugin-held-unread', 1316, 819);
   // His tracker taken in for Copilot CLI alone, then Off: a profile that has it keeps the plugin's tracker on there (without holding), said on its row.
   for (const on of [true, false]) await a.run(`window.centralKnot.applyServers([{ key: 'tracker', on: ${on}, except: ['claude-cli', 'codex-cli', 'pi-cli'], ...(${on} ? {} : { seenOn: true }) }], false, ${JSON.stringify(home)})`);
@@ -11521,7 +11521,7 @@ async function profilePluginsFlow() {
   await newProfile(a, 'Mine');
   await a.click(byId('pf-mcp:tracker')); await done();
   same('the plugin’s tracker, sharing its name with his tracker in Copilot CLI, shows the shared-name note while Codex turns it off', [await a.all(`${trackerRow} .pf-note`, 'e.textContent'), await a.run(`document.querySelector('${trackerRow} .pf-state').dataset.state`)],
-    [['Stays on in Copilot CLI: it uses the plugin’s “tracker” while yours has the same name there.'], 'Turns off in Codex']);
+    [['Stays on in Copilot CLI, which runs the plugin’s “tracker” instead of yours (same name).'], 'Turns off in Codex']);
   same('no page errors', a.pageErrors, []);
   await a.quit();
 
@@ -11724,21 +11724,44 @@ async function profilePluginsFlow() {
   same('his own issues taken in for Copilot CLI alone', await b.run(`window.centralKnot.applyServers([{ key: 'issues', on: true, except: ['claude-cli', 'codex-cli'] }], false, ${JSON.stringify(oldHome)}).then(r => r.stopped ?? 'ok')`), 'ok');
   await b.click('#header-refresh');
 
-  // Example 1: managing profile Mine has his issues and leaves out plugin's issues -> Copilot CLI files untouched, Claude Code & Codex off, Mine in use, row shows exact sentence.
+  // Example 1: managing profile Mine has his issues and leaves out plugin's issues -> Copilot CLI files untouched, Claude Code & Codex off, Mine in use, row shows exact sentence, hover, tooltip and Now column.
   await b.run(`window.centralKnot.saveProfile({ id: 'legacy', items: ['skill:notes', ${JSON.stringify(triageId)}, ${JSON.stringify(issuesId)}] }, ${JSON.stringify(oldHome)})`);
   await b.run(`window.centralKnot.saveProfile({ name: 'Mine', items: ['skill:notes', 'mcp:issues', ${JSON.stringify(triageId)}] }, ${JSON.stringify(oldHome)})`);
   await b.run(`window.centralKnot.saveProfile({ name: 'Quiet', items: ['skill:notes', ${JSON.stringify(triageId)}] }, ${JSON.stringify(oldHome)})`);
   await b.click('#header-refresh');
   await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('Mine')).click()`); await b.settle();
-  const sharedRowNote = 'Stays on in Copilot CLI: it uses the plugin’s “issues” while yours has the same name there.';
-  same('Mine’s plugin server row shows the exact Copilot CLI shared-name sentence', await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), [sharedRowNote]);
+  const sharedRowNote = 'Stays on in Copilot CLI, which runs the plugin’s “issues” instead of yours (same name).';
+  const sharedRowTitle = 'To use yours there, rename one of the two or turn the plugin off in Copilot CLI.';
+  const sharedBoxTitle = 'Not in Mine: switching to it turns issues off in each tool that can switch it, except Copilot CLI (same name as yours). Click to put it in.';
+  same('Mine’s plugin server row shows the exact Copilot CLI shared-name sentence, hover title and unticked box tooltip',
+    [await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await b.run(`document.querySelector('${row(issuesId)} .pf-note')?.title`),
+      await b.run(`document.querySelector('${row(issuesId)} .pf-tick')?.title`)],
+    [[sharedRowNote], sharedRowTitle, sharedBoxTitle]);
+  // Standing disabledMcpServers while Claude Code & Codex are still on: "Turns on" row beside Switching column saying off in other tools.
   const copilotBeforeEx1 = { settings: readNow(oldCopilotSettings), mcp: readNow(oldCopilotMcp) };
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ ...JSON.parse(copilotBeforeEx1.settings), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+  await b.click('#header-refresh');
+  same('standing rule on Mine shows Turns on note beside per-tool Switching column',
+    [await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await b.run(`document.querySelector('${row(issuesId)} .pf-state')?.dataset.state`)],
+    [['Turns on in Copilot CLI, which runs the plugin’s “issues” instead of yours (same name).'], 'Turns on in Copilot CLI; turns off in Claude Code and Codex']);
+  if (shots) {
+    await b.run(`window.centralKnot.setAppearance('light')`);
+    await sizeTo(b, 1316, 819);
+    if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+    await b.run(`document.querySelector('${row(issuesId)}')?.scrollIntoView({ block: 'center' })`);
+    await b.settle();
+    await b.shot('copilot-shared-turns-on-light-1316');
+    await b.run(`window.centralKnot.setAppearance('system')`);
+    await fullSize(b);
+  }
+  writeFileSync(oldCopilotSettings, copilotBeforeEx1.settings);
+  await b.click('#header-refresh');
   await b.click('#profile-switch'); await bDone();
-  same('example 1: Copilot CLI’s two files are untouched, Claude Code and Codex turn plugin’s issues off, and Mine is in use on page and status bar',
+  same('example 1: Copilot CLI’s two files are untouched, Claude Code and Codex turn plugin’s issues off, Mine is in use and Now reads Off · on in Copilot CLI',
     [{ settings: readNow(oldCopilotSettings), mcp: readNow(oldCopilotMcp) }, (readNow(oldCodexCfg) ?? '').includes('[plugins."issue-tracker@ck-test-market".mcp_servers.issues]\nenabled = false'),
       JSON.parse(readNow(join(oldHome, '.claude/settings.json'))).deniedMcpServers, (await b.text('#status-profile'))?.trim(), (await b.text('.profile-header p'))?.startsWith('In use · '),
-      await b.all(`${row(issuesId)} .pf-note`, 'e.textContent')],
-    [copilotBeforeEx1, true, [{ serverName: 'plugin:issue-tracker:issues' }], 'Mine', true, [sharedRowNote]]);
+      await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await b.run(`document.querySelector('${row(issuesId)} .pf-state')?.dataset.state`)],
+    [copilotBeforeEx1, true, [{ serverName: 'plugin:issue-tracker:issues' }], 'Mine', true, [sharedRowNote], 'Off · on in Copilot CLI']);
   await b.click('#status-profile');
   same('example 1: status bar menu marks Mine checked as In use',
     await b.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Mine'))?.getAttribute('aria-checked')`), 'true');
@@ -11750,6 +11773,9 @@ async function profilePluginsFlow() {
       if (width === 1316 && await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
       await b.run(`document.querySelector('${row(issuesId)}')?.scrollIntoView({ block: 'center' })`);
       await b.settle();
+      const rowMetrics = await b.run(`(() => { const el = document.querySelector('${row(issuesId)} .pf-note'), r = document.createRange(); r.selectNodeContents(el); return { textWidth: Math.round(r.getBoundingClientRect().width), boxWidth: Math.round(el.getBoundingClientRect().width), height: Math.round(el.getBoundingClientRect().height), clipped: el.scrollWidth > el.clientWidth + 1 }; })()`);
+      console.log(`copilot row note (${width}):`, JSON.stringify(rowMetrics));
+      check(`copilot row note fits without clipping at ${width}`, !rowMetrics.clipped, rowMetrics);
       await b.shot(`copilot-shared-row-light-${width}`);
     }
     await b.run(`window.centralKnot.setAppearance('system')`);
@@ -11772,22 +11798,40 @@ async function profilePluginsFlow() {
   await b.click('#status-profile');
   await b.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Quiet')).click()`); await bDone();
 
-  // Example 5: non-managing profile Old work (not touching his issues leaves rule intact; ticking mcp:issues carries preview exception, clears rule, says so in result, in use).
+  // Example 5: non-managing profile Old work (not touching his issues leaves rule intact; ticking mcp:issues carries preview exception, wraps cleanly in header and 400px menu, clears rule, says so in result, in use).
   const quietFiles = { settings: readNow(oldCopilotSettings), mcp: readNow(oldCopilotMcp), codex: readNow(oldCodexCfg), claude: readNow(join(oldHome, '.claude/settings.json')) };
   await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('Old work')).click()`); await b.settle();
   same('example 5: non-managing profile not touching his issues shows no exception and leaves rule intact',
     await b.text('.profile-header p'), 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.');
   await b.click(byId('pf-mcp:issues')); await bDone();
-  const ex5Preview = 'Switching turns 2 items on. Plugin items stay as they are, but for “issues” in Copilot CLI, which shares its name with yours.';
+  const ex5Preview = 'Switching turns 2 items on. Plugin items stay as they are, except the plugin’s “issues” turns on in Copilot CLI (same name as yours).';
   same('example 5: ticking mcp:issues on the non-managing profile adds the Copilot CLI exception to the header preview', await b.text('.profile-header p'), ex5Preview);
+  if (shots) {
+    await b.run(`window.centralKnot.setAppearance('light')`);
+    await sizeTo(b, 1316, 819);
+    if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+    await b.settle();
+    const hdrMetrics = await b.run(`(() => { const el = document.querySelector('.profile-header p'); return { boxWidth: Math.round(el.getBoundingClientRect().width), height: Math.round(el.getBoundingClientRect().height), clipped: el.scrollWidth > el.clientWidth + 1 }; })()`);
+    console.log('copilot legacy header (1316):', JSON.stringify(hdrMetrics));
+    check('legacy exception header wraps without clipping at 1316', !hdrMetrics.clipped, hdrMetrics);
+    await b.shot('copilot-shared-legacy-header-light-1316');
+  }
   await b.click('#status-profile');
   same('example 5: status bar menu shows the same exception preview for Old work',
     await b.run(`document.querySelector('#status-profile-empty-old .pf-menu-preview')?.textContent`), ex5Preview);
+  const menuMetrics = await b.run(`(() => { const m = document.querySelector('.pf-menu'), el = document.querySelector('#status-profile-empty-old .pf-menu-preview'); return { menuWidth: Math.round(m.getBoundingClientRect().width), boxWidth: Math.round(el.getBoundingClientRect().width), height: Math.round(el.getBoundingClientRect().height), clipped: el.scrollWidth > el.clientWidth + 1 }; })()`);
+  console.log('copilot legacy menu (1316):', JSON.stringify(menuMetrics));
+  check('legacy exception menu preview wraps within 400px without clipping', !menuMetrics.clipped && menuMetrics.menuWidth <= 400, menuMetrics);
+  if (shots) {
+    await b.shot('copilot-shared-legacy-menu-light-1316');
+    await b.run(`window.centralKnot.setAppearance('system')`);
+    await fullSize(b);
+  }
   await b.click('#status-profile-empty-old'); await bDone();
   same('example 5: switching to Old work from the status bar clears disabledMcpServers, restores his issues, leaves Claude & Codex untouched, says so in the result, and marks Old work in use',
     [JSON.parse(readNow(oldCopilotMcp)).mcpServers.issues?.command, JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers,
       readNow(oldCodexCfg), readNow(join(oldHome, '.claude/settings.json')),
-      (await b.text('.band-done'))?.includes('Copilot CLI’s off-switch for “issues” was cleared so yours is on; the plugin’s “issues” is on there too.'),
+      (await b.text('.band-done'))?.includes('Copilot CLI’s off-switch for “issues” was cleared; there the plugin’s “issues” runs, not yours (same name).'),
       await b.text('.profile-header p'), (await b.text('#status-profile'))?.trim()],
     ['mine', undefined, quietFiles.codex, quietFiles.claude, true, 'In use · 2 items on. Plugin items stay as they are.', 'Old work and Mine']);
 

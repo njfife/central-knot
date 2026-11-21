@@ -306,6 +306,9 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
   const edited = made ? pendingEdits(made) : [];
   const shape = item ? await readVersion(look.context, key, item.hash) : entries[0]?.server;
   const copilotName = item && !slot['copilot-cli'] && item.own['copilot-cli'] ? (await keptOwn(look.context, item, 'copilot-cli'))?.name : undefined;
+  const copilotSpell = slot['copilot-cli']?.name ?? plugin['copilot-cli']?.name ?? copilotName ?? name;
+  const copilotSwitch = item && !item.except.includes('copilot-cli') ? disk.switches.get('copilot-cli') : undefined;
+  const copilotOff = copilotSwitch && !copilotSwitch.problem && mcpDisabled('copilot-cli', copilotSwitch.text, copilotSpell) ? copilotSpell : undefined;
   const some = (field: string, value: object) => (Object.keys(value).length ? { [field]: value } : {});
   return {
     key, name, description: shape ? summary(shape) : '', copies, on: !!item?.on, except: item?.except ?? [], cannot, edited,
@@ -313,7 +316,7 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key) }),
     ...some('plugin', plugin), ...some('unseen', unseen), ...some('switchedOff', switchedOff), ...some('switchProblem', switchProblem),
-    ...(copilotName ? { copilotName } : {}),
+    ...(copilotName ? { copilotName } : {}), ...(copilotOff ? { copilotOff } : {}),
     ...(fromSource ? { fromSource } : {}),
   };
 }

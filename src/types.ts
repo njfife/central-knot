@@ -420,7 +420,7 @@ export interface Change {
   forPlugin?: string;
 }
 
-export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, and what is not as it asked; and each plugin item's copy it left, with why (`since`: "pdf-reader in Codex, changed since the switch"). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'> & { since?: string[] }; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'settingsChanged'> & { since?: string[] }; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
  * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
@@ -569,7 +569,7 @@ export interface HistoryEvent {
    * it turned back too, which have entries of their own as well), which has no Undo. An
    * entry from before profiles were sets of items has neither `on` nor `off`: it is past.
    */
-  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; migrated?: true; undoOf?: string };
+  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
   /** What the pass changed in a tool's own settings with the copies, in words (librarypass.ts Kind.follow): Pi's skills list. */
@@ -1009,6 +1009,8 @@ export interface LibraryFacts {
   switchedOff?: HarnessId[];
   /** MCP servers: the exact name Copilot CLI will write from its kept own part (servers.ts writeServer) when it has no copy there now. */
   copilotName?: string;
+  /** MCP servers: the server's exact Copilot CLI name while `disabledMcpServers` in Copilot CLI's settings.json holds it off (managed and not kept out). */
+  copilotOff?: string;
   /**
    * In the library, from a source the home records: that source's link, as given. Linked to it (library.ts LibraryItem source):
    * whether its last read has a version that waits because the item was changed here (`waits`: library.ts A SOURCE `wait`), or
