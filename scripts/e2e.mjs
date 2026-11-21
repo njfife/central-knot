@@ -1092,13 +1092,13 @@ async function chooseFrom(a, value) {
   await a.settle();
 }
 /**
- * Whether the list `id` came to rest within 3 s: unchanged across animation frames (six at full rate, or at least one frame after
- * 200 ms without moving when a window covered by the other groups' draws few frames), or still where it last stood for 200 ms
- * when the 3 s runs out. It is found by its id each frame, as a redraw replaces it. A scroll that animates (a mouse wheel's) or
- * an opening row's next-frame move (matrix.ts openRow) moves scrollTop until it settles; a check that writes a scroll place
- * checks this first, so a list that never rests fails under its own name.
+ * Whether the list `id` came to rest within 3 s: six unchanged animation frames, or still where it last stood for 200 ms when the
+ * 3 s runs out. With `queued` (a one-frame move already queued ahead of this call, such as matrix.ts openRow), a window covered
+ * by the other groups' that draws slow frames also rests once one unchanged frame lands at least 200 ms after the last move. The
+ * list is found by its id each frame, as a redraw replaces it. A check that writes a scroll place checks this first, so a list
+ * that never rests fails under its own name.
  */
-const stillList = (a, id) => a.run(`new Promise(done => {
+const stillList = (a, id, { queued = false } = {}) => a.run(`new Promise(done => {
   const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop;
   let last = at(), still = 0, since = performance.now(), ended = false;
   const end = answer => { if (!ended) { ended = true; done(answer); } };
@@ -1106,7 +1106,7 @@ const stillList = (a, id) => a.run(`new Promise(done => {
   const look = () => {
     if (ended) return;
     const now = performance.now(), cur = at();
-    if (cur === last) { still++; if (still === 6 || now - since >= 200) { end(true); return; } }
+    if (cur === last) { still++; if (still === 6 || (${queued} && now - since >= 200)) { end(true); return; } }
     else { still = 0; last = cur; since = now; }
     requestAnimationFrame(look);
   };
@@ -1284,7 +1284,7 @@ async function openedRowLook(a, kind, key) {
     const row = document.querySelector('${row}');
     return ${what};
   })()`);
-  await stillList(a, await a.run(`document.querySelector('${row}').closest('.scroll').id`));
+  await stillList(a, await a.run(`document.querySelector('${row}').closest('.scroll').id`), { queued: true });
   const [x, y] = await a.run(`(() => { const box = document.querySelector('${row}').getBoundingClientRect(); return [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)]; })()`);
   await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
   const underPointer = await read(`[row.matches(':hover') ? 'pointer on the row' : 'pointer elsewhere', drawn(row), drawn(row.nextElementSibling)]`);
@@ -6068,22 +6068,17 @@ async function draftFlow() {
   const a = await launch(data, [], realHome);
   // A sync record (Synchronize everything off) lets background passes report changes made outside (homepass.ts pageSees).
   await a.click('#setup-no');
-  await a.run(`(window.ckSyncs = 0, window.centralKnot.onSyncChanged(() => {
-    window.ckSyncs++;
-    const head = document.querySelector('#header > *');
-    if (head) head.ckAfterSync = true;
-  }), true)`);
   const says = async selector => (await a.text(selector)) ?? '';
-  const until = async test => { for (let tries = 0; tries < 80 && !(await test()); tries++) await wait(100); return test(); };
+  const until = async (test, tries = 80) => { for (let count = 0; count < tries && !(await test()); count++) await wait(100); return test(); };
   const untilThere = selector => until(() => a.exists(selector));
-  // A change outside, read in the background: a skill folder written into the home until the background pass tells the page
-  // (sync:changed) and its refresh redraws the header, then taken away.
+  // A change outside, read in the background: a skill folder written into the home until the background refresh redraws the
+  // page with the new Library count (5 s at most), then taken away.
   const readInBackground = async () => {
-    const before = await a.run(`window.ckSyncs`), folder = join(home, '.claude/skills/read-in-the-background');
+    const before = Number(await says('#nav-library .nav-count')), folder = join(home, '.claude/skills/read-in-the-background');
     mkdirSync(folder, { recursive: true }); writeFileSync(join(folder, 'SKILL.md'), text('read-in-the-background'));
-    const redrew = await until(() => a.run(`window.ckSyncs > ${before} && !document.querySelector('#header > *')?.ckAfterSync`));
+    const shown = await until(async () => Number(await says('#nav-library .nav-count')) > before, 50);
     rmSync(folder, { recursive: true, force: true });
-    if (!redrew) await a.run(`document.querySelector('#header > *').ckDrawn = true`);
+    if (!shown) await a.run(`document.querySelector('#header > *').ckDrawn = true`);
   };
   const typeModel = name => a.run(`(() => { const box = document.querySelector('#base-draft-model'); box.value = ${JSON.stringify(name)}; box.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const argsSent = () => readNow(ran).trim().split('\n');
@@ -6096,7 +6091,9 @@ async function draftFlow() {
   const crlf = 'Run codex review before pushing.\r\nline one\r\nline two\r\nTARGET here\r\nlast line\r\n';
   writeFileSync(agentsMd, crlf);
   await a.click('#header-refresh');
-  await until(async () => (await says(codexText)).includes('TARGET'));
+  const sawTarget = await until(async () => (await says(codexText)).includes('TARGET'));
+  check('Refresh shows the updated AGENTS.md', sawTarget, await says(codexText));
+  if (!sawTarget) { await a.quit(); return; }
   const target = await pointAt(a, codexText, 'TARGET');
   // What is under the click's point, said if the check fails.
   const under = await a.run(`(() => { const hit = document.elementFromPoint(${target.x}, ${target.y}), at = document.caretRangeFromPoint(${target.x}, ${target.y}); return { point: ${JSON.stringify(target)}, hit: hit && (hit.id || hit.className || hit.tagName), at: at && [at.startContainer.nodeName, at.startOffset], scroll: document.querySelector('#instructions-scroll').scrollTop }; })()`);
@@ -9624,7 +9621,7 @@ async function libraryFlow() {
   await c.click('#chip-attention');
   await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const top = () => c.run(`Math.round(document.querySelector('#table-library-all').scrollTop)`);
-  check('the Library’s list comes to rest once review’s row has opened', await stillList(c, 'table-library-all'));
+  check('the Library’s list comes to rest once review’s row has opened', await stillList(c, 'table-library-all', { queued: true }));
   await c.run(`document.querySelector('#table-library-all').scrollTop = 80`);
   const before = await top();
   await c.click(`#${rowPart('diff', 'skills', 'review')}`);
@@ -9646,7 +9643,7 @@ async function libraryFlow() {
   await c.click('#chip-attention');
   await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const tabTop = () => c.run(`Math.round(document.querySelector('#table-skills-claude-cli')?.scrollTop ?? -1)`);
-  check('Claude Code’s Skills list comes to rest once review’s row has opened', await stillList(c, 'table-skills-claude-cli'));
+  check('Claude Code’s Skills list comes to rest once review’s row has opened', await stillList(c, 'table-skills-claude-cli', { queued: true }));
   await c.run(`document.querySelector('#table-skills-claude-cli').scrollTop = 30`);
   const tabBefore = await tabTop();
   await c.click(`#${rowPart('diff', 'skills', 'review')}`);
