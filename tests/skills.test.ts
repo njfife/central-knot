@@ -994,7 +994,8 @@ test('A switch set in a tool is left exactly as it is: the folder stays and the 
     await turnOn(box);
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), config, 'Off and On never write a tool’s own switch');
     const { fact, item, row } = await seen(box);
-    assert.deepEqual(fact!.loads?.['codex-cli'], { ...target, switchedOff: true });
+    // Its own folder's copy (`in`: the tool whose folder holds it), which its own switch keeps out.
+    assert.deepEqual(fact!.loads?.['codex-cli'], { ...target, switchedOff: true, in: 'codex-cli' });
     // The row as the page has it: the view's switchedOff (matrix.ts fromFacts copies it), said in Codex's own settings.
     const switchedOff = fact!.switchedOff;
     assert.deepEqual(switchedOff, ['codex-cli']);

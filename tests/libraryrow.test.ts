@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, rowClicks, foldVersions, harnessIs, loadsFrom, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyOn, kindSource } from '../src/itemrow.ts';
@@ -199,18 +199,19 @@ test('The status line says where the agent stands, and in which harnesses', () =
 });
 
 test('The switch says what a click does: off everywhere, or on everywhere; a found agent’s Add says it takes it in, or asks which copy', () => {
-  assert.equal(switchLabel(...withItem({ 'claude-cli': 'b' }, item()), tools), 'reviewer: on. Click to take it out of every tool; Central Knot keeps it.');
+  assert.equal(switchLabel(...withItem({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }, item()), tools), 'reviewer: on. Click to take it out of every tool; Central Knot keeps it.');
   assert.equal(switchLabel(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'reviewer: off, in Central Knot and Codex. Click to put it in every tool; Codex has a copy of its own, which is kept as versions first.');
   assert.equal(addLabel(row({ 'claude-cli': 'a' }), undefined, tools), 'Add reviewer to Central Knot and put it in every tool');
   assert.equal(addLabel(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, tools, 'closed'), 'Add reviewer: its copies differ. Click to choose which one Central Knot takes in.');
-  const all = row({ 'claude-cli': 'b' });
+  // The two tools it is in have their copies (a copy missing where Central Knot put one was deleted by hand: no tool loads it there).
+  const all = row({ 'claude-cli': 'b', 'copilot-cli': 'b' }), notInCodex = { 'claude-cli': 'b', 'copilot-cli': 'b' };
   assert.deepEqual([placeTag(all, item(), tools)?.text, placeTag(row({}), item({ on: false, applied: {} }), tools)?.text, placeTag(all, undefined, tools)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);
   // Kept out of a tool (partial) shows on the closed row too: where it is, so it never reads as on everywhere.
-  assert.deepEqual(placeTag(all, item({ except: ['codex-cli'] }), tools), { text: 'in 2 of 3 tools · kept out of Codex', title: 'Kept out of Codex. Its switch there, in the opened row, puts it back.' });
-  assert.equal(switchLabel(all, item({ except: ['codex-cli'] }), tools), 'reviewer: on in 2 of 3 tools. Click to take it out of every tool; Central Knot keeps it.');
+  assert.deepEqual(placeTag(all, item({ except: ['codex-cli'], applied: notInCodex }), tools), { text: 'in 2 of 3 tools · kept out of Codex', title: 'Kept out of Codex. Its switch there, in the opened row, puts it back.' });
+  assert.equal(switchLabel(all, item({ except: ['codex-cli'], applied: notInCodex }), tools), 'reviewer: on in 2 of 3 tools. Click to take it out of every tool; Central Knot keeps it.');
   // So does a tool that can't take it: the tag says where it can be, its tooltip why.
   const why = 'Codex can’t store this name (é). Rename it in Claude Code to use it there.';
-  const cannotOnly = row({ 'claude-cli': 'b' }, { cannot: { 'codex-cli': why } }, item());
+  const cannotOnly = row({ 'claude-cli': 'b', 'copilot-cli': 'b' }, { cannot: { 'codex-cli': why } }, item());
   assert.deepEqual(placeTag(cannotOnly, item(), tools), { text: 'Claude Code and Copilot CLI only', title: why });
   const keptOut = item({ except: ['copilot-cli'] }), cannot = row({ 'claude-cli': 'b' }, { cannot: { 'codex-cli': why } }, keptOut);
   assert.deepEqual(placeTag(cannot, keptOut, tools), { text: 'in 1 of 3 tools · kept out of Copilot CLI', title: `${why} Kept out of Copilot CLI. Its switch there, in the opened row, puts it back.` });
@@ -237,6 +238,36 @@ test('The switch counts the tools an item is on in as its tag does: a tool that 
   const kept = item({ except: ['pi-cli'], applied: { 'opencode-cli': 'b' } });
   assert.equal(placeTag(triage, kept, five)?.text, 'in 1 of 5 tools · kept out of Pi');
   assert.equal(switchLabel(triage, kept, five), 'triage: on in 1 of 5 tools. Click to take it out of every tool; Central Knot keeps it.');
+});
+
+test('Whether a tool loads an item, and from which copy, is one answer: Central Knot’s, one it doesn’t write (which an Off leaves), a plugin’s, unknown or none', () => {
+  const five = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'], at = (folder: string) => ({ folder: 'notes', name: 'notes', skillFile: `${folder}/notes/SKILL.md`, switchedOff: false });
+  const notes = { ...newItem('notes', 'notes'), on: true, hash: 'a', applied: { 'claude-cli': 'a', 'codex-cli': 'a' } };
+  // Claude Code: its own folder's copy, Central Knot's. Copilot CLI: the shared folder's. Codex: Central Knot's and the shared
+  // folder's (two copies). Pi: a copy that can't be seen for sure. OpenCode: Claude Code's, in Claude Code's folder, which it reads.
+  const row: LibraryRow = { key: 'notes', name: 'notes', hashes: { 'claude-cli': 'a', 'codex-cli': 'a' }, unseen: { 'pi-cli': 'Pi’s copy can’t be read.' },
+    anotherWay: { 'copilot-cli': 'shared', 'codex-cli': 'shared', 'opencode-cli': 'Claude Code’s' },
+    loads: { 'claude-cli': { ...at('~/.claude/skills'), in: 'claude-cli' }, 'copilot-cli': at('~/.agents/skills'), 'codex-cli': { ...at('~/.codex/skills'), in: 'codex-cli' }, 'opencode-cli': { ...at('~/.claude/skills'), in: 'claude-cli' } } };
+  // Only Copilot CLI's stays after an Off: OpenCode's goes with Claude Code's copy, and which of Codex's two it would then load isn't read.
+  assert.deepEqual(five.map(tool => loadsFrom(row, notes, tool)), ['central-knot', 'elsewhere', 'central-knot', 'unknown', 'central-knot']);
+  // A tool whose own switch has it off loads none; a plugin's copy on there is a plugin's.
+  assert.deepEqual([loadsFrom({ ...row, switchedOff: ['copilot-cli'] }, notes, 'copilot-cli'), loadsFrom({ key: 'notes', pluginOn: ['claude-cli'] }, notes, 'claude-cli')], [undefined, 'plugin']);
+});
+
+test('After Use the plugin’s in Pi, his server’s row counts the five tools that load it, four running their own copies, as its tag and its switch say; the take’s Undo gives the row back as before', () => {
+  // tracker, his in five tools; the plugin's taken in Pi (library.ts TAKE): its version current and written in Pi alone, the
+  // four others kept out and let go, so each keeps running his copy, which Central Knot didn't put there.
+  const five = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'], servers = sentences(libraryWords.mcp);
+  const present = (hashes: Record<string, string>) => Object.fromEntries(Object.entries(hashes).map(([tool, hash]) => [tool, { is: 'present', hash, at: 0 }])) as Copies;
+  const his = Object.fromEntries(five.map(tool => [tool, 'his'])), takenIn = { ...his, 'pi-cli': 'kit' };
+  const taken = { ...newItem('tracker', 'tracker'), on: true, hash: 'kit', except: five.filter(tool => tool !== 'pi-cli') as HarnessId[], applied: { 'pi-cli': 'kit' } };
+  const after: LibraryRow = { key: 'tracker', name: 'tracker', hashes: takenIn, plan: plan(taken, present(takenIn)) };
+  assert.deepEqual(five.map(tool => loadsFrom(after, taken, tool)), ['elsewhere', 'elsewhere', 'elsewhere', 'central-knot', 'elsewhere']);
+  assert.deepEqual([servers.placeTag(after, taken, five)?.text, switchLabel(after, taken, five)],
+    ['in 5 of 5 tools · 4 run their own copies', 'tracker: on in 5 of 5 tools; 4 run their own copies. Click to take it out of every tool; Central Knot keeps it.']);
+  // Undone (librarypass.ts untake): his version current again, applied in every tool, kept out of none.
+  const back = { ...taken, hash: 'his', except: [], applied: his }, before: LibraryRow = { key: 'tracker', name: 'tracker', hashes: his, plan: plan(back, present(his)) };
+  assert.deepEqual([servers.placeTag(before, back, five), switchLabel(before, back, five)], [undefined, 'tracker: on. Click to take it out of every tool; Central Knot keeps it.']);
 });
 
 test('What a result says of Off skills tools still read another way, one click and a run alike: one sentence for the skills the same tools read, none for a tool whose own switch has it off', () => {

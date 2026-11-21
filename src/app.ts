@@ -34,7 +34,7 @@ import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, t
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { turnsWords, undoOffered } from './profileplan.ts';
+import { stillLoadAfter, turnsWords, undoOffered } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
@@ -1810,18 +1810,26 @@ export const profileState = {
   draft: undefined as string | undefined,
 };
 
-/** What a switch or its Undo did, as its band says it: what it turned On and Off, and what could not change. */
-function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], { act, fade }: { act?: Outcome['act']; fade?: boolean } = {}) {
+/**
+ * What a switch or its Undo did, as its band says it: what it turned On and Off (a switch's, with how many of those still load:
+ * `still`, profileplan.ts stillLoadAfter), and what could not change.
+ */
+function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[],
+  { act, fade, still = '' }: { act?: Outcome['act']; fade?: boolean; still?: string } = {}) {
   const leftSaid = `${turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : ''}${(turned.settingsChanged ?? []).map(said => ` ${said}`).join('')}`;
   // An Undo's plugin copies changed since the switch (profiles.ts undoSwitch), left as they are.
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}: ${turned.since.join('; ')}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
   const warn = results.length > 0 || turned.left.length > 0 || !!turned.since?.length;
-  tell({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn, act });
+  tell({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}${still}.${leftSaid}${sinceSaid}${notDone}`, warn, act });
 }
 
-/** What a switch did, with Undo switch only where History would offer it (profileplan.ts undoOffered, over the view already in state.home). */
-const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, result, result.results, { act: result.event && state.home && undoOffered(result, state.home)
+/**
+ * What a switch did, read back from the view after it already in state.home: how many of the items it turned off still load
+ * (profileplan.ts stillLoadAfter), and Undo switch only where History would offer it (profileplan.ts undoOffered).
+ */
+const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, result, result.results, {
+  still: result.profile && state.home ? stillLoadAfter(result.profile, state.home) : '', act: result.event && state.home && undoOffered(result, state.home)
   ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined });
 
 /** Switches to a profile. The band says what changed, with Undo where History offers it; the menu bar follows. */

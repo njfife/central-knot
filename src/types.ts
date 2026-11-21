@@ -1032,9 +1032,11 @@ export interface LibraryFacts {
   takeOver?: Partial<Record<HarnessId, { kind: 'link' | 'shared'; path: string }>>;
   /**
    * Skills: the copy each tool loads (its own, or one it has another way; not a plugin's), as its own switch names it, and
-   * whether that switch turns it off there (`switchedOff`): the copy stays, and the tool doesn't load it. Read at each look.
+   * whether that switch turns it off there (`switchedOff`): the copy stays, and the tool doesn't load it. `in`: the managed tool
+   * whose own skills folder holds that copy (its own, or another's it reads or links to); none for the shared folder or a folder
+   * of his elsewhere. Read at each look.
    */
-  loads?: Partial<Record<HarnessId, SwitchTarget & { switchedOff: boolean }>>;
+  loads?: Partial<Record<HarnessId, SwitchTarget & { switchedOff: boolean; in?: HarnessId }>>;
   /** Skills and MCP servers: why a tool's own switch can't be read (its settings file), for the tools that have a copy. */
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
   /** MCP servers: tools whose own switch turns it off there (mcpswitch.ts), read at each look: the entry stays, and the tool doesn't start it. */

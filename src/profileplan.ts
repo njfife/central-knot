@@ -12,18 +12,19 @@
 //   otherwise a standing rule rides on `LiveItem.copilotOff` (`switchPlan`, `inUse`, `switchPreview`, `copilotUndo`) and
 //   `profiles.ts runCopilotRules` writes it.
 // - `inUse` holds while a switch changes and holds nothing (never stored); `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`)
-//   gives the header and menu line; `undoPlan`, `pluginUndo` and `copilotUndo` revert items still as left, never re-disabling a
+//   gives the header and menu line, counting apart the items it turns off that still load from a copy Central Knot doesn't
+//   write (`keptOn`, `stillLoadWords`; a switch's result asks the view after it: `stillLoadAfter`); `undoPlan`, `pluginUndo` and `copilotUndo` revert items still as left, never re-disabling a
 //   Copilot CLI name a server of his uses now (`onAfterUndo`, `copilotHasYours`), and `undoOffered` (`undoInHome`) is the one rule
 //   both History and the header ask. `itemRowState` words a library item's live state for its row tooltip (`profilespage.ts`; `switchPlan` puts any `copilotOff` item under Turns on or Turns off, so the Now column only sees on/off). Dormant ids
 //   stay skipped; plugin-linked library items belong to `pluginLive` (`pluginItemKey`), not `liveItems`; found-only rows no
 //   profile can tick are counted by `leftOut`.
 import { itemKey, type ItemKind, type LibraryItem } from './library.ts';
-import { placeOf } from './libraryrow.ts';
+import { loadsFrom, placeOf } from './libraryrow.ts';
 import { plural } from './model.ts';
 import { loadsKind, pageOfPart } from './pluginstatus.ts';
 import { cantSwitch, onNow, ownSwitch, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
-import { andList, kindNouns, toolNames } from './words.ts';
+import { andList, byToolOrder, kindNouns, orList, toolNames } from './words.ts';
 import type { HarnessId, HistoryEvent, HomeView, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
 
 /** What every screen calls the state where no profile is in use. */
@@ -46,8 +47,12 @@ export const pluginItemKey = ({ plugin, marketName }: { plugin: string; marketNa
  */
 export const pluginItemId = (kind: ItemKind, key: string) => `plugin:${itemId(kind, key)}`;
 
-/** A live library item (not deleted) as profiles see it. `except`: tools kept out of; `copilotOff`: exact Copilot CLI name currently disabled in settings.json. */
-export interface LiveItem { id: string; kind: ItemKind; key: string; name: string; on: boolean; except: LibraryItem['except']; copilotOff?: string }
+/**
+ * A live library item (not deleted) as profiles see it. `except`: tools kept out of; `copilotOff`: exact Copilot CLI name currently
+ * disabled in settings.json; `loadsElsewhere`: the tools that load it from a copy Central Knot doesn't write, which an Off leaves
+ * (libraryrow.ts loadsFrom `elsewhere`, from the view: homeItems).
+ */
+export interface LiveItem { id: string; kind: ItemKind; key: string; name: string; on: boolean; except: LibraryItem['except']; copilotOff?: string; loadsElsewhere?: HarnessId[] }
 
 /** Each kind's items as the library holds them, deleted ones too (types.ts LibraryView `library`, or a kind's record). */
 export type Libraries = Record<ItemKind, Record<string, LibraryItem>>;
@@ -77,8 +82,16 @@ export function withCopilotOff(items: LiveItem[], rows: readonly LibraryFacts[],
   const off = new Map(rows.flatMap(row => (row.copilotOff && !covered.has(row.copilotOff) ? [[row.key, row.copilotOff]] : [])));
   return items.map(item => (item.kind === 'mcp' && off.has(item.key) ? { ...item, copilotOff: off.get(item.key) } : item));
 }
-/** A home view's live items that profiles act on, with any uncovered Copilot CLI `disabledMcpServers` block (`withCopilotOff`). */
-export const homeItems = (home: PluginHome, plugins: readonly PluginLive[] = pluginLive(home)): LiveItem[] => withCopilotOff(ownHomeItems(home), home.mcp.items, plugins);
+/** A home view's live items that profiles act on, with any uncovered Copilot CLI `disabledMcpServers` block (`withCopilotOff`) and where each loads from a copy Central Knot doesn't write (`withLoads`). */
+export const homeItems = (home: PluginHome, plugins: readonly PluginLive[] = pluginLive(home)): LiveItem[] =>
+  withCopilotOff(ownHomeItems(home), home.mcp.items, plugins).map(item => withLoads(home, item));
+/** A live item with the tools that load it from a copy Central Knot doesn't write (LiveItem `loadsElsewhere`), from its row in `home`. */
+function withLoads(home: PluginHome, item: LiveItem): LiveItem {
+  const view = home[pageOfPart[item.kind]], facts = view.items.find(row => row.key === item.key);
+  const row = facts && { ...facts, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])) };
+  const tools = row ? view.tools.filter(tool => loadsFrom(row, view.library[item.key], tool) === 'elsewhere') : [];
+  return tools.length ? { ...item, loadsElsewhere: tools } : item;
+}
 /** The ids of the plugins the home records. */
 const recordedPlugins = (home: Pick<HomeView, 'profiles'>) => new Set(home.profiles.plugins?.map(entry => entry.id));
 
@@ -383,6 +396,26 @@ export const allTurns = (turns: Turns, plugins: PluginTurn[]) =>
 export const changes = (turns: { on: unknown[]; off: unknown[] }) => turns.on.length + turns.off.length;
 
 /**
+ * The tools that keep an item on once a switch turns it off, from a copy Central Knot doesn't write: a library item's
+ * (`loadsElsewhere`: copies an Off leaves); a plugin's, each copy on now that `turn` (its pluginPlan) doesn't turn off. Asked
+ * before a switch it projects; asked of the view after one (no `turn`), it reads back.
+ */
+export const keptOn = (item: LiveItem | PluginLive, turn?: PluginTurn): HarnessId[] => ('copies' in item
+  ? item.copies.filter(copy => copy.on && copy.way !== 'unread' && !turn?.off.includes(copy.tool)).map(copy => copy.tool) : item.loadsElsewhere ?? []);
+
+/** After the count of items a switch turns off, or turned: how many still load (each one's keptOn), and in which tools; '' for none. */
+export function stillLoadWords(kept: HarnessId[][]): string {
+  const loading = kept.filter(tools => tools.length), where = [...new Set(loading.flat())].sort(byToolOrder);
+  return loading.length ? `; ${loading.length} still ${loading.length === 1 ? 'loads' : 'load'} another way, in ${orList(where.map(tool => toolNames[tool]))}` : '';
+}
+
+/** What a switch's result adds of the items its entry turned off that still load, asked of the view after it (`home`). */
+export function stillLoadAfter(entry: NonNullable<HistoryEvent['profile']>, home: PluginHome): string {
+  const off = new Set(entryTurns(entry).off.map(each => each.id)), plugins = pluginLive(home);
+  return stillLoadWords([...homeItems(home, plugins).filter(item => !item.on), ...plugins].filter(item => off.has(item.id)).map(item => keptOn(item)));
+}
+
+/**
  * What the Undo of a switch's History entry turns back, decided from each item now: each item it turned On that is still On
  * goes Off, each it turned Off that is still Off goes On. An item whose On or Off differs now, or one no longer in the library,
  * is left (one turned back and forth since, and now as the switch left it, is turned back like any other).
@@ -450,5 +483,6 @@ export function switchPreview(profile: Profile, live: LiveItem[], plugins: Plugi
     return `In use · ${plural(count, 'item')} on${rest}${keep}`;
   }
   if (!count) return `0 items${keep}`;
-  return changes(counted) ? `Switching ${turnsWords(counted, 'will')}${keep}` : `Not in use · ${heldWords(plugs, plugins).text}`;
+  const kept = [...turns.off.map(item => keptOn(item)), ...plugs.filter(turn => turn.off.length).map(turn => keptOn(plugins.find(item => item.id === turn.id)!, turn))];
+  return changes(counted) ? `Switching ${turnsWords(counted, 'will')}${stillLoadWords(kept)}${keep}` : `Not in use · ${heldWords(plugs, plugins).text}`;
 }

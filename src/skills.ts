@@ -586,10 +586,14 @@ export async function skillsForRepo(context: ShareContext, tools: HarnessId[]): 
 
 // ---------- View ----------
 
-/** The folder a tool loads a skill from, own copy first, then the one it has another way, and how its switch names it there. */
-function loadTarget(look: SkillLook, key: string, name: string, tool: HarnessId): SwitchTarget | undefined {
+/** The copy a tool loads a skill from: its own folder's first, then the one it has another way, then the one in the folder it reads. */
+function loadedCopy(look: SkillLook, key: string, tool: HarnessId): SkillCopy | undefined {
   const disk = look.disk, source = disk.readsFrom[tool];
-  const copy = disk.byKey.get(key)?.[tool] ?? disk.outside.get(key)?.[tool] ?? (source ? disk.byKey.get(key)?.[source] : undefined);
+  return disk.byKey.get(key)?.[tool] ?? disk.outside.get(key)?.[tool] ?? (source ? disk.byKey.get(key)?.[source] : undefined);
+}
+/** How a tool's own switch names the copy it loads (loadedCopy). */
+function loadTarget(look: SkillLook, key: string, name: string, tool: HarnessId): SwitchTarget | undefined {
+  const copy = loadedCopy(look, key, tool);
   return copy && switchTarget(copy);
 }
 /** The skill a tool's switch is cleared for (clearSwitch): its name, in Central Knot or found in a tool, and the copy the tool loads. */
@@ -723,8 +727,10 @@ function toolFacts(look: SkillLook, row: RowOf, tool: HarnessId, facts: ToolFact
   // Take over is for a skill in Central Knot: a found one is taken in first.
   const outsideWay = disk.ways.get(key)?.[tool];
   if (item && !item.deleted && outsideWay?.take && outsideCopy) facts.takeOver[tool] = { kind: outsideWay.take, path: outsideWay.path };
-  const target = given && !here ? undefined : loadTarget(look, key, name, tool);
-  if (target) facts.loads[tool] = { ...target, switchedOff: offIn(look.context, disk, key, tool) };
+  const loaded = given && !here ? undefined : loadedCopy(look, key, tool);
+  // The managed tool whose own folder holds it, by where it really is: a link's copy is the folder it leads to.
+  const holder = loaded && look.managed.find(each => disk.byKey.get(key)?.[each]?.skill.realDirectory === loaded.skill.realDirectory);
+  if (loaded) facts.loads[tool] = { ...switchTarget(loaded), switchedOff: offIn(look.context, disk, key, tool), ...(holder ? { in: holder } : {}) };
 }
 
 /** A copy outside a tool's own folder that has moved on since the skill was taken in: neither its current version nor another of its versions. */

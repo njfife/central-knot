@@ -3,7 +3,7 @@
 // before (profilemigrate.ts). The temp home has Claude Code, Copilot CLI and Codex.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentsView, applyAgents } from '../src/agents.ts';
 import { readHistory } from '../src/history.ts';
@@ -11,8 +11,8 @@ import { newItem, type ItemKind } from '../src/library.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, copilotKeptOnBy, copilotServerName, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, switchable, switchPlan, switchPreview, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, withCopilotOff, type Libraries } from '../src/profileplan.ts';
-import { NO_PLUGINS, deleteProfile, liveNow, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
+import { allTurns, copilotKeptOnBy, copilotServerName, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, withCopilotOff, type Libraries } from '../src/profileplan.ts';
+import { NO_PLUGINS, deleteProfile, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { runPlan, type PlanApi } from '../src/pluginplan.ts';
 import { savePluginRecord } from '../src/pluginrecord.ts';
@@ -350,7 +350,8 @@ const everything = async (box: Box, skills: string[], servers: string[]) => ({
   settings: await Promise.all(tools.map(tool => (tool === 'codex-cli' ? undefined : text(box, SETTINGS[tool])))),
 });
 const history = async (box: Box) => readHistory(box.context);
-const live = (box: Box) => liveNow(box.context);
+/** The live library items now, from the records (profiles.ts readLibraries). */
+const live = async (box: Box) => { const read = await readLibraries(box.context); return 'stop' in read ? [] : liveItems(read.libraries, read.plugins); };
 const names = (items: { name: string }[]) => items.map(item => item.name);
 
 /**
@@ -396,6 +397,59 @@ test('Switching turns what a profile leaves out Off in one History entry, Claude
     assert.deepEqual([back.on, back.off], [['pager', 'sentry'], []]);
     assert.deepEqual(await everything(box, ['dev', 'pager'], ['sentry']), before);
     assert.deepEqual((await inUse(await profiles(), await live(box), [])).map(each => each.name), ['All']);
+  } finally { await box.cleanup(); }
+});
+
+/** The home as the Profiles page and the menus read it (profileplan.ts PluginHome), with no plugins. */
+const homeNow = async (box: Box) => ({ pluginItems: [], profiles: await readProfiles(box.home), skills: await skillsView(box.context, box.tools),
+  mcp: await serversView(box.context, box.tools), agents: await agentsView(box.context, box.tools) }) as unknown as HomeView;
+/** A skill's folder in the shared skills folder (~/.agents/skills), which Central Knot never writes. */
+const putShared = (box: Box, name: string, body = `The ${name} skill.`) => putFile(join(box.home, '.agents/skills', name, 'SKILL.md'), skillText(body, name));
+/** What a switch to `name` would do, as the page's header and both menus say it, read from the home now. */
+const preview = async (box: Box, name: string) => {
+  const view = await homeNow(box), profile = view.profiles.profiles.find(each => each.name === name)!;
+  return switchPreview(profile, homeItems(view), pluginLive(view));
+};
+
+test('His case: six of his skills in a tool’s folder and four only in the shared folder, all On; a profile with none of them says it turns ten off and that four still load, in the tools that read the shared folder; with none of those, the words as before', async () => {
+  const five: Tool[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'], box = await sandbox(five);
+  try {
+    const own = ['one', 'two', 'three', 'four', 'five', 'six'], shared = ['s-one', 's-two', 's-three', 's-four'];
+    for (const name of [...own, 'keep']) await put(box, 'claude-cli', { 'SKILL.md': skillText(`The ${name} skill.`, name) }, [], name);
+    for (const name of shared) await putShared(box, name);
+    await applySkills(box.context, box.tools, [...own, ...shared, 'keep'].map(key => ({ key, on: true, except: [] })));
+    // One unrelated item ticked, so Switch is offered (profileplan.ts switchable).
+    await saveProfile(box.context, { name: 'Writing', items: ['skill:keep'] });
+    await saveProfile(box.context, { name: 'Shared', items: ['skill:keep', ...shared.map(key => `skill:${key}`)] });
+    // Off takes Central Knot's copies out of every tool (Claude Code's of the shared ones too); the shared folder stays as it is,
+    // and Copilot CLI, Codex, Pi and OpenCode read it by themselves.
+    assert.equal(await preview(box, 'Writing'), 'Switching turns 10 items off; 4 still load another way, in Copilot CLI, Codex, Pi or OpenCode');
+    assert.equal(await preview(box, 'Shared'), 'Switching turns 6 items off', 'none of the six still loads: the words as before');
+    // The switch's result asks the home read again after it, not the preview: an item its entry names that is On there now is
+    // not one it turned off.
+    assert.equal(stillLoadAfter({ toName: 'Writing', on: [], off: [{ id: 'skill:s-one', name: 's-one' }] }, await homeNow(box)), '');
+    const writing = (await readProfiles(box.home)).profiles.find(each => each.name === 'Writing')!;
+    const switched = await switchProfile(box.context, box.tools, writing.id, NO_PLUGINS);
+    assert.equal(stillLoadAfter(switched.profile!, await homeNow(box)), '; 4 still load another way, in Copilot CLI, Codex, Pi or OpenCode');
+  } finally { await box.cleanup(); }
+});
+
+test('Still loading after a switch is what the read decides of each copy that stays: a link into the shared folder does, a link to a copy Central Knot wrote in another tool doesn’t, a folder of his in a tool the item is kept out of does', async () => {
+  const box = await sandbox(tools);
+  try {
+    // linked: Claude Code has it by a link into the shared folder, which Copilot CLI and Codex read; nothing of Central Knot's anywhere.
+    await putShared(box, 'linked');
+    await mkdir(join(box.home, '.claude/skills'), { recursive: true });
+    await symlink('../../.agents/skills/linked', join(box.home, '.claude/skills/linked'));
+    // via-codex: Codex's folder, taken in (Central Knot's from then on), and Claude Code's link to it: Off removes the folder, so the link leads nowhere.
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('Via Codex.', 'via-codex') }, [], 'via-codex');
+    await symlink('../../.codex/skills/via-codex', join(box.home, '.claude/skills/via-codex'));
+    // kept: kept out of Codex, where he has a folder of his own by that name, which Off leaves alone.
+    for (const name of ['kept', 'keep']) await put(box, 'claude-cli', { 'SKILL.md': skillText(`The ${name} skill.`, name) }, [], name);
+    await applySkills(box.context, box.tools, [{ key: 'linked', on: true, except: [] }, { key: 'via-codex', on: true, except: [] }, { key: 'kept', on: true, except: ['codex-cli'] }, { key: 'keep', on: true, except: [] }]);
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('His own, in Codex.', 'kept') }, [], 'kept');
+    await saveProfile(box.context, { name: 'Other', items: ['skill:keep'] });
+    assert.equal(await preview(box, 'Other'), 'Switching turns 3 items off; 2 still load another way, in Claude Code, Copilot CLI or Codex');
   } finally { await box.cleanup(); }
 });
 
@@ -1343,7 +1397,8 @@ test('switchPreview gives the same line for the page header and both menus: mana
   assert.equal(switchPreview(legacy, liveList, plugs), 'Switching turns 1 item on and 1 off. Plugin items stay as they are.');
   assert.equal(switchPreview(profile('EmptyOld', [], false), liveList, plugs), '0 items. Plugin items stay as they are.');
   assert.equal(switchPreview(profile('EmptyNew', [], true), liveList, plugs), '0 items');
-  assert.equal(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs), 'Switching turns 1 item on and 3 off');
+  // pdf and sheet turn off in Codex; Claude Code, with no switch for one skill of a plugin, still loads both.
+  assert.equal(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs), 'Switching turns 1 item on and 3 off; 2 still load another way, in Claude Code');
   // notes on, pager off: Legacy is in use (other personal item off, plugin items left alone); Modern is not (plugin items still on).
   const notesOn = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', true], ['skill', 'pager', false]]);
   assert.equal(switchPreview(legacy, homeItems(notesOn), pluginLive(notesOn)), 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.');
@@ -1791,7 +1846,7 @@ test('Copilot shared name fix 4: pluginRowState lives in profileplan.ts and retu
   assert.deepEqual(copilotKeptOnBy(profile('BothAndHis', ['mcp:issues', issuesId]), trackerItem, trackerItem.copies[0]!), { by: 'plugin', plugin: 'document-tools' });
 });
 
-test('Copilot shared name short 1: liveNow carries uncovered copilotOff so menus agree with the page', async () => {
+test('Copilot shared name short 1: the menus’ live items (homeItems, as main.ts refreshMenus reads them) carry uncovered copilotOff, so the menus agree with the page', async () => {
   const { box, made } = await pluginHome({ copilot: true });
   try {
     await takeInCopilotServer(box);
@@ -1800,8 +1855,7 @@ test('Copilot shared name short 1: liveNow carries uncovered copilotOff so menus
     await writeFile(settingsPath, `${JSON.stringify({ ...JSON.parse((await text(box, '.copilot/settings.json'))!), disabledMcpServers: ['issues'] }, null, 2)}\n`);
     const mineId = await made('Mine', ['mcp:issues', pdfId2, sheetId2, issuesId2]);
     const mineProfile = (await readProfiles(box.home)).profiles.find(each => each.id === mineId)!;
-    const { plugins } = await sideNow(box);
-    const menuItems = await liveNow(box.context, box.tools, plugins);
+    const { plugins, live: menuItems } = await sideNow(box);
     assert.equal(menuItems.find(item => item.id === 'mcp:issues')?.copilotOff, 'issues');
     assert.deepEqual(inUse([mineProfile], menuItems, plugins), [], 'menu must not say In use while off-switch stands');
     assert.equal(switchPreview(mineProfile, menuItems, plugins), 'Switching turns 1 item on');

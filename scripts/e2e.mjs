@@ -12097,9 +12097,10 @@ async function profilePluginsFlow() {
   same('with everything on, Work is in use', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p')], ['Work', 'In use · 2 items on']);
   await newProfile(a, 'Quiet');
   await a.click(byId(`pf-${issuesId}`)); await done();
-  same('before the click: Quiet turns triage off where it can, its title saying where it stays on; issues has no change', [await a.text(`${row(triageId)} .pf-state`),
-    await a.run(`document.querySelector('${row(triageId)} .pf-state').title`), await a.text(`${row(issuesId)} .pf-state`), await a.text('.profile-header p')],
-    ['Turns off in Codex and Pi', 'Claude Code has no switch for a single skill of a plugin, so it stays on there.', 'No change', 'Switching turns 1 item off']);
+  const keptOnNote = 'Claude Code has no switch for a single skill of a plugin, so it stays on there.';
+  same('before the click: Quiet turns triage off where it can, and its row says, under its name and not in a tooltip, that Claude Code keeps it on and why; issues has no change; the header counts triage as still loading there',
+    [await a.text(`${row(triageId)} .pf-state`), await a.run(`document.querySelector('${row(triageId)} .pf-state').title`), await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text(`${row(issuesId)} .pf-state`), await a.text('.profile-header p')],
+    ['Turns off in Codex and Pi', '', [keptOnNote], 'No change', 'Switching turns 1 item off; 1 still loads another way, in Claude Code']);
   await pictures('profile-plugin-rows');
 
   // The switch: Codex's own rule for triage alone, Pi's copy out, Claude Code untouched; one History entry, with Undo.
@@ -12108,8 +12109,9 @@ async function profilePluginsFlow() {
   check('before the switch, Pi has its copy of triage', !!before.pi);
   same('Codex’s rule turns triage alone off, the plugin left on; Pi’s copy is out; Claude Code’s settings are as they were', files(),
     { codex: `${codexBefore}\n[[skills.config]]\nname = "issue-tracker:triage"\nenabled = false\n`, claude: before.claude, pi: undefined });
-  same('Quiet is in use, said with what it can switch', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p'), await a.text(`${row(triageId)} .pf-state`)], ['Quiet', 'In use · 1 item on, the other 1 off wherever they can be switched', 'Off']);
-  check('the result says what it turned off, with Undo switch', /^Switched to Quiet: 1 item turned off\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
+  same('Quiet is in use, said with what it can switch; triage’s row still says Claude Code keeps it on', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p'), await a.text(`${row(triageId)} .pf-state`), await a.all(`${row(triageId)} .pf-note`, 'e.textContent')],
+    ['Quiet', 'In use · 1 item on, the other 1 off wherever they can be switched', 'Off', [keptOnNote]]);
+  check('the result says what it turned off and, read again, that Claude Code still loads it, with Undo switch', /^Switched to Quiet: 1 item turned off; 1 still loads another way, in Claude Code\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   if (a.inspect) {
     const menu = await mainHelpers(a.inspect);
     // A click on the profile in use changes nothing (main.ts switchFromMenu), so finding the ticked Quiet is a look, not a switch.
@@ -12187,8 +12189,10 @@ async function profilePluginsFlow() {
   await picture('profile-plugin-long-name', ...SMALLEST);
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Quiet')).click()`); await a.settle();
   await sizeTo(a, 1316, 819);
-  same('at his window, a plugin’s row the profile leaves out is as tall as his own: the column on one line', await a.run(`[...document.querySelectorAll('.pf-row[data-item]')].filter(row => row.dataset.item.includes('skill:')).map(row => [row.dataset.item.split('/').at(-1), Math.round(row.getBoundingClientRect().height)])`),
-    [['skill:notes', 37], [long, 37], ['triage', 37]]);
+  // Lines an element's text takes on screen: the tops of its text's boxes.
+  const lines = 'element => { const range = document.createRange(); range.selectNodeContents(element); return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size; }';
+  same('at his window, each row’s column is on one line; a plugin’s row the profile leaves out has its note, on one line, under its name', await a.run(`[...document.querySelectorAll('.pf-row[data-item]')].filter(row => row.dataset.item.includes('skill:')).map(row => [row.dataset.item.split('/').at(-1), (${lines})(row.querySelector('.pf-state')), [...row.querySelectorAll('.pf-note')].map(${lines})])`),
+    [['skill:notes', 1, []], [long, 1, [1]], ['triage', 1, [1]]]);
   await fullSize(a);
   await picture('profile-plugin-own-rows', 1316, 819);
   const copilotCopy = join(home, '.copilot/installed-plugins/ck-test-market/issue-tracker');
@@ -12204,7 +12208,7 @@ async function profilePluginsFlow() {
   const trackerRow = row('plugin:mcp:issue-tracker@ck-test-market/tracker');
   same('Copilot CLI’s found tracker shows the shared-name note on unticked tracker (not on ticked issues), and document-tools’s unread copy shows not known on pdf',
     [await a.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await a.all(`${trackerRow} .pf-note`, 'e.textContent'), await a.all(`${row('plugin:skill:document-tools@ck-test-market/pdf')} .pf-note`, 'e.textContent')],
-    [[], ['Stays on in Copilot CLI, which runs the plugin’s “tracker” instead of yours (same name).'], ['Not known in Copilot CLI: its copy couldn’t be read.']]);
+    [[], ['Stays on in Copilot CLI, which runs the plugin’s “tracker” instead of yours (same name).'], ['Claude Code has no switch for a single skill of a plugin, so it stays on there.', 'Not known in Copilot CLI: its copy couldn’t be read.']]);
   await picture('profile-plugin-held-unread', 1316, 819);
   // His tracker taken in for Copilot CLI alone, then Off: a profile that has it keeps the plugin's tracker on there (without holding), said on its row.
   for (const on of [true, false]) await a.run(`window.centralKnot.applyServers([{ key: 'tracker', on: ${on}, except: ['claude-cli', 'codex-cli', 'pi-cli'], ...(${on} ? {} : { seenOn: true }) }], false, ${JSON.stringify(home)})`);
@@ -12354,7 +12358,7 @@ async function profilePluginsFlow() {
     [!(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"'), !(JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
       (readNow(oldCodexCfg) ?? '').includes('[plugins."issue-tracker@ck-test-market".mcp_servers.issues]\nenabled = false')], [true, true, true]);
   await b.click(byId(`pf-${triageId}`)); await bDone();
-  same('unticking triage (keeping notes ticked) counts 1 item turning off before Switch', await b.text('.profile-header p'), 'Switching turns 1 item off');
+  same('unticking triage (keeping notes ticked) counts 1 item turning off before Switch, which Claude Code still loads', await b.text('.profile-header p'), 'Switching turns 1 item off; 1 still loads another way, in Claude Code');
   await b.click('#profile-switch'); await bDone();
   same('switching with triage unticked turns triage off in both Codex and Copilot CLI, and format 3 keeps the flag',
     [(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"\nenabled = false'), (JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
@@ -12660,6 +12664,134 @@ async function profilePluginsFlow() {
  * other's, its row named in the result, with one Undo (matrix.ts pluginRowSwitch finds its row again by kind and key); two quick
  * clicks, one on each, turn each its own; and a profile that ticks one and not the other leaves each tool's file as it says.
  */
+async function stillLoadsFlow() {
+  // What a profile's count and a Library row say of a tool that still loads an item from a copy Central Knot doesn't write
+  // (libraryrow.ts loadsFrom; profileplan.ts keptOn, stillLoadWords, stillLoadAfter), in a home with five tools: six skills of
+  // his in Claude Code's folder, four only in the shared folder (~/.agents/skills, which the other four tools read by
+  // themselves), and his server issues, in every tool from Claude Code's. A profile with issues alone: its header and rows, the
+  // status bar's and the menu bar's menus, and each switch route's result, read again after it; History's entry as before; the
+  // files as a switch leaves them. Then the plugin issue-tracker's issues, put in Pi by its box, taken there (library.ts TAKE):
+  // his row counts the five tools that load it, and each of the four running his says so beside its switch.
+  const home = join(scratch, 'home-still-loads'), data = join(scratch, 'still-loads-data'), market = join(scratch, 'market-still-loads'), tools = join(scratch, 'tools-still-loads');
+  writeMarket(market, 'ck-test-market');
+  const own = ['one', 'two', 'three', 'four', 'five', 'six'], shared = ['s-one', 's-two', 's-three', 's-four'], mine = { command: 'npx', args: ['-y', 'my-issues'] };
+  for (const name of own) skill(join(home, '.claude/skills'), name);
+  for (const name of shared) skill(join(home, '.agents/skills'), name);
+  for (const folder of ['.copilot', '.codex', '.pi/agent', '.config/opencode']) mkdirSync(join(home, folder), { recursive: true });
+  writeFileSync(join(home, '.claude.json'), `${JSON.stringify({ mcpServers: { issues: mine } }, null, 2)}\n`);
+  toolClis(tools);
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  const roots = ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills', '.agents/skills'];
+  /** Every skills folder of the home, file by file (tree), as a switch and its Undo must leave them. */
+  const listing = () => Object.fromEntries(roots.map(root => [root, existsSync(join(home, root)) ? tree(join(home, root)) : {}]));
+  const ours = [...own, ...shared], outOfTools = files => Object.fromEntries(Object.entries(files).filter(([path]) => !ours.includes(path.split('/')[0])));
+  const a = await launch(data, [], tools);
+  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+  // Light and dark, at the smallest window and the owner's own.
+  const pictures = async name => {
+    if (!shots) return;
+    for (const theme of ['light', 'dark']) {
+      await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await a.shot(`${name}-${theme}-${width}`); }
+    }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await fullSize(a);
+  };
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  await done();
+  check('Synchronize everything takes his in: each own skill and issues in every tool', await until(() => ['.codex/skills/one/SKILL.md', '.pi/agent/skills/six/SKILL.md', '.pi/agent/mcp.json'].every(path => existsSync(join(home, path)))), listing());
+
+  // The profile: issues alone ticked, so Switch is offered (profileplan.ts switchable); the ten skills turn off.
+  await a.click('#nav-profiles');
+  await newProfile(a, 'Writing');
+  await a.click(byId('pf-mcp:issues'));
+  await done();
+  const header = 'Switching turns 10 items off; 4 still load another way, in Copilot CLI, Codex, Pi or OpenCode';
+  const notes = async () => Object.fromEntries((await a.all('.pf-row[data-item^="skill:"]', `[e.dataset.item, e.querySelector('.pf-note')?.textContent ?? '']`)).sort());
+  const sharedNote = 'Copilot CLI, Codex, Pi and OpenCode still load it another way.';
+  same('the header counts the ten it turns off and, apart, the four that still load from the shared folder; each of those four rows names the tools, the six others nothing',
+    [await a.text('.profile-header p'), await notes()], [header, Object.fromEntries(ours.map(name => [`skill:${name}`, shared.includes(name) ? sharedNote : '']).sort())]);
+  await a.click('#status-profile');
+  const barPreview = await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Writing'))?.querySelector('.pf-menu-preview')?.textContent`);
+  await a.click('#status-profile');
+  same('the status bar’s menu says what the header says', barPreview, header);
+  await pictures('still-loads-profile');
+  await fitsAtMinimum(a, 'a profile whose rows name the tools that still load them');
+
+  // The page's Switch: Central Knot's copies leave every tool; the shared folder is as it was; the result is read again.
+  const before = listing();
+  await a.click('#profile-switch');
+  await done();
+  same('the switch takes the ten out of every tool’s own folder and leaves the shared folder as it was', listing(), Object.fromEntries(Object.entries(before).map(([root, files]) => [root, root === '.agents/skills' ? files : outOfTools(files)])));
+  const said = 'Switched to Writing: 10 items turned off; 4 still load another way, in Copilot CLI, Codex, Pi or OpenCode.';
+  check('its result says what it turned off and, read again, how many still load and where', (await a.text('.band-done') ?? '').startsWith(said), await a.text('.bands'));
+  await pictures('still-loads-result');
+  await a.click('#nav-history');
+  same('History’s entry counts what it turned in the Library, as before', await a.text('li.history-row[data-kind="profile"] .history-about'), 'Switched to Writing: 10 items turned off.');
+  await a.click('li.history-row[data-kind="profile"] .history-actions button');
+  await done();
+  same('its Undo puts every folder back', listing(), before);
+
+  // The menu bar's menu: the same words, and its route's result read again the same way, on the page open (Profiles).
+  await a.click('#nav-profiles');
+  if (a.inspect) {
+    const menu = await mainHelpers(a.inspect);
+    let clicked = 0;
+    try { clicked = await menu.clickMenu(`Writing · ${header}`, false); } finally { menu.close(); }
+    check('the menu bar’s Profile menu says what the header says, and a click there switches', clicked >= 1);
+    check('its result, by the menu bar’s route, says the same', clicked && await until(async () => (await a.text('.band-done') ?? '').startsWith(said)), await a.text('.bands'));
+    if (clicked) { await a.click('#outcome-undo'); await done(); }
+    same('its Undo puts every folder back', listing(), before);
+  } else console.log('No main-process inspector: skipping the menu bar’s Profile menu.');
+
+  // His issues meets the plugin's in Pi: Use the plugin's takes the plugin's there, and his row counts the tools that load it.
+  same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  const row = `.ov-row[data-key="${rowPart('', 'mcp', 'issues')}"]`, opened = `#${rowPart('open', 'mcp', 'issues')}`;
+  /** His row as the Library shows it: its tags, and each tool's switch, ticked or not, with the word beside it. */
+  const rowNow = async () => {
+    await openKind(a, 'mcp');
+    if (await a.run(`document.querySelector('${opened}')?.getAttribute('aria-expanded')`) !== 'true') await a.click(opened);
+    return { tags: await a.all(`${row} .row-tag`), tools: await a.all(`[id^="${rowPart('enable', 'mcp', 'issues')}-"]`, `[e.id.split('-issues-')[1], e.getAttribute('aria-checked'), e.closest('.tool-switch')?.querySelector('.tool-switch-word')?.textContent]`) };
+  };
+  const asBefore = await rowNow();
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists('#popen-0-issue-tracker')); tries++) await wait(100);
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-issue-tracker-pi-cli')); tries++) await wait(100);
+  await a.click('#pbox-0-issue-tracker-pi-cli');
+  await done();
+  const take = '#ptake-0-issue-tracker-pi-cli-mcp-issues';
+  check('Pi’s box offers Use the plugin’s issues', await until(() => a.exists(take)), await a.text('.plugin-tool[data-tool="pi-cli"]'));
+  await a.click(take);
+  await done();
+  const piIssues = () => jsonOrNothing(join(home, '.pi/agent/mcp.json'))?.mcpServers?.issues?.args, claudeIssues = () => jsonOrNothing(join(home, '.claude.json'))?.mcpServers?.issues?.args;
+  same('Pi runs the plugin’s issues; Claude Code keeps his', [piIssues(), claudeIssues()], [['-y', '@example/issues-mcp'], mine.args]);
+  const taken = await rowNow();
+  same('his row counts the five tools that load it, four running their own copies; beside each of those four switches, unticked as before, that it runs its own copy; Pi’s On',
+    [taken.tags.filter(tag => !tag.startsWith('from')), taken.tools], [['in 5 of 5 tools · 4 run their own copies'],
+      [['claude-cli', 'false', 'Its own copy'], ['copilot-cli', 'false', 'Its own copy'], ['codex-cli', 'false', 'Its own copy'], ['pi-cli', 'true', 'On'], ['opencode-cli', 'false', 'Its own copy']]]);
+  await pictures('still-loads-taken');
+  await fitsAtMinimum(a, 'a row after Use the plugin’s, opened');
+  // The switch beside "Its own copy" does what it always did (rowClicks.inHarness): Claude Code is let in again.
+  await a.click(`#${rowPart('enable', 'mcp', 'issues', 'claude-cli')}`);
+  await done();
+  same('a click there does what it did before this step: Claude Code is let in again, its file as it was, his copy still running there', [claudeIssues(), (await a.text('.band-done'))?.startsWith('issues is on in Claude Code again.')], [mine.args, true]);
+  await a.click('#outcome-undo');
+  await done();
+  same('its Undo gives the row back as the take left it', await rowNow(), taken);
+  // The take's Undo, from History: the row exactly as before the take.
+  await a.click('#nav-history');
+  const undoTake = await a.run(`[...document.querySelectorAll('li.history-row')].find(row => /^Use the plugin’s/.test(row.querySelector('.history-about')?.textContent ?? ''))?.querySelector('.history-actions button')?.id`);
+  check('History has the take, with Undo', !!undoTake);
+  await a.click(byId(undoTake));
+  await done();
+  same('the take’s Undo gives Pi his issues back, and his row is exactly as before the take', [piIssues(), await rowNow()], [mine.args, asBefore]);
+  await a.quit();
+}
+
 async function sameNamePluginFlow() {
   const home = join(scratch, 'home-same-name'), data = join(scratch, 'same-name-data'), market = join(scratch, 'market-same-name'), tools = join(scratch, 'tools-same-name');
   writeMarket(market, 'ck-test-market');
@@ -12750,7 +12882,7 @@ async function sameNamePluginFlow() {
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
   [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.

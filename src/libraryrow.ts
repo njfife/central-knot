@@ -14,7 +14,8 @@
 //          (the kind's view gives both answers of library.ts takeInAnswer: `takeInAnswers`; this file only says them)
 // A harness's line can say two more things the kind's view works out at each look and that change nothing a pass does: how
 // the harness has the item another way (`anotherWay`), and that its own switch turns it off there (`switchedOff`, skills and
-// MCP servers).
+// MCP servers). From those and the copies, whether a tool loads the item now and from which copy (loadsFrom) is the one answer
+// the row's count and switches and the Profiles page (profileplan.ts homeItems) ask.
 // What each harness's mark says is the library's plan for the item (library.ts plan), worked out by the kind's view
 // (agents.ts agentsView) from the same reading a pass makes (copiesOf), so a mark says what the next pass will do there and
 // never something of its own.
@@ -173,6 +174,25 @@ export function harnessIs(row: LibraryRow, item: LibraryItem | undefined, tool: 
   const step = (['write', 'remove', 'ownCopy', 'current'] as const).find(list => made[list].includes(harness));
   if (step) return ({ write: 'gets-it', remove: 'leaving', ownCopy: 'own-copy', current: 'current' } as const)[step];
   return inLib.on && inLib.except.includes(harness) ? 'kept-out' : 'none';
+}
+
+/**
+ * Whether one tool loads an item now, and from which copy, from what the read observed (the one answer the row's count and
+ * switches, loadingIn, and the Profiles page, profileplan.ts homeItems, ask): `central-knot`, a copy Central Knot wrote (item
+ * `applied`), in the tool's own folder or in another tool's it reads (LibraryFacts loads `in`); `elsewhere`, a copy Central Knot
+ * doesn't write (in the shared skills folder, a link, a folder of his), which an Off leaves as it is; `plugin`, a plugin's
+ * (`pluginOn`, which only the page reads); `unknown`, its copy can't be seen for sure; undefined, none (no copy, or its own switch
+ * has it off). A tool with a copy Central Knot wrote beside another (Pi loads either: skills.ts offIn) is `central-knot`: which of
+ * the two it would load once an Off removes Central Knot's isn't read.
+ */
+export type LoadsFrom = 'central-knot' | 'elsewhere' | 'plugin' | 'unknown';
+export function loadsFrom(row: LibraryRow, item: LibraryItem | undefined, tool: string): LoadsFrom | undefined {
+  if (row.unseen?.[tool]) return 'unknown';
+  if (row.switchedOff?.includes(tool)) return undefined;
+  const has = row.hashes?.[tool] !== undefined, loads = row.loads?.[tool as HarnessId];
+  if (!has && !loads) return row.pluginOn?.includes(tool) ? 'plugin' : undefined;
+  const at = has ? tool : loads!.in;
+  return at && inLibrary(item)?.applied[at as HarnessId] !== undefined ? 'central-knot' : 'elsewhere';
 }
 
 const KEPT_FIRST = 'before it is written over, a copy Central Knot doesn’t have yet is kept as a version';
@@ -392,9 +412,9 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
 export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = []): string {
   const name = row.name ?? row.key;
   if (placeOf(item) === 'on') {
-    // The tools its tag says it is in, less those whose own switch has it off there.
-    const on = inTools(row, item, tools).filter(tool => !row.switchedOff?.includes(tool)).length;
-    return `${name}: on${on < tools.length ? ` in ${on} of ${tools.length} tools` : ''}. Click to take it out of every tool; Central Knot keeps it.`;
+    const { loading, own } = loadingIn(row, item, tools), ownSaid = runOwn(own);
+    const where = loading.length < tools.length || ownSaid ? ` in ${loading.length} of ${tools.length} tools${ownSaid ? `; ${ownSaid}` : ''}` : '';
+    return `${name}: on${where}. Click to take it out of every tool; Central Knot keeps it.`;
   }
   const own = ownCopies(row, item, tools);
   const kept = own.length === 1 ? 'has a copy of its own, which is' : 'have copies of their own, which are';
@@ -431,11 +451,17 @@ export function whereAdded(row: LibraryRow, item: LibraryItem | undefined, tools
  */
 const cannotHave = (row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) =>
   tools.filter(tool => harnessIs(row, item, tool) === 'cannot' && row.hashes?.[tool] === undefined);
-/** The home's harnesses an item that is On is in, as its tag and its switch count them: all but those it is kept out of, and cannotHave. */
-export function inTools(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
-  const cannot = cannotHave(row, item, tools);
-  return tools.filter(tool => !cannot.includes(tool) && !item?.except.includes(tool as HarnessId));
+/**
+ * The home's harnesses that load an item (loadsFrom), as its tag and its switch count them: one it is kept out of only where it
+ * runs a copy of its own there (`own`: a take, library.ts TAKE, leaves his so), not where Central Knot's copy leaves when sync runs.
+ */
+export function loadingIn(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
+  const loads = (tool: string) => ['central-knot', 'elsewhere', 'plugin'].includes(loadsFrom(row, item, tool) ?? ''), out = (tool: string) => !!item?.except.includes(tool as HarnessId);
+  const own = tools.filter(tool => out(tool) && harnessIs(row, item, tool) === 'own-copy' && loads(tool));
+  return { loading: tools.filter(tool => loads(tool) && (!out(tool) || own.includes(tool))), own };
 }
+/** How many of loadingIn's tools run a copy of their own, as the tag and the switch say it; '' for none. */
+const runOwn = (own: readonly string[]) => (!own.length ? '' : own.length === 1 ? '1 runs its own copy' : `${own.length} run their own copies`);
 
 /**
  * What Synchronize everything does with a found item, as its row says it while the rule is on (the take-in table's answer for
@@ -538,10 +564,10 @@ export function sentences(words: RowWords) {
     if (place === 'found') return { text: 'not in Central Knot', title: found };
     const out = item!.except.filter(tool => tools.includes(tool)), keptOut = `Kept out of ${andList(out.map(toolName))}. Its switch there, in the opened row, puts it back.`;
     // A tool that can't take it and has no copy is as lasting as one it is kept out of: the tag names where it is.
-    const cannot = cannotHave(row, item, tools), can = inTools(row, item, tools);
-    // Partial: on in some of the tools, by the person's choice, and said as such, never as On everywhere.
-    const where = out.length ? `in ${can.length} of ${tools.length} tools · kept out of ${andList(out.map(toolName))}`
-      : cannot.length ? (can.length ? `${andList(can.map(toolName))} only` : 'in no tool') : '';
+    const cannot = cannotHave(row, item, tools), loads = loadingIn(row, item, tools), loading = loads.loading, away = out.filter(tool => !loads.own.includes(tool));
+    // Partial: kept out of some of the tools by the person's choice (or by a take), and said as such, never as On everywhere.
+    const where = out.length ? [`in ${loading.length} of ${tools.length} tools`, runOwn(loads.own), away.length ? `kept out of ${andList(away.map(toolName))}` : ''].filter(Boolean).join(' · ')
+      : cannot.length ? (loading.length ? `${andList(loading.map(toolName))} only` : 'in no tool') : '';
     const whereTitle = [...cannot.map(tool => row.cannot![tool]!), out.length ? keptOut : ''].filter(Boolean).join(' ');
     // A tool's own switch that turns it off: said too, so an item switched off everywhere never reads as plainly on.
     const switched = tools.filter(tool => row.switchedOff?.includes(tool) && !out.includes(tool as HarnessId));
