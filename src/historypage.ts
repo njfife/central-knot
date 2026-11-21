@@ -7,7 +7,7 @@ import { DAY_MS, plural, timesApart } from './model.ts';
 import { acting, noToolManaged, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
-import { changes, homeItems, NO_PROFILE, turnsWords, undoPlan } from './profileplan.ts';
+import { changes, entryTurns, homeItems, NO_PROFILE, pluginLive, turnsWords, undoTurns } from './profileplan.ts';
 import { changePanel, openKind, outcomeBand, seeChangeLink } from './matrix.ts';
 import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
@@ -83,19 +83,23 @@ function pulledBase(event: HistoryEvent, tools: string): { glyph: IconName; text
 }
 
 /**
- * A profile entry (profiles.ts): a switch, or the profiles migration (profilemigrate.ts), with the items it turned On and Off. Its Undo is offered while an item is still as it left it (profileplan.ts undoPlan). One from before
- * profiles were sets of items has neither list, and is past: it offers nothing.
+ * A profile entry (profiles.ts): a switch, or the profiles migration (profilemigrate.ts), with the items it turned On and Off, a
+ * plugin's item once however many tools it was turned in. Its Undo is offered while an item, or a plugin item's copy, is still as
+ * it left it (profileplan.ts undoTurns). One from before profiles were sets of items has neither list, and is past: it offers nothing.
  */
 function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const was = event.profile!, glyph: IconName = 'sliders-horizontal';
+  if (was.undoOf) return { glyph, text: `Undid the switch to ${was.toName}: ${turnsWords(entryTurns(was), 'did') || 'nothing changed'}.` };
   if (!was.on && !was.off) return { glyph, text: `Switched to ${was.toName ?? NO_PROFILE} with each tool’s own switches, before profiles were sets of items.` };
-  const action = state.home && changes(undoPlan(event, homeItems(state.home))) ? 'Undo' : undefined;
+  const action = state.home && changes(undoNow(event)) ? 'Undo' : undefined;
   if (was.migrated) {
     const off = was.off ?? [];
     return { glyph, text: `Profiles are sets of items now: ${plural(off.length, 'item')} ${was.toName ?? 'a profile'} held off in every tool ${off.length === 1 ? 'is' : 'are'} off now, and the switches profiles had set in tools are released.`, action };
   }
-  return { glyph, text: `Switched to ${was.toName}: ${turnsWords({ on: was.on ?? [], off: was.off ?? [] }, 'did')}.`, action };
+  return { glyph, text: `Switched to ${was.toName}: ${turnsWords(entryTurns(was), 'did') || 'nothing changed'}.`, action };
 }
+/** What a profile entry's Undo would turn back now, from the home as the page read it. */
+const undoNow = (event: HistoryEvent) => undoTurns(event, homeItems(state.home!), pluginLive(state.home!));
 
 /**
  * A tool's Manage switch turned (toolchoice.ts), said as what holds from then on. It offers nothing: the switch on the tool's
@@ -122,7 +126,7 @@ const day = (iso: string) => {
 };
 /** What a profile's, the base instructions' or Synchronize everything's action will do, said before the click. */
 const actionHelp = (event: HistoryEvent) => (event.kind === 'profile'
-  ? `Undo: ${turnsWords(undoPlan(event, homeItems(state.home!)), 'will')}, as each was before this; an item changed since stays as it is`
+  ? `Undo: ${turnsWords(undoNow(event), 'will')}, as each was before this; an item changed since stays as it is`
   : event.kind === 'everything' ? everythingOffer(event)?.help ?? ''
     : 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)');
 

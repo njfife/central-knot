@@ -17,7 +17,7 @@ import { serverHash } from '../src/mcp.ts';
 import { hideParts, migrateParts, type PartItem } from '../src/partsmigrate.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
 import { readPluginRecord, savePluginRecord, type PluginEntry } from '../src/pluginrecord.ts';
-import { readLibraries, saveProfile, switchProfile } from '../src/profiles.ts';
+import { NO_PLUGINS, readLibraries, saveProfile, switchProfile } from '../src/profiles.ts';
 import { inUse, liveItems } from '../src/profileplan.ts';
 import { applyServers, serverKind } from '../src/servers.ts';
 import { copyTree, exists, libraryGate, readTree, storeFolder, type ShareContext } from '../src/share.ts';
@@ -383,8 +383,8 @@ test('An item linked to a plugin is outside profiles: a switch never turns it Of
     await box.migrate();
     const read = await readLibraries(box.context);
     assert.ok('libraries' in read);
-    assert.deepEqual(inUse([{ id: made.id!, name: 'Focus', items: ['skill:notes'] }], liveItems(read.libraries, read.plugins)).map(profile => profile.name), ['Focus']);
-    await switchProfile(box.context, box.managed, made.id!);
+    assert.deepEqual(inUse([{ id: made.id!, name: 'Focus', items: ['skill:notes'] }], liveItems(read.libraries, read.plugins), []).map(profile => profile.name), ['Focus']);
+    await switchProfile(box.context, box.managed, made.id!, NO_PLUGINS);
     assert.equal((await box.library()).pdf.on, true);
   } finally { await box.cleanup(); }
 });

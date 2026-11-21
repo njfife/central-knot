@@ -23,6 +23,7 @@ import { applyServers, serverKind } from './servers.ts';
 import { sha256, syncsHere, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
 import { installedCopies, type InstalledCopyOf } from './plugins.ts';
+import { loadsKind } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import type { DestinationResult, HarnessId, PassResult, Reason } from './types.ts';
 
@@ -102,7 +103,7 @@ export async function pageSees(context: ShareContext, managed: HarnessId[], sync
   const named = (parts: { name: string; text?: string; entry?: string }[]) => parts.map(part => [part.name, part.text ?? part.entry] as const).sort(byName);
   const shown = (tool: HarnessId) => ({ plugin, marketplace, off, state, contents, serversOff = [], agentsOff = [] }: InstalledCopyOf) => {
     const installed = state.state === 'installed' ? state : undefined, sorted = (names: string[]) => [...names].sort();
-    const parts = contents && [named(contents.skills), named(contents.mcpServers), named(tool === 'codex-cli' ? [] : contents.agents)];
+    const parts = contents && [named(contents.skills), named(contents.mcpServers), named(loadsKind(tool, 'agent') ? contents.agents : [])];
     return [`${plugin}@${marketplace}`, { off, state: state.state, version: installed?.version, live: installed?.live,
       skillsOff: sorted((installed?.skillsOff ?? []).map(each => each.skill)), serversOff: sorted(serversOff), agentsOff: sorted(agentsOff), parts }] as const;
   };

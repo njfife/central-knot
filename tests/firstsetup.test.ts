@@ -651,7 +651,7 @@ test('Yes with a profile in use and a tool left out: the profile’s name drops 
     await applySkills(box.context, tools, [rowClicks.on(pageRow(rowOf(await skillsView(box.context, tools), 'notes')), undefined)]);
     await saveProfile(box.context, { name: 'Work', items: ['skill:notes'] });
     const live = async () => { const read = await readLibraries(box.context); return 'libraries' in read ? liveItems(read.libraries, read.plugins) : []; };
-    assert.deepEqual(inUse((await readProfiles(box.home)).profiles, await live()).map(profile => profile.name), ['Work']);
+    assert.deepEqual(inUse((await readProfiles(box.home)).profiles, await live(), []).map(profile => profile.name), ['Work']);
     await putSkill(box, skillRoot['claude-cli'], 'tidy');
     await putSkill(box, skillRoot['claude-cli'], 'plan');
     // Codex is left out: what Yes would do names Claude Code and Copilot CLI only.
@@ -661,7 +661,7 @@ test('Yes with a profile in use and a tool left out: the profile’s name drops 
     const codexBefore = (await readdir(join(box.home, skillRoot['codex-cli']))).sort();
     await setSyncEverything(box.context, true, true);
     await background(box, managed);
-    assert.deepEqual([inUse((await readProfiles(box.home)).profiles, await live()), (await readdir(join(box.home, skillRoot['codex-cli']))).sort()], [[], codexBefore]);
+    assert.deepEqual([inUse((await readProfiles(box.home)).profiles, await live(), []), (await readdir(join(box.home, skillRoot['codex-cli']))).sort()], [[], codexBefore]);
     // Copilot CLI is left out between Yes and the Undo: it keeps what it has, and the Undo says so.
     await chooseTools(box.context, 'copilot-cli', false);
     const copilotBefore = (await readdir(join(box.home, skillRoot['copilot-cli']))).sort();

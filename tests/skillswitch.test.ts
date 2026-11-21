@@ -10,7 +10,7 @@ import { agentsView, applyAgents } from '../src/agents.ts';
 import { applySkills, clearSwitch, restoreSkill, skillsView, takeOver } from '../src/skills.ts';
 import { isDisabled, readSwitchFile, setDisabled, switchPath } from '../src/skillswitch.ts';
 import { setSyncEverything } from '../src/everything.ts';
-import { saveProfile, switchProfile } from '../src/profiles.ts';
+import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import { libraryWords, sentences } from '../src/libraryrow.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -475,7 +475,7 @@ test('Pi: a profile switch that changes his list says so, in its result and its 
     await writeFile(switchPath(box.context, 'pi-cli'), '{ "skills": ["!*"] }');
     await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
     const none = (await saveProfile(box.context, { name: 'None', items: [] })).id!;
-    const switched = await switchProfile(box.context, tools, none);
+    const switched = await switchProfile(box.context, tools, none, NO_PLUGINS);
     assert.match(switched.settingsChanged?.join(' ') ?? '', /\+skills\/notes\/SKILL\.md taken out of Pi’s skills list/);
     assert.match((await readHistory(box.context)).find(event => event.kind === 'profile')?.settingsChanged?.join(' ') ?? '', /\+skills\/notes\/SKILL\.md taken out of Pi’s skills list/);
   } finally { await box.cleanup(); }

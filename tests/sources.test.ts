@@ -796,7 +796,7 @@ test('Turned On again, the revert: the notice goes, the next read changes nothin
 });
 
 test('History’s Turn it on and a profile that includes it are reverts too: each turns it On, and the notice goes', async () => {
-  const { saveProfile, switchProfile } = await import('../src/profiles.ts');
+  const { NO_PLUGINS, saveProfile, switchProfile } = await import('../src/profiles.ts');
   const box = await sandbox();
   try {
     const { repo, id } = await oneSkill(box, 'notes', { on: true });
@@ -807,7 +807,7 @@ test('History’s Turn it on and a profile that includes it are reverts too: eac
     assert.deepEqual([(await itemOf(box, 'notes'))!.on, await fromSourceOf(box)], [true, undefined]);
     await applySkills(box.context, box.tools, [{ ...asItIs('notes', await itemOf(box, 'notes')), on: false, seenOn: true }]);
     assert.equal((await fromSourceOf(box))?.removed, true);
-    await switchProfile(box.context, box.tools, profile);
+    await switchProfile(box.context, box.tools, profile, NO_PLUGINS);
     assert.deepEqual([(await itemOf(box, 'notes'))!.on, await fromSourceOf(box)], [true, undefined]);
   } finally { await box.cleanup(); }
 });
@@ -1219,7 +1219,7 @@ test('A profile that includes a source’s skill is in use while it is On; the s
   try {
     const { repo, id } = await oneSkill(box, 'notes', { on: true });
     await saveProfile(box.context, { name: 'Writing', items: ['skill:notes'] });
-    const used = async () => { const libraries = await readLibraries(box.context); return 'stop' in libraries ? [] : inUse((await readProfiles(box.home)).profiles, liveItems(libraries.libraries, libraries.plugins)).map(profile => profile.name); };
+    const used = async () => { const libraries = await readLibraries(box.context); return 'stop' in libraries ? [] : inUse((await readProfiles(box.home)).profiles, liveItems(libraries.libraries, libraries.plugins), []).map(profile => profile.name); };
     assert.deepEqual(await used(), ['Writing']);
     await repo.commit({ 'SKILL.md': null, 'other/SKILL.md': skillMd('other') });
     await check(box, id);
