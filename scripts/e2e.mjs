@@ -6527,9 +6527,11 @@ esac
   // The plugin's page counts what Pi loads: triage, which his list keeps out, is said apart.
   await a.click('#nav-plugins');
   if (!(await a.exists('#pbox-0-issue-tracker-pi-cli'))) await a.click('#popen-0-issue-tracker');
-  for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-issue-tracker-pi-cli')); tries++) await wait(100);
-  const boxSays = await a.run(`document.querySelector('#pbox-0-issue-tracker-pi-cli')?.title`);
-  check('the plugin’s box for Pi says Pi’s own settings keep one of its items out', /1 of its 2 items is on there \(Pi’s own settings keep 1 out\)/.test(boxSays ?? ''), boxSays);
+  // The box is drawn from the page's last view at once; its read after Pi's settings changed follows (slower on the Mac).
+  const boxSaid = () => a.run(`document.querySelector('#pbox-0-issue-tracker-pi-cli')?.title ?? ''`), keptOut = /1 of its 2 items is on there \(Pi’s own settings keep 1 out\)/;
+  for (let tries = 0; tries < 50 && !keptOut.test(await boxSaid()); tries++) await wait(100);
+  const boxSays = await boxSaid();
+  check('the plugin’s box for Pi says Pi’s own settings keep one of its items out', keptOut.test(boxSays), boxSays);
   await openKind(a, 'skills');
   if ((await a.run(`document.querySelector('#${rowPart('open', 'skills', 'triage')}')?.getAttribute('aria-expanded')`)) !== 'true') await a.click(`#${rowPart('open', 'skills', 'triage')}`);
   await a.click(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`);

@@ -17,7 +17,7 @@ import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { forgetMissing } from '../src/librarypass.ts';
 import { clickResults } from '../src/clickplan.ts';
-import { saveProfile, switchProfile } from '../src/profiles.ts';
+import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import type { HarnessId, PassResult } from '../src/types.ts';
 import { bytes, choose, everywhere, folderOf, historyActions, historyOf, inTool, itemOf, makeCurrent, pass, put, remove, restore, roots, sandbox, seen, send, skillText, tools, turnOff, turnOn, type Box, type Tool } from './skillclicks.ts';
 
@@ -682,7 +682,7 @@ test('A click while the shared folder can’t be vouched for writes no copy for 
     assert.equal(on.results.find(result => result.harness === 'codex-cli')?.message, 'Codex waits for the shared skills folder (…/.agents/skills) to be back: nothing is written there until then.');
     await turnOff(box);
     const id = (await saveProfile(box.context, { name: 'Notes', items: ['skill:notes', 'skill:other'] })).id!;
-    const switched = await switchProfile(box.context, box.tools, id);
+    const switched = await switchProfile(box.context, box.tools, id, NO_PLUGINS);
     assert.deepEqual([await toolFolders(), switched.on, waits(switched.results)], [before, ['notes'], wanting]);
   } finally { await box.cleanup(); }
 });
