@@ -99,7 +99,7 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
   return { glyph, text: `Switched to ${was.toName}: ${turnsWords(entryTurns(was), 'did') || 'nothing changed'}.`, action };
 }
 /** What a profile entry's Undo would turn back now, from the home as the page read it. */
-const undoNow = (event: HistoryEvent) => undoTurns(event, homeItems(state.home!), pluginLive(state.home!));
+const undoNow = (event: HistoryEvent) => undoTurns(event, homeItems(state.home!), pluginLive(state.home!), state.home!.mcp);
 
 /**
  * A tool's Manage switch turned (toolchoice.ts), said as what holds from then on. It offers nothing: the switch on the tool's
