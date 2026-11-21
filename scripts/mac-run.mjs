@@ -1,4 +1,4 @@
-// The Mac run: every check of a change, as `.github/workflows/mac.yml` runs it after `npm ci`, in the order `phases` gives
+// The Mac run: every check of a change, as `.github/workflows/mac.yml` and `.github/workflows/mac-hosted.yml` run it after `npm ci`, in the order `phases` gives
 // with its reasons. Each part's output prints as one block when it has closed (folded when the part passed), then a table of
 // every part's result and time, and one line for each part that failed, quoting what failed when its output says. Exit code:
 // 0 when every part passed; 1 when a part failed (the parts it kept from running are "not run"); 130 when the run was stopped

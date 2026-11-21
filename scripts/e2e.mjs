@@ -1094,11 +1094,10 @@ async function chooseFrom(a, value) {
   await a.run(`(select => { select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-from'))`);
   await a.settle();
 }
-/** Opens History via `trigger` and waits for its async loadHistory() read (main's serial history:list queue) to finish and draw. */
-async function openHistory(a, trigger) {
+/** Opens History via `trigger` and polls until `ready()` holds (bounded by `ms`): loadHistory() runs outside busy(). */
+async function openHistory(a, trigger, ready, ms = 10000) {
   await a.click(trigger);
-  await a.run(`window.centralKnot.history().then(() => new Promise(done => setTimeout(done, 0)))`);
-  await a.settle();
+  for (let end = Date.now() + ms; Date.now() < end && !(await ready()); ) await wait(100);
 }
 /**
  * Whether the list `id` came to rest within 3 s: six unchanged animation frames, or still where it last stood for 200 ms when the
@@ -2478,10 +2477,11 @@ async function practiceFlow() {
   await a.click('#add-marketplace');
   for (let tries = 0; tries < 50 && !/already/.test(await addSaid()); tries++) await wait(100);
   same('added again, it is on this page already, with its plugin installed counted', await addSaid(), 'Marketplace already on this page: 5 plugins, 1 installed (ck-test-market).');
-  // .market-list is a vertical list from #main >= 880 px (style.css); size to 1280×800 so smaller displays don't fold it into its strip.
+  // .market-list is a vertical list from #main >= 880 px (style.css) and a sideways strip below it; test both.
   await sizeTo(a, 1280, 800);
   same('scrolled, the marketplaces’ list stays where it was through Refresh', await placeThroughRedraw(a, '.market-list', () => a.click('#header-refresh')), [true, 40]);
-  await a.send('Emulation.setDeviceMetricsOverride', { width: SMALLEST[0], height: SMALLEST[1], deviceScaleFactor: 1, mobile: false });
+  await sizeTo(a, ...SMALLEST);
+  same('and folded into its narrow strip, scrolled sideways through Refresh', await placeThroughRedraw(a, '.market-list', () => a.click('#header-refresh'), { sideways: true }), [true, 40]);
   // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
   // The scroller is held short for the measurement, so the five-plugin fixture scrolls far enough at any layout.
   const pinned = await a.run(`(() => {
@@ -5939,9 +5939,9 @@ async function firstSetupFlow() {
     check('a large Sync once shows two successful items, counts the rest and offers their History',
       (words?.match(/Took in guide-/g) ?? []).length === 2 && /took in 6 more items/i.test(words)
       && await d.exists('#outcome-history'), words);
-    await openHistory(d, '#outcome-history');
-    const guides = (await d.all('.history-row[data-kind="on"] .history-what strong')).filter(name => name.startsWith('guide-'));
-    same('History lists all eight guides, including the six folded into the count', new Set(guides).size, 8);
+    const guidesOf = async () => (await d.all('.history-row[data-kind="on"] .history-what strong')).filter(name => name.startsWith('guide-'));
+    await openHistory(d, '#outcome-history', async () => new Set(await guidesOf()).size >= 8);
+    same('History lists all eight guides, including the six folded into the count', new Set(await guidesOf()).size, 8);
     // On the Overview, its band says the same: the sentence, then each refusal on a line of its own.
     await d.click('#nav-overview');
     await d.click('#overview-sync-now');
@@ -6081,12 +6081,17 @@ async function crashFlow() {
   const a = await launch(join(scratch, 'crash-data'));
   await a.click('#home-actual');
   await openKind(a, 'skills');
-  // Opening catches up every skill on record; the ones a kill left found are turned on: the first via its Add button, the
-  // rest in one applySkills pass so a slower machine with many still found doesn't re-hash all 40 skills twenty times over.
-  const leftFound = [];
-  for (const key of await rowKeys(a, 'skills')) if (key.startsWith('bulk-') && await a.exists(`#${rowPart('add', 'skills', key)}`)) leftFound.push(key);
-  if (leftFound.length) await a.click(`#${rowPart('add', 'skills', leftFound[0])}`);
-  if (leftFound.length > 1) await a.run(`window.centralKnot.applySkills(${JSON.stringify(leftFound.slice(1).map(key => ({ key, on: true, except: [] })))}, false, document.querySelector('.status-home').title)`);
+  // Opening catches up every skill on record; the ones a kill left found are turned on, each.
+  const addMs = [];
+  try {
+    for (const key of await rowKeys(a, 'skills')) if (key.startsWith('bulk-') && await a.exists(`#${rowPart('add', 'skills', key)}`)) {
+      const t0 = Date.now();
+      await a.click(`#${rowPart('add', 'skills', key)}`);
+      addMs.push([key, Date.now() - t0]);
+    }
+  } finally {
+    console.log(`[MEASURE crashFlow.add2] onRecord=${onRecord} count=${addMs.length} max=${Math.max(0, ...addMs.map(x => x[1]))}ms times=${JSON.stringify(addMs)}`);
+  }
   console.log(`crash finish: ${onRecord} of 40 on record before opening, caught up on open; the rest turned on again`);
   same('after crashes, opening again completes every copy', readdirSync(COPILOT).filter(name => name.startsWith('bulk-')).length, 40);
   for (const name of Object.keys(expected)) same(`final ${name} bytes`, tree(join(COPILOT, name)), expected[name]);
@@ -11383,7 +11388,7 @@ async function fromFlow() {
   await a.run(`[...document.querySelectorAll('.market-item')].find(item => item.textContent.includes('market-one'))?.click()`);
   await until(() => a.exists('.plugin-row-library'));
   // The list scrolled so review (which sorts first as installed: pluginstate.ts shownPlugins) sits just under the sticky header,
-  // leaving the list scrolled at any window size; its place kept by the visit Back returns to (places.ts).
+  // leaving the list scrolled wherever it overflows; its place kept by the visit Back returns to (places.ts).
   for (let tries = 0; tries < 4 && !(await stillList(a, 'plugins-scroll')); tries++);
   const listAt = await a.run(`(list => { const head = list.querySelector('.ov-head')?.getBoundingClientRect().height ?? 0; list.scrollTop += list.querySelector('[data-plugin="review"]').getBoundingClientRect().top - list.getBoundingClientRect().top - head - 4; return Math.round(list.scrollTop); })(document.getElementById('plugins-scroll'))`);
   const link = await a.run(`document.querySelector('[data-plugin="review"] .plugin-row-library')?.id`);
@@ -11864,7 +11869,7 @@ async function profilePluginsFlow() {
   }
   // The menu helper clicks every menu object still alive with that label, older ones too: each switch after the first plans from the
   // home as the one before left it (main.ts pluginSide), finds nothing to change, and writes no entry.
-  await openHistory(a, '#nav-history');
+  await openHistory(a, '#nav-history', async () => (await a.all('.history-row[data-kind="profile"] .history-about')).length >= 4);
   same('History has one entry per switch and one for the Undo, newest first, each saying what it did, the switch it undid marked Undone',
     [await a.all('.history-row[data-kind="profile"] .history-about', 'e.textContent'), await a.all('.history-row[data-kind="profile"] .history-done', 'e.textContent')],
     [['Switched to Work: 1 item turned on.', 'Switched to Quiet: 1 item turned off.', 'Undid the switch to Quiet: 1 item turned on.', 'Switched to Quiet: 1 item turned off.'], ['Undone']]);

@@ -1,6 +1,9 @@
 name: Mac checks on a hosted Mac
+run-name: ${{ inputs.measure && 'MEASURING: proves nothing' || 'Mac checks on a hosted Mac' }}
 # The Mac run (scripts/mac-run.mjs, every check mac.yml runs) on GitHub's Apple-silicon Macs, started only by hand:
 # gh workflow run mac-hosted.yml -R njfife/central-knot --ref <branch>. It is not the run that counts: mac.yml still is.
+# Does not prove: Developer ID signing/notarising/stapling or real signed updates (ad hoc here); real-window chrome, Retina
+# or default 1280x800 (1024x768 display, Reduce Motion on); real CLIs/home; newer macOS than 15; mac.yml's guard/clean-up.
 on:
   workflow_dispatch:
     inputs:
@@ -43,9 +46,12 @@ jobs:
           path: ~/Library/Caches/electron
           key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
       - run: npm ci
-      # exec: a stop (cancellation) reaches the script itself, which sends it on to every part. A measuring run exits 0.
+      # Proving runs use exec so cancellation reaches scripts/mac-run.mjs directly; measuring runs exit 0 and warn loudly.
       - run: |
-          if [ "${{ inputs.measure }}" = "true" ]; then node scripts/mac-run.mjs || true; else exec node scripts/mac-run.mjs; fi
+          if [ "${{ inputs.measure }}" != "true" ]; then exec node scripts/mac-run.mjs; fi
+          code=0; node scripts/mac-run.mjs || code=$?
+          [ "$code" -eq 0 ] || echo "::warning::Measuring run: scripts/mac-run.mjs exited $code — this green proves nothing."
+          echo "Measuring run only (\`measure=true\`, exit $code): proves nothing." >> "$GITHUB_STEP_SUMMARY"
       # The light tour's pictures: gh run download <run> -R njfife/central-knot -n light-tour.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()

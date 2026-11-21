@@ -15,6 +15,7 @@ const run = (command, args, options) => execFileSync(command, args, { stdio: ['i
 // holding a disk it was just handed, or one that Spotlight or a scan has just looked at ("Resource busy"); a few seconds later
 // it is free (hosted macOS 15 under load held a writable image past 4 s). So a call that meets one is tried again after `waitMs`
 // (default 2 s), twelve tries in all (`again`: the arguments of each later try), and says so in the log; any other failure throws.
+// Synchronously pauses between busy retries inside execFileSync's loop without spawning a child sleep process.
 const HDIUTIL_TRIES = 12, pause = new Int32Array(new SharedArrayBuffer(4));
 const hdiutil = (args, { again = args, stdout = 'ignore', waitMs = 2000 } = {}) => {
   for (let tries = 1; ; tries++) {
@@ -30,19 +31,36 @@ const hdiutil = (args, { again = args, stdout = 'ignore', waitMs = 2000 } = {}) 
 const attach = (image, mount, flags, waitMs) => {
   const said = hdiutil(['attach', image, '-nobrowse', '-noautoopen', '-mountpoint', mount, ...flags], { stdout: 'pipe', waitMs });
   const device = /^\/dev\/disk\d+(?=\s)/m.exec(said)?.[0];
-  if (!device) throw new Error(`hdiutil attached ${image} and named no disk:\n${said}`);
+  if (!device) {
+    detach(mount, waitMs, image, mount);
+    throw new Error(`hdiutil attached ${image} and named no disk:\n${said}`);
+  }
   return device;
 };
 // Detached by its device, not its mount: a first try can unmount the volume and still be refused the eject, and by the next
 // try the mount's path is gone. A later try is forced; a disk no longer there ("No such file or directory") is detached.
-const detach = (device, waitMs) => {
-  try { hdiutil(['detach', device], { again: ['detach', device, '-force'], waitMs }); }
-  catch (error) { if (!/No such file or directory/.test(String(error.stderr ?? ''))) throw error; }
+const detach = (target, waitMs, image, mount) => {
+  try { hdiutil(['detach', target], { again: ['detach', target, '-force'], waitMs }); }
+  catch (error) {
+    if (/No such file or directory/.test(String(error.stderr ?? ''))) return;
+    throw Object.assign(
+      new Error(`Could not detach ${image} (${target} at ${mount}): ${String(error.stderr || error.message).trim()}`, { cause: error }),
+      { leftMounted: true },
+    );
+  }
 };
 /** Attaches `image` at `mount` for `use`, and detaches it after, however `use` ends. Returns what `use` returns. */
 export function whileAttached(image, mount, flags, use, waitMs = 2000) {
   const device = attach(image, mount, flags, waitMs);
-  try { return use(); } finally { detach(device, waitMs); }
+  let failed, result;
+  try { result = use(); } catch (error) { failed = error; }
+  try { detach(device, waitMs, image, mount); }
+  catch (error) {
+    if (!failed) throw error;
+    throw Object.assign(new Error(`${failed.message ?? failed} (${error.message})`, { cause: failed }), { leftMounted: true });
+  }
+  if (failed) throw failed;
+  return result;
 }
 
 // Each app's window is its own folder, assets/dmg/<its download name>/ (Central-Knot, Central-Knot-Alpha): the picture,
@@ -54,6 +72,7 @@ export function buildDmg({ bundle, dmg, name, identity, notaryProfile }) {
   const volumeName = name, appName = `${name}.app`, look = join('assets/dmg', downloadName(name));
   if (!existsSync(join(look, 'DS_Store'))) throw new Error(`No disk image window for ${name} in ${look}: make it with scripts/mac-dmg-layout.sh "${name}".`);
   const work = mkdtempSync(join(tmpdir(), 'ck-dmg-'));
+  let leftMounted = false;
   try {
     const stage = join(work, 'stage');
     mkdirSync(stage);
@@ -89,5 +108,8 @@ export function buildDmg({ bundle, dmg, name, identity, notaryProfile }) {
       if (readlinkSync(join(mount, 'Applications')) !== '/Applications') throw new Error('The disk image’s Applications shortcut doesn’t lead to /Applications.');
       for (const name of ['.DS_Store', '.background.tiff', '.VolumeIcon.icns']) lstatSync(join(mount, name));
     });
-  } finally { rmSync(work, { recursive: true, force: true }); }
+  } catch (error) {
+    leftMounted = Boolean(error?.leftMounted);
+    throw error;
+  } finally { if (!leftMounted) rmSync(work, { recursive: true, force: true }); }
 }
