@@ -1,7 +1,8 @@
 name: Linux package
-# The Linux checks, split into jobs side by side: two unit-test shards (type check once), one package job (AppImage, smoke
-# test, light tour), four end-to-end jobs (one group of scripts/e2e.mjs each), and one final job (`linux`) green only if all
-# passed. Never a required check for a Mac change yet (AGENTS.md, "Checking a change").
+# The Linux checks, split into jobs side by side: two unit-test shards (type check once), four end-to-end jobs (each packages
+# its AppImage and runs one group of scripts/e2e.mjs; the shortest group also runs the smoke test and light tour), and one
+# final job (`linux`) green only if every job passed. Nothing is released or uploaded but the light tour's pictures.
+# Triggered on next, ci/** branches, and workflow_dispatch; never a required check for a Mac change yet (AGENTS.md).
 on:
   push:
     branches: [next, 'ci/**']
@@ -27,48 +28,17 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      # librarywalk.test.ts alone takes roughly as long as all other unit tests combined; shard 1 also runs tsc once.
+      # librarywalk.test.ts alone takes longer than all other 83 test files combined, so it gets shard 1 to itself and shard 2
+      # runs the type check once plus every other tests/*.test.ts file.
       - if: matrix.shard == 1
-        run: npx tsc --noEmit && node --test tests/librarywalk.test.ts
+        run: node --test tests/librarywalk.test.ts
       - if: matrix.shard == 2
         run: |
+          npx tsc --noEmit
           shopt -s extglob
           node --test tests/!(librarywalk).test.ts
 
-  package:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version: '24'
-          cache: npm
-      # A display for the app (Xvfb), FUSE for the AppImage to mount itself, and mksquashfs to make it.
-      - run: dpkg -s xvfb fuse3 squashfs-tools >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb fuse3 squashfs-tools)
-      - run: npm ci
-      - run: npm run package:linux
-      # Every launch passes --no-sandbox: Ubuntu 24.04 and later keep Chromium's sandbox from the user namespaces it needs.
-      - run: xvfb-run -a release/Central-Knot-*-linux-x86_64.AppImage --smoke-test --no-sandbox
-      # The light tour: the packaged app opens and so does each page, one picture each (gh run download <run> -n light-tour).
-      - run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/ui-tour.mjs light-tour --no-sandbox
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always()
-        with:
-          name: light-tour
-          path: light-tour
-          if-no-files-found: ignore
-          retention-days: 7
-      # The AppImage is already zstd-compressed squashfs; compression-level 0 avoids spending time recompressing it.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: appimage
-          path: release/Central-Knot-*-linux-x86_64.AppImage
-          compression-level: 0
-          retention-days: 1
-
   e2e:
-    needs: package
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -81,23 +51,35 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: dpkg -s xvfb fuse3 >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb fuse3)
+      # A display for the app (Xvfb), FUSE for the AppImage to mount itself, and mksquashfs to make it.
+      - run: dpkg -s xvfb fuse3 squashfs-tools >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb fuse3 squashfs-tools)
       - run: npm ci
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+      # Packaging in each e2e job (~13s) beats a separate package job + AppImage artifact hand-off (~61s before e2e can start).
+      - run: npm run package:linux
+      # Smoke test and light tour ride on group 4 (the shortest group by ~2½ minutes): no extra runner and zero critical-path cost.
+      # Every launch passes --no-sandbox: Ubuntu 24.04 and later keep Chromium's sandbox from the user namespaces it needs.
+      - if: matrix.group == 4
+        run: xvfb-run -a release/Central-Knot-*-linux-x86_64.AppImage --smoke-test --no-sandbox
+      # The light tour: the packaged app opens and so does each page, one picture each (gh run download <run> -n light-tour).
+      - if: matrix.group == 4
+        run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/ui-tour.mjs light-tour --no-sandbox
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: (!cancelled()) && matrix.group == 4
         with:
-          name: appimage
-          path: release
-      - run: chmod +x release/Central-Knot-*-linux-x86_64.AppImage
+          name: light-tour
+          path: light-tour
+          if-no-files-found: ignore
+          retention-days: 7
       - run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/e2e.mjs --group ${{ matrix.group }} --no-sandbox
 
   linux:
-    needs: [unit, package, e2e]
+    needs: [unit, e2e]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - env:
-          RESULTS: ${{ needs.unit.result }} ${{ needs.package.result }} ${{ needs.e2e.result }}
+          RESULTS: ${{ needs.unit.result }} ${{ needs.e2e.result }}
         run: |
           echo "Job results: $RESULTS"
           for result in $RESULTS; do [ "$result" = success ] || exit 1; done
