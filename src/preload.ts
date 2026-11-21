@@ -8,7 +8,7 @@ const api: DesktopApi = {
   selectHome: mode => ipcRenderer.invoke('discovery:select', mode),
   refresh: asked => ipcRenderer.invoke('discovery:refresh', asked === true),
   applySkills: (changes, resume, home) => ipcRenderer.invoke('skills:apply', changes, resume, home),
-  clearSkillSwitch: (key, tool, resume, home) => ipcRenderer.invoke('skills:clear-switch', key, tool, resume, home),
+  clearSkillSwitch: (key, tool, resume, home, of) => ipcRenderer.invoke('skills:clear-switch', key, tool, resume, home, of),
   takeOverSkill: (key, tool, resume, home) => ipcRenderer.invoke('skills:take-over', key, tool, resume, home),
   skillVersion: (key, hash) => ipcRenderer.invoke('skills:version', key, hash),
   history: () => ipcRenderer.invoke('history:list'),

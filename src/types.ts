@@ -102,7 +102,7 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string };
 
-export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; /** A held or failed removal. */ removal?: boolean; replaced?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** The kind of the item, where a pass of the whole home tells it (homepass.ts passTells), so two kinds' items of one name stay apart. */ of?: 'skills' | 'mcp' | 'agents'; }
+export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; /** A held or failed removal. */ removal?: boolean; replaced?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `written`, but the tool's own settings keep it out there (librarypass.ts Kind.follow). */ switchedOff?: true; /** What the write or removal also changed in the tool's own settings, in words (Kind.follow). */ settingsChanged?: string; /** The kind of the item, where a pass of the whole home tells it (homepass.ts passTells), so two kinds' items of one name stay apart. */ of?: 'skills' | 'mcp' | 'agents'; }
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, its record's gate and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** The tools whose own record of their plugins can't be read (plugins.ts recordReadable): what they have installed isn't known. */ pluginRecordsUnread?: HarnessId[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Other builds of Central Knot on this Mac (otherbuilds.ts): while one is found this build is held (model.ts holdingBuild) and the window shows only the held screen. Unset where they aren't looked for (main.ts buildsContext: only an installed app on a Mac, or a test with its stand-ins) and where an Applications folder can't be read. */ otherBuilds?: OtherBuild[]; /** Where this copy of the app runs from, when that is not the top of an Applications folder (otherbuilds.ts runsOutside): it replaces no build from there. */ runsOutside?: string; /** What this build said on taking the home's record over at this view's look, where it carried the other build's choices (main.ts lookForOthers, takeOverHome): the page says it once. */ tookOver?: string; /** Central Knot's own settings file couldn't be read at this launch (main.ts loadAppSettings): the Overview and Settings say so this launch, until closed on Settings (settingspage.ts keptNote). `keptAs`: where it is kept aside; absent, it is still in place. */ settingsUnread?: { keptAs?: string }; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
 
@@ -115,7 +115,7 @@ export interface DesktopApi {
   refresh(asked?: boolean): Promise<HomeView | null>;
   applySkills(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
   /** Clears a tool's own switch that turns a skill off there (skills.ts clearSwitch). `resume`: as a click's (app.ts clickResumes). */
-  clearSkillSwitch(key: string, tool: HarnessId, resume: boolean, home: string): Promise<PassResult>;
+  clearSkillSwitch(key: string, tool: HarnessId, resume: boolean, home: string, of?: 'skill' | 'agent'): Promise<PassResult>;
   /** Makes a copy outside Central Knot's own (a link, a copy in ~/.agents/skills) Central Knot's (skills.ts takeOver). `resume`: as a click's. */
   takeOverSkill(key: string, tool: HarnessId, resume: boolean, home: string): Promise<PassResult>;
   /** One version of a skill: its SKILL.md and the names of its other files (skills.ts skillVersion). */
@@ -343,7 +343,7 @@ export interface SwitchTarget { folder: string; name: string; /** Absolute path 
  * One switch a 'switched' History event changed: which way, and for a skill the entry it named and a Claude Code override it
  * replaced ("name-only"). An MCP server's switch goes by the server's name (the event's item), so it has no `target`.
  */
-export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: SwitchTarget; before?: string }
+export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: SwitchTarget; before?: string; /** Pi: what this Enable changed in its list (skillswitch.ts PiEdit: his exact `-` taken out, a `+` added), which its Undo takes back exactly. */ listEdit?: { added: string[]; removed: string[] } }
 
 /**
  * What is true of the open home as a whole, which every page reads: the tools Central Knot manages, where each keeps its
@@ -446,13 +446,15 @@ export interface ItemNotice {
   orderProved: boolean;
   /** The History event to Undo or Restore from. */
   history: string;
+  /** As its History entry's (HistoryEvent settingsChanged). */
+  settingsChanged?: string[];
 }
 
 /**
  * What Synchronize everything took into Central Knot in one pass of one kind (librarypass.ts takeInByRule): the items, by name,
  * and the tools they were found in. Each has its own History entry, with an Add's Undo; `history` is the first, which keys the notice.
  */
-export interface TakenInNotice { kind: 'taken-in'; items: string[]; from: HarnessId[]; history: string }
+export interface TakenInNotice { kind: 'taken-in'; items: string[]; from: HarnessId[]; history: string; /** As its items' History entries' (HistoryEvent settingsChanged). */ settingsChanged?: string[] }
 
 /**
  * A skill's take-over from before the library (Replace with managed copies), as its History entry recorded it: links replaced
@@ -559,6 +561,8 @@ export interface HistoryEvent {
   profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; migrated?: true };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
+  /** What the pass changed in a tool's own settings with the copies, in words (librarypass.ts Kind.follow): Pi's skills list. */
+  settingsChanged?: string[];
   /** 'added', from before the library: copies for tools a synced item synced to again. */
   rejoined?: boolean;
   winner?: { tool: HarnessId; hash: string };
@@ -691,7 +695,7 @@ export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninsta
   /** An update: the version the tool records now. */ version?: string;
   /** An update of a copy that differed at the same version: done by the tool's own update, or by uninstalling and installing again. */ byContent?: 'update' | 'reinstall';
   /** A failed update with nobody watching: the tool's own update kept its copy, and only a reinstall (never made unasked) would change that. */ kept?: true;
-  /** Said beside what a step did, to be read (an update that turned a server on and couldn't turn it off again: plugins.ts). */ notes?: string[] }
+  /** Said beside what a step did, to be read (an update that turned a server on and couldn't turn it off again: plugins.ts; what a run on a plugin's items changed in a tool's own settings: pluginlibrary.ts reportIn). */ notes?: string[] }
 
 // ---------- A plugin's parts: the skills, MCP servers and agents it holds, installed with it ----------
 export type PartKind = 'skill' | 'mcp' | 'agent';
@@ -791,7 +795,7 @@ export interface PluginItemLine { kind: ItemKind; key: string; name: string; sta
  * (`on`), whether Update has something to do, and why the plugin can't be read now. `notIn`: for a plugin On, each tool it is
  * wanted in where none is on, why, one sentence per reason (pluginstatus.ts notInWhy), and whether a tick on that tool's box brings some in (`tickHelps`).
  */
-export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; of: number; ready?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean }>> }
+export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; /** Of those on, how many the tool's own settings keep out (it doesn't load them). */ keptOut?: Partial<Record<HarnessId, number>>; of: number; ready?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean }>> }
 
 /**
  * One named part of a plugin (a skill, command, agent or instruction file): what it says it does, its whole file (SKILL.md,
@@ -1376,4 +1380,4 @@ export interface SwitchedItem { id: string; name: string }
  * one turned Off again because a copy was deleted by hand; History says so), by name; and what could not be done in a tool
  * (`results`). `event`: its History entry; none when nothing changed.
  */
-export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; view?: HomeView }
+export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[] }

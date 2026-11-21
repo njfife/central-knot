@@ -1319,6 +1319,27 @@ async function agentInPi(a, practice) {
   for (let tries = 0; tries < 30 && await cellState(a, 'agents', 'code-reviewer', 'pi-cli') !== 'current'; tries++) await wait(100);
   await a.click(`#${rowPart('open', 'agents', 'code-reviewer')}`);
   same('its row has a Pi mark and a Pi line with its switch', [await cellState(a, 'agents', 'code-reviewer', 'pi-cli'), await a.exists(`#${rowPart('enable', 'agents', 'code-reviewer', 'pi-cli')}`)], ['current', true]);
+  // His Pi list keeping every skill out, the agent put there before any inclusion was written: its Pi line says Pi doesn't load
+  // it, and Let Pi load it lets it in, as a skill's does; its Undo takes the inclusion out again.
+  const piSettings = join(practice, '.pi/agent/settings.json'), piList = () => jsonOrNothing(piSettings)?.skills;
+  const opened = async () => { if (await a.run(`document.querySelector('#${rowPart('open', 'agents', 'code-reviewer')}')?.getAttribute('aria-expanded')`) !== 'true') await a.click(`#${rowPart('open', 'agents', 'code-reviewer')}`); };
+  // Pi joined just now: once the skills are in it, his pattern comes, so nothing the joining puts in gets an inclusion.
+  await openKind(a, 'skills');
+  await piCaughtUp(a);
+  await openKind(a, 'agents');
+  writeFileSync(piSettings, '{ "skills": ["!*"] }\n');
+  await a.click('#header-refresh');
+  await opened();
+  const letPi = `#${rowPart('clear-switch', 'agents', 'code-reviewer', 'pi-cli')}`;
+  check('under his !*, the agent’s Pi line says Pi doesn’t load it, with Let Pi load it', /switched off in Pi’s own settings: Pi doesn’t load it\./.test(await a.text('.details') ?? '') && await a.exists(letPi), await a.text('.details'));
+  const before = piList();
+  await a.click(letPi);
+  same('Let Pi load it adds the agent’s file to his Pi list, and nothing else', piList(), [...before, '+skills/code-reviewer.md']);
+  await a.click('#outcome-undo');
+  same('its Undo takes that out again', piList(), before);
+  rmSync(piSettings);
+  await a.click('#header-refresh');
+  await opened();
   const note = (await a.text(`#${rowPart('as-skill', 'agents', 'code-reviewer')}`) ?? '').trim();
   check('the opened row says once what Pi gets, and that deleting its file there turns the agent off everywhere',
     /^Pi holds no agents of its own, so there an agent is a skill[\s\S]*no isolated context of its own, tool restrictions and model selection[\s\S]*Deleting that file in Pi turns the agent off in every tool/.test(note), note);
@@ -1594,7 +1615,7 @@ async function practiceFlow() {
   for (let tries = 0; tries < 80 && !(await offMarks(a, 'skills', 'release-notes')).length; tries++) await wait(100);
   same('a switch set in Claude Code’s settings reaches the open page, and is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'skills', 'release-notes'), /switched off in Claude Code/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? ''), await switchOn(a, 'skills', 'release-notes')], [true, ['claude-cli'], true, true]);
   await opened('release-notes');
-  check('its line in the opened row says the tool doesn’t load it', /Claude Code doesn’t load it, and Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its line in the opened row says the tool doesn’t load it', /switched off in Claude Code’s own settings: Claude Code doesn’t load it\./.test(await a.text('.details') ?? ''), await a.text('.details'));
   // While the skills record is damaged, Let Claude Code load it is drawn and off, as the row's other controls are (that a click
   // writes nothing then is tests/librarygate.test.ts's).
   const clearSwitch = `#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`, skillsRecordHere = join(practice, '.central-knot/skills.json'), skillsRecordGood = readFileSync(skillsRecordHere, 'utf8');
@@ -6366,6 +6387,9 @@ async function pluginSwitchFlow() {
   writeMarket(market, 'ck-test-market');
   mkdirSync(join(home, '.claude'), { recursive: true });
   mkdirSync(join(home, '.pi/agent'), { recursive: true });
+  // Pi's settings as in a person's report: a pattern keeps every skill out, and one is let back in by name.
+  const piSettings = join(home, '.pi/agent/settings.json'), hisList = ['!*', '+skills/other-skill/SKILL.md'], piSkills = () => jsonOrNothing(piSettings)?.skills;
+  writeFileSync(piSettings, `${JSON.stringify({ skills: hisList }, null, 2)}\n`);
   const copy = join(home, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0'), triage = join(market, 'plugins/issue-tracker/skills/triage/SKILL.md');
   mkdirSync(join(tools, '.local/bin'), { recursive: true });
   writeFileSync(join(tools, '.local/bin/claude'), `#!/bin/sh
@@ -6399,7 +6423,8 @@ esac
   await done();
   same('On installs it in Claude Code with its own command and puts its items in Pi', [calls(), installed(), inPi(), await marks(), await switchIs('#pswitch-0-issue-tracker')],
     [['plugin marketplace add ' + market, 'plugin install issue-tracker@ck-test-market --scope user'], true, [true, true], ['installed', 'items'], 'true']);
-  check('the result says what the switch did, with Undo', /issue-tracker: installed in Claude Code; its items put in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
+  // With his pattern in Pi's list, what it added there too (pluginlibrary.ts reportIn's notes).
+  check('the result says what the switch did, with what it added to his Pi list, and Undo', /issue-tracker: installed in Claude Code; its items put in Pi; \+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
   await pictures('plugin-switch-list');
   // Sync once from the menu bar with the switch's result up: its own result takes the header, as on the item lists, and × lets it
@@ -6430,6 +6455,41 @@ esac
   await openKind(a, 'skills');
   check('triage is one row on Skills, “from the plugin issue-tracker”, and Claude Code has it with the plugin', /from the plugin issue-tracker/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`) ?? '')
     && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'issue-tracker@ck-test-market/triage')}"]`)), await a.text('.page'));
+  // Under his pattern, the copy the On put in Pi is one Pi loads: the inclusion `pi config` writes follows his entries.
+  const offInPi = async () => (await offMarks(a, 'skills', 'triage')).includes('pi-cli');
+  same('under his pattern, On let Pi load triage: the inclusion pi config writes, after his entries as they were, and no off mark for Pi', [piSkills(), await offInPi()], [[...hisList, '+skills/triage/SKILL.md'], false]);
+  // As an earlier Central Knot left it, the copy there with no inclusion: the row says Pi doesn't load it, and Let Pi load it lets it in.
+  writeFileSync(piSettings, `${JSON.stringify({ skills: hisList }, null, 2)}\n`);
+  await a.click('#header-refresh');
+  if ((await a.run(`document.querySelector('#${rowPart('open', 'skills', 'triage')}')?.getAttribute('aria-expanded')`)) !== 'true') await a.click(`#${rowPart('open', 'skills', 'triage')}`);
+  check('with no inclusion, triage is off in Pi: its mark, its line, and Let Pi load it', await offInPi() && /Pi doesn’t load it/.test(await a.text('.details') ?? '') && await a.exists(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`), await a.text('.details'));
+  // The plugin's page counts what Pi loads: triage, which his list keeps out, is said apart.
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#pbox-0-issue-tracker-pi-cli'))) await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-issue-tracker-pi-cli')); tries++) await wait(100);
+  const boxSays = await a.run(`document.querySelector('#pbox-0-issue-tracker-pi-cli')?.title`);
+  check('the plugin’s box for Pi says Pi’s own settings keep one of its items out', /1 of its 2 items is on there \(Pi’s own settings keep 1 out\)/.test(boxSays ?? ''), boxSays);
+  await openKind(a, 'skills');
+  if ((await a.run(`document.querySelector('#${rowPart('open', 'skills', 'triage')}')?.getAttribute('aria-expanded')`)) !== 'true') await a.click(`#${rowPart('open', 'skills', 'triage')}`);
+  await a.click(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`);
+  same('Let Pi load it puts the inclusion back after his entries, and the mark is on', [piSkills(), await offInPi()], [[...hisList, '+skills/triage/SKILL.md'], false]);
+  // A found skill his exact `-` keeps out of Pi, taken in by Add: its result says where it is on, which is not Pi.
+  mkdirSync(join(home, '.claude/skills/kept-note'), { recursive: true });
+  writeFileSync(join(home, '.claude/skills/kept-note/SKILL.md'), '---\nname: kept-note\ndescription: Made-up.\n---\n\nMade-up.\n');
+  writeFileSync(piSettings, `${JSON.stringify({ skills: [...hisList, '+skills/triage/SKILL.md', '-skills/kept-note/SKILL.md'] }, null, 2)}\n`);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'kept-note')}"] .add-item`)); tries++) await wait(100);
+  await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'kept-note')}"] .add-item`);
+  await done();
+  check('Add of a skill his list keeps out of Pi says it is on in Claude Code, not in Pi', /kept-note is in Central Knot now, and on in Claude Code\./.test(await a.text('#header') ?? ''), await a.text('#header'));
+  // One his pattern alone keeps out: Add says it is on in Pi too, and what it added to his list.
+  mkdirSync(join(home, '.claude/skills/open-note'), { recursive: true });
+  writeFileSync(join(home, '.claude/skills/open-note/SKILL.md'), '---\nname: open-note\ndescription: Made-up.\n---\n\nMade-up.\n');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'open-note')}"] .add-item`)); tries++) await wait(100);
+  await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'open-note')}"] .add-item`);
+  await done();
+  check('Add under his pattern says what it added to his Pi list', /open-note is in Central Knot now, and on in Claude Code and Pi\. \+skills\/open-note\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('#header') ?? ''), await a.text('#header'));
   await openKind(a, 'mcp');
   check('issues is one row on MCP servers, from the plugin too', /from the plugin issue-tracker/.test(await a.text(`.ov-row[data-key="${rowPart('', 'mcp', 'issues')}"]`) ?? ''), await a.text('.page'));
   await a.click('#nav-plugins');
@@ -6563,6 +6623,18 @@ esac
   await a.click('#nav-plugins');
   same('each row shows its switch On, its marks, and its own result', [await switchIs('#pswitch-0-release-helper'), await switchIs('#pswitch-0-starter-skills'), await marks('release-helper'), await marks('starter-skills'), await rowSays('release-helper'), await rowSays('starter-skills')],
     ['true', 'true', ['installed', 'items'], ['installed', 'items'], 'ended', 'ended']);
+  // A profile switch that takes a skill out of Pi says what it took out of his Pi list, in its result.
+  await a.click('#nav-profiles');
+  await newProfile(a, 'Only kept');
+  await a.click('#pf-skill\\:kept-note');
+  await a.click('#profile-switch');
+  await done();
+  const switchSaid = `${await a.text('#header') ?? ''} ${await a.text('.bands') ?? ''}`;
+  check('a profile switch says what it took out of his Pi list', /Switched to Only kept: [\s\S]*\+skills\/open-note\/SKILL\.md taken out of Pi’s skills list \(settings\.json\) with its copy\./.test(switchSaid), switchSaid);
+  // History's entry for the On says what it added to his Pi list.
+  await a.click('#nav-history');
+  for (let tries = 0; tries < 50 && !/added to Pi’s skills list/.test(await a.text('.page') ?? ''); tries++) await wait(100);
+  check('History says the On added triage to his Pi list', /\+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('.page') ?? ''), (await a.text('.page'))?.slice(0, 600));
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
 }
