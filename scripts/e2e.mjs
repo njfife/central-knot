@@ -1,8 +1,8 @@
 // Drives the real app end to end over its debug port, in a throwaway HOME, so "This Mac's home" is disposable too.
-// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,…]
-// `--flows` runs only the named flows, here, on one HOME, for working on one. Without it the run is every flow that can run here
-// (crashFlow needs a home the app writes and --crash-rounds above 0: `runs`): this script once per group (`groups`, at the end)
-// with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time (runGroups).
+// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,… | --group n/total]
+// `--flows` runs only the named flows, here, on one HOME, for working on one. Otherwise the run goes through `runGroups` (each
+// selected group as a supervised copy of this script with that group's `--flows`): every group when neither is given (crashFlow
+// needs a home the app writes and --crash-rounds above 0: `runs`), or group n alone with `--group n/total` (refused if total != groups.length).
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, closeSync, constants as fsConstants, cpSync, existsSync, openSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -28,6 +28,10 @@ const flag = name => args.includes(name);
 const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
 const shots = option('--shots');
 const named = option('--flows')?.split(',');
+const groupAt = args.indexOf('--group');
+const groupArg = groupAt >= 0 ? args[groupAt + 1] : undefined;
+const groupMatch = groupArg?.match(/^(\d+)\/(\d+)$/);
+const group = groupMatch ? Number(groupMatch[1]) : undefined;
 const crashRounds = Number(option('--crash-rounds', 6));
 const canWriteRealHome = writesRealHome(process.platform);
 // The packaged app on Linux is the AppImage, which starts at sign-in from its first open (signin.ts): appImageSignIn.
@@ -158,7 +162,7 @@ let app;
 // failed or interrupted run must not leave an app holding a debug port that a later run could attach to, or a stand-in for ever.
 const launched = new Set();
 process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
-// A grouped run's parent passes these on to its copies and waits for them instead (runGroups).
+// A --flows child exits on signals; a parent running one or all groups passes them on to its copies and waits instead (runGroups).
 if (named) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
@@ -9313,8 +9317,9 @@ async function searchFlow() {
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
-// Every flow, in groups. A run with no --flows starts this script once per group, so each group has a throwaway home, data
-// folders, stand-ins and debug ports of its own, and several run at once (runGroups). Four groups, as the Mac runner was
+// Every flow, in groups. A run with neither --flows nor --group starts this script once per group (and --group <n>/<total> starts
+// one copy for that group), so each group has a throwaway home, data folders, stand-ins and debug ports of its own, and several
+// run at once (runGroups). Four groups, as the Mac runner was
 // measured with four apps at once, balanced by each flow's seconds there with four at once (each flow's line in a run gives
 // them): practiceFlow, the longest, has little beside it. realHomeFlow is in its group, as both open the default data folder
 // (launch) and realHomeFlow's preview-only branch reads the History window practiceFlow set there. crashFlow comes last in its
@@ -12197,17 +12202,116 @@ async function profilePluginsFlow() {
   await b.quit();
 }
 
+/**
+ * A plugin with a skill and an MCP server of one name: docs's skill issues and server issues, installed in Codex and Copilot
+ * CLI, each of which has a switch for one skill and one server of a plugin (their records written here; Codex's CLI answers
+ * --version alone, Copilot CLI's turns a skill in its settings as its `copilot skill` does). On the Library's All both are rows,
+ * with the one key docs@ck-test-market/issues (pluginrows.ts PluginRow): each row's switch turns its own item and nothing of the
+ * other's, its row named in the result, with one Undo (matrix.ts pluginRowSwitch finds its row again by kind and key); two quick
+ * clicks, one on each, turn each its own; and a profile that ticks one and not the other leaves each tool's file as it says.
+ */
+async function sameNamePluginFlow() {
+  const home = join(scratch, 'home-same-name'), data = join(scratch, 'same-name-data'), market = join(scratch, 'market-same-name'), tools = join(scratch, 'tools-same-name');
+  writeMarket(market, 'ck-test-market');
+  const parts = { 'skills/issues/SKILL.md': text('issues'), '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', 'issues-mcp'] } } }),
+    '.codex-plugin/plugin.json': JSON.stringify({ name: 'docs', version: '1.0.0', skills: './skills', mcpServers: './.mcp.json' }) };
+  const copilotCopy = join(home, '.copilot/installed-plugins/ck-test-market/docs');
+  for (const copy of [join(home, '.codex/plugins/cache/ck-test-market/docs/1.0.0'), copilotCopy]) for (const [path, body] of Object.entries(parts)) { mkdirSync(dirname(join(copy, path)), { recursive: true }); writeFileSync(join(copy, path), body); }
+  const codexConfig = join(home, '.codex/config.toml'), copilotSettings = join(home, '.copilot/settings.json');
+  writeFileSync(codexConfig, `[marketplaces.ck-test-market]\nsource = "${market}"\n\n[plugins."docs@ck-test-market"]\nenabled = true\n`);
+  writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'docs', marketplace: 'ck-test-market', version: '1.0.0', cache_path: copilotCopy, enabled: true }] }));
+  writeFileSync(copilotSettings, `${JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: market } } } }, null, 2)}\n`);
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.142.3" && exit 0\nexit 9\n', { mode: 0o755 });
+  // Copilot CLI's skill switch takes a second while $HOME/slow is there: a click made meanwhile waits its turn.
+  writeFileSync(join(tools, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\n[ "$1" = "skill" ] && [ -f "$HOME/slow" ] && sleep 1\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="skill"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`, { mode: 0o755 });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  // Each tool's file, and which of the two items each has off, Codex's then Copilot CLI's.
+  const files = () => ({ codex: readNow(codexConfig), copilot: readNow(copilotSettings) });
+  const offIn = () => {
+    const codex = readNow(codexConfig), copilot = jsonOrNothing(copilotSettings) ?? {};
+    return { skill: [codex.includes('name = "docs:issues"\nenabled = false'), (copilot.disabledSkills ?? []).includes('docs:issues')],
+      server: [codex.includes('[plugins."docs@ck-test-market".mcp_servers.issues]\nenabled = false'), (copilot.disabledMcpServers ?? []).includes('issues')] };
+  };
+  const bothOn = { skill: [false, false], server: [false, false] }, serverOff = { skill: [false, false], server: [true, true] }, skillOff = { skill: [true, true], server: [false, false] };
+  const key = 'docs@ck-test-market/issues', [skillSwitch, serverSwitch] = ['skills', 'mcp'].map(kind => byId(rowPart('switch', kind, key)));
+  const a = await launch(data, [], tools);
+  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const said = () => a.text('#header [data-outcome] .band-text');
+  // The rows the result of a click's Undo flashes: the rows its click named (app.ts sayDone).
+  const watchFlashes = () => a.run(`window.flashedRows = []; window.flashWatch?.disconnect(); window.flashWatch = new MutationObserver(() => { for (const row of document.querySelectorAll('.ov-row.row-flash')) if (!flashedRows.includes(row.dataset.key)) flashedRows.push(row.dataset.key); }); flashWatch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })`);
+  const flashed = async () => { for (let tries = 0; tries < 30 && !(await a.run('window.flashedRows')).length; tries++) await wait(100); return a.run('window.flashedRows'); };
+  await openKind(a, 'all');
+  for (let tries = 0; tries < 60 && !(await a.exists(serverSwitch)); tries++) await wait(100);
+  const before = files();
+  same('on the Library’s All, docs’s skill and server named issues are two rows, both on, and neither is off in any tool', [await switchOn(a, 'skills', key), await switchOn(a, 'mcp', key), offIn()], [true, true, bothOn]);
+
+  // The server's switch: the server off in Codex and Copilot CLI, the skill on in both; the result is the server's row's; Undo.
+  await a.click(serverSwitch); await done();
+  same('a click on the server’s switch turns the server off in Codex and Copilot CLI, and leaves the skill on in both', [offIn(), await switchOn(a, 'mcp', key), await switchOn(a, 'skills', key)], [serverOff, false, true]);
+  same('its result names the server by its kind, as a skill on All has its name', await said(), 'issues (MCP server) is off in Copilot CLI and Codex.');
+  const afterServer = files();
+  await watchFlashes();
+  await a.click('#outcome-undo-plugin'); await done();
+  same('its Undo leaves each tool’s file as before the click, and flashes the row the click named: the server’s, not the skill’s', [files(), await flashed()], [before, [rowPart('', 'mcp', key)]]);
+  // The skill's switch: the skill, not the server.
+  await a.click(skillSwitch); await done();
+  same('a click on the skill’s switch turns the skill off in Codex and Copilot CLI, and leaves the server on in both; its result names the skill by its kind', [offIn(), await switchOn(a, 'skills', key), await switchOn(a, 'mcp', key), await said()], [skillOff, false, true, 'issues (skill) is off in Copilot CLI and Codex.']);
+  await a.click('#outcome-undo-plugin'); await done();
+  same('its Undo leaves each tool’s file as before the click', files(), before);
+  // The Library's MCP servers lists the server alone: its switch turns the server, as on All.
+  await openKind(a, 'mcp');
+  await a.click(serverSwitch); await done();
+  const onMcpPage = offIn();
+  await a.click('#outcome-undo-plugin'); await done();
+  same('on the Library’s MCP servers, the server’s switch turns the server off and leaves the skill on, and its Undo puts each file back', [onMcpPage, files()], [serverOff, before]);
+
+  // Two quick clicks on All, the skill's then the server's while the first still runs (Copilot CLI's skill switch takes a second):
+  // each turns its own; the run's one Undo puts each file back.
+  await openKind(a, 'all');
+  writeFileSync(join(home, 'slow'), '');
+  await a.run(`document.querySelector(${JSON.stringify(skillSwitch)}).click()`); await wait(150);
+  await a.run(`document.querySelector(${JSON.stringify(serverSwitch)}).click()`);
+  await done();
+  rmSync(join(home, 'slow'));
+  same('two quick clicks, the skill’s then the server’s: each turns its own off in both tools, and the run names both by kind', [offIn(), await said()],
+    [{ skill: [true, true], server: [true, true] }, '2 items are off: issues (skill) and issues (MCP server).']);
+  await a.click('#outcome-undo'); await done();
+  same('the run’s one Undo leaves each tool’s file as before the two clicks', files(), before);
+
+  // Profiles: one that ticks the skill and not the server, then one the other way; each tool's file as the profile says.
+  await a.click('#nav-profiles');
+  await newProfile(a, 'Skill only');
+  await a.click(byId(`pf-plugin:skill:${key}`)); await done();
+  await a.click('#profile-switch'); await done();
+  same('switching to Skill only turns the plugin’s server issues off in Codex and Copilot CLI, and leaves its skill issues on', offIn(), serverOff);
+  const skillOnly = files();
+  await newProfile(a, 'Server only');
+  await a.click(byId(`pf-plugin:mcp:${key}`)); await done();
+  await a.click('#profile-switch'); await done();
+  same('switching to Server only turns the plugin’s skill issues off in Codex and Copilot CLI, and its server issues back on', offIn(), skillOff);
+  await a.click('#outcome-undo'); await done();
+  same('Undo switch puts each tool’s file back as Skill only left it', files(), skillOnly);
+  same('no page errors', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
   [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
 const listed = groups.flat().map(flow => flow.name);
 const written = [...readFileSync(import.meta.filename, 'utf8').matchAll(/^async function (\w+Flow)\(/gm)].map(([, name]) => name);
+const badGroup = groupAt >= 0 && (!groupMatch || group < 1 || group > groups.length || Number(groupMatch[2]) !== groups.length);
 const refused = [...written.filter(name => listed.filter(each => each === name).length !== 1).map(name => `${name} is in no group or in two`),
+  ...(flag('--flows') && groupAt >= 0 ? ['--group and --flows cannot be used together'] : []),
+  ...(groupAt >= 0 && args.lastIndexOf('--group') !== groupAt ? ['--group may be given only once'] : []),
+  ...(badGroup ? [`--group takes 1 to ${groups.length} of ${groups.length} (<n>/${groups.length}), and was given ${groupArg || 'none'}`] : []),
   ...(named ?? []).filter(name => !listed.includes(name)).map(name => `--flows names ${name}, which is no flow`),
   ...(Number.isInteger(crashRounds) && crashRounds >= 0 ? [] : [`--crash-rounds takes a whole number, and was given ${option('--crash-rounds') ?? 'none'}`])];
 if (refused.length) { rmSync(scratch, { recursive: true, force: true }); throw new Error(`Refused to start: ${refused.join('; ')}.`); }
@@ -12235,7 +12339,8 @@ function readCopy(names, number, output, code, signal) {
 }
 
 /**
- * The run with no --flows: this script once per group with that group's --flows and the run's other options,
+ * The run with neither --flows nor --group (every group), or with --group <n>/<total> (that one group): this script once per
+ * selected group with that group's --flows and the run's other options,
  * CK_E2E_GROUPS_AT_ONCE copies at a time (default 1). Each copy's stdout and stderr, in the order they came, print as one
  * block when it ends; then the run's total, the flows not finished and not run, and every FAIL line again. The run's failures
  * are its copies' FAIL lines, one more for each copy that died or whose total counts more failures than its FAIL lines
@@ -12244,14 +12349,16 @@ function readCopy(names, number, output, code, signal) {
  */
 async function runGroups() {
   const atOnce = Math.max(1, Number(process.env.CK_E2E_GROUPS_AT_ONCE) || 1);
-  const waiting = groups.map(group => group.filter(runs).map(flow => flow.name)).filter(names => names.length);
-  const count = waiting.length;
+  const selected = group ? [[group, groups[group - 1]]] : groups.map((each, index) => [index + 1, each]);
+  const waiting = selected.map(([number, each]) => [number, each.filter(runs).map(flow => flow.name)]).filter(([, names]) => names.length);
+  const count = group ? groups.length : waiting.length;
+  const childArgs = groupAt >= 0 ? args.filter((_, index) => index !== groupAt && index !== groupAt + 1) : args;
   const running = new Set(), unfinished = [], notRun = [], failLines = [], uncounted = [];
-  let passed = 0, begun = 0, stoppedBy;
+  let passed = 0, stoppedBy;
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stoppedBy = signal; for (const copy of running) copy.kill(signal); });
-  const runOne = names => new Promise(done => {
-    const from = Date.now(), number = ++begun;
-    const copy = spawn(process.execPath, [...process.execArgv, import.meta.filename, ...args, '--flows', names.join(',')], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const runOne = ([number, names]) => new Promise(done => {
+    const from = Date.now();
+    const copy = spawn(process.execPath, [...process.execArgv, import.meta.filename, ...childArgs, '--flows', names.join(',')], { stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     for (const stream of [copy.stdout, copy.stderr]) stream.on('data', chunk => { output += chunk; });
     running.add(copy);
@@ -12266,9 +12373,9 @@ async function runGroups() {
       done();
     });
   });
-  console.log(`${waiting.length} groups of flows, ${atOnce} at a time; each group's output follows when it ends.`);
+  console.log(group ? `group ${group} of ${count}; its output follows when it ends.` : `${waiting.length} groups of flows, ${atOnce} at a time; each group's output follows when it ends.`);
   await Promise.all(Array.from({ length: atOnce }, async () => { while (waiting.length && !stoppedBy) await runOne(waiting.shift()); }));
-  notRun.push(...waiting.flat());
+  notRun.push(...waiting.flatMap(([, names]) => names));
   const notCounted = uncounted.length ? ` (the passes of group ${uncounted.join(' and group ')} are not counted: no total line)` : '';
   console.log(`\ne2e: ${passed} passed, ${failLines.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}${notCounted}`);
   if (unfinished.length) console.error(`not finished: ${unfinished.join(', ')}`);

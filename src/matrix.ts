@@ -26,7 +26,7 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt } from './words.ts';
+import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
@@ -538,6 +538,8 @@ export const kindGlyph: Record<PageKind, IconName> = { skills: 'wand-sparkles', 
 const kindMark = (t: Table, kind: PageKind) => (t.tool ? null : h('span.kind-mark', { role: 'img', 'aria-label': kindNouns[kind].one, title: kindNouns[kind].one }, icon(kindGlyph[kind], 13)));
 /** A row's kind in words beside its name where a row of another kind in the list has that name ("review · agent"), as a run's words name it. */
 const kindWord = (t: Table, kind: PageKind, name: string) => (t.shared?.has(name.toLowerCase()) ? h('span.row-kind', {}, kindNouns[kind].one) : null);
+/** A row's name as its click's result says it: with its kind after it where kindWord writes the kind (words.ts withKind). */
+const nameSaid = (t: Table, kind: PageKind, name: string) => (t.shared?.has(name.toLowerCase()) ? withKind({ kind, name }) : name);
 /** The names rows of two kinds share in a table (a plugin's own rows too), lower-cased: where kindWord writes the kind. */
 const sharedNames = (t: Table) => {
   const kindsOf = groupBy([...rowsIn(t), ...plugged(t).rows], row => nameOf(row).toLowerCase());
@@ -1918,13 +1920,14 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
     // Drawn as a click on it asks, it is clicked from that state, and worked out in its turn; else from what each tool has now.
     const plugins = turnEvery(items, next);
     // Nothing it can turn: every tool's switch held (said first, a reason for each tool), or it is that way already.
-    const already = { page: state.page, item: row.name, rows: [rowKey(row)], warn: true, band: true, text: `${row.name}: nothing changed.` };
+    const named = nameSaid(t, kind, row.name), already = { page: state.page, item: row.name, rows: [rowKey(row)], warn: true, band: true, text: `${named}: nothing changed.` };
     if (wanted === undefined && !plugins.ops.length) { tell(plugins.left ? notDoneFirst({ ...already, reasons: plugins.left }) : { ...already, text: `${already.text} It is ${next ? 'on' : 'off'} already.` }); rerender(); return; }
-    // Its part in each tool is worked out in its turn, from the plugins as the clicks before it left them.
-    const rowNow = () => plugged(t).rows.find(each => each.key === row.key);
+    // Its part in each tool is worked out in its turn, from the plugins as the clicks before it left them. Its row is found again
+    // by its kind and key (idOf): a plugin's skill and MCP server of one name have one key, and the Library's All lists both.
+    const rowNow = () => plugged(t).rows.find(each => idOf(each) === idOf(row));
     queueClick({ kind, key: row.key, on: next }, row.name, () => {
       const now = rowNow(), turned = now && turnEvery(rowItems(now), next);
-      return now && turned?.ops.length ? mainClick(t, now, next, [], turned, () => `${row.name} is ${next ? 'on' : 'off'} in ${toolsPhrase(turned.turned.map(item => item.tool), tools())}.`, turned.left) : undefined;
+      return now && turned?.ops.length ? mainClick(t, now, next, [], turned, () => `${named} is ${next ? 'on' : 'off'} in ${toolsPhrase(turned.turned.map(item => item.tool), tools())}.`, turned.left) : undefined;
     }, () => { const now = rowNow(); return now && rowItems(now).some(itemOn); });
   } });
 }
