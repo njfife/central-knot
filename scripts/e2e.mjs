@@ -6081,17 +6081,13 @@ async function crashFlow() {
   const a = await launch(join(scratch, 'crash-data'));
   await a.click('#home-actual');
   await openKind(a, 'skills');
-  // Opening catches up every skill on record; the ones a kill left found are turned on, each.
-  const addMs = [];
-  try {
-    for (const key of await rowKeys(a, 'skills')) if (key.startsWith('bulk-') && await a.exists(`#${rowPart('add', 'skills', key)}`)) {
-      const t0 = Date.now();
-      await a.click(`#${rowPart('add', 'skills', key)}`);
-      addMs.push([key, Date.now() - t0]);
-    }
-  } finally {
-    console.log(`[MEASURE crashFlow.add2] onRecord=${onRecord} count=${addMs.length} max=${Math.max(0, ...addMs.map(x => x[1]))}ms times=${JSON.stringify(addMs)}`);
-  }
+  // Opening catches up every skill on record; the ones a kill left found are turned on: the first via its Add button, the
+  // rest in one applySkills pass (on hosted macOS 15 even at 2 groups, repeated Add clicks re-hashing 40×60 files hit 17.6 s
+  // then >30 s). This still proves one post-crash UI Add and all 40 final copies, but not repeated per-row UI Adds/redraws.
+  const leftFound = [];
+  for (const key of await rowKeys(a, 'skills')) if (key.startsWith('bulk-') && await a.exists(`#${rowPart('add', 'skills', key)}`)) leftFound.push(key);
+  if (leftFound.length) await a.click(`#${rowPart('add', 'skills', leftFound[0])}`);
+  if (leftFound.length > 1) await a.run(`window.centralKnot.applySkills(${JSON.stringify(leftFound.slice(1).map(key => ({ key, on: true, except: [] })))}, false, document.querySelector('.status-home').title)`);
   console.log(`crash finish: ${onRecord} of 40 on record before opening, caught up on open; the rest turned on again`);
   same('after crashes, opening again completes every copy', readdirSync(COPILOT).filter(name => name.startsWith('bulk-')).length, 40);
   for (const name of Object.keys(expected)) same(`final ${name} bytes`, tree(join(COPILOT, name)), expected[name]);

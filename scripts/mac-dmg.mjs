@@ -31,11 +31,9 @@ const hdiutil = (args, { again = args, stdout = 'ignore', waitMs = 2000 } = {}) 
 const attach = (image, mount, flags, waitMs) => {
   const said = hdiutil(['attach', image, '-nobrowse', '-noautoopen', '-mountpoint', mount, ...flags], { stdout: 'pipe', waitMs });
   const device = /^\/dev\/disk\d+(?=\s)/m.exec(said)?.[0];
-  if (!device) {
-    detach(mount, waitMs, image, mount);
-    throw new Error(`hdiutil attached ${image} and named no disk:\n${said}`);
-  }
-  return device;
+  if (device) return device;
+  detach(mount, waitMs, image, mount);
+  throw new Error(`hdiutil attached ${image} and named no disk:\n${said}`);
 };
 // Detached by its device, not its mount: a first try can unmount the volume and still be refused the eject, and by the next
 // try the mount's path is gone. A later try is forced; a disk no longer there ("No such file or directory") is detached.
@@ -43,10 +41,7 @@ const detach = (target, waitMs, image, mount) => {
   try { hdiutil(['detach', target], { again: ['detach', target, '-force'], waitMs }); }
   catch (error) {
     if (/No such file or directory/.test(String(error.stderr ?? ''))) return;
-    throw Object.assign(
-      new Error(`Could not detach ${image} (${target} at ${mount}): ${String(error.stderr || error.message).trim()}`, { cause: error }),
-      { leftMounted: true },
-    );
+    throw Object.assign(new Error(`Could not detach ${image} (${target} at ${mount}): ${String(error.stderr || error.message).trim()}`, { cause: error }), { leftMounted: true });
   }
 };
 /** Attaches `image` at `mount` for `use`, and detaches it after, however `use` ends. Returns what `use` returns. */
@@ -108,8 +103,6 @@ export function buildDmg({ bundle, dmg, name, identity, notaryProfile }) {
       if (readlinkSync(join(mount, 'Applications')) !== '/Applications') throw new Error('The disk image’s Applications shortcut doesn’t lead to /Applications.');
       for (const name of ['.DS_Store', '.background.tiff', '.VolumeIcon.icns']) lstatSync(join(mount, name));
     });
-  } catch (error) {
-    leftMounted = Boolean(error?.leftMounted);
-    throw error;
-  } finally { if (!leftMounted) rmSync(work, { recursive: true, force: true }); }
+  } catch (error) { leftMounted = Boolean(error?.leftMounted); throw error; }
+  finally { if (!leftMounted) rmSync(work, { recursive: true, force: true }); }
 }

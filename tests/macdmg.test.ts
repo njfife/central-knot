@@ -16,10 +16,8 @@ const busy = 'hdiutil: couldn\'t eject "disk5" - Resource busy', gone = 'hdiutil
  * prints for /dev/disk5, and its nth detach refuses in the words `refusals[n-1]`, or succeeds past their end. Returns the
  * stand-in's calls, after them.
  */
-function detachWith(t: { after: (done: () => void) => void }, refusals: string[], {
-  attachOut = '/dev/disk5\tGUID_partition_scheme\t\n/dev/disk5s1\tApple_HFS\t',
-  use = () => 'done',
-}: { attachOut?: string; use?: () => string } = {}) {
+type Fail = Error & { calls: string[]; image: string; mount: string; leftMounted?: boolean };
+function detachWith(t: { after: (done: () => void) => void }, refusals: string[], attachOut = '/dev/disk5\tGUID_partition_scheme\t\n/dev/disk5s1\tApple_HFS\t', use = () => 'done') {
   const box = mkdtempSync(join(tmpdir(), 'ck-hdiutil-'));
   t.after(() => { process.env.PATH = PATH; rmSync(box, { recursive: true, force: true }); });
   writeFileSync(join(box, 'hdiutil'), `#!/bin/sh
@@ -32,12 +30,8 @@ esac`);
   process.env.PATH = `${box}:${PATH}`;
   const image = join(box, 'writable.dmg'), mount = join(box, 'volume');
   const calls = () => readFileSync(join(box, 'calls'), 'utf8').trimEnd().split('\n').map(call => call.replaceAll(box, '<box>'));
-  try {
-    assert.equal(whileAttached(image, mount, ['-readonly'], use, 0), 'done', 'what is done on the image is done, and returned');
-    return calls();
-  } catch (error) {
-    throw Object.assign(error as Error, { calls: calls(), image, mount });
-  }
+  try { assert.equal(whileAttached(image, mount, ['-readonly'], use, 0), 'done', 'what is done on the image is done, and returned'); return calls(); }
+  catch (error) { throw Object.assign(error as Error, { calls: calls(), image, mount }); }
 }
 
 test('A disk refused its eject (“Resource busy”) is detached by its device, tried again forced: no longer there is detached', t => {
@@ -47,15 +41,10 @@ test('A disk refused its eject (“Resource busy”) is detached by its device, 
 });
 
 test('A disk still busy after twelve tries fails naming image, mount and device, any other refusal fails at once, and work errors or bad attach output are not lost', t => {
-  assert.throws(() => detachWith(t, Array(15).fill(busy)), (err: Error & { calls: string[]; image: string; mount: string; leftMounted?: boolean }) =>
-    /Resource busy/.test(err.message) && err.message.includes(err.image) && err.message.includes(err.mount) && err.message.includes('/dev/disk5')
-    && err.leftMounted === true && err.calls.slice(1).length === 12);
-  assert.throws(() => detachWith(t, ['hdiutil: detach failed - Operation not permitted']), (err: Error & { calls: string[]; leftMounted?: boolean }) =>
-    /Operation not permitted/.test(err.message) && err.leftMounted === true && err.calls.slice(1).length === 1);
-  assert.throws(() => detachWith(t, [], { attachOut: 'unexpected output ' }), (err: Error & { calls: string[] }) =>
-    /named no disk/.test(err.message) && err.calls[1] === 'detach <box>/volume');
-  assert.throws(() => detachWith(t, ['hdiutil: detach failed - Operation not permitted'], { use: () => { throw new Error('work broke'); } }),
-    (err: Error & { image: string; mount: string; leftMounted?: boolean }) =>
-      /work broke/.test(err.message) && /Operation not permitted/.test(err.message)
-      && err.message.includes(err.image) && err.message.includes(err.mount) && err.message.includes('/dev/disk5') && err.leftMounted === true);
+  const namesAll = (e: Fail) => e.message.includes(e.image) && e.message.includes(e.mount) && e.message.includes('/dev/disk5') && e.leftMounted === true;
+  assert.throws(() => detachWith(t, Array(15).fill(busy)), (e: Fail) => /Resource busy/.test(e.message) && namesAll(e) && e.calls.slice(1).length === 12);
+  assert.throws(() => detachWith(t, ['hdiutil: detach failed - Operation not permitted']), (e: Fail) => /Operation not permitted/.test(e.message) && namesAll(e) && e.calls.slice(1).length === 1);
+  assert.throws(() => detachWith(t, [], 'unexpected output '), (e: Fail) => /named no disk/.test(e.message) && e.calls[1] === 'detach <box>/volume');
+  assert.throws(() => detachWith(t, ['hdiutil: detach failed - Operation not permitted'], undefined, () => { throw new Error('work broke'); }),
+    (e: Fail) => /work broke/.test(e.message) && /Operation not permitted/.test(e.message) && namesAll(e));
 });
