@@ -25,6 +25,7 @@ import { applySkills, skillKind } from './skills.ts';
 import { installedCopies, type InstalledCopyOf } from './plugins.ts';
 import { loadsKind } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
+import { toItemKind, writtenReloads, type ReloadWrite } from './reload.ts';
 import type { DestinationResult, HarnessId, PassResult, Reason } from './types.ts';
 
 /**
@@ -130,6 +131,13 @@ export function passTells(synced: NonNullable<HomePass['synced']>): { copies: De
   };
 }
 
+/** Confirmed writes made for the items Synchronize everything itself took in during these passes (never unrelated catch-up). */
+export const takenInReloads = (passes: NonNullable<HomePass['synced']>[]): ReloadWrite[] =>
+  passes.flatMap(pass => ([['skills', 'skill'], ['servers', 'mcp'], ['agents', 'agent']] as const).flatMap(([key, kind]) => {
+    const run = pass[key], taken = new Set((run?.notices ?? []).flatMap(notice => (notice.kind === 'taken-in' ? notice.items : [])));
+    return run && taken.size ? writtenReloads(run.results.filter(entry => taken.has(entry.item)), kind) : [];
+  }));
+
 /** The result of one explicit request. Keep each kind apart and name the tools from the writes themselves.
  * For each tool its last result decides whether a refusal still stands. A deleted-by-hand notice says what turned Off
  * when no copy result already describes the removal. What was done goes in the sentence, folded past three items; each
@@ -141,9 +149,10 @@ export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stoppe
     const key = kind === 'mcp' ? 'servers' : kind;
     const runs = passes.flatMap(pass => pass[key] ?? []);
     for (const run of runs) if (run.stopped) problems.add(run.stopped);
-    const results = groupBy([...runs.flatMap(run => run.results), ...(passes.at(-1)?.[key]?.unread ?? [])], result => result.item);
+    const runResults = runs.flatMap(run => run.results);
+    const results = groupBy([...runResults, ...(passes.at(-1)?.[key]?.unread ?? [])], result => result.item);
     const notices = runs.flatMap(run => run.notices ?? []);
-    return { kind, results, notices, names: new Set([...results.keys(), ...notices.flatMap(noticeNames)]) };
+    return { kind, results, runResults, notices, names: new Set([...results.keys(), ...notices.flatMap(noticeNames)]) };
   });
   // An item's kind is named where an item of another kind in the result has its name, as a run's words do (words.ts rowNames).
   const among = kinds.flatMap(({ kind, names }) => [...names].map(name => ({ kind, name })));
@@ -184,5 +193,6 @@ export function syncOnceReport(passes: NonNullable<HomePass['synced']>[], stoppe
   if (changed) lines.push(`Changed ${plural(changed, 'more item')}.`);
   // What it could not do is its reasons, each a problem line of its own (app.ts Outcome); its sentence says so first.
   const text = [problems.size || refused.length ? 'Not everything was synced.' : '', ...lines].filter(Boolean).join(' ') || 'Nothing to do.';
-  return { text, reasons: [...problems, ...refused], warn: problems.size + refused.length > 0, history: folded.length > 0 };
+  const reloads = kinds.flatMap(({ kind, runResults }) => writtenReloads(runResults, toItemKind(kind)));
+  return { text, reasons: [...problems, ...refused], warn: problems.size + refused.length > 0, history: folded.length > 0, ...(reloads.length ? { reloads } : {}) };
 }

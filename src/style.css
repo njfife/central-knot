@@ -252,6 +252,14 @@ ul { list-style: none; }
 .header-result:has(.problem-line) { gap: 0; }
 .header-result:has(.problem-line) :is(.band-done > .band-text, .toolbar-result-text) { -webkit-line-clamp: 1; }
 .header-result:has(.problem-line) .btn { height: 22px; }
+/* Copy controls for reload commands (matrix.ts copyLine): a wrapping line of their own inside the result and its Show all card. */
+.result-copies { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding-left: 20px; }
+.result-copies .btn.micro { height: 20px; padding: 0 7px; font-size: 11.5px; line-height: 16px; }
+.header-result:not(.result-whole):has(.result-copies) :is(.band-done > .band-text, .toolbar-result-text) { -webkit-line-clamp: 1; }
+.header-result:not(.result-whole):has(.result-copies) :is(.band-done, .toolbar-result) .btn { height: 22px; }
+#header:has(.header-result:not(.result-whole) .result-copies) { height: auto; min-height: 48px; padding-block: 2px; }
+.band-done:has(> .result-copies) { flex-wrap: wrap; row-gap: 4px; }
+.band-done > .result-copies { order: 2; flex-basis: 100%; }
 .result-whole { --card: color-mix(in oklab, var(--surface) 88%, white); align-self: flex-start; max-height: calc(100vh - 120px); overflow-y: auto; margin: 0 -12px;
   padding: 0 12px 12px; background: var(--card); border: 1px solid var(--control-line); border-top: 0; border-radius: 0 0 8px 8px;
   box-shadow: 0 14px 28px -10px rgb(0 0 0 / 0.5); }
@@ -307,7 +315,8 @@ ul { list-style: none; }
 .notices-card .sync-notice > .change-panel, .notices-card .change-panel > .ins-diff { max-height: none; overflow: visible; }
 /* What an Undo or Turn it on in the card did, in its notice's place and at least as tall (matrix.ts noticeLines): the result's
    band, set as a notice is. */
-.notice-done > .band { flex-wrap: wrap; gap: 2px 8px; padding: 0 26px 0 0; border: 0; background: none; }
+.notice-done > .band { flex-wrap: nowrap; align-items: flex-start; gap: 2px 8px; padding: 0 26px 0 0; border: 0; background: none; }
+.notice-done > .band > svg { margin-top: 1px; }
 .notice-done .band-text { max-width: calc(100% - 22px); }
 .header-end { display: flex; gap: 8px; }
 
@@ -515,6 +524,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .notice-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 /* Narrow content: a notice's actions, and those of what was done in its place, take their own line under its sentence, so no button is squeezed or cut. */
 @container content (width < 880px) {
+  .notice-done > .band { flex-wrap: wrap; }
   .sync-notice > .notice-actions, .notice-done .band-actions { flex-basis: 100%; padding-left: 22px; }
   .sync-notice > .kind-mark ~ .notice-actions { padding-left: 42px; }
 }

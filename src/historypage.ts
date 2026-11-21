@@ -175,8 +175,8 @@ export function historyPage() {
   if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or turning something on adds or replaces a copy, it shows up here with Undo. Turn a skill on to begin.', button({ variant: 'outline', label: 'Open the Library', id: 'history-open-library', onclick: () => openKind('all') })));
   const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   const reread = rereadBand(state.history);
-  // A refused Undo made here is a warning band, as on the other pages; other results here are in the status bar.
-  const refused = state.outcome?.page === 'history' && state.outcome.warn ? outcomeBand() : null;
+  // A refused Undo, or a Restore with reload advice, shows in a band; other results here are in the status bar.
+  const refused = state.outcome?.page === 'history' && (state.outcome.warn || !!state.outcome.reloads?.length) ? outcomeBand() : null;
   return h('div.page', {}, reread || refused ? h('div.bands', {}, reread, refused) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     // What it also changed in a tool's own settings (Pi's skills list: HistoryEvent settingsChanged) follows its words.
     const about = (said => (event.settingsChanged ? { ...said, text: `${said.text} ${event.settingsChanged.join(' ')}` } : said))(describe(event));

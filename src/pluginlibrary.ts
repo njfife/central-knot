@@ -31,6 +31,7 @@ import { recordedIds } from './sourcestore.ts';
 import type { Change, HarnessId, PassResult, PluginItemLine, PluginItemsView, SyncNotice, YourName } from './types.ts';
 import { harnessIds } from './harnesses.ts';
 import { notInWhy, type ItemOut } from './pluginstatus.ts';
+import { writtenReloads } from './reload.ts';
 import { toolNames } from './words.ts';
 
 /** The managed tools a plugin's items go to as library items: those with no plugin installer (Pi, OpenCode). */
@@ -206,7 +207,8 @@ function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linke
   const said = `${on} of its ${of} items ${on === 1 ? 'is' : 'are'} on in ${name}.`;
   // Its notes: what the run also changed in the tool's own settings with its items' copies (Pi's list: librarypass.ts Kind.follow).
   const notes = results.flatMap(({ result }) => result.results.flatMap(each => (each.harness === tool && each.settingsChanged ? [each.settingsChanged] : [])));
-  const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message, runs: [], changed, ...(notes.length ? { notes } : {}) });
+  const reloads = reloadsIn(results, tool);
+  const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message, runs: [], changed, ...(notes.length ? { notes } : {}), ...(reloads.length ? { reloads } : {}) });
   if ('outOf' in ask) return report(has ? 'failed' : 'uninstalled');
   if (!has && 'into' in ask) return report('held', why);
   if (unread && 'read' in ask) return report('failed', why);
@@ -226,6 +228,7 @@ function outsIn(tool: HarnessId, lines: PluginItemLine[], linked: Linked[], own:
   ...linked.filter(({ item }) => !wantedIn(item, tool)).map(({ kind, item }): Out => ({ name: item.name, kind, out: !item.on ? 'off' : own(item) ? 'own' : 'kept' }))];
 }
 const wroteIn = (results: Passed[], tool: HarnessId) => results.some(({ result }) => result.results.some(each => each.harness === tool && (each.outcome === 'written' || each.outcome === 'removed')));
+const reloadsIn = (results: Passed[], tool: HarnessId) => results.flatMap(({ kind, result }) => writtenReloads(result.results.filter(each => each.harness === tool), kind));
 
 /**
  * The Undo of a run on a plugin's items (runItems' `back`): each item as it was, by the same clicks, taken only while it is
@@ -242,9 +245,9 @@ export async function itemsBack(context: ShareContext, tools: HarnessId[], id: s
   }
   const after = await linkedItems(context, id);
   const done = named.map((tool): PluginDone => {
-    const has = onIn(after, tool) > 0, changed = has !== onIn(before, tool) > 0 || wroteIn(results, tool);
+    const has = onIn(after, tool) > 0, changed = has !== onIn(before, tool) > 0 || wroteIn(results, tool), reloads = reloadsIn(results, tool);
     const kept = results.flatMap(({ result }) => result.results).filter(each => each.harness === tool && each.outcome === 'held').map(each => ` ${each.item}: ${each.message}`);
-    return { ...op, tool, report: { tool, outcome: has ? 'installed' : 'uninstalled', message: `Its items are as they were in ${toolNames[tool]}.${kept.join('')}`, runs: [], changed } };
+    return { ...op, tool, report: { tool, outcome: has ? 'installed' : 'uninstalled', message: `Its items are as they were in ${toolNames[tool]}.${kept.join('')}`, runs: [], changed, ...(reloads.length ? { reloads } : {}) } };
   });
   return ran(done, results);
 }

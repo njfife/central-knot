@@ -53,6 +53,7 @@ import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, rowCount
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
+import { reloadAdvice, rowReload, toItemKind, type ReloadAction } from './reload.ts';
 import { pageData, readPageData, resetPageData } from './pagedata.ts';
 
 const names = toolNames as Record<Tool, string>;
@@ -931,6 +932,23 @@ export const resultInHeader = () => state.page === 'library' || state.page === '
  * acted on was (noticeLines), whatever the page shows; unmarked so the status bar says it too (app.ts paintStatusMessage), with no
  * ×, its actions only while it is the last result.
  */
+/** A wrapping line of Copy buttons for reload commands inside an existing result (header, card or off-header band). */
+export function copyLine(actions: readonly ReloadAction[]): HTMLElement | null {
+  if (!actions.length) return null;
+  return h('div.result-copies', {}, actions.map(({ tool, command }) => {
+    const control = button({ variant: 'outline', size: 'micro', icon: 'copy', label: `Copy ${command}`, name: `Copy ${command} for ${names[tool]}`, id: `outcome-copy-${tool}`,
+      attrs: { title: `Copy ${command} for ${names[tool]}`, 'data-copy': command },
+      onclick: (event: Event) => {
+        event.stopPropagation();
+        void navigator.clipboard.writeText(command).then(() => {
+          control.firstElementChild?.replaceWith(icon('copy-check', 14)); announce(`Copied ${command}.`);
+          setTimeout(() => control.firstElementChild?.replaceWith(icon('copy', 14)), 1500);
+        }, () => announce('Could not copy. Select the text instead.'));
+      } });
+    return control;
+  }));
+}
+
 export function outcomeBand(cardResult?: Outcome): HTMLElement | null {
   const outcome = cardResult ?? state.outcome;
   if (!outcome || (!cardResult && !outcomeShown(outcome, useTableShown())) || saidInStatusBar(outcome)) return null;
@@ -958,7 +976,8 @@ export function outcomeBand(cardResult?: Outcome): HTMLElement | null {
         : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined, !!acting())
         : outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
-    cardResult ? null : closeButton(closeResult, { id: 'outcome-dismiss' }));
+    cardResult ? null : closeButton(closeResult, { id: 'outcome-dismiss' }),
+    outcome === state.outcome && !resultInHeader() && outcome.reloads ? copyLine(reloadAdvice(outcome.reloads).actions) : null);
 }
 
 /**
@@ -1046,7 +1065,8 @@ export function listResult(): HTMLElement[] {
   const close = () => { for (const { problem } of background) state.dismissed.add(problemKey(problem)); closeResult(); };
   // With no problem line, Show all follows the sentence, for one the header's two lines cut.
   if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0));
-  return [done, lines.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, done ? state.outcome : kept.length ? lastResult(kept[0]!.kind) : background[0]?.problem), done ? null : closeButton(close, { id: 'problems-dismiss' })) : null]
+  const copies = done && state.outcome?.reloads ? copyLine(reloadAdvice(state.outcome.reloads).actions) : null;
+  return [done, copies, lines.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, done ? state.outcome : kept.length ? lastResult(kept[0]!.kind) : background[0]?.problem), done ? null : closeButton(close, { id: 'problems-dismiss' })) : null]
     .filter((band): band is HTMLElement => !!band);
 }
 
@@ -2360,13 +2380,15 @@ function offNote(t: Table, list: ItemRow[]) {
 /** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */
 const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skill), toolsFor(t, skill.kind), !!state.home?.sync.syncEverything, leftOutTools());
 
-/** What one tool has, for its row in the item's details: what its copy is, then whether its own switch has it off. */
+/** What one tool has, for its row in the item's details: what its copy is, then whether its own switch has it off, and any reload step from the active click result. */
 function harnessLine(skill: ItemRow, tool: Tool): string {
+  const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
+    ? rowReload(state.outcome.reloads, toItemKind(skill.kind), skill.key, tool as HarnessId) : '';
   // Through a plugin: where it comes from, then why its switch can't be used here, or that it is the whole plugin's.
   const through = itemThrough(skill, tool);
-  if (through) return [skill.cannot?.[tool], cantSwitch(through) ?? switchWords(through)].filter(Boolean).join(' ');
+  if (through) return [skill.cannot?.[tool], cantSwitch(through) ?? switchWords(through), reload].filter(Boolean).join(' ');
   const lib = libraryPages[skill.kind], own = skill.ownPart?.[tool];
-  return [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : ''].filter(Boolean).join(' ');
+  return [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : '', reload].filter(Boolean).join(' ');
 }
 
 /**

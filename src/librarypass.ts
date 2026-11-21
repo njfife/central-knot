@@ -77,6 +77,7 @@ import { errorCode, libraryGate } from './share.ts';
 import { hideParts } from './partsmigrate.ts';
 import type { ThroughWhichPlugin } from './plugins.ts';
 import { pluginLink } from './sourcelink.ts';
+import { reloadLine } from './reload.ts';
 import { recordedIds, type Recorded } from './sourcestore.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, JoinCounts, MergeDone, PassResult, SyncNotice, TakenInNotice } from './types.ts';
@@ -779,9 +780,11 @@ async function writeCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: S
   if (wrote && 'stopped' in wrote) return stopped(wrote.stopped);
   pass.writes++;
   const done = here ? {} : await follow(pass, item, tool, true);
+  const switchedOff = !!done.off || !!pass.disk.switchedOff?.get(item.key)?.includes(tool);
   const off = done.off ? ` ${toolName(tool)}’s own settings keep it out, so it doesn’t load it.` : '';
-  const message = `${here ? 'Now has the current version' : 'Added'}${wrote ? `, ${wrote.said}` : ''}.${done.changed ? ` ${done.changed}` : ''}${off} Start a new session to use it.`;
-  pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message, ...(done.off ? { switchedOff: true as const } : {}), ...(done.changed ? { settingsChanged: done.changed } : {}) });
+  const next = switchedOff ? '' : reloadLine(tool, pass.kind.kind);
+  const message = `${here ? 'Now has the current version' : 'Added'}${wrote ? `, ${wrote.said}` : ''}.${done.changed ? ` ${done.changed}` : ''}${off}${next ? ` ${next}` : ''}`;
+  pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message, ...(switchedOff ? { switchedOff: true as const } : {}), ...(done.changed ? { settingsChanged: done.changed } : {}) });
   return true;
 }
 
@@ -806,7 +809,7 @@ async function removeCopy(pass: Pass, item: LibraryItem, here: Seen): Promise<bo
  */
 async function giveBackCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: Seen | undefined, hash: string): Promise<boolean> {
   const where = toolName(tool), result = (outcome: 'written' | 'held', message: string) => pass.results.push({ item: item.name, harness: tool, outcome, message });
-  if (here?.hash === hash) { result('written', `${where} keeps its own copy, as before.`); return true; }
+  if (here?.hash === hash) { pass.results.push({ item: item.name, harness: tool, outcome: 'written', unchanged: true, message: `${where} keeps its own copy, as before.` }); return true; }
   const content = await pass.kind.readVersion(pass.context, item.key, hash);
   if (!content) { result('held', `${where}’s own copy is no longer in Central Knot’s store, so it can’t be given back.`); return false; }
   const refused = await pass.kind.write(pass.context, item, tool, here, content);

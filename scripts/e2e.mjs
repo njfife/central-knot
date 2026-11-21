@@ -1572,9 +1572,9 @@ async function practiceFlow() {
   await a.click(`#${rowPart('delete', 'skills', 'same-everywhere')}`);
   await a.click(`#${rowPart('delete-confirm', 'skills', 'same-everywhere')}`);
   same('Delete from Central Knot takes it out of every tool and off the page', [sameStats(), (await rowKeys(a, 'skills')).includes('same-everywhere')], [[null, null, null], false]);
-  // Two Adds, the second soon after the first: one run, said once.
+  // Two Adds, the second soon after the first: one run, said once, with each written tool's reload advice.
   for (const key of ['release-notes', 'standup']) await a.clickInRun(`#${rowPart('add', 'skills', key)}`);
-  same('two Adds in a row are one run, said once', await a.text('#header [data-outcome] .band-text'), '2 skills are on: release-notes and standup.');
+  same('two Adds in a row are one run, said once', await a.text('#header [data-outcome] .band-text'), '2 skills are on: release-notes and standup. In Copilot CLI, type /skills reload. Codex picks it up at the next turn; if not, start a new chat.');
   await a.click('#header-refresh');
   same('Refresh regroups the rows: the three are On', (await sectionsNow(a, 'skills'))[0], ['on', ['notes', 'release-notes', 'standup']]);
   same('copies written every way', [existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.claude/skills/standup/SKILL.md')), existsSync(join(practice, '.codex/skills/standup/SKILL.md'))], [true, true, true]);
@@ -1693,7 +1693,7 @@ async function practiceFlow() {
   // On History, the switch's Undo turns back only what is still as the switch left it: standup, turned on since, stays.
   await a.click('#nav-history');
   await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
-  check('its Undo from History says what it did, in the status bar', /^Undone: 2 items turned on\./.test(await statusShown() ?? ''), await statusShown());
+  check('its Undo from History says what it did with reload advice and Copy', /^Undone: 2 items turned on\..*In Copilot CLI, type \/skills reload\..*Codex picks it up/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-copy-copilot-cli'), await a.text('.bands'));
   same('…and every skill is on again', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
   await openKind(a, 'skills');
   // An armed Delete from Central Knot stays on the visit it was clicked on.
@@ -2207,7 +2207,7 @@ async function practiceFlow() {
   check('code-reviewer reached Copilot with name, description and prompt, without Claude Code’s own fields', taken[1].includes('description: Reviews a change') && taken[1].includes('You are a careful code reviewer.') && !taken[1].includes('tools:') && !taken[1].includes('model:'), taken[1]);
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', taken[2].includes('developer_instructions = """'));
-  same('taken in, they are On, and the two Adds, one soon after the other, are said once', [await switchOn(a, 'agents', 'code-reviewer'), await a.text('#header [data-outcome] .band-text')], [true, '2 agents are on: code-reviewer and release-notes.']);
+  same('taken in, they are On, and the two Adds, one soon after the other, are said once', [await switchOn(a, 'agents', 'code-reviewer'), await a.text('#header [data-outcome] .band-text')], [true, '2 agents are on: code-reviewer and release-notes. In Copilot CLI, start a new session. In Codex, start a new session.']);
   // Off takes the agent out of every harness. Central Knot keeps it: its row stays, off, with its description; On (here the
   // result's Undo) writes every harness's file back byte for byte, Claude Code's own fields included.
   await a.click(`#${rowPart('switch', 'agents', 'code-reviewer')}`);
@@ -6509,8 +6509,10 @@ esac
   await done();
   same('On installs it in Claude Code with its own command and puts its items in Pi', [calls(), installed(), inPi(), await marks(), await switchIs('#pswitch-0-issue-tracker')],
     [['plugin marketplace add ' + market, 'plugin install issue-tracker@ck-test-market --scope user'], true, [true, true], ['installed', 'items'], 'true']);
-  // With his pattern in Pi's list, what it added there too (pluginlibrary.ts reportIn's notes).
-  check('the result says what the switch did, with what it added to his Pi list, and Undo', /issue-tracker: installed in Claude Code; its items put in Pi; \+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
+  // With his pattern in Pi's list, what it added there too (pluginlibrary.ts reportIn's notes), and Pi named once with /reload.
+  check('the result says what the switch did, with what it added to his Pi list, Pi reload advice, Copy and Undo',
+    /issue-tracker: installed in Claude Code; its items put in Pi; \+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\. In Pi, type \/reload\./.test(await a.text('#plugins-result') ?? '')
+    && await a.exists('#plugins-undo') && await a.run(`document.querySelector('#outcome-copy-pi-cli')?.dataset.copy`) === '/reload', await a.text('#header'));
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
   await pictures('plugin-switch-list');
   // Sync once from the menu bar with the switch's result up: its own result takes the header, as on the item lists, and × lets it
@@ -10199,6 +10201,139 @@ async function libraryFlow() {
   same('the last skill deleted from Files on Skills: no skills here yet, Find empty', [await g.text('.empty-title'), await g.run(`document.querySelector('#find')?.value ?? ''`)], ['No skills here yet', '']);
   same('no page errors, the empty states and Resume', [...d.pageErrors, ...e.pageErrors, ...g.pageErrors], []);
   await g.quit();
+
+  // ---------- Reload words: per-tool advice, Copy buttons and opened row ----------
+  const R = { home: join(scratch, 'reload-home'), data: join(scratch, 'reload-data'), tools: join(scratch, 'reload-tools') };
+  mkdirSync(join(R.tools, '.local/bin'), { recursive: true });
+  mkdirSync(join(R.tools, '.opencode/bin'), { recursive: true });
+  for (const [cli, ver] of [['claude', '2.1.327 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.113.'], ['codex', 'codex-cli 0.169.1'], ['pi', '1.5.2']]) {
+    writeFileSync(join(R.tools, '.local/bin', cli), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${ver}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  }
+  writeFileSync(join(R.tools, '.opencode/bin/opencode'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.19.6" && exit 0\nexit 9\n', { mode: 0o755 });
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills', '.claude/agents', '.copilot/agents', '.codex/agents', '.config/opencode/agents']) {
+    mkdirSync(join(R.home, dir), { recursive: true });
+  }
+  writeFileSync(join(R.home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { command: 'npx', args: ['docs'] } } }, null, 2)}\n`);
+  writeFileSync(join(R.home, '.copilot/mcp-config.json'), '{}\n');
+  writeFileSync(join(R.home, '.codex/config.toml'), '');
+  writeFileSync(join(R.home, '.pi/agent/settings.json'), '{}\n');
+  writeFileSync(join(R.home, '.config/opencode/opencode.json'), '{}\n');
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills']) skill(join(R.home, dir), 'pi-only');
+  for (const dir of ['.claude/skills', '.codex/skills']) skill(join(R.home, dir), 'two-copy');
+  skill(join(R.home, '.claude/skills'), 'four-skill');
+  agent(R.home, 'claude-cli', 'reviewer', agentText('reviewer', 'You review.'));
+  agent(R.home, 'copilot-cli', 'reviewer', agentText('reviewer', 'You review.'));
+  writeFileSync(join(R.home, '.config/opencode/agents/reviewer.md'), agentText('reviewer', 'You review.'));
+  mkdirSync(R.data, { recursive: true });
+  writeFileSync(join(R.data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: R.home }, closeExplained: true }));
+  const r = await launch(R.data, [], R.tools);
+  await r.click('#nav-overview');
+  await r.click('#setup-no');
+  await openKind(r, 'all');
+  const copyIds = () => r.all('.result-copies button', 'e.id.replace("outcome-copy-", "")');
+  const copyCmds = () => r.all('.result-copies button', 'e.dataset.copy');
+  const fitsHeader = () => r.run(`document.querySelector('#header .header-result').getBoundingClientRect().bottom <= document.querySelector('#page').getBoundingClientRect().top + 1`);
+  const rShots = async (name, size, railMode) => {
+    if (!shots) return;
+    await sizeTo(r, ...size);
+    if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
+    const hold = await r.run(`(box => box && { x: Math.round(box.left + 4), y: Math.round(box.top + 4) })(document.querySelector('#header .header-result .band-text')?.getBoundingClientRect())`);
+    if (hold) await r.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hold.x, y: hold.y });
+    for (const look of ['light', 'dark']) { await theme(r, look); await r.shot(`${name}-${look}`); }
+    await theme(r, 'light');
+  };
+  // Example 1: skill written only to Pi -> only Pi's sentence + Copy holding /reload; clicking Copy announces Copied /reload.
+  await r.click(`#${rowPart('add', 'skills', 'pi-only')}`);
+  await done(r);
+  same('Example 1: skill written to Pi says only Pi’s sentence with Copy /reload', [
+    (await r.text('#header [data-outcome] .band-text'))?.endsWith('In Pi, type /reload.'), await copyIds(), await copyCmds(),
+  ], [true, ['pi-cli'], ['/reload']]);
+  await r.run(`(() => { window.__copied = []; Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: text => { window.__copied.push(text); return Promise.resolve(); } }); })()`);
+  await r.click('#outcome-copy-pi-cli');
+  same('clicking Copy copies the command and announces it', [await r.run(`window.__copied`), await r.run(`document.querySelector('#announcement')?.dataset.text`)], [['/reload'], 'Copied /reload.']);
+  // Example 2 & 5: MCP server written to all five -> exact sentences for 4 tools, nothing for Copilot CLI; opened row matches result and clears on dismiss.
+  await r.click(`#${rowPart('add', 'mcp', 'docs')}`);
+  await done(r);
+  await r.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+  await done(r);
+  await r.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+  await done(r);
+  same('Example 2: MCP server written to all five names four tools in order with three Copy buttons and nothing for Copilot CLI', [
+    (await r.text('#header [data-outcome] .band-text'))?.endsWith('Restart Claude Code (claude --continue keeps the chat). In Codex, type /new or restart it. In Pi, type /reload. Restart OpenCode.'),
+    await copyIds(), await copyCmds(),
+  ], [true, ['claude-cli', 'codex-cli', 'pi-cli'], ['claude --continue', '/new', '/reload']]);
+  await r.click(`#${rowPart('open', 'mcp', 'docs')}`);
+  const rowLines = () => r.run(`Object.fromEntries([...document.querySelectorAll('.details-tool')].map(row => [row.querySelector('.details-tool-label strong')?.textContent?.trim(), row.querySelector('.details-tool-line')?.textContent ?? '']))`);
+  const openedWithResult = await rowLines();
+  same('Example 5: opened row lines match the result for each tool, nothing for Copilot CLI', [
+    openedWithResult['Claude Code']?.includes('Restart Claude Code (claude --continue keeps the chat).'),
+    /reload|restart|new session/i.test(openedWithResult['Copilot CLI'] ?? ''),
+    openedWithResult['Codex']?.includes('In Codex, type /new or restart it.'),
+    openedWithResult['Pi']?.includes('In Pi, type /reload.'),
+    openedWithResult['OpenCode']?.includes('Restart OpenCode.'),
+  ], [true, false, true, true, true]);
+  await rShots('reload-opened-row-1316-open', [1316, 819], false);
+  await rShots('reload-opened-row-1316-rail', [1316, 819], true);
+  await fullSize(r);
+  await r.click('#outcome-dismiss');
+  const openedAfterDismiss = await rowLines();
+  same('dismissing the result clears the transient reload lines from the opened row', Object.values(openedAfterDismiss).some(line => /reload|restart|new session/i.test(line)), false);
+  await r.click(`#${rowPart('open', 'mcp', 'docs')}`);
+  // Example 4: turning Off says no reload sentence and renders no Copy button.
+  await r.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+  await done(r);
+  same('Example 4: turning Off says no reload sentence and offers no Copy button', [/reload|restart|new session/i.test(await r.text('#header [data-outcome] .band-text') ?? ''), await copyIds()], [false, []]);
+  // Example 6 & Pi agent rule: agent written to Codex and Pi -> Codex new session, Pi /reload.
+  await r.click(`#${rowPart('add', 'agents', 'reviewer')}`);
+  await done(r);
+  same('Example 6 and Pi agent: agent written to Codex and Pi says Codex new session and Pi /reload', [
+    (await r.text('#header [data-outcome] .band-text'))?.endsWith('In Codex, start a new session. In Pi, type /reload.'), await copyIds(), await copyCmds(),
+  ], [true, ['pi-cli'], ['/reload']]);
+  // Example 7: two Copy buttons + Undo at 860×528 and 1316×819 with sidebar open, nothing cut off.
+  await r.click(`#${rowPart('add', 'skills', 'two-copy')}`);
+  await done(r);
+  same('Example 7: two Copy buttons and Undo', [await copyIds(), await copyCmds(), await r.exists('#outcome-undo')], [['copilot-cli', 'pi-cli'], ['/skills reload', '/reload'], true]);
+  await sizeTo(r, ...SMALLEST);
+  same('two Copy buttons + Undo fit at 860×528 without clipping or overlapping the page', [await r.run(CUT_OFF), await fitsHeader()], [[], true]);
+  await rShots('reload-two-copy-860', SMALLEST);
+  await sizeTo(r, 1316, 819);
+  if (await r.run(`document.body.classList.contains('rail')`)) await r.click('#sidebar-toggle');
+  same('two Copy buttons + Undo fit at 1316×819 with sidebar open', [await r.run(CUT_OFF), await fitsHeader()], [[], true]);
+  await rShots('reload-two-copy-1316-open', [1316, 819], false);
+  await rShots('reload-two-copy-1316-rail', [1316, 819], true);
+  await fullSize(r);
+  // Four Copy buttons + Undo in one run (skill + MCP server across all five tools) at 860×528 (folded and Show all) and 1316×819.
+  await r.click(`#${rowPart('add', 'skills', 'four-skill')}`);
+  await done(r);
+  await r.click(`#${rowPart('switch', 'skills', 'four-skill')}`);
+  await done(r);
+  await r.click('#outcome-dismiss');
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'four-skill')}`);
+  await r.clickInRun(`#${rowPart('switch', 'mcp', 'docs')}`);
+  await done(r);
+  same('four Copy buttons + Undo in tool order', [await copyIds(), await copyCmds(), await r.exists('#outcome-undo')], [
+    ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'], ['claude --continue', '/skills reload', '/new', '/reload'], true,
+  ]);
+  await sizeTo(r, ...SMALLEST);
+  same('four Copy buttons + Undo fit folded at 860×528', [await r.run(CUT_OFF), await fitsHeader()], [[], true]);
+  await rShots('reload-four-copy-860', SMALLEST);
+  if (await r.run(`(btn => !!btn && !btn.hidden)(document.querySelector('#problems-show-all'))`)) {
+    await r.click('#problems-show-all');
+    same('four Copy buttons + Undo fit in Show all card at 860×528', [await r.run(CUT_OFF), await r.exists('#result-whole .result-copies')], [[], true]);
+    await rShots('reload-four-copy-860-whole', SMALLEST);
+    await r.click('#problems-show-all');
+  }
+  await sizeTo(r, 1316, 819);
+  if (await r.run(`document.body.classList.contains('rail')`)) await r.click('#sidebar-toggle');
+  same('four Copy buttons + Undo fit at 1316×819 with sidebar open', [await r.run(CUT_OFF), await fitsHeader()], [[], true]);
+  await rShots('reload-four-copy-1316-open', [1316, 819], false);
+  await rShots('reload-four-copy-1316-rail', [1316, 819], true);
+  await rShots('reload-four-copy-1280', [1280, 800]);
+  await rShots('reload-four-copy-1728', [1728, 1117]);
+  await rShots('reload-four-copy-2560', [2560, 1440]);
+  await fullSize(r);
+  same('no page errors, reload words', r.pageErrors, []);
+  await r.quit();
 }
 
 /**
