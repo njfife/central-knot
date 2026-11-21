@@ -1007,6 +1007,8 @@ export interface LibraryFacts {
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
   /** MCP servers: tools whose own switch turns it off there (mcpswitch.ts), read at each look: the entry stays, and the tool doesn't start it. */
   switchedOff?: HarnessId[];
+  /** MCP servers: the exact name Copilot CLI will write from its kept own part (servers.ts writeServer) when it has no copy there now. */
+  copilotName?: string;
   /**
    * In the library, from a source the home records: that source's link, as given. Linked to it (library.ts LibraryItem source):
    * whether its last read has a version that waits because the item was changed here (`waits`: library.ts A SOURCE `wait`), or
@@ -1365,8 +1367,8 @@ export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the
  * A named set of items to have on (profileplan.ts): library items as `skill:<key>`, `agent:<key>` and `mcp:<key>`, and, when
  * `switchesPluginItems` is true, plugins' items as `plugin:<kind>:<key>` (profileplan.ts pluginItemId). Switching to it turns
  * those library items On and every other Off; when `switchesPluginItems` is true it also turns each plugin's item on or off in
- * each tool that can switch that one item, and when false it leaves every plugin copy as it stands. Which profile is in use is
- * worked out.
+ * each tool that can switch that one item, and when false it leaves every plugin copy as it stands except clearing a Copilot CLI
+ * off-switch blocking a server of yours that it names. Which profile is in use is worked out.
  */
 export interface Profile { id: string; name: string; items: string[]; switchesPluginItems: boolean }
 

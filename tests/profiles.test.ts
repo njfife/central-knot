@@ -11,7 +11,7 @@ import { newItem, type ItemKind } from '../src/library.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, entryTurns, homeItems, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginUndo, switchable, switchPlan, switchPreview, turnsWords, undoPlan, undoTurns, type Libraries } from '../src/profileplan.ts';
+import { allTurns, copilotKeptOnBy, entryTurns, homeItems, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginStayNote, pluginUndo, switchable, switchPlan, switchPreview, turnsWords, undoPlan, undoTurns, type Libraries } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, liveNow, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { runPlan, type PlanApi } from '../src/pluginplan.ts';
@@ -137,7 +137,7 @@ test('His case: a plugin’s skill in Claude Code, Codex and Pi turns off in Cod
   const before = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [{ key: 'pdf-reader', on: true }, { key: 'spreadsheet', on: true }]);
   assert.deepEqual(copiesIn(before)[pdfId], ['claude-cli on stays', 'codex-cli on', 'pi-cli on'], 'one item, whichever way each tool has it');
   assert.deepEqual([pluginItemsAgree(work, pluginLive(before)), pluginItemsAgree(other, pluginLive(before))], [true, false]);
-  assert.deepEqual(pluginPlan(other, pluginLive(before)), [{ id: pdfId, on: false, turn: ['codex-cli', 'pi-cli'], held: [] }]);
+  assert.deepEqual(pluginPlan(other, pluginLive(before)), [{ id: pdfId, on: [], off: ['codex-cli', 'pi-cli'], held: [] }]);
   // What a switch acts on in each: the copy installed whole, as the Library's switch takes it (pluginswitch.ts); Pi's library item.
   assert.deepEqual(pluginLive(before).find(item => item.id === pdfId)!.copies.map(({ target }) => ('libraryKey' in target ? target : [target.tool, target.name])),
     [['claude-cli', 'pdf-reader'], ['codex-cli', 'pdf-reader'], { libraryKey: 'pdf-reader' }]);
@@ -145,14 +145,14 @@ test('His case: a plugin’s skill in Claude Code, Codex and Pi turns off in Cod
   const after = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { skillsOff: ['pdf-reader'] })], [{ key: 'pdf-reader', on: false }, { key: 'spreadsheet', on: true }]);
   assert.deepEqual(copiesIn(after)[pdfId], ['claude-cli on stays', 'codex-cli off', 'pi-cli off']);
   assert.deepEqual([pluginItemsAgree(work, pluginLive(after)), pluginItemsAgree(other, pluginLive(after))], [false, true], 'Other agrees with Claude Code’s copy on');
-  assert.deepEqual(pluginPlan(work, pluginLive(after)), [{ id: pdfId, on: true, turn: ['codex-cli', 'pi-cli'], held: [] }]);
+  assert.deepEqual(pluginPlan(work, pluginLive(after)), [{ id: pdfId, on: ['codex-cli', 'pi-cli'], off: [], held: [] }]);
   // The person's own items are none of these: the plugin's items are listed and switched as the plugin's.
   assert.deepEqual(ids(homeItems(after)), []);
 });
 
 test('A profile that leaves out one skill of a plugin turns that one alone: its sibling, and the plugin, are left as they are in every tool', () => {
   const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [{ key: 'pdf-reader', on: true }, { key: 'spreadsheet', on: true }]);
-  assert.deepEqual(pluginPlan(profile('Sheets', [sheetId]), pluginLive(home)), [{ id: pdfId, on: false, turn: ['codex-cli', 'pi-cli'], held: [] }]);
+  assert.deepEqual(pluginPlan(profile('Sheets', [sheetId]), pluginLive(home)), [{ id: pdfId, on: [], off: ['codex-cli', 'pi-cli'], held: [] }]);
 });
 
 test('A copy Pi edited, let go of its plugin, is the person’s own item: the plugin’s id goes dormant there, and his own is another id', () => {
@@ -171,22 +171,30 @@ test('A plugin’s item has an id of its own form, `plugin:` before its kind, wh
   assert.deepEqual([ids(homeItems(home)), pluginLive(home).map(item => item.id)], [['mcp:document-tools@team-tools/issues'], ['plugin:mcp:document-tools@team-tools/issues']]);
 });
 
-test('Copilot CLI turns a server off by its bare name: a plugin’s server named exactly as another server there, the person’s own or another plugin’s, is held, and the other tools switch it', () => {
+test('In Copilot CLI one exact server name is one switch: kept on without holding when the profile names another member (his own or another plugin’s), turned off when it names neither; case differs is two names', () => {
   const issues = { kind: 'mcp' as const, name: 'issues', description: '' }, issuesId = 'plugin:mcp:document-tools@team-tools/issues';
   const installs = [docsIn('copilot-cli', { items: [issues] }), docsIn('codex-cli', { items: [issues] })];
   /** The person's own server in Copilot CLI, spelled as its file has it (types.ts ToolCopy `folder`). */
   const mine = (spelled: string) => ({ ...row('issues'), copies: { 'copilot-cli': { folder: spelled } } }) as unknown as LibraryFacts;
-  const quiet = profile('Quiet', ['mcp:issues']), plan = (home: HomeView) => pluginPlan(quiet, pluginLive(home)).map(each => [each.id, each.turn, each.held.map(held => `${held.tool}: ${held.why}`)]);
-  assert.deepEqual(plan(docsHome(installs, [], [['mcp', 'issues', true]], [mine('issues')])),
-    [[issuesId, ['codex-cli'], ['copilot-cli: Copilot CLI turns a server off by its name alone, and a server of your own there is named “issues” too.']]]);
-  // Another plugin's server of that name there: both plugins' are held in Copilot CLI.
+  const quiet = profile('Quiet', ['mcp:issues']), neither = profile('Neither', []);
+  const plan = (prof: Profile, home: HomeView) => pluginPlan(prof, pluginLive(home)).map(each => [each.id, each.on, each.off, each.held]);
+  // Profile has his own `issues` (same exact name): stays on in Copilot CLI (no hold, copilotKeptOnBy says 'own'), turns off in Codex.
+  const sameName = docsHome(installs, [], [['mcp', 'issues', true]], [mine('issues')]);
+  assert.deepEqual(plan(quiet, sameName), [[issuesId, [], ['codex-cli'], []]]);
+  const copilotCopy = pluginLive(sameName).find(item => item.id === issuesId)!.copies.find(copy => copy.tool === 'copilot-cli')!;
+  assert.deepEqual(copilotKeptOnBy(quiet, { id: issuesId }, copilotCopy), { by: 'own' });
+  // Profile has neither: turns off in both Copilot CLI and Codex in one plan (no hold).
+  assert.deepEqual(plan(neither, sameName), [[issuesId, [], ['copilot-cli', 'codex-cli'], []]]);
+  // Another plugin's server of that exact name there: profile wanting one keeps Copilot CLI on (copilotKeptOnBy says 'plugin'); neither turns both off.
   const tracker: InstalledPlugin = { tool: 'copilot-cli', plugin: 'tracker', marketName: 'team-tools', listed: true, items: [issues] };
-  assert.deepEqual(plan(docsHome([...installs, tracker])), [
-    [issuesId, ['codex-cli'], ['copilot-cli: Copilot CLI turns a server off by its name alone, and tracker there has a server named “issues” too.']],
-    ['plugin:mcp:tracker@team-tools/issues', [], ['copilot-cli: Copilot CLI turns a server off by its name alone, and document-tools there has a server named “issues” too.']],
-  ]);
-  // It goes by the exact spelling (mcpswitch.ts): his own Issues is another name there, so the plugin's issues switches there too.
-  assert.deepEqual(plan(docsHome(installs, [], [['mcp', 'issues', true]], [mine('Issues')])), [[issuesId, ['copilot-cli', 'codex-cli'], []]]);
+  const twoPlugins = docsHome([...installs, tracker]);
+  const wantTracker = profile('Tracker', ['plugin:mcp:tracker@team-tools/issues']);
+  assert.deepEqual(plan(wantTracker, twoPlugins), [[issuesId, [], ['codex-cli'], []]]);
+  assert.deepEqual(copilotKeptOnBy(wantTracker, { id: issuesId }, pluginLive(twoPlugins).find(item => item.id === issuesId)!.copies.find(copy => copy.tool === 'copilot-cli')!),
+    { by: 'plugin', plugin: 'tracker' });
+  assert.deepEqual(plan(neither, twoPlugins), [[issuesId, [], ['copilot-cli', 'codex-cli'], []], ['plugin:mcp:tracker@team-tools/issues', [], ['copilot-cli'], []]]);
+  // Exact spelling (case-sensitive): his own `Issues` is another name, so Quiet turns the plugin's `issues` off in Copilot CLI too.
+  assert.deepEqual(plan(quiet, docsHome(installs, [], [['mcp', 'issues', true]], [mine('Issues')])), [[issuesId, [], ['copilot-cli', 'codex-cli'], []]]);
 });
 
 test('A plugin that is one skill at its root is one item installed and placed, though Pi has it under its folder’s name; not when the plugin has more than one skill placed', () => {
@@ -202,13 +210,13 @@ test('A plugin that is one skill at its root is one item installed and placed, t
 test('A copy placed in Pi is held while its plugin is Off on Plugins: a profile never turns on what the plugin’s Off turned off', () => {
   const off = docsHome([], [{ key: 'pdf-reader', on: false }, { key: 'spreadsheet', on: false }], [], [], { on: false });
   assert.deepEqual(copiesIn(off)[pdfId], ['pi-cli off plugin-off']);
-  assert.deepEqual(pluginPlan(profile('Docs', [pdfId]), pluginLive(off)), [{ id: pdfId, on: true, turn: [], held: [{ tool: 'pi-cli', why: 'The whole plugin document-tools is off in Pi.' }] }]);
+  assert.deepEqual(pluginPlan(profile('Docs', [pdfId]), pluginLive(off)), [{ id: pdfId, on: [], off: [], held: [{ tool: 'pi-cli', why: 'The whole plugin document-tools is off in Pi.' }] }]);
   assert.equal(pluginItemsAgree(profile('Empty', []), pluginLive(off)), true);
 });
 
 test('After an update drops a plugin’s skill and brings another, a profile still plans: the dropped one dormant, the new one turned off as one it leaves out', () => {
   const work = profile('Work', [pdfId, sheetId]), home = docsHome([docsIn('codex-cli', { items: [skill('spreadsheet'), skill('forms')] })]);
-  assert.deepEqual(pluginPlan(work, pluginLive(home)), [{ id: 'plugin:skill:document-tools@team-tools/forms', on: false, turn: ['codex-cli'], held: [] }]);
+  assert.deepEqual(pluginPlan(work, pluginLive(home)), [{ id: 'plugin:skill:document-tools@team-tools/forms', on: [], off: ['codex-cli'], held: [] }]);
   assert.equal(pluginItemsAgree(work, pluginLive(home)), false, 'not in use until switched again');
 });
 
@@ -216,7 +224,7 @@ test('With the whole plugin off in Codex a switch changes nothing there: its ite
   const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { off: true })]);
   assert.deepEqual(copiesIn(home)[pdfId], ['claude-cli on stays', 'codex-cli off plugin-off']);
   const off = { tool: 'codex-cli', why: 'The whole plugin document-tools is off in Codex.' };
-  assert.deepEqual(pluginPlan(profile('Docs', [pdfId, sheetId]), pluginLive(home)), [{ id: pdfId, on: true, turn: [], held: [off] }, { id: sheetId, on: true, turn: [], held: [off] }]);
+  assert.deepEqual(pluginPlan(profile('Docs', [pdfId, sheetId]), pluginLive(home)), [{ id: pdfId, on: [], off: [], held: [off] }, { id: sheetId, on: [], off: [], held: [off] }]);
   assert.equal(pluginItemsAgree(profile('Empty', []), pluginLive(home)), true);
   // Off in Claude Code too, where a skill has no switch of its own: off there, not left out of the reckoning as one that stays on.
   assert.deepEqual(copiesIn(docsHome([docsIn('claude-cli', { off: true })]))[pdfId], ['claude-cli off plugin-off']);
@@ -233,7 +241,7 @@ test('Which tools a profile switches a plugin’s item in: each with a switch fo
     [pdfId]: ['codex-cli on held', 'pi-cli off'],
     [sheetId]: ['codex-cli on held'],
   });
-  assert.deepEqual(pluginPlan(profile('Sheets', [sheetId]), pluginLive(home)).map(each => [each.id, each.turn, each.held.map(held => held.why)]), [
+  assert.deepEqual(pluginPlan(profile('Sheets', [sheetId]), pluginLive(home)).map(each => [each.id, each.off, each.held.map(held => held.why)]), [
     ['plugin:agent:document-tools@team-tools/reviewer', ['claude-cli'], []],
     [pdfId, [], ['Codex’s config.toml writes skills.config as a value.']],
   ]);
@@ -243,7 +251,7 @@ test('A tool whose copy of the plugin can’t be read: what it has there isn’t
   const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { items: [], problem: 'Its plugin.json can’t be read.' })]);
   assert.deepEqual(copiesIn(home)[pdfId], ['claude-cli on stays', 'codex-cli off unread']);
   const unread = { tool: 'codex-cli', why: 'Codex’s copy of document-tools couldn’t be read: Its plugin.json can’t be read.' };
-  assert.deepEqual(pluginPlan(profile('Docs', [pdfId, sheetId]), pluginLive(home)), [{ id: pdfId, on: true, turn: [], held: [unread] }, { id: sheetId, on: true, turn: [], held: [unread] }]);
+  assert.deepEqual(pluginPlan(profile('Docs', [pdfId, sheetId]), pluginLive(home)), [{ id: pdfId, on: [], off: [], held: [unread] }, { id: sheetId, on: [], off: [], held: [unread] }]);
   assert.deepEqual([pluginItemsAgree(profile('Docs', [pdfId, sheetId]), pluginLive(home)), pluginItemsAgree(profile('Empty', []), pluginLive(home))], [false, false], 'neither way');
   // An item only the unread copy could have isn't known at all: nothing is listed for it.
   assert.deepEqual(pluginLive(docsHome([docsIn('codex-cli', { items: [], problem: 'Unreadable.' })])), []);
@@ -265,7 +273,7 @@ test('In use takes in the plugins’ items wherever a tool can switch them: two 
 test('A switch’s count takes each plugin’s item once however many tools turn it, and an item only held is not counted as turned', () => {
   const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { skillsOff: ['spreadsheet'] })], [{ key: 'pdf-reader', on: true }, { key: 'spreadsheet', on: true }], [['skill', 'notes', true]]);
   const sheets = profile('Sheets', ['skill:notes', sheetId]), plan = pluginPlan(sheets, pluginLive(home));
-  assert.deepEqual(plan.map(each => [each.id, each.on, each.turn]), [[pdfId, false, ['codex-cli', 'pi-cli']], [sheetId, true, ['codex-cli']]]);
+  assert.deepEqual(plan.map(each => [each.id, each.on, each.off]), [[pdfId, [], ['codex-cli', 'pi-cli']], [sheetId, ['codex-cli'], []]]);
   assert.equal(turnsWords(allTurns(switchPlan(sheets, homeItems(home)), plan), 'will'), 'turns 1 item on and 1 off');
   const off = docsHome([docsIn('codex-cli', { off: true })]);
   assert.deepEqual(allTurns(switchPlan(profile('Docs', [pdfId]), homeItems(off)), pluginPlan(profile('Docs', [pdfId]), pluginLive(off))), { on: [], off: [] });
@@ -288,11 +296,22 @@ test('The Undo of a switch turns back each plugin copy still as the switch left 
   assert.deepEqual(pluginUndo(entry, pluginLive(pluginOff)).back.map(turn => turn.copy.tool), ['pi-cli']);
 });
 
-test('His own server not in Copilot CLI now is compared with a plugin’s by its key: the spelling it gets back there isn’t known until it is written', () => {
+test('His own server not in Copilot CLI now is compared by the exact spelling Copilot CLI will write (kept copilotName, else its item name)', () => {
   const issues = { kind: 'mcp' as const, name: 'issues', description: '' }, issuesId = 'plugin:mcp:document-tools@team-tools/issues';
-  const home = docsHome([docsIn('copilot-cli', { items: [issues] }), docsIn('codex-cli', { items: [issues] })], [], [['mcp', 'issues', false]]);
-  home.mcp.library.issues!.name = 'Issues';
-  assert.deepEqual(pluginPlan(profile('Mine', ['mcp:issues']), pluginLive(home)).map(each => [each.id, each.turn, each.held.map(held => held.tool)]), [[issuesId, ['codex-cli'], ['copilot-cli']]]);
+  const installs = [docsIn('copilot-cli', { items: [issues] }), docsIn('codex-cli', { items: [issues] })];
+  const mine = profile('Mine', ['mcp:issues']);
+  // Item named `Issues` with no kept Copilot CLI own part: writes `Issues`, not `issues`, so Copilot CLI turns plugin's `issues` off.
+  const capital = docsHome(installs, [], [['mcp', 'issues', false]]);
+  capital.mcp.library.issues!.name = 'Issues';
+  assert.deepEqual(pluginPlan(mine, pluginLive(capital)), [{ id: issuesId, on: [], off: ['copilot-cli', 'codex-cli'], held: [] }]);
+  // Item named `Issues` whose kept Copilot CLI own part spells it `issues`: matches exact name, so Copilot CLI stays on (no hold).
+  const keptLower = docsHome(installs, [], [['mcp', 'issues', false]], [{ ...row('issues'), copilotName: 'issues' }]);
+  keptLower.mcp.library.issues!.name = 'Issues';
+  assert.deepEqual(pluginPlan(mine, pluginLive(keptLower)), [{ id: issuesId, on: [], off: ['codex-cli'], held: [] }]);
+  // Item named `Issues` served through the plugin in Copilot CLI (same content as plugin's `issues`, servers.ts viaPlugin): matches the plugin's exact name there.
+  const viaPlug = docsHome(installs, [], [['mcp', 'issues', false]], [row('issues', { 'copilot-cli': { plugin: 'document-tools', marketplace: 'team-tools', name: 'issues' } })]);
+  viaPlug.mcp.library.issues!.name = 'Issues';
+  assert.deepEqual(pluginPlan(mine, pluginLive(viaPlug)), [{ id: issuesId, on: [], off: ['codex-cli'], held: [] }]);
 });
 
 test('A plugin’s item is on, for Start from what’s on now and the row alike, where a tool switches it: Claude Code’s copy that stays on doesn’t count while Codex has it off', () => {
@@ -634,16 +653,20 @@ test('A tool whose write fails is said, and is in neither the History entry nor 
   } finally { await box.cleanup(); }
 });
 
-test('Copilot CLI’s server sharing its name with one of the person’s own is left on there and said; Claude Code and Codex turn it off by their own switches', async () => {
+test('A server of his only found in Copilot CLI (not in Central Knot) is never disabled by a profile: Quiet leaves Copilot CLI’s files intact, turns Claude Code and Codex off, and is in use', async () => {
   const { box, made } = await pluginHome({ copilot: true });
   try {
-    const copilotBefore = await text(box, '.copilot/settings.json');
-    const switched = await switchProfile(box.context, box.tools, await made('Quiet', [docsId('skill', 'pdf-reader'), docsId('skill', 'spreadsheet')]), (await sideNow(box)).side);
-    assert.deepEqual([switched.off, switched.results.map(result => [result.harness, result.outcome, result.message])], [['issues'],
-      [['copilot-cli', 'held', 'issues: Copilot CLI turns a server off by its name alone, and a server of your own there is named “issues” too.']]]);
-    assert.deepEqual([await text(box, '.copilot/settings.json'), await text(box, '.codex/config.toml'), JSON.parse((await text(box, '.claude/settings.json'))!).deniedMcpServers],
-      [copilotBefore, `${CODEX_BEFORE}\n[plugins."docs@team".mcp_servers.issues]\nenabled = false\n`, [{ serverName: 'plugin:docs:issues' }]]);
-    assert.deepEqual(await (await sideNow(box)).inUse(), [], 'held in Copilot CLI, so not in use');
+    const copilotBefore = await text(box, '.copilot/settings.json'), mcpBefore = await text(box, '.copilot/mcp-config.json');
+    const quiet = await made('Quiet', [docsId('skill', 'pdf-reader'), docsId('skill', 'spreadsheet')]);
+    const switched = await switchProfile(box.context, box.tools, quiet, (await sideNow(box)).side);
+    assert.deepEqual([switched.off, switched.results], [['issues'], []]);
+    assert.deepEqual([await text(box, '.copilot/settings.json'), await text(box, '.copilot/mcp-config.json'), await text(box, '.codex/config.toml'), JSON.parse((await text(box, '.claude/settings.json'))!).deniedMcpServers],
+      [copilotBefore, mcpBefore, `${CODEX_BEFORE}\n[plugins."docs@team".mcp_servers.issues]\nenabled = false\n`, [{ serverName: 'plugin:docs:issues' }]]);
+    const now = await sideNow(box);
+    assert.deepEqual(await now.inUse(), ['Quiet'], 'standing fact of Copilot CLI’s found entry does not hold Quiet back');
+    const quietProfile = (await readProfiles(box.home)).profiles.find(each => each.id === quiet)!;
+    const copilotCopy = now.plugins.find(item => item.id === issuesId2)!.copies.find(copy => copy.tool === 'copilot-cli')!;
+    assert.deepEqual(copilotKeptOnBy(quietProfile, { id: issuesId2 }, copilotCopy), { by: 'found' });
   } finally { await box.cleanup(); }
 });
 
@@ -685,7 +708,7 @@ test('With the whole plugin off in Codex a switch writes nothing there: it is of
 
 const pdfId2 = docsId('skill', 'pdf-reader'), sheetId2 = docsId('skill', 'spreadsheet'), issuesId2 = docsId('mcp', 'issues');
 
-test('A switch that turns his own Copilot CLI server on leaves the plugin’s server of that name on there, and says so: Copilot CLI turns a server off by its name alone', async () => {
+test('A switch that turns his own Copilot CLI server on leaves the plugin’s server of that name on there without holding it, and Mine is in use', async () => {
   const { box, made } = await pluginHome({ copilot: true });
   try {
     // His own issues, taken in for Copilot CLI alone, then turned Off: not there now.
@@ -693,11 +716,16 @@ test('A switch that turns his own Copilot CLI server on leaves the plugin’s se
     await applyServers(box.context, box.tools, [{ key: 'issues', on: true, except: others }]);
     await applyServers(box.context, box.tools, [{ key: 'issues', on: false, except: others, seenOn: true }]);
     assert.equal(JSON.parse((await text(box, '.copilot/mcp-config.json'))!).mcpServers.issues, undefined);
-    const switched = await switchProfile(box.context, box.tools, await made('Mine', ['mcp:issues', pdfId2, sheetId2]), (await sideNow(box)).side);
-    assert.deepEqual(switched.results.map(result => [result.harness, result.outcome, result.message]),
-      [['copilot-cli', 'held', 'issues: Copilot CLI turns a server off by its name alone, and a server of your own there is named “issues” too.']]);
+    const mine = await made('Mine', ['mcp:issues', pdfId2, sheetId2]);
+    const switched = await switchProfile(box.context, box.tools, mine, (await sideNow(box)).side);
+    assert.deepEqual(switched.results, []);
     assert.deepEqual([JSON.parse((await text(box, '.copilot/mcp-config.json'))!).mcpServers.issues?.command, JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers],
       ['mine', undefined], 'his own server back, and no rule that would turn it off');
+    const now = await sideNow(box);
+    assert.deepEqual(await now.inUse(), ['Mine']);
+    const mineProfile = (await readProfiles(box.home)).profiles.find(each => each.id === mine)!;
+    const copilotCopy = now.plugins.find(item => item.id === issuesId2)!.copies.find(copy => copy.tool === 'copilot-cli')!;
+    assert.deepEqual(copilotKeptOnBy(mineProfile, { id: issuesId2 }, copilotCopy), { by: 'own' });
   } finally { await box.cleanup(); }
 });
 
@@ -767,7 +795,7 @@ test('A profile whose every difference is held is not switched, and says why in 
   } finally { await box.cleanup(); }
 });
 
-test('A disable rule an earlier switch wrote for the plugin’s server goes when a switch turns his own server of that name on: Quiet, then Dev, then Undo, and his server is never both there and disabled', async () => {
+test('A disable rule an earlier switch wrote for the plugin’s server goes when a switch turns his own server of that name on: Quiet, then Dev, then Undo restores the prior rule', async () => {
   const { box, made } = await pluginHome({ copilot: true });
   try {
     const others: HarnessId[] = ['claude-cli', 'codex-cli', 'pi-cli'];
@@ -777,10 +805,11 @@ test('A disable rule an earlier switch wrote for the plugin’s server goes when
     await switchProfile(box.context, box.tools, await made('Quiet', [pdfId2, sheetId2]), (await sideNow(box)).side);
     assert.deepEqual(await copilot(), { his: false, disabled: ['issues'] }, 'Quiet: neither, so the plugin’s goes off by its name');
     const dev = await switchProfile(box.context, box.tools, await made('Dev', ['mcp:issues', pdfId2, sheetId2]), (await sideNow(box)).side);
-    assert.deepEqual([await copilot(), dev.results.map(result => [result.harness, result.outcome])], [{ his: true, disabled: [] }, [['copilot-cli', 'held']]], 'Dev: his back, and the rule gone');
+    assert.deepEqual([await copilot(), dev.results, dev.settingsChanged],
+      [{ his: true, disabled: [] }, [], ['Copilot CLI’s off-switch for “issues” was cleared so yours is on; the plugin’s “issues” is on there too.']], 'Dev: his back, rule gone, no hold');
+    assert.deepEqual(await (await sideNow(box)).inUse(), ['Dev']);
     await undoSwitch(box.context, box.tools, dev.event!, (await sideNow(box)).side);
-    const after = await copilot();
-    assert.ok(!(after.his && after.disabled.includes('issues')), JSON.stringify(after));
+    assert.deepEqual(await copilot(), { his: false, disabled: ['issues'] }, 'Undo puts the earlier disable rule back');
   } finally { await box.cleanup(); }
 });
 
@@ -1114,7 +1143,7 @@ test('Choosing plugin items on an older profile keeps his own tick, starts with 
     const reopened = (await readProfiles(box.home)).profiles[0]!;
     assert.deepEqual(reopened, { id: 'legacy', name: 'Legacy', items: ['skill:notes'], switchesPluginItems: true });
     await writeFile(join(box.home, '.codex/config.toml'), CODEX_BEFORE);
-    assert.ok(pluginPlan(reopened, (await sideNow(box)).plugins).some(turn => turn.id === pdfId2 && !turn.on && turn.turn.includes('codex-cli')));
+    assert.ok(pluginPlan(reopened, (await sideNow(box)).plugins).some(turn => turn.id === pdfId2 && turn.off.includes('codex-cli')));
   } finally { await box.cleanup(); }
 });
 
@@ -1135,7 +1164,7 @@ test('A new empty profile cannot be switched; ticking one item of his own lets a
     const ready = (await readProfiles(box.home)).profiles[0]!;
     assert.equal(switchable(ready, await live(box), before.plugins), true);
     const plan = pluginPlan(ready, before.plugins);
-    assert.deepEqual(plan.filter(turn => !turn.on && turn.turn.length).map(turn => turn.id).sort(), [issuesId2, pdfId2, sheetId2]);
+    assert.deepEqual(plan.filter(turn => turn.off.length).map(turn => turn.id).sort(), [issuesId2, pdfId2, sheetId2]);
     const switched = await switchProfile(box.context, box.tools, freshId, before.side);
     assert.deepEqual([switched.stopped, switched.on, switched.off.sort()], [undefined, [], ['issues', 'pdf-reader', 'spreadsheet']]);
     assert.deepEqual(JSON.parse((await text(box, '.copilot/settings.json'))!).disabledSkills.sort(), ['docs:pdf-reader', 'docs:spreadsheet']);
@@ -1170,8 +1199,8 @@ test('A plugin installed after a managing and a non-managing profile: the managi
     const now = await sideNow(box), [old, modern] = (await readProfiles(box.home)).profiles;
     assert.deepEqual(pluginPlan(old!, now.plugins), [], 'Old leaves the newly installed plugin alone');
     assert.deepEqual(await now.inUse(), ['Old'], 'Old stays in use; Modern does not until switched');
-    assert.deepEqual(pluginPlan(modern!, now.plugins).map(turn => [turn.id, turn.on, turn.turn]),
-      [['plugin:skill:tracker@team/triage', false, ['codex-cli', 'copilot-cli']]]);
+    assert.deepEqual(pluginPlan(modern!, now.plugins).map(turn => [turn.id, turn.on, turn.off]),
+      [['plugin:skill:tracker@team/triage', [], ['codex-cli', 'copilot-cli']]]);
 
     // Switching to Old (with notes off first so the switch runs) leaves tracker's triage untouched.
     await applySkills(box.context, box.tools, [{ key: 'notes', on: false, except: [], seenOn: true }]);
@@ -1291,4 +1320,282 @@ test('switchPreview gives the same line for the page header and both menus: mana
   const offInCodex = docsHome([docsIn('codex-cli', { off: true })], [], [['skill', 'notes', true]]);
   assert.equal(switchPreview(profile('Docs', ['skill:notes', pdfId, sheetId], true), homeItems(offInCodex), pluginLive(offInCodex)),
     'Not in use · document-tools is off in Codex, so 2 of its items can’t be switched from here');
+});
+
+// ---------- Copilot CLI shared MCP server name: one name is one switch ----------
+
+/** Takes his own server in `.copilot/mcp-config.json` into Central Knot for Copilot CLI alone, On. */
+async function takeInCopilotServer(box: Box, key = 'issues') {
+  const others = box.tools.filter(tool => tool !== 'copilot-cli');
+  await applyServers(box.context, box.tools, [{ key, on: true, except: others }]);
+}
+const copilotFiles = async (box: Box) => ({
+  settings: await text(box, '.copilot/settings.json'),
+  mcp: await text(box, '.copilot/mcp-config.json'),
+  codex: await text(box, '.codex/config.toml'),
+  claude: await text(box, '.claude/settings.json'),
+});
+
+test('Copilot shared name example 1: both configured, a managing profile with his and without the plugin’s writes nothing to Copilot CLI, turns Claude Code and Codex off, and is in use', async () => {
+  const { box, made } = await pluginHome({ copilot: true });
+  try {
+    await takeInCopilotServer(box);
+    const before = await copilotFiles(box);
+    const mine = await made('Mine', ['mcp:issues', pdfId2, sheetId2]);
+    const switched = await switchProfile(box.context, box.tools, mine, (await sideNow(box)).side);
+    assert.deepEqual([switched.stopped, switched.on, switched.off, switched.results], [undefined, [], ['issues'], []]);
+    const after = await copilotFiles(box);
+    assert.deepEqual([after.settings, after.mcp], [before.settings, before.mcp], 'Copilot CLI’s two files untouched');
+    assert.equal(after.codex, `${CODEX_BEFORE}\n[plugins."docs@team".mcp_servers.issues]\nenabled = false\n`);
+    assert.deepEqual(JSON.parse(after.claude!).deniedMcpServers, [{ serverName: 'plugin:docs:issues' }]);
+    const now = await sideNow(box);
+    assert.deepEqual(await now.inUse(), ['Mine']);
+    const mineProfile = (await readProfiles(box.home)).profiles.find(each => each.id === mine)!;
+    assert.match(switchPreview(mineProfile, await live(box), now.plugins), /^In use · /);
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot shared name examples 2, 3 and 4: Quiet turns both off in one switch with byte-exact Undo; PluginOnly clears the rule; Mine restores his, clears the rule and says so', async () => {
+  const { box, made } = await pluginHome({ copilot: true });
+  try {
+    // Realistic Copilot CLI entry shape (`type: 'local'`, `tools: ['*']` as mcp.ts writes it) so Off -> On restores byte for byte.
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'mine', tools: ['*'] } } }, null, 2)}\n`);
+    await takeInCopilotServer(box);
+    const initial = await copilotFiles(box);
+    const quiet = await made('Quiet', [pdfId2, sheetId2]);
+    const pluginOnly = await made('PluginOnly', [pdfId2, sheetId2, issuesId2]);
+    const mine = await made('Mine', ['mcp:issues', pdfId2, sheetId2]);
+    const profileById = async (id: string) => (await readProfiles(box.home)).profiles.find(each => each.id === id)!;
+
+    // Example 2: Quiet previews two off, turns both off in one switch, is in use, and Undo puts every file back byte for byte.
+    const beforeQuiet = await sideNow(box);
+    assert.equal(switchPreview(await profileById(quiet), await live(box), beforeQuiet.plugins), 'Switching turns 2 items off');
+    const toQuiet = await switchProfile(box.context, box.tools, quiet, beforeQuiet.side);
+    assert.deepEqual([toQuiet.stopped, toQuiet.on, toQuiet.off, toQuiet.results], [undefined, [], ['issues', 'issues'], []]);
+    const atQuiet = await copilotFiles(box);
+    assert.deepEqual([JSON.parse(atQuiet.mcp!).mcpServers.issues, JSON.parse(atQuiet.settings!).disabledMcpServers], [undefined, ['issues']]);
+    assert.deepEqual(await (await sideNow(box)).inUse(), ['Quiet']);
+    await undoSwitch(box.context, box.tools, toQuiet.event!, (await sideNow(box)).side);
+    assert.deepEqual(await copilotFiles(box), initial, 'Undo of Quiet restores every file byte for byte');
+
+    // Back to Quiet for examples 3 and 4.
+    await switchProfile(box.context, box.tools, quiet, (await sideNow(box)).side);
+
+    // Example 3: PluginOnly clears the rule, keeps his entry out, and preview, result and History agree on 1 item on.
+    const beforePlugin = await sideNow(box);
+    assert.equal(switchPreview(await profileById(pluginOnly), await live(box), beforePlugin.plugins), 'Switching turns 1 item on');
+    const toPlugin = await switchProfile(box.context, box.tools, pluginOnly, beforePlugin.side);
+    assert.deepEqual([toPlugin.stopped, toPlugin.on, toPlugin.off, toPlugin.results, toPlugin.settingsChanged], [undefined, ['issues'], [], [], undefined]);
+    assert.deepEqual([JSON.parse((await copilotFiles(box)).mcp!).mcpServers.issues, JSON.parse((await copilotFiles(box)).settings!).disabledMcpServers], [undefined, undefined]);
+    assert.equal(turnsWords(entryTurns((await history(box)).at(-1)!.profile!), 'did'), '1 item turned on');
+    assert.deepEqual(await (await sideNow(box)).inUse(), ['PluginOnly']);
+
+    // Back to Quiet for example 4.
+    await switchProfile(box.context, box.tools, quiet, (await sideNow(box)).side);
+    const quietAgain = await copilotFiles(box);
+
+    // Example 4: Mine puts his entry back, clears the rule (plugin's on there too, said in the result), preview == result == History, in use, and Undo restores the prior rule.
+    const beforeMine = await sideNow(box);
+    assert.equal(switchPreview(await profileById(mine), await live(box), beforeMine.plugins), 'Switching turns 2 items on');
+    const toMine = await switchProfile(box.context, box.tools, mine, beforeMine.side);
+    assert.deepEqual([toMine.stopped, toMine.on, toMine.off, toMine.results, toMine.settingsChanged], [undefined, ['issues', 'issues'], [], [],
+      ['Copilot CLI’s off-switch for “issues” was cleared so yours is on; the plugin’s “issues” is on there too.']]);
+    const atMine = await copilotFiles(box);
+    assert.deepEqual([JSON.parse(atMine.mcp!).mcpServers.issues?.command, JSON.parse(atMine.settings!).disabledMcpServers], ['mine', undefined]);
+    assert.equal(turnsWords(entryTurns((await history(box)).at(-1)!.profile!), 'did'), '2 items turned on');
+    assert.deepEqual(await (await sideNow(box)).inUse(), ['Mine']);
+    await undoSwitch(box.context, box.tools, toMine.event!, (await sideNow(box)).side);
+    assert.deepEqual(await copilotFiles(box), quietAgain, 'Undo of Mine restores the prior disabledMcpServers rule byte for byte');
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot shared name example 5: a non-managing profile naming his server clears a standing Copilot CLI rule and says so in preview and result; one not naming it leaves the rule intact', async () => {
+  const { box, made } = await pluginHome({ copilot: true });
+  try {
+    await takeInCopilotServer(box);
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('My notes.', 'notes') }, [], 'notes');
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]);
+    await switchProfile(box.context, box.tools, await made('Quiet', [pdfId2, sheetId2]), (await sideNow(box)).side);
+    await saveProfile(box.context, { name: 'Legacy', items: ['mcp:issues'], switchesPluginItems: false });
+    await saveProfile(box.context, { name: 'NotesOnly', items: ['skill:notes'], switchesPluginItems: false });
+    const atQuiet = await copilotFiles(box);
+    const profiles = (await readProfiles(box.home)).profiles;
+    const legacy = profiles.find(each => each.name === 'Legacy')!;
+    const notesOnly = profiles.find(each => each.name === 'NotesOnly')!;
+
+    // A non-managing profile that does not touch his issues keeps the rule untouched and shows no exception.
+    const beforeNotes = await sideNow(box);
+    assert.equal(switchPreview(notesOnly, await live(box), beforeNotes.plugins), 'Switching turns 1 item on. Plugin items stay as they are.');
+    const toNotes = await switchProfile(box.context, box.tools, notesOnly.id, beforeNotes.side);
+    assert.deepEqual([toNotes.stopped, toNotes.settingsChanged, await copilotFiles(box)], [undefined, undefined, atQuiet]);
+
+    // Legacy (non-managing, names mcp:issues): preview carries the exception, switch clears the rule, Claude & Codex untouched, in use, Undo restores.
+    const beforeLegacy = await sideNow(box);
+    assert.equal(switchPreview(legacy, await live(box), beforeLegacy.plugins),
+      'Switching turns 2 items on and 1 off. Plugin items stay as they are, but for “issues” in Copilot CLI, which shares its name with yours.');
+    const toLegacy = await switchProfile(box.context, box.tools, legacy.id, beforeLegacy.side);
+    assert.deepEqual([toLegacy.stopped, toLegacy.on, toLegacy.off, toLegacy.results, toLegacy.settingsChanged], [undefined, ['issues', 'issues'], ['notes'], [],
+      ['Copilot CLI’s off-switch for “issues” was cleared so yours is on; the plugin’s “issues” is on there too.']]);
+    const atLegacy = await copilotFiles(box);
+    assert.deepEqual([JSON.parse(atLegacy.mcp!).mcpServers.issues?.command, JSON.parse(atLegacy.settings!).disabledMcpServers, atLegacy.claude, atLegacy.codex],
+      ['mine', undefined, atQuiet.claude, atQuiet.codex], 'only Copilot CLI’s rule cleared; Claude Code and Codex plugin copies untouched');
+    assert.deepEqual(await (await sideNow(box)).inUse(), ['Legacy']);
+
+    // When his issues is already On and only the Copilot CLI rule stands: not in use, preview says 1 item on with the exception, switch clears it.
+    await writeFile(join(box.home, '.copilot/settings.json'), atQuiet.settings!);
+    const standing = await sideNow(box);
+    assert.deepEqual(await standing.inUse(), [], 'rule standing blocks In use even though his item is On');
+    assert.equal(switchPreview(legacy, await live(box), standing.plugins),
+      'Switching turns 1 item on. Plugin items stay as they are, but for “issues” in Copilot CLI, which shares its name with yours.');
+    const cleared = await switchProfile(box.context, box.tools, legacy.id, standing.side);
+    assert.deepEqual([cleared.on, cleared.off, cleared.settingsChanged], [['issues'], [],
+      ['Copilot CLI’s off-switch for “issues” was cleared so yours is on; the plugin’s “issues” is on there too.']]);
+    assert.equal(JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers, undefined);
+    assert.deepEqual(await (await sideNow(box)).inUse(), ['Legacy']);
+    // pluginStayNote handles zero, one, and two shared names cleanly.
+    const two = [
+      { id: 'plugin:mcp:docs@team/issues', kind: 'mcp' as const, name: 'issues', plugin: 'docs', marketName: 'team', copies: [] },
+      { id: 'plugin:mcp:docs@team/tracker', kind: 'mcp' as const, name: 'tracker', plugin: 'docs', marketName: 'team', copies: [] },
+    ];
+    assert.equal(pluginStayNote([], two), PLUGIN_ITEMS_STAY);
+    assert.equal(pluginStayNote([{ id: two[0]!.id, on: ['copilot-cli'], off: [], held: [] }], two),
+      'Plugin items stay as they are, but for “issues” in Copilot CLI, which shares its name with yours.');
+    assert.equal(pluginStayNote(two.map(item => ({ id: item.id, on: ['copilot-cli'], off: [], held: [] })), two),
+      'Plugin items stay as they are, but for “issues” and “tracker” in Copilot CLI, which share their names with yours.');
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot shared name example 6: names differing only in case (Issues vs issues) are two switches with no shared rule, whether On or Off', async () => {
+  const { box, made } = await pluginHome({ copilot: true });
+  try {
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: { Issues: { command: 'mine' } } }, null, 2)}\n`);
+    await takeInCopilotServer(box);
+    const mine = await made('Mine', ['mcp:issues', pdfId2, sheetId2]);
+    const quiet = await made('Quiet', [pdfId2, sheetId2]);
+    // Both on: Mine leaves out plugin's `issues` and keeps his `Issues` -> writes disabledMcpServers: ['issues'] in one switch.
+    const toMine = await switchProfile(box.context, box.tools, mine, (await sideNow(box)).side);
+    assert.deepEqual([toMine.results, toMine.settingsChanged], [[], undefined]);
+    assert.deepEqual([JSON.parse((await text(box, '.copilot/mcp-config.json'))!).mcpServers.Issues?.command, JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers], ['mine', ['issues']]);
+    assert.deepEqual(await (await sideNow(box)).inUse(), ['Mine']);
+    // Quiet turns his `Issues` off too; switching back to Mine restores `Issues` without clearing `disabledMcpServers: ['issues']`.
+    await switchProfile(box.context, box.tools, quiet, (await sideNow(box)).side);
+    const backToMine = await switchProfile(box.context, box.tools, mine, (await sideNow(box)).side);
+    assert.deepEqual([backToMine.on, backToMine.off, backToMine.settingsChanged], [['Issues'], [], undefined]);
+    assert.deepEqual([JSON.parse((await text(box, '.copilot/mcp-config.json'))!).mcpServers.Issues?.command, JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers], ['mine', ['issues']]);
+    assert.deepEqual(await (await sideNow(box)).inUse(), ['Mine']);
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot shared name example 7: when .copilot/settings.json cannot be written, the result says so, History holds only what was confirmed, and the profile is not in use', async () => {
+  const { box, made } = await pluginHome({ copilot: true });
+  try {
+    await takeInCopilotServer(box);
+    await switchProfile(box.context, box.tools, await made('Quiet', [pdfId2, sheetId2]), (await sideNow(box)).side);
+    const pluginOnly = await made('PluginOnly', [pdfId2, sheetId2, issuesId2]);
+    const side = (await sideNow(box)).side;
+    const copilotDir = join(box.home, '.copilot');
+    await chmod(copilotDir, 0o555);
+    let switched;
+    try { switched = await switchProfile(box.context, box.tools, pluginOnly, side); } finally { await chmod(copilotDir, 0o755); }
+    assert.deepEqual([switched.on, switched.left, switched.results.map(result => [result.harness, result.outcome])], [['issues'], ['issues'], [['copilot-cli', 'failed']]]);
+    assert.deepEqual((await history(box)).at(-1)!.profile?.plugins?.map(copy => copy.tool), ['claude-cli', 'codex-cli'], 'History keeps only confirmed tools');
+    assert.deepEqual(await (await sideNow(box)).inUse(), [], 'rule still stands, so not in use');
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot shared name sequences: (a) box-written rule flips on in Copilot CLI and off in Claude Code and Codex; (b) found entry then plugin profile; (c) same-content server held back by viaPlugin; (d) two plugins sharing a name', async () => {
+  // Sequence (a): Copilot CLI off-switch written by the Plugins/Library box while Claude Code & Codex still have issues on, then Mine.
+  {
+    const { box, made } = await pluginHome({ copilot: true });
+    try {
+      await takeInCopilotServer(box);
+      const settingsPath = join(box.home, '.copilot/settings.json');
+      await writeFile(settingsPath, `${JSON.stringify({ ...JSON.parse((await text(box, '.copilot/settings.json'))!), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+      const before = await copilotFiles(box);
+      const mine = await made('Mine', ['mcp:issues', pdfId2, sheetId2]);
+      const planNow = await sideNow(box);
+      const mineProfile = (await readProfiles(box.home)).profiles.find(each => each.id === mine)!;
+      assert.equal(switchPreview(mineProfile, await live(box), planNow.plugins), 'Switching turns 1 item on and 1 off');
+      const switched = await switchProfile(box.context, box.tools, mine, planNow.side);
+      assert.deepEqual([switched.on, switched.off, switched.results, switched.settingsChanged], [['issues'], ['issues'], [],
+        ['Copilot CLI’s off-switch for “issues” was cleared so yours is on; the plugin’s “issues” is on there too.']]);
+      assert.equal(turnsWords(entryTurns((await history(box)).at(-1)!.profile!), 'did'), '1 item turned on and 1 turned off');
+      assert.equal(JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers, undefined);
+      assert.deepEqual(JSON.parse((await text(box, '.claude/settings.json'))!).deniedMcpServers, [{ serverName: 'plugin:docs:issues' }]);
+      assert.match((await text(box, '.codex/config.toml'))!, /\[plugins\."docs@team"\.mcp_servers\.issues\]\nenabled = false/);
+      assert.deepEqual(await (await sideNow(box)).inUse(), ['Mine']);
+      await undoSwitch(box.context, box.tools, switched.event!, (await sideNow(box)).side);
+      assert.deepEqual(await copilotFiles(box), before, 'Undo reverses both directions byte for byte');
+    } finally { await box.cleanup(); }
+  }
+
+  // Sequence (b): found-only personal entry in Copilot CLI (not in Central Knot) — Quiet writes no rule and is in use; then Work (with plugin's) is in use.
+  {
+    const { box, made } = await pluginHome({ copilot: true });
+    try {
+      const copilotBefore = await text(box, '.copilot/settings.json');
+      const quiet = await made('Quiet', [pdfId2, sheetId2]);
+      const work = await made('Work', [pdfId2, sheetId2, issuesId2]);
+      const toQuiet = await switchProfile(box.context, box.tools, quiet, (await sideNow(box)).side);
+      assert.deepEqual([toQuiet.off, toQuiet.results, await text(box, '.copilot/settings.json')], [['issues'], [], copilotBefore]);
+      assert.deepEqual(await (await sideNow(box)).inUse(), ['Quiet']);
+      const toWork = await switchProfile(box.context, box.tools, work, (await sideNow(box)).side);
+      assert.deepEqual([toWork.on, toWork.results, await text(box, '.copilot/settings.json')], [['issues'], [], copilotBefore]);
+      assert.deepEqual(await (await sideNow(box)).inUse(), ['Work']);
+    } finally { await box.cleanup(); }
+  }
+
+  // Sequence (c): his own issues has the same content as the plugin's (servers.ts viaPlugin holds his entry back in Copilot CLI).
+  {
+    const { box, made } = await pluginHome({ copilot: true });
+    try {
+      await writeFile(join(box.home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`);
+      await putFile(join(box.home, '.pi/agent/mcp.json'), `${JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['issues'] } } }, null, 2)}\n`);
+      await applyServers(box.context, box.tools, [{ key: 'issues', on: true, except: [] }]);
+      assert.equal(JSON.parse((await text(box, '.copilot/mcp-config.json'))!).mcpServers.issues, undefined, 'held back in Copilot CLI because same content as plugin’s');
+      const quiet = await made('Quiet', [pdfId2, sheetId2]);
+      const mine = await made('Mine', ['mcp:issues', pdfId2, sheetId2]);
+      await switchProfile(box.context, box.tools, quiet, (await sideNow(box)).side);
+      assert.deepEqual(JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers, ['issues']);
+      assert.deepEqual(await (await sideNow(box)).inUse(), ['Quiet']);
+      const toMine = await switchProfile(box.context, box.tools, mine, (await sideNow(box)).side);
+      assert.deepEqual([toMine.results, JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers, JSON.parse((await text(box, '.copilot/mcp-config.json'))!).mcpServers.issues],
+        [[], undefined, undefined]);
+      assert.deepEqual(await (await sideNow(box)).inUse(), ['Mine']);
+    } finally { await box.cleanup(); }
+  }
+
+  // Sequence (d): two plugins sharing exact name `issues` in Copilot CLI — one rule, absent when profile wants either, present when it wants neither.
+  {
+    const { box, made } = await pluginHome({ copilot: true });
+    try {
+      await writeFile(join(box.home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`);
+      const trackerCache = join(box.home, '.copilot/installed-plugins/team/tracker');
+      await putFile(join(trackerCache, '.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['tracker-issues'] } } }));
+      await putFile(join(trackerCache, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'tracker', version: '1.0.0' }));
+      const cfg = JSON.parse((await text(box, '.copilot/config.json'))!);
+      cfg.installedPlugins.push({ name: 'tracker', marketplace: 'team', version: '1.0.0', cache_path: trackerCache, enabled: true });
+      await writeFile(join(box.home, '.copilot/config.json'), JSON.stringify(cfg));
+      const trackerIssues = 'plugin:mcp:tracker@team/issues';
+      const docsOnly = await made('DocsOnly', [pdfId2, sheetId2, issuesId2]);
+      const neither = await made('Neither', [pdfId2, sheetId2]);
+      // DocsOnly wants docs' issues and not tracker's: rule stays absent, in use!
+      assert.deepEqual(await (await sideNow(box)).inUse(), ['DocsOnly']);
+      // Neither wants neither: preview says 2 off, one switch writes disabledMcpServers: ['issues'], result & History count 2 off, Undo restores both.
+      const beforeNeither = await sideNow(box);
+      const neitherProfile = (await readProfiles(box.home)).profiles.find(each => each.id === neither)!;
+      assert.equal(switchPreview(neitherProfile, await live(box), beforeNeither.plugins), 'Switching turns 2 items off');
+      const toNeither = await switchProfile(box.context, box.tools, neither, beforeNeither.side);
+      assert.deepEqual([toNeither.off.length, JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers], [2, ['issues']]);
+      assert.equal(turnsWords(entryTurns((await history(box)).at(-1)!.profile!), 'did'), '2 items turned off');
+      assert.deepEqual(await (await sideNow(box)).inUse(), ['Neither']);
+      // Switching to DocsOnly clears the shared rule and counts 2 on (matching preview).
+      const beforeDocs = await sideNow(box);
+      const docsProfile = (await readProfiles(box.home)).profiles.find(each => each.id === docsOnly)!;
+      assert.equal(switchPreview(docsProfile, await live(box), beforeDocs.plugins), 'Switching turns 2 items on');
+      const toDocs = await switchProfile(box.context, box.tools, docsOnly, beforeDocs.side);
+      assert.deepEqual([toDocs.on.length, JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers, toDocs.settingsChanged], [2, undefined, undefined]);
+      assert.deepEqual(await (await sideNow(box)).inUse(), ['DocsOnly']);
+    } finally { await box.cleanup(); }
+  }
 });

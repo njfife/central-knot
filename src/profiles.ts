@@ -23,7 +23,7 @@ import { itemKey, type ItemKind } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
 import { succeeded, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { click } from './pluginswitch.ts';
-import { changes, heldWords, liveItems, pluginPlan, pluginUndo, switchPlan, undoPlan, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { changes, copilotKeptOnBy, heldWords, liveItems, pluginPlan, pluginUndo, switchPlan, undoPlan, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
 import { applyServers, serverKind } from './servers.ts';
 import { errorCode, libraryGate, storeDirectory, writeDurably, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
@@ -164,10 +164,10 @@ export interface PluginSide { live: () => Promise<PluginLive[]>; run: (ops: Plug
 /** A home read with no plugins' items, for a caller whose home has none (tests of the library's part alone). */
 export const NO_PLUGINS: PluginSide = { live: async () => [], run: async () => [] };
 
-/** The copies a plugin plan turns (pluginPlan `turn`), each toward what the profile has, and those it turns on to keep his own server on (`release`). */
+/** The copies a plugin plan turns (pluginPlan `on` and `off`), each toward its own tool's direction. */
 const copiesTurned = (plan: PluginTurn[], live: PluginLive[]): CopyTurn[] => plan.flatMap(turn => {
   const item = live.find(each => each.id === turn.id)!, at = (tool: HarnessId, on: boolean) => ({ item, copy: item.copies.find(copy => copy.tool === tool)!, on });
-  return [...turn.turn.map(tool => at(tool, turn.on)), ...(turn.release ?? []).map(tool => at(tool, true))];
+  return [...turn.on.map(tool => at(tool, true)), ...turn.off.map(tool => at(tool, false))];
 });
 /** A plan's held copies (pluginPlan `held`), as a result says them: the item, its tool and why. */
 const heldResults = (plan: PluginTurn[], live: PluginLive[]): DestinationResult[] => plan.flatMap(turn => turn.held.map(({ tool, why }) => {
@@ -218,10 +218,14 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
       if (mine) placedResults.push(...done.results); else made.push(...(done.made ?? []));
     }
   }
-  const confirmed: CopyTurn[] = [], asAsked: CopyTurn[] = [];
+  const confirmed: CopyTurn[] = [], asAsked: CopyTurn[] = [], copilotDone = new Set<string>();
   for (const turn of copies.filter(each => !placedKey(each))) {
+    // Two plugins sharing an exact MCP server name in Copilot CLI share one switch: once the first confirmed it, the second did too.
+    const shared = turn.item.kind === 'mcp' && turn.copy.tool === 'copilot-cli' ? `${turn.item.name}\u0000${turn.on}` : undefined;
+    if (shared && copilotDone.has(shared)) { confirmed.push(turn); continue; }
     const { changed, failed } = await installedCopy(turn, plugins);
-    if (failed) results.push(failed); else (changed ? confirmed : asAsked).push(turn);
+    if (failed) results.push(failed);
+    else { (changed ? confirmed : asAsked).push(turn); if (changed && shared) copilotDone.add(shared); }
   }
   const after = await readLibraries(context), records = 'stop' in after ? undefined : after.libraries;
   const now = (item: LiveItem) => records && !records[item.kind][item.key]?.deleted ? records[item.kind][item.key]?.on : undefined;
@@ -283,6 +287,15 @@ async function settleEntry(context: ShareContext, eventId: string, confirmed: Co
   await replaceHistory(context, history);
 }
 
+/** Confirmed Copilot CLI off-switches cleared only because the profile names his own server of that exact name (said in result and History). */
+function clearedForHis(live: PluginLive[], profile: Profile, confirmed: CopyTurn[]): string[] {
+  const pluginWanted = (name: string) => profile.switchesPluginItems && live.some(item => item.kind === 'mcp' && item.name === name
+    && item.copies.some(copy => copy.tool === 'copilot-cli' && copy.way === 'switch') && profile.items.includes(item.id));
+  const names = [...new Set(confirmed.filter(turn => turn.on && turn.copy.tool === 'copilot-cli' && turn.item.kind === 'mcp'
+    && copilotKeptOnBy(profile, turn.item, turn.copy)?.by === 'own' && !pluginWanted(turn.item.name)).map(turn => turn.item.name))];
+  return names.map(name => `Copilot CLI’s off-switch for “${name}” was cleared so yours is on; the plugin’s “${name}” is on there too.`);
+}
+
 // ---------- Switching, and its Undo ----------
 
 /**
@@ -307,8 +320,8 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off), ...(copies.length ? { plugins: copies.map(switched) } : {}) });
   await appendHistory(context, [event]);
   const done = await turnTogether(context, tools, turns, true, copies, read.libraries, plugins);
-  // What its passes changed in a tool's own settings (Pi's list: librarypass.ts Kind.follow), said by its entry and its result.
-  const settingsChanged = done.results.flatMap(result => (result.settingsChanged ? [result.settingsChanged] : []));
+  // What its passes changed in a tool's own settings (Pi's list: librarypass.ts Kind.follow, or a shared Copilot CLI off-switch cleared for his server), said by its entry and its result.
+  const settingsChanged = [...done.results.flatMap(result => (result.settingsChanged ? [result.settingsChanged] : [])), ...clearedForHis(live, profile, done.copies)];
   if (done.copies.length < copies.length || settingsChanged.length) await settleEntry(context, event.id, done.copies, settingsChanged);
   return { name: profile.name, ...outcome(turns, done.done, [...held, ...done.results], copies.filter(turn => !done.asAsked.includes(turn)), done.copies), event: event.id,
     ...(settingsChanged.length ? { settingsChanged } : {}) };

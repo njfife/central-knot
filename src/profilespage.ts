@@ -9,12 +9,12 @@
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
-import { allTurns, changes, heldWords, homeItems, inUse, inUseName, leftOut, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, switchable, switchPlan, switchPreview, turnsWords, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { allTurns, changes, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, leftOut, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, pluginStayNote, switchable, switchPlan, switchPreview, turnsWords, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
 import { noSingleSwitch } from './pluginstatus.ts';
 import { andList, toolNames } from './words.ts';
 import type { ItemKind } from './library.ts';
 import { plural } from './model.ts';
-import type { Profile } from './types.ts';
+import type { HarnessId, Profile } from './types.ts';
 
 let find = '';
 /** Whether the status bar's profile menu is open. */
@@ -111,9 +111,14 @@ function itemRow(profile: Profile, item: LiveItem, turns: Turns, isInUse: boolea
 function pluginState(profile: Profile, item: PluginLive, turn: PluginTurn | undefined, isInUse: boolean): { said: string; title?: string; changes: boolean } {
   const stays = profile.items.includes(item.id) ? [] : item.copies.filter(copy => copy.way === 'stays');
   const title = stays.map(copy => `${noSingleSwitch(copy.tool, item.kind)}, so it stays on there.`).join(' ') || undefined;
-  if (!turn?.turn.length) return { said: isInUse ? (pluginItemOn(item) ? 'On' : 'Off') : 'No change', title, changes: false };
-  const where = turn.turn.length < item.copies.length ? ` in ${andList(turn.turn.map(tool => toolNames[tool]))}` : '';
-  return { said: `Turns ${turn.on ? 'on' : 'off'}${where}`, title, changes: true };
+  if (!turn?.on.length && !turn?.off.length) {
+    const independent = item.copies.filter(copy => copy.way === 'switch' && !copilotKeptOnBy(profile, item, copy));
+    const on = independent.length ? independent.some(copy => copy.on) : pluginItemOn(item);
+    return { said: isInUse ? (on ? 'On' : 'Off') : 'No change', title, changes: false };
+  }
+  const part = (dir: 'on' | 'off', list: HarnessId[]) => `turns ${dir}${list.length < item.copies.length ? ` in ${andList(list.map(tool => toolNames[tool]))}` : ''}`;
+  const both = [turn.on.length && part('on', turn.on), turn.off.length && part('off', turn.off)].filter(Boolean).join('; ');
+  return { said: `${both.charAt(0).toUpperCase()}${both.slice(1)}`, title, changes: true };
 }
 
 /** At the head of a kind, once: each tool with no switch for one item of a plugin of that kind that has such an item here, which keeps those items on. */
@@ -123,16 +128,21 @@ function kindNote(kind: ItemKind, plugged: PluginLive[]) {
 }
 
 /**
- * Under a plugin item's name, one tool's copy that a switch can't turn though it could switch that one item, and why: its whole
- * plugin off there, with the way to the plugin's page; its own switch held (pluginswitch.ts cantSwitch, sharesName), or held by
- * this profile's plan (`turn`: Copilot CLI would take his own server of its name with it); its copy unreadable. Nothing for a copy
- * that switches, or that stays on in a tool with no switch for one item (kindNote, pluginState).
+ * Under a plugin item's name, one tool's copy that a switch can't turn though it could switch that one item, or a Copilot CLI
+ * MCP server kept on by another member sharing its exact name (profileplan.ts copilotKeptOnBy): its whole plugin off there,
+ * with the way to the plugin's page; its own switch held (pluginswitch.ts cantSwitch); its copy unreadable. Nothing for a copy
+ * that switches for this item alone, or that stays on in a tool with no switch for one item (kindNote, pluginState).
  */
-function copyNote(item: PluginLive, copy: PluginCopy, turn: PluginTurn | undefined): HTMLElement | null {
+function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy): HTMLElement | null {
   const tool = toolNames[copy.tool], note = (text: string, ...more: (Node | null)[]) => h('span.pf-note', { 'data-tool': copy.tool }, text, ...more);
-  const heldHere = copy.way === 'switch' && turn?.held.find(held => held.tool === copy.tool);
-  if (heldHere) return note(`${turn!.release?.includes(copy.tool) ? 'Turns on' : 'Stays on'} in ${tool}: ${heldHere.why}`);
-  if (copy.way === 'switch' || copy.way === 'stays') return null;
+  if (copy.way === 'switch') {
+    const kept = copilotKeptOnBy(profile, item, copy);
+    if (!kept) return null;
+    const verb = copy.on ? 'Stays on' : 'Turns on';
+    return note(kept.by === 'plugin' ? `${verb} in ${tool}: ${kept.plugin} shares the name “${item.name}” there.`
+      : `${verb} in ${tool}: it uses the plugin’s “${item.name}” while yours has the same name there.`);
+  }
+  if (copy.way === 'stays') return null;
   if (copy.way === 'unread') return h('span.pf-note', { 'data-tool': copy.tool, title: copy.why }, `Not known in ${tool}: its copy couldn’t be read.`);
   if (copy.way === 'held') return note(`Stays ${copy.on ? 'on' : 'off'} in ${tool}: ${copy.why}`);
   const source = 'install' in copy.target ? copy.target.install.source : undefined;
@@ -140,9 +150,9 @@ function copyNote(item: PluginLive, copy: PluginCopy, turn: PluginTurn | undefin
     attrs: { title: `Open ${item.plugin} on Plugins, where it is turned on or off in each tool` }, onclick: () => openPlugin({ source, plugin: item.plugin, marketplace: item.marketName }) }));
 }
 
-/** A plugin's item's row: its box, its name and plugin (the Library's mark, matrix.ts pluginTag), what a switch does to it, and under its name each tool whose copy it can't turn (copyNote). */
+/** A plugin's item's row: its box, its name and plugin (the Library's mark, matrix.ts pluginTag), what a switch does to it, and under its name each tool whose copy it can't turn or keeps on by shared name (copyNote). */
 function pluginRow(profile: Profile, item: PluginLive, turn: PluginTurn | undefined, isInUse: boolean) {
-  const included = profile.items.includes(item.id), { said, title, changes: moves } = pluginState(profile, item, turn, isInUse), notes = item.copies.flatMap(copy => copyNote(item, copy, turn) ?? []);
+  const included = profile.items.includes(item.id), { said, title, changes: moves } = pluginState(profile, item, turn, isInUse), notes = item.copies.flatMap(copy => copyNote(profile, item, copy) ?? []);
   const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on` : `Not in ${profile.name}: switching to it turns ${item.name} off`} in each tool that can switch it. Click to ${included ? 'leave it out' : 'put it in'}.`;
   return h(`div.pf-row${included ? '.pf-included' : ''}`, { role: 'row', 'data-item': item.id },
     h('span.pf-name', { role: 'cell' },
@@ -264,7 +274,7 @@ function switchButton(profile: Profile, plan: Plan, all: LiveItem[], plugged: Pl
     onclick: () => openPlugin({ source: 'install' in off.copy.target ? off.copy.target.install.source : undefined, plugin: off.item.plugin, marketplace: off.item.marketName }) });
   if (!changes(plan.counted) || !switchable(profile, all, plugged)) return null;
   const label = profile.name.length > 18 ? 'Switch to this profile' : `Switch to ${profile.name}`;
-  const title = whyReadOnly(state.home!) ?? `Use ${profile.name}: ${turnsWords(plan.counted, 'will')}.${profile.switchesPluginItems ? '' : ` ${PLUGIN_ITEMS_STAY}`} One step in History, with Undo.`;
+  const title = whyReadOnly(state.home!) ?? `Use ${profile.name}: ${turnsWords(plan.counted, 'will')}.${profile.switchesPluginItems ? '' : ` ${pluginStayNote(plan.plugs, plugged)}`} One step in History, with Undo.`;
   return button({ variant: 'primary', size: 'small', label, id: 'profile-switch', disabled: !canEditProfiles(), attrs: { title }, onclick: () => void switchToProfile(profile.id) });
 }
 
