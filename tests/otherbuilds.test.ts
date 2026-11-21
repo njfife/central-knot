@@ -2,10 +2,11 @@
 // running apps in a temp folder (tests/macstandins.ts): what counts as another build, where it runs, and every way Replace and
 // Quit refuse or go ahead. What a held build writes (nothing): tests/held.test.ts.
 import assert from 'node:assert/strict';
-import type { ChildProcess } from 'node:child_process';
+import { spawnSync, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 import { test } from 'node:test';
 import { QUIT_WAIT_MS } from '../src/model.ts';
@@ -269,6 +270,17 @@ test('Every script that starts the app names its stand-in for this Mac, so none 
   // Set in the app's environment, not only named in a comment line.
   const sets = (text: string) => /\bCK_TEST_APPS\s*:/.test(text.replace(/^\s*\/\/.*$/gm, ''));
   assert.deepEqual(starting.filter(([, text]) => !sets(text)).map(([name]) => name), []);
+});
+
+test('A stand-in app ends with the process that started it: one that won’t quit, started by a test that throws before it kills it, is gone', async () => {
+  const standIns = pathToFileURL(join(import.meta.dirname, 'macstandins.ts')).href;
+  const failing = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { standInApp } from ${JSON.stringify(standIns)}; console.log((await standInApp(false)).pid); throw new Error('the test failed');`], { encoding: 'utf8' });
+  const pid = Number(failing.stdout.trim());
+  assert.ok(pid > 0 && failing.stderr.includes('the test failed'), failing.stderr);
+  const running = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  try { await within('the stand-in gone with the test that started it', (async () => { while (running()) await wait(50); })()); }
+  finally { if (running()) process.kill(pid, 'SIGKILL'); }
 });
 
 // ---------- Quit ----------

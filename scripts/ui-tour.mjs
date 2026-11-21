@@ -21,8 +21,7 @@
 // update to install, and at 1280×800 the states one line changes).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
@@ -30,6 +29,7 @@ import { serveReleases } from './update-fixture.mjs';
 import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, openKind, refocus, byId, rowPart, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { packagedApp } from './package-app.mjs';
+import { launched, scratchFolder, tempPlaces } from './scratch.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -38,7 +38,7 @@ const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',
 const full = flag('--full');
 const root = resolve(import.meta.dirname, '..');
 const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : packagedApp();
-const scratch = mkdtempSync(join(tmpdir(), 'ck-tour-'));
+const scratch = scratchFolder('ck-tour-');
 const HOME = join(scratch, 'home');
 mkdirSync(HOME, { recursive: true });
 // What stands in for /Applications, the running apps and the Trash in every launch (platform.ts macPlaces): the tour never
@@ -49,16 +49,14 @@ mkdirSync(join(scratch, 'bin'));
 writeFileSync(join(scratch, 'bin/xdg-open'), '#!/bin/sh\nexit 0\n');
 chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
 
-// Every app this run started is closed when the run ends, however it ends: a failed or interrupted run must not leave
-// an app holding a debug port that a later run could attach to.
-const launched = new Set();
-process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
+// Every app this run started is in `launched`, killed when the run ends, however it ends, and then the scratch folder goes
+// (scratch.mjs): a failed or interrupted run leaves no app holding a debug port that a later run could attach to. A signal ends it so.
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 /** What a page threw, in any app this run started. */
 const pageErrors = [];
 async function launch(more = {}) {
-  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', CK_TEST_APPS: MAC.root, ...more };
+  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, ...tempPlaces(join(scratch, 'tmp')), CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', CK_TEST_APPS: MAC.root, ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -3251,8 +3249,6 @@ if (wanted('overview')) {
 }
 
 a.quit();
-// The app was stopped just now and its helper processes may still be writing, and an AppImage's mount goes after it: the
-// folder goes once they are done.
+// An AppImage's mount goes a moment after its app; the folder goes as the script ends (scratch.mjs).
 await mountsGone(scratch);
-rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 console.log(`tour in ${out}`);

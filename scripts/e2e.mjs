@@ -5,16 +5,16 @@
 // with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time (runGroups).
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { chmodSync, closeSync, constants as fsConstants, cpSync, existsSync, openSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants as fsConstants, cpSync, existsSync, openSync, renameSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer as tcpServer } from 'node:net';
-import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { packagedApp } from './package-app.mjs';
 import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, openKind, openKindNow, refocus, byId, rowPart, standIn } from './cdp.mjs';
+import { launched, scratchFolder, tempPlaces } from './scratch.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
@@ -58,7 +58,7 @@ const entriesSorted = text => {
 };
 
 // ---------- Disposable home ----------
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'ck-e2e-')));
+const scratch = scratchFolder('ck-e2e-');
 const HOME = join(scratch, 'home');
 // What stands in for /Applications, the running apps and the Trash in every launch on a Mac (platform.ts macPlaces): no flow
 // looks at or removes the real ones. Off a Mac, where there are none, only the flows about another build name stand-ins of
@@ -154,18 +154,16 @@ if (process.platform === 'linux') {
 `, { mode: 0o755 });
 }
 let app;
-// Every app this run started, and a flow's stand-in running app (standInApp), is closed when the run ends, however it ends: a
-// failed or interrupted run must not leave an app holding a debug port that a later run could attach to, or a stand-in for ever.
-const launched = new Set();
-process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
-// A grouped run's parent passes these on to its copies and waits for them instead (runGroups).
+// Every app this run started, and a flow's stand-in running app (standInApp), is in `launched`: killed when the run ends,
+// however it ends, and then its scratch folder goes (scratch.mjs), so no app is left holding a debug port a later run could
+// attach to. A signal ends a run so; a grouped run's parent passes it on to its copies and waits for them instead (runGroups).
 if (named) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
   // OpenCode's CLI is looked for only inside the throwaway home, and on a Mac every app in the stand-in for /Applications
   // (CK_TEST_APPS, empty here): a machine that has them installed (the Mac these run on does) would otherwise bring them into
   // every flow that opens "This Mac's home".
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, ...tempPlaces(join(scratch, 'tmp')), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -11729,7 +11727,7 @@ const written = [...readFileSync(import.meta.filename, 'utf8').matchAll(/^async 
 const refused = [...written.filter(name => listed.filter(each => each === name).length !== 1).map(name => `${name} is in no group or in two`),
   ...(named ?? []).filter(name => !listed.includes(name)).map(name => `--flows names ${name}, which is no flow`),
   ...(Number.isInteger(crashRounds) && crashRounds >= 0 ? [] : [`--crash-rounds takes a whole number, and was given ${option('--crash-rounds') ?? 'none'}`])];
-if (refused.length) { rmSync(scratch, { recursive: true, force: true }); throw new Error(`Refused to start: ${refused.join('; ')}.`); }
+if (refused.length) throw new Error(`Refused to start: ${refused.join('; ')}.`);
 
 /**
  * What a copy's output and its end say: its passes (undefined without a total line), its FAIL lines, among them one more when
@@ -11812,15 +11810,13 @@ if (!named) {
       await flow();
       console.log(`${flow.name}: ${Math.round((Date.now() - from) / 1000)}s`);
     }
-    execChmod();
   } catch (error) {
     check(`aborted: ${error.message}`, false);
     console.error(error);
   } finally {
+    // An AppImage's mount goes a moment after its app; the folder goes as the script ends (scratch.mjs).
     app?.child.kill('SIGKILL');
-    execChmod();
     await mountsGone(scratch);
-    rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
   }
   console.log(`e2e: ${passes} passed, ${failures.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}`);
   if (failures.length) { console.error(failures.join('\n')); process.exit(1); }
