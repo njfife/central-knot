@@ -4,7 +4,8 @@
 // (tests/skillclicks.ts), edits, files added, modes changed and folders deleted by hand, copies made by hand, a copy in
 // ~/.agents/skills (which Copilot CLI, Codex and Pi read; beside the installer's other skill, on too) coming and going (gone
 // while a tool had the skill only there: a deletion by hand, after which no pass writes a copy there), the whole shared folder
-// away, unreadable or replaced by a folder of other things for a pass, Take over of it,
+// away, unreadable or replaced by a folder of other things for a pass, or away for two passes beside a reader's own copy (no
+// folder of any tool changes), Take over of it,
 // a tool's own switch set by hand and cleared, Automatic sync off and on, History's days passing, a folder that can't be
 // written during a click, a crash at each step of a write or a removal, a tool uninstalled or left out, the agent turned off and on, and a source (a made-up
 // repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own in its notes/ folder: added, changed
@@ -496,6 +497,18 @@ async function walk(seed: number): Promise<Finding[]> {
         whole('replaced by a folder of other things', async () => { await rename(root, aside); await mkdir(root); await writeFile(join(root, 'README.md'), 'Not mounted.\n'); },
           async () => { await rm(root, { recursive: true }); await rename(aside, root); });
         if (process.getuid?.() !== 0) whole('unreadable', () => chmod(root, 0), () => chmod(root, 0o755));
+        // A reader that had it only there gets a differing folder of its own, then the shared folder is away for two passes: its
+        // own copy may be beside one away, so no folder of any tool changes (library.ts THE SHARED FOLDER).
+        const reader = (['codex-cli', 'copilot-cli'] as Tool[]).find(tool => held.throughShared?.[tool]);
+        if (reader && !(await bytes(folderOf(box, reader)))) add(1, { name: `the shared folder away for two passes, ${reader} with a differing copy of its own`, app: true, byHand: true, run: async () => {
+          await put(box, reader, rich(`${reader}’s own ${++marker}.`));
+          await rename(root, aside);
+          try {
+            const before = await folders();
+            await pass(); await pass();
+            if (!same(await folders(), before)) fail('the shared folder away for two passes changed a tool’s folder, beside a reader’s own copy');
+          } finally { await rename(aside, root); }
+        } });
       }
 
       const act = pick(acts);

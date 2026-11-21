@@ -108,6 +108,11 @@ export interface Disk<Entry extends Seen> {
   /** What could not be read, in words for the page. */
   problems: string[];
   /**
+   * Of the copies `unseen` names, those that hold a found key back (library.ts takeInAnswer: it waits, saying why), by
+   * `harness:key`: a copy that may stand beside one that is away (skills: a reader's own while the shared folder is away).
+   */
+  holdsBack?: Map<string, string>;
+  /**
    * Why a harness the item is wanted in is held (library.ts HarnessCopy), for the kind's own reasons: it can't be given a
    * copy (a name it can't store), or it has it another way (`anotherWay`: through a plugin, a tool that reads another's folder
    * while the item is in that one, a link or a folder Central Knot doesn't own). Undefined when it can be given it. Asked
@@ -533,7 +538,8 @@ export function foundKey(look: AnyLook, key: string, except: readonly HarnessId[
   const switchedOff = look.disk.switchedOff?.get(key) ?? [];
   const copies = foundCopies(look, key, except).map((copy): FoundCopy => ({ harness: copy.tool, hash: copy.hash, at: copy.at,
     ...(switchedOff.includes(copy.tool) ? { switchedOff: true } : {}) }));
-  return { copies, deleted: !!look.library.items[key]?.deleted };
+  const heldBack = look.managed.map(tool => (except.includes(tool) ? undefined : look.disk.holdsBack?.get(`${tool}:${key}`))).find(Boolean);
+  return { copies, deleted: !!look.library.items[key]?.deleted, ...(heldBack ? { heldBack } : {}) };
 }
 
 /** A found key's answers, a click's and Synchronize everything's, as each kind's view gives its row (types.ts LibraryFacts takeInAnswers). */
@@ -1062,13 +1068,13 @@ const refusedAdd: Partial<Record<LeftFound, string>> = {
  * one content or the copy chosen (`use`, as seen: `useHash`); a wait for a choice of copy, said as such; or refused.
  */
 async function addClicked(pass: Pass, asked: Change, refuse: Refuse) {
-  const answer = takeInAnswer('click', foundKey(pass, asked.key, asked.except), asked.use && { harness: asked.use, hash: asked.useHash });
+  const found = foundKey(pass, asked.key, asked.except), answer = takeInAnswer('click', found, asked.use && { harness: asked.use, hash: asked.useHash });
   if ('take' in answer) return takeIn(pass, asked.key, answer, asked.except, 'click');
   if ('wait' in answer) {
     pass.results.push({ item: foundCopies(pass, asked.key, asked.except)[0].name, outcome: 'held', differs: true, message: 'Copies differ. Choose which copy to use.' });
     return;
   }
-  refuse(refusedAdd[answer.leave] ?? '', answer.leave === 'choice-changed' ? { chooseAgain: true } : {});
+  refuse(answer.leave === 'held-back' ? found.heldBack! : refusedAdd[answer.leave] ?? '', answer.leave === 'choice-changed' ? { chooseAgain: true } : {});
 }
 
 /**

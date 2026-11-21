@@ -9,13 +9,14 @@ import { chmod, mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
-import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
+import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, rowClicks, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
 import { pruneDeleted } from '../src/skillstore.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { forgetMissing } from '../src/librarypass.ts';
+import { readRecord, saveRecord } from '../src/share.ts';
 import { clickResults } from '../src/clickplan.ts';
 import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import type { HarnessId, PassResult } from '../src/types.ts';
@@ -821,6 +822,81 @@ test('A tool that has the skill both ways, its own copy beside the shared one: t
     assert.deepEqual([after.item!.on, done.writes, done.notices ?? [], await toolFolders()], [true, 0, [], before]);
     // Its own copy holds the current version, so it is counted as the skill's there now.
     assert.deepEqual([harnessIs(after.row, after.item, 'codex-cli'), Object.keys(after.item!.applied).sort()], ['current', ['claude-cli', 'codex-cli']]);
+  } finally { await box.cleanup(); }
+});
+
+// ---------- While the shared folder can't be vouched for, a reader's own copy is not read either ----------
+
+/**
+ * A home like the owner's: notes and other in ~/.agents/skills, which Copilot CLI, Codex, Pi and OpenCode read, and Claude Code's
+ * entry for notes a link to the shared copy; other on (so the record names the shared folder), notes not yet; Synchronize
+ * everything on unless `rule` is false. `away` and `back` move the shared folder; `toolFolders`: every tool's folder byte for byte.
+ */
+async function outageHome(rule = true) {
+  const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']), root = join(box.home, '.agents/skills');
+  for (const name of ['notes', 'other']) { await mkdir(join(root, name), { recursive: true }); await writeFile(join(root, name, 'SKILL.md'), skillText('In the shared folder.', name)); }
+  await symlink('../../.agents/skills/notes', folderOf(box, 'claude-cli'));
+  await turnOn(box, box.context, 'other');
+  await saveRecord(box.home, { ...(await readRecord(box.home)).record!, syncEverything: rule });
+  const aside = join(box.base, 'shared-away');
+  const toolFolders = async () => Object.fromEntries(await Promise.all(Object.values(roots).map(async folder => [folder, await bytes(join(box.home, folder))] as const)));
+  return { box, toolFolders, away: () => rename(root, aside), back: () => rename(aside, root) };
+}
+const twoPasses = async (box: Box) => [await pass(box), await pass(box)];
+const waitsInCodex = 'Codex waits for the shared skills folder (…/.agents/skills) to be back: nothing is written there until then.';
+
+test('A found skill with a copy in a tool that reads the shared folder waits while that folder can’t be vouched for: the rule takes nothing in, Add is refused with why, and the copy stays byte for byte; back, its copies differ again', async () => {
+  const { box, toolFolders, away, back } = await outageHome();
+  try {
+    // notes found: Codex's own folder and the shared copy (Claude Code's link to it) differ, so it waits for a choice.
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('Codex’s own.'), 'codex-only.md': 'Codex notes\n' });
+    await twoPasses(box);
+    assert.ok('wait' in (await seen(box)).fact!.takeInAnswers!.rule);
+    const before = await toolFolders(), history = (await readHistory(box.context)).length;
+    await away();
+    const during = await twoPasses(box), { fact, item } = await seen(box);
+    assert.deepEqual([await toolFolders(), item, (await readHistory(box.context)).length, during.map(done => done.writes)], [before, undefined, history, [0, 0]]);
+    assert.deepEqual([fact!.takeInAnswers, fact!.unseen?.['codex-cli']], [{ click: { leave: 'held-back' }, rule: { leave: 'held-back' } }, waitsInCodex]);
+    // With the rule off, a click on Add is refused with that reason, and writes nothing.
+    await saveRecord(box.home, { ...(await readRecord(box.home)).record!, syncEverything: false });
+    const add = await send(box, rowClicks.on((await seen(box)).row, undefined));
+    assert.deepEqual([add.results.map(result => [result.outcome, result.message]), await toolFolders(), (await itemOf(box))], [[['held', waitsInCodex]], before, undefined]);
+    await back();
+    await twoPasses(box);
+    assert.deepEqual(['wait' in (await seen(box)).fact!.takeInAnswers!.click, await toolFolders()], [true, before]);
+  } finally { await box.cleanup(); }
+});
+
+test('A skill in the library with a differing copy of its own in a tool that reads the shared folder: during an outage that copy is not written over, kept as a version or removed; back, it is held as before', async () => {
+  const { box, toolFolders, away, back } = await outageHome();
+  try {
+    await twoPasses(box);
+    assert.equal((await itemOf(box))?.on, true, 'the rule took notes in from the shared copy');
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('Codex’s own.'), 'codex-only.md': 'Codex notes\n' });
+    await twoPasses(box);
+    const before = await toolFolders(), versions = (await itemOf(box))!.versions.length, held = (await seen(box)).fact!.anotherWay?.['codex-cli'];
+    assert.ok(held, 'Codex has notes through the shared folder, beside its own copy');
+    await away();
+    await twoPasses(box);
+    assert.deepEqual([await toolFolders(), (await itemOf(box))!.versions.length, (await itemOf(box))!.applied['codex-cli']], [before, versions, undefined]);
+    await back();
+    await twoPasses(box);
+    assert.deepEqual([await toolFolders(), (await itemOf(box))!.versions.length, (await seen(box)).fact!.anotherWay?.['codex-cli'], (await itemOf(box))!.on], [before, versions, held, true]);
+  } finally { await box.cleanup(); }
+});
+
+test('During an outage of the shared folder, a skill found only in Claude Code’s own folder (no link) is taken in as on any day; one found only in Codex’s own folder waits, with no shared copy ever (the price), and is taken in once the folder is back', async () => {
+  const { box, toolFolders, away, back } = await outageHome();
+  try {
+    await away();
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Claude Code’s own.', 'claude-only') }, [], 'claude-only');
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('Codex’s own.', 'codex-only') }, [], 'codex-only');
+    const before = await toolFolders();
+    await twoPasses(box);
+    assert.deepEqual([(await itemOf(box, 'claude-only'))?.on, (await itemOf(box, 'codex-only'))?.on, (await toolFolders())['.codex/skills']], [true, undefined, before['.codex/skills']]);
+    await back();
+    await twoPasses(box);
+    assert.equal((await itemOf(box, 'codex-only'))?.on, true);
   } finally { await box.cleanup(); }
 });
 

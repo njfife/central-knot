@@ -95,7 +95,7 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
   const disk: SkillDisk = {
     byKey: new Map(), unseen: new Map(), uncopied: new Set(), locked: new Map(), problems: [], outside: new Map(), ways: new Map(), readsFrom: {},
     through: await throughPlugins(context, managed, 'skill'), shapes: new Map(), switches: new Map(), switchedOff: new Map(),
-    sharedNow: new Set(), dangling: new Map(),
+    sharedNow: new Set(), dangling: new Map(), holdsBack: new Map(),
     linked: await pluginHolds(context, managed),
     anotherWay: (item, tool) => anotherWay(disk, managed, item, tool)?.why,
     cannotTake: (item, tool) => cannotTake(context, disk, item, tool),
@@ -113,6 +113,13 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
   for (const tool of managed) if (await readOwnFolder(context, disk, tool, sharedAt)) sound.push(tool);
   disk.sharedNow = await sharedListing(context, recorded, [...disk.dangling.values()].some(Boolean));
   if (typeof disk.sharedNow === 'string') disk.problems.push(disk.sharedNow);
+  // While it can't be vouched for, a tool that reads it may have any skill through it: its own copies are unseen too, so nothing
+  // is taken in from them, written over or removed (library.ts THE SHARED FOLDER). copyRead and the found copies read this.
+  if (typeof disk.sharedNow === 'string') for (const [key, slot] of disk.byKey) for (const tool of managed) {
+    if (!slot[tool] || !readsShared(context, tool)) continue;
+    const at = `${tool}:${key}`, why = waitsForShared(context, tool);
+    disk.unseen.set(at, why); disk.holdsBack!.set(at, why);
+  }
   await readAlsoRead(context, disk, managed, sound, sharedAt);
   // A skill's shape: its current version's SKILL.md where the library has it, else a copy's.
   for (const item of recorded) {
@@ -261,6 +268,12 @@ async function sharedListing(context: ShareContext, recorded: LibraryItem[], lin
   return noneOfThem ? why('holds none of them', 'they are back (if you removed them, turn them off)') : listed;
 }
 
+/** Whether a tool reads the shared skills folder itself (Copilot CLI, Codex, Pi and OpenCode do; Claude Code doesn't). */
+const readsShared = (context: ShareContext, tool: HarnessId) => alsoReads(context, tool).some(root => root.path === sharedFolder(context));
+/** Why a tool that may have a skill through the shared folder is unseen while that folder can't be vouched for. */
+const waitsForShared = (context: ShareContext, tool: HarnessId) =>
+  `${nameOf(tool)} waits for the shared skills folder (${pathWords(context, sharedFolder(context))}) to be back: nothing is written there until then.`;
+
 /**
  * Disk.lostShared for skills, for a tool with no copy and no other way. While the shared folder can't be vouched
  * for: unseen where the tool may have had the skill through it (it reads that folder, holds a link that leads nowhere, or had it
@@ -269,11 +282,8 @@ async function sharedListing(context: ShareContext, recorded: LibraryItem[], lin
  * that doesn't read the shared folder (Claude Code) had it by a link, now gone (`link`).
  */
 function lostShared(context: ShareContext, disk: SkillDisk, item: Wanted, tool: HarnessId): 'copy' | 'link' | { unseen: string } | undefined {
-  const folder = item.throughShared?.[tool], dangling = disk.dangling.has(`${tool}:${item.key}`);
-  const reads = alsoReads(context, tool).some(root => root.path === sharedFolder(context));
-  const at = pathWords(context, sharedFolder(context));
-  const waits = `${nameOf(tool)} waits for the shared skills folder (${at}) to be back: nothing is written there until then.`;
-  if (typeof disk.sharedNow === 'string') return folder || dangling || reads ? { unseen: waits } : undefined;
+  const folder = item.throughShared?.[tool], dangling = disk.dangling.has(`${tool}:${item.key}`), reads = readsShared(context, tool);
+  if (typeof disk.sharedNow === 'string') return folder || dangling || reads ? { unseen: waitsForShared(context, tool) } : undefined;
   if (!folder) return undefined;
   if (!disk.sharedNow.has(itemKey(folder))) return 'copy';
   if (!reads && !dangling) return 'link';
