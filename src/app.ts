@@ -34,7 +34,7 @@ import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, t
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { turnsWords } from './profileplan.ts';
+import { turnsWords, undoOffered } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
@@ -1080,7 +1080,8 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if ((past?.kind !== 'profile' && past?.kind !== 'everything') || result.stopped) keepOwn([{ kind: (past && libraryEntry(past)?.kind) || 'agents', results: result.results, notices: result.notices }]);
   if (past?.kind === 'profile') {
     // Each item it turned back has its own History entry, with its own action: the band offers no Undo of the Undo.
-    if (result.stopped || !result.switched) tell(undefined, result.stopped); else turnedOutcome(page, 'Undone', result.switched, result.results);
+    if (result.stopped || !result.switched) tell({ page, text: result.stopped ?? 'That switch has nothing to undo.', warn: true, band: true, history: page !== 'history', refused: true });
+    else turnedOutcome(page, 'Undone', result.switched, result.results);
     return;
   }
   const everywhere = touchedToolsPhrase(where);
@@ -1758,14 +1759,15 @@ function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult
   // An Undo's plugin copies changed since the switch (profiles.ts undoSwitch), left as they are.
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}: ${turned.since.join('; ')}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
-  tell({ page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0 || !!turned.since?.length, act });
+  tell({ page, band: true, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0 || !!turned.since?.length, act });
 }
 
-/** What a switch did, with Undo switch (from the page or, next time the window shows, the menu bar). */
+/** What a switch did, with Undo switch only where History would offer it (profileplan.ts undoOffered, over the view already in state.home). */
 const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, result, result.results,
-  result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined);
+  result.event && state.home && undoOffered(result, state.home)
+    ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined);
 
-/** Switches to a profile. The band says what changed, with Undo; the menu bar follows. */
+/** Switches to a profile. The band says what changed, with Undo where History offers it; the menu bar follows. */
 export const switchToProfile = (id: string) => busy('Switching profile…', async page => {
   const result = await api().switchProfile(id, state.home!.home);
   if (result.view) setHome(result.view);
@@ -1773,11 +1775,14 @@ export const switchToProfile = (id: string) => busy('Switching profile…', asyn
   switchOutcome(result, page);
   if (state.page === 'history') await putHistory();
 });
-// A switch from the menu bar: its result and Undo are on the page the next time the window shows.
+// A switch from the menu bar: its fresh view and result land together so switchOutcome asks undoOffered against the post-switch home.
 api().onProfileSwitched(async result => {
+  if (result.view) setHome(result.view);
   switchOutcome(result, state.page);
   // History lists the new switch at once when it is the page open (it reads History only when opened).
   if (state.page === 'history') await putHistory();
+  loadRepoSoon();
+  if (state.page === 'sources') void loadSources();
   rerender();
 });
 
