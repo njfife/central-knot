@@ -11,7 +11,7 @@ import { newItem, type ItemKind } from '../src/library.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, copilotKeptOnBy, copilotServerName, entryTurns, homeItems, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, switchable, switchPlan, switchPreview, turnsWords, undoPlan, undoTurns, withCopilotOff, type Libraries } from '../src/profileplan.ts';
+import { allTurns, copilotKeptOnBy, copilotServerName, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, switchable, switchPlan, switchPreview, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, withCopilotOff, type Libraries } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, liveNow, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { runPlan, type PlanApi } from '../src/pluginplan.ts';
@@ -1888,4 +1888,74 @@ test('Copilot shared name short 4: one withCopilotOff & copilotServerName helper
     assert.deepEqual(bad.results.map(r => [r.harness, r.outcome, r.message]),
       [['copilot-cli', 'failed', 'issues: Copilot CLI’s settings.json couldn’t be read, so it was left as it is.']]);
   } finally { await box.cleanup(); }
+});
+
+test('A profile switch returns the settled History profile payload, and undoOffered agrees on the result and History entry', async () => {
+  const { box, made } = await pluginHome({ copilot: true });
+  try {
+    await takeInCopilotServer(box);
+    await writeFile(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }));
+    const settingsPath = join(box.home, '.copilot/settings.json');
+    await writeFile(settingsPath, `${JSON.stringify({ ...JSON.parse((await text(box, '.copilot/settings.json'))!), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+    const mineId = await made('Mine', ['mcp:issues', pdfId2, sheetId2, issuesId2]);
+    const homeNow = async (): Promise<HomeView> => ({
+      pluginItems: await readPluginItems({ home: box.home, dataDir: box.home, binaries: {}, overrides: {} }, box.tools),
+      profiles: await readProfiles(box.home),
+      skills: await skillsView(box.context, box.tools),
+      mcp: await serversView(box.context, box.tools),
+      agents: await agentsView(box.context, box.tools),
+    } as unknown as HomeView);
+    // Worked example 1: orphan clear alone -> settled profile payload matches History entry and undoOffered is false for both.
+    const cleared = await switchProfile(box.context, box.tools, mineId, (await sideNow(box)).side);
+    const entry = (await history(box)).find(each => each.id === cleared.event)!;
+    assert.deepEqual(cleared.profile, entry.profile, 'switch result carries the settled profile entry for the header');
+    const afterCleared = await homeNow();
+    assert.equal(undoOffered(cleared, afterCleared), false);
+    assert.equal(undoOffered(entry, afterCleared), false);
+    assert.deepEqual(undoInHome(cleared, afterCleared), { on: [], off: [] });
+    // Failed orphan Copilot CLI clear: settleEntry drops copilotCleared from History and returns that exact payload (no drift).
+    await writeFile(settingsPath, `${JSON.stringify({ ...JSON.parse((await text(box, '.copilot/settings.json'))!), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+    await chmod(join(box.home, '.copilot'), 0o555);
+    try {
+      const failedClear = await switchProfile(box.context, box.tools, mineId, (await sideNow(box)).side);
+      const failedEntry = (await history(box)).find(each => each.id === failedClear.event)!;
+      assert.equal(failedEntry.profile?.copilotCleared, undefined);
+      assert.deepEqual(failedClear.profile, failedEntry.profile);
+      assert.equal(undoOffered(failedClear, await homeNow()), false);
+    } finally { await chmod(join(box.home, '.copilot'), 0o755); }
+    // Worked example 2: two items turned on + orphan clear -> undoOffered is true (2 items), and undoSwitch turns them back while leaving the off-switch off.
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Notes.', 'notes') }, [], 'notes');
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Standup.', 'standup') }, [], 'standup');
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }, { key: 'standup', on: true, except: [] }]);
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: false, except: [], seenOn: true }, { key: 'standup', on: false, except: [], seenOn: true }]);
+    await writeFile(settingsPath, `${JSON.stringify({ ...JSON.parse((await text(box, '.copilot/settings.json'))!), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+    const withTwoId = await made('WithTwo', ['skill:notes', 'skill:standup', 'mcp:issues']);
+    const withTwo = await switchProfile(box.context, box.tools, withTwoId, (await sideNow(box)).side);
+    const twoEntry = (await history(box)).find(each => each.id === withTwo.event)!;
+    assert.deepEqual(withTwo.profile, twoEntry.profile);
+    const afterTwo = await homeNow();
+    assert.equal(undoOffered(withTwo, afterTwo), true);
+    assert.equal(undoOffered(twoEntry, afterTwo), true);
+    assert.equal(undoInHome(withTwo, afterTwo).off.length, 2);
+    const undone = await undoSwitch(box.context, box.tools, withTwo.event!, (await sideNow(box)).side);
+    assert.deepEqual([undone.stopped, undone.switched?.off.sort(), undone.switched?.settingsChanged],
+      [undefined, ['notes', 'standup'], ['Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.']]);
+    // When settleEntry finds no History entry (e.g. removed mid-switch), switchProfile returns what settleEntry returned (undefined) instead of rebuilding a separate payload.
+    const { side } = await sideNow(box);
+    const pruneMidSwitch: PluginSide = {
+      live: () => side.live(),
+      run: async ops => { await rm(join(box.home, '.central-knot/history.json'), { force: true }); return ops.map(op => ({ ...op, report: { tool: op.tool, outcome: 'failed' as const, changed: false, message: 'failed', runs: [] } })); },
+    };
+    const emptyId = await made('EmptyAfterPrune', []);
+    const pruned = await switchProfile(box.context, box.tools, emptyId, pruneMidSwitch);
+    assert.equal(pruned.profile, undefined);
+    assert.equal(pruned.profile, (await history(box)).find(each => each.id === pruned.event)?.profile);
+  } finally { await box.cleanup(); }
+});
+
+test('A library item’s row tooltip words (itemRowState): an off-switch standing in Copilot CLI is never called on', () => {
+  assert.equal(itemRowState({ on: true }), 'on');
+  assert.equal(itemRowState({ on: false }), 'off');
+  assert.equal(itemRowState({ on: false, copilotOff: 'github' }), 'off');
+  assert.equal(itemRowState({ on: true, copilotOff: 'github' }), 'off in Copilot CLI');
 });

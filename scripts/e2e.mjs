@@ -12263,8 +12263,112 @@ async function profilePluginsFlow() {
     } finally { menu.close(); }
     for (let tries = 0; tries < 80 && JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers; tries++) await wait(100);
     await bDone();
+    for (let tries = 0; tries < 50 && !(await b.exists('.band-done')); tries++) await wait(100);
     same('native menu switch to Old work clears the orphan disabledMcpServers rule', JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, undefined);
+    // Worked example 1 (menu bar): header result keeps the off-switch sentence with no Undo switch; History offers none either.
+    same('worked example 1 (menu bar): header result says the off-switch was cleared and offers no Undo switch',
+      [await b.text('.band-done .band-text'), await b.exists('#outcome-undo')],
+      ['Switched to Old work: 1 item turned on. Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.', false]);
+    await b.click('#nav-history');
+    same('worked example 1 (menu bar): History shows the same entry with no Undo',
+      [await b.run(`document.querySelector('.history-row[data-kind="profile"] .history-about')?.textContent`),
+        await b.run(`!!document.querySelector('.history-row[data-kind="profile"]')?.querySelector('.history-actions button')`)],
+      ['Switched to Old work: 1 item turned on. Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.', false]);
+    await b.click('#nav-profiles');
   }
+
+  // Worked examples 1 (page) and 5 (row tooltip with off-switch standing): standing disabledMcpServers while his issues is On.
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ ...JSON.parse(readNow(oldCopilotSettings)), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+  await b.click('#header-refresh');
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('Old work')).click()`); await b.settle();
+  same('worked example 5: with an off-switch standing in Copilot CLI, the row tooltip does not say issues is on now',
+    [await b.text('.profile-header p'), await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-state')?.dataset.state`),
+      await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-tick')?.title`)],
+    ['Switching turns 1 item on. Plugin items stay as they are.', 'Turns on',
+      'In Old work: switching to it turns issues on. Click to leave it out. issues is off in Copilot CLI now.']);
+  await b.click('#profile-switch'); await bDone();
+  same('worked example 1 (page): switch clears the off-switch, header keeps the sentence with no Undo switch, and Now and tooltip both say On',
+    [JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, JSON.parse(readNow(oldCopilotMcp)).mcpServers.issues?.command,
+      await b.text('.band-done .band-text'), await b.exists('#outcome-undo'),
+      await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-state')?.dataset.state`),
+      await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-tick')?.title`)],
+    [undefined, 'mine', 'Switched to Old work: 1 item turned on. Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.', false,
+      'On', 'In Old work: switching to it turns issues on. Click to leave it out. issues is on now.']);
+  await b.click('#nav-history');
+  same('worked example 1 (page): History’s newest profile entry has no Undo',
+    [await b.run(`document.querySelector('.history-row[data-kind="profile"] .history-about')?.textContent`),
+      await b.run(`!!document.querySelector('.history-row[data-kind="profile"]')?.querySelector('.history-actions button')`)],
+    ['Switched to Old work: 1 item turned on. Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.', false]);
+
+  // Worked example 2: a switch turning two items on and clearing an orphan Copilot CLI off-switch offers Undo; clicking Undo
+  // turns the two items back off and says in the header's result that the off-switch was left off and why.
+  mkdirSync(join(oldHome, '.claude/skills/standup'), { recursive: true });
+  writeFileSync(join(oldHome, '.claude/skills/standup/SKILL.md'), md('standup', 'Writes standup notes.'));
+  await b.click('#nav-profiles');
+  await b.click('#header-refresh');
+  same('second skill standup taken in, then notes and standup turned off', [
+    await b.run(`window.centralKnot.applySkills([{ key: 'standup', on: true, except: [] }], false, ${JSON.stringify(oldHome)}).then(r => r.stopped ?? 'ok')`),
+    await b.run(`window.centralKnot.applySkills([{ key: 'notes', on: false, except: [], seenOn: true }, { key: 'standup', on: false, except: [], seenOn: true }], false, ${JSON.stringify(oldHome)}).then(r => r.stopped ?? 'ok')`),
+  ], ['ok', 'ok']);
+  await b.run(`window.centralKnot.saveProfile({ name: 'WithTwo', items: ['skill:notes', 'skill:standup', 'mcp:issues'], switchesPluginItems: false }, ${JSON.stringify(oldHome)})`);
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ ...JSON.parse(readNow(oldCopilotSettings)), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+  await b.click('#header-refresh');
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('WithTwo')).click()`); await b.settle();
+  await b.click('#profile-switch'); await bDone();
+  same('worked example 2: switch turning two items on and clearing the off-switch offers Undo switch',
+    [await b.text('.band-done .band-text'), await b.exists('#outcome-undo'),
+      existsSync(join(oldHome, '.claude/skills/notes/SKILL.md')), existsSync(join(oldHome, '.claude/skills/standup/SKILL.md')),
+      JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers],
+    ['Switched to WithTwo: 3 items turned on. Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.', true, true, true, undefined]);
+  await b.click('#outcome-undo'); await bDone();
+  same('worked example 2: Undo turns the two items back off and says in the header’s result that the off-switch was left off and why',
+    [existsSync(join(oldHome, '.claude/skills/notes/SKILL.md')), existsSync(join(oldHome, '.claude/skills/standup/SKILL.md')),
+      JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, JSON.parse(readNow(oldCopilotMcp)).mcpServers.issues?.command,
+      await b.text('.band-done .band-text')],
+    [false, false, undefined, 'mine', 'Undone: 2 items turned off. Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.']);
+
+  // Worked example 4: Undo offered, then a server of his added by hand under that name in the copy, then the click -> refusal
+  // shown whole in the header's result, wrapped not cut, at 860x528 and 1316x819 (light and dark).
+  writeFileSync(join(oldHome, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'issue-tracker', marketplace: 'ck-test-market', version: '2.0.0', cache_path: oldCopilot, enabled: true }] }));
+  writeFileSync(oldCodexCfg, oldCodexInit);
+  writeFileSync(join(oldHome, '.claude/settings.json'), `${JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: market } } }, enabledPlugins: { 'issue-tracker@ck-test-market': true } }, null, 2)}\n`);
+  await b.run(`window.centralKnot.applyServers([{ key: 'issues', on: false, except: ['claude-cli', 'codex-cli'], seenOn: true }], false, ${JSON.stringify(oldHome)})`);
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: market } } }, disabledMcpServers: ['issues'] }, null, 2)}\n`);
+  await b.run(`window.centralKnot.saveProfile({ name: 'PluginOnly', items: [${JSON.stringify(triageId)}, ${JSON.stringify(issuesId)}], switchesPluginItems: true }, ${JSON.stringify(oldHome)})`);
+  await b.click('#header-refresh');
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('PluginOnly')).click()`); await b.settle();
+  await b.click('#profile-switch'); await bDone();
+  same('worked example 4: switch clearing plugin’s Copilot CLI off-switch with no personal server offers Undo switch',
+    [await b.text('.band-done .band-text'), await b.exists('#outcome-undo'), JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers],
+    ['Switched to PluginOnly: 1 item turned on.', true, undefined]);
+  // Add a server of his own under that exact name by hand in Copilot CLI before clicking Undo switch.
+  writeFileSync(oldCopilotMcp, `${JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'hand', tools: ['*'] } } }, null, 2)}\n`);
+  await b.click('#outcome-undo'); await bDone();
+  const refusalReason = 'Undo switch to PluginOnly: nothing was undone. Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.';
+  same('worked example 4: refused Undo says its reason in the header’s result with History, leaving the off-switch off',
+    [await b.text('.band-done .band-text'), await b.exists('.band-done svg.tone-warning'), await b.text('.band-done #outcome-history'),
+      JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, JSON.parse(readNow(oldCopilotMcp)).mcpServers.issues?.command],
+    [refusalReason, true, 'History', undefined, 'hand']);
+  for (const theme of ['light', 'dark']) {
+    await b.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+    for (const [width, height] of [[860, 528], [1316, 819]]) {
+      await sizeTo(b, width, height);
+      if (width === 1316 && await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+      await b.settle();
+      const metrics = await b.run(`(() => {
+        const band = document.querySelector('.band-done'), text = band?.querySelector('.band-text');
+        if (!band || !text) return null;
+        const b = band.getBoundingClientRect(), t = text.getBoundingClientRect();
+        return { text: text.textContent, clippedX: text.scrollWidth > text.clientWidth + 1, clippedY: text.scrollHeight > text.clientHeight + 1,
+          fitsWidth: b.right <= window.innerWidth + 1, height: Math.round(t.height) };
+      })()`);
+      same(`worked example 4: refusal wraps whole without clipping at ${width}×${height} (${theme})`,
+        metrics && [metrics.text, metrics.clippedX, metrics.clippedY, metrics.fitsWidth], [refusalReason, false, false, true]);
+      if (shots) await b.shot(`undo-refused-${theme}-${width}`);
+    }
+  }
+  await b.run(`window.centralKnot.setAppearance('system')`);
+  await fullSize(b);
 
   same('no page errors after reopen', b.pageErrors, []);
   await b.quit();

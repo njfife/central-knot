@@ -13,8 +13,10 @@
 //   `profiles.ts runCopilotRules` writes it.
 // - `inUse` holds while a switch changes and holds nothing (never stored); `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`)
 //   gives the header and menu line; `undoPlan`, `pluginUndo` and `copilotUndo` revert items still as left, never re-disabling a
-//   Copilot CLI name a server of his uses now (`onAfterUndo`, `copilotHasYours`). Dormant ids stay skipped; plugin-linked library
-//   items belong to `pluginLive` (`pluginItemKey`), not `liveItems`; found-only rows no profile can tick are counted by `leftOut`.
+//   Copilot CLI name a server of his uses now (`onAfterUndo`, `copilotHasYours`), and `undoOffered` (`undoInHome`) is the one rule
+//   both History and the header ask. `itemRowState` words a library item's live state for its row tooltip (`profilespage.ts`; `switchPlan` puts any `copilotOff` item under Turns on or Turns off, so the Now column only sees on/off). Dormant ids
+//   stay skipped; plugin-linked library items belong to `pluginLive` (`pluginItemKey`), not `liveItems`; found-only rows no
+//   profile can tick are counted by `leftOut`.
 import { itemKey, type ItemKind, type LibraryItem } from './library.ts';
 import { placeOf } from './libraryrow.ts';
 import { plural } from './model.ts';
@@ -314,6 +316,10 @@ export function pluginRowState(profile: Pick<Profile, 'items' | 'switchesPluginI
   return switched.some(copy => copy.on) ? 'Off · on in Copilot CLI' : 'Off';
 }
 
+/** What a library item's row tooltip says for its state now (`profilespage.ts`; `switchPlan` puts any `copilotOff` item under Turns on or Turns off, so the Now column never sees it). */
+export const itemRowState = (item: Pick<LiveItem, 'on' | 'copilotOff'>): 'on' | 'off' | 'off in Copilot CLI' =>
+  (!item.on ? 'off' : item.copilotOff ? 'off in Copilot CLI' : 'on');
+
 /**
  * Why a switch to a profile can't turn what it holds (pluginPlan `held`), in the words the page's header and a menu's refusal
  * share, without a full stop: each plugin off in a tool, with how many of its items that stops ("docs is off in Codex, so 3 of its
@@ -399,6 +405,15 @@ export function undoTurns(event: Pick<HistoryEvent, 'profile'>, live: LiveItem[]
   const rules = copilotUndo(event, mcp.items, mcp.library, afterOn).back.filter(rule => !library.off.some(item => item.id === rule.id));
   return { on: [...library.on, ...itemsToward(back, true)], off: [...library.off, ...rules, ...itemsToward(back, false)] };
 }
+
+/** What undoing a profile entry turns back in `home` as the page read it: its live items, plugins' items and MCP servers from that one read. */
+export function undoInHome(event: Pick<HistoryEvent, 'profile'>, home: PluginHome) {
+  const plugins = pluginLive(home);
+  return undoTurns(event, homeItems(home, plugins), plugins, home.mcp);
+}
+
+/** Whether Undo is offered for a profile entry in `home`: true only while at least one item, plugin copy or Copilot CLI rule can be turned back (shared by the header and History). */
+export const undoOffered = (event: Pick<HistoryEvent, 'profile'>, home: PluginHome): boolean => changes(undoInHome(event, home)) > 0;
 
 /**
  * A plan's counts in words: what it will do ("turns 2 items on and 5 off") or did ("2 items turned on and 5 turned off"); ''

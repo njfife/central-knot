@@ -1432,4 +1432,4 @@ export interface PluginSwitched { id: string; name: string; tool: HarnessId; on:
  * was turned in; and what could not be done in a tool (`results`: a plugin item's copy held or failed there too). `event`: its
  * History entry; none when nothing changed.
  */
-export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[] }
+export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; /** The settled profile entry written to History, so the header asks profileplan.ts undoOffered without rereading History. */ profile?: HistoryEvent['profile']; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[] }
