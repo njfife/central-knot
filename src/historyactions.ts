@@ -56,6 +56,11 @@
 //   switched: a skill's tool switch          Undo: sets that        some tool still loads it (`loads`)
 //     cleared (isClearedSwitch)              switch again
 //   a plugin's item let go (edit, `own-now`) none: no version changed, and the item is the person's own
+//   a plugin's version taken over his        Undo: his version      it carries a link, at the version the take made;
+//     (edit, `plugin-taken`: library.ts      current, his own, On   after that, "Go back before this", while it carries
+//     TAKE)                                  or Off and kept out    a link or his version is not the current one
+//                                            as before (`took`)
+//   that Undo (current, `plugin-taken`)      none: the plugin's page offers Use the plugin's again
 //
 // Synchronize everything's own entries (a switch on or off, and the one Undo of a switch-on: everything.ts, whose header has
 // their table) are worded and decided at the end of this file: everythingPlan reads what that Undo takes back from History,
@@ -159,6 +164,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.previous !== undefined && event.previous === event.version) {
         return { glyph: 'undo-2', text: 'Undone: yours stays current; the source’s version is no longer marked as declined or taken, and the source’s row says whether an update waits.' };
       }
+      if (event.cause === 'plugin-taken') return { glyph: 'undo-2', text: `Undone: ${event.item} is yours again, as it was in every tool.` };
       if (undid) return { glyph: 'undo-2', text: `Undone: ${when ? `the version from ${when}` : 'the version before'} is current again${also(', in')}.` };
       return { glyph: 'undo-2', text: `${made ? `T${theVersion(made.from).slice(1)} (${when})` : 'An earlier version'} was made current${also(', in')}.` };
     }
@@ -191,6 +197,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.cause === 'source-kept') {
         return { glyph: 'link-2', text: `Yours stays current over ${source}’s version, which no longer waits: it is kept as a version, and the source’s next change is compared with it.` };
       }
+      if (event.cause === 'plugin-taken') return { glyph: 'link-2', text: `Use the plugin’s: the plugin ${plugin}’s version became current${tools ? `, in ${tools}` : ''};`
+        + ' yours is kept as a version, and each other tool with your copy keeps it as its own.' };
       if (event.cause === 'own-now') return { glyph: 'link-2-off', text: `Yours now: it was changed here, so it no longer follows ${source}, which never writes over it. It stays in the tools that had it, and its row lets it into the others. Its versions stay.` };
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'switched': {
@@ -306,6 +314,7 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   if (event.kind === 'current' && event.previous !== undefined && event.previous === event.version) return undefined;
   // A plugin's item let go as the person's own changed no version: nothing to take back.
   if (event.cause === 'own-now') return undefined;
+  if (event.cause === 'plugin-taken') return event.took ? takeBack(event, event.took, item) : undefined;
   // Copies an earlier engine added, removed, switched or took over: there is no earlier version to go back to.
   if (['added', 'removed', 'switched', 'took-over'].includes(event.kind) || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.
@@ -314,6 +323,20 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   // the Undo of that Undo puts back the one it replaced, recorded on its own entry.
   const replaced = event.seen !== undefined ? { seen: event.seen } : {};
   return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous, ...replaced } };
+}
+
+/**
+ * A take's Undo (library.ts TAKE; Change untake): his version current, his own, On or Off and kept out as before it, each tool's
+ * own copy the take wrote over given back. Undo while the item is as the take left it; else Go back before this, while there is
+ * something to go back to: it still carries a link (`source`, its plugin recorded or not: a tick's Undo takes the record back
+ * first), or his version is not the current one.
+ */
+function takeBack(event: HistoryEvent, took: NonNullable<HistoryEvent['took']>, item: LibraryItem): EntryAction | undefined {
+  const latest = !!item.source && event.version === item.hash;
+  if (!item.source && !isVersion(item, event.previous)) return undefined;
+  const help = `Make your ${item.name} from before this current again and your own, in the tools it was in before; the plugin’s stays a version`;
+  const change: Change = { key: item.key, on: took.on, except: [...took.except], version: event.previous, untake: { ...took.copies }, ...givenBack(event, item) };
+  return { label: latest ? 'Undo' : 'Go back before this', help, change };
 }
 
 /**

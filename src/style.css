@@ -1373,6 +1373,8 @@ span.ins-confirm { margin-top: 0; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .plugin-tool-state { display: flex; flex-direction: column; font-size: 11.5px; color: var(--ink-soft); }
+/* A name of his under a tool's box (pluginpage.ts yourLines): its sentence, then Use the plugin's under it, at its start. */
+.plugin-tool-yours { align-items: flex-start; gap: 4px; }
 .plugin-section { margin: 22px 0 0; }
 .plugin-section .plugin-outcome-list { margin-top: 8px; }
 .plugin-outcome-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
