@@ -251,11 +251,15 @@ function outcome(turns: Turns, done: Turns, results: DestinationResult[], copies
     left: [...names(left), ...itemNames(copies.filter(turn => !confirmed.includes(turn)))], results: results.filter(result => result.outcome === 'failed' || result.outcome === 'held') };
 }
 
-/** A switch's entry left holding only the plugin copies their tools confirmed (types.ts HistoryEvent profile `plugins`): a write that failed is no part of its Undo. */
-async function keepConfirmed(context: ShareContext, eventId: string, confirmed: CopyTurn[]) {
+/**
+ * A switch's entry once its passes ran: holding only the plugin copies their tools confirmed (types.ts HistoryEvent profile
+ * `plugins`: a write that failed is no part of its Undo), and what its passes changed in a tool's own settings (`settingsChanged`).
+ */
+async function settleEntry(context: ShareContext, eventId: string, confirmed: CopyTurn[], settingsChanged: string[]) {
   const history = await readHistory(context), entry = history.find(each => each.id === eventId);
   if (!entry?.profile) return;
-  entry.profile.plugins = confirmed.map(switched);
+  if (entry.profile.plugins) entry.profile.plugins = confirmed.map(switched);
+  if (settingsChanged.length) entry.settingsChanged = settingsChanged;
   await replaceHistory(context, history);
 }
 
@@ -282,8 +286,11 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off), ...(copies.length ? { plugins: copies.map(switched) } : {}) });
   await appendHistory(context, [event]);
   const done = await turnTogether(context, tools, turns, true, copies, read.libraries, plugins);
-  if (done.copies.length < copies.length) await keepConfirmed(context, event.id, done.copies);
-  return { name: profile.name, ...outcome(turns, done.done, [...held, ...done.results], copies.filter(turn => !done.asAsked.includes(turn)), done.copies), event: event.id };
+  // What its passes changed in a tool's own settings (Pi's list: librarypass.ts Kind.follow), said by its entry and its result.
+  const settingsChanged = done.results.flatMap(result => (result.settingsChanged ? [result.settingsChanged] : []));
+  if (done.copies.length < copies.length || settingsChanged.length) await settleEntry(context, event.id, done.copies, settingsChanged);
+  return { name: profile.name, ...outcome(turns, done.done, [...held, ...done.results], copies.filter(turn => !done.asAsked.includes(turn)), done.copies), event: event.id,
+    ...(settingsChanged.length ? { settingsChanged } : {}) };
 }
 
 /**

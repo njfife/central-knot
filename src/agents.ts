@@ -29,9 +29,10 @@ import { mergeAgent } from './merge.ts';
 import { partsHolding, pluginHolds, type ThroughWhichPlugin } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
 import { errorCode, exists, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
+import { followCopy, isDisabled, readSwitchFile } from './skillswitch.ts';
 import { sourceFacts } from './sources.ts';
 import type { ShareContext } from './share.ts';
-import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ToolCopy } from './types.ts';
+import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SwitchTarget, SyncNotice, ToolCopy } from './types.ts';
 import { throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -178,6 +179,9 @@ export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
     try { await removeFileChecked(here.file, here.text); return 'removed'; }
     catch (error) { return errorCode(error) === 'CK_CHANGED' ? 'changed' : 'failed'; }
   },
+  // In Pi an agent is a skill, a loose file in its skills folder, which its skills list keeps step with (skillswitch.ts followCopy).
+  follow: (context, item, tool, placed) => followCopy(context, tool, { folder: item.name, name: item.name, skillFile: fileFor(context, tool as AgentTool, item.name) }, placed)
+    .catch(error => { if (!errorCode(error)) throw error; return undefined; }),
   historyAction: libraryAction,
   merge: mergeAgent,
 };
@@ -219,6 +223,15 @@ export function applyAgents(context: ShareContext, tools: HarnessId[], changes: 
 
 /** A History entry's action on an agent (librarypass.ts restore; historyactions.ts says which click it is). */
 export const restoreAgent = (context: ShareContext, tools: HarnessId[], eventId: string, version?: string) => restore(agentKind, context, tools, eventId, version);
+
+/** An agent's file in Pi as Pi's own switch names it (skillswitch.ts): Pi takes it as a skill. None in another tool. */
+const piSwitchTarget = (copy: AgentEntry | undefined, name: string): SwitchTarget | undefined => (copy?.tool === 'pi-cli' ? { folder: name, name, skillFile: copy.file } : undefined);
+/** The agent Pi's switch is cleared for (skills.ts clearSwitch): its name, its file in Pi when `tool` is Pi, and the record's stop. */
+export async function agentInPi(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId) {
+  const { look, live, problem } = await lookFor(agentKind, context, tools);
+  const copy = look.disk.byKey.get(key)?.[tool], name = live.find(entry => entry.key === key)?.name ?? copy?.name ?? key;
+  return { name, target: piSwitchTarget(copy, name), problem };
+}
 
 // ---------- For the callers around a pass ----------
 
@@ -314,7 +327,10 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
   }
   // The edits the next pass handles: the one that becomes the current version, and any that give way to it.
   const edited = made ? pendingEdits(made) : [];
+  // Pi takes an agent as a skill: where its own list keeps the file out, its line says so and offers to let it in, as a skill's.
+  const pi = piSwitchTarget(slot['pi-cli'], name), off = !!pi && isDisabled(look.context, await readSwitchFile(look.context, 'pi-cli'), pi);
   return {
+    ...(off ? { switchedOff: ['pi-cli' as HarnessId] } : {}),
     key, name, description: current?.description ?? '', copies, on: !!item?.on, except: item?.except ?? [], cannot, edited,
     // The copies a harness managed again gives way with are kept before the plan, by the pass (librarypass.ts cameBack): said with it.
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }

@@ -153,8 +153,8 @@ export const state = {
   drafting: undefined as HarnessId | undefined,
   /** Sync notices the person has dismissed, by History event or item, and a background pass's problems (matrix.ts listResult). */
   dismissed: new Set<string>(),
-  /** Sync notices drawn in the header's lines or its open card: seen (matrix.ts noticeUnseen). */
-  seenNotices: new Set<string>(),
+  /** Sync notices seen, and when: drawn in the header's lines or its open card while the window had the focus (matrix.ts markSeen). */
+  seenNotices: new Map<string, number>(),
   /** Whether the content is wide enough to dock an open row's details beside its table; set by the renderer's layout. */
   wide: false,
   /** The harness whose page is open on Harnesses; none shows every harness. */
@@ -564,7 +564,9 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
   const notClaimed = [...notIn, ...(plugged?.failedIn ?? [])], held = new Set(ours.filter(heldWhole).map(entry => entry.item.toLowerCase()));
   const changed = click.rows.map((row, at) => ({ ...row, name: click.items[at] ?? row.key })).filter(row => !held.has(row.name.toLowerCase()));
-  const said = typeof click.said === 'string' ? click.said : click.said(notClaimed, wrote);
+  // What the click also changed in a tool's own settings with its copies (Pi's skills list: librarypass.ts Kind.follow) follows.
+  const settings = [...new Set(ours.flatMap(entry => (entry.settingsChanged ? [entry.settingsChanged] : [])))];
+  const said = [typeof click.said === 'string' ? click.said : click.said(notClaimed, wrote), ...settings].join(' ');
   const choose = differs ? ` ${copiesDiffer(click.items)}` : '';
   const along = plugged && !switchProblems(plugged).length ? click.plugins?.said : undefined;
   const text = done || !refusal ? [said, along].filter(Boolean).join(' ') + choose : refusal.message;
@@ -1103,7 +1105,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
  */
 function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult) {
   const entry = libraryEntry(past)!, rows = [entry];
-  if (result.stopped) { tell({ page, item: past.item, rows, text: result.stopped, warn: true, history: true }); return; }
+  if (result.stopped) { tell({ page, item: past.item, rows, text: `${past.item}: ${result.stopped}`, warn: true, history: true, refused: true }); return; }
   const view = state.home?.[entry.kind];
   const made = state.history.data?.find(event => event.id === past.undoneBy);
   const item = view?.library[entry.key];
@@ -1122,7 +1124,7 @@ function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult) {
  * (restoreEvent, from restorePlan before the click); a switch made in Settings since is not its doing.
  */
 function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, switchedOn: boolean) {
-  if (result.stopped) { tell({ page, item: past.item, text: result.stopped, warn: true, history: true }); return; }
+  if (result.stopped) { tell({ page, item: past.item, text: result.stopped, warn: true, history: true, refused: true }); return; }
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
   const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
@@ -1136,13 +1138,13 @@ function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, swit
  * outside Central Knot's taken over. What it did is said in the band, with no Undo there: Take over has none (the band and its
  * History entry say so); a cleared switch's Undo is its History entry's action (skills.ts switchBack).
  */
-export const skillAction = (action: 'clear-switch' | 'take-over', key: string, tool: HarnessId, name: string) =>
+export const skillAction = (action: 'clear-switch' | 'take-over', key: string, tool: HarnessId, name: string, kind: 'skills' | 'agents' = 'skills') =>
   busy(action === 'take-over' ? 'Taking it over…' : 'Clearing the switch…', async page => {
-    const home = state.home!;
-    const result = received(await (action === 'take-over' ? api().takeOverSkill(key, tool, clickResumes(home), home.home) : api().clearSkillSwitch(key, tool, clickResumes(home), home.home)));
+    const home = state.home!, of = kind === 'agents' ? 'agent' : 'skill';
+    const result = received(await (action === 'take-over' ? api().takeOverSkill(key, tool, clickResumes(home), home.home) : api().clearSkillSwitch(key, tool, clickResumes(home), home.home, of)));
     setHome(await api().refresh());
-    keepOwn([{ kind: 'skills', results: result.results, notices: result.notices }]);
-    const row = { kind: 'skills' as const, key };
+    keepOwn([{ kind, results: result.results, notices: result.notices }]);
+    const row = { kind, key };
     if (result.stopped) { tell({ page, item: name, rows: [row], text: result.stopped, warn: true, band: true }); return; }
     // Letting a tool load it again has an Undo (its History entry's: the switch set again); a take-over has none, and says so.
     const said = `${name}: ${result.results[0]?.message ?? 'done.'}${action === 'take-over' ? ' This has no Undo.' : ''}`;
@@ -1177,6 +1179,8 @@ export interface Outcome {
   kind?: 'saved';
   tool?: HarnessId;
   history?: boolean;
+  /** Nothing was done, its reason the text: History is offered as itself, not as where its Undo is (matrix.ts outcomeBand). */
+  refused?: boolean;
   /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be. */
   band?: boolean;
   /** The band goes after a few seconds: an Undo's confirmation. */
@@ -1747,8 +1751,8 @@ export const profileState = {
 };
 
 /** What a switch or its Undo did, as its band says it: what it turned On and Off, and what could not change. */
-function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']>, results: DestinationResult[], act?: Outcome['act']) {
-  const leftSaid = turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : '';
+function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], act?: Outcome['act']) {
+  const leftSaid = `${turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : ''}${(turned.settingsChanged ?? []).map(said => ` ${said}`).join('')}`;
   // An Undo's plugin copies changed since the switch (profiles.ts undoSwitch), left as they are.
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}, changed since the switch: ${andList(turned.since)}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';

@@ -32,7 +32,7 @@ import { switchPath } from './skillswitch.ts';
 import { applyServers, restoreServer, serversView, serverVersion } from './servers.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
 import { agentsFolder } from './agentfiles.ts';
-import { libraryEntry } from './historyactions.ts';
+import { isClearedSwitch, libraryEntry } from './historyactions.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
 import { clearDraftFolders, draftSources, draftTools, promptNow, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';
@@ -1619,7 +1619,8 @@ app.whenReady().then(async () => {
       const whose = past && libraryEntry(past);
       if (!whose) return { stopped: 'That History entry has nothing Central Knot can undo. Nothing was changed.', results: [], harnessWrites: 0 };
       const version = typeof choice === 'string' ? choice : undefined;
-      const restored = await { skills: restoreSkill, mcp: restoreServer, agents: restoreAgent }[whose.kind](context(), await toolsNow(), eventId, version);
+      // A tool's switch cleared, an agent's in Pi too, is undone by restoreSkill (skills.ts switchBack).
+      const restored = await (isClearedSwitch(past) && !past.undoneBy ? restoreSkill : { skills: restoreSkill, mcp: restoreServer, agents: restoreAgent }[whose.kind])(context(), await toolsNow(), eventId, version);
       return { stopped: restored.stopped, results: restored.results, harnessWrites: restored.writes, made: restored.made };
     })()
     : { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult));
@@ -1690,8 +1691,8 @@ app.whenReady().then(async () => {
     ? applySkills(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: elsewhere, results: [], writes: 0 }));
   // A skill's two actions a Change can't carry: a tool's own switch cleared, and a copy outside Central Knot's taken over.
-  handle('skills:clear-switch', async (key, tool, resume, home) => (home === current?.home && typeof key === 'string' && isTool(tool)
-    ? clearSwitch(context(), await toolsNow(), key, tool, resume === true) : { stopped: elsewhere, results: [], writes: 0 }));
+  handle('skills:clear-switch', async (key, tool, resume, home, of) => (home === current?.home && typeof key === 'string' && isTool(tool)
+    ? clearSwitch(context(), await toolsNow(), key, tool, resume === true, of === 'agent' ? 'agent' : 'skill') : { stopped: elsewhere, results: [], writes: 0 }));
   handle('skills:take-over', async (key, tool, resume, home) => (home === current?.home && typeof key === 'string' && isTool(tool)
     ? takeOver(context(), await toolsNow(), key, tool, resume === true) : { stopped: elsewhere, results: [], writes: 0 }));
   handleNow('skills:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await skillVersion(context(), key, hash)) ?? null : null));

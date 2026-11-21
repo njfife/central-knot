@@ -225,7 +225,7 @@ function renderStatus() {
  * its sentence then the first of them, each on one line; without, its sentence in two (style.css .header-result); either cut where
  * it runs past them, with Show all (matrix.ts wholeToggle). With no result, they hold the newest notice, said as an automatic change,
  * its sentence cut where it runs past them, with its × (style.css .header-notice). Beside them, the Notices control counts the
- * notices, marked while one is unseen; a notice arriving while a result is on show is told there alone, the result keeping the
+ * notices, marked and filled while one is unseen; a notice arriving while a result is on show is told there alone, the result keeping the
  * lines until it fades, is closed or a newer result takes its place. A card hangs from the header over the page, one at a time
  * (state.shownWhole says which): the result whole, from Show all, or every notice, from Notices or the notice in the lines
  * (matrix.ts noticesCard). A card closes like a menu: on Show less or Notices again, its ×, Escape, or a press that begins outside
@@ -269,6 +269,8 @@ document.addEventListener('click', event => {
 // Escape with a card open folds it and does nothing else, before any other Escape is heard: a find box, or a search field's own
 // clearing, keeps its words.
 window.addEventListener('keydown', event => { if (event.key === 'Escape' && foldResult(true)) { event.stopPropagation(); event.preventDefault(); } }, true);
+// Coming back to the window draws it again: a notice drawn while it had no focus is seen now, and its arrival plays (matrix.ts markSeen).
+window.addEventListener('focus', () => rerender());
 
 // Laid out, and at each resize: a Show all drawn for a cut shows where the header cuts the sentence or a problem line.
 const cut = (text: Element) => text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight;

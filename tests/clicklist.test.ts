@@ -47,7 +47,7 @@ const textOf = (node: any): string => (typeof node === 'string' ? node : (node?.
 const announcement = element();
 Object.assign(globalThis, {
   window: { centralKnot: new Proxy(api, { get: (known, name) => (known as Record<string | symbol, unknown>)[name] ?? (() => Promise.resolve(null)) }), addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }) },
-  document: { body: element(), documentElement: element(), activeElement: null, getElementById: (id: string) => id === 'announcement' ? announcement : element(), querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, createElement: element, createTextNode: element },
+  document: { body: element(), documentElement: element(), activeElement: null, hasFocus: () => true, getElementById: (id: string) => id === 'announcement' ? announcement : element(), querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, createElement: element, createTextNode: element },
   ResizeObserver: class { observe() {} disconnect() {} },
 });
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });

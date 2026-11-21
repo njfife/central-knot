@@ -187,10 +187,10 @@ export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Direc
 
 /** Whether the tool has the plugin's items: "has it" for Pi and OpenCode, as pluginlibrary.ts onIn counted it for the view. */
 export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => !!entry.items?.[plugin]?.on[tool];
-/** "2 of its 3 items are on", in one tool. */
-export const itemsOnWords = (entry: MarketplaceView, plugin: string, tool: HarnessId) => {
-  const on = entry.items?.[plugin]?.on[tool] ?? 0;
-  return `${on} of its ${entry.items?.[plugin]?.of ?? 0} items ${on === 1 ? 'is' : 'are'} on`;
+/** "2 of its 3 items are on", in one tool (`where`: " there"), as the tool loads them: those its own settings keep out said apart. */
+export const itemsOnWords = (entry: MarketplaceView, plugin: string, tool: HarnessId, where = '') => {
+  const items = entry.items?.[plugin], out = items?.keptOut?.[tool] ?? 0, on = (items?.on[tool] ?? 0) - out;
+  return `${on} of its ${items?.of ?? 0} items ${on === 1 ? 'is' : 'are'} on${where}${out ? ` (${names[tool]}’s own settings keep ${out} out)` : ''}`;
 };
 
 /**
@@ -448,7 +448,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   }
   if (owed.has === 'items') {
     const ready = entry.items?.[plugin]?.ready ? ' An update is ready: Update.' : '';
-    const words = `${name}: ${itemsOnWords(entry, plugin, tool)} there, as items of Central Knot’s that follow the plugin.${ready}`;
+    const words = `${name}: ${itemsOnWords(entry, plugin, tool, ' there')}, as items of Central Knot’s that follow the plugin.${ready}`;
     return unwanted ? { mark: 'stays', words: `${words}${unwanted}` } : { mark: 'items', words };
   }
   if (owed.wanted && owed.held) return { mark: 'cannot', words: toolSaid(tool, owed.held) };

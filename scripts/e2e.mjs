@@ -1319,6 +1319,27 @@ async function agentInPi(a, practice) {
   for (let tries = 0; tries < 30 && await cellState(a, 'agents', 'code-reviewer', 'pi-cli') !== 'current'; tries++) await wait(100);
   await a.click(`#${rowPart('open', 'agents', 'code-reviewer')}`);
   same('its row has a Pi mark and a Pi line with its switch', [await cellState(a, 'agents', 'code-reviewer', 'pi-cli'), await a.exists(`#${rowPart('enable', 'agents', 'code-reviewer', 'pi-cli')}`)], ['current', true]);
+  // His Pi list keeping every skill out, the agent put there before any inclusion was written: its Pi line says Pi doesn't load
+  // it, and Let Pi load it lets it in, as a skill's does; its Undo takes the inclusion out again.
+  const piSettings = join(practice, '.pi/agent/settings.json'), piList = () => jsonOrNothing(piSettings)?.skills;
+  const opened = async () => { if (await a.run(`document.querySelector('#${rowPart('open', 'agents', 'code-reviewer')}')?.getAttribute('aria-expanded')`) !== 'true') await a.click(`#${rowPart('open', 'agents', 'code-reviewer')}`); };
+  // Pi joined just now: once the skills are in it, his pattern comes, so nothing the joining puts in gets an inclusion.
+  await openKind(a, 'skills');
+  await piCaughtUp(a);
+  await openKind(a, 'agents');
+  writeFileSync(piSettings, '{ "skills": ["!*"] }\n');
+  await a.click('#header-refresh');
+  await opened();
+  const letPi = `#${rowPart('clear-switch', 'agents', 'code-reviewer', 'pi-cli')}`;
+  check('under his !*, the agent’s Pi line says Pi doesn’t load it, with Let Pi load it', /switched off in Pi’s own settings: Pi doesn’t load it\./.test(await a.text('.details') ?? '') && await a.exists(letPi), await a.text('.details'));
+  const before = piList();
+  await a.click(letPi);
+  same('Let Pi load it adds the agent’s file to his Pi list, and nothing else', piList(), [...before, '+skills/code-reviewer.md']);
+  await a.click('#outcome-undo');
+  same('its Undo takes that out again', piList(), before);
+  rmSync(piSettings);
+  await a.click('#header-refresh');
+  await opened();
   const note = (await a.text(`#${rowPart('as-skill', 'agents', 'code-reviewer')}`) ?? '').trim();
   check('the opened row says once what Pi gets, and that deleting its file there turns the agent off everywhere',
     /^Pi holds no agents of its own, so there an agent is a skill[\s\S]*no isolated context of its own, tool restrictions and model selection[\s\S]*Deleting that file in Pi turns the agent off in every tool/.test(note), note);
@@ -1594,7 +1615,7 @@ async function practiceFlow() {
   for (let tries = 0; tries < 80 && !(await offMarks(a, 'skills', 'release-notes')).length; tries++) await wait(100);
   same('a switch set in Claude Code’s settings reaches the open page, and is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'skills', 'release-notes'), /switched off in Claude Code/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? ''), await switchOn(a, 'skills', 'release-notes')], [true, ['claude-cli'], true, true]);
   await opened('release-notes');
-  check('its line in the opened row says the tool doesn’t load it', /Claude Code doesn’t load it, and Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its line in the opened row says the tool doesn’t load it', /switched off in Claude Code’s own settings: Claude Code doesn’t load it\./.test(await a.text('.details') ?? ''), await a.text('.details'));
   // While the skills record is damaged, Let Claude Code load it is drawn and off, as the row's other controls are (that a click
   // writes nothing then is tests/librarygate.test.ts's).
   const clearSwitch = `#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`, skillsRecordHere = join(practice, '.central-knot/skills.json'), skillsRecordGood = readFileSync(skillsRecordHere, 'utf8');
@@ -6366,6 +6387,9 @@ async function pluginSwitchFlow() {
   writeMarket(market, 'ck-test-market');
   mkdirSync(join(home, '.claude'), { recursive: true });
   mkdirSync(join(home, '.pi/agent'), { recursive: true });
+  // Pi's settings as in a person's report: a pattern keeps every skill out, and one is let back in by name.
+  const piSettings = join(home, '.pi/agent/settings.json'), hisList = ['!*', '+skills/other-skill/SKILL.md'], piSkills = () => jsonOrNothing(piSettings)?.skills;
+  writeFileSync(piSettings, `${JSON.stringify({ skills: hisList }, null, 2)}\n`);
   const copy = join(home, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0'), triage = join(market, 'plugins/issue-tracker/skills/triage/SKILL.md');
   mkdirSync(join(tools, '.local/bin'), { recursive: true });
   writeFileSync(join(tools, '.local/bin/claude'), `#!/bin/sh
@@ -6399,7 +6423,8 @@ esac
   await done();
   same('On installs it in Claude Code with its own command and puts its items in Pi', [calls(), installed(), inPi(), await marks(), await switchIs('#pswitch-0-issue-tracker')],
     [['plugin marketplace add ' + market, 'plugin install issue-tracker@ck-test-market --scope user'], true, [true, true], ['installed', 'items'], 'true']);
-  check('the result says what the switch did, with Undo', /issue-tracker: installed in Claude Code; its items put in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
+  // With his pattern in Pi's list, what it added there too (pluginlibrary.ts reportIn's notes).
+  check('the result says what the switch did, with what it added to his Pi list, and Undo', /issue-tracker: installed in Claude Code; its items put in Pi; \+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
   await pictures('plugin-switch-list');
   // Sync once from the menu bar with the switch's result up: its own result takes the header, as on the item lists, and × lets it
@@ -6430,6 +6455,41 @@ esac
   await openKind(a, 'skills');
   check('triage is one row on Skills, “from the plugin issue-tracker”, and Claude Code has it with the plugin', /from the plugin issue-tracker/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`) ?? '')
     && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'issue-tracker@ck-test-market/triage')}"]`)), await a.text('.page'));
+  // Under his pattern, the copy the On put in Pi is one Pi loads: the inclusion `pi config` writes follows his entries.
+  const offInPi = async () => (await offMarks(a, 'skills', 'triage')).includes('pi-cli');
+  same('under his pattern, On let Pi load triage: the inclusion pi config writes, after his entries as they were, and no off mark for Pi', [piSkills(), await offInPi()], [[...hisList, '+skills/triage/SKILL.md'], false]);
+  // As an earlier Central Knot left it, the copy there with no inclusion: the row says Pi doesn't load it, and Let Pi load it lets it in.
+  writeFileSync(piSettings, `${JSON.stringify({ skills: hisList }, null, 2)}\n`);
+  await a.click('#header-refresh');
+  if ((await a.run(`document.querySelector('#${rowPart('open', 'skills', 'triage')}')?.getAttribute('aria-expanded')`)) !== 'true') await a.click(`#${rowPart('open', 'skills', 'triage')}`);
+  check('with no inclusion, triage is off in Pi: its mark, its line, and Let Pi load it', await offInPi() && /Pi doesn’t load it/.test(await a.text('.details') ?? '') && await a.exists(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`), await a.text('.details'));
+  // The plugin's page counts what Pi loads: triage, which his list keeps out, is said apart.
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#pbox-0-issue-tracker-pi-cli'))) await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-issue-tracker-pi-cli')); tries++) await wait(100);
+  const boxSays = await a.run(`document.querySelector('#pbox-0-issue-tracker-pi-cli')?.title`);
+  check('the plugin’s box for Pi says Pi’s own settings keep one of its items out', /1 of its 2 items is on there \(Pi’s own settings keep 1 out\)/.test(boxSays ?? ''), boxSays);
+  await openKind(a, 'skills');
+  if ((await a.run(`document.querySelector('#${rowPart('open', 'skills', 'triage')}')?.getAttribute('aria-expanded')`)) !== 'true') await a.click(`#${rowPart('open', 'skills', 'triage')}`);
+  await a.click(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`);
+  same('Let Pi load it puts the inclusion back after his entries, and the mark is on', [piSkills(), await offInPi()], [[...hisList, '+skills/triage/SKILL.md'], false]);
+  // A found skill his exact `-` keeps out of Pi, taken in by Add: its result says where it is on, which is not Pi.
+  mkdirSync(join(home, '.claude/skills/kept-note'), { recursive: true });
+  writeFileSync(join(home, '.claude/skills/kept-note/SKILL.md'), '---\nname: kept-note\ndescription: Made-up.\n---\n\nMade-up.\n');
+  writeFileSync(piSettings, `${JSON.stringify({ skills: [...hisList, '+skills/triage/SKILL.md', '-skills/kept-note/SKILL.md'] }, null, 2)}\n`);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'kept-note')}"] .add-item`)); tries++) await wait(100);
+  await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'kept-note')}"] .add-item`);
+  await done();
+  check('Add of a skill his list keeps out of Pi says it is on in Claude Code, not in Pi', /kept-note is in Central Knot now, and on in Claude Code\./.test(await a.text('#header') ?? ''), await a.text('#header'));
+  // One his pattern alone keeps out: Add says it is on in Pi too, and what it added to his list.
+  mkdirSync(join(home, '.claude/skills/open-note'), { recursive: true });
+  writeFileSync(join(home, '.claude/skills/open-note/SKILL.md'), '---\nname: open-note\ndescription: Made-up.\n---\n\nMade-up.\n');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'open-note')}"] .add-item`)); tries++) await wait(100);
+  await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'open-note')}"] .add-item`);
+  await done();
+  check('Add under his pattern says what it added to his Pi list', /open-note is in Central Knot now, and on in Claude Code and Pi\. \+skills\/open-note\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('#header') ?? ''), await a.text('#header'));
   await openKind(a, 'mcp');
   check('issues is one row on MCP servers, from the plugin too', /from the plugin issue-tracker/.test(await a.text(`.ov-row[data-key="${rowPart('', 'mcp', 'issues')}"]`) ?? ''), await a.text('.page'));
   await a.click('#nav-plugins');
@@ -6563,6 +6623,18 @@ esac
   await a.click('#nav-plugins');
   same('each row shows its switch On, its marks, and its own result', [await switchIs('#pswitch-0-release-helper'), await switchIs('#pswitch-0-starter-skills'), await marks('release-helper'), await marks('starter-skills'), await rowSays('release-helper'), await rowSays('starter-skills')],
     ['true', 'true', ['installed', 'items'], ['installed', 'items'], 'ended', 'ended']);
+  // A profile switch that takes a skill out of Pi says what it took out of his Pi list, in its result.
+  await a.click('#nav-profiles');
+  await newProfile(a, 'Only kept');
+  await a.click('#pf-skill\\:kept-note');
+  await a.click('#profile-switch');
+  await done();
+  const switchSaid = `${await a.text('#header') ?? ''} ${await a.text('.bands') ?? ''}`;
+  check('a profile switch says what it took out of his Pi list', /Switched to Only kept: [\s\S]*\+skills\/open-note\/SKILL\.md taken out of Pi’s skills list \(settings\.json\) with its copy\./.test(switchSaid), switchSaid);
+  // History's entry for the On says what it added to his Pi list.
+  await a.click('#nav-history');
+  for (let tries = 0; tries < 50 && !/added to Pi’s skills list/.test(await a.text('.page') ?? ''); tries++) await wait(100);
+  check('History says the On added triage to his Pi list', /\+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('.page') ?? ''), (await a.text('.page'))?.slice(0, 600));
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
 }
@@ -7150,6 +7222,27 @@ fs.writeFileSync(record, JSON.stringify(now));
     same('a switch in the middle pressed and held while a notice arrives, then let go: one click, on that switch', await heldAcross(middleSwitch, inFile[9]), [true, { [middleSwitch]: 1 }, true]);
     const lowest = await lowestSwitch();
     same('the lowest switch in view pressed and held while a notice arrives, then let go: one click, on that switch', await heldAcross(lowest, inFile[10]), [true, { [lowest]: 1 }, true]);
+    // Five edited at once, all five kept, then the second and the fourth undone in one open card: each place keeps its top and says
+    // what was done there, the first still saying it after the second, so no notice in the card moves under the pointer.
+    await letNoticesGo(a);
+    editServers(...inFile.slice(0, 5))();
+    check('five servers edited at once: Notices counts five', await until(async () => await counted() === 5), await counted());
+    await openNotices(a);
+    const cardTops = () => a.all('#notices-card .sync-notice-lines > *', 'Math.round(e.getBoundingClientRect().top)');
+    const topsBefore = await cardTops(), topsAfter = [];
+    for (const nth of [2, 4]) {
+      await a.run(`document.querySelector('#notices-card .sync-notice-lines > :nth-child(${nth}) [id^="notice-undo-"]')?.click()`);
+      await done(); topsAfter.push(await cardTops());
+    }
+    const doneSays = await a.all('#notices-card .notice-done', 'e.textContent');
+    same('two notices undone in one open card: every notice where it was after each, both places saying what was done',
+      [topsBefore.length, ...topsAfter, doneSays.length, doneSays.every(says => / undone: /.test(says))], [5, topsBefore, topsBefore, 2, true]);
+    if (shots) for (const [width, height] of [[860, 528], [1316, 819], [1728, 1117]]) {
+      await sizeTo(a, width, height);
+      for (const look of ['light', 'dark']) { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] }); await a.shot(`notices-two-undone-in-card-${width}-${look}`); }
+    }
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await sizeTo(a, 1280, 800);
+    await closeNotices(a);
   }
 }
 
@@ -9521,6 +9614,10 @@ async function libraryFlow() {
   // Library, whose every kind is on show.
   await letNoticesGo(tb);
   await fullSize(tb);
+  // A notice is seen when drawn while the window has the focus (matrix.ts markSeen). The Mac's run has four windows at once, which
+  // take the focus from each other, so whether this one has it at a given check is chance: the page is told it has it (emulated),
+  // and every check of "seen" here reads the same on any run. The check of a hidden window turns that off for its own steps.
+  await tb.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   const edit = (...names) => { for (const name of names) writeFileSync(join(T.claude, name, 'SKILL.md'), text(name, `Edited by hand ${Date.now()}.`)); };
   const copilotSays = name => readNow(join(T.copilot, name, 'SKILL.md'));
   /** Notices as it is: its count and whether it is marked; null where it isn't drawn. */
@@ -9548,6 +9645,43 @@ async function libraryFlow() {
   };
   edit('alpha');
   check('alpha edited in Claude Code: its notice comes to the header’s lines', await until(async () => /alpha was edited in Claude Code/.test(await noticeInLines(tb) ?? ''), 30000), await tb.text('#header'));
+  // It comes with a stronger fill that settles once into the line's own: each redraw carries it on from where it was, never from
+  // the start (its animations, and how far along each is, in hundredths).
+  const arriving = () => tb.run(`(line => line && line.getAnimations().map(each => [each.animationName, Math.round(each.effect.getComputedTiming().progress * 100)]))(document.querySelector('#header .header-notice'))`);
+  const came = await arriving();
+  if (shots) await tb.shot('notices-arriving-full-light');
+  await wait(600);
+  for (let twice = 0; twice < 2; twice++) await tb.click('#sidebar-toggle');
+  const carried = await arriving();
+  await wait(2600);
+  same('a notice come to the lines is marked as it comes, the mark carried on through two redraws, not started again, then rests',
+    [came?.[0]?.[0], carried?.[0]?.[1] - came?.[0]?.[1] >= 15, await arriving()], ['notice-arrives', true, []]);
+  /** The colour of what the app does by itself (style.css --accent-ink), as a page element shows it. */
+  const accentInk = () => tb.run(`(probe => { probe.style.color = 'var(--accent-ink)'; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; })(document.createElement('i'))`);
+  same('…led by its mark and “Automatic change:” in the colour of what the app does by itself, on a fill of it, with a chevron for the card it opens',
+    await tb.run(`(([line, lead]) => [!!lead.querySelector('svg'), getComputedStyle(lead).color, getComputedStyle(line).backgroundColor !== 'rgba(0, 0, 0, 0)', !!line.querySelector('.notice-opens')])(['#header .header-notice', '#header .header-notice .notice-source'].map(id => document.querySelector(id)))`),
+    [true, await accentInk(), true, true]);
+  // Seen only in his sight: alpha edited with the window hidden (closed to the menu bar) is drawn in the lines but stays unseen
+  // through redraws (Refresh, three times); shown and focused again, the window is drawn, the arrival starts then, and it is seen.
+  if (tb.inspect) {
+    await tb.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+    const inspector = await tb.main(), appWindow = 'electron.BrowserWindow.getAllWindows()[0]';
+    await letNoticesGo(tb);
+    await inspector.run(`${appWindow}.hide()`);
+    edit('alpha');
+    const drawnAway = await until(async () => /alpha was edited/.test(await noticeInLines(tb) ?? ''), 30000);
+    for (let reads = 0; reads < 3; reads++) { await tb.run(`document.getElementById('header-refresh').click()`); await done(tb); }
+    await wait(2600);
+    const away = [drawnAway, await control()];
+    await inspector.run(`(shown => { shown.show(); shown.focus(); })(${appWindow})`);
+    await tb.settle();
+    const back = [await control(), (await arriving())?.[0]];
+    inspector.close();
+    await tb.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    same('a notice drawn while the window is hidden stays unseen through redraws; shown and focused, its arrival starts and it is seen',
+      [away, back[0], back[1]?.[0], back[1]?.[1] < 50], [[true, ['1', true]], ['1', false], 'notice-arrives', true]);
+    await wait(2600);
+  }
   same('said as an automatic change, with no result’s check; Notices counts it, unmarked: drawn in the lines, it is seen; the header 48px',
     [(await noticeInLines(tb))?.startsWith('Automatic change'), await tb.run(`document.querySelector('#header .header-notice .sync-notice')?.firstElementChild?.className`), await control(), await header48()], [true, 'notice-source', ['1', false], 48]);
   same('Notices is a button when closed: a border as Refresh has, its count on a fill of its own', await tb.run(`(([control, refresh, count]) => [getComputedStyle(control).borderTopColor === getComputedStyle(refresh).borderTopColor, getComputedStyle(control).borderTopWidth, !!count && getComputedStyle(count).backgroundColor !== 'rgba(0, 0, 0, 0)'])(['#notices', '#header-refresh', '#notices .notices-count'].map(id => document.querySelector(id)))`), [true, '1px', true]);
@@ -9607,6 +9741,9 @@ async function libraryFlow() {
   const sixEdited = ['beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta'].map(copilotSays), openBefore = await tb.all('.ov-row[aria-expanded="true"]', 'e.dataset.key');
   const undone = await tb.run(`document.querySelector('#notices-card [id^="notice-undo-"]')?.closest('.sync-notice').querySelector('.item-name').textContent`);
   const undoAt = await centre('#notices-card [id^="notice-undo-"]') ?? { x: 0, y: 0 };
+  /** A notice in the card whose action `selector` names: its top, and the next notice's name and top. */
+  const noticePlace = selector => tb.run(`(notice => notice && (next => ({ top: Math.round(notice.getBoundingClientRect().top), next: next.querySelector('.item-name').textContent, nextTop: Math.round(next.getBoundingClientRect().top) }))(notice.nextElementSibling))(document.querySelector(${JSON.stringify(selector)})?.closest('.sync-notice'))`);
+  const undoPlace = await noticePlace('#notices-card [id^="notice-undo-"]');
   await mouse(tb, 'mouseMoved', undoAt, 0); await mouse(tb, 'mousePressed', undoAt, 1); await mouse(tb, 'mouseReleased', undoAt, 0);
   await wait(120);
   for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await tb.send('Input.dispatchMouseEvent', { type, x: undoAt.x, y: undoAt.y, button: 'left', buttons, clickCount: 2 });
@@ -9614,6 +9751,24 @@ async function libraryFlow() {
   same('a double click on Undo undoes that notice alone: the card open with five, the page under it untouched, the result in the status bar',
     [await tb.exists('#notices-card'), (await inCard()).length, ['beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta'].filter((name, at) => copilotSays(name) !== sixEdited[at]), await tb.all('.ov-row[aria-expanded="true"]', 'e.dataset.key'), await tb.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id`), (await statusSays() || '').startsWith(undone)],
     [true, 5, [undone], openBefore, 'library-kind-all', true]);
+  /** The line an action in the card leaves in its notice's place: its top, its words, whether it warns; null with none. */
+  const doneLine = () => tb.run(`(line => line && [Math.round(line.getBoundingClientRect().top), line.textContent, !!line.querySelector('.tone-warning')])(document.querySelector('#notices-card .notice-done'))`);
+  const topIn = name => tb.run(`Math.round([...document.querySelectorAll('#notices-card .sync-notice')].find(notice => notice.querySelector('.item-name')?.textContent === ${JSON.stringify(name)})?.getBoundingClientRect().top ?? -1)`);
+  const [undoneTop, undoneSays, undoneWarns] = await doneLine() ?? [];
+  same('…and says what it did where the notice was, in its result’s words with its Undo: the next notice where it was',
+    [undoneTop, undoneSays?.startsWith(`${undone}: undone: `), undoneWarns, await tb.exists('#notices-card .notice-done #outcome-undo'), await topIn(undoPlace?.next)],
+    [undoPlace?.top, true, false, true, undoPlace?.nextTop]);
+  /** Pictures (with --shots) of the card as it is, `name`, at 860×528, 1316×819 and 1728×1117, light and dark: a resize keeps it open. */
+  const cardPictures = async name => {
+    if (!shots) return;
+    for (const size of [SMALLEST, [1316, 819], [1728, 1117]]) {
+      await sizeTo(tb, ...size);
+      const rail = await tb.run(`document.body.classList.contains('rail')`) && size[0] > SMALLEST[0];
+      for (const look of ['light', 'dark']) { await theme(tb, look); await tb.shot(`notices-${name}-${size[0]}${rail ? '-rail' : ''}-${look}`); }
+    }
+    await theme(tb, 'light'); await fullSize(tb);
+  };
+  await cardPictures('undone-in-card');
   await pressIf('#notices-card [id^="notice-dismiss-"]');
   same('a notice’s × in the card dismisses that one alone, the card staying open', [(await inCard()).length, await tb.exists('#notices-card')], [4, true]);
   await openNotices(tb);
@@ -9641,6 +9796,12 @@ async function libraryFlow() {
   edit('delta');
   check('a second folds the first into History: Notices names delta', await until(() => tb.run(`/delta/.test(document.querySelector('#notices')?.title ?? '')`), 30000), await tb.run(`document.querySelector('#notices')?.title`));
   same('…counting one, marked, the result and its problem line keeping the lines, the header 48px', [await control(), await tb.exists('#header [data-outcome]'), await tb.exists('#header .problem-line'), await noticeInLines(tb), await header48()], [['1', true], true, true, null, 48]);
+  /** Notices against Refresh: whether its fill differs, and its words' colour. */
+  const filled = () => tb.run(`(([control, refresh]) => control && [getComputedStyle(control).backgroundColor !== getComputedStyle(refresh).backgroundColor, getComputedStyle(control).color])(['#notices', '#header-refresh'].map(id => document.querySelector(id)))`);
+  same('…Notices filled with the colour of what the app does by itself while its notice is unseen, its words white', await filled(), [true, 'rgb(255, 255, 255)']);
+  /** Notices' width, to the pixel: its unseen mark takes no room of the lines beside it. */
+  const noticesWide = () => tb.run(`Math.round(document.querySelector('#notices').getBoundingClientRect().width * 10) / 10`);
+  const wideUnseenOne = await noticesWide();
   await noticePictures('with-result');
   chmodSync(T.claude, 0o755);
   await tb.click('#nav-overview');
@@ -9652,6 +9813,8 @@ async function libraryFlow() {
   same('back on the Library, the click’s problem line still has the lines, delta’s notice unseen', [await tb.exists('#header .problem-line'), await noticeInLines(tb), await control()], [true, null, ['1', true]]);
   await tb.run(`document.querySelector('#outcome-dismiss, #problems-dismiss')?.click()`); await tb.settle();
   same('its × closes it: delta’s notice has the lines, and is seen', [/delta was edited/.test(await noticeInLines(tb) ?? ''), await control()], [true, ['1', false]]);
+  same('…Notices resting as Refresh is, once its notice is seen', (await filled())?.[0], false);
+  const wideSeenOne = await noticesWide();
   if (!(await switchOn(tb, 'skills', 'beta'))) { await tb.click(`#${rowPart('switch', 'skills', 'beta')}`); await done(tb); }
   await letNoticesGo(tb);
   // Away from the Library, iota saved twice, the first save reaching Copilot CLI before the second: one notice, whose Undo undoes
@@ -9716,18 +9879,58 @@ async function libraryFlow() {
   await letNoticesGo(tb);
   for (const name of toolbarSkills) rmSync(join(T.claude, name), { recursive: true, force: true });
   check('twelve skills deleted by hand at once: Notices counts twelve', await until(async () => (await control())?.[0] === '12', 30000), await control());
+  const wideUnseenTwelve = await noticesWide();
   check('and the Library, open on All, has no dot', !(await tb.exists('#nav-library .nav-unseen')), await dotSays());
   await tb.click('#nav-overview');
   check('away from the Library, the dot counts the eleven not seen: the newest was drawn in the lines', /^11 automatic changes: /.test(await dotSays() ?? ''), await dotSays());
   await openKind(tb, 'all');
   await openNotices(tb);
   same('the card holds all twelve, the seventh and the twelfth too', [...await inCard()].sort(), [...toolbarSkills].sort());
+  same('Notices is as wide with its unseen mark as without, at one notice and at twelve', [wideUnseenOne, wideUnseenTwelve], [wideSeenOne, await noticesWide()]);
   await sizeTo(tb, 1728, 1117);
   await openNotices(tb);
   same('at 1728×1117 the card is as tall as its twelve: every one in view, nothing to scroll', await tb.run(`(card => card.scrollHeight <= card.clientHeight + 1 && card.getBoundingClientRect().bottom < innerHeight)(document.querySelector('#notices-card'))`), true);
   if (shots) await tb.shot('notices-card-twelve-tall-1728-light');
   await fullSize(tb);
   await noticePictures('card-twelve', () => openNotices(tb));
+  // Turn it on refused, the skills record unreadable for that click: in its notice's place the notice says why, by name, keeping its
+  // own Turn it on for another try and History; tried again in the same card, it goes through and says so there. A refusal's result
+  // in the header, once the card closes, offers History: nothing was written to undo.
+  const turnOn = '#notices-card [id^="notice-restore-"]', refusedPlace = await noticePlace(turnOn), skillsRecord = join(T.home, '.central-knot/skills.json');
+  const refusedName = await tb.run(`document.querySelector('${turnOn}').closest('.sync-notice').querySelector('.item-name').textContent`);
+  const refusedTurnOn = async (button = turnOn) => { chmodSync(skillsRecord, 0o000); try { await pressIf(button); } finally { chmodSync(skillsRecord, 0o644); } };
+  await refusedTurnOn();
+  /** `name`'s notice in the card: its top, its words, whether it warns, and whether it offers Turn it on and History. */
+  const noticeOf = name => tb.run(`(notice => notice && [Math.round(notice.getBoundingClientRect().top), notice.textContent, ...['.tone-warning', '[id^="notice-restore-"]', '[id^="notice-history-"]'].map(part => !!notice.querySelector(part))])([...document.querySelectorAll('#notices-card .sync-notice')].find(notice => notice.querySelector('.item-name')?.textContent === ${JSON.stringify(name)}))`);
+  const [refusedTop, refusedSays, ...refusedOffers] = await noticeOf(refusedName) ?? [];
+  same('Turn it on refused: in its notice’s place, why, by name, with its own Turn it on for another try and History; the next notice where it was',
+    [refusedTop, refusedSays?.startsWith(`${refusedName}: The skills record could not be read.`), refusedOffers, await topIn(refusedPlace?.next)], [refusedPlace?.top, true, [true, true, true], refusedPlace?.nextTop]);
+  await cardPictures('refused-in-card');
+  await pressIf(`#notices-card [id^="notice-restore-"]`);
+  const [retriedTop, retriedSays] = await doneLine() ?? [];
+  same('…tried again in the same card, it goes through and says so in that place', [retriedTop, retriedSays?.startsWith(`${refusedName}: turned on`), await topIn(refusedPlace?.next)], [refusedPlace?.top, true, refusedPlace?.nextTop]);
+  await refusedTurnOn(`#notices-card .sync-notice [id^="notice-restore-"]`);
+  await closeNotices(tb);
+  same('…a refusal’s result in the header offers History, not an Undo in it', await tb.text('#header [data-outcome] #outcome-history'), 'History');
+  // In the Files view of the list's first skill, Turn it on of another skill's notice says what it did in its place all the same.
+  const filesOf = await tb.run(`document.querySelector('.ov-row[data-key^="skills-"]')?.dataset.key.slice('skills-'.length)`);
+  await tb.click(`#${rowPart('open', 'skills', filesOf)}`); await tb.click(`#${rowPart('files', 'skills', filesOf)}`);
+  await openNotices(tb);
+  const otherName = await tb.run(`[...document.querySelectorAll('#notices-card .sync-notice')].map(notice => notice.querySelector('.item-name')?.textContent).find(name => name && name !== ${JSON.stringify(filesOf)})`);
+  await tb.run(`[...document.querySelectorAll('#notices-card .sync-notice')].find(notice => notice.querySelector('.item-name')?.textContent === ${JSON.stringify(otherName)})?.querySelector('[id^="notice-restore-"]').click()`);
+  await done(tb);
+  same('in a skill’s Files view, Turn it on of another skill’s notice says what it did in that notice’s place', (await doneLine())?.[1]?.startsWith(`${otherName}: turned on`), true);
+  await closeNotices(tb); await tb.click('#files-back');
+  // The sidebar as a rail at 1316×819, chosen before the card opens (a press outside closes it): a Turn it on, then a refused one.
+  if (shots) {
+    await closeNotices(tb); await sizeTo(tb, 1316, 819);
+    if (!(await tb.run(`document.body.classList.contains('rail')`))) await tb.click('#sidebar-toggle');
+    await openNotices(tb); await pressIf(turnOn);
+    for (const look of ['light', 'dark']) { await theme(tb, look); await tb.shot(`notices-turned-on-in-card-1316-rail-${look}`); }
+    await theme(tb, 'light'); await refusedTurnOn();
+    for (const look of ['light', 'dark']) { await theme(tb, look); await tb.shot(`notices-refused-in-card-1316-rail-${look}`); }
+    await theme(tb, 'light'); await fullSize(tb);
+  }
   await closeNotices(tb);
   await tb.click('#nav-overview');
   check('every notice seen in the card: the Library has no dot', !(await tb.exists('#nav-library .nav-unseen')), await dotSays());

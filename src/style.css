@@ -279,15 +279,25 @@ ul { list-style: none; }
 #header:has(.header-result, .header-notice, .notices-card) > .page-title { flex: none; }
 @container content (width < 900px) { #header:has(.header-result, .header-notice, .notices-card) > .page-title { display: none; } }
 /* The sync notices in the header (matrix.ts headerNotices, placed by renderer.ts resultHere). With no result there, the newest
-   in its two lines, led by "Automatic change:": its sentence cut where it runs past them, its × at the right; a click on it opens
-   the card, where its actions are. Notices, a button as Refresh is with its count on a fill, takes its room from the lines, never
-   the header's height. */
-.header-notice { flex: 1 1 0; min-width: 0; display: flex; align-items: center; font-size: 12px; line-height: 16px; cursor: pointer; }
+   in its two lines, on a faint fill of the colour of what the app does by itself (the sidebar's dot's), led by its mark and
+   "Automatic change:" in it: its sentence cut where it runs past them, the chevron of the card it opens, its × at the right. It
+   comes on a stronger fill that settles into that one in 2.4 s, once: its delay, set as it is drawn, is the time since it was first
+   shown; with reduced motion, at rest at once. Notices, a button as Refresh is with its count on a fill, filled itself while a
+   notice is unseen (a primary button), takes its room from the lines, never the header's height. */
+.header-notice { flex: 1 1 0; min-width: 0; display: flex; align-items: center; padding: 4px 6px 4px 8px; border-radius: 8px; font-size: 12px; line-height: 16px; cursor: pointer;
+  background: color-mix(in oklab, var(--accent) 9%, var(--surface)); animation: notice-arrives 2.4s ease-out; }
+.header-notice:hover { background: color-mix(in oklab, var(--accent) 15%, var(--surface)); }
+@keyframes notice-arrives { from { background: color-mix(in oklab, var(--accent) 32%, var(--surface)); } }
 .header-notice > .sync-notice { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; }
 .header-notice .notice-text { max-width: none; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.notice-source { flex: none; color: var(--ink-soft); }
+.notice-source { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--accent-ink); font-weight: 500; }
+.notice-opens { flex: none; color: var(--accent-ink); }
 .btn.notices-control[aria-expanded="true"] { background: var(--current); }
 .notices-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--press); font-size: 11.5px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.btn.primary > .notices-count { background: rgb(255 255 255 / 22%); }
+/* Notices' unseen dot sits in its corner's padding, so the button is as wide with it as without. */
+.notices-control { position: relative; }
+.btn.primary > .notices-unseen { position: absolute; top: 4px; right: 4px; background: currentColor; }
 /* Their card: the result's card (.result-whole), as tall as its notices up to the window less 120px, past which they scroll under
    its top line (their count, Dismiss all, its ×); See change's panel opens in that one scroll, pushing the next notice down. */
 .notices-card { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 16px; }
@@ -295,6 +305,10 @@ ul { list-style: none; }
 .notices-head > .band-dismiss { margin-left: auto; }
 .notices-card .sync-notice-lines { gap: 10px; }
 .notices-card .sync-notice > .change-panel, .notices-card .change-panel > .ins-diff { max-height: none; overflow: visible; }
+/* What an Undo or Turn it on in the card did, in its notice's place and at least as tall (matrix.ts noticeLines): the result's
+   band, set as a notice is. */
+.notice-done > .band { flex-wrap: wrap; gap: 2px 8px; padding: 0 26px 0 0; border: 0; background: none; }
+.notice-done .band-text { max-width: calc(100% - 22px); }
 .header-end { display: flex; gap: 8px; }
 
 #status { container: status / inline-size; height: 28px; flex: none; display: flex; align-items: center; gap: 26px; padding: 0 16px 0 24px; background: var(--chrome); border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 12px; line-height: 16px; white-space: nowrap; }
@@ -499,9 +513,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .notice-name { all: unset; cursor: pointer; font-weight: 600; color: var(--ink); }
 .notice-name:hover { text-decoration: underline; }
 .notice-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
-/* Narrow content: a notice's actions take their own line under its sentence, so no button is squeezed or cut. */
+/* Narrow content: a notice's actions, and those of what was done in its place, take their own line under its sentence, so no button is squeezed or cut. */
 @container content (width < 880px) {
-  .sync-notice > .notice-actions { flex-basis: 100%; padding-left: 22px; }
+  .sync-notice > .notice-actions, .notice-done .band-actions { flex-basis: 100%; padding-left: 22px; }
   .sync-notice > .kind-mark ~ .notice-actions { padding-left: 42px; }
 }
 .change-removed { padding: 0 2px; border-radius: 2px; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 70%, transparent); }
