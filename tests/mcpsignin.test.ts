@@ -252,7 +252,7 @@ test('Check runs the tool’s command once, from an empty folder that is gone af
     assert.equal(calls.length, 1);
     const [[folder, entries, home, , args]] = calls;
     assert.deepEqual([entries, home, args], ['0', sandbox.home, 'mcp list --json']);
-    assert.ok(folder.startsWith(tmpdir()) && folder !== sandbox.home, folder);
+    assert.ok(folder.startsWith(await realpath(tmpdir())) && folder !== sandbox.home, folder);
     await assert.rejects(readdir(folder), { code: 'ENOENT' });
     assert.deepEqual(await readdir(join(sandbox.home, '.central-knot')), kept);
     // Pi ends with exit code 1 when a server failed: its answer is read all the same.
@@ -302,19 +302,29 @@ test('A tool with no command line here says so, Copilot CLI is never run, and on
 
 test('A home other than this computer’s is checked with an environment made for it: the path, the home, the temporary folder, the locale and the terminal', { timeout: 15_000 }, async () => {
   const sandbox = await standIns();
-  const set = { OPENCODE_CONFIG: join(sandbox.base, 'real-home/opencode.json'), SOME_TOKEN: 'x', LANG: 'C.UTF-8', TERM: 'xterm-256color' } as Record<string, string>;
-  const before = Object.fromEntries(Object.keys(set).map(name => [name, process.env[name]]));
+  const kept: Record<string, string> = { TMPDIR: sandbox.base, LANG: 'C.UTF-8', LC_ALL: 'C', LC_CTYPE: 'UTF-8', TERM: 'xterm-256color' };
+  const extra: Record<string, string> = { OPENCODE_CONFIG: join(sandbox.base, 'real-home/opencode.json'), SOME_TOKEN: 'x' };
+  const before = Object.fromEntries([...Object.keys(kept), ...Object.keys(extra)].map(name => [name, process.env[name]]));
   try {
-    Object.assign(process.env, set);
     const seen = join(sandbox.base, 'env.txt');
-    await sandbox.put('opencode', `env | cut -d= -f1 | sort > ${seen}\ncat ${join(import.meta.dirname, 'mcpsignin/opencode-list.stdout')}`);
+    await sandbox.put('opencode', `env > ${seen}\ncat ${join(import.meta.dirname, 'mcpsignin/opencode-list.stdout')}`);
+    // What the shell adds by itself (PWD, OLDPWD, SHLVL, _) aside.
+    const readEnv = async () => Object.fromEntries((await readFile(seen, 'utf8')).split('\n').filter(Boolean)
+      .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)])
+      .filter(([name]) => !['PWD', 'OLDPWD', 'SHLVL', '_'].includes(name)));
+    // Set: the kept variables are passed on with their values, and nothing else from the app's environment reaches another home.
+    Object.assign(process.env, extra, kept);
     await checkSignin(sandbox.where(false), 'opencode-cli', []);
-    // What the shell adds by itself (PWD, SHLVL, _) aside.
-    const names = (await readFile(seen, 'utf8')).split('\n').filter(name => name && !['PWD', 'OLDPWD', 'SHLVL', '_'].includes(name));
-    assert.deepEqual(names, ['HOME', 'LANG', 'PATH', 'TERM', ...(process.env.TMPDIR ? ['TMPDIR'] : [])].sort());
+    const withKept = await readEnv();
+    assert.deepEqual(Object.keys(withKept).sort(), ['HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'PATH', 'TERM', 'TMPDIR']);
+    assert.deepEqual(Object.fromEntries(Object.keys(kept).map(name => [name, withKept[name]])), kept);
+    // Unset: absent from the environment, not passed on empty.
+    for (const name of Object.keys(kept)) delete process.env[name];
+    await checkSignin(sandbox.where(false), 'opencode-cli', []);
+    assert.deepEqual(Object.keys(await readEnv()).sort(), ['HOME', 'PATH']);
     // This computer's own home: the app's environment, an override of the tool's own included.
     await checkSignin(sandbox.where(true), 'opencode-cli', []);
-    assert.ok((await readFile(seen, 'utf8')).split('\n').includes('OPENCODE_CONFIG'));
+    assert.ok((await readFile(seen, 'utf8')).split('\n').includes(`OPENCODE_CONFIG=${extra.OPENCODE_CONFIG}`));
   } finally {
     for (const [name, value] of Object.entries(before)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
     await sandbox.done();
