@@ -2178,13 +2178,13 @@ async function practiceFlow() {
   same('Undo puts it back in Codex, every table byte for byte', entriesSorted(readNow(mcpFiles[2])), entriesSorted(codexBefore));
   writeFileSync(copilotMcpSwitch, readNow(copilotMcpSwitch).replace(/,?\n\s*"disabledMcpServers": \[\s*"docs"\s*\]/, ''));
   if (await a.exists(`#${rowPart('enable', 'mcp', 'docs', 'codex-cli')}`)) await a.click(`#${rowPart('open', 'mcp', 'docs')}`);
-  // An MCP edit spreads within seconds: settings files are watched, not left to the 20 s poll.
+  // An MCP edit spreads on its own without a click (settings files are watched; polling is the fallback): wait for the edit
+  // notice in the header, then check Codex's file.
   const copilotFile = join(practice, '.copilot/mcp-config.json');
   writeFileSync(copilotFile, readFileSync(copilotFile, 'utf8').replace('"command": "npx"', '"command": "npx-edited"'));
-  let mcpSpread = false;
-  for (let tries = 0; tries < 24 && !mcpSpread; tries++) { await wait(250); mcpSpread = readNow(join(practice, '.codex/config.toml')).includes('command = "npx-edited"'); }
-  check('an MCP edit in Copilot reaches Codex within 6 s', mcpSpread);
-  for (let tries = 0; tries < 20 && !(await a.exists('.sync-notice[data-kind="edit"]')); tries++) await wait(250);
+  await waitFor('the MCP edit notice in the header', () => a.exists('.sync-notice[data-kind="edit"]'));
+  check('an MCP edit in Copilot reaches Codex on its own', readNow(join(practice, '.codex/config.toml')).includes('command = "npx-edited"')
+    && (await noticeInLines(a) ?? '').includes('files was edited in Copilot CLI'), [readNow(join(practice, '.codex/config.toml')), await noticeInLines(a)]);
   await fitsAtMinimum(a, 'MCP servers with the edit’s notice in the header');
   await fitsAtMinimum(a, 'MCP servers with the notices’ card open, the edit’s actions in it', () => openNotices(a));
   await closeNotices(a);
@@ -6233,7 +6233,9 @@ async function draftFlow() {
   await until(async () => (await says(codexText)) === codex0.trimEnd());
 
   await a.shot('draft-entry');
-  const page0 = await says('#instructions-scroll');
+  // Earlier versions' relative age ("just now" → "1 min ago" at 30 s: editparts.ts ago) advances with the clock across the checks below.
+  const pageAtRest = async () => (await says('#instructions-scroll')).replace(/\((?:just now|\d+ min ago)\)/g, '(<age>)');
+  const page0 = await pageAtRest();
 
   // The first click opens a panel and runs nothing: which tool, the model, what it does, and the whole prompt.
   await a.click('#base-draft');
@@ -6257,7 +6259,9 @@ async function draftFlow() {
 
   // Cancel: nothing ran, and the page and the files are as they were.
   await a.click('#base-draft-cancel');
-  same('Cancel closes the panel, with the page, the files and what ran as they were', [await says('#instructions-scroll'), readNow(claudeMd), readNow(agentsMd), existsSync(copilotMd), existsSync(ran), await a.run(`document.activeElement?.id`)], [page0, claude0, codex0, false, false, 'base-draft']);
+  same('Cancel closes the panel, with the page, the files and what ran as they were',
+    [await a.exists('#base-draft-panel'), await pageAtRest(), readNow(claudeMd), readNow(agentsMd), existsSync(copilotMd), existsSync(ran), await a.run(`document.activeElement?.id`)],
+    [false, page0, claude0, codex0, false, false, 'base-draft']);
 
   // Opened in the smallest window, the panel shows Start and Cancel, Start holding the focus.
   await sizeTo(a, 860, 600);
@@ -7524,9 +7528,9 @@ esac
   check('the plugin the marketplace dropped is kept as it was', versions()['release-helper'] === '0.4.1' && existsSync(join(home, '.claude/plugins/cache/ck-test-market/release-helper/0.4.1/commands/release-notes.md')), JSON.stringify(versions()));
   const logged = readFileSync(join(data, 'central-knot.log'), 'utf8');
   check('the log says what was checked and what each update came to', /plugin updates: checked: 2 due/.test(logged) && /plugins:update \(by itself\) issue-tracker@ck-test-market in claude-cli: updated: Updated to 2\.0\.0\./.test(logged) && /document-tools@ck-test-market in claude-cli: updated: Updated to 1\.2\.0\. It is still off in Claude Code\./.test(logged), logged.split('\n').filter(line => /plugin/.test(line)).join('\n'));
-  const before = calls().length;
-  await wait(5000);
-  check('once up to date, later checks run nothing', calls().length === before && noted().checked.updated === 0, JSON.stringify([calls(), noted().checked]));
+  const before = calls().length, checkedAt = noted().checked?.at ?? 0;
+  const ranAgain = await until(() => (noted().checked?.at ?? 0) > checkedAt);
+  check('once up to date, later checks run nothing', ranAgain && calls().length === before && noted().checked.updated === 0, JSON.stringify([calls(), noted().checked]));
   await a.quit();
 
   // 2. After a restart, the note and the Settings row say what happened; the dropped plugin is marked.
@@ -8741,6 +8745,11 @@ async function usageFlow() {
   const reading = () => { if (writer === undefined) { try { writer = openSync(pipe, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK); } catch { return false; } } return true; };
   /** Lets the waiting reading go on: the pipe's other end closed, it reads an empty session file. */
   const letGo = async () => { for (let tries = 0; tries < 200 && !reading(); tries++) await wait(25); if (writer !== undefined) closeSync(writer); writer = undefined; };
+  /** Releases the pipe as soon as a reading reaches it, and waits until the page shows Collected. */
+  const collectThroughPipe = async () => {
+    for (let tries = 0; tries < 300 && !(await collected()); tries++) { if (reading()) { closeSync(writer); writer = undefined; } await wait(100); }
+    return collected();
+  };
   {
     const lead = () => a.text('#usage-when');
     await chooseOrder('name');
@@ -8868,13 +8877,12 @@ async function usageFlow() {
   await openKind(a, 'skills');
   await wait(2000);
   same('started with no window, it collects nothing until the window shows', [reading(), await a.text('#usage-when')], [false, 'Collecting…']);
-  const again = spawn(command, [...(flag('--electron') ? [root] : []), `--user-data-dir=${data}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])],
-    { env: { ...process.env, HOME: real, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') }, stdio: 'ignore' });
+  // Clean env like launch(): a caller exporting ELECTRON_RUN_AS_NODE=1 must not make the second launch run as Node instead of Electron.
+  const againEnv = { HOME: real, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}) };
+  for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) againEnv[name] = process.env[name];
+  const again = spawn(command, [...(flag('--electron') ? [root] : []), `--user-data-dir=${data}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env: againEnv, stdio: 'ignore' });
   await new Promise(done => again.once('exit', done));
-  for (let tries = 0; tries < 100 && !reading(); tries++) await wait(50);
-  await letGo();
-  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
-  same('once the window shows, usage is collected', await collected(), true);
+  same('once the window shows, usage is collected', await collectThroughPipe(), true);
   // The window shown while its page isn't listening (a development run only: main's debugger reloads the page and shows the
   // window at once, so the message that it showed reaches no page): told again once the page has loaded, it still collects.
   if (a.inspect) {
@@ -8885,10 +8893,7 @@ async function usageFlow() {
     main.close();
     for (let tries = 0; tries < 100 && !(await a.exists('#nav-library')); tries++) await wait(50);
     await openKind(a, 'skills');
-    for (let tries = 0; tries < 100 && !reading(); tries++) await wait(50);
-    await letGo();
-    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
-    same('started with no window, then shown while its page wasn’t listening: it still collects', await collected(), true);
+    same('started with no window, then shown while its page wasn’t listening: it still collects', await collectThroughPipe(), true);
   }
   same('no page errors, usage started at sign-in', a.pageErrors, []);
   await a.quit();
