@@ -1,7 +1,7 @@
 // Each tool's definition (HarnessDefinition): its name, binary, config folder and the variable that moves it, the folders it
-// loads skills from, the skill folder names it keeps for itself, and what its user does to use a copy. Facts only, for the
-// main process: which tools are in a home is discovery.ts and presence.ts, their names in words words.ts toolNames, and each
-// kind's reader and writer for a tool its own module's (MAP.md, "To add or change": a tool).
+// loads skills from, and the skill folder names it keeps for itself. What a running session needs to pick up a change is
+// reload.ts reloadTable. Facts only, for the main process: which tools are in a home is discovery.ts and presence.ts, their
+// names in words words.ts toolNames, and each kind's reader and writer for a tool its own module's (MAP.md, "To add or change": a tool).
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HarnessId } from './types.ts';
@@ -27,8 +27,6 @@ export interface HarnessDefinition {
   loadsDotFolders: boolean;
   /** Other products that read the folder this harness is written through (CD Appendix A). */
   otherReaders: string[];
-  /** What its user does to use a copy just written ("Start a new Pi session to use it."). */
-  nextStep: string;
   /** Roots this harness loads standalone skills from, its own first. */
   skillRoots(config: string, home: string): SkillRoot[];
 }
@@ -38,14 +36,12 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
     id: 'claude-cli', name: 'Claude Code', surface: 'CLI', binary: 'claude',
     configEnv: 'CLAUDE_CONFIG_DIR', defaultConfig: '.claude', reservedSkills: ['synced'], loadsDotFolders: true,
     otherReaders: ['Claude desktop (Code tab)', 'OpenCode', 'VS Code'],
-    nextStep: 'Start a new Claude Code session (CLI or Claude desktop’s Code tab), or run /reload-skills, to use it.',
     skillRoots: config => [{ path: join(config, 'skills'), label: 'Claude Code skills' }],
   },
   'copilot-cli': {
     id: 'copilot-cli', name: 'GitHub Copilot', surface: 'CLI', binary: 'copilot',
     configEnv: 'COPILOT_HOME', defaultConfig: '.copilot', reservedSkills: [], loadsDotFolders: false,
     otherReaders: ['GitHub Copilot app', 'VS Code'],
-    nextStep: 'Start a new Copilot session (CLI or the GitHub Copilot app), or run /skills reload in the CLI, to use it.',
     skillRoots: (config, home) => [
       { path: join(config, 'skills'), label: 'Copilot skills' },
       { path: join(home, '.agents/skills'), label: 'Shared .agents skills' },
@@ -57,7 +53,6 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
     id: 'codex-cli', name: 'Codex', surface: 'CLI', binary: 'codex',
     configEnv: 'CODEX_HOME', defaultConfig: '.codex', reservedSkills: [], loadsDotFolders: false,
     otherReaders: ['ChatGPT desktop (Codex)'],
-    nextStep: 'Start a new Codex session to use it; restart the ChatGPT desktop app if it is open.',
     skillRoots: (config, home) => [
       { path: join(config, 'skills'), label: 'Codex skills' },
       { path: join(home, '.agents/skills'), label: 'Shared .agents skills' },
@@ -70,7 +65,6 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
     id: 'pi-cli', name: 'Pi', surface: 'CLI', binary: 'pi',
     configEnv: 'PI_CODING_AGENT_DIR', defaultConfig: '.pi/agent', reservedSkills: [], loadsDotFolders: false,
     otherReaders: ['pi-gui (third-party)'],
-    nextStep: 'Start a new Pi session to use it.',
     skillRoots: (config, home) => [
       { path: join(config, 'skills'), label: 'Pi skills' },
       { path: join(home, '.agents/skills'), label: 'Shared .agents skills' },
@@ -83,7 +77,6 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
     id: 'opencode-cli', name: 'OpenCode', surface: 'CLI', binary: 'opencode',
     configEnv: 'XDG_CONFIG_HOME', configUnder: 'opencode', defaultConfig: '.config/opencode', reservedSkills: [], loadsDotFolders: false,
     otherReaders: ['OpenCode desktop'],
-    nextStep: 'Start a new OpenCode session to use it.',
     skillRoots: (config, home) => [
       { path: join(config, 'skills'), label: 'OpenCode skills' },
       { path: join(home, '.claude/skills'), label: 'Claude Code skills' },

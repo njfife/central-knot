@@ -127,16 +127,15 @@ test('A plugin’s item has one plan key by both routes, read on real files: ins
     assert.deepEqual(installed('claude-cli', 'demo'), [['pdf-reader', 'demo@m/pdf'], ['tracker', 'demo@m/tracker'], ['checker', 'demo@m/checker']]);
     assert.deepEqual(installed('codex-cli', 'demo'), [['pdf-reader', 'demo@m/pdf'], ['tracker', 'demo@m/tracker']], 'Codex’s copy: the same key (and no agents)');
     assert.deepEqual((await placed('demo', demo)).map(each => each.key), ['demo@m/checker', 'demo@m/pdf', 'demo@m/tracker'], 'Pi’s: the same keys');
-    // A plugin that is one skill: installed, keyed by the plugin's name; placed, its library item keeps the name of its folder in
-    // the marketplace, bundle. The plan maps that one placed skill to the installed copy's key, knowing it from the installed read.
+    // A plugin that is one skill, in a folder of another name (bundle): installed and placed, keyed by the plugin's name.
     const [soloPlaced] = await placed('solo', bundle);
-    assert.deepEqual([installed('claude-cli', 'solo'), soloPlaced], [[['solo-skill', 'solo@m/solo']], { key: 'solo@m/bundle', name: 'bundle' }]);
+    assert.deepEqual([installed('claude-cli', 'solo'), soloPlaced], [[['solo-skill', 'solo@m/solo']], { key: 'solo@m/solo', name: 'solo' }]);
     const home = (installs: InstalledPlugin[]) => ({ pluginItems: installs, profiles: { profiles: [], plugins: [{ id: 'solo-id', plugin: 'solo', marketName: 'm', on: true }] },
-      skills: { tools: ['claude-cli', 'pi-cli'], items: [], library: { bundle: { ...newItem('bundle', soloPlaced!.name), on: true, source: 'solo-id' } } },
+      skills: { tools: ['claude-cli', 'pi-cli'], items: [], library: { solo: { ...newItem('solo', soloPlaced!.name), on: true, source: 'solo-id' } } },
       mcp: { tools: [], items: [], library: {} }, agents: { tools: [], items: [], library: {} } }) as unknown as HomeView;
     const plan = (view: HomeView) => pluginLive(view).map(item => [item.id, item.copies.map(copy => copy.tool)]);
     assert.deepEqual(plan(home(read.filter(install => install.plugin === 'solo'))), [['plugin:skill:solo@m/solo', ['claude-cli', 'pi-cli']]], 'one item, both routes');
-    assert.deepEqual(plan(home([])), [['plugin:skill:solo@m/bundle', ['pi-cli']]], 'with no tool having it installed, its own key');
+    assert.deepEqual(plan(home([])), [['plugin:skill:solo@m/solo', ['pi-cli']]], 'with no tool having it installed, the same key');
     // The same plugin from another marketplace is another item; a skill's case is folded as library keys are, a server's kept.
     assert.equal(pluginItemKey({ plugin: 'demo', marketName: 'elsewhere' }, { kind: 'skill', name: 'PDF' }), 'demo@elsewhere/pdf');
     assert.equal(pluginItemKey({ plugin: 'demo', marketName: 'm' }, { kind: 'mcp', name: 'Tracker' }), 'demo@m/Tracker');

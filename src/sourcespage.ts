@@ -16,7 +16,7 @@
 // handOff), the look's one action is the hand-off button (words.ts toPluginsLabel), the Plugins page's own add (pluginstate.ts
 // addMarketplace), run on that page, which tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way
 // and in Central Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
-import { acting, announce, applyClick, busy, rerender, setHome, showPage, state, type PageKind } from './app.ts';
+import { acting, announce, applyClick, busy, rerender, setHome, showPage, state, tellWritten, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { asItIs } from './libraryrow.ts';
 import { dayAndTime, plural } from './model.ts';
@@ -78,9 +78,8 @@ async function settle(result: SourceResult, said: Said | undefined, added?: stri
   if (said && !result.stopped) {
     const open = !said.open ? undefined : added ? { label: 'Open in the Library', id: 'source-open-library', run: () => openKind('all', { from: sourceFrom(added) }) }
       : { label: `Open ${kindNouns[said.open].title}`, id: `source-open-${said.open}`, run: () => openKind(said.open!) };
-    state.outcome = { page: 'sources', text: said.text, band: true, warn: said.warns, ...(said.note ? { note: said.note } : {}), ...(said.undo ? { undo: said.undo } : {}), ...(open ? { next: open } : {}) };
-  }
-  announce(result.stopped ?? said?.text ?? '', true);
+    tellWritten({ page: 'sources', text: said.text, band: true, warn: said.warns, ...(said.note ? { note: said.note } : {}), ...(said.undo ? { undo: said.undo } : {}), ...(open ? { next: open } : {}) }, result.reloads);
+  } else announce(result.stopped ?? '', true);
 }
 
 const look = () => busy('Reading the link…', async () => {

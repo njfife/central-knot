@@ -444,7 +444,8 @@ async function copilotManifest(folder: string) {
 export interface PluginFiles {
   /** The plugin's folder: a server's relative paths are checked against it. */
   folder: string;
-  skills: { name: string; dir: string }[];
+  /** Each skill's folder (the plugin's own folder for a plugin that is one skill at its root). */
+  skills: string[];
   /** Each agent's file: its name, its path from `folder`, its text, and whether that text is all of it. */
   agents: { name: string; path: string; text: string; whole: boolean }[];
   servers: Record<string, unknown>;
@@ -474,7 +475,7 @@ export async function pluginFiles(folder: string, entry: Record<string, unknown>
     if (read) agents.push({ name: agentName(file), path: part.path, text: read.text, whole: read.whole });
     else unread.agents.push(agentName(file));
   }
-  return { folder, skills: skills.map(dir => ({ name: basename(dir), dir })), agents, servers: servers.values, unread };
+  return { folder, skills, agents, servers: servers.values, unread };
 }
 
 /**

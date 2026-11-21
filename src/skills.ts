@@ -29,6 +29,7 @@ import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unread
 import { libraryWords } from './libraryrow.ts';
 import { comparableText } from './pluginstatus.ts';
 import { pluginHolds, throughPlugins, type GivenByPlugin, type PluginHold } from './plugins.ts';
+import { destinationReloads } from './reload.ts';
 import { errorCode, itemKey, landingOf, libraryGate, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recoverFolders, removeFolder, rootOf, rootProblem, sharedFolder, swapFolder, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
@@ -399,7 +400,7 @@ export async function applySkills(context: ShareContext, tools: HarnessId[], cha
   try { return await runPass(skillKind, context, tools, changes, { ...options, pulled }); }
   catch (error) {
     if (!errorCode(error)) throw error;
-    return { stopped: `That could not finish. ${errorCode(error) === 'CK_CHANGED' ? (error as Error).message : plainError(error)} Click Refresh to see where things stand.`, results: [], writes: 0 };
+    return { stopped: `That could not finish. ${errorCode(error) === 'CK_CHANGED' ? (error as Error).message : plainError(error)} Click Refresh to see where things stand.`, results: [], writes: 0, reloads: [] };
   }
 }
 
@@ -419,18 +420,19 @@ export async function restoreSkill(context: ShareContext, tools: HarnessId[], ev
  * record's own stop and the gate come before any write, as clearSwitch's do.
  */
 async function switchBack(context: ShareContext, tools: HarnessId[], past: HistoryEvent): Promise<PassResult> {
+  const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0, reloads: [] });
   const recorded = past.switched!.filter(entry => entry.target), away = recorded.filter(entry => !tools.includes(entry.tool));
   const entries = recorded.filter(entry => tools.includes(entry.tool));
-  if (!entries.length) return { stopped: away.map(entry => notManagedHere(entry.tool)).join(' '), results: [], writes: 0 };
+  if (!entries.length) return stop(away.map(entry => notManagedHere(entry.tool)).join(' '));
   const already = await Promise.all(entries.map(async ({ tool, target }) => isDisabled(context, await readSwitchFile(context, tool), target!)));
-  if (already.every(Boolean)) return { stopped: `${andList(entries.map(entry => toolName(entry.tool)))}’s own switch has it off already. Nothing was changed.`, results: [], writes: 0 };
+  if (already.every(Boolean)) return stop(`${andList(entries.map(entry => toolName(entry.tool)))}’s own switch has it off already. Nothing was changed.`);
   const { problem } = await (past.of === 'agent' ? agentKind : skillKind).open(context);
-  if (problem) return { stopped: problem, results: [], writes: 0 };
+  if (problem) return stop(problem);
   const gate = await libraryGate(context, { start: true });
-  if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0 };
+  if ('refused' in gate) return stop(gate.refused);
   for (const { tool, target, listEdit } of entries) {
     try { await setDisabled(context, tool, target!, true, listEdit); }
-    catch (error) { return { stopped: `Could not set ${toolName(tool)}’s switch: ${switchFailure(error)}`, results: [], writes: 0 }; }
+    catch (error) { return stop(`Could not set ${toolName(tool)}’s switch: ${switchFailure(error)}`); }
   }
   const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: past.key, of: past.of, item: past.item, kind: 'switched', cause: 'switch', switched: entries.map(({ listEdit: _edit, ...entry }) => ({ ...entry, disabled: true })), losers: [], orderProved: true };
   const history = await readHistory(context);
@@ -438,7 +440,7 @@ async function switchBack(context: ShareContext, tools: HarnessId[], past: Histo
   await replaceHistory(context, [...history, event]);
   const results = entries.map(({ tool }): DestinationResult => ({ item: past.item, harness: tool, outcome: 'switched', disabled: true, message: `${toolName(tool)}’s own switch has it off again.` }));
   results.push(...away.map(({ tool }): DestinationResult => ({ item: past.item, harness: tool, outcome: 'held', message: notManagedHere(tool) })));
-  return { results, writes: entries.length, made: [event.id] };
+  return { results, writes: entries.length, made: [event.id], reloads: destinationReloads(results, past.of === 'agent' ? 'agent' : 'skill') };
 }
 
 // ---------- The two actions a Change can't carry ----------
@@ -452,7 +454,7 @@ async function switchBack(context: ShareContext, tools: HarnessId[], past: Histo
  * nothing is written before either is known. `resume`: the click is a Resume.
  */
 export async function clearSwitch(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId, resume = false, of: 'skill' | 'agent' = 'skill'): Promise<PassResult> {
-  const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0 });
+  const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0, reloads: [] });
   if (!tools.includes(tool)) return stop(`${toolName(tool)} isn’t managed here now. Nothing was changed.`);
   const { name, target, problem } = of === 'agent' ? await agentInPi(context, tools, key, tool) : await skillLoads(context, tools, key, tool);
   if (!target || !isDisabled(context, await readSwitchFile(context, tool), target)) return stop(`${toolName(tool)}’s own switch doesn’t turn ${name} off any more. Nothing was changed.`);
@@ -466,8 +468,8 @@ export async function clearSwitch(context: ShareContext, tools: HarnessId[], key
   const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: of === 'agent' ? `agent:${key}` : key, of, item: name, kind: 'switched', switched: [switched], losers: [], orderProved: true };
   await appendHistory(context, [event]);
   const done = await (of === 'agent' ? applyAgents : applySkills)(context, tools, [], { only: new Set([key]) });
-  const cleared: DestinationResult = { item: name, harness: tool, outcome: 'switched', disabled: false, message: `${toolName(tool)} loads it again from its next session.` };
-  return { ...done, results: [cleared, ...done.results], made: [event.id] };
+  const cleared: DestinationResult = { item: name, harness: tool, outcome: 'switched', disabled: false, message: `${toolName(tool)} loads it again.` };
+  return { ...done, results: [cleared, ...done.results], made: [event.id], reloads: destinationReloads([cleared, ...done.results], of) };
 }
 
 /**
@@ -495,7 +497,7 @@ async function overrideBefore(context: ShareContext, key: string, tool: HarnessI
  * remembers before the copy goes, so the closing pass is never refused after it.
  */
 export async function takeOver(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId, resume = false): Promise<PassResult> {
-  const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0 });
+  const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0, reloads: [] });
   if (!tools.includes(tool)) return stop(`${toolName(tool)} isn’t managed here now. Nothing was changed.`);
   const { look, live } = await lookFor(skillKind, context, tools);
   const item = live.find(entry => entry.key === key);
@@ -526,7 +528,8 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   if (listSaid.length) { event.settingsChanged = listSaid; await replaceHistory(context, (await readHistory(context)).map(each => (each.id === event.id ? event : each))); }
   const said = way.take === 'link' ? `Replaced the link in ${toolName(tool)}’s skills folder with Central Knot’s copy.`
     : `Removed the copy at ${pathWords(context, way.path)}; other apps that read that folder won’t find it there.`;
-  return { ...done, results: [{ item: item.name, harness: tool, outcome: 'written', message: [`${said}${keep ? ' It is kept as a version.' : ''}`, ...listSaid].join(' ') }, ...done.results], made: [event.id] };
+  const reloads = done.reloads.filter(entry => !heldOff.some(each => each.tool === entry.tool));
+  return { ...done, results: [{ item: item.name, harness: tool, outcome: 'written', message: [`${said}${keep ? ' It is kept as a version.' : ''}`, ...listSaid].join(' ') }, ...done.results], made: [event.id], reloads };
 }
 
 /**

@@ -5,12 +5,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { agentKind, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { pluginFiles } from '../src/catalogdetail.ts';
+import { libraryAction } from '../src/historyactions.ts';
 import type { ItemKind } from '../src/library.ts';
+import { readPluginItems } from '../src/pluginitems.ts';
 import { readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
-import { pluginLive } from '../src/profileplan.ts';
+import { homeItems, inUse, pluginLive } from '../src/profileplan.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
 import { notInWhy } from '../src/pluginstatus.ts';
@@ -46,8 +48,11 @@ async function market(root: string) {
   return kit;
 }
 
-/** A home with Claude Code and Pi (or `tools`), whose Claude Code installs kit for real as far as its records go. */
-async function kitHome(options: { tools?: HarnessId[] } = {}) {
+/**
+ * A home with Claude Code and Pi (or `tools`), whose Claude Code installs kit for real as far as its records go. `remote`: a
+ * plugin kept in another repository is read from the copy Central Knot keeps of it, as the app reads it (nothing is fetched).
+ */
+async function kitHome(options: { tools?: HarnessId[]; remote?: true } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-plugin-items-')));
   const home = join(base, 'home'), root = join(base, 'market'), tools = options.tools ?? ['claude-cli', 'pi-cli'];
   await mkdir(join(home, '.pi/agent'), { recursive: true });
@@ -63,7 +68,7 @@ async function kitHome(options: { tools?: HarnessId[] } = {}) {
   const use: MarketplaceEngine = {
     findClis: async () => ({ binaries: { 'claude-cli': '/bin/true' }, apps: {} }),
     checkAccess: engine.checkAccess, addMarketplace: async () => ({ outcome: 'added', message: 'Added.', runs: [] }), readCatalog: engine.readCatalog,
-    readRemotePlugin: async () => ({ problem: 'not in tests' }),
+    readRemotePlugin: options.remote ? engine.readRemotePlugin : async () => ({ problem: 'not in tests' }),
     install: async (_context, catalog, plugin, tool) => {
       calls.push(`install ${plugin} ${tool}`);
       const copy = join(home, '.claude/plugins/cache', catalog.name, plugin, '1.0.0');
@@ -1050,5 +1055,321 @@ test('The same through the header’s Undo: his OpenCode copy edited since stays
     const undone = await box.undo(took);
     assert.deepEqual([(await box.toolFiles())['opencode/opencode.json'], undone.done.find(step => step.tool === 'opencode-cli')?.report.message],
       [edited, 'Its items are as they were in OpenCode. maps: OpenCode’s copy was changed since, so it stays as it is, kept out.']);
+  } finally { await box.cleanup(); }
+});
+
+// ---------- A plugin that is one skill at its root: named for the plugin (library.ts A PLUGIN) ----------
+
+/** A commit a plugin is pinned to, made of one letter. */
+const pinOf = (letter: string) => letter.repeat(40);
+
+/**
+ * A home with Pi and OpenCode (or `tools`) whose marketplace team lists, besides kit, plugins each kept in a repository of its
+ * own and pinned to a commit (`list`: each plugin's pin; another marketplace by its folder and name). `copy` puts a pin's
+ * repository where Central Knot keeps its copy (plugins.ts remoteCopyFolder: a folder named for the URL and the pin, `copyName`),
+ * so the app reads it there and nothing is fetched.
+ */
+async function rootHome(tools: HarnessId[] = ['pi-cli', 'opencode-cli']) {
+  const box = await kitHome({ tools, remote: true });
+  await mkdir(join(box.home, '.config/opencode'), { recursive: true });
+  const context = { home: box.home, dataDir: join(box.base, 'data/plugins'), binaries: {} };
+  const url = (plugin: string, market: string) => `https://example.test/${market}/${plugin}.git`;
+  const list = (pins: Record<string, string>, root = box.root, market = 'team') => put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: market, plugins: [
+    ...(root === box.root ? [{ name: 'kit', source: './plugins/kit', version: '1.0.0' }] : []),
+    ...Object.entries(pins).map(([plugin, sha]) => ({ name: plugin, source: { source: 'url', url: url(plugin, market), sha } }))] }));
+  const copyName = (plugin: string, sha: string, market = 'team') => basename(engine.remoteCopyFolder(context, { url: url(plugin, market), sha }));
+  const copy = async (plugin: string, sha: string, files: Record<string, string>, market = 'team') => {
+    const folder = engine.remoteCopyFolder(context, { url: url(plugin, market), sha });
+    for (const [path, text] of Object.entries({ '.claude-plugin/plugin.json': JSON.stringify({ name: plugin }), ...files })) await put(join(folder, path), text);
+  };
+  const itemsIn = tools.filter(tool => tool === 'pi-cli' || tool === 'opencode-cli');
+  const turnOf = (plugin: string, what: PluginTurn, tool?: HarnessId, root = box.root) => box.markets.turn(root, plugin, what, tool, box.home);
+  /** The page's Update of one plugin. */
+  const updateOf = (plugin: string) => box.markets.items(box.root, 'team', plugin, itemsIn, box.home, false, true);
+  const folders = async () => ({ pi: (await readdir(box.pi('skills')).catch(() => [])).sort(), opencode: (await readdir(join(box.home, '.config/opencode/skills')).catch(() => [])).sort() });
+  /** The home as the page reads it. */
+  const view = async () => ({ pluginItems: await readPluginItems(context, tools), profiles: await readProfiles(box.home), skills: await skillsView(box.share, tools),
+    mcp: await serversView(box.share, tools), agents: await agentsView(box.share, tools) }) as unknown as HomeView;
+  const live = async () => pluginLive(await view());
+  /** The profiles in use, as the status bar names them, from that read (profileplan.ts homeItems). */
+  const inUseNow = async () => { const home = await view(), plugins = pluginLive(home); return inUse((await readProfiles(box.home)).profiles, homeItems(home, plugins), plugins).map(profile => profile.name); };
+  const skills = async () => (await box.library()).skill;
+  return { ...box, list, copy, copyName, turnOf, updateOf, folders, live, inUseNow, skills };
+}
+const rootId = (plugin: string, name = plugin) => `plugin:skill:${plugin}@team/${name}`;
+
+test('A plugin that is one skill at its repository’s root is placed in Pi and OpenCode under the plugin’s name; an update to another pin writes the same folders: one item before and after, its earlier version kept, a profile that has it still in use', async () => {
+  const box = await rootHome();
+  try {
+    await box.list({ 'root-fixture': pinOf('a') });
+    await box.copy('root-fixture', pinOf('a'), { 'SKILL.md': skill('root-fixture', 'First text.') });
+    await box.turnOf('root-fixture', 'on');
+    assert.deepEqual(await box.folders(), { pi: ['root-fixture'], opencode: ['root-fixture'] });
+    const first = (await box.skills())['root-fixture']!;
+    await saveProfile(box.share, { name: 'Roots', items: [rootId('root-fixture')] });
+    assert.deepEqual(await box.inUseNow(), ['Roots']);
+    await box.list({ 'root-fixture': pinOf('b') });
+    await box.copy('root-fixture', pinOf('b'), { 'SKILL.md': skill('root-fixture', 'Second text.') });
+    await box.updateOf('root-fixture');
+    assert.deepEqual(await box.folders(), { pi: ['root-fixture'], opencode: ['root-fixture'] }, 'the same folders');
+    for (const folder of [box.pi('skills/root-fixture'), join(box.home, '.config/opencode/skills/root-fixture')]) assert.equal(await readFile(join(folder, 'SKILL.md'), 'utf8'), skill('root-fixture', 'Second text.'));
+    const after = await box.skills(), item = after['root-fixture']!;
+    assert.deepEqual([Object.keys(after), item.on, item.source, item.hash !== first.hash, item.versions.some(version => version.hash === first.hash)], [['root-fixture'], true, first.source, true, true]);
+    assert.deepEqual(await box.inUseNow(), ['Roots'], 'the profile still has it, and is in use');
+  } finally { await box.cleanup(); }
+});
+
+test('After two updates of a root skill, History’s Go back before this on the first makes its first version current again under the same name', async () => {
+  const box = await rootHome();
+  try {
+    await box.list({ 'root-fixture': pinOf('a') });
+    await box.copy('root-fixture', pinOf('a'), { 'SKILL.md': skill('root-fixture', 'First text.') });
+    await box.turnOf('root-fixture', 'on');
+    for (const [letter, text] of [['b', 'Second text.'], ['c', 'Third text.']]) {
+      await box.list({ 'root-fixture': pinOf(letter!) });
+      await box.copy('root-fixture', pinOf(letter!), { 'SKILL.md': skill('root-fixture', text) });
+      await box.updateOf('root-fixture');
+    }
+    const now = (await box.skills())['root-fixture']!;
+    // The first update's entry: from the first version to the second, which is no longer current.
+    const updates = (await readHistory(box.share)).filter(event => event.key === 'root-fixture' && !!event.previous && event.previous !== event.version && event.version !== now.hash);
+    assert.equal(updates.length, 1);
+    const firstUpdate = updates[0]!;
+    assert.equal(libraryAction(firstUpdate, now, { managed: box.tools, pending: [], linked: true })?.label, 'Go back before this');
+    await restoreSkill(box.share, box.tools, firstUpdate.id);
+    assert.deepEqual(await box.folders(), { pi: ['root-fixture'], opencode: ['root-fixture'] });
+    assert.equal(await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), skill('root-fixture', 'First text.'));
+    assert.deepEqual(Object.keys(await box.skills()), ['root-fixture']);
+  } finally { await box.cleanup(); }
+});
+
+test('Pi unticked and ticked again, the plugin Off and On: its root skill leaves and comes back under the plugin’s name each time, one item throughout', async () => {
+  const box = await rootHome();
+  try {
+    await box.list({ 'root-fixture': pinOf('a') });
+    await box.copy('root-fixture', pinOf('a'), { 'SKILL.md': skill('root-fixture') });
+    const steps: [PluginTurn, HarnessId | undefined][] = [['on', undefined], ['keep-out', 'pi-cli'], ['let-in', 'pi-cli'], ['off', undefined], ['on', undefined]];
+    const seen: string[] = [];
+    for (const [what, tool] of steps) {
+      await box.turnOf('root-fixture', what, tool);
+      const { pi, opencode } = await box.folders();
+      seen.push(`${what}${tool ? ` ${tool}` : ''}: Pi ${pi.join(',') || '-'}, OpenCode ${opencode.join(',') || '-'}, items ${Object.keys(await box.skills()).join(',')}`);
+    }
+    assert.deepEqual(seen, [
+      'on: Pi root-fixture, OpenCode root-fixture, items root-fixture',
+      'keep-out pi-cli: Pi -, OpenCode root-fixture, items root-fixture',
+      'let-in pi-cli: Pi root-fixture, OpenCode root-fixture, items root-fixture',
+      'off: Pi -, OpenCode -, items root-fixture',
+      'on: Pi root-fixture, OpenCode root-fixture, items root-fixture',
+    ]);
+  } finally { await box.cleanup(); }
+});
+
+test('Two root-skill plugins of one marketplace each have their own item; a root-skill plugin named as another plugin’s skill doesn’t take that item: another source has it', async () => {
+  const box = await rootHome();
+  try {
+    await box.list({ alpha: pinOf('a'), beta: pinOf('b'), notes: pinOf('c') });
+    for (const plugin of ['alpha', 'beta', 'notes']) await box.copy(plugin, pinOf(plugin === 'alpha' ? 'a' : plugin === 'beta' ? 'b' : 'c'), { 'SKILL.md': skill(plugin, `The ${plugin} plugin.`) });
+    await box.turnOf('alpha', 'on');
+    await box.turnOf('beta', 'on');
+    const linked = async () => Object.fromEntries(Object.values(await box.skills()).map(item => [item.key, item.source]));
+    const ids = await linked();
+    assert.deepEqual([Object.keys(ids).sort(), ids.alpha !== ids.beta], [['alpha', 'beta'], true]);
+    assert.deepEqual((await box.folders()).pi, ['alpha', 'beta']);
+    // kit's skills/notes first, then the plugin notes, whose one skill is named notes too.
+    await box.turn('on');
+    const kitNotes = (await box.skills()).notes!;
+    const ran = await box.turnOf('notes', 'on');
+    assert.deepEqual(ran.done.map(step => `${step.tool}: ${step.report.message}`), [
+      'pi-cli: Nothing of notes is on in Pi. notes: another source has a skill by that name here; delete it on its row to take the plugin’s.',
+      'opencode-cli: Nothing of notes is on in OpenCode. notes: another source has a skill by that name here; delete it on its row to take the plugin’s.',
+    ]);
+    assert.deepEqual([(await box.skills()).notes!.source, (await box.skills()).notes!.hash], [kitNotes.source, kitNotes.hash], 'kit’s notes stays kit’s');
+    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), skill('notes'));
+    assert.deepEqual((await box.view()).items!.notes!.lines.map(line => [line.key, line.state, line.why]), [['notes', 'not-brought', 'another source has it']]);
+  } finally { await box.cleanup(); }
+});
+
+test('Two plugins of one name from two marketplaces, each one skill at its root: the second doesn’t take over the first’s item', async () => {
+  const box = await rootHome();
+  try {
+    const other = join(box.base, 'other-market');
+    await box.list({ 'root-fixture': pinOf('a') });
+    await box.list({ 'root-fixture': pinOf('b') }, other, 'other');
+    await box.copy('root-fixture', pinOf('a'), { 'SKILL.md': skill('root-fixture', 'From team.') });
+    await box.copy('root-fixture', pinOf('b'), { 'SKILL.md': skill('root-fixture', 'From other.') }, 'other');
+    await box.markets.add(other);
+    await box.turnOf('root-fixture', 'on');
+    const first = (await box.skills())['root-fixture']!;
+    const ran = await box.turnOf('root-fixture', 'on', undefined, other);
+    assert.deepEqual(ran.done.map(step => `${step.tool}: ${step.report.message}`), [
+      'pi-cli: Nothing of root-fixture is on in Pi. root-fixture: another source has a skill by that name here; delete it on its row to take the plugin’s.',
+      'opencode-cli: Nothing of root-fixture is on in OpenCode. root-fixture: another source has a skill by that name here; delete it on its row to take the plugin’s.',
+    ]);
+    assert.deepEqual([Object.keys(await box.skills()), (await box.skills())['root-fixture']!.source, (await box.folders()).pi], [['root-fixture'], first.source, ['root-fixture']]);
+    assert.equal(await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), skill('root-fixture', 'From team.'));
+  } finally { await box.cleanup(); }
+});
+
+test('The plugin’s name is a skill of his own: the plugin’s root skill isn’t brought in, said as for any name he has, and Use the plugin’s puts the plugin’s in Pi', async () => {
+  const box = await rootHome();
+  try {
+    await put(box.pi('skills/root-fixture/SKILL.md'), skill('root-fixture', 'His own.'));
+    await applySkills(box.share, box.tools, [{ key: 'root-fixture', on: true, except: [] }]);
+    await box.list({ 'root-fixture': pinOf('a') });
+    await box.copy('root-fixture', pinOf('a'), { 'SKILL.md': skill('root-fixture', 'The plugin’s.') });
+    const ran = await box.turnOf('root-fixture', 'let-in', 'pi-cli');
+    assert.deepEqual(ran.done.map(step => step.report.message), ['Nothing of root-fixture is on in Pi. root-fixture: you keep your own skill by that name, not the plugin’s.']);
+    assert.deepEqual((await box.view()).items!['root-fixture']!.yours, { 'pi-cli': [{ kind: 'skill', key: 'root-fixture', name: 'root-fixture' }] });
+    const took = await box.markets.take(box.root, 'root-fixture', { kind: 'skill', key: 'root-fixture' }, 'pi-cli', box.home);
+    assert.deepEqual(took.done.map(step => `${step.tool} ${step.report.outcome}`), ['pi-cli installed']);
+    assert.equal(await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), skill('root-fixture', 'The plugin’s.'));
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin whose one skill moves from a subfolder to its repository’s root between two pins: the root skill is a new item named for the plugin, and the subfolder skill’s item is dropped as any skill the plugin no longer has', async () => {
+  const box = await rootHome();
+  try {
+    await box.list({ 'root-fixture': pinOf('a') });
+    await box.copy('root-fixture', pinOf('a'), { 'skills/notes/SKILL.md': skill('notes', 'In a subfolder.') });
+    await box.turnOf('root-fixture', 'on');
+    assert.deepEqual(await box.folders(), { pi: ['notes'], opencode: ['notes'] });
+    await box.list({ 'root-fixture': pinOf('b') });
+    await box.copy('root-fixture', pinOf('b'), { 'SKILL.md': skill('root-fixture', 'At the root.') });
+    await box.updateOf('root-fixture');
+    assert.deepEqual(await box.folders(), { pi: ['root-fixture'], opencode: ['root-fixture'] });
+    const { notes, 'root-fixture': root } = await box.skills();
+    assert.deepEqual([notes!.on, notes!.source, root!.on, !!root!.source, root!.versions.some(version => version.hash === notes!.hash)], [false, undefined, true, true, false]);
+  } finally { await box.cleanup(); }
+});
+
+/**
+ * A home as an earlier build left it: the plugin's root skill placed under the name of the folder its copy is kept in
+ * (plugins.ts remoteCopyFolder, named for the URL and the pin). It is made here by this build's own reads: at pin a the plugin
+ * holds its one skill in a folder of that name, so the item (its key, name, link and one version) and its copies are as that
+ * build left them. `whole`: Claude Code has the plugin installed whole, one skill at its root, as that build's profiles keyed it.
+ */
+async function earlierHome(box: Awaited<ReturnType<typeof rootHome>>, whole = false, files: Record<string, string> = {}) {
+  const old = box.copyName('root-fixture', pinOf('a'));
+  await box.list({ 'root-fixture': pinOf('a') });
+  await box.copy('root-fixture', pinOf('a'), { [`skills/${old}/SKILL.md`]: skill('root-fixture', 'First text.'), ...files });
+  if (whole) {
+    const installed = join(box.home, '.claude/plugins/cache/team/root-fixture/1.0.0');
+    await put(join(installed, 'SKILL.md'), skill('root-fixture', 'First text.'));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'root-fixture@team': [{ scope: 'user', installPath: installed, version: '1.0.0' }] } }));
+  }
+  for (const tool of ['pi-cli', 'opencode-cli'] as const) await box.turnOf('root-fixture', 'let-in', tool);
+  return old;
+}
+/** The plugin at pin b: one skill at its root, read by its Update (`files` beside it). */
+async function rootAtPinB(box: Awaited<ReturnType<typeof rootHome>>, files: Record<string, string> = {}) {
+  await box.list({ 'root-fixture': pinOf('b') });
+  await box.copy('root-fixture', pinOf('b'), { 'SKILL.md': skill('root-fixture', 'Second text.'), ...files });
+  return box.updateOf('root-fixture');
+}
+const profileIds = async (box: Awaited<ReturnType<typeof rootHome>>) => (await readProfiles(box.home)).profiles.map(profile => `${profile.name}: ${profile.items.join(', ')}`);
+
+test('An earlier build’s copy under its copy’s folder name: the next read moves it to the plugin’s name once, its old item kept Off with its version, and a profile that named it names the new one; from then on an update renames nothing', async () => {
+  const box = await rootHome();
+  try {
+    const old = await earlierHome(box);
+    await saveProfile(box.share, { name: 'Roots', items: [rootId('root-fixture', old)] });
+    assert.deepEqual([await box.folders(), Object.keys(await box.skills()), await box.inUseNow()], [{ pi: [old], opencode: [old] }, [old], ['Roots']]);
+    const before = new Set((await readHistory(box.share)).map(event => event.id));
+    await rootAtPinB(box);
+    assert.deepEqual(await box.folders(), { pi: ['root-fixture'], opencode: ['root-fixture'] }, 'dropped and made, once');
+    const items = await box.skills();
+    assert.deepEqual([items[old]!.on, items[old]!.source, items[old]!.deleted, items[old]!.versions.length], [false, undefined, undefined, 1], 'the old item kept, Off and unlinked, with its version');
+    assert.deepEqual([items['root-fixture']!.on, !!items['root-fixture']!.source], [true, true]);
+    assert.deepEqual((await readHistory(box.share)).filter(event => !before.has(event.id)).map(event => `${event.key} ${event.kind} ${event.cause}`).sort(), [`${old} off source-dropped`, 'root-fixture on source']);
+    assert.deepEqual([await profileIds(box), await box.inUseNow()], [[`Roots: ${rootId('root-fixture')}`], ['Roots']], 'the profile names the moved item');
+    await switchProfile(box.share, box.tools, (await readProfiles(box.home)).profiles[0]!.id, { live: box.live, run: async () => [] });
+    assert.deepEqual(await box.folders(), { pi: ['root-fixture'], opencode: ['root-fixture'] }, 'its switch keeps both copies');
+    await box.list({ 'root-fixture': pinOf('c') });
+    await box.copy('root-fixture', pinOf('c'), { 'SKILL.md': skill('root-fixture', 'Third text.') });
+    await box.updateOf('root-fixture');
+    assert.deepEqual([await box.folders(), Object.keys(await box.skills()).sort()], [{ pi: ['root-fixture'], opencode: ['root-fixture'] }, [old, 'root-fixture'].sort()], 'an update renames nothing');
+  } finally { await box.cleanup(); }
+});
+
+test('Upgrading with the plugin installed whole in Claude Code: a switch to a profile that ticks its root skill before the plugin’s next read leaves the earlier build’s copies on and the profile in use; the read puts the root skill in their place', async () => {
+  const box = await rootHome(['claude-cli', 'pi-cli', 'opencode-cli']);
+  try {
+    const old = await earlierHome(box, true);
+    const saved = (await saveProfile(box.share, { name: 'Saved', items: [rootId('root-fixture')] })).id!;
+    assert.deepEqual((await box.live()).map(item => [item.id, item.copies.map(copy => copy.tool)]), [[rootId('root-fixture'), ['claude-cli', 'pi-cli', 'opencode-cli']]], 'one item, as the earlier build keyed it');
+    await switchProfile(box.share, box.tools, saved, { live: box.live, run: async () => [] });
+    assert.deepEqual([await box.folders(), await box.inUseNow()], [{ pi: [old], opencode: [old] }, ['Saved']]);
+    await rootAtPinB(box);
+    await switchProfile(box.share, box.tools, saved, { live: box.live, run: async () => [] });
+    assert.deepEqual([await box.folders(), (await box.skills())['root-fixture']!.except, await box.inUseNow()], [{ pi: ['root-fixture'], opencode: ['root-fixture'] }, [], ['Saved']]);
+  } finally { await box.cleanup(); }
+});
+
+test('The move puts the root skill where the earlier build’s copy was: Off where it was Off, kept out of OpenCode where it was, though the plugin’s server is in OpenCode', async () => {
+  for (const [state, wanted] of [[{ on: false, except: [] }, { on: false, except: [], pi: [], opencode: [] }],
+    [{ on: true, except: ['opencode-cli'] }, { on: true, except: ['opencode-cli'], pi: ['root-fixture'], opencode: [] }]] as const) {
+    const box = await rootHome();
+    try {
+      const relay = { '.mcp.json': JSON.stringify({ mcpServers: { relay: { command: 'npx', args: ['relay'] } } }) };
+      const old = await earlierHome(box, false, relay);
+      await applySkills(box.share, box.tools, [{ key: old, on: state.on, except: [...state.except] }]);
+      await rootAtPinB(box, relay);
+      const root = (await box.skills())['root-fixture']!;
+      assert.deepEqual({ on: root.on, except: root.except, ...await box.folders() }, wanted);
+    } finally { await box.cleanup(); }
+  }
+});
+
+test('A local plugin whose root skill an earlier build named for its folder (bundle, listed as solo): the move names it solo and a profile that named bundle names solo', async () => {
+  const box = await rootHome();
+  try {
+    const list = (skillFolder: string) => put(join(box.root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'solo', source: './plugins/bundle' }] }))
+      .then(() => rm(join(box.root, 'plugins/bundle'), { recursive: true, force: true })).then(() => put(join(box.root, 'plugins/bundle', skillFolder, 'SKILL.md'), skill('solo', skillFolder || 'root')));
+    await list('skills/bundle');
+    await box.turnOf('solo', 'on');
+    await saveProfile(box.share, { name: 'Solo', items: [rootId('solo', 'bundle')] });
+    assert.deepEqual([await box.folders(), await box.inUseNow()], [{ pi: ['bundle'], opencode: ['bundle'] }, ['Solo']]);
+    await list('');
+    await box.markets.items(box.root, 'team', 'solo', ['pi-cli', 'opencode-cli'], box.home, false, true);
+    assert.deepEqual([await box.folders(), await profileIds(box), await box.inUseNow()], [{ pi: ['solo'], opencode: ['solo'] }, [`Solo: ${rootId('solo')}`], ['Solo']]);
+  } finally { await box.cleanup(); }
+});
+
+test('Where the move can’t be made (his own skill holds the plugin’s name), a profile that named the earlier build’s copy keeps that id, and the result says so', async () => {
+  const box = await rootHome();
+  try {
+    const old = await earlierHome(box);
+    await saveProfile(box.share, { name: 'Roots', items: [rootId('root-fixture', old)] });
+    await put(box.pi('skills/root-fixture/SKILL.md'), skill('root-fixture', 'His own.'));
+    await applySkills(box.share, box.tools, [{ key: 'root-fixture', on: true, except: [] }]);
+    const ran = await rootAtPinB(box);
+    assert.deepEqual([await profileIds(box), ran.reports.map(report => report.message.endsWith(`Roots still names ${old}, the name an earlier version gave root-fixture’s skill: tick root-fixture there instead.`))],
+      [[`Roots: ${rootId('root-fixture', old)}`], [true, true]]);
+  } finally { await box.cleanup(); }
+});
+
+test('With the plugin installed whole in Claude Code and placed in Pi, its root skill is one item for a profile: one id, both copies, in use', async () => {
+  const box = await rootHome(['claude-cli', 'pi-cli']);
+  try {
+    await box.list({ 'root-fixture': pinOf('a') });
+    await box.copy('root-fixture', pinOf('a'), { 'SKILL.md': skill('root-fixture') });
+    const installed = join(box.home, '.claude/plugins/cache/team/root-fixture/1.0.0');
+    await put(join(installed, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'root-fixture' }));
+    await put(join(installed, 'SKILL.md'), skill('root-fixture'));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'root-fixture@team': [{ scope: 'user', installPath: installed, version: '1.0.0' }] } }));
+    await box.turnOf('root-fixture', 'let-in', 'pi-cli');
+    assert.deepEqual((await box.folders()).pi, ['root-fixture']);
+    const items = (await box.live()).filter(item => item.plugin === 'root-fixture');
+    assert.deepEqual(items.map(item => [item.id, item.copies.map(copy => copy.tool)]), [[rootId('root-fixture'), ['claude-cli', 'pi-cli']]]);
+    await saveProfile(box.share, { name: 'Roots', items: [rootId('root-fixture')] });
+    assert.deepEqual(await box.inUseNow(), ['Roots']);
+    // The marketplace moves to a pin whose one skill is in a folder, notes, while Claude Code keeps the root skill it installed:
+    // Pi's copy is another item, by the name its item records, never taken for the installed root skill.
+    await box.list({ 'root-fixture': pinOf('b') });
+    await box.copy('root-fixture', pinOf('b'), { 'skills/notes/SKILL.md': skill('notes') });
+    await box.updateOf('root-fixture');
+    assert.deepEqual((await box.live()).filter(item => item.plugin === 'root-fixture').map(item => [item.id, item.copies.map(copy => copy.tool)]),
+      [[rootId('root-fixture'), ['claude-cli']], [rootId('root-fixture', 'notes'), ['pi-cli']]]);
   } finally { await box.cleanup(); }
 });

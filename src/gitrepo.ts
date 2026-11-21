@@ -33,7 +33,7 @@ import { leftOutSentence, pageNames } from './words.ts';
 import { copyTree, errorCode, exists, itemKey, libraryGate, managedNow, notCopied, sha256 as sha, plainError, readTree, removeTree, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext, type Tree } from './share.ts';
 import { undoBase } from './instructions.ts';
 import { recordedIds, sourceAt } from './sourcestore.ts';
-import type { BaseUndo, DestinationResult, HarnessId, HistoryEvent, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, Snapshot } from './types.ts';
+import type { ApplyResult, BaseUndo, DestinationResult, HarnessId, HistoryEvent, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, Snapshot } from './types.ts';
 
 /** The base instructions (instructions.ts repoBase): read for Push, applied on Pull. Without it, instructions/ is left alone. */
 export interface BaseInstructions { read(): Promise<string | undefined>; apply(text: string | undefined): Promise<{ stopped?: string; undo?: BaseUndo }> }
@@ -747,8 +747,8 @@ async function keepSettingsFile(context: ShareContext, existing: AgentEntry, nex
  * holds what that change wrote (an edit since is never lost), and the file it displaces is kept, in a 'restored' event of its own
  * that undoes this. Nothing spreads: no other tool has those settings. The gate every restore meets comes first (share.ts libraryGate).
  */
-export async function undoSettingsChange(context: ShareContext, eventId: string): Promise<{ stopped?: string; results: DestinationResult[]; harnessWrites: number }> {
-  const stop = (stopped: string) => ({ stopped, results: [], harnessWrites: 0 });
+export async function undoSettingsChange(context: ShareContext, eventId: string): Promise<ApplyResult> {
+  const stop = (stopped: string): ApplyResult => ({ stopped, results: [], harnessWrites: 0, reloads: [] });
   const gate = await libraryGate(context);
   if ('refused' in gate) return stop(gate.refused);
   const history = await readHistory(context);
@@ -766,7 +766,7 @@ export async function undoSettingsChange(context: ShareContext, eventId: string)
   const winner = past.winner ?? { tool: 'claude-cli' as HarnessId, hash: '' };
   await replaceHistory(context, [...history, { id, at: new Date().toISOString(), key: past.key, item: past.item, kind: 'restored', winner, losers: [{ tool: winner.tool, hash: winner.hash }], previous: winner.hash, orderProved: true,
     settingsFile: { path: past.settingsFile.path, kept: await keepWhole(context, past.key, now), wrote: sha(earlier) } }]);
-  return { results: [{ item: past.item, harness: winner.tool, outcome: 'written', message: 'Its earlier Claude Code settings are back.' }], harnessWrites: 1 };
+  return { results: [{ item: past.item, harness: winner.tool, outcome: 'written', message: 'Its earlier Claude Code settings are back.' }], harnessWrites: 1, reloads: [] }; // Claude Code agents need none.
 }
 
 /**
@@ -782,13 +782,13 @@ async function pullBase(context: ShareContext, dir: string, change: RepoChange, 
 }
 
 /** Undo of a Pull that edited or deleted the base instructions: the base's own Undo, said per tool. Only once, and only while the base is still as the Pull left it. */
-export async function undoPulledBase(context: ShareContext, snapshots: Snapshot[], eventId: string): Promise<{ stopped?: string; results: DestinationResult[]; harnessWrites: number }> {
+export async function undoPulledBase(context: ShareContext, snapshots: Snapshot[], eventId: string): Promise<ApplyResult> {
   const history = await readHistory(context);
   const past = history.find(event => event.id === eventId);
-  if (!past?.base) return { stopped: 'That change can’t be restored.', results: [], harnessWrites: 0 };
-  if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], harnessWrites: 0 };
+  if (!past?.base) return { stopped: 'That change can’t be restored.', results: [], harnessWrites: 0, reloads: [] };
+  if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], harnessWrites: 0, reloads: [] };
   const done = await undoBase(context, snapshots, past.base);
-  if (done.stopped) return { stopped: done.stopped, results: [], harnessWrites: 0 };
+  if (done.stopped) return { stopped: done.stopped, results: [], harnessWrites: 0, reloads: [] };
   // No event of its own: the base keeps every text it replaces as an earlier version on the Instructions page.
   past.undoneBy = randomUUID();
   await replaceHistory(context, history);
@@ -799,7 +799,7 @@ export async function undoPulledBase(context: ShareContext, snapshots: Snapshot[
     ...done.left.map(file => ({ item: past.item, harness: file.tool, outcome: 'held' as const, message: file.why === 'edited' ? `${harnesses[file.tool].name}’s file changed since, so it was left as it is.` : file.why === 'left-out' ? leftOutSentence(file.tool) : `${harnesses[file.tool].name}’s file could not be written.` })),
     ...(done.problem ? [notIn(past.item, done.problem)] : []),
   ];
-  return { results, harnessWrites: done.written.length };
+  return { results, harnessWrites: done.written.length, reloads: [] }; // Base instructions outside reload table.
 }
 
 /**

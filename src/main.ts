@@ -46,7 +46,7 @@ import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
-import { homePass, passTells, syncOnceReport, type HomePass } from './homepass.ts';
+import { homePass, passTells, syncOnceReport, takenInReloads, type HomePass } from './homepass.ts';
 import { deleteProfile, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
 import { homeItems, inUse, inUseName, pluginLive, switchable, switchPreview, type LiveItem, type PluginHome, type PluginLive } from './profileplan.ts';
 import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
@@ -654,7 +654,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   if (partsWait && !partsWaitsLogged.has(partsWait)) { partsWaitsLogged.add(partsWait); log(`plugin parts: waiting to be moved to the library: ${partsWait}`); }
   if (!synced) return {};
   const { skills, servers, agents } = synced;
-  return { synced, seen, skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
+  return { synced, seen, skills: skills ?? { results: [], writes: 0, reloads: [] }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
     changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) } };
 }
@@ -1627,7 +1627,7 @@ app.whenReady().then(async () => {
       const past = (await readHistory(context())).find(entry => entry.id === eventId);
       if (past?.kind === 'profile') { const tools = await toolsNow(); return undoSwitch(context(), tools, eventId, pluginSide(tools)); }
       // A tool's Manage switch has no Undo (History offers none): the switch on its card is the way back.
-      if (past?.kind === 'managing') return { stopped: 'Turning a tool’s Manage switch has no Undo: turn it back on the tool’s Harnesses card.', results: [], harnessWrites: 0 };
+      if (past?.kind === 'managing') return { stopped: 'Turning a tool’s Manage switch has no Undo: turn it back on the tool’s Harnesses card.', results: [], harnessWrites: 0, reloads: [] };
       // Synchronize everything switched on: its one Undo; that Undo's entry: its Restore (everything.ts).
       if (past?.kind === 'everything') return everythingEntryAction(context(), await toolsNow(), eventId);
       // A pull that changed only an agent's Claude Code settings has its own Undo (its earlier file, kept whole).
@@ -1636,13 +1636,13 @@ app.whenReady().then(async () => {
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
       // A library item's entry goes to its kind's restore, by the one rule for whose an entry is; any other reaches none.
       const whose = past && libraryEntry(past);
-      if (!whose) return { stopped: 'That History entry has nothing Central Knot can undo. Nothing was changed.', results: [], harnessWrites: 0 };
+      if (!whose) return { stopped: 'That History entry has nothing Central Knot can undo. Nothing was changed.', results: [], harnessWrites: 0, reloads: [] };
       const version = typeof choice === 'string' ? choice : undefined;
       // A tool's switch cleared, an agent's in Pi too, is undone by restoreSkill (skills.ts switchBack).
       const restored = await (isClearedSwitch(past) && !past.undoneBy ? restoreSkill : { skills: restoreSkill, mcp: restoreServer, agents: restoreAgent }[whose.kind])(context(), await toolsNow(), eventId, version);
-      return { stopped: restored.stopped, results: restored.results, harnessWrites: restored.writes, made: restored.made };
+      return { stopped: restored.stopped, results: restored.results, harnessWrites: restored.writes, made: restored.made, reloads: restored.reloads };
     })()
-    : { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult));
+    : { stopped: elsewhere, results: [], harnessWrites: 0, reloads: [] } satisfies ApplyResult));
   // Profiles: their definitions are Central Knot's own file; a switch is the library's own On and Off clicks (profiles.ts).
   handle('profiles:save', async (profile, home) => {
     if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
@@ -1656,7 +1656,7 @@ app.whenReady().then(async () => {
     return deleted.problem ? deleted : { profiles: await profilesSaved() };
   });
   handle('profiles:switch', async (id, home) => {
-    if (home !== current?.home || typeof id !== 'string') return { stopped: elsewhere, on: [], off: [], left: [], results: [] };
+    if (home !== current?.home || typeof id !== 'string') return { stopped: elsewhere, on: [], off: [], left: [], results: [], reloads: [] };
     const tools = await toolsNow(), result = await switchProfile(context(), tools, id, pluginSide(tools));
     return { ...result, view: await syncThenView() };
   });
@@ -1664,10 +1664,12 @@ app.whenReady().then(async () => {
   // Synchronize everything, the open home's standing rule (everything.ts setSyncEverything): turned on, the pass right after takes
   // in what is found now, with Automatic sync on (with it off, at Sync once). `answering`: first setup's question (firstsetup.ts).
   handle('sync:everything', async (on, home, answering) => {
-    if (home !== current?.home) return { stopped: elsewhere, view: null };
+    if (home !== current?.home) return { stopped: elsewhere, view: null, reloads: [] };
     const set = await setSyncEverything(context(), on === true, answering === true);
     if (!set.stopped) log(`sync: Synchronize everything ${on === true ? 'on' : 'off'} in ${home}`);
-    return { ...set, view: await syncThenView() };
+    const { view, passes } = await syncAndView();
+    const reloads = on === true && !set.stopped ? takenInReloads(passes.flatMap(pass => pass.synced ?? [])) : [];
+    return { ...set, view, reloads };
   });
   handleNow('sync:now', syncOnce);
   // One install at a time: the build the held screen names (by its id, and for Replace its bundle) replaced, or quit where it only
@@ -1701,19 +1703,19 @@ app.whenReady().then(async () => {
   // With Sync off, a click writes exactly the items it is about; spreading anything else waits for Sync.
   handle('servers:apply', async (list, resume, home) => (home === current?.home
     ? applyServers(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
-    : { stopped: elsewhere, results: [], writes: 0 }));
+    : { stopped: elsewhere, results: [], writes: 0, reloads: [] }));
   handle('agents:apply', async (list, resume, home) => (home === current?.home
     ? applyAgents(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0, reloads: [] }));
   handleNow('servers:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await serverVersion(context(), key, hash)) ?? null : null));
   handle('skills:apply', async (list, resume, home) => (home === current?.home
     ? applySkills(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
-    : { stopped: elsewhere, results: [], writes: 0 }));
+    : { stopped: elsewhere, results: [], writes: 0, reloads: [] }));
   // A skill's two actions a Change can't carry: a tool's own switch cleared, and a copy outside Central Knot's taken over.
   handle('skills:clear-switch', async (key, tool, resume, home, of) => (home === current?.home && typeof key === 'string' && isTool(tool)
-    ? clearSwitch(context(), await toolsNow(), key, tool, resume === true, of === 'agent' ? 'agent' : 'skill') : { stopped: elsewhere, results: [], writes: 0 }));
+    ? clearSwitch(context(), await toolsNow(), key, tool, resume === true, of === 'agent' ? 'agent' : 'skill') : { stopped: elsewhere, results: [], writes: 0, reloads: [] }));
   handle('skills:take-over', async (key, tool, resume, home) => (home === current?.home && typeof key === 'string' && isTool(tool)
-    ? takeOver(context(), await toolsNow(), key, tool, resume === true) : { stopped: elsewhere, results: [], writes: 0 }));
+    ? takeOver(context(), await toolsNow(), key, tool, resume === true) : { stopped: elsewhere, results: [], writes: 0, reloads: [] }));
   handleNow('skills:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await skillVersion(context(), key, hash)) ?? null : null));
   // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;
   // Connect, Pull, Push and Disconnect take their turn with every other change.
@@ -1728,7 +1730,7 @@ app.whenReady().then(async () => {
   handle('repo:disconnect', async home => (home === current?.home ? disconnectRepo(context(), repoOptions()) : repoElsewhere()));
   // Sources (sources.ts): a Git link read on a click, never written. Look and Check now fetch outside the queue, so a slow
   // network never holds a sync pass up; what a check brings takes its turn with every other change (`queued`).
-  const sourceElsewhere = { stopped: elsewhere, view: null };
+  const sourceElsewhere = { stopped: elsewhere, reloads: [], view: null };
   handleNow('sources:view', async () => (current ? sourcesView(context(), await toolsNow()) : null));
   handleNow('sources:preview', async (link, home) => (home === current?.home && typeof link === 'string' ? previewSource(context(), await toolsNow(), link) : { refused: elsewhere, link: String(link ?? '') }));
   handle('sources:add', async (token, home) => (home === current?.home && typeof token === 'string' ? addSource(context(), await toolsNow(), token) : sourceElsewhere));

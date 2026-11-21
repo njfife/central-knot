@@ -148,7 +148,7 @@ const linesOf = (source: SourceRecord, found: Holds, libraries: Awaited<ReturnTy
  * that stops stops the rest.
  */
 async function runSource(context: ShareContext, tools: HarnessId[], source: SourceRecord, clicked?: { kind: ItemKind; asked: RowClick }) {
-  const found = await lastFound(context, source), done: Omit<SourceResult, 'view'> & { results: DestinationResult[] } = { results: [] };
+  const found = await lastFound(context, source), done: Omit<SourceResult, 'view'> & { results: DestinationResult[] } = { results: [], reloads: [] };
   const { ids } = await recordedIds(context.home);
   for (const entry of sourceKinds()) {
     const read = readOf(source, found, entry, ids, clicked?.kind === entry.kind.kind ? clicked.asked : {});
@@ -156,6 +156,7 @@ async function runSource(context: ShareContext, tools: HarnessId[], source: Sour
     const toolsOf = (name: string, outcome: 'written' | 'removed') => passed.results.filter(each => each.item === name && each.outcome === outcome && each.harness).map(each => each.harness!);
     const sourced = passed.sourced?.map(each => ({ ...each, kind: read.kind, written: toolsOf(each.name, 'written'), removed: toolsOf(each.name, 'removed') }));
     done.results.push(...passed.results);
+    done.reloads.push(...passed.reloads);
     if (sourced) done.sourced = [...done.sourced ?? [], ...sourced];
     if (!read.whole) done.notWhole = [...done.notWhole ?? [], read.kind];
     if (passed.stopped) return { ...done, stopped: passed.stopped };
@@ -267,27 +268,28 @@ const foundOf = (source: Resolved & Partial<Pick<SourceRecord, 'commit' | 'commi
  * is told only where the source's row still says it, of that kind and key, once the pass is done: the plan after the step may
  * give a tool's copy way (a tool managed again) or take in the source's own text, and then nothing waits.
  */
-async function answer(context: ShareContext, tools: HarnessId[], done: Omit<SourceResult, 'view'> = {}): Promise<SourceResult> {
-  const { stopped, results, notWhole } = done, view = await sourcesView(context, tools);
+async function answer(context: ShareContext, tools: HarnessId[], done: Omit<SourceResult, 'view'>): Promise<SourceResult> {
+  const { stopped, results, reloads, notWhole } = done, view = await sourcesView(context, tools);
   const waitsNow = new Set(view.sources.flatMap(source => source.names.filter(name => name.state === 'wait').map(name => itemId(name.kind, name.key))));
   const sourced = done.sourced?.filter(entry => entry.answer !== 'wait' || waitsNow.has(itemId(entry.kind, itemKey(entry.name))));
-  return { ...(stopped ? { stopped } : {}), ...(sourced ? { sourced } : {}), ...(results ? { results } : {}), ...(notWhole ? { notWhole } : {}), view };
+  return { ...(stopped ? { stopped } : {}), ...(sourced ? { sourced } : {}), ...(results ? { results } : {}), reloads, ...(notWhole ? { notWhole } : {}), view };
 }
 
 /** Add: the look `token` read becomes a source, recorded first, then carried out by the pass: each item there comes in Off. */
 export async function addSource(context: ShareContext, tools: HarnessId[], token: string): Promise<SourceResult> {
+  const stop = (stopped: string) => answer(context, tools, { stopped, reloads: [] });
   const look = /^[0-9a-f-]{36}$/.test(token) ? lookOf(context.home, token) : '';
   const where = look && await readFile(`${look}.json`, 'utf8').then(text => JSON.parse(text) as Resolved & { commit: string; commitAt: string }, () => undefined);
-  if (!where || !(await exists(look))) return answer(context, tools, { stopped: 'That look at the link is no longer kept. Look at it again.' });
+  if (!where || !(await exists(look))) return stop('That look at the link is no longer kept. Look at it again.');
   const { sources, problem } = await readSources(context.home);
-  if (problem) return answer(context, tools, { stopped: problem });
-  if (twinOf(sources, where)) return answer(context, tools, { stopped: 'That link is a source already: its row is below.' });
+  if (problem) return stop(problem);
+  if (twinOf(sources, where)) return stop('That link is a source already: its row is below.');
   const isRepo = await theGitRepo(context, where.repository);
-  if (isRepo) return answer(context, tools, { stopped: isRepo });
+  if (isRepo) return stop(isRepo);
   const refused = nothingToAddWhy(await holdsAt(look, where.folder, where.repository, sourceKinds()), where);
-  if (refused) return answer(context, tools, { stopped: refused });
+  if (refused) return stop(refused);
   const gate = await libraryGate(context, { start: true });
-  if ('refused' in gate) return answer(context, tools, { stopped: gate.refused });
+  if ('refused' in gate) return stop(gate.refused);
   const now = new Date().toISOString();
   const source: SourceRecord = { id: randomUUID(), link: where.link, repository: where.repository, ref: where.ref, folder: where.folder, commit: where.commit, commitAt: where.commitAt, readAt: now, addedAt: now };
   await rename(look, copyOf(context.home, source.id));
@@ -302,7 +304,7 @@ export async function addSource(context: ShareContext, tools: HarnessId[], token
  * source's row (`problem`); any read fetched takes the last one's place, whole or not, so its row says why it isn't.
  */
 export async function checkSource(context: ShareContext, toolsNow: () => Promise<HarnessId[]>, id: string, turn: <T>(work: () => Promise<T>) => Promise<T>): Promise<SourceResult> {
-  const stop = async (stopped: string) => answer(context, await toolsNow(), { stopped });
+  const stop = async (stopped: string) => answer(context, await toolsNow(), { stopped, reloads: [] });
   // Asked before the fetch, so a home that can't be written fetches nothing; entered in its turn, before anything is written.
   const asked = await libraryGate(context);
   if ('refused' in asked) return stop(asked.refused);
@@ -339,29 +341,32 @@ export async function checkSource(context: ShareContext, toolsNow: () => Promise
  * click no line has, as main.ts passes on whatever the page sent, is refused and changes nothing.
  */
 export async function rowClick(context: ShareContext, tools: HarnessId[], id: string, kind: string, key: string, click: string): Promise<SourceResult> {
+  const stop = (stopped: string) => answer(context, tools, { stopped, reloads: [] });
   const entry = sourceKinds().find(each => each.kind.kind === kind);
   const known = entry && ROW_CLICKS.includes(click as SourceRowClick);
-  if (!known) return answer(context, tools, { stopped: `A source’s line has no click “${click}” for a “${kind}”, so nothing was changed.` });
+  if (!known) return stop(`A source’s line has no click “${click}” for a “${kind}”, so nothing was changed.`);
   const { sources, problem } = await readSources(context.home), source = sources.find(each => each.id === id);
-  if (problem || !source) return answer(context, tools, { stopped: problem ?? 'That source is no longer recorded. Nothing was changed.' });
-  if (!(await exists(copyOf(context.home, id)))) return answer(context, tools, { stopped: 'Its last read is no longer kept. Check it now first.' });
+  if (problem || !source) return stop(problem ?? 'That source is no longer recorded. Nothing was changed.');
+  if (!(await exists(copyOf(context.home, id)))) return stop('Its last read is no longer kept. Check it now first.');
   const first = click === 'merge' && await entry.apply(context, tools, [], { only: new Set([key]) });
-  if (first && first.stopped) return answer(context, tools, { stopped: first.stopped });
-  return answer(context, tools, await runSource(context, tools, source, { kind: entry.kind.kind, asked: { [click]: new Set([key]) } }));
+  if (first && first.stopped) return stop(first.stopped);
+  const ran = await runSource(context, tools, source, { kind: entry.kind.kind, asked: { [click]: new Set([key]) } });
+  return answer(context, tools, first ? { ...ran, reloads: [...first.reloads, ...ran.reloads] } : ran);
 }
 /** The clicks a source's line has (types.ts SourceRowClick), each a key set its kind's read carries (atlink.ts RowClick). */
 const ROW_CLICKS: readonly SourceRowClick[] = ['bringBack', 'replace', 'merge', 'keep'];
 
 /** Remove: the source is forgotten, with its last read. Each item it brought stays as it is, On or Off, with its versions, no longer linked. */
 export async function removeSource(context: ShareContext, tools: HarnessId[], id: string): Promise<SourceResult> {
+  const stop = (stopped: string) => answer(context, tools, { stopped, reloads: [] });
   const { sources, problem } = await readSources(context.home);
-  if (problem) return answer(context, tools, { stopped: problem });
-  if (!sources.some(source => source.id === id)) return answer(context, tools, { stopped: 'That source is no longer recorded. Nothing was changed.' });
+  if (problem) return stop(problem);
+  if (!sources.some(source => source.id === id)) return stop('That source is no longer recorded. Nothing was changed.');
   const gate = await libraryGate(context, { ownFile: true });
-  if ('refused' in gate) return answer(context, tools, { stopped: gate.refused });
+  if ('refused' in gate) return stop(gate.refused);
   await saveSources(context.home, sources.filter(source => source.id !== id));
   await removeTree(copyOf(context.home, id));
-  return answer(context, tools);
+  return answer(context, tools, { reloads: [] }); // Forgets source; no tool files change.
 }
 
 // ---------- Once a day ----------

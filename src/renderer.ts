@@ -275,11 +275,27 @@ window.addEventListener('keydown', event => { if (event.key === 'Escape' && fold
 // Coming back to the window draws it again: a notice drawn while it had no focus is seen now, and its arrival plays (matrix.ts markSeen).
 window.addEventListener('focus', () => rerender());
 
-// Laid out, and at each resize: a Show all drawn for a cut shows where the header cuts the sentence or a problem line.
+// Laid out, and at each resize: fit reload chips on Row 2 (+N more on overflow) and show Show all on cut or hidden advice.
 const cut = (text: Element) => text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight;
+function fitReloadChips(header: HTMLElement): boolean {
+  const strip = header.querySelector<HTMLElement>('.header-result:not(.result-whole) .result-reloads');
+  if (!strip) return false;
+  const chips = [...strip.querySelectorAll<HTMLElement>('.result-copies > *')], more = strip.querySelector<HTMLElement>('#outcome-reload-more');
+  for (const chip of chips) chip.hidden = false;
+  if (more) more.hidden = true;
+  if (strip.scrollWidth <= strip.clientWidth + 1) return false;
+  for (let hidden = 1; hidden <= chips.length; hidden++) {
+    chips[chips.length - hidden]!.hidden = true;
+    if (more) { more.textContent = `+${hidden} more`; more.hidden = false; }
+    if (strip.scrollWidth <= strip.clientWidth + 1) return true;
+  }
+  return chips.length > 0;
+}
 afterLayout(() => {
   const header = region('header'), more = header.querySelector<HTMLElement>('[data-when-cut]');
-  if (more) { more.hidden = true; more.hidden = ![...header.querySelectorAll('.problem-text, .problem-text > *, .band-done > .band-text, .toolbar-result-text')].some(cut); }
+  const textCut = more ? (more.hidden = true, [...header.querySelectorAll('.problem-text, .problem-text > *, .band-done > .band-text, .toolbar-result-text')].some(cut)) : false;
+  if (more) more.hidden = !textCut;
+  if (!fitReloadChips(header) && more && !textCut && more.hasAttribute('data-has-advice')) { more.hidden = false; fitReloadChips(header); }
 });
 
 /** The whole window drawn again, the focus kept on the control that had it (app.ts keepingFocus). */

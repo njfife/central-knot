@@ -197,14 +197,13 @@ test('In Copilot CLI one exact server name is one switch: kept on without holdin
   assert.deepEqual(plan(quiet, docsHome(installs, [], [['mcp', 'issues', true]], [mine('Issues')])), [[issuesId, [], ['copilot-cli', 'codex-cli'], []]]);
 });
 
-test('A plugin that is one skill at its root is one item installed and placed, though Pi has it under its folder’s name; not when the plugin has more than one skill placed', () => {
-  // Claude Code read document-tools as one skill, SKILL.md at its root; Pi has it from the marketplace, named by its folder, bundle.
-  const root = docsIn('claude-cli', { items: [{ kind: 'skill', name: 'docs-skill', keyName: 'document-tools', root: true, description: '' }] });
+test('A plugin that is one skill at its root is one item installed and placed: Claude Code’s copy and Pi’s are both named for the plugin; a placed skill of another name is another item', () => {
+  // Claude Code read document-tools as one skill, SKILL.md at its root; Pi has it from the marketplace under the plugin's name (pluginlibrary.ts readPlugin).
+  const root = docsIn('claude-cli', { items: [{ kind: 'skill', name: 'docs-skill', keyName: 'document-tools', description: '' }] });
   const rootId = 'plugin:skill:document-tools@team-tools/document-tools';
-  assert.deepEqual(copiesIn(docsHome([root], [{ key: 'bundle', on: true }])), { [rootId]: ['claude-cli on stays', 'pi-cli on'] });
-  // Two skills placed are not that one skill (the marketplace's version is not the one installed): each keeps its own key.
-  assert.deepEqual(Object.keys(copiesIn(docsHome([root], [{ key: 'bundle', on: true }, { key: 'forms', on: true }]))).sort(),
-    [rootId, 'plugin:skill:document-tools@team-tools/bundle', 'plugin:skill:document-tools@team-tools/forms'].sort());
+  assert.deepEqual(copiesIn(docsHome([root], [{ key: 'document-tools', on: true }])), { [rootId]: ['claude-cli on stays', 'pi-cli on'] });
+  // Placed from another version of the plugin, whose one skill is in a folder (bundle): its own item, by its own name.
+  assert.deepEqual(Object.keys(copiesIn(docsHome([root], [{ key: 'bundle', on: true }]))).sort(), [rootId, 'plugin:skill:document-tools@team-tools/bundle'].sort());
 });
 
 test('A copy placed in Pi is held while its plugin is Off on Plugins: a profile never turns on what the plugin’s Off turned off', () => {

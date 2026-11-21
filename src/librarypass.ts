@@ -77,6 +77,7 @@ import { errorCode, libraryGate } from './share.ts';
 import { hideParts } from './partsmigrate.ts';
 import type { ThroughWhichPlugin } from './plugins.ts';
 import { pluginLink } from './sourcelink.ts';
+import { destinationReloads, reloadLine } from './reload.ts';
 import { recordedIds, type Recorded } from './sourcestore.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, JoinCounts, MergeDone, PassResult, SyncNotice, TakenInNotice } from './types.ts';
@@ -639,11 +640,11 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], clicks: Change[], options: PassOptions<C> = {},
 ): Promise<PassResult> {
   const gate = await libraryGate(context, { start: clicks.length > 0 || !!options.pulled?.size || !!options.source, resume: options.resume });
-  if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0 };
+  if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0, reloads: [] };
   // A home with no sync record gets one only when something is asked of the pass (a click, what Pull brings, or what a source holds).
-  if (!gate.record) return { results: [], writes: 0 };
+  if (!gate.record) return { results: [], writes: 0, reloads: [] };
   const { library, problem } = await kind.open(context, true);
-  if (problem) return { stopped: problem, results: [], writes: 0 };
+  if (problem) return { stopped: problem, results: [], writes: 0, reloads: [] };
   const managed = kind.harnesses(tools);
   // A write or removal a crash interrupted is finished first, so a copy moved aside is never read as deleted.
   for (const tool of managed) await kind.recover(context, tool);
@@ -680,7 +681,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   }
   keepFolders(library, pass.foldersNow, managed, !options.only && !sourceScope);
   await saveIfChanged(pass);
-  return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made,
+  return { results: pass.results, writes: pass.writes, reloads: destinationReloads(pass.results, kind.kind), notices: pass.notices, settling: settle.settling, made: pass.made,
     ...(options.background ? { found: foundNow(pass), unread } : {}), ...(options.source ? { sourced: [...pass.sourced.values()] } : {}) };
 }
 
@@ -786,9 +787,11 @@ async function writeCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: S
   if (wrote && 'stopped' in wrote) return stopped(wrote.stopped);
   pass.writes++;
   const done = here ? {} : await follow(pass, item, tool, true);
+  const switchedOff = !!done.off || !!pass.disk.switchedOff?.get(item.key)?.includes(tool);
   const off = done.off ? ` ${toolName(tool)}’s own settings keep it out, so it doesn’t load it.` : '';
-  const message = `${here ? 'Now has the current version' : 'Added'}${wrote ? `, ${wrote.said}` : ''}.${done.changed ? ` ${done.changed}` : ''}${off} Start a new session to use it.`;
-  pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message, ...(done.off ? { switchedOff: true as const } : {}), ...(done.changed ? { settingsChanged: done.changed } : {}) });
+  const next = switchedOff ? '' : reloadLine(tool, pass.kind.kind);
+  const message = `${here ? 'Now has the current version' : 'Added'}${wrote ? `, ${wrote.said}` : ''}.${done.changed ? ` ${done.changed}` : ''}${off}${next ? ` ${next}` : ''}`;
+  pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message, ...(switchedOff ? { switchedOff: true as const } : {}), ...(done.changed ? { settingsChanged: done.changed } : {}) });
   return true;
 }
 
@@ -813,13 +816,14 @@ async function removeCopy(pass: Pass, item: LibraryItem, here: Seen): Promise<bo
  */
 async function giveBackCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: Seen | undefined, hash: string): Promise<boolean> {
   const where = toolName(tool), result = (outcome: 'written' | 'held', message: string) => pass.results.push({ item: item.name, harness: tool, outcome, message });
-  if (here?.hash === hash) { result('written', `${where} keeps its own copy, as before.`); return true; }
+  if (here?.hash === hash) { pass.results.push({ item: item.name, harness: tool, outcome: 'kept', message: `${where} keeps its own copy, as before.` }); return true; }
   const content = await pass.kind.readVersion(pass.context, item.key, hash);
   if (!content) { result('held', `${where}’s own copy is no longer in Central Knot’s store, so it can’t be given back.`); return false; }
   const refused = await pass.kind.write(pass.context, item, tool, here, content);
   if (refused && 'stopped' in refused) { result('held', refused.stopped); return false; }
   pass.writes++;
-  result('written', `${where} has its own copy back, as before.`);
+  const switchedOff = !!pass.disk.switchedOff?.get(item.key)?.includes(tool);
+  pass.results.push({ item: item.name, harness: tool, outcome: 'written', message: `${where} has its own copy back, as before.`, ...(switchedOff ? { switchedOff: true as const } : {}) });
   return true;
 }
 
@@ -994,12 +998,12 @@ export async function restoreAll<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], eventIds: string[], version?: string,
 ): Promise<PassResult & { undid: Map<string, string> }> {
   const undid = new Map<string, string>(), about = await itemsNow(kind, context, tools);
-  if (about.problem) return { stopped: about.problem, results: [], writes: 0, undid };
+  if (about.problem) return { stopped: about.problem, results: [], writes: 0, reloads: [], undid };
   const asked = (await readHistory(context)).filter(event => eventIds.includes(event.id)).flatMap(past => {
     const { item, now } = about.of(past), action = kind.historyAction(past, item, now, version);
     return action ? [{ past, change: action.change }] : [];
   });
-  if (!asked.length) return { results: [], writes: 0, undid };
+  if (!asked.length) return { results: [], writes: 0, reloads: [], undid };
   const done = await runPass(kind, context, tools, asked.map(({ change }) => change), { only: new Set(asked.map(({ change }) => change.key)) });
   const away = asked.flatMap(({ past }) => [...new Set([...past.losers, ...(past.tookFrom ?? [])].map(copy => copy.tool))]
     .filter(tool => !kind.harnesses(tools).includes(tool) && kind.harnesses([tool]).length).sort(byToolOrder)
@@ -1021,7 +1025,7 @@ export async function restore<C, E extends Seen, D extends Disk<E>>(
 ): Promise<PassResult> {
   const { undid: _undid, ...done } = await restoreAll(kind, context, tools, [eventId], version);
   if (done.stopped || done.made?.length || done.results.length) return done;
-  return { stopped: `That change has nothing left to undo: the ${kind.words.item} is as that would leave it.`, results: [], writes: 0 };
+  return { stopped: `That change has nothing left to undo: the ${kind.words.item} is as that would leave it.`, results: [], writes: 0, reloads: [] };
 }
 
 // ---------- Clicks, and what Pull brings ----------
