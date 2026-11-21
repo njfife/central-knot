@@ -161,19 +161,31 @@ let app;
 // A --flows child exits on signals; a parent running one or all groups passes them on to its copies and waits instead (runGroups).
 if (named) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
-async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
+/** Clean environment for every app launch (main and second-instance): never inherits ELECTRON_RUN_AS_NODE or real tool configs. */
+function appEnv(home = HOME, more = {}) {
   // OpenCode's CLI is looked for only inside the throwaway home, and on a Mac every app in the stand-in for /Applications
   // (CK_TEST_APPS, empty here): a machine that has them installed (the Mac these run on does) would otherwise bring them into
   // every flow that opens "This Mac's home".
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, ...tempPlaces(join(scratch, 'tmp')), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
-  mkdirSync(env.TMPDIR, { recursive: true });
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
+  return env;
+}
+
+/** Starts the app with appEnv(), both temporary places (scratch.ts tempPlaces) and shared clean-up registration. */
+function spawnApp(args, home = HOME, more = {}, stdio = ['ignore', 'ignore', 'pipe']) {
+  const env = appEnv(home, { ...tempPlaces(join(scratch, 'tmp')), ...more });
+  mkdirSync(env.TMPDIR, { recursive: true });
+  const child = spawn(command, args, { env, stdio });
+  launched.add(child);
+  child.once('exit', () => launched.delete(child));
+  return child;
+}
+
+async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
   // debugPorts). A dev run also opens its main process to the checks (an installed app doesn't take --inspect). A window that
   // another copy's window covers stays a shown page (Chromium's switch): hidden, it would take no new size from the checks.
-  const child = spawn(command, [...(flag('--electron') ? [root, '--inspect=0'] : []), '--remote-debugging-port=0', '--disable-backgrounding-occluded-windows', `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: ['ignore', 'ignore', 'pipe'] });
-  launched.add(child);
-  child.once('exit', () => launched.delete(child));
+  const child = spawnApp([...(flag('--electron') ? [root, '--inspect=0'] : []), '--remote-debugging-port=0', '--disable-backgrounding-occluded-windows', `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], home, more);
   let port, inspect;
   try { ({ port, inspect } = await debugPorts(child, flag('--electron'))); } catch (error) { child.kill('SIGKILL'); throw error; }
   let targets;
@@ -2174,13 +2186,13 @@ async function practiceFlow() {
   same('Undo puts it back in Codex, every table byte for byte', entriesSorted(readNow(mcpFiles[2])), entriesSorted(codexBefore));
   writeFileSync(copilotMcpSwitch, readNow(copilotMcpSwitch).replace(/,?\n\s*"disabledMcpServers": \[\s*"docs"\s*\]/, ''));
   if (await a.exists(`#${rowPart('enable', 'mcp', 'docs', 'codex-cli')}`)) await a.click(`#${rowPart('open', 'mcp', 'docs')}`);
-  // An MCP edit spreads within seconds: settings files are watched, not left to the 20 s poll.
+  // An MCP edit spreads on its own without a click (staleFlow proves .copilot/mcp-config.json is watched with Sync off): wait for
+  // files's own edit notice in the header, then check Codex's file.
   const copilotFile = join(practice, '.copilot/mcp-config.json');
   writeFileSync(copilotFile, readFileSync(copilotFile, 'utf8').replace('"command": "npx"', '"command": "npx-edited"'));
-  let mcpSpread = false;
-  for (let tries = 0; tries < 24 && !mcpSpread; tries++) { await wait(250); mcpSpread = readNow(join(practice, '.codex/config.toml')).includes('command = "npx-edited"'); }
-  check('an MCP edit in Copilot reaches Codex within 6 s', mcpSpread);
-  for (let tries = 0; tries < 20 && !(await a.exists('.sync-notice[data-kind="edit"]')); tries++) await wait(250);
+  await waitFor('files’s edit notice in the header', async () => await a.exists('.sync-notice[data-kind="edit"]')
+    && (await noticeInLines(a) ?? '').includes('files was edited in Copilot CLI'));
+  check('an MCP edit in Copilot reaches Codex on its own', readNow(join(practice, '.codex/config.toml')).includes('command = "npx-edited"'), readNow(join(practice, '.codex/config.toml')));
   await fitsAtMinimum(a, 'MCP servers with the edit’s notice in the header');
   await fitsAtMinimum(a, 'MCP servers with the notices’ card open, the edit’s actions in it', () => openNotices(a));
   await closeNotices(a);
@@ -6258,7 +6270,11 @@ async function draftFlow() {
   await until(async () => (await says(codexText)) === codex0.trimEnd());
 
   await a.shot('draft-entry');
-  const page0 = await says('#instructions-scroll');
+  // Earlier versions' relative age ("just now" → "1 min ago" at 30 s: editparts.ts ago) advances with the clock across the checks below.
+  const pageAtRest = () => a.run(`(() => { const copy = document.querySelector('#instructions-scroll').cloneNode(true);
+    for (const age of copy.querySelectorAll('.ins-version .tone-faint')) age.textContent = age.textContent.replace(/^ \\((?:just now|\\d+ min ago)\\)/, ' (<age>)');
+    return copy.textContent ?? ''; })()`);
+  const page0 = await pageAtRest();
 
   // The first click opens a panel and runs nothing: which tool, the model, what it does, and the whole prompt.
   await a.click('#base-draft');
@@ -6282,7 +6298,9 @@ async function draftFlow() {
 
   // Cancel: nothing ran, and the page and the files are as they were.
   await a.click('#base-draft-cancel');
-  same('Cancel closes the panel, with the page, the files and what ran as they were', [await says('#instructions-scroll'), readNow(claudeMd), readNow(agentsMd), existsSync(copilotMd), existsSync(ran), await a.run(`document.activeElement?.id`)], [page0, claude0, codex0, false, false, 'base-draft']);
+  same('Cancel closes the panel, with the page, the files and what ran as they were',
+    [await a.exists('#base-draft-panel'), await pageAtRest(), readNow(claudeMd), readNow(agentsMd), existsSync(copilotMd), existsSync(ran), await a.run(`document.activeElement?.id`)],
+    [false, page0, claude0, codex0, false, false, 'base-draft']);
 
   // Opened in the smallest window, the panel shows Start and Cancel, Start holding the focus.
   await sizeTo(a, 860, 600);
@@ -7549,9 +7567,13 @@ esac
   check('the plugin the marketplace dropped is kept as it was', versions()['release-helper'] === '0.4.1' && existsSync(join(home, '.claude/plugins/cache/ck-test-market/release-helper/0.4.1/commands/release-notes.md')), JSON.stringify(versions()));
   const logged = readFileSync(join(data, 'central-knot.log'), 'utf8');
   check('the log says what was checked and what each update came to', /plugin updates: checked: 2 due/.test(logged) && /plugins:update \(by itself\) issue-tracker@ck-test-market in claude-cli: updated: Updated to 2\.0\.0\./.test(logged) && /document-tools@ck-test-market in claude-cli: updated: Updated to 1\.2\.0\. It is still off in Claude Code\./.test(logged), logged.split('\n').filter(line => /plugin/.test(line)).join('\n'));
-  const before = calls().length;
-  await wait(5000);
-  check('once up to date, later checks run nothing', calls().length === before && noted().checked.updated === 0, JSON.stringify([calls(), noted().checked]));
+  // Wait for one scheduled check after the updates to finish, then check the record that wait saw and both tools' command logs.
+  const before = calls().length, checkedAt = noted().checked?.at ?? 0;
+  const codexCalls = () => (existsSync(join(home, 'codex-calls.txt')) ? readFileSync(join(home, 'codex-calls.txt'), 'utf8').trim().split('\n') : []);
+  let seen;
+  const ranAgain = await until(() => { const checked = noted().checked; if ((checked?.at ?? 0) > checkedAt) { seen = checked; return true; } return false; });
+  check('once up to date, later checks run nothing', ranAgain && !seen?.stopped && !seen?.unread?.length && seen?.updated === 0
+    && calls().length === before && codexCalls().length === 0, JSON.stringify({ ranAgain, checkedAt, seen, claude: calls(), codex: codexCalls() }));
   await a.quit();
 
   // 2. After a restart, the note and the Settings row say what happened; the dropped plugin is marked.
@@ -8260,11 +8282,13 @@ async function ownPartsFlow() {
 
 /**
  * What changes outside the app reaches the page and the search index without a Refresh (homepass.ts pageSees, main.ts
- * seenChanged; the watch on the tools' plugin records, main.ts startWatching). One home with Claude Code, its found skills kept
- * found by a record whose Synchronize everything is off. With Automatic sync off, then on, each change waited for as a newer
- * index for this home whose answers hold it and the row's going or coming: a plugin's first install (which makes Claude Code's
- * plugins folder), a found skill edited, one deleted, the plugin taken out of Claude Code's record and put back, with what was
- * typed in Find and the row opened kept. With it on, the home brought back to what a view had, after views that made no value.
+ * seenChanged; the watch on the tools' plugin records and MCP settings files, main.ts startWatching). One home with Claude Code
+ * and Copilot CLI's MCP settings file, its found items kept found by a record whose Synchronize everything is off. With Automatic
+ * sync off, then on, each change waited for as a newer index for this home whose answers hold it and the row's going or coming: a
+ * plugin's first install (which makes Claude Code's plugins folder), a found skill edited, one deleted, the plugin taken out of
+ * Claude Code's record and put back, with what was typed in Find and the row opened kept; and with Automatic sync off (so no 20 s
+ * poll can carry it), Copilot CLI's MCP settings file edited. With it on, the home brought back to what a view had, after views
+ * that made no value.
  * Then, with it on, how light it stays: no signal for .claude.json and the plugin record written again with the same content;
  * none after a click's own view and a minute idle; while a skill changes every second, no more than the watch's debounce and
  * the poll allow.
@@ -8272,10 +8296,13 @@ async function ownPartsFlow() {
 async function staleFlow() {
   const home = join(scratch, 'stale-home'), data = join(scratch, 'stale-data'), skills = join(home, '.claude/skills');
   const notes = join(skills, 'notes/SKILL.md'), record = join(home, '.claude/plugins/installed_plugins.json'), servers = join(home, '.claude.json');
+  const copilotServers = join(home, '.copilot/mcp-config.json');
   skill(skills, 'notes', text('notes', 'Write it down in the lantern log.'));
   // Each body has a word of its own, which only that skill's text holds.
   for (const [name, body] of [['review', 'Read the diff twice.'], ['spare', 'A tyre for the road.'], ['keep', 'Nothing changes here.'], ['busy', 'Round one.']]) skill(skills, name, text(name, body));
   writeFileSync(servers, `${JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' } } }, null, 2)}\n`);
+  mkdirSync(dirname(copilotServers), { recursive: true });
+  writeFileSync(copilotServers, `${JSON.stringify({ mcpServers: { atlas: { type: 'local', command: 'npx', args: ['-y', 'quarry'], tools: ['*'] } } }, null, 2)}\n`);
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
   writeFileSync(join(data, 'sync-settings.json'), JSON.stringify({ syncOn: false }));
@@ -8319,6 +8346,9 @@ async function staleFlow() {
   // ---------- Automatic sync off: a watch event asks for a view ----------
   took['off: first install'] = await arrives(install, async () => (await shown(plugin)) && (await ids('duplicate rows')).includes(plugin));
   await sequences('off', ['lantern', 'compass'], ['review', 'diff']);
+  // With Automatic sync off, no 20 s poll asks for a view: only the watch on MCP settings files (main.ts startWatching) delivers this edit.
+  took['off: copilot mcp edited'] = await arrives(() => writeFileSync(copilotServers, readFileSync(copilotServers, 'utf8').replace('quarry', 'anchor')),
+    async () => (await ids('anchor')).includes('mcp-atlas') && !(await ids('quarry')).includes('mcp-atlas'));
   // ---------- Automatic sync on: a pass tells the page when what it read differs ----------
   await a.click('#sync-switch');
   same('Automatic sync is on', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
@@ -8766,6 +8796,11 @@ async function usageFlow() {
   const reading = () => { if (writer === undefined) { try { writer = openSync(pipe, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK); } catch { return false; } } return true; };
   /** Lets the waiting reading go on: the pipe's other end closed, it reads an empty session file. */
   const letGo = async () => { for (let tries = 0; tries < 200 && !reading(); tries++) await wait(25); if (writer !== undefined) closeSync(writer); writer = undefined; };
+  /** Releases the pipe as soon as a reading reaches it, and waits until the page shows Collected. */
+  const collectThroughPipe = async () => {
+    for (let tries = 0; tries < 300 && !(await collected()); tries++) { if (reading()) { closeSync(writer); writer = undefined; } await wait(100); }
+    return collected();
+  };
   {
     const lead = () => a.text('#usage-when');
     await chooseOrder('name');
@@ -8893,14 +8928,10 @@ async function usageFlow() {
   await openKind(a, 'skills');
   await wait(2000);
   same('started with no window, it collects nothing until the window shows', [reading(), await a.text('#usage-when')], [false, 'Collecting…']);
-  const again = spawn(command, [...(flag('--electron') ? [root] : []), `--user-data-dir=${data}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])],
-    { env: { ...process.env, HOME: real, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, ...tempPlaces(join(scratch, 'tmp')) }, stdio: 'ignore' });
-  launched.add(again);
+  // Same clean launcher as launch() (spawnApp/appEnv): no inherited ELECTRON_RUN_AS_NODE, both tempPlaces, and registered in scratch.ts launched.
+  const again = spawnApp([...(flag('--electron') ? [root] : []), `--user-data-dir=${data}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], real, {}, 'ignore');
   await new Promise(done => again.once('exit', done));
-  for (let tries = 0; tries < 100 && !reading(); tries++) await wait(50);
-  await letGo();
-  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
-  same('once the window shows, usage is collected', await collected(), true);
+  same('once the window shows, usage is collected', await collectThroughPipe(), true);
   // The window shown while its page isn't listening (a development run only: main's debugger reloads the page and shows the
   // window at once, so the message that it showed reaches no page): told again once the page has loaded, it still collects.
   if (a.inspect) {
@@ -8911,10 +8942,7 @@ async function usageFlow() {
     main.close();
     for (let tries = 0; tries < 100 && !(await a.exists('#nav-library')); tries++) await wait(50);
     await openKind(a, 'skills');
-    for (let tries = 0; tries < 100 && !reading(); tries++) await wait(50);
-    await letGo();
-    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
-    same('started with no window, then shown while its page wasn’t listening: it still collects', await collected(), true);
+    same('started with no window, then shown while its page wasn’t listening: it still collects', await collectThroughPipe(), true);
   }
   same('no page errors, usage started at sign-in', a.pageErrors, []);
   await a.quit();
