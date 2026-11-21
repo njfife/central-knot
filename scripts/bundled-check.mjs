@@ -12,7 +12,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { connect, debugPorts, openKind, rowPart } from './cdp.mjs';
 import { stage } from './custom-build.mjs';
-import { launched, scratchFolder, tempPlaces } from './scratch.mjs';
+import { launched, scratchFolder, tempPlaces } from './scratch.ts';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';

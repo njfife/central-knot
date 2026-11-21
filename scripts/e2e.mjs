@@ -14,7 +14,7 @@ import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market
 import { serveReleases } from './update-fixture.mjs';
 import { packagedApp } from './package-app.mjs';
 import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, openKind, openKindNow, refocus, byId, rowPart, standIn } from './cdp.mjs';
-import { launched, scratchFolder, tempPlaces } from './scratch.mjs';
+import { launched, scratchFolder, tempPlaces } from './scratch.ts';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
@@ -154,9 +154,7 @@ if (process.platform === 'linux') {
 `, { mode: 0o755 });
 }
 let app;
-// Every app this run started, and a flow's stand-in running app (standInApp), is in `launched`: killed when the run ends,
-// however it ends, and then its scratch folder goes (scratch.mjs), so no app is left holding a debug port a later run could
-// attach to. A signal ends a run so; a grouped run's parent passes it on to its copies and waits for them instead (runGroups).
+// A grouped run's parent passes a signal on to its copies and waits for them instead (runGroups).
 if (named) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
@@ -8853,7 +8851,8 @@ async function usageFlow() {
   await wait(2000);
   same('started with no window, it collects nothing until the window shows', [reading(), await a.text('#usage-when')], [false, 'Collecting…']);
   const again = spawn(command, [...(flag('--electron') ? [root] : []), `--user-data-dir=${data}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])],
-    { env: { ...process.env, HOME: real, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') }, stdio: 'ignore' });
+    { env: { ...process.env, HOME: real, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, ...tempPlaces(join(scratch, 'tmp')) }, stdio: 'ignore' });
+  launched.add(again);
   await new Promise(done => again.once('exit', done));
   for (let tries = 0; tries < 100 && !reading(); tries++) await wait(50);
   await letGo();
@@ -11977,7 +11976,8 @@ function readCopy(names, number, output, code, signal) {
  * block when it ends; then the run's total, the flows not finished and not run, and every FAIL line again. The run's failures
  * are its copies' FAIL lines, one more for each copy that died or whose total counts more failures than its FAIL lines
  * (readCopy); the passes of a copy without a total line are not known, and the total says so. A signal is passed on to every
- * copy, and each one's block printed as it ends. Returns the exit code.
+ * copy, and each one's block printed as it ends; if the parent ends any other way while copies run (an error of its own), each
+ * is sent SIGTERM and cleans up as it ends. A parent killed by SIGKILL leaves them to the Mac run's last step. Returns the exit code.
  */
 async function runGroups() {
   const atOnce = Math.max(1, Number(process.env.CK_E2E_GROUPS_AT_ONCE) || 1);
@@ -11986,6 +11986,7 @@ async function runGroups() {
   const running = new Set(), unfinished = [], notRun = [], failLines = [], uncounted = [];
   let passed = 0, begun = 0, stoppedBy;
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stoppedBy = signal; for (const copy of running) copy.kill(signal); });
+  process.on('exit', () => { for (const copy of running) copy.kill('SIGTERM'); });
   const runOne = names => new Promise(done => {
     const from = Date.now(), number = ++begun;
     const copy = spawn(process.execPath, [...process.execArgv, import.meta.filename, ...args, '--flows', names.join(',')], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -12016,9 +12017,6 @@ async function runGroups() {
 
 const started = Date.now();
 if (!named) {
-  // The scratch folder and its stand-ins were made as this script loaded, as every flow's paths are built from them; the parent
-  // runs no flow, so it deletes them.
-  rmSync(scratch, { recursive: true, force: true });
   process.exitCode = await runGroups();
 } else {
   try {
@@ -12034,7 +12032,7 @@ if (!named) {
     check(`aborted: ${error.message}`, false);
     console.error(error);
   } finally {
-    // An AppImage's mount goes a moment after its app; the folder goes as the script ends (scratch.mjs).
+    // An AppImage's mount goes a moment after its app; the folder goes as the script ends (scratch.ts).
     app?.child.kill('SIGKILL');
     await mountsGone(scratch);
   }

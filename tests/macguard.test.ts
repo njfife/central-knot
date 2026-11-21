@@ -2,7 +2,7 @@
 // in one line naming the limit and the number. The readings are made up, as top, sysctl and df print them on a Mac.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readMac, roomToRun, short, WAIT_MINUTES } from '../scripts/mac-guard.ts';
+import { figures, readMac, roomToRun, short, WAIT_MINUTES } from '../scripts/mac-guard.ts';
 
 const roomy = { mdsGB: 0.04, swapUsedGB: 1.7, swapTotalGB: 3, freeDiskGB: 331 };
 /** The guard over one reading a minute (the last one repeated): what it came to, and the minutes it waited. */
@@ -18,8 +18,10 @@ test('Spotlight’s indexer at 69 GB, or swap 58 of 59 GB used: the run waits te
   assert.deepEqual(await guarded({ ...roomy, swapUsedGB: 58, swapTotalGB: 59 }), fails('58.0 of 59.0 GB of swap used, above 8 GB'));
 });
 
-test('Within every limit the run goes at once, and a short one goes the minute it is not; off a Mac nothing is read and it goes', async () => {
+test('Within every limit the run goes at once, saying what it read, and a short one goes the minute it is not; off a Mac nothing is read and it goes', async t => {
+  const said = t.mock.method(console, 'log', () => {});
   assert.deepEqual(await guarded(roomy), { came: undefined, minutes: 0 });
+  assert.equal(said.mock.calls[0].arguments[0], 'The Mac has room for the checks: mds 0.0 GB, swap used 1.7 GB of 3.0 GB, disk free 331.0 GB.');
   assert.deepEqual(await guarded({ ...roomy, freeDiskGB: 12 }, { ...roomy, freeDiskGB: 12 }, roomy), { came: undefined, minutes: 2 });
   assert.deepEqual(await guarded(readMac('linux', () => { throw new Error('read off a Mac'); })), { came: undefined, minutes: 0 });
 });
@@ -30,13 +32,16 @@ test('Each limit is where it says: at it the run goes, one past it the limit is 
     [undefined, 'Spotlight’s indexer (mds) uses 4.1 GB of memory, above 4 GB', '8.1 of 59.0 GB of swap used, above 8 GB', '29.9 GB of disk free, below 30 GB']);
 });
 
-test('On a Mac the readings come from top’s memory column, sysctl’s swap and df’s free blocks; one that can’t be read holds nothing back', () => {
+test('On a Mac the readings come from top’s memory column, sysctl’s swap and df’s free blocks, in K, M, G or T; one that can’t be read, or whose command fails, is said as unread and holds nothing back', () => {
   const printed: Record<string, string> = {
     top: 'Processes: 702 total\n\nMEM    COMMAND\n1280M+ WindowServer\n69G    mds\n17M    mds_stores\n',
     sysctl: 'total = 60416.00M  used = 59392.00M  free = 1024.00M  (encrypted)\n',
     df: 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 971350180 586314652 347075384 63% /System/Volumes/Data\n',
   };
-  const reading = readMac('darwin', command => printed[command]);
-  assert.deepEqual(reading && { ...reading, freeDiskGB: Math.round(reading.freeDiskGB) }, { mdsGB: 69, swapUsedGB: 58, swapTotalGB: 59, freeDiskGB: 331 });
-  assert.equal(short(readMac('darwin', () => 'nothing it knows')!), undefined);
+  assert.equal(figures(readMac('darwin', command => printed[command])!), 'mds 69.0 GB, swap used 58.0 GB of 59.0 GB, disk free 331.0 GB');
+  const otherUnits: Record<string, string> = { top: '0.1T   mds\n', sysctl: 'total = 59.40G  used = 58.60G  free = 0.80G\n' };
+  const dfFailed = readMac('darwin', command => { if (command === 'df') throw new Error('df failed'); return otherUnits[command]; })!;
+  assert.deepEqual([figures(dfFailed), short(dfFailed)], ['mds 102.4 GB, swap used 58.6 GB of 59.4 GB, disk free unread', 'Spotlight’s indexer (mds) uses 102.4 GB of memory, above 4 GB; 58.6 of 59.4 GB of swap used, above 8 GB']);
+  const unknown = readMac('darwin', () => 'nothing it knows')!;
+  assert.deepEqual([figures(unknown), short(unknown)], ['mds unread, swap used unread of unread, disk free unread', undefined]);
 });

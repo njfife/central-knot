@@ -13,7 +13,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSy
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { connect, debugPorts } from './cdp.mjs';
-import { launched, scratchFolder, tempPlaces } from './scratch.mjs';
+import { launched, scratchFolder, tempPlaces } from './scratch.ts';
 import { serveReleases } from './update-fixture.mjs';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';

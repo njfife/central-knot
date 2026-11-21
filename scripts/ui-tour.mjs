@@ -29,7 +29,7 @@ import { serveReleases } from './update-fixture.mjs';
 import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, openKind, refocus, byId, rowPart, standIn } from './cdp.mjs';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { packagedApp } from './package-app.mjs';
-import { launched, scratchFolder, tempPlaces } from './scratch.mjs';
+import { launched, scratchFolder, tempPlaces } from './scratch.ts';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -49,8 +49,6 @@ mkdirSync(join(scratch, 'bin'));
 writeFileSync(join(scratch, 'bin/xdg-open'), '#!/bin/sh\nexit 0\n');
 chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
 
-// Every app this run started is in `launched`, killed when the run ends, however it ends, and then the scratch folder goes
-// (scratch.mjs): a failed or interrupted run leaves no app holding a debug port that a later run could attach to. A signal ends it so.
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 /** What a page threw, in any app this run started. */
@@ -2575,7 +2573,7 @@ if (wanted('remove-build')) {
   const putBack = () => MAC.bundle(MAC.applications, 'Central Knot Alpha', ALPHA_ID);
   const apps = [];
   /** Stand-in copies of a build running from `paths` (one that quits when asked, or not), listed as running. */
-  const running = async (paths, quits = true, id = ALPHA_ID) => { const started = await Promise.all(paths.map(() => standInApp(quits))); apps.push(...started); MAC.running(paths.map((path, at) => ({ bundleId: id, pid: started[at].pid, path }))); };
+  const running = async (paths, quits = true, id = ALPHA_ID) => { const started = await Promise.all(paths.map(() => standInApp(quits))); apps.push(...started); for (const app of started) launched.add(app); MAC.running(paths.map((path, at) => ({ bundleId: id, pid: started[at].pid, path }))); };
   const idle = `document.body.dataset.busy !== 'true'`;
   const look = async () => { await refresh(); await waitFor(a, idle, 30000); };
   // The alpha synced this home last, and kept History for 90 days there: Replace carries that over.
@@ -3249,6 +3247,6 @@ if (wanted('overview')) {
 }
 
 a.quit();
-// An AppImage's mount goes a moment after its app; the folder goes as the script ends (scratch.mjs).
+// An AppImage's mount goes a moment after its app; the folder goes as the script ends (scratch.ts).
 await mountsGone(scratch);
 console.log(`tour in ${out}`);
