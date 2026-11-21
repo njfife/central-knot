@@ -54,6 +54,8 @@ export interface RowWords {
   switchedOff?: { line(where: string): string; tag: string };
 }
 
+/** A skill's, or an agent's in Pi (a skill there), that the tool's own switch keeps out: the opened row's Let … load it clears it. */
+const notLoaded = { line: (where: string) => `${where} doesn’t load it.`, tag: 'The opened row can clear it.' };
 /**
  * Each kind on the library, in its words, keyed by the page's name for it (app.ts PageKind); the one place they are written
  * (agents.ts takes its Kind's from here). Every other place a kind is wired in is in librarypass.ts's recipe.
@@ -63,13 +65,14 @@ export const libraryWords = {
     item: kindNouns.agents.one, an: kindNouns.agents.a, many: kindNouns.agents.many, copy: 'file', body: 'Prompt',
     shared: 'Name, description and prompt are the same in every tool; other settings stay in each tool’s file.',
     own: names => `Its own settings stay in its file: ${andList([...names])}.`,
+    switchedOff: notLoaded,
   },
   skills: {
     item: kindNouns.skills.one, an: kindNouns.skills.a, many: kindNouns.skills.many, copy: 'folder',
     shared: 'Every tool it is on in gets the same folder: every file as it is, and its scripts still runnable.',
     // A skill's folder is the same in every tool: no part of it stays one tool's own.
     own: () => '',
-    switchedOff: { line: where => `${where} doesn’t load it, and Central Knot leaves that switch as it is.`, tag: 'The opened row can clear it.' },
+    switchedOff: notLoaded,
   },
   mcp: {
     item: kindNouns.mcp.one, an: kindNouns.mcp.a, many: kindNouns.mcp.many, copy: 'entry',
@@ -590,7 +593,7 @@ export function sentences(words: RowWords) {
    * taken in (the latest, where times prove it), or a copy deleted by hand that turned the item off. `action`: the notice's button, which runs its History entry's
    * own action (historyactions.ts); `help`: what that does.
    */
-  function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved' | 'sharedWay' | 'stillRead'> | PluginItemNotice)
+  function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved' | 'sharedWay' | 'stillRead' | 'settingsChanged'> | PluginItemNotice)
     : { text: string; action?: 'undo' | 'turn-on'; help: string } {
     // A plugin's item (library.ts A PLUGIN): let go as the person's own, said with no button (History has the entry), or dropped.
     if ('link' in notice) return notice.kind === 'let-go' ? { text: `${notice.item} is your own now: you changed it here, so it no longer follows ${linkLabel(notice.link)}. It stays in the tools that have it; its row lets it into the others.`, help: '' }
@@ -601,7 +604,8 @@ export function sentences(words: RowWords) {
       // The tools it was taken out of.
       const place = deletedIn(notice.winner, notice.sharedWay), readers = notice.stillRead ?? [];
       const still = readers.length ? ` ${andList(readers.map(toolName))} still ${readers.length === 1 ? 'reads' : 'read'} it another way.` : '';
-      const text = `${name} was deleted in ${place}, so it is off${others ? ` and was taken out of ${others}` : ''}.${still} Central Knot keeps it.`;
+      const changed = notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : '';
+      const text = `${name} was deleted in ${place}, so it is off${others ? ` and was taken out of ${others}` : ''}.${still} Central Knot keeps it.${changed}`;
       // What it had through the shared folder isn't put back: each tool gets Central Knot's own copy (library.ts THE SHARED FOLDER).
       const help = notice.sharedWay ? `Put ${name} in every tool as Central Knot’s own ${copy}, in place of a link that leads nowhere`
         : `Put ${name} back in every tool, each ${copy} as it was`;
@@ -618,9 +622,9 @@ export function sentences(words: RowWords) {
    * What Synchronize everything's notice says (types.ts TakenInNotice), on its page and in Settings: how many it took in and
    * where it found them, their names, and that History can undo each.
    */
-  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from'>): string {
+  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>): string {
     const count = notice.items.length, many = count === 1 ? noun : words.many;
-    return `Synchronize everything took in ${count} ${many}, found in ${andList(notice.from.map(toolName))}: ${andList(notice.items)}. History can undo ${count === 1 ? 'it' : 'each'}.`;
+    return `Synchronize everything took in ${count} ${many}, found in ${andList(notice.from.map(toolName))}: ${andList(notice.items)}.${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''} History can undo ${count === 1 ? 'it' : 'each'}.`;
   }
 
   return { harnessLine, placeTag, said, noticeWords, takenInWords };

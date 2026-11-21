@@ -21,7 +21,8 @@
 //                  once), a folder moved, made again or gone
 //   syncItem       the library's plan for the item (copiesOf, plan), carried out by carryOut: History first (logItem), then
 //                  versions and the record, then each harness's copy (writeCopy, removeCopy, through the kind); a write or
-//                  removal held is then taken out of what History was told (untell)
+//                  removal held is then taken out of what History was told (untell); a harness's own settings that follow
+//                  its copy (Kind.follow: Pi's skills list) are kept in step, and what that changed is added to what was told
 //   keepFolders    the folder identities the next pass compares with
 //
 // Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved), so a mark says what a pass
@@ -231,6 +232,12 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
    * own reason, said as given (Claude Code's lock: servers.ts). Either way the next pass tries again.
    */
   remove(context: ShareContext, item: LibraryItem, here: Entry): Promise<'removed' | 'changed' | 'failed' | { held: string }>;
+  /**
+   * A harness's own settings kept in step with Central Knot's copy there (Pi's skills list: skillswitch.ts followCopy), after the
+   * copy is put in where there was none (`placed`), or is gone (taken out, given way to another copy, or deleted by hand). Answers
+   * what it changed, which the result, History and the notice say. A kind with no such settings leaves it out.
+   */
+  follow?(context: ShareContext, item: LibraryItem, harness: HarnessId, placed: boolean): Promise<Followed | undefined>;
   /**
    * A History entry's action as the click it is (as the page would send it), from the entry, the item now and what the
    * managed tools hold of it now (historyactions.ts ItemNow); undefined when it has nothing left to do.
@@ -575,11 +582,15 @@ interface Pass extends AnyLook {
   /** History has the clicks in an entry of the caller's own (PassOptions told). */
   told: boolean;
   /** What Synchronize everything took in, as History told it (logItem): its one notice, made when the pass ends. */
-  takenIn: { name: string; foundIn: HarnessId[]; history: string }[];
+  takenIn: { name: string; foundIn: HarnessId[]; history: string; settingsChanged?: string[] }[];
   /** What a source's read did to each item, by key, but `nothing` and `same` (fromSourceStep; logItem names its entry): PassResult sourced. */
   sourced: Map<string, NonNullable<PassResult['sourced']>[number]>;
   results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[];
+  /** What a kind's `follow` changed with each item's copies, by key: added to the entries and notices of it (syncItem). */
+  followed: Map<string, string[]>;
 }
+/** What a kind's `follow` did to a harness's own settings: what it changed there, in words; `off`: they keep the copy just put in out. */
+export interface Followed { changed?: string; off?: true }
 /** What may be asked of a pass besides its clicks. */
 export interface PassOptions<Content> {
   /**
@@ -630,7 +641,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? SETTLE_MS, settling: false };
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
-  const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [] };
+  const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [], followed: new Map() };
   await deletionsTold(pass);
   await letGo(pass, await recordedIds(context.home));
   for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
@@ -721,6 +732,20 @@ async function syncItem(pass: Pass, item: LibraryItem) {
     remove: harness => (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
   });
   if (held.length) await untell(pass, told, held);
+  // A copy found gone (deleted by hand: plan `forget`): its settings follow it out too.
+  for (const harness of made.forget) await follow(pass, item, harness, false);
+  const changed = pass.followed.get(item.key);
+  if (!changed) return;
+  for (const said of [...told.named.keys(), ...pass.takenIn.filter(taken => taken.name === item.name)]) said.settingsChanged = changed;
+  const mine = new Map(told.events.map(event => [event.id, event]));
+  if (mine.size) await replaceHistory(pass.context, (await readHistory(pass.context)).map(event => mine.get(event.id) ?? event));
+}
+
+/** A kind's `follow` for one harness (Kind.follow), what it changed kept for the item's entries and notices. */
+async function follow(pass: Pass, item: LibraryItem, harness: HarnessId, placed: boolean): Promise<Followed> {
+  const done = await pass.kind.follow?.(pass.context, item, harness, placed) ?? {};
+  if (done.changed) pass.followed.set(item.key, [...(pass.followed.get(item.key) ?? []), done.changed]);
+  return done;
 }
 
 /** Writes the current version into one harness (Kind.write). True when it is there (carryOut notes it as applied). */
@@ -731,11 +756,13 @@ async function writeCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: S
   // A version this harness won't load is never written there; the copy it has stays (copyIn asks the same of the version it read).
   const wont = await pass.kind.refusesToLoad?.(pass.context, item, tool, content);
   if (wont) return stopped(wont);
-  const done = await pass.kind.write(pass.context, item, tool, here, content);
-  if (done && 'stopped' in done) return stopped(done.stopped);
+  const wrote = await pass.kind.write(pass.context, item, tool, here, content);
+  if (wrote && 'stopped' in wrote) return stopped(wrote.stopped);
   pass.writes++;
-  const message = `${here ? 'Now has the current version' : 'Added'}${done ? `, ${done.said}` : ''}. Start a new session to use it.`;
-  pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message });
+  const done = here ? {} : await follow(pass, item, tool, true);
+  const off = done.off ? ` ${toolName(tool)}’s own settings keep it out, so it doesn’t load it.` : '';
+  const message = `${here ? 'Now has the current version' : 'Added'}${wrote ? `, ${wrote.said}` : ''}.${done.changed ? ` ${done.changed}` : ''}${off} Start a new session to use it.`;
+  pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message, ...(done.off ? { switchedOff: true as const } : {}), ...(done.changed ? { settingsChanged: done.changed } : {}) });
   return true;
 }
 
@@ -749,7 +776,8 @@ async function removeCopy(pass: Pass, item: LibraryItem, here: Seen): Promise<bo
     return false;
   }
   pass.writes++;
-  pass.results.push({ item: item.name, harness: here.tool, outcome: 'removed', message: 'Removed. Central Knot keeps it.' });
+  const followed = await follow(pass, item, here.tool, false);
+  pass.results.push({ item: item.name, harness: here.tool, outcome: 'removed', message: `Removed.${followed.changed ? ` ${followed.changed}` : ''} Central Knot keeps it.`, ...(followed.changed ? { settingsChanged: followed.changed } : {}) });
   return true;
 }
 
@@ -1096,7 +1124,8 @@ async function takeIn(pass: Pass, key: string, answer: { take: FoundCopy; chosen
 /** Synchronize everything's one notice for a pass: how many it took in, by name, and the tools they were found in. */
 function takenInNotice(taken: Pass['takenIn']): TakenInNotice {
   const from = [...new Set(taken.flatMap(entry => entry.foundIn))].sort(byToolOrder);
-  return { kind: 'taken-in', items: taken.map(entry => entry.name), from, history: taken[0].history };
+  const settingsChanged = taken.flatMap(entry => entry.settingsChanged ?? []);
+  return { kind: 'taken-in', items: taken.map(entry => entry.name), from, history: taken[0].history, ...(settingsChanged.length ? { settingsChanged } : {}) };
 }
 
 /**

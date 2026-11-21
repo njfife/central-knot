@@ -10,8 +10,8 @@ export const heldWhole = (entry: DestinationResult) => entry.outcome === 'held' 
 /**
  * A click's own results, out of a pass that may have done more (with Sync on, every click is a full pass), and what they say:
  * whether it did anything, a hold on the whole item (`refusal`; its `unchanged` says the click did nothing at all), whether
- * something failed, the tools where it failed or was held (`notIn`), and whether its copies differ (waiting for a choice),
- * which is no failure.
+ * something failed, the tools where it failed or was held or whose own settings keep it out (`notIn`), and whether its copies
+ * differ (waiting for a choice), which is no failure.
  */
 export function clickResults(results: DestinationResult[], names: readonly string[]) {
   const own = new Set(names.map(name => name.toLowerCase()));
@@ -21,7 +21,7 @@ export function clickResults(results: DestinationResult[], names: readonly strin
     did: ours.some(entry => entry.outcome === 'written' || entry.outcome === 'switched' || entry.outcome === 'removed'),
     refusal: ours.find(heldWhole),
     failed: ours.some(keptBack),
-    notIn: [...new Set(ours.filter(entry => keptBack(entry) && entry.harness).map(entry => entry.harness!))],
+    notIn: [...new Set(ours.filter(entry => (keptBack(entry) || entry.switchedOff) && entry.harness).map(entry => entry.harness!))],
     differs: ours.some(entry => entry.outcome === 'held' && entry.differs),
   };
 }
