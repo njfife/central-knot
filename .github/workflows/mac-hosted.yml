@@ -1,0 +1,48 @@
+name: Mac checks on a hosted Mac
+# The Mac run (scripts/mac-run.mjs, every check mac.yml runs) on one of GitHub's own Apple-silicon machines, a fresh one each
+# run, several at once (free for a public repository), instead of the owner's Mac. It is not the run that counts: mac.yml,
+# on the self-hosted runner, still is (AGENTS.md, "Checking a change"). A push to a branch named ci/** runs it, so a change to
+# it is proven from its own branch; any other branch: gh workflow run mac-hosted.yml -R njfife/central-knot --ref <branch>.
+on:
+  push:
+    branches: ['ci/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+# A group of its own: groups are shared by every workflow in the repository, so mac.yml's would let the two cancel each other.
+concurrency:
+  group: mac-hosted-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  mac:
+    # Apple silicon, 3 cores and 7 GB. A fresh machine: nothing left running by an earlier run to stop first, as mac.yml does.
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      # Temporary folders, test homes and mounted disk images under /private/tmp, as on the owner's Mac.
+      TMPDIR: /private/tmp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      # The Electron zip that npm ci and the packaging both take from Electron's download cache, kept between runs for each
+      # Electron version.
+      - id: electron
+        run: echo "version=$(node -p "require('./package.json').devDependencies.electron")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/Library/Caches/electron
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
+      - run: npm ci
+      # exec: a stop (a newer push cancels this run) reaches the script itself, which sends it on to every part.
+      - run: exec node scripts/mac-run.mjs
+      # The light tour's pictures: gh run download <run> -R njfife/central-knot -n light-tour.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: light-tour
+          path: light-tour
+          if-no-files-found: ignore
+          retention-days: 7

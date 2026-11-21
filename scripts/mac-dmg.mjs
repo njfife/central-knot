@@ -1,6 +1,7 @@
 // The Mac download people open by hand: a disk image whose window shows the app (Central Knot, or Central Knot Alpha) beside
 // a shortcut to the Applications folder, to drag one onto the other. (The zip beside it stays: scripts and updates take the
-// app from there.)
+// app from there.) Also how an image is attached for a while and detached after (whileAttached), here and in the alpha check
+// (scripts/mac-dmg-layout.sh, run by hand, has its own).
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,15 +11,38 @@ import { downloadName } from '../src/updates.ts';
 const customIconFlag = '0000000000000000040000000000000000000000000000000000000000000000';
 
 const run = (command, args, options) => execFileSync(command, args, { stdio: ['ignore', 'ignore', 'inherit'], ...options });
-// macOS can still be holding an image it was just handed ("Resource busy"); a moment later it mounts.
-const attach = (image, mount, ...flags) => {
-  for (let tries = 1; ; tries++) {
-    try { return run('/usr/bin/hdiutil', ['attach', image, '-nobrowse', '-noautoopen', '-mountpoint', mount, ...flags]); }
+// hdiutil is taken from PATH (/usr/bin on every Mac), so a test can stand one in (tests/macdmg.test.ts).
+// macOS can still be holding an image it was just handed ("Resource busy"); a moment later it mounts. Returns the device the
+// image is attached as: the whole disk, which hdiutil names first ("/dev/disk5	GUID_partition_scheme").
+const attach = (image, mount, flags) => {
+  let said;
+  for (let tries = 1; said === undefined; tries++) {
+    try { said = run('hdiutil', ['attach', image, '-nobrowse', '-noautoopen', '-mountpoint', mount, ...flags], { stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8' }); }
     catch (error) { if (tries === 3) throw error; run('/bin/sleep', ['2']); }
   }
+  const device = /^\/dev\/disk\d+(?=\s)/m.exec(said)?.[0];
+  if (!device) throw new Error(`hdiutil attached ${image} and named no disk:\n${said}`);
+  return device;
 };
-// A disk that Spotlight or Finder has just looked at can refuse to eject once.
-const detach = mount => { try { run('/usr/bin/hdiutil', ['detach', mount]); } catch { run('/usr/bin/hdiutil', ['detach', mount, '-force']); } };
+// Detached by its device, not its mount: a first try can unmount the volume and still be refused the eject, as a disk that
+// Spotlight or a scan has just looked at is ("Resource busy"), and by the next try the mount's path is gone. Busy is tried
+// again, forced, a second later, five tries in all; a disk no longer there ("No such file or directory") is detached.
+const detach = device => {
+  for (let tries = 1; ; tries++) {
+    try { return run('hdiutil', ['detach', device, ...(tries > 1 ? ['-force'] : [])], { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' }); }
+    catch (error) {
+      if (/No such file or directory/.test(error.stderr)) return;
+      if (tries === 5 || !/Resource busy/.test(error.stderr)) throw error;
+      process.stderr.write(error.stderr);
+      run('/bin/sleep', ['1']);
+    }
+  }
+};
+/** Attaches `image` at `mount` for `use`, and detaches it after, however `use` ends. Returns what `use` returns. */
+export function whileAttached(image, mount, flags, use) {
+  const device = attach(image, mount, flags);
+  try { return use(); } finally { detach(device); }
+}
 
 // Each app's window is its own folder, assets/dmg/<its download name>/ (Central-Knot, Central-Knot-Alpha): the picture,
 // background.svg, kept as PNGs at both sizes (it says the app's name), and DS_Store, the file Finder keeps a folder's view
@@ -42,14 +66,13 @@ export function buildDmg({ bundle, dmg, name, identity, notaryProfile }) {
     // Built writable first: the disk's own icon flag can only be set on the mounted volume.
     const writable = join(work, 'writable.dmg');
     const mount = join(work, 'volume');
-    run('/usr/bin/hdiutil', ['create', '-volname', volumeName, '-srcfolder', stage, '-fs', 'HFS+', '-format', 'UDRW', writable]);
-    attach(writable, mount);
-    try {
+    run('hdiutil', ['create', '-volname', volumeName, '-srcfolder', stage, '-fs', 'HFS+', '-format', 'UDRW', writable]);
+    whileAttached(writable, mount, [], () => {
       run('/usr/bin/xattr', ['-wx', 'com.apple.FinderInfo', customIconFlag, mount]);
       rmSync(join(mount, '.fseventsd'), { recursive: true, force: true });
-    } finally { detach(mount); }
+    });
     rmSync(dmg, { force: true });
-    run('/usr/bin/hdiutil', ['convert', writable, '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-o', dmg]);
+    run('hdiutil', ['convert', writable, '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-o', dmg]);
 
     // Signed and notarized in its own right, so the download itself opens with no warning, also offline.
     if (identity) run('/usr/bin/codesign', ['--sign', identity, '--timestamp', dmg]);
@@ -60,11 +83,10 @@ export function buildDmg({ bundle, dmg, name, identity, notaryProfile }) {
     }
 
     // What someone who opens it gets: the app, intact, and a shortcut that leads to Applications.
-    attach(dmg, mount, '-readonly');
-    try {
+    whileAttached(dmg, mount, ['-readonly'], () => {
       run('/usr/bin/codesign', ['--verify', '--deep', '--strict', join(mount, appName)]);
       if (readlinkSync(join(mount, 'Applications')) !== '/Applications') throw new Error('The disk image’s Applications shortcut doesn’t lead to /Applications.');
       for (const name of ['.DS_Store', '.background.tiff', '.VolumeIcon.icns']) lstatSync(join(mount, name));
-    } finally { detach(mount); }
+    });
   } finally { rmSync(work, { recursive: true, force: true }); }
 }
