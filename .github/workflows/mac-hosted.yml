@@ -36,8 +36,8 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      # The Electron zip that npm ci and the packaging both take from Electron's download cache, kept between runs for each
-      # Electron version: saved as soon as npm ci has downloaded it, so a red run keeps it too.
+      # The Electron zip the packaging downloads (Electron 45 has no install step), kept between runs for each Electron version:
+      # restored here, saved after the run whatever its result.
       - id: electron
         run: echo "version=$(node -p "require('./package.json').devDependencies.electron")" >> "$GITHUB_OUTPUT"
       - id: electron-zip
@@ -46,11 +46,6 @@ jobs:
           path: ~/Library/Caches/electron
           key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
       - run: npm ci
-      - if: steps.electron-zip.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: ~/Library/Caches/electron
-          key: ${{ steps.electron-zip.outputs.cache-primary-key }}
       # exec: a stop (a newer push cancels this run) reaches the script itself, which sends it on to every part.
       - run: exec node scripts/mac-run.mjs
       # The light tour's pictures: gh run download <run> -R njfife/central-knot -n light-tour.
@@ -61,3 +56,8 @@ jobs:
           path: light-tour
           if-no-files-found: ignore
           retention-days: 7
+      - if: always() && steps.electron-zip.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/Library/Caches/electron
+          key: ${{ steps.electron-zip.outputs.cache-primary-key }}
