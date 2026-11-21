@@ -8,13 +8,17 @@ jobs:
   mac-hosted-trial:
     runs-on: macos-15
     timeout-minutes: 40
+    env:
+      # Keep temp mounts and test homes out of Spotlight-indexed /var/folders (also stops hdiutil detach "Resource busy").
+      TMPDIR: /private/tmp
     steps:
-      - name: Runner environment
+      - name: Runner environment & disable Spotlight
         run: |
           uname -a
           sw_vers
           sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
           df -h .
+          sudo mdutil -a -i off || true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
