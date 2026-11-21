@@ -332,6 +332,8 @@ export interface ToolCopy {
   name?: string;
   /** A library kind: the names in this harness's own part of its copy (an agent's settings in its file: tools, model, …), which never leave it. */
   ownPart?: string[];
+  /** MCP servers: the hash of this tool's own part of the copy (mcp.ts ownPartOf: its own fields, `extras`, with its name and place), which `hash` leaves out. */
+  ownHash?: string;
 }
 
 /** The plugin a tool has an item through: its name, the marketplace as that tool added it, and the installed copy's version. `off`: turned off there. */

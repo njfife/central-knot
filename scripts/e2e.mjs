@@ -8547,9 +8547,9 @@ async function mcpSigninFlow() {
   mkdirSync(join(home, '.local/bin'), { recursive: true });
   for (const [binary, version] of Object.entries(versions)) {
     if (outputs[binary]) writeFileSync(join(said, binary), outputs[binary]);
-    // Every call but --version is recorded as it starts and as it ends: the tool, the folder it ran in, how many entries that held, its arguments.
+    // Every call but --version is recorded as it starts and as it ends: the tool, the folder it ran in, how many entries that held, its arguments, its process.
     writeFileSync(join(home, '.local/bin', binary), [`#!/bin/sh`, `[ "$1" = "--version" ] && echo "${version}" && exit 0`,
-      `echo "start|${binary}|$(pwd)|$(ls -A | wc -l | tr -d ' ')|$*" >> ${calls}`, `[ -f ${said}/${binary}.wait ] && sleep "$(cat ${said}/${binary}.wait)"`,
+      `echo "start|${binary}|$(pwd)|$(ls -A | wc -l | tr -d ' ')|$*|$$" >> ${calls}`, `[ -f ${said}/${binary}.wait ] && sleep "$(cat ${said}/${binary}.wait)"`,
       `cat ${said}/${binary} 2>/dev/null`, `echo "end|${binary}" >> ${calls}`, binary === 'pi' ? 'exit 1' : 'exit 0', ''].join('\n'));
     chmodSync(join(home, '.local/bin', binary), 0o755);
   }
@@ -8689,6 +8689,10 @@ async function mcpSigninFlow() {
   same('a server added since its column’s check is not checked; the rest keep their words', [added.wiki, added.plain], ['Not checked', 'Connected']);
   write('.claude.json', JSON.stringify({ mcpServers: remote(claudeServers) }));
   await a.click('#header-refresh');
+  // OpenCode's own setting for a server changed since its check (its sign-in's client): OpenCode's answer was the old copy's; Claude Code's stands.
+  write('.config/opencode/opencode.json', JSON.stringify({ mcp: { ...Object.fromEntries(['plain', 'oauth', 'down', 'silent', 'search', longName].map((name, index) => [name, { type: 'remote', url: P(47201 + index) }])), oauth: { type: 'remote', url: P(47202), oauth: { clientId: 'standin-client' } } } }));
+  await a.click('#header-refresh');
+  same('a tool’s own setting changed since its check says Not checked in that tool only', [(await column('opencode-cli')).oauth, (await column('claude-cli')).oauth], ['Not checked', 'Needs sign-in']);
   // A server given another address while Claude Code was checked: the answer is the old copy's, so that cell says Not checked, now
   // and after the address is put back; the others take the answer.
   writeFileSync(join(said, 'claude.wait'), '2');
@@ -8706,7 +8710,7 @@ async function mcpSigninFlow() {
   writeFileSync(join(said, 'opencode'), '┌  MCP Servers\n│\nError: Unexpected end of JSON input\n');
   await a.click('#signin-check-opencode-cli');
   await checked('opencode-cli');
-  same('an answer in a shape not known says so, with the line it printed first', [(await column('opencode-cli')).plain, await a.text(`#${await cellId('opencode-cli', 'plain')} .signin-command`)], ['Couldn’t read OpenCode’s answer', '┌  MCP Servers']);
+  same('an answer in a shape not known says so, with the first line it printed that says something', [(await column('opencode-cli')).plain, await a.text(`#${await cellId('opencode-cli', 'plain')} .signin-command`)], ['Couldn’t read OpenCode’s answer', 'Error: Unexpected end of JSON input']);
   await fits('unreadable');
   // No command line here: OpenCode's taken away after the page was read.
   renameSync(join(home, '.local/bin/opencode'), join(scratch, 'opencode-aside'));
@@ -8751,8 +8755,21 @@ async function mcpSigninFlow() {
   await a.click('#header-refresh');
   same('with no server in any tool the page says so', await a.text('.empty-title'), 'No MCP servers in your tools');
   await owners('no-servers');
+  // Quit twice while a check runs: the app goes only once the check's tool is stopped and its folder removed.
+  write('.claude.json', JSON.stringify({ mcpServers: remote(claudeServers) }));
+  await a.click('#header-refresh');
+  writeFileSync(join(said, 'claude.wait'), '30');
+  const quitFrom = called().length;
+  await a.click('#signin-check-claude-cli');
+  await until(async () => called().slice(quitFrom).some(([what]) => what === 'start'), 'the check Quit stops to start');
+  const [[, , quitCwd, , , quitPid]] = called().slice(quitFrom);
   same('no page errors, mcp sign-in', a.pageErrors, []);
-  await a.quit();
+  const quitter = await a.main();
+  const gone = new Promise(done => (a.child.exitCode !== null ? done() : a.child.once('exit', done)));
+  await quitter.run('(setTimeout(() => { electron.app.quit(); electron.app.quit(); }, 50), true)').catch(() => undefined);
+  await Promise.race([gone, wait(20000)]);
+  const alive = pid => { try { process.kill(Number(pid), 0); return true; } catch { return false; } };
+  same('a second Quit waits for the check it stopped: the app gone, its tool stopped, its folder removed', [a.child.exitCode !== null || a.child.signalCode !== null, alive(quitPid), existsSync(quitCwd)], [true, false, false]);
 }
 
 /**

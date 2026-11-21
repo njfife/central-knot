@@ -1365,19 +1365,21 @@ app.on('activate', () => { log('opened again'); showWindow(); });
 // does, and what follows it here (turning a turned-off plugin off again, the note saved) must not be lost. No further step
 // starts, so the check ends with that one. A check that is only reading the marketplaces holds nothing up. The reading of what
 // plugins hold stops at once, git with it, and what it had finished is saved first (plugintext.ts stop).
-let heldForWork = false;
+/** Quit's wait for the work under way: none yet, waiting (a second Quit waits for it too), or done (the app goes). */
+let heldForWork: 'waiting' | 'done' | undefined;
 app.on('before-quit', event => {
   quitting = true;
+  if (heldForWork) { if (heldForWork === 'waiting') event.preventDefault(); return; }
   drafting?.abort();
   const saving = pluginText?.stop();
-  // An MCP sign-in check under way is stopped, its tool's processes with it, and its folder removed before the app goes.
+  // An MCP sign-in check under way is stopped, its tool's processes with it, and its folder removed before the app goes; none starts after.
   const signins = stopChecks();
-  if (heldForWork || (!pluginStep && !saving && !signins)) return;
-  heldForWork = true;
+  if (!pluginStep && !saving && !signins) return;
+  heldForWork = 'waiting';
   event.preventDefault();
   if (pluginStep) log('quit waits for a plugin update under way');
   const check = pluginStep && (pluginUpdates?.underWay() ?? pluginStep).catch(() => undefined);
-  void Promise.race([Promise.all([check, saving, signins]), new Promise(done => setTimeout(done, 15_000))]).then(() => app.quit());
+  void Promise.race([Promise.all([check, saving, signins]), new Promise(done => setTimeout(done, 15_000))]).then(() => { heldForWork = 'done'; app.quit(); });
 });
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
@@ -1579,9 +1581,9 @@ app.whenReady().then(async () => {
     ? readUsage({ home: current.home, overrides: context().overrides, dataHome: current.mode === 'actual' ? process.env.XDG_DATA_HOME : undefined }) : null));
   // MCP sign-in: one tool's own list command for the home on screen, of the servers the page names, run on a click (mcpsigninrun.ts):
   // outside the queue, as it can take 70 s and changes nothing of Central Knot's. This computer's own command lines are looked for,
-  // as the Plugins page's are. CK_SIGNIN_LIMIT_MS: an end-to-end run's shorter limit.
+  // as the Plugins page's are. CK_SIGNIN_LIMIT_MS: an end-to-end run's shorter limit (mcpsigninrun.ts checkLimit: never longer).
   handleNow('mcp-signin:check', async (tool, home, names) => (current && home === current.home && isTool(tool)
-    ? (await checkSignin({ home: current.home, actual: current.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, tool, strings(names) ?? [], Number(process.env.CK_SIGNIN_LIMIT_MS) || undefined)) ?? null : null));
+    ? (await checkSignin({ home: current.home, actual: current.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, tool, strings(names) ?? [], Number(process.env.CK_SIGNIN_LIMIT_MS))) ?? null : null));
   // Word search: answered at once from the index last published (search.ts), which reads no file and waits for no pass.
   handleNow('search:ask', async (typed, shown) => search.ask(typeof typed === 'string' ? typed : '', Number.isInteger(shown) ? Number(shown) : 0));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));

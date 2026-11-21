@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { answerFor, askedNow, cellSays, connectedLine, followView, readAnswer, signInCommand, signinRows, type SigninCell, type SigninChecks } from '../src/mcpsignin.ts';
-import { checkSignin, stopChecks } from '../src/mcpsigninrun.ts';
+import { checkLimit, checkSignin, stopChecks } from '../src/mcpsigninrun.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, SigninAnswer } from '../src/types.ts';
 
 const captured = (file: string) => readFileSync(join(import.meta.dirname, 'mcpsignin', file), 'utf8');
@@ -67,14 +67,16 @@ test('OpenCode’s text is read line by line, its colours left out, a failed ser
 });
 
 test('What a reader could not read is never made into a status: a state it doesn’t know is that server’s unread line', () => {
-  const claude = readAnswer('claude-cli', 'Checking MCP server health…\n\nplain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval\n', '', ['plain']);
-  assert.deepEqual(cellSays('claude-cli', cell('plain'), claude), { words: 'Couldn’t read Claude Code’s answer', line: 'plain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval' });
+  const claude = readAnswer('claude-cli', 'Checking MCP server health…\n\nplain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval\noauth: http://127.0.0.1:2/mcp (HTTP) - ✔ Connected\n', '', ['plain', 'oauth']);
+  assert.deepEqual(['plain', 'oauth'].map(name => cellSays('claude-cli', cell(name), claude)), [{ words: 'Couldn’t read Claude Code’s answer', line: 'plain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval' }, { words: 'Connected' }]);
   const openCode = readAnswer('opencode-cli', '┌  MCP Servers\n│\n●  ○ plain needs client registration\n│      http://127.0.0.1:1/mcp\n│\n└  1 server(s)\n', '', ['plain']);
   assert.deepEqual(cellSays('opencode-cli', cell('plain'), openCode), { words: 'Couldn’t read OpenCode’s answer', line: '●  ○ plain needs client registration' });
   // OpenCode's heading and then an error is no list: the whole answer is unread, its first line kept for every cell.
-  const cut = readAnswer('opencode-cli', '┌  MCP Servers\n│\nError: Unexpected end of JSON input\n', '', ['plain']);
-  assert.deepEqual(cut, { unreadable: '┌  MCP Servers' });
-  assert.deepEqual(cellSays('opencode-cli', cell('plain'), cut), { words: 'Couldn’t read OpenCode’s answer', line: '┌  MCP Servers' });
+  const cut = readAnswer('opencode-cli', '\u001b[0m┌  MCP Servers\n│\n\u001b[91mError: Unexpected end of JSON input\u001b[0m\n', '', ['plain']);
+  assert.deepEqual(cellSays('opencode-cli', cell('plain'), cut), { words: 'Couldn’t read OpenCode’s answer', line: 'Error: Unexpected end of JSON input' });
+  // Claude Code's heading is no listing either: followed by an error, or by lines naming none of the servers asked about, it is unread.
+  assert.deepEqual(readAnswer('claude-cli', 'Checking MCP server health…\n\nError: Failed to read the configuration\n', '', ['plain']), { unreadable: 'Error: Failed to read the configuration' });
+  assert.deepEqual(readAnswer('claude-cli', 'Checking MCP server health…\n\nplain → reachable\n', '', ['plain']), { unreadable: 'plain → reachable' });
   // A server named like an object's own member is a server like any other.
   assert.equal(cellSays('codex-cli', cell('__proto__'), readAnswer('codex-cli', JSON.stringify([{ name: '__proto__', auth_status: 'unsupported' }]), '')).words, 'No sign-in needed');
 });
@@ -197,6 +199,22 @@ test('An answer holds only for the copies it was asked about: one changed, gone 
   assert.deepEqual(said(running, before), { 'issues (plugin)': 'Connected', keep: 'Connected', paused: 'Connected', plain: 'Not checked', solo: 'Connected' });
 });
 
+test('A copy is its shared content and that tool’s own part: one tool’s own setting changed says Not checked in that tool only', () => {
+  const tools: HarnessId[] = ['claude-cli', 'opencode-cli'];
+  const home = (openCodeOwn: string) => view(tools, [fact('team', {}, { copies: {
+    'claude-cli': { folder: 'team', hash: 'shared#1', ownHash: 'claude-own#1' }, 'opencode-cli': { folder: 'team', hash: 'shared#1', ownHash: openCodeOwn },
+  } as LibraryFacts['copies'] })]);
+  const before = home('opencode-own#1'), after = home('opencode-own#2');
+  const checks: SigninChecks = { home: '/h', columns: {
+    'claude-cli': { at: '2026-11-21T10:00:00Z', answer: readAnswer('claude-cli', 'team: http://127.0.0.1:1/mcp (HTTP) - ✔ Connected', '', ['team']), asked: askedNow(before, 'claude-cli') },
+    'opencode-cli': { at: '2026-11-21T10:00:00Z', answer: readAnswer('opencode-cli', '┌  MCP Servers\n│\n●  ✓ team connected\n│\n└  1 server(s)', '', ['team']), asked: askedNow(before, 'opencode-cli') },
+  } };
+  // Only OpenCode's own part of the copy changed (its sign-in setting, say): OpenCode's answer is the old copy's; Claude Code's stands.
+  followView(checks, after);
+  const [row] = signinRows(after);
+  assert.deepEqual(tools.map(tool => cellSays(tool, row.cells[tool]!, answerFor(checks, tool, row)).words), ['Connected', 'Not checked']);
+});
+
 // ---------- One check, run for a home ----------
 
 const BINARIES = 'claude,codex,copilot,pi,opencode';
@@ -258,24 +276,8 @@ test('A command that never answers is stopped at the limit with the processes it
   } finally { await sandbox.done(); }
 });
 
-test('Quit stops a check under way, with the processes it started, and removes its folder', { timeout: 15_000 }, async () => {
-  const sandbox = await standIns();
-  try {
-    const pidFile = join(sandbox.base, 'child.pid');
-    await sandbox.put('claude', `sleep 300 &\necho $! > ${pidFile}\nwait`);
-    const check = checkSignin(sandbox.where(), 'claude-cli', []);
-    await until(async () => !!(await readFile(pidFile, 'utf8').catch(() => '')));
-    const [[folder]] = await sandbox.calledWith();
-    const from = Date.now();
-    await stopChecks();
-    assert.ok(Date.now() - from < 5000, `stopped after ${Date.now() - from} ms`);
-    const child = Number(await readFile(pidFile, 'utf8'));
-    await until(async () => !isRunning(child));
-    assert.equal(isRunning(child), false, 'the command’s own child was stopped');
-    await assert.rejects(readdir(folder), { code: 'ENOENT' });
-    await check;
-    assert.equal(await stopChecks(), undefined, 'nothing is left to stop');
-  } finally { await sandbox.done(); }
+test('A check’s limit can only be shortened: a longer one, none, zero or a negative one is the 70 s', () => {
+  assert.deepEqual([4000, 100_000, Number.NaN, 0, -5].map(checkLimit), [4000, 70_000, 70_000, 70_000, 70_000]);
 });
 
 test('A tool with no command line here says so, Copilot CLI is never run, and only this computer’s home is given the tools’ folder variables', { timeout: 15_000 }, async () => {
@@ -328,5 +330,33 @@ test('Only a command line outside an app bundle is run: a link into one is passe
     const answer = await checkSignin(sandbox.where(true, join(sandbox.tools, 'later-bin')), 'codex-cli', []);
     assert.equal(cellSays('codex-cli', cell('plain'), answer).words, 'No sign-in needed');
     assert.equal((await sandbox.calledWith()).length, 1);
+  } finally { await sandbox.done(); }
+});
+
+// Last in this file: Quit closes the door to new checks for the rest of the process, as it does for the app.
+test('Quit stops every check, the one just clicked too, each second Quit waits for the clean-up, and no new check starts', { timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    const pidFile = join(sandbox.base, 'child.pid');
+    await sandbox.put('claude', `sleep 300 &\necho $! > ${pidFile}\nwait`);
+    await sandbox.put('codex', `cat ${join(import.meta.dirname, 'mcpsignin/codex-list.stdout')}`);
+    const running = checkSignin(sandbox.where(), 'claude-cli', []);
+    await until(async () => !!(await readFile(pidFile, 'utf8').catch(() => '')));
+    const [[folder]] = await sandbox.calledWith();
+    // Clicked a moment before Quit: still looking for its command line when Quit comes.
+    const clicked = checkSignin(sandbox.where(), 'codex-cli', []);
+    const from = Date.now(), first = stopChecks(), second = stopChecks();
+    assert.ok(first && second, 'both Quits wait');
+    await second;
+    assert.ok(Date.now() - from < 5000, `stopped after ${Date.now() - from} ms`);
+    await assert.rejects(readdir(folder), { code: 'ENOENT' });
+    const child = Number(await readFile(pidFile, 'utf8'));
+    await until(async () => !isRunning(child));
+    assert.equal(isRunning(child), false, 'the command’s own child was stopped');
+    assert.equal(await clicked, undefined);
+    // Once Quit has begun no check starts: only the first ever ran its command.
+    assert.equal(await checkSignin(sandbox.where(), 'codex-cli', []), undefined);
+    assert.deepEqual((await sandbox.calledWith()).map(call => call[4]), ['mcp list']);
+    await running;
   } finally { await sandbox.done(); }
 });

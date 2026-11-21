@@ -27,23 +27,24 @@ export const CHECK_LIMIT_MS = 70_000;
 type Servers = Record<string, SigninSaid>;
 const lines = (text: string) => text.replace(/\r/g, '').split('\n');
 const json = (text: string): unknown => { try { return JSON.parse(text); } catch { return undefined; } };
+const COLOUR = /\x1b\[[0-9;?]*[A-Za-z]/g;
 /** A server's state kept as its own member whatever its name (`__proto__` too). */
 const put = (servers: Servers, name: string, said: SigninSaid) => Object.defineProperty(servers, name, { value: said, enumerable: true, writable: true, configurable: true });
 /** The server, of `names`, whose name a line gives before `after`: the longest first, so `foo: bar`'s line is never `foo`'s. */
 const whose = (line: string, names: string[], after: string) => [...names].sort((first, second) => second.length - first.length).find(name => line.startsWith(`${name}${after}`));
 
 // After a line saying it is checking: `<name>: <what it runs> - ✔ Connected`, `… - ! Needs authentication`, `… - ✘ Failed to
-// connect — <why>`; with no servers, "No MCP servers configured". A line in another state is its server's unread line. A server its
-// own switch turns off isn't listed.
+// connect — <why>`; with no servers, "No MCP servers configured". A line in another state is its server's unread line; an answer
+// naming none of the servers asked about, and not saying none are configured, is no listing. A server its own switch turns off
+// isn't listed.
 const CLAUDE_STATE = / - (✔ Connected|! Needs authentication|✘ (?:Failed to connect(?: — )?)?(.*))$/;
 function fromClaude(stdout: string, names: string[]): Servers | undefined {
-  if (!/Checking MCP server health|No MCP servers configured/.test(stdout)) return undefined;
   const servers: Servers = {};
   for (const line of lines(stdout)) {
     const name = whose(line, names, ': '), state = CLAUDE_STATE.exec(line);
     if (name !== undefined) put(servers, name, !state ? { is: 'unread', line } : state[1].startsWith('✔') ? { is: 'connected' } : state[1].startsWith('!') ? { is: 'needs-sign-in' } : { is: 'unreachable', why: state[2] || 'Failed to connect' });
   }
-  return servers;
+  return Object.keys(servers).length || stdout.includes('No MCP servers configured') ? servers : undefined;
 }
 
 // A list of `{ name, auth_status, … }`.
@@ -80,7 +81,7 @@ function fromPi(stdout: string): Servers | undefined {
 // A server's line in another state is its unread line.
 const OPENCODE = new Map<string, (why: string) => SigninSaid>([['connected', () => ({ is: 'connected' })], ['needs authentication', () => ({ is: 'needs-sign-in' })], ['failed', why => ({ is: 'unreachable', why: why || 'failed' })]]);
 function fromOpenCode(stdout: string, names: string[]): Servers | undefined {
-  const text = lines(stdout.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')).map(line => line.trim()), servers: Servers = {};
+  const text = lines(stdout.replace(COLOUR, '')).map(line => line.trim()), servers: Servers = {};
   if (!text.some(line => /^└\s+\d+ server\(s\)$/.test(line) || line.endsWith('No MCP servers configured'))) return undefined;
   text.forEach((line, at) => {
     const listed = /^●\s+\S+\s+(.*)$/.exec(line)?.[1] ?? '', name = whose(listed, names, ' ');
@@ -91,9 +92,9 @@ function fromOpenCode(stdout: string, names: string[]): Servers | undefined {
 }
 
 const readers: Partial<Record<HarnessId, (stdout: string, names: string[]) => Servers | undefined>> = { 'claude-cli': fromClaude, 'codex-cli': fromCodex, 'pi-cli': fromPi, 'opencode-cli': fromOpenCode };
-/** The first line a tool printed, cut at a word past 200 characters. */
+/** The first line a tool printed that says something (its colours, frame and heading left out), cut at a word past 200 characters. */
 function firstLine(text: string): string | undefined {
-  const line = lines(text).map(each => each.trim()).find(Boolean);
+  const line = lines(text.replace(COLOUR, '')).map(each => each.replace(/^[┌│└●\s]+/, '').trim()).find(each => each && !/^(Checking MCP server health|MCP Servers$)/.test(each));
   if (!line || line.length <= 200) return line;
   const cut = line.lastIndexOf(' ', 200);
   return `${line.slice(0, cut > 100 ? cut : 200)}…`;
@@ -110,7 +111,7 @@ export function readAnswer(tool: HarnessId, stdout: string, output: string, name
 
 // ---------- The page's rows ----------
 
-/** One tool's cell: the tool's own name for the server there (none: its list doesn't name it), what the copy is (its content's hash, or its plugin's version), and whether that tool has it switched off. */
+/** One tool's cell: the tool's own name for the server there (none: its list doesn't name it), what the copy is (the hashes of its shared content and of that tool's own part, or its plugin's version), and whether that tool has it switched off. */
 export interface SigninCell { name?: string; copy?: string; off: boolean }
 /** One server: a Library row of the person's own (its key) or of a plugin (the plugin's row key, and the plugin), with a cell for each managed tool that has it. */
 export interface SigninRow { id: string; name: string; plugin?: string; cells: Partial<Record<HarnessId, SigninCell>> }
@@ -122,7 +123,7 @@ const pluginCell = (tool: HarnessId, plugin: string, server: string, off: boolea
 /** A row of the person's own in one tool: its own copy there by the copy's name, or the plugin it has it through there. */
 function ownCell(fact: LibraryFacts, tool: HarnessId): SigninCell | undefined {
   const copy = fact.copies[tool], given = fact.plugin?.[tool];
-  if (copy) return { name: copy.folder, copy: copy.hash, off: !!fact.switchedOff?.includes(tool) };
+  if (copy) return { name: copy.folder, copy: `${copy.hash} ${copy.ownHash ?? ''}`, off: !!fact.switchedOff?.includes(tool) };
   return given ? pluginCell(tool, given.plugin, given.name ?? fact.name, !!given.off, given.version) : undefined;
 }
 
