@@ -5442,7 +5442,8 @@ async function sharedCopiesFlow() {
  * ~/.agents/skills, which every tool but Claude Code reads, and Claude Code's entry a link to it. Every tool's own skills folder
  * is listed before and after each case: no file is written. The shared folder renamed away and back changes nothing and is said
  * once; the copy deleted there turns its skill off, with one notice and one History entry naming the shared folder, and the
- * notice's Turn it on gives each tool its own copy; only the link deleted is a deletion in Claude Code.
+ * notice's Turn it on gives Claude Code, Copilot CLI, Codex and Pi Central Knot's copy (OpenCode reads Claude Code's); only the
+ * link deleted is a deletion in Claude Code, its notice naming the tools that still read the shared copy.
  */
 async function sharedDeletionChecks(a, home) {
   const agents = join(home, '.agents/skills'), roots = ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills'];
@@ -5486,13 +5487,14 @@ async function sharedDeletionChecks(a, home) {
   await openNotices(a);
   await a.run(`[...document.querySelectorAll('#notices-card .sync-notice')].find(notice => notice.textContent.includes('gone-one was deleted'))?.querySelector('[id^="notice-restore-"]')?.click()`);
   for (let tries = 0; tries < 40 && !(await switchOn(a, 'skills', 'gone-one')); tries++) await wait(100);
-  same('its Turn it on gives each tool its own copy, Claude Code’s in place of the link, and writes nothing in the shared folder',
-    [...roots.slice(0, 4).map(root => lstatSync(join(home, root, 'gone-one'), { throwIfNoEntry: false })?.isDirectory() ?? false), existsSync(join(agents, 'gone-one'))], [true, true, true, true, false]);
+  same('its Turn it on gives four tools Central Knot’s copy, Claude Code’s in place of the link, OpenCode reading Claude Code’s, and writes nothing in the shared folder',
+    [...roots.map(root => lstatSync(join(home, root, 'gone-one'), { throwIfNoEntry: false })?.isDirectory() ?? false), await cellState(a, 'skills', 'gone-one', 'opencode-cli'), existsSync(join(agents, 'gone-one'))],
+    [true, true, true, true, false, 'another-way', false]);
   rmSync(join(home, '.claude/skills/link-one'));
   const linkBefore = listed();
   await twoPasses();
   same('only Claude Code’s link deleted: nothing written, off, the notice naming Claude Code', [listed(), await switchOn(a, 'skills', 'link-one'), await noticeOf('link-one')],
-    [linkBefore, false, ['link-one was deleted in Claude Code, so it is off. Central Knot keeps it.']]);
+    [linkBefore, false, ['link-one was deleted in Claude Code, so it is off. Copilot CLI, Codex, Pi and OpenCode still read it another way. Central Knot keeps it.']]);
 }
 
 /**

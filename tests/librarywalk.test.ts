@@ -2,8 +2,9 @@
 // with an agent on the library in the same home ("writer"; in Pi a loose file beside the skill's folder, in the same skills folder):
 // every click the Library and History offer
 // (tests/skillclicks.ts), edits, files added, modes changed and folders deleted by hand, copies made by hand, a copy in
-// ~/.agents/skills (which Copilot CLI, Codex and Pi read; beside the installer's other skill) coming and going (gone while a
-// tool had the skill only there: a deletion by hand), the whole shared folder away or unreadable for a pass, Take over of it,
+// ~/.agents/skills (which Copilot CLI, Codex and Pi read; beside the installer's other skill, on too) coming and going (gone
+// while a tool had the skill only there: a deletion by hand, after which no pass writes a copy there), the whole shared folder
+// away, unreadable or replaced by a folder of other things for a pass, Take over of it,
 // a tool's own switch set by hand and cleared, Automatic sync off and on, History's days passing, a folder that can't be
 // written during a click, a crash at each step of a write or a removal, a tool uninstalled or left out, the agent turned off and on, and a source (a made-up
 // repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own in its notes/ folder: added, changed
@@ -232,9 +233,11 @@ async function walk(seed: number): Promise<Finding[]> {
   });
 
   try {
-    // The installer's other skill, never in Central Knot: the shared folder still lists a skill once notes's copy goes from it.
+    // The installer's other skill, on: the shared folder still holds a skill the record names once notes's copy goes from it, so
+    // that is a deletion, not a folder that can't be vouched for (library.ts THE SHARED FOLDER).
     await mkdir(join(box.home, '.agents/skills/kept'), { recursive: true });
     await writeFile(join(box.home, '.agents/skills/kept/SKILL.md'), skillText('The installer’s.', 'kept'));
+    await send(rowClicks.on((await seen(box, context(), 'kept')).row, undefined));
     if (seed % 2) {
       await put(box, 'claude-cli', rich(), ['empty']);
       await send(rowClicks.on((await seen(box)).row, undefined));
@@ -292,7 +295,16 @@ async function walk(seed: number): Promise<Finding[]> {
           add(1, { name: `${tool}’s switch set by hand`, run: () => setDisabled(context(), tool, { folder: 'notes', name: 'notes', skillFile: join(folder, 'SKILL.md') }, true) });
         } else if (!there) add(1, { name: `hand-made copy in ${tool}`, run: async () => { await put(box, tool, rich(`Hand ${marker + 1}.`)); await touch(); } });
       }
-      if (await bytes(shared)) add(1, { name: 'the installer removes the shared copy', run: () => rm(shared, { recursive: true }) });
+      // The tools that had notes only there get no folder written by the pass after, whatever it concludes (the fault it once had).
+      const onlyThere = Object.keys(held?.throughShared ?? {}) as Tool[];
+      if (await bytes(shared)) add(1, { name: 'the installer removes the shared copy', run: async () => {
+        const before = await folders();
+        await rm(shared, { recursive: true });
+        if (!onlyThere.length) return;
+        await pass();
+        const after = await folders();
+        for (const tool of onlyThere) if (after[tool] && !same(after[tool], before[tool])) fail(`a pass wrote ${tool}’s copy after the shared copy it had notes only through was deleted`);
+      } });
       else add(1, { name: 'the installer puts a copy in ~/.agents/skills', run: async () => { await mkdir(shared, { recursive: true }); await writeFile(join(shared, 'SKILL.md'), skillText(pick(['Take notes.', `Installed ${marker + 1}.`]))); } });
       add(2, { name: 'pass', app: true, run: more => pass(more) });
       const recorded = await sourceNow();
@@ -472,6 +484,8 @@ async function walk(seed: number): Promise<Finding[]> {
           } finally { await show(); }
         } });
         whole('renamed away', () => rename(root, aside), () => rename(aside, root));
+        whole('replaced by a folder of other things', async () => { await rename(root, aside); await mkdir(root); await writeFile(join(root, 'README.md'), 'Not mounted.\n'); },
+          async () => { await rm(root, { recursive: true }); await rename(aside, root); });
         if (process.getuid?.() !== 0) whole('unreadable', () => chmod(root, 0), () => chmod(root, 0o755));
       }
 

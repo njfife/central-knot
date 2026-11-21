@@ -203,12 +203,16 @@ export async function swapFolder(context: ShareContext, source: string, target: 
   } finally { await removeTree(stage).catch(() => undefined); }
 }
 
-/** Puts `source`'s folder at `target`, where nothing is (a link there that leads nowhere is removed first: it holds nothing). */
-export async function placeFolder(context: ShareContext, tool: HarnessId, source: string, target: string, tree: Tree): Promise<void> {
+/**
+ * Puts `source`'s folder at `target`, where nothing is (a link there that leads nowhere is removed first: it holds nothing). True
+ * when it took such a link's place, which the result says.
+ */
+export async function placeFolder(context: ShareContext, tool: HarnessId, source: string, target: string, tree: Tree): Promise<boolean> {
   await mkdir(dirname(target), { recursive: true });
   const broken = await lstat(target).then(info => info.isSymbolicLink(), () => false) && await stat(target).then(() => false, () => true);
   if (broken) await unlink(target);
   await placeCopy(context, source, { harness: tool, directory: target, limits: [] }, tree);
+  return broken;
 }
 
 /**

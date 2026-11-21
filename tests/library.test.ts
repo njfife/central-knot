@@ -54,7 +54,7 @@ test('A copy of its own that Central Knot never put there, where the harness has
   assert.equal(decide(ON, 'b', bothWays('b'), undefined), 'own-copy');
 });
 /** No copy now, where the harness had the item only through the shared skills folder (LibraryItem throughShared): gone from there, or its link here to it gone. */
-const goneFromShared: HarnessCopy = { is: 'absent', goneFrom: 'shared' }, linkGone: HarnessCopy = { is: 'absent', goneFrom: 'here' };
+const goneFromShared: HarnessCopy = { is: 'absent', sharedWay: 'copy' }, linkGone: HarnessCopy = { is: 'absent', sharedWay: 'link' };
 test('On, no copy where the harness had the item only through the shared folder, its copy there or its link to it deleted: deleted by hand, though nothing of Central Knot’s was applied there', () => {
   for (const copy of [goneFromShared, linkGone]) assert.equal(decide(ON, 'b', copy, undefined), 'turn-off');
   assert.equal(decide(OFF, 'b', goneFromShared, undefined), 'nothing');
@@ -162,7 +162,7 @@ test('A harness that has the item another way never turns it Off; once the other
 });
 
 /** A harness that has the item only through the shared skills folder, at its folder there named `folder` (skills.ts). */
-const throughShared = (folder = 'reviewer'): HarnessCopy => ({ is: 'held', why: 'It reads a copy in ~/.agents/skills.', anotherWay: true, through: folder });
+const throughShared = (folder = 'reviewer'): HarnessCopy => ({ is: 'held', why: 'It reads a copy in ~/.agents/skills.', anotherWay: true, throughShared: folder });
 test('A harness that has the item only through the shared folder: nothing of Central Knot’s goes there, and the plan notes the folder it reads, which carryOut keeps', async () => {
   const agent = item({ applied: { 'claude-cli': 'a' } });
   const made = plan(agent, { 'claude-cli': has('a'), 'copilot-cli': throughShared('reviewer'), 'codex-cli': throughShared('review-kit') });
@@ -174,12 +174,17 @@ test('The shared folder’s copy deleted by hand: the item turns Off once, in th
   // Claude Code's entry was a link to the shared copy, which now leads nowhere; Copilot CLI read the shared folder itself.
   const agent = item({ applied: {}, throughShared: { 'claude-cli': 'reviewer', 'copilot-cli': 'reviewer' } });
   const made = plan(agent, { 'claude-cli': goneFromShared, 'copilot-cli': goneFromShared });
-  assert.deepEqual(made, { ...quiet, turnedOffBy: 'claude-cli', inSharedFolder: true, current: [] });
+  assert.deepEqual(made, { ...quiet, turnedOffBy: 'claude-cli', sharedWay: 'copy', current: [] });
   await carryOut(agent, made, { ...shelf(agent).made, copy: () => ({ hash: 'a', content: '' }), keepOwn: async () => {}, log: async () => {}, write: async () => true, remove: async () => true });
   assert.deepEqual([agent.on, agent.throughShared], [false, undefined]);
   // Its link deleted by hand in Claude Code, the shared copy still there: a deletion there, as for a copy of its own.
   const linkOnly = plan(item({ applied: {}, throughShared: { 'claude-cli': 'reviewer', 'copilot-cli': 'reviewer' } }), { 'claude-cli': linkGone, 'copilot-cli': throughShared() });
-  assert.deepEqual(linkOnly, { ...quiet, turnedOffBy: 'claude-cli', current: [] });
+  assert.deepEqual(linkOnly, { ...quiet, turnedOffBy: 'claude-cli', sharedWay: 'link', current: [] });
+});
+test('A copy of its own removed as one too many beside the shared copy: the same pass notes that the harness has it through the shared folder now', () => {
+  const beside: HarnessCopy = { is: 'present', hash: 'a', at: 0, anotherWay: 'It reads a copy in ~/.agents/skills.', throughShared: 'reviewer' };
+  assert.deepEqual(plan(item(), { 'claude-cli': has('a'), 'copilot-cli': beside, 'codex-cli': has('a') }),
+    { ...quiet, remove: ['copilot-cli'], current: ['claude-cli', 'codex-cli'], throughShared: { 'copilot-cli': 'reviewer' } });
 });
 test('A harness that had the item through the shared folder and can’t be seen for sure now keeps that, so a later look can still tell its copy went', () => {
   const agent = item({ applied: { 'claude-cli': 'a' }, throughShared: { 'copilot-cli': 'reviewer' } });

@@ -143,7 +143,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
       if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}${named(event.only) ? ': its copy there was removed' : ''}. ${keeps}${gaveSaid}` };
       if (event.cause === 'deleted-by-hand') {
-        const place = deletedIn(event.winner?.tool ?? '', event.inSharedFolder);
+        const place = deletedIn(event.winner?.tool ?? '', event.sharedWay);
         return { glyph: 'trash-2', text: `Its copy was deleted in ${place}, so it was turned off${also(' and removed from')}. ${keeps}` };
       }
       if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}: in Central Knot, Off, until you turn it on.` };
