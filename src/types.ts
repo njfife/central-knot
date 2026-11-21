@@ -422,10 +422,10 @@ export interface Change {
   forPlugin?: string;
   /**
    * With `version`, `on` and `except`, the Undo of a take (HistoryEvent cause `plugin-taken`; library.ts TAKE): the item made his
-   * own again, unlinked, at his version, On or Off and kept out as before the take. Made by History's action in main alone, never
-   * sent by the page.
+   * own again, unlinked, at his version, On or Off and kept out as before the take; each tool the take let go, with the copy it
+   * held then (HistoryEvent took `copies`). Made by History's action in main alone, never sent by the page.
    */
-  untake?: true;
+  untake?: Partial<Record<HarnessId, string>>;
 }
 
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, and what is not as it asked; and each plugin item's copy it left, with why (`since`: "pdf-reader in Codex, changed since the switch"). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left'> & { since?: string[] }; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
@@ -554,8 +554,11 @@ export interface HistoryEvent {
    * over ('on'; `losers`, each with what it held), or removed ('off', or 'deleted' for a deleted item) (librarypass.ts logItem).
    */
   cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'source' | 'source-merged' | 'source-kept' | 'source-dropped' | 'own-now' | 'plugin-taken' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
-  /** A take's 'edit' (`cause` 'plugin-taken'): his item's On and the tools it was kept out of before it, which its Undo puts back. */
-  took?: { on: boolean; except: HarnessId[] };
+  /**
+   * A take's 'edit' (`cause` 'plugin-taken'): his item's On and the tools it was kept out of before it, and each other tool it let
+   * go with the copy it held then (`copies`, a hash each), which its Undo puts back.
+   */
+  took?: { on: boolean; except: HarnessId[]; copies: Partial<Record<HarnessId, string>> };
   /** A source's entry (`cause` 'source', 'source-merged', 'source-kept' or 'source-dropped'): its link as the person gave it, kept here since the source may be removed later. */
   link?: string;
   /**

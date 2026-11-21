@@ -85,12 +85,30 @@ const onIn = (linked: Linked[], tool: HarnessId) => (takesPlugins(tool) ? 0 : li
 
 /**
  * The tools a name the plugin makes is kept out of (library.ts A PLUGIN): each managed tool with no installer where the plugin
- * is not now (no item linked to it wanted there), but those a click brings it into (`into`); and each the entry keeps it out
+ * is not now (no item linked to it, nor his of the same content, wanted there), but those a click brings it into (`into`); and each the entry keeps it out
  * of, managed or not, so a tool that appears later gets none of it (partsmigrate.ts keeps a moved item out of them too). The
  * step adds each tool with a copy of that name (librarypass.ts fromSourceStep).
  */
 const pluginOutOf = (entry: PluginEntry, tools: readonly HarnessId[], linked: Linked[], into: readonly HarnessId[]) =>
   [...new Set([...itemTools(entry.except), ...itemTools(tools).filter(tool => !into.includes(tool) && !onIn(linked, tool))])];
+
+/** His items of the same content as the plugin's (library.ts `alike`), by the table for its read. */
+async function alikeIn(context: ShareContext, reads: SourceRead<unknown>[]): Promise<Linked[]> {
+  return (await Promise.all(reads.map(async read => {
+    const items = (await sourceKinds().find(each => each.kind.kind === read.kind)!.kind.open(context)).library.items;
+    return [...sourceAnswers(items, read, read.recorded)].flatMap(([key, answer]) => (answer === 'alike' ? [{ kind: read.kind, item: items[key]! }] : []));
+  }))).flat();
+}
+
+/**
+ * How many of a plugin's items are on in a tool with no installer, as a look finds them: each of `items` (those linked to it, and
+ * where the plugin is wanted his of the same content) wanted there with its copy present. The one count the plugin's box
+ * (itemsView `on`) and a run's report say.
+ */
+const onThere = (looks: KindLooks, items: Linked[], tool: HarnessId) => items.filter(({ kind, item }) => {
+  const look = looks.find(each => each.kind.kind.kind === kind)!.look, now = look.library.items[item.key];
+  return !!now && wantedIn(now, tool) && copiesOf(look, now)[tool]?.is === 'present';
+}).length;
 
 // ---------- Running it ----------
 
@@ -112,8 +130,10 @@ export type ItemsAsk = { into: HarnessId[]; on?: true; letIn?: true; take?: Pick
 export async function runItems(context: ShareContext, tools: HarnessId[], entry: PluginEntry, ask: ItemsAsk, files: Files, op: Op): Promise<Ran & { back?: ItemState[] }> {
   const before = await linkedItems(context, entry.id), named = 'into' in ask ? ask.into : 'outOf' in ask ? ask.outOf : ask.read;
   const brought = 'into' in ask || ('read' in ask && ask.bring) ? named : [];
-  const outOf = pluginOutOf(entry, tools, before, brought), recorded = (await recordedIds(context.home)).ids;
-  const read = files.files && !('outOf' in ask) ? await readPlugin(files.files, entry, files.commitAt, recorded, outOf, brought) : [];
+  const recorded = (await recordedIds(context.home)).ids, plain = files.files && !('outOf' in ask) ? await readPlugin(files.files, entry, files.commitAt, recorded, [], brought) : [];
+  // His items of the same content put the plugin in each tool they are wanted in, as its own items do.
+  const alike = await alikeIn(context, plain), outOf = pluginOutOf(entry, tools, [...before, ...alike], brought);
+  const read = plain.map(each => ({ ...each, plugin: { ...each.plugin!, outOf } }));
   // A click that turns its items On (its On, Add, a box ticked) brings back a name of its own he deleted; the background never does (library.ts A PLUGIN).
   // Use the plugin's reads its one name, as not read whole, so nothing else of the plugin changes.
   const taken = 'take' in ask && ask.take, bringsBack = ('into' in ask && ask.on) || ('read' in ask && ask.click);
@@ -145,12 +165,13 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   // Why none is on in a tool, from what this run knows (no other look): its names not brought in (an unreadable one in the read,
   // his own or another source's by the pass's answer), and an item made now and kept out had a copy of that name there.
   const lines: PluginItemLine[] = [...read.flatMap(each => [...each.names].flatMap(([key, name]) => ('unreadable' in name ? [{ kind: each.kind, key, name: key, state: 'not-brought' as const, why: name.unreadable }] : []))),
-    ...sourced.flatMap(({ kind, said }) => (said.answer === 'differs' || said.answer === 'another' ? [{ kind, key: said.name, name: said.name, state: 'not-brought' as const, why: said.answer === 'another' ? ANOTHER : YOURS }] : []))];
+    ...sourced.flatMap(({ kind, said }) => (['differs', 'another', 'alike'].includes(said.answer) ? [{ kind, key: said.name, name: said.name, state: 'not-brought' as const, why: { another: ANOTHER, alike: SAME }[said.answer as string] ?? YOURS }] : []))];
   const why = (tool: HarnessId) => files.problem ?? `Nothing of ${entry.plugin} is on in ${toolNames[tool]}. ${notInWhy(tool, entry.plugin, outsIn(tool, lines, after, item => item.except.includes(tool) && made.has(item.name))).join(' ')}`;
-  // A take that can't land says why, and nothing changed; a name of his of the same content counts as on (library.ts TAKE, `alike`).
-  const refused = sourced.find(({ said }) => said.held)?.said, alike = sourced.filter(({ said }) => said.answer === 'alike').length;
+  // A take that can't land says why, and nothing changed. What is on in each tool is counted as the box counts it (onThere).
+  const refused = sourced.find(({ said }) => said.held)?.said, looks = await lookAtKinds(context, tools), his = sourced.filter(({ said }) => said.answer === 'differs').length;
+  const on = (tool: HarnessId) => onThere(looks, [...after, ...(!('outOf' in ask) && entry.on && !entry.except.includes(tool) ? alike : [])], tool);
   const done = named.map((tool): PluginDone => ({ ...op, tool, report: refused ? { tool, outcome: 'held', message: `${refused.name}: ${refused.held}`, runs: [], changed: false }
-    : reportIn(tool, ask, before, after, results, why(tool), !!files.problem, alike) }));
+    : reportIn(tool, ask, before, after, results, why(tool), !!files.problem, on(tool), after.length + alike.length + his) }));
   return { ...ran(done, results), ...(undo.length ? { back: undo } : {}) };
 }
 type Op = Pick<PluginOp, 'source' | 'marketName' | 'plugin' | 'action'>;
@@ -176,14 +197,13 @@ function clickOn(ask: ItemsAsk, item: LibraryItem, own: (tool: HarnessId) => boo
 }
 
 /**
- * One tool's report of a run on a plugin's items: what it has of them now, his of the same content counted on (`alike`), and
- * whether the run changed what it has. `why`: why none is on there, the plugin's files unreadable (`unread`) or each item's
- * reason (notInWhy).
+ * One tool's report of a run on a plugin's items: how many of its `of` are on there now (onThere), and whether the run changed what
+ * it has. `why`: why none is on there, the plugin's files unreadable (`unread`) or each item's reason (notInWhy).
  */
-function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], why: string, unread: boolean, alike: number): PluginDone['report'] {
-  const on = onIn(after, tool) + alike, has = on > 0, name = toolNames[tool];
+function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], why: string, unread: boolean, on: number, of: number): PluginDone['report'] {
+  const has = on > 0, name = toolNames[tool];
   const changed = onIn(after, tool) > 0 !== onIn(before, tool) > 0 || wroteIn(results, tool);
-  const said = `${on} of its ${after.length + alike} items ${on === 1 ? 'is' : 'are'} on in ${name}.`;
+  const said = `${on} of its ${of} items ${on === 1 ? 'is' : 'are'} on in ${name}.`;
   // Its notes: what the run also changed in the tool's own settings with its items' copies (Pi's list: librarypass.ts Kind.follow).
   const notes = results.flatMap(({ result }) => result.results.flatMap(each => (each.harness === tool && each.settingsChanged ? [each.settingsChanged] : [])));
   const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message, runs: [], changed, ...(notes.length ? { notes } : {}) });
@@ -223,7 +243,8 @@ export async function itemsBack(context: ShareContext, tools: HarnessId[], id: s
   const after = await linkedItems(context, id);
   const done = named.map((tool): PluginDone => {
     const has = onIn(after, tool) > 0, changed = has !== onIn(before, tool) > 0 || wroteIn(results, tool);
-    return { ...op, tool, report: { tool, outcome: has ? 'installed' : 'uninstalled', message: `Its items are as they were in ${toolNames[tool]}.`, runs: [], changed } };
+    const kept = results.flatMap(({ result }) => result.results).filter(each => each.harness === tool && each.outcome === 'held').map(each => ` ${each.item}: ${each.message}`);
+    return { ...op, tool, report: { tool, outcome: has ? 'installed' : 'uninstalled', message: `Its items are as they were in ${toolNames[tool]}.${kept.join('')}`, runs: [], changed } };
   });
   return ran(done, results);
 }
@@ -265,14 +286,13 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
   // Where a plugin that is On is wanted and none of its items is on: why (outsIn; the page looked at each tool's own copies).
   // Not where a name new to it comes in at its install (a tick, or the automatic updates for a tool new here), nor for a plugin
   // not read now (its problem is said instead).
-  // His names (a clash, or the same content: `alike`), each with his item. What is there in each tool, as this look reads it: each
-  // item linked to the plugin, and his of the same content, wanted and present there.
+  // His names (a clash, or the same content: `alike`), each with his item. What is on in each tool: onThere, his of the same
+  // content counted where the plugin is wanted.
   const look = (kind: ItemKind) => looks.find(each => each.kind.kind.kind === kind)!.look;
   const his = lines.filter(line => line.state === 'alike' || line.why === YOURS).map(line => ({ line, item: look(line.kind).library.items[line.key]! }));
-  const there = [...linked, ...his.filter(({ line }) => line.state === 'alike').map(({ line, item }) => ({ kind: line.kind, item }))];
-  const on = Object.fromEntries(itemTools(tools).map(tool => [tool, there.filter(({ kind, item }) => wantedIn(item, tool) && copiesOf(look(kind), item)[tool]?.is === 'present').length]));
+  const alike = his.filter(({ line }) => line.state === 'alike').map(({ line, item }) => ({ kind: line.kind, item })), wanted = itemTools(tools).filter(tool => entry.on && !entry.except.includes(tool));
+  const on = Object.fromEntries(itemTools(tools).map(tool => [tool, onThere(looks, [...linked, ...(wanted.includes(tool) ? alike : [])], tool)]));
   // A name of his is said apart, under each tool's box (`yours`, below), so not among these.
-  const wanted = itemTools(tools).filter(tool => entry.on && !entry.except.includes(tool));
   const away = reads && !lines.some(line => line.state === 'new') ? wanted.filter(tool => !on[tool]).flatMap(tool => {
     const own = (item: LibraryItem) => !!look(linked.find(each => each.item === item)!.kind).disk.byKey.get(item.key)?.[tool] && item.applied[tool] === undefined;
     const why = outsIn(tool, lines, linked, own).filter(({ out }) => out !== 'yours');
@@ -290,8 +310,8 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
     ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(Object.keys(yours).length ? { yours } : {}) };
 }
 
-/** A name not brought in, as its line says why: his own item of that name, or another source's. */
-const YOURS = 'you keep your own', ANOTHER = 'another source has it';
+/** A name not brought in, as its line says why: his own item of that name, another source's, or his of the same content (a run's report). */
+const YOURS = 'you keep your own', ANOTHER = 'another source has it', SAME = 'the same as yours, so yours stays.';
 /** One name's line in "Its items", from the table's answer for it (library.ts SourceAnswer). */
 function lineOf(kind: SourceKind, key: string, name: string, item: LibraryItem | undefined, answer: string, unreadable?: string): PluginItemLine {
   const base = { kind: kind.kind.kind, key, name };

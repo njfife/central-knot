@@ -139,7 +139,7 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const where = line.on === false ? 'Off' : out.length ? `Kept out of ${andList(out)}` : '';
     const said = { linked: where, update: 'An update is ready: Update brings it in', going: 'No longer in the plugin: Update turns it off', new: 'New in the plugin: Update brings it in',
       removed: 'Removed by the plugin’s update, so it is off. Turning it on keeps it as yours', deleted: 'Deleted here: tick to bring it back',
-      'not-brought': `Not brought in: ${line.why ?? ''}`, alike: 'The same as yours, so yours stays' }[line.state];
+      'not-brought': `Not brought in: ${line.why ?? ''}`, alike: 'Yours, the same as the plugin’s: its switch leaves yours as it is' }[line.state];
     return [said, line.state === 'update' ? where : ''].filter(Boolean).join(' · ');
   };
   const linked = (line: PluginItemLine) => line.state !== 'new' && line.state !== 'not-brought' && line.state !== 'deleted';

@@ -6753,14 +6753,15 @@ esac
   same('turning them back on in another order than last-first restores config.toml byte for byte', readFileSync(codexConfig, 'utf8'), codexBefore);
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
-  if (shots) await nameClashPictures();
+  await nameClashPage();
 }
 
 /**
- * Pictures only (with --shots), at 1316×819, light, the sidebar open, of names of his under Pi's box on a plugin's page
- * (pluginpage.ts yourLines): three at once, one of the same content, one he has only through the shared skills folder.
+ * Names of his under Pi's box on a plugin's page (pluginpage.ts yourLines), pictured with --shots at 1316×819, light, the sidebar
+ * open: three at once, one of the same content (its line and its row under Its items checked: his), one he has only through the
+ * shared skills folder.
  */
-async function nameClashPictures() {
+async function nameClashPage() {
   const home = join(scratch, 'home-clash'), data = join(scratch, 'clash-data'), market = join(scratch, 'market-clash');
   writeMarket(market, 'ck-clash-market');
   writeFileSync(join(market, 'plugins/document-tools/.mcp.json'), JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['files-of-the-plugin'] } } }));
@@ -6786,7 +6787,9 @@ async function nameClashPictures() {
     for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
     for (let tries = 0; tries < 50 && !(await a.exists('.plugin-tool-yours')); tries++) await wait(100);
     await a.settle();
-    await a.shot(`name-conflict-${name}-1316`);
+    if (name === 'same') same('his of the same content: a state under Pi’s box, and its row says it is his, not the switch’s', [await a.text('.plugin-tool[data-tool="pi-cli"] .plugin-tool-yours'), await a.text('.plugin-items-list [data-key="agent:release-reviewer"] .plugin-outcome-what')],
+      ['release-reviewer is the same as yours, so yours stays.', 'Yours, the same as the plugin’s: its switch leaves yours as it is']);
+    if (shots) await a.shot(`name-conflict-${name}-1316`);
     await a.click('#plugin-back');
   }
   await a.quit();

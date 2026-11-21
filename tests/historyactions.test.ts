@@ -227,10 +227,10 @@ test('A switch-on, a switch-off and an Undo say what they did; the Undo’s entr
 });
 
 test('Use the plugin’s (library.ts TAKE): its entry says what happened; its Undo makes his version current, his own, On and kept out as before, while it carries the link; then Go back before this; its Undo’s entry offers nothing', () => {
-  const took = entry({ cause: 'plugin-taken', previous: 'a', version: 'b', link: 'plugin:geo@team', took: { on: false, except: ['codex-cli'] }, losers: [{ tool: 'claude-cli', hash: 'a' }] });
+  const took = entry({ cause: 'plugin-taken', previous: 'a', version: 'b', link: 'plugin:geo@team', took: { on: false, except: ['codex-cli'], copies: { 'copilot-cli': 'a' } }, losers: [{ tool: 'claude-cli', hash: 'a' }] });
   assert.equal(librarySentence(took, libraryWords.agents, tools)?.text,
     'Use the plugin’s: the plugin geo’s version became current, in Claude Code; yours is kept as a version, and each other tool with your copy keeps it as its own.');
-  const back = { key: 'reviewer', on: false, except: ['codex-cli'], version: 'a', untake: true };
+  const back = { key: 'reviewer', on: false, except: ['codex-cli'], version: 'a', untake: { 'copilot-cli': 'a' } };
   assert.deepEqual(offered(took, item({ source: 'geo-id' })), ['Undo', back]);
   assert.deepEqual(offered(took, item({ source: 'geo-id', hash: 'x' })), ['Go back before this', back], 'the plugin updated meanwhile');
   assert.deepEqual(offered(took, item())?.[0], 'Go back before this', 'let go by an edit: his first version is not current');

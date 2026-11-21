@@ -335,7 +335,7 @@ function takeBack(event: HistoryEvent, took: NonNullable<HistoryEvent['took']>, 
   const latest = !!item.source && event.version === item.hash;
   if (!item.source && !isVersion(item, event.previous)) return undefined;
   const help = `Make your ${item.name} from before this current again and your own, in the tools it was in before; the plugin’s stays a version`;
-  const change: Change = { key: item.key, on: took.on, except: [...took.except], version: event.previous, untake: true, ...givenBack(event, item) };
+  const change: Change = { key: item.key, on: took.on, except: [...took.except], version: event.previous, untake: { ...took.copies }, ...givenBack(event, item) };
   return { label: latest ? 'Undo' : 'Go back before this', help, change };
 }
 
