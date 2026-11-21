@@ -28,7 +28,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      # librarywalk.test.ts alone takes longer than all other 83 test files combined, so it gets shard 1 to itself and shard 2
+      # librarywalk.test.ts alone takes longer than the rest of tests/*.test.ts combined, so it gets shard 1 to itself and shard 2
       # runs the type check once plus every other tests/*.test.ts file.
       - if: matrix.shard == 1
         run: node --test tests/librarywalk.test.ts
