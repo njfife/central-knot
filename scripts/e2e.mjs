@@ -5453,8 +5453,69 @@ async function sharedCopiesFlow() {
   await a.click('#harness-tab-skills');
   same('OpenCode reads Claude Code’s copy of clash, so its card and Copies differ chip both count it',
     [parseInt(differ ?? '', 10), await a.text('.chip-warn .chip-count')], [1, '1']);
+  await sharedDeletionChecks(a, home);
   same('no page errors, shared copies', a.pageErrors, []);
   await a.quit();
+}
+
+/**
+ * A copy in the shared folder deleted by hand (library.ts THE SHARED FOLDER), in sharedCopiesFlow's home: two skills on, each in
+ * ~/.agents/skills, which every tool but Claude Code reads, and Claude Code's entry a link to it. Every tool's own skills folder
+ * is listed before and after each case: no file is written. The shared folder renamed away and back changes nothing and is said
+ * once; the copy deleted there turns its skill off, with one notice and one History entry naming the shared folder, and the
+ * notice's Turn it on gives Claude Code, Copilot CLI, Codex and Pi Central Knot's copy (OpenCode reads Claude Code's); only the
+ * link deleted is a deletion in Claude Code, its notice naming the tools that still read the shared copy.
+ */
+async function sharedDeletionChecks(a, home) {
+  const agents = join(home, '.agents/skills'), roots = ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills'];
+  const listed = () => roots.map(root => readdirSync(join(home, root)).sort().map(name => (lstatSync(join(home, root, name)).isSymbolicLink() ? `${name} → ${readlinkSync(join(home, root, name))}` : name)).join(', '));
+  const twoPasses = async () => { await a.click('#header-refresh'); await wait(2200); await a.click('#header-refresh'); };
+  /** What the notices' card says of a skill, each notice's words (matrix.ts noticesCard), the card closed again. */
+  const noticeOf = async name => {
+    await openNotices(a);
+    const said = await a.run(`[...document.querySelectorAll('#notices-card .sync-notice')].filter(notice => notice.textContent.includes(${JSON.stringify(name)})).map(notice => notice.querySelector('.notice-text')?.textContent.replace(/ · .*$/, '').trim())`);
+    await closeNotices(a);
+    return said;
+  };
+  for (const name of ['gone-one', 'link-one']) {
+    skill(agents, name, text(name, 'Read in the shared folder.'));
+    symlinkSync(`../../.agents/skills/${name}`, join(home, '.claude/skills', name));
+  }
+  await openKind(a, 'skills');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'link-one')}"] .add-item`)); tries++) await wait(100);
+  for (const name of ['gone-one', 'link-one']) {
+    await a.click(`.ov-row[data-key="${rowPart('', 'skills', name)}"] .add-item`);
+    for (let tries = 0; tries < 40 && !(await switchOn(a, 'skills', name)); tries++) await wait(100);
+  }
+  const before = listed();
+  renameSync(agents, `${agents}-away`);
+  await twoPasses();
+  const said = (await a.text('.bands') ?? '').split('The shared skills folder').length - 1;
+  same('the shared folder renamed away: nothing written, nothing off, said once', [listed(), await switchOn(a, 'skills', 'gone-one'), await switchOn(a, 'skills', 'link-one'), said, await noticeOf('-one')], [before, true, true, 1, []]);
+  renameSync(`${agents}-away`, agents);
+  await twoPasses();
+  same('and back, all as before', [listed(), await switchOn(a, 'skills', 'gone-one'), (await a.text('.bands') ?? '').includes('The shared skills folder')], [before, true, false]);
+  rmSync(join(agents, 'gone-one'), { recursive: true });
+  await twoPasses();
+  same('the shared copy deleted: two passes later every tool’s folder is as it was, the link that leads nowhere too, and the skill is off', [listed(), await switchOn(a, 'skills', 'gone-one')], [before, false]);
+  same('one notice, naming the shared folder', await noticeOf('gone-one'), ['gone-one was deleted in the shared folder, so it is off. Central Knot keeps it.']);
+  if (shots) { await sizeTo(a, 1316, 819); await a.shot('shared-deleted-notice'); await openNotices(a); await a.shot('shared-deleted-notice-card'); await closeNotices(a); await fullSize(a); }
+  await a.click('#nav-history');
+  same('one History entry, naming the shared folder', await a.run(`[...document.querySelectorAll('.history-row[data-kind="off"]')].filter(row => row.textContent.includes('gone-one')).map(row => row.querySelector('.history-about')?.textContent)`),
+    ['Its copy was deleted in the shared folder, so it was turned off. Central Knot keeps it.']);
+  await openKind(a, 'skills');
+  await openNotices(a);
+  await a.run(`[...document.querySelectorAll('#notices-card .sync-notice')].find(notice => notice.textContent.includes('gone-one was deleted'))?.querySelector('[id^="notice-restore-"]')?.click()`);
+  for (let tries = 0; tries < 40 && !(await switchOn(a, 'skills', 'gone-one')); tries++) await wait(100);
+  same('its Turn it on gives four tools Central Knot’s copy, Claude Code’s in place of the link, OpenCode reading Claude Code’s, and writes nothing in the shared folder',
+    [...roots.map(root => lstatSync(join(home, root, 'gone-one'), { throwIfNoEntry: false })?.isDirectory() ?? false), await cellState(a, 'skills', 'gone-one', 'opencode-cli'), existsSync(join(agents, 'gone-one'))],
+    [true, true, true, true, false, 'another-way', false]);
+  rmSync(join(home, '.claude/skills/link-one'));
+  const linkBefore = listed();
+  await twoPasses();
+  same('only Claude Code’s link deleted: nothing written, off, the notice naming Claude Code', [listed(), await switchOn(a, 'skills', 'link-one'), await noticeOf('link-one')],
+    [linkBefore, false, ['link-one was deleted in Claude Code, so it is off. Copilot CLI, Codex, Pi and OpenCode still read it another way. Central Knot keeps it.']]);
 }
 
 /**
@@ -9803,16 +9864,19 @@ async function libraryFlow() {
   const noticesWide = () => tb.run(`Math.round(document.querySelector('#notices').getBoundingClientRect().width * 10) / 10`);
   const wideUnseenOne = await noticesWide();
   await noticePictures('with-result');
-  chmodSync(T.claude, 0o755);
+  // Claude Code's folder stays read-only until the problem line has been read back on the Library: leaving the page lets the
+  // click's own result go (app.ts showPage), and what is said there on return is the background pass's line, kept while beta's
+  // removal is still owed (matrix.ts backgroundProblems). Writable, the next pass would remove the copy and the line with it.
   await tb.click('#nav-overview');
   same('away from the Library, the dot counts delta alone: gamma, folded before it was ever seen, is not unseen', await dotSays(), '1 automatic change: delta');
   await tb.click('#nav-history');
   const editsInHistory = () => tb.all('.history-row', 'e.querySelector(".history-what strong")?.textContent + ": " + e.textContent.includes("Edited in Claude Code")');
   check('History has both edits', await until(async () => (rows => ['gamma: true', 'delta: true'].every(entry => rows.includes(entry)))(await editsInHistory())), await editsInHistory());
   await openKind(tb, 'all');
-  same('back on the Library, the click’s problem line still has the lines, delta’s notice unseen', [await tb.exists('#header .problem-line'), await noticeInLines(tb), await control()], [true, null, ['1', true]]);
+  same('back on the Library, the removal still owed: the background pass’s problem line has the lines, delta’s notice unseen', [await tb.exists('#header .problem-line'), await noticeInLines(tb), await control()], [true, null, ['1', true]]);
   await tb.run(`document.querySelector('#outcome-dismiss, #problems-dismiss')?.click()`); await tb.settle();
   same('its × closes it: delta’s notice has the lines, and is seen', [/delta was edited/.test(await noticeInLines(tb) ?? ''), await control()], [true, ['1', false]]);
+  chmodSync(T.claude, 0o755);
   same('…Notices resting as Refresh is, once its notice is seen', (await filled())?.[0], false);
   const wideSeenOne = await noticesWide();
   if (!(await switchOn(tb, 'skills', 'beta'))) { await tb.click(`#${rowPart('switch', 'skills', 'beta')}`); await done(tb); }

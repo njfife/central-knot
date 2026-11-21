@@ -70,7 +70,7 @@ import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import { asItIs, noTimeTells, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts, PartKind } from './types.ts';
-import { andList, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
+import { andList, deletedIn, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
 
 /**
  * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key.
@@ -142,7 +142,10 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
     case 'off':
       if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
       if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}${named(event.only) ? ': its copy there was removed' : ''}. ${keeps}${gaveSaid}` };
-      if (event.cause === 'deleted-by-hand') return { glyph: 'trash-2', text: `Its copy was deleted in ${from}, so it was turned off${also(' and removed from')}. ${keeps}` };
+      if (event.cause === 'deleted-by-hand') {
+        const place = deletedIn(event.winner?.tool ?? '', event.sharedWay);
+        return { glyph: 'trash-2', text: `Its copy was deleted in ${place}, so it was turned off${also(' and removed from')}. ${keeps}` };
+      }
       if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}: in Central Knot, Off, until you turn it on.` };
       if (event.cause === 'source-dropped' && plugin) return { glyph: 'link-2-off', text: `The plugin ${plugin} no longer has it, so it is off${also(' and removed from')}, and no longer follows it. ${keeps}` };
       if (event.cause === 'source-dropped') return { glyph: 'link-2-off', text: `${source} no longer has it, so it is off${also(' and removed from')}, and no longer from that source. ${keeps}` };

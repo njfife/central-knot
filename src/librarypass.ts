@@ -114,9 +114,17 @@ export interface Disk<Entry extends Seen> {
    * also where the harness has a copy of its own: there only `anotherWay` counts (library.ts, the table's last row). `item` is
    * as this pass's clicks left it, so library.ts wantedIn says where else it is wanted and `applied` whether a copy elsewhere
    * is Central Knot's; what the other harnesses hold is this Disk's (byKey, unseen). A folder that can't be written is
-   * `locked`, which the pass adds itself. Worked out at each look, never stored.
+   * `locked`, which the pass adds itself. Worked out at each look, never stored. `throughShared`: the other way is the shared
+   * skills folder, at this folder there (library.ts THE SHARED FOLDER).
    */
-  held(item: Wanted, harness: HarnessId): { why: string; anotherWay?: true } | undefined;
+  held(item: Wanted, harness: HarnessId): { why: string; anotherWay?: true; throughShared?: string } | undefined;
+  /**
+   * For a harness the item is wanted in, with no copy and no other way: whether it lost the item it had only
+   * through the shared folder (LibraryItem throughShared): that folder's copy deleted (`copy`), or its link to it (`link`); or why
+   * that can't be told now (unseen: library.ts THE SHARED FOLDER, while that folder can't be vouched for). A kind with no shared
+   * folder leaves it out.
+   */
+  lostShared?(item: Wanted, harness: HarnessId): 'copy' | 'link' | { unseen: string } | undefined;
   /**
    * Why a harness won't load the item's current version, where that holds whether or not it has a copy (a skill's shape a tool
    * refuses): nothing of the item is written there, so a copy it has stays as it is and is `held`. A kind with no such reason
@@ -147,7 +155,8 @@ export interface Disk<Entry extends Seen> {
  * each harness's own part where the record keeps one, and the source it is linked to (a plugin's item is held by plugins.ts
  * pluginHolds in the tools that take the plugin).
  */
-export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'> & Partial<Pick<LibraryItem, 'hash' | 'own' | 'source'>>;
+export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'>
+  & Partial<Pick<LibraryItem, 'hash' | 'own' | 'source' | 'throughShared'>>;
 
 /** One kind's part of the library as its record holds it: its items, and each harness's folder as a pass last saw it. */
 export interface KindLibrary { items: Record<string, LibraryItem>; folders: Partial<Record<HarnessId, FolderSeen>> }
@@ -206,10 +215,12 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   /**
    * Writes a version into one harness in its format: over its copy (`here`, only while it is as read), every byte of its own
    * part kept; else as the copy the harness last had (its kept own part), or a new one. Answers why it could not be written,
-   * if it couldn't (the next pass tries again). What it wrote is that harness's own part from then on: kept by the kind here
-   * (agents), or by the next pass's keepOwn before anything there is removed (MCP servers).
+   * if it couldn't (the next pass tries again), or what its result says besides (`said`: a skill in place of a link that led
+   * nowhere). What it wrote is that harness's own part from then on: kept by the kind here (agents), or by the next pass's
+   * keepOwn before anything there is removed (MCP servers).
    */
-  write(context: ShareContext, item: LibraryItem, harness: HarnessId, here: Entry | undefined, content: Content): Promise<{ stopped: string } | undefined>;
+  write(context: ShareContext, item: LibraryItem, harness: HarnessId, here: Entry | undefined, content: Content)
+    : Promise<{ stopped: string } | { said: string } | undefined>;
   /**
    * Why a harness won't load this content, asked by writeCopy of the current version just before it writes it there (Disk.refuses
    * answered for the version the look read; an edit this same pass took in may be one the harness won't load). Not asked by
@@ -340,7 +351,8 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
   for (const tool of look.managed) {
     const path = look.kind.folder(look.context, tool), was = look.library.folders[tool];
     const here = look.kind.folderSeen ? await look.kind.folderSeen(look.context, tool) : await folderAt(path);
-    const forget = (which: LibraryItem[]) => { for (const item of which) delete item.applied[tool]; };
+    // What was applied there, and what it had through the shared folder (library.ts THE SHARED FOLDER), is no longer known.
+    const forget = (which: LibraryItem[]) => { for (const item of which) { delete item.applied[tool]; delete item.throughShared?.[tool]; } };
     const where = `${toolName(tool)}’s ${look.kind.words.folder(tool)}`;
     const backWithoutFolder = !was && Object.values(look.library.items).some(item => item.applied[tool] !== undefined);
     if (!here) {
@@ -351,12 +363,13 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
     }
     if ('away' in here) {
       if (!backWithoutFolder) look.foldersNow[tool] = here;
-      const applied = items.filter(item => item.applied[tool] !== undefined);
-      if (!applied.length) continue;
+      // What was applied there, or what it had there only by a link into the shared folder (library.ts THE SHARED FOLDER).
+      const had = items.filter(item => item.applied[tool] !== undefined || item.throughShared?.[tool]);
+      if (!had.length) continue;
       if (stillSettling(look, path)) { look.disk.unseen.set(`${tool}:*`, `${where} isn’t there just now. If it stays away, Central Knot writes it afresh.`); continue; }
-      forget(applied.filter(item => wantedIn(item, tool)));
+      forget(had.filter(item => wantedIn(item, tool)));
       const owed = `${where} isn’t there. Its copy is removed once it is back.`;
-      for (const item of applied.filter(item => !wantedIn(item, tool))) look.disk.unseen.set(`${tool}:${item.key}`, owed);
+      for (const item of had.filter(item => !wantedIn(item, tool) && item.applied[tool] !== undefined)) look.disk.unseen.set(`${tool}:${item.key}`, owed);
       continue;
     }
     look.foldersNow[tool] = here;
@@ -400,6 +413,7 @@ export const sharedFileAt = (path: string) => stat(path).then(() => sharedFileSe
 async function cameBack(look: AnyLook, tool: HarnessId, shelf?: Shelf<unknown>) {
   const givingWay: { item: LibraryItem; version: Version; content: unknown }[] = [];
   for (const item of Object.values(look.library.items)) {
+    delete item.throughShared?.[tool];
     const here = look.disk.byKey.get(item.key)?.[tool], unseen = unseenIn(look.disk, tool, item.key);
     const copy: HarnessCopy = unseen ? { is: 'unseen', why: unseen } : here ? { is: 'present', hash: here.hash, at: here.at } : { is: 'absent' };
     const version = managedAgain(item, tool, copy);
@@ -419,7 +433,7 @@ async function cameBack(look: AnyLook, tool: HarnessId, shelf?: Shelf<unknown>) 
  * pass and by the page. `unseen`, so that nothing happens there: a copy that can't be read for sure, a folder away inside
  * the settle window, and a copy missing for less than the settle window (an editor's save moves the file away for a moment).
  * `held`: a harness the item should be in that can't be given a copy (Disk.held, or its folder is locked), or has it another
- * way (Disk.held).
+ * way (Disk.held). Absent where it had it only through the shared folder: lost there (Disk.lostShared), or unseen.
  */
 export function copiesOf(look: AnyLook, item: LibraryItem): Copies {
   const slot = look.disk.byKey.get(item.key) ?? {};
@@ -431,7 +445,7 @@ export function copiesOf(look: AnyLook, item: LibraryItem): Copies {
  */
 function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | undefined, inScope = true): HarnessCopy {
   const copy = copyRead(look, item, tool, here), at = `${look.kind.folder(look.context, tool)}#${look.kind.kind}:${item.key}`;
-  const owed = copy.is === 'absent' && wantedIn(item, tool) && item.applied[tool] !== undefined;
+  const owed = copy.is === 'absent' && wantedIn(item, tool) && (item.applied[tool] !== undefined || !!copy.sharedWay);
   if (owed && !inScope) return copy;
   if (owed && stillSettling(look, at)) {
     const { copy: noun, item: kindNoun } = look.kind.words;
@@ -450,11 +464,15 @@ function copyRead(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen 
     const refused = wanted && !kindHeld?.anotherWay ? look.disk.refuses?.(item, tool) : undefined;
     if (refused) return { is: 'held', why: refused };
     // A copy of its own where the harness has the item another way too: the table's last row (library.ts wantedHere).
-    return { is: 'present', hash: here.hash, at: here.at, ...(kindHeld?.anotherWay ? { anotherWay: kindHeld.why } : {}) };
+    const { why: anotherWay, throughShared } = kindHeld?.anotherWay ? kindHeld : {};
+    return { is: 'present', hash: here.hash, at: here.at, ...(anotherWay ? { anotherWay } : {}), ...(throughShared ? { throughShared } : {}) };
   }
   const locked = look.disk.locked.get(tool);
   const held = kindHeld ?? (wanted && locked ? { why: locked.why } : undefined);
-  return held ? { is: 'held', ...held } : { is: 'absent' };
+  if (held) return { is: 'held', ...held };
+  const lost = wanted ? look.disk.lostShared?.(item, tool) : undefined;
+  if (typeof lost === 'object') return { is: 'unseen', why: lost.unseen };
+  return lost ? { is: 'absent', sharedWay: lost } : { is: 'absent' };
 }
 /** What a pass read of an item outside its scope (a click's or a source's) ends that item's absences, and starts or ages none. */
 function seenOutside(look: AnyLook, item: LibraryItem) {
@@ -699,6 +717,7 @@ async function syncItem(pass: Pass, item: LibraryItem) {
   // Central Knot's before any file changes, so the next pass removes it (telling History) and an Undo meanwhile gives it back.
   for (const { tool, hash } of pass.asked.get(item.key)?.tookFrom ?? []) item.applied[tool] = hash;
   let told: Told = { events: [], named: new Map() };
+  const hadThroughShared = Object.keys(item.throughShared ?? {}) as HarnessId[], clicked = pass.asked.has(item.key);
   const held = await carryOut(item, made, {
     ...pass.shelf,
     copy: harness => { const here = slot[harness]!; return { hash: here.hash, at: here.at, content: kind.contentOf(here) }; },
@@ -709,14 +728,22 @@ async function syncItem(pass: Pass, item: LibraryItem) {
         if (text !== undefined) await kind.keepOwn(context, item, harness, text);
       }
     },
-    log: async () => { told = logItem(pass, item, made, slot); await appendHistory(context, told.events); },
+    log: async () => { told = logItem(pass, item, made, slot, copies); await appendHistory(context, told.events); },
     write: harness => writeCopy(pass, item, harness, slot[harness]),
     // An Undo gives a harness back the copy its click took over, as that harness's own, instead of removing what is there.
     remove: harness => (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
   });
   if (held.length) await untell(pass, told, held);
-  // A copy found gone (deleted by hand: plan `forget`): its settings follow it out too.
-  for (const harness of made.forget) await follow(pass, item, harness, false);
+  // A click's item that waits in a tool for the shared folder (library.ts THE SHARED FOLDER) is held there, so its result doesn't
+  // count it as on there, and says why.
+  if (clicked) for (const harness of pass.managed) {
+    const waits = copies[harness]?.is === 'unseen' && wantedIn(item, harness) ? pass.disk.lostShared?.(item, harness) : undefined;
+    if (typeof waits === 'object') pass.results.push({ item: item.name, harness, outcome: 'held', message: waits.unseen });
+  }
+  // A copy found gone (deleted by hand: plan `forget`), or the shared folder's that a harness had it only through and has it no
+  // more (library.ts THE SHARED FOLDER): its settings follow it out too.
+  const outThere = hadThroughShared.filter(harness => !made.throughShared?.[harness] && copies[harness]?.is === 'absent');
+  for (const harness of [...made.forget, ...outThere]) await follow(pass, item, harness, false);
   const changed = pass.followed.get(item.key);
   if (!changed) return;
   for (const said of [...told.named.keys(), ...pass.takenIn.filter(taken => taken.name === item.name)]) said.settingsChanged = changed;
@@ -739,12 +766,12 @@ async function writeCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: S
   // A version this harness won't load is never written there; the copy it has stays (copyIn asks the same of the version it read).
   const wont = await pass.kind.refusesToLoad?.(pass.context, item, tool, content);
   if (wont) return stopped(wont);
-  const refused = await pass.kind.write(pass.context, item, tool, here, content);
-  if (refused) return stopped(refused.stopped);
+  const wrote = await pass.kind.write(pass.context, item, tool, here, content);
+  if (wrote && 'stopped' in wrote) return stopped(wrote.stopped);
   pass.writes++;
   const done = here ? {} : await follow(pass, item, tool, true);
   const off = done.off ? ` ${toolName(tool)}’s own settings keep it out, so it doesn’t load it.` : '';
-  const message = `${here ? 'Now has the current version' : 'Added'}.${done.changed ? ` ${done.changed}` : ''}${off} Start a new session to use it.`;
+  const message = `${here ? 'Now has the current version' : 'Added'}${wrote ? `, ${wrote.said}` : ''}.${done.changed ? ` ${done.changed}` : ''}${off} Start a new session to use it.`;
   pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message, ...(done.off ? { switchedOff: true as const } : {}), ...(done.changed ? { settingsChanged: done.changed } : {}) });
   return true;
 }
@@ -774,7 +801,7 @@ async function giveBackCopy(pass: Pass, item: LibraryItem, here: Seen, hash: str
   const content = await pass.kind.readVersion(pass.context, item.key, hash);
   if (!content) { result('held', `${where}’s own copy is no longer in Central Knot’s store, so it can’t be given back.`); return false; }
   const refused = await pass.kind.write(pass.context, item, here.tool, here, content);
-  if (refused) { result('held', refused.stopped); return false; }
+  if (refused && 'stopped' in refused) { result('held', refused.stopped); return false; }
   pass.writes++;
   result('written', `${where} has its own copy back, as before.`);
   return true;
@@ -813,7 +840,7 @@ async function deletionsTold(pass: Pass) {
  * click that asked for it covers it, Undo included). A copy a harness managed again gives way with has its entry from
  * cameBack, which may concern an item outside this pass.
  */
-function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record<HarnessId, Seen>>): Told {
+function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record<HarnessId, Seen>>, copies: Copies): Told {
   // The item as it is before the plan is carried out: the edit taken in is current only after this is told.
   const taken = made.takeIn ? slot[made.takeIn]!.hash : item.hash;
   const key = `${pass.kind.historyPrefix}${item.key}`, events: HistoryEvent[] = [], named: Told['named'] = new Map();
@@ -836,8 +863,8 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
     named.set(event, writes);
     return event.id;
   };
-  const notice = (kind: ItemNotice['kind'], winner: HarnessId, losers: HarnessId[], history: string, writes: HarnessId[], orderProved = true) => {
-    const told: ItemNotice = { key, item: item.name, kind, winner, losers, orderProved, history };
+  const notice = (kind: ItemNotice['kind'], winner: HarnessId, losers: HarnessId[], history: string, writes: HarnessId[], orderProved = true, more = {}) => {
+    const told: ItemNotice = { key, item: item.name, kind, winner, losers, orderProved, history, ...more };
     pass.notices.push(told);
     named.set(told, writes);
   };
@@ -869,8 +896,12 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
     notice(kind, made.takeIn, others.length ? others : written, id, others.length ? [] : written, made.orderProved);
   }
   if (made.turnedOffBy) {
-    const id = log({ kind: 'off', cause: 'deleted-by-hand', winner: { tool: made.turnedOffBy, hash: taken }, losers: before(did.removed) }, did.removed);
-    notice('deleted-by-hand', made.turnedOffBy, did.removed, id, did.removed);
+    const how = made.sharedWay ? { sharedWay: made.sharedWay } : {};
+    const entry = { kind: 'off' as const, cause: 'deleted-by-hand' as const, winner: { tool: made.turnedOffBy, hash: taken }, losers: before(did.removed) };
+    const id = log({ ...entry, ...how }, did.removed);
+    // The tools that still read the shared copy (once only a link to it was deleted), which the notice names.
+    const stillRead = pass.managed.filter(tool => { const copy = copies[tool]; return copy?.is === 'held' && !!copy.throughShared; });
+    notice('deleted-by-hand', made.turnedOffBy, did.removed, id, did.removed, true, { ...how, ...(stillRead.length ? { stillRead } : {}) });
   }
   // Edits no pass had taken in that give way to the current version (Pull, Make current): each is a version, offered back here.
   const gaveWay = made.takeIn ? [] : made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness);
