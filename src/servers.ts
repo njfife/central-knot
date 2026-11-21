@@ -35,6 +35,7 @@ import { mergeServer } from './merge.ts';
 import { cannotHold, editEntry, fromJson, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
 import { partsHolding, pluginHolds, type ThroughWhichPlugin } from './plugins.ts';
+import { copilotServerName } from './profileplan.ts';
 import { mcpTools } from './presence.ts';
 import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
 import { errorCode, itemKey, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
@@ -305,6 +306,10 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
   const switchProblem = Object.fromEntries(entries.flatMap(entry => { const problem = disk.switches.get(entry.tool)?.problem; return problem ? [[entry.tool, problem]] : []; }));
   const edited = made ? pendingEdits(made) : [];
   const shape = item ? await readVersion(look.context, key, item.hash) : entries[0]?.server;
+  const copilotName = item && !slot['copilot-cli'] && item.own['copilot-cli'] ? (await keptOwn(look.context, item, 'copilot-cli'))?.name : undefined;
+  const copilotSpell = copilotServerName({ copies, plugin, copilotName }, name);
+  const copilotSwitch = item && !item.except.includes('copilot-cli') ? disk.switches.get('copilot-cli') : undefined;
+  const copilotOff = copilotSwitch && !copilotSwitch.problem && mcpDisabled('copilot-cli', copilotSwitch.text, copilotSpell) ? copilotSpell : undefined;
   const some = (field: string, value: object) => (Object.keys(value).length ? { [field]: value } : {});
   return {
     key, name, description: shape ? summary(shape) : '', copies, on: !!item?.on, except: item?.except ?? [], cannot, edited,
@@ -312,6 +317,7 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key) }),
     ...some('plugin', plugin), ...some('unseen', unseen), ...some('switchedOff', switchedOff), ...some('switchProblem', switchProblem),
+    ...(copilotName ? { copilotName } : {}), ...(copilotOff ? { copilotOff } : {}),
     ...(fromSource ? { fromSource } : {}),
   };
 }

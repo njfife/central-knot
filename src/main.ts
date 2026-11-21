@@ -473,7 +473,7 @@ function switchFromMenu(id: string) {
     if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
     else if (result.event && window && !window.isDestroyed()) window.webContents.send('profile:switched', result);
     pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
-    lastItems = await liveNow(context());
+    await refreshMenus(tools);
   });
 }
 
@@ -997,6 +997,12 @@ const pluginSide = (tools: HarnessId[]): PluginSide => ({ live: async () => {
   return (await runPlan(ops, { install: (...args) => never(args[3]), uninstall: (...args) => never([args[3]]), setSkill: markets.setSkill, setPart: markets.setPart }, home)).done;
 } });
 
+/** Refreshes the menus' live library items and plugin copies for `tools`, from the same read the page and switch use. */
+async function refreshMenus(tools: HarnessId[]) {
+  const plugins = await pluginSide(tools).live();
+  followProfiles(lastProfiles, await liveNow(context(), tools, plugins), plugins);
+}
+
 /** After a profile is made, changed or deleted (Central Knot's own file only, no tool changes): the profiles for the page, and the menus. */
 async function profilesSaved(): Promise<ProfilesView> {
   const profiles = await readProfiles(current!.home);
@@ -1071,12 +1077,9 @@ async function backgroundPass() {
   if (stopped && stopped !== lastStopped) changed = true;
   lastStopped = stopped;
   const wrote = !!skills && !!(skills.writes || skills.notices?.length || serversAndAgents?.changed);
-  if (wrote) {
-    // An item the pass turned On or Off (a copy deleted by hand, one taken in) may change which profile is in use.
-    followProfiles(lastProfiles, await liveNow(context()));
-    // Nobody saw it: the window is closed, gone or behind other windows (D-36).
-    if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
-  }
+  if (wrote || fromSettings) await refreshMenus(await managedNow(context(), snapshots));
+  // Nobody saw it: the window is closed, gone or behind other windows (D-36).
+  if (wrote && (window.isDestroyed() || !window.isVisible() || !window.isFocused())) { unseen = true; refreshTray(); }
   if (changed || wrote) send('sync:changed');
 }
 

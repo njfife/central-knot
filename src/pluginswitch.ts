@@ -3,7 +3,8 @@
 // in Copilot CLI or Codex, ENB-06; an MCP server in Claude Code, Copilot CLI or Codex and an agent in Claude Code,
 // partswitch.ts), else the whole plugin's there. A click applies at once: it is worked out as
 // the plugin choices it needs (pluginplan), which run, report and undo like the Plugins page's.
-// Pure functions over plain data; the page draws and applies.
+// Pure functions over plain data; the page draws and applies. Copilot CLI's server switch goes by its bare name, which
+// clickWords warns of here; how profiles plan around a shared server name in Copilot CLI lives in profileplan.ts.
 import { choose, chosenPart, chosenSkill, chosenWhole, clear, wholeChoice, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { NO_SKILL_SWITCH, hasPartSwitch, noSwitchReason, partWords, samePart } from './pluginstatus.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -64,20 +65,6 @@ export const LIVE_PLUGIN = 'Copilot CLI loads this plugin live from a folder, wh
 export function cantSwitch(item: PluginItemAt): string | undefined {
   if (!ownSwitch(item)) return item.tool === 'copilot-cli' && item.install.live ? LIVE_PLUGIN : undefined;
   return switchHeld(item.install, item);
-}
-
-/**
- * Why Copilot CLI can't switch a plugin's server alone, if it can't: it turns a server off by its bare name (partswitch.ts), so
- * every server it has spelled exactly so goes with it, one of the person's own (`own`: his servers' names there, as its file spells
- * them) or another installed plugin's (`installs`). A profile's plan holds such a server (profileplan.ts); the Library's own
- * switch only warns of it (clickWords).
- */
-export function sharesName(item: PluginItemAt, own: readonly string[], installs: readonly InstalledPlugin[]): string | undefined {
-  if (item.tool !== 'copilot-cli' || item.kind !== 'mcp') return undefined;
-  const hasIt = (install: InstalledPlugin) => install.tool === item.tool && install.items.some(part => part.kind === 'mcp' && part.name === item.name);
-  const other = installs.find(install => install !== item.install && hasIt(install));
-  const whose = own.includes(item.name) ? 'a server of your own there is named' : other ? `${other.plugin} there has a server named` : undefined;
-  return whose && `Copilot CLI turns a server off by its name alone, and ${whose} “${item.name}” too.`;
 }
 
 /**
