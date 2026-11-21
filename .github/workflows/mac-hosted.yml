@@ -5,8 +5,8 @@ on:
   workflow_dispatch:
     inputs:
       groups_at_once:
-        description: How many groups of end-to-end checks run at once (scripts/mac-run.mjs; 4 on the owner's Mac)
-        default: '4'
+        description: How many groups of end-to-end checks run at once (scripts/mac-run.mjs; 2 on 3 cores, 4 on the owner's Mac)
+        default: '2'
       measure:
         description: Print results and exit 0 whatever the checks say (for measuring runs, off by default)
         type: boolean
@@ -25,7 +25,7 @@ jobs:
     env:
       # Temporary folders, test homes and mounted disk images under /private/tmp, as on the owner's Mac.
       TMPDIR: /private/tmp
-      CK_E2E_GROUPS_AT_ONCE: ${{ inputs.groups_at_once || '4' }}
+      CK_E2E_GROUPS_AT_ONCE: ${{ inputs.groups_at_once || '2' }}
     steps:
       # The machine, to compare runs by: cores, memory in bytes, macOS, the display.
       - run: sysctl -n hw.ncpu hw.memsize && sw_vers -productVersion && system_profiler SPDisplaysDataType | grep -i resolution || true

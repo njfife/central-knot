@@ -9,12 +9,12 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { extractFile } from '@electron/asar';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { connect, debugPorts } from './cdp.mjs';
 import { whileAttached } from './mac-dmg.mjs';
+import { launched, scratchFolder, tempPlaces } from './scratch.ts';
 import { serveReleases } from './update-fixture.mjs';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
@@ -38,14 +38,9 @@ function check(name, ok, detail) {
   console.error(`FAIL ${name}${detail === undefined ? '' : `: ${JSON.stringify(detail)?.slice(0, 600)}`}`);
 }
 
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'ck-alpha-')));
+const scratch = scratchFolder('ck-alpha-');
 const HOME = join(scratch, 'home');
 const appData = join(HOME, 'Library/Application Support');
-const launched = new Set();
-process.on('exit', () => {
-  for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
-  rmSync(scratch, { recursive: true, force: true });
-});
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 // ---------- The package ----------
@@ -116,7 +111,7 @@ async function launch(name, env) {
   const bundle = resolve('release', `${name}-darwin-arm64`, `${name}.app`), exe = join(bundle, 'Contents/MacOS', name);
   mkdirSync(join(scratch, 'tmp'), { recursive: true });
   // No data folder is named: each app must choose its own.
-  const child = spawn(exe, ['--remote-debugging-port=0'], { env: { HOME, CFFIXED_USER_HOME: HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp'), CK_TEST_APPS: mac.root, ...env }, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(exe, ['--remote-debugging-port=0'], { env: { HOME, CFFIXED_USER_HOME: HOME, PATH: '/usr/bin:/bin', ...tempPlaces(join(scratch, 'tmp')), CK_TEST_APPS: mac.root, ...env }, stdio: ['ignore', 'ignore', 'pipe'] });
   runningApps.push({ bundleId: name === ALPHA ? ALPHA_BUILD : STANDARD_BUILD, pid: child.pid, path: bundle });
   mac.running(runningApps);
   launched.add(child);
