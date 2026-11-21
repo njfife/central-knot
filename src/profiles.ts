@@ -347,9 +347,11 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const settingsChanged = [...done.results.flatMap(result => (result.settingsChanged ? [result.settingsChanged] : [])), ...clearedForHis(profile, done.copies),
     ...rules.confirmed.map(orphanClearedNote)];
   if (done.copies.length < copies.length || rules.confirmed.length < clears.length || settingsChanged.length) await settleEntry(context, event.id, done.copies, settingsChanged, clears.length ? rules.confirmed : undefined);
+  const settled: NonNullable<HistoryEvent['profile']> = { toName: profile.name, on: named(turns.on), off: named(turns.off),
+    ...(copies.length ? { plugins: done.copies.map(switched) } : {}), ...(rules.confirmed.length ? { copilotCleared: rules.confirmed } : {}) };
   const out = outcome(turns, done.done, [...held, ...done.results, ...rules.results], copies.filter(turn => !done.asAsked.includes(turn)), done.copies);
   return { name: profile.name, on: [...out.on, ...rules.confirmed.filter(rule => !done.done.on.some(item => item.id === rule.id)).map(rule => rule.name)],
-    off: out.off, left: [...new Set([...out.left, ...rules.left])], results: out.results, event: event.id, ...(settingsChanged.length ? { settingsChanged } : {}) };
+    off: out.off, left: [...new Set([...out.left, ...rules.left])], results: out.results, event: event.id, profile: settled, ...(settingsChanged.length ? { settingsChanged } : {}) };
 }
 
 /** Undo of a profile entry: turns back library items, plugin copies and uncovered Copilot CLI rules still as left, never re-disabling a name his server uses now, and clears any uncovered rule blocking a server it turns back on. */
