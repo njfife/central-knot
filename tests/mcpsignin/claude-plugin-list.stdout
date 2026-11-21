@@ -1,0 +1,4 @@
+Checking MCP server health…
+
+plugin:tracker:issues: http://127.0.0.1:47312/mcp (HTTP) - ! Needs authentication
+issues: http://127.0.0.1:47311/mcp (HTTP) - ✔ Connected

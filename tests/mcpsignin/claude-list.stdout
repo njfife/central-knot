@@ -1,0 +1,6 @@
+Checking MCP server health…
+
+plain: http://127.0.0.1:47201/mcp (HTTP) - ✔ Connected
+oauth: http://127.0.0.1:47202/mcp (HTTP) - ! Needs authentication
+down: http://127.0.0.1:47203/mcp (HTTP) - ✘ Failed to connect — ECONNREFUSED: Unable to connect. Is the computer able to access the url?
+silent: http://127.0.0.1:47204/mcp (HTTP) - ✘ Failed to connect — MCP server "silent" connection timed out after 30000ms

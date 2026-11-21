@@ -1,0 +1,18 @@
+┌  MCP Servers
+│
+●  ✓ plain [90mconnected
+│      [90mhttp://127.0.0.1:47201/mcp
+│
+●  ⚠ oauth [90mneeds authentication
+│      [90mhttp://127.0.0.1:47202/mcp
+│
+●  ✗ down [90mfailed
+│      SSE error: ECONNREFUSED: Unable to connect. Is the computer able to access the url?
+│      [90mhttp://127.0.0.1:47203/mcp
+│
+●  ✗ silent [90mfailed
+│      Operation timed out after 30000ms
+│      [90mhttp://127.0.0.1:47204/mcp
+│
+└  4 server(s)
+

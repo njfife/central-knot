@@ -4430,7 +4430,7 @@ async function fewToolsFlow() {
   cli('.pi/agent/bin/pi', 'pi 1.5.0');
   await a.click('#header-refresh');
   // Codex, whose folder is still here, holds plugins: were it counted, that page would be back.
-  same('with Pi alone, Plugins is left out, and the Library stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'library', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']);
+  same('with Pi alone, Plugins is left out, and the Library stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']);
   check('and the Overview names it once', (await a.text('#overview-absent') ?? '').includes('No tool here holds plugins') && await a.exists('#overview-agents'), await a.text('#overview-absent'));
   await openKind(a, 'skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
@@ -4444,7 +4444,7 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.claude'), { recursive: true });
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
-  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'library', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
+  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
   await a.click('#nav-harnesses');
   check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
   // On Plugins, its only tool goes away (Pi, still here, holds no plugins): the page it was on no longer exists here, so the
@@ -4453,7 +4453,7 @@ async function fewToolsFlow() {
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   rmSync(join(home, '.local/bin/claude'));
   await a.click('#header-refresh');
-  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'library', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']]);
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
   check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds plugins now\.$/.test(moved ?? ''), moved);
   // Claude desktop alone, with no CLI and no .claude folder yet: Claude Code is here, said so with both versions.
@@ -8419,6 +8419,183 @@ async function overviewFlow() {
 }
 
 /**
+ * The MCP sign-in page (mcpsigninpage.ts) with stand-in CLIs for the five tools, each printing what the real one printed for the
+ * same servers (tests/mcpsignin/) and recording every call but --version: twelve servers by five tools, a plugin's server in
+ * Claude Code beside a direct one of the same name, a server switched off in Codex. Opening the page runs nothing; Check runs
+ * one tool once from an empty folder that is gone after, writing nothing of Central Knot's; the page stays usable while a check
+ * runs, Check all runs the columns one after another, and a second press meanwhile does nothing; what a check said is still there
+ * after another page, and is not shown on another home; Copy gives the tool's own command with its name for the server. Nothing
+ * is cut off at 860×528 or in the owner's 1316×819 window, the sidebar open and as a rail; with --shots, pictures in light and dark.
+ */
+async function mcpSigninFlow() {
+  const home = join(scratch, 'signin-home'), calls = join(scratch, 'signin-calls.log'), said = join(scratch, 'signin-said');
+  const P = port => `http://127.0.0.1:${port}/mcp`;
+  const write = (path, text) => { mkdirSync(dirname(join(home, path)), { recursive: true }); writeFileSync(join(home, path), text); };
+  const remote = names => Object.fromEntries(names.map((name, index) => [name, { type: 'http', url: P(47201 + index) }]));
+  write('.claude.json', JSON.stringify({ mcpServers: remote(['plain', 'oauth', 'down', 'silent', 'issues', 'calendar']) }));
+  write('.copilot/mcp-config.json', JSON.stringify({ mcpServers: Object.fromEntries(Object.entries(remote(['plain', 'oauth', 'github'])).map(([name, entry]) => [name, { ...entry, tools: ['*'] }])) }));
+  write('.codex/config.toml', ['plain', 'oauth', 'down', 'silent', 'docs'].map((name, index) => `[mcp_servers.${name}]\nurl = "${P(47201 + index)}"\n${name === 'docs' ? 'enabled = false\n' : ''}`).join('\n'));
+  write('.pi/agent/mcp.json', JSON.stringify({ mcpServers: Object.fromEntries(['plain', 'oauth', 'down', 'silent', 'tickets', 'calendar'].map((name, index) => [name, { url: P(47201 + index) }])) }));
+  const longName = 'team-knowledge-base-for-the-platform-group';
+  write('.config/opencode/opencode.json', JSON.stringify({ mcp: Object.fromEntries(['plain', 'oauth', 'down', 'silent', 'search', longName].map((name, index) => [name, { type: 'remote', url: P(47201 + index) }])) }));
+  // A plugin installed in Claude Code with a server of the same bare name as a direct one there.
+  writeClaudeInstall(home, 'probe-market', 'tracker', '1.0.0', { '.claude-plugin/plugin.json': '{"name":"tracker","version":"1.0.0"}', '.mcp.json': JSON.stringify({ mcpServers: { issues: { type: 'http', url: P(47212) } } }) });
+  write('.central-knot/kept.txt', 'Central Knot’s own folder, listed before and after.\n');
+  // Each stand-in prints what its tool printed for the four stand-in servers, and a line for each of this home's own servers.
+  const fixture = name => readFileSync(join(root, 'tests/mcpsignin', name), 'utf8');
+  const codex = JSON.parse(fixture('codex-list.stdout'));
+  const outputs = {
+    claude: [fixture('claude-list.stdout').trimEnd(), 'issues: http://127.0.0.1:47205/mcp (HTTP) - ✔ Connected', 'calendar: http://127.0.0.1:47206/mcp (HTTP) - ✔ Connected', 'plugin:tracker:issues: http://127.0.0.1:47212/mcp (HTTP) - ! Needs authentication', ''].join('\n'),
+    codex: JSON.stringify([...codex, { ...codex[0], name: 'docs', enabled: false, auth_status: 'unsupported' }], null, 2),
+    pi: (pi => JSON.stringify({ ...pi, servers: [...pi.servers, { ...pi.servers[0], name: 'tickets' }, { ...pi.servers[1], name: 'calendar' }] }, null, 2))(JSON.parse(fixture('pi-list.stdout'))),
+    opencode: fixture('opencode-list.stdout').replace('└', `●  ✓ search \u001b[90mconnected\n│      \u001b[90mhttp://127.0.0.1:47205/mcp\n│\n●  ⚠ ${longName} \u001b[90mneeds authentication\n│      \u001b[90mhttp://127.0.0.1:47206/mcp\n│\n└`),
+  };
+  mkdirSync(said, { recursive: true });
+  const versions = { claude: '2.1.330 (Claude Code)', codex: 'codex-cli 0.171.0', copilot: 'GitHub Copilot CLI 1.0.114.', pi: '1.6.0', opencode: '1.19.6' };
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const [binary, version] of Object.entries(versions)) {
+    if (outputs[binary]) writeFileSync(join(said, binary), outputs[binary]);
+    // Every call but --version is recorded as it starts and as it ends: the tool, the folder it ran in, how many entries that held, its arguments.
+    writeFileSync(join(home, '.local/bin', binary), [`#!/bin/sh`, `[ "$1" = "--version" ] && echo "${version}" && exit 0`,
+      `echo "start|${binary}|$(pwd)|$(ls -A | wc -l | tr -d ' ')|$*" >> ${calls}`, `[ -f ${said}/${binary}.wait ] && sleep "$(cat ${said}/${binary}.wait)"`,
+      `cat ${said}/${binary} 2>/dev/null`, `echo "end|${binary}" >> ${calls}`, binary === 'pi' ? 'exit 1' : 'exit 0', ''].join('\n'));
+    chmodSync(join(home, '.local/bin', binary), 0o755);
+  }
+  const called = () => readNow(calls).split('\n').filter(Boolean).map(line => line.split('|'));
+  const started = () => called().filter(([what]) => what === 'start');
+  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(',') });
+  const page = async () => {
+    const tools = await a.all('.signin-head', 'e.dataset.tool');
+    const rows = await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', ...[...row.querySelectorAll('td')].map(cell => cell.querySelector('.signin-words')?.textContent ?? '')])`);
+    return { tools, rows };
+  };
+  /** Each row's words in one tool's column, by the row's name (and plugin). */
+  /** A row by its name, and a plugin's by its name and the plugin's: "issues (tracker)". */
+  const rowName = ([name, plugin]) => `${name}${plugin ? ` (${plugin.replace('In the plugin ', '')})` : ''}`;
+  const column = async tool => { const { tools, rows } = await page(); return Object.fromEntries(rows.map(row => [rowName(row), row[2 + tools.indexOf(tool)]])); };
+  const head = tool => a.run(`document.querySelector('.signin-head[data-tool="${tool}"]')?.innerText ?? null`);
+  const until = async (ready, what) => { for (let tries = 0; tries < 200; tries++) { if (await ready()) return; await wait(100); } check(`in time: ${what}`, false); };
+  const shoot = async name => { if (!shots) return; for (const theme of ['light', 'dark']) { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await a.shot(`mcp-signin-${name}-${theme}`); } };
+  /** At each size: nothing cut off (the sidebar open, then as a rail), and the table no wider than its page; pictures with --shots. */
+  const fits = async name => {
+    for (const [width, height] of [SMALLEST, [1280, 800], [1316, 819], [1728, 1117], [2560, 1440]]) {
+      await sizeTo(a, width, height);
+      for (const shape of ['open', 'rail']) {
+        if ((await a.run(`document.body.classList.contains('rail')`)) !== (shape === 'rail')) await a.click('#sidebar-toggle');
+        same(`nothing cut off at ${width}×${height}, the sidebar ${shape}: ${name}`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+        same(`the table fits its page at ${width}×${height}, the sidebar ${shape}: ${name}`, await a.run(`(t => t.getBoundingClientRect().right <= t.parentElement.getBoundingClientRect().right + 1)(document.querySelector('.signin-table'))`), true);
+        if ((width === 860 || width === 1316) || shape === 'open') await shoot(`${name}-${width}-${shape}`);
+      }
+    }
+    await fullSize(a);
+  };
+
+  // The page opened: no tool is run, every cell says Not checked, Copilot CLI's column says where its sign-in is.
+  const before = started().length;
+  await a.click('#nav-mcpsignin');
+  same('the page is in the sidebar beside the Library, under its name', [await a.text('.page-title'), await a.all('#nav [id^="nav-"]', 'e.id.slice(4)')],
+    ['MCP sign-in', ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']]);
+  await wait(500);
+  same('opening the page runs no tool', started().length, before);
+  const opened = await page();
+  same('twelve servers by five tools', [opened.rows.length, opened.tools], [12, ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']]);
+  same('every cell with a server says Not checked; Copilot CLI’s cells and a tool without the server are empty', opened.rows.find(([name, plugin]) => name === 'plain' && !plugin), ['plain', '', 'Not checked', '', 'Not checked', 'Not checked', 'Not checked']);
+  same('a plugin’s server is its own row, beside the direct one of its name', opened.rows.filter(([name]) => name === 'issues').map(([name, plugin, claude]) => [plugin, claude]), [['', 'Not checked'], ['In the plugin tracker', 'Not checked']]);
+  same('Copilot CLI runs nothing: no Check, its sentence once at its head', [await a.exists('#signin-check-copilot-cli'), await head('copilot-cli')], [false, 'Copilot CLI\nCopilot CLI shows sign-in only inside a session: type /mcp auth <name> there.']);
+  same('a tool that can’t tell a sign-in from none says so at its head', await head('pi-cli'), 'Pi\nCheck\nConnected means the server answered; Pi does not say whether it needed a sign-in.');
+  check('the page says nothing is kept and that a check runs the tool’s own command', (await a.text('.signin-intro')).includes('kept only until Central Knot quits') && (await a.text('.signin-intro')).includes('Check runs each tool’s own command, which may write its own logs.'), await a.text('.signin-intro'));
+  await fits('not-checked');
+
+  // Check on Codex: one call, from an empty folder gone after; nothing of Central Knot's written.
+  const kept = tree(join(home, '.central-knot'));
+  await a.click('#signin-check-codex-cli');
+  await until(async () => (await head('codex-cli'))?.includes('Checked'), 'Codex’s check');
+  const codexCalls = started().slice(before);
+  same('Check runs Codex’s own command once', codexCalls.map(([, tool, , entries, args]) => [tool, entries, args]), [['codex', '0', 'mcp list --json']]);
+  check('from a folder made for it and gone after', !!codexCalls[0] && codexCalls[0][2] !== home && !existsSync(codexCalls[0][2]), codexCalls[0]);
+  same('nothing of Central Knot’s written', tree(join(home, '.central-knot')), kept);
+  const codexWords = await column('codex-cli');
+  same('Codex’s answers in words, its switched-off server Off, a server it doesn’t list blank', ['plain', 'oauth', 'down', 'silent', 'docs'].map(name => codexWords[name]), ['No sign-in needed', 'Needs sign-in', 'Not known to Codex', 'Not known to Codex', 'Off in Codex']);
+  same('the other columns are still not checked', (await column('claude-cli')).plain, 'Not checked');
+
+  // Copy on a cell that needs a sign-in: the tool's own command, with its name for the server.
+  const main = await a.main();
+  const copyOn = async (tool, name) => {
+    const index = (await page()).rows.findIndex(row => rowName(row) === name);
+    await a.click(`#signin-copy-${tool}-${index}`);
+    await wait(200);
+    return [await main.run('electron.clipboard.readText()'), await a.run(`document.querySelector('#announcement').dataset.text`)];
+  };
+  same('Copy gives Codex’s own sign-in command', await copyOn('codex-cli', 'oauth'), ['codex mcp login oauth', 'Copied. Run it in a terminal; then Check again.']);
+
+  // A slow check: the column says Checking…, every Check waits, the page stays usable, and Check all meanwhile does nothing.
+  writeFileSync(join(said, 'pi.wait'), '2');
+  await a.click('#signin-check-pi-cli');
+  same('while Pi is checked its column says so and every Check waits', [await head('pi-cli'), await a.run(`[...document.querySelectorAll('[id^="signin-check-"]')].every(button => button.disabled)`)], ['Pi\nCheck\nChecking…\nConnected means the server answered; Pi does not say whether it needed a sign-in.', true]);
+  const during = started().length;
+  await a.run(`document.querySelector('#signin-check-all').click()`);
+  await a.click('#nav-library');
+  check('another page opens while it runs', await a.text('.page-title') === 'Library');
+  await a.click('#nav-mcpsignin');
+  await until(async () => (await head('pi-cli'))?.includes('Checked'), 'Pi’s slow check');
+  same('a second press while it ran did nothing', started().length, during);
+  rmSync(join(said, 'pi.wait'));
+  const piWords = await column('pi-cli');
+  same('Pi’s answers read though it ended with exit code 1', ['plain', 'oauth', 'down', 'silent', 'tickets', 'calendar'].map(name => piWords[name]), ['Connected', 'Needs sign-in', 'Couldn’t reach: fetch failed', 'Couldn’t reach: MCP request timed out after 60000ms', 'Connected', 'Needs sign-in']);
+
+  // Check all: the four columns one after another, never two at once.
+  const allFrom = called().length;
+  await a.click('#signin-check-all');
+  await until(async () => called().slice(allFrom).filter(([what]) => what === 'end').length === 4 && !(await a.run(`document.querySelector('#signin-check-all').disabled`)), 'Check all');
+  same('Check all runs each tool in turn, each ending before the next starts', called().slice(allFrom).map(([what, tool]) => `${what} ${tool}`),
+    ['start claude', 'end claude', 'start codex', 'end codex', 'start pi', 'end pi', 'start opencode', 'end opencode']);
+  const claudeWords = await column('claude-cli'), openCodeWords = await column('opencode-cli');
+  same('Claude Code’s answers, a failure with its reason, the plugin’s server its own', ['plain', 'oauth', 'down', 'silent', 'issues', 'issues (tracker)'].map(name => claudeWords[name]),
+    ['Connected', 'Needs sign-in', 'Couldn’t reach: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: MCP server "silent" connection timed out after 30000ms', 'Connected', 'Needs sign-in']);
+  same('OpenCode’s answers, line by line', ['plain', 'oauth', 'down', 'silent', 'search', longName].map(name => openCodeWords[name]),
+    ['Connected', 'Needs sign-in', 'Couldn’t reach: SSE error: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: Operation timed out after 30000ms', 'Connected', 'Needs sign-in']);
+  same('Copy on the plugin’s server gives Claude Code’s name for it', await copyOn('claude-cli', 'issues (tracker)'), ['claude mcp login plugin:tracker:issues', 'Copied. Run it in a terminal; then Check again.']);
+  await fits('checked');
+
+  // Another page and back: what each check said, and when, is still there.
+  const shown = await page(), times = await a.all('.signin-when');
+  await a.click('#nav-history');
+  await a.click('#nav-mcpsignin');
+  same('after another page the statuses and their times are still there', [await page(), await a.all('.signin-when')], [shown, times]);
+  // A server added since Claude Code's check was not asked about: it says Not checked, the others keep what Claude Code said.
+  write('.claude.json', JSON.stringify({ mcpServers: remote(['plain', 'oauth', 'down', 'silent', 'issues', 'calendar', 'wiki']) }));
+  await a.click('#header-refresh');
+  const added = await column('claude-cli');
+  same('a server added since its column’s check is not checked; the rest keep their words', [added.wiki, added.plain], ['Not checked', 'Connected']);
+  write('.claude.json', JSON.stringify({ mcpServers: remote(['plain', 'oauth', 'down', 'silent', 'issues', 'calendar']) }));
+  await a.click('#header-refresh');
+
+  // An answer in a shape not known: every cell of the column says so, and its head shows the first line the tool printed.
+  writeFileSync(join(said, 'opencode'), 'Error: unknown command "mcp"\nRun opencode --help for usage.\n');
+  await a.click('#signin-check-opencode-cli');
+  await until(async () => (await a.exists('#signin-raw-opencode-cli')), 'OpenCode’s unreadable answer');
+  same('an answer in a shape not known', [await a.text('#signin-raw-opencode-cli'), (await column('opencode-cli')).plain], ['It printed: Error: unknown command "mcp"', 'Couldn’t read OpenCode’s answer']);
+  await fits('unreadable');
+
+  // A check still running when another home opens: its answer is not shown there, nor on this home opened again.
+  writeFileSync(join(said, 'claude.wait'), '2');
+  await a.click('#signin-check-claude-cli');
+  await a.click('#home-fixture');
+  await a.click('#nav-mcpsignin');
+  await until(async () => called().filter(([what, tool]) => what === 'end' && tool === 'claude').length === 2, 'the slow Claude Code check to end');
+  await wait(300);
+  const practice = await page();
+  check('the Practice copy shows nothing of the other home’s check', practice.rows.length > 0 && practice.rows.every(([, , ...cells]) => cells.every(cell => ['', 'Not checked'].includes(cell) || cell.startsWith('Off in'))) && !(await a.all('.signin-when')).length, practice);
+  rmSync(join(said, 'claude.wait'));
+  await a.click('#home-actual');
+  await a.click('#nav-mcpsignin');
+  same('this home opened again starts with nothing checked', [(await column('claude-cli')).plain, await a.all('.signin-when')], ['Not checked', []]);
+  same('no page errors, mcp sign-in', a.pageErrors, []);
+  await main.close();
+  await a.quit();
+}
+
+/**
  * Usage (usage.ts, usagerow.ts, app.ts collectUsage) on a folder home whose tools have made-up session history: collected by
  * itself when the home opens, so each row says its figure without a click, an opened row each tool's, and Sort can put the rows
  * by last used. Update usage statistics collects again, with a band that says what collecting does and closes; a reading that
@@ -9285,7 +9462,7 @@ async function libraryFlow() {
   }
   rmSync(join(A.copilot, 'idle'), { recursive: true, force: true });
   a = await launch(A.data, [], A.real);
-  same('one Library row in the sidebar, where the three kinds had theirs', await a.all('#nav .nav-row', 'e.id.replace("nav-", "")'), ['overview', 'harnesses', 'library', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
+  same('one Library row in the sidebar, where the three kinds had theirs', await a.all('#nav .nav-row', 'e.id.replace("nav-", "")'), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
   await openKind(a, 'all');
   const total = (await counts(a)).all;
   same('the sidebar’s total is the kind switch’s All, and each segment counts the rows of its kind listed',
@@ -11720,7 +11897,7 @@ const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
-  [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
+  [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);

@@ -1,0 +1,66 @@
+[
+  {
+    "name": "down",
+    "enabled": true,
+    "disabled_reason": null,
+    "transport": {
+      "type": "streamable_http",
+      "url": "http://127.0.0.1:47203/mcp",
+      "bearer_token_env_var": null,
+      "http_headers": null,
+      "env_http_headers": null,
+      "http_headers_helper": null
+    },
+    "startup_timeout_sec": null,
+    "tool_timeout_sec": null,
+    "auth_status": "unknown"
+  },
+  {
+    "name": "oauth",
+    "enabled": true,
+    "disabled_reason": null,
+    "transport": {
+      "type": "streamable_http",
+      "url": "http://127.0.0.1:47202/mcp",
+      "bearer_token_env_var": null,
+      "http_headers": null,
+      "env_http_headers": null,
+      "http_headers_helper": null
+    },
+    "startup_timeout_sec": null,
+    "tool_timeout_sec": null,
+    "auth_status": "not_logged_in"
+  },
+  {
+    "name": "plain",
+    "enabled": true,
+    "disabled_reason": null,
+    "transport": {
+      "type": "streamable_http",
+      "url": "http://127.0.0.1:47201/mcp",
+      "bearer_token_env_var": null,
+      "http_headers": null,
+      "env_http_headers": null,
+      "http_headers_helper": null
+    },
+    "startup_timeout_sec": null,
+    "tool_timeout_sec": null,
+    "auth_status": "unsupported"
+  },
+  {
+    "name": "silent",
+    "enabled": true,
+    "disabled_reason": null,
+    "transport": {
+      "type": "streamable_http",
+      "url": "http://127.0.0.1:47204/mcp",
+      "bearer_token_env_var": null,
+      "http_headers": null,
+      "env_http_headers": null,
+      "http_headers_helper": null
+    },
+    "startup_timeout_sec": null,
+    "tool_timeout_sec": null,
+    "auth_status": "unknown"
+  }
+]

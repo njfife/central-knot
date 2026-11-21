@@ -145,11 +145,16 @@ export async function findOtherApps(home: string): Promise<OtherApp[]> {
  * desktop's Codex), with that app. That copy never counts as a CLI install (CD §3).
  */
 export async function findBinary(tool: HarnessId, home: string, searchPath: string): Promise<{ binary: string; app?: DesktopApp } | undefined> {
-  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary)) {
-    if (await runnable(candidate)) return { binary: candidate };
-  }
+  const cli = await findCli(tool, home, searchPath);
+  if (cli) return { binary: cli };
   const app = await findApp(appCandidates(home, harnesses[tool].binary));
   return app?.binary ? { binary: app.binary, app } : undefined;
+}
+
+/** The tool's own CLI here, the first of findBinary's candidates that runs; never a desktop app's copy. */
+export async function findCli(tool: HarnessId, home: string, searchPath: string): Promise<string | undefined> {
+  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary)) if (await runnable(candidate)) return candidate;
+  return undefined;
 }
 
 const OPENING = /^﻿?---[ \t]*\r?\n/;

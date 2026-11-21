@@ -90,13 +90,13 @@ export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; max
  * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` its output byte for
  * byte. A run stopped by its `signal` reads as one that timed out (`'timeout'`).
  */
-type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer };
+export type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer };
 
 /**
- * Runs a command, stopped at its timeout or its `signal`. `group` (git's runs, off Windows): it runs in a process group of its
- * own, and stopping it stops the whole group, the helpers it started (git's remote-http) with it.
+ * Runs a command, stopped at its timeout or its `signal`. `group` (git's runs and mcpsigninrun.ts's, off Windows): it runs in a
+ * process group of its own, and stopping it stops the whole group, the helpers it started (git's remote-http) with it.
  */
-function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
+export function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
   const maxBytes = options.maxBytes ?? 4 * 1024 * 1024, group = !!options.group && process.platform !== 'win32';
   return new Promise(done => {
     const out: Buffer[] = [], err: Buffer[] = [];

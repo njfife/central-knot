@@ -13,7 +13,7 @@
 // Text in, text out: the engine (plugins.setPart) reads, writes and reads back.
 import { mcpDisabled, withMcpSwitch } from './mcpswitch.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, type TomlTable } from './textedit.ts';
-import { hasPartSwitch } from './pluginstatus.ts';
+import { claudeServerName, hasPartSwitch } from './pluginstatus.ts';
 import { record, withoutBom } from './values.ts';
 import type { HarnessId, PartKind } from './types.ts';
 
@@ -21,7 +21,7 @@ import type { HarnessId, PartKind } from './types.ts';
 export interface PluginPartAt { plugin: string; marketplace: string; kind: PartKind; name: string }
 
 /** The name Claude Code gives a plugin's server, which its denied list goes by. */
-const claudeServer = ({ plugin, name }: PluginPartAt) => `plugin:${plugin}:${name}`;
+const claudeServer = ({ plugin, name }: PluginPartAt) => claudeServerName(plugin, name);
 /** Claude Code's rules that deny a plugin's agent: `Agent(…)`, and `Task(…)`, the tool's older name, which it reads the same. */
 const claudeAgentRules = ({ plugin, name }: PluginPartAt) => [`Agent(${plugin}:${name})`, `Task(${plugin}:${name})`];
 const denyList = (text: string): unknown[] => {

@@ -41,6 +41,7 @@ import { addSource, checkDue, checkSource, previewSource, removeSource, rowClick
 import { searchFollower, type SearchDoc } from './search.ts';
 import { catalogDocs, libraryDocs } from './searchdocs.ts';
 import { readUsage } from './usage.ts';
+import { checkSignin } from './mcpsigninrun.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
@@ -1571,6 +1572,10 @@ app.whenReady().then(async () => {
   // computer's home reads OpenCode's data where XDG_DATA_HOME moves it, as each tool's folder follows its own variable.
   handleNow('usage:read', async home => (current && home === current.home
     ? readUsage({ home: current.home, overrides: context().overrides, dataHome: current.mode === 'actual' ? process.env.XDG_DATA_HOME : undefined }) : null));
+  // MCP sign-in: one tool's own list command for the home on screen, run on a click (mcpsigninrun.ts): outside the queue, as it can
+  // take 70 s and changes nothing of Central Knot's. This computer's own CLIs are looked for, as the Plugins page's are.
+  handleNow('mcp-signin:check', async (tool, home) => (current && home === current.home && isTool(tool)
+    ? (await checkSignin({ home: current.home, actual: current.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, tool)) ?? null : null));
   // Word search: answered at once from the index last published (search.ts), which reads no file and waits for no pass.
   handleNow('search:ask', async (typed, shown) => search.ask(typeof typed === 'string' ? typed : '', Number.isInteger(shown) ? Number(shown) : 0));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));

@@ -162,12 +162,13 @@ export function libraryPage() {
   }, selectItem);
 }
 
-export function copyButton(text: string, what: string, id: string, label?: string) {
+/** Copies `text`, its glyph ticked for a moment, and says so in the status bar (`said`, else "Copied <what>."). */
+export function copyButton(text: string, what: string, id: string, label?: string, said = `Copied ${what}.`) {
   const glyphButton = button({
     variant: 'ghost', size: 'micro', icon: 'copy', name: `Copy ${what}`, id, label,
     onclick: () => void navigator.clipboard.writeText(text).then(() => {
       glyphButton.firstElementChild!.replaceWith(icon('copy-check', 14));
-      announce(`Copied ${what}.`);
+      announce(said);
       setTimeout(() => glyphButton.firstElementChild?.replaceWith(icon('copy', 14)), 1500);
     }, () => announce('Could not copy. Select the text instead.')),
   });

@@ -36,13 +36,14 @@ import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
+import type { SigninChecks } from './mcpsigninpage.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 /** Every page, in the sidebar's order. The Library lists every kind of item (matrix.ts libraryTable), its segment `state.libraryKind`. */
-export const pages = ['overview', 'harnesses', 'library', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings'] as const;
+export const pages = ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings'] as const;
 export type Page = typeof pages[number];
 
 /** This computer's names, and what its platform offers (machine.ts). */
@@ -164,6 +165,8 @@ export const state = {
   sidebar: undefined as 'open' | 'rail' | undefined,
   /** The rows a click pins where they were, on the list on screen (pinnedRows). */
   pinned: noPins(),
+  /** MCP sign-in: what each column's last Check said in the open home (mcpsigninpage.ts), made again when a home opens; never stored. */
+  mcpSignin: { home: '', columns: {} } as SigninChecks,
 };
 
 /**
@@ -394,6 +397,8 @@ function accept(view: HomeView): HomeView {
   resetPageData(state.history);
   resetPageData(state.usage);
   state.usageBand = false;
+  // What the MCP sign-in checks said is the last home's; one still running there is dropped when it answers.
+  state.mcpSignin = { home: view.home, columns: {} };
   drop(turn => turn.state === 'waiting');
   endRun();
   resetMarket();
