@@ -38,7 +38,7 @@ import { partsHolding, pluginHolds, type ThroughWhichPlugin } from './plugins.ts
 import { copilotServerName } from './profileplan.ts';
 import { mcpTools } from './presence.ts';
 import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
-import { errorCode, itemKey, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, itemKey, sha256, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { SwitchFile } from './skillswitch.ts';
 import { sourceFacts } from './sources.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ToolCopy } from './types.ts';
@@ -276,7 +276,7 @@ export async function serversView(context: ShareContext, tools: HarnessId[], not
 /** One entry as the page shows it (types.ts ToolCopy): the copy question quotes its summary; `ownPart` names its own fields. */
 const toolCopy = (entry: McpEntry): ToolCopy => ({
   hash: entry.hash, directory: entry.file, rootLabel: toolName(entry.tool), lines: 0, modified: '', summary: summary(entry.server), writable: true,
-  folder: entry.name, ownPart: Object.keys(entry.extras).filter(key => !key.startsWith('#')).map(key => key.replace(/^\[(.*)\]$/, '$1')),
+  folder: entry.name, ownPart: Object.keys(entry.extras).filter(key => !key.startsWith('#')).map(key => key.replace(/^\[(.*)\]$/, '$1')), ownHash: sha256(ownPartOf(entry)),
 });
 
 /**

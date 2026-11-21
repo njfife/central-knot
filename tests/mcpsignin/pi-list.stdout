@@ -1,0 +1,49 @@
+{
+  "servers": [
+    {
+      "name": "plain",
+      "scope": "global",
+      "source": "/tmp/sr2/pi/home/.pi/agent/mcp.json",
+      "enabled": true,
+      "exposure": "codemode",
+      "transport": "http://127.0.0.1:47201/mcp",
+      "state": "connected",
+      "tools": [
+        "echo"
+      ]
+    },
+    {
+      "name": "oauth",
+      "scope": "global",
+      "source": "/tmp/sr2/pi/home/.pi/agent/mcp.json",
+      "enabled": true,
+      "exposure": "codemode",
+      "transport": "http://127.0.0.1:47202/mcp",
+      "state": "needs-auth",
+      "tools": []
+    },
+    {
+      "name": "down",
+      "scope": "global",
+      "source": "/tmp/sr2/pi/home/.pi/agent/mcp.json",
+      "enabled": true,
+      "exposure": "codemode",
+      "transport": "http://127.0.0.1:47203/mcp",
+      "state": "failed",
+      "tools": [],
+      "error": "fetch failed"
+    },
+    {
+      "name": "silent",
+      "scope": "global",
+      "source": "/tmp/sr2/pi/home/.pi/agent/mcp.json",
+      "enabled": true,
+      "exposure": "codemode",
+      "transport": "http://127.0.0.1:47204/mcp",
+      "state": "failed",
+      "tools": [],
+      "error": "MCP request timed out after 60000ms"
+    }
+  ],
+  "errors": []
+}
