@@ -1,5 +1,5 @@
 name: Mac checks on a hosted Mac
-run-name: ${{ inputs.measure && 'MEASURING: proves nothing' || 'Mac checks on a hosted Mac' }}
+run-name: "${{ inputs.measure && 'MEASURING: proves nothing' || 'Mac checks on a hosted Mac' }}"
 # The Mac run (scripts/mac-run.mjs, every check mac.yml runs) on GitHub's Apple-silicon Macs, started only by hand:
 # gh workflow run mac-hosted.yml -R njfife/central-knot --ref <branch>. It is not the run that counts: mac.yml still is.
 # Does not prove: Developer ID signing/notarising/stapling or real signed updates (ad hoc here); real-window chrome, Retina
