@@ -11,8 +11,8 @@ import { newItem, type ItemKind } from '../src/library.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, entryTurns, homeItems, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, pluginItemsAgree, pluginLive, pluginPlan, pluginUndo, switchable, switchPlan, turnsWords, undoPlan, undoTurns, type Libraries } from '../src/profileplan.ts';
-import { NO_PLUGINS, deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
+import { allTurns, entryTurns, homeItems, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginUndo, switchable, switchPlan, switchPreview, turnsWords, undoPlan, undoTurns, type Libraries } from '../src/profileplan.ts';
+import { NO_PLUGINS, deleteProfile, liveNow, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { runPlan, type PlanApi } from '../src/pluginplan.ts';
 import { savePluginRecord } from '../src/pluginrecord.ts';
@@ -33,7 +33,7 @@ const libraryOf = (items: [ItemKind, string, boolean, boolean?][]): Libraries =>
   return libraries;
 };
 const ids = (items: { id: string }[]) => items.map(item => item.id);
-const profile = (name: string, items: string[]): Profile => ({ id: name, name, items });
+const profile = (name: string, items: string[], switchesPluginItems = true): Profile => ({ id: name, name, items, switchesPluginItems });
 
 test('A switch turns what the profile names On and every other library item Off; an id naming no live item is skipped', () => {
   const live = liveItems(libraryOf([['skill', 'dev', true], ['skill', 'pager', true], ['skill', 'gone', true, true], ['mcp', 'docs', false], ['agent', 'writer', true]]), new Set());
@@ -443,7 +443,7 @@ test('Which profile is in use follows the library: Delete, a hand click, an item
     await applySkills(box.context, box.tools, []);
     assert.equal(await name(), 'No profile', 'a copy deleted by hand turns its item Off');
     // A profiles file this Central Knot can't use is reported and never written.
-    for (const file of ['{ not json', '{ "formatVersion": 3, "profiles": [] }']) {
+    for (const file of ['{ not json', '{ "formatVersion": 4, "profiles": [] }']) {
       await writeFile(join(box.home, '.central-knot/profiles.json'), file);
       assert.ok((await readProfiles(box.home)).problem);
       assert.ok((await saveProfile(box.context, { name: 'Other' })).problem);
@@ -460,7 +460,7 @@ test('Profiles save only the fields given, a deleted one comes back with its id,
     // A plugin's item is kept by its own form, `plugin:` before its kind (profileplan.ts pluginItemId); a plugin of no kind is not.
     await saveProfile(box.context, { id: dev, items: ['skill:dev', 'agent:writer', 'plugin:skill:document-tools@team-tools/pdf', 'plugin:tool:x', 'nonsense', 'tool:x'] });
     await saveProfile(box.context, { id: dev, name: '  Dev   work ' });
-    assert.deepEqual(await profiles(), [{ id: dev, name: 'Dev work', items: ['skill:dev', 'agent:writer', 'plugin:skill:document-tools@team-tools/pdf'] }]);
+    assert.deepEqual(await profiles(), [{ id: dev, name: 'Dev work', items: ['skill:dev', 'agent:writer', 'plugin:skill:document-tools@team-tools/pdf'], switchesPluginItems: true }]);
     assert.equal((await saveProfile(box.context, { name: 'dev WORK' })).problem, 'There is already a profile called “dev WORK”.');
     const before = await live(box);
     await switchProfile(box.context, box.tools, dev, NO_PLUGINS);
@@ -531,7 +531,14 @@ async function pluginHome({ copilot = false, opencode = false } = {}) {
  * planned from that one read, each copy turned through its tool's own switch (plugins.ts setSkill, setPart), as main.ts pluginSide does.
  */
 async function sideNow(box: Box) {
-  const context = { ...box.context, dataDir: join(box.base, 'data'), binaries: {} };
+  let binaries: Partial<Record<PluginTool, string>> = {};
+  if (box.tools.includes('copilot-cli')) {
+    const bin = join(box.base, 'bin/copilot');
+    await putFile(bin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="skill"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`);
+    await chmod(bin, 0o755);
+    binaries = { 'copilot-cli': bin };
+  }
+  const context = { ...box.context, dataDir: join(box.base, 'data'), binaries };
   const view = { pluginItems: await readPluginItems(context, box.tools), profiles: await readProfiles(box.home), skills: await skillsView(box.context, box.tools),
     mcp: await serversView(box.context, box.tools), agents: await agentsView(box.context, box.tools) } as unknown as HomeView;
   const plugins = pluginLive(view), never = async () => { throw new Error('A profile never installs or uninstalls.'); };
@@ -1021,4 +1028,267 @@ test('A migration stopped part-way is finished by the next pass, with one Histor
     assert.deepEqual([(await live(box)).find(item => item.key === 'pager')?.on, await bytes(folderOf(box, 'codex-cli', 'pager'))], [false, undefined]);
     assert.equal((await history(box)).filter(entry => entry.profile?.migrated).length, 1);
   } finally { await box.cleanup(); }
+});
+
+// ---------- An older profile leaves plugin items alone until chosen ----------
+
+/** Sets up docs@team in Claude Code, Codex, Copilot CLI and Pi, with pdf-reader on in Codex and off in Copilot CLI, plus his own skill `notes` (Off). */
+async function mixedPluginHome() {
+  const { box, made } = await pluginHome({ copilot: true });
+  await put(box, 'claude-cli', { 'SKILL.md': skillText('My notes.', 'notes') }, [], 'notes');
+  await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]);
+  await applySkills(box.context, box.tools, [{ key: 'notes', on: false, except: [], seenOn: true }]);
+  // pdf-reader stays on in Codex, and is off in Copilot CLI by its own switch (`plugin:skill`).
+  const copilotSettings = JSON.parse((await text(box, '.copilot/settings.json'))!);
+  await writeFile(join(box.home, '.copilot/settings.json'), `${JSON.stringify({ ...copilotSettings, disabledSkills: ['docs:pdf-reader'] }, null, 2)}\n`);
+  return { box, made };
+}
+
+const mixedPluginFiles = async (box: Box) => ({
+  codex: await text(box, '.codex/config.toml'),
+  copilot: await text(box, '.copilot/settings.json'),
+  claude: await text(box, '.claude/settings.json'),
+  piPdf: await bytes(folderOf(box, 'pi-cli', 'pdf-reader')),
+  piSheet: await bytes(folderOf(box, 'pi-cli', 'spreadsheet')),
+});
+
+test('A format 2 profile leaves mixed plugin copies alone on switch and Undo, is in use by his own items, and never rewrites the format 2 file', async () => {
+  const { box } = await mixedPluginHome();
+  try {
+    const format2 = `${JSON.stringify({ formatVersion: 2, profiles: [{ id: 'legacy', name: 'Legacy', items: ['skill:notes'] }] }, null, 2)}\n`;
+    await writeFile(join(box.home, '.central-knot/profiles.json'), format2);
+    const beforeFiles = await mixedPluginFiles(box);
+    const read = await readProfiles(box.home), legacy = read.profiles[0]!;
+    assert.equal(legacy.switchesPluginItems, false);
+    const first = await sideNow(box);
+    assert.deepEqual(pluginPlan(legacy, first.plugins), [], 'a non-managing profile plans no plugin copy');
+    assert.equal(pluginItemsAgree(legacy, first.plugins), true);
+
+    // Switch: turns his own skill `notes` On, leaves every plugin copy and profiles.json byte for byte.
+    const switched = await switchProfile(box.context, box.tools, 'legacy', first.side);
+    assert.deepEqual([switched.stopped, switched.on, switched.off, switched.results], [undefined, ['notes'], [], []]);
+    assert.deepEqual(await mixedPluginFiles(box), beforeFiles, 'Codex, Copilot CLI, Claude Code and Pi plugin copies byte for byte');
+    assert.equal(await text(box, '.central-knot/profiles.json'), format2, 'profiles.json stays format 2, byte for byte');
+    assert.deepEqual(await (await sideNow(box)).inUse(), ['Legacy'], 'in use by his own items alone');
+    assert.equal((await history(box)).at(-1)!.profile?.plugins, undefined, 'History records no plugin change');
+
+    // Undo: turns `notes` back Off, still leaves every plugin copy and format 2 profiles.json byte for byte.
+    const undone = await undoSwitch(box.context, box.tools, switched.event!, (await sideNow(box)).side);
+    assert.deepEqual([undone.stopped, undone.switched], [undefined, { on: [], off: ['notes'], left: [] }]);
+    assert.deepEqual(await mixedPluginFiles(box), beforeFiles);
+    assert.equal(await text(box, '.central-knot/profiles.json'), format2);
+    assert.deepEqual(await (await sideNow(box)).inUse(), []);
+  } finally { await box.cleanup(); }
+});
+
+test('Choosing plugin items on an older profile keeps his own tick, starts with no plugin tick, switches plugin copies on and off, writes format 3, and survives reopening', async () => {
+  const { box } = await mixedPluginHome();
+  try {
+    const format2 = `${JSON.stringify({ formatVersion: 2, profiles: [{ id: 'legacy', name: 'Legacy', items: ['skill:notes'] }] }, null, 2)}\n`;
+    await writeFile(join(box.home, '.central-knot/profiles.json'), format2);
+    const beforeFiles = await mixedPluginFiles(box);
+
+    // Choose plugin items: changes only profiles.json (now format 3 with switchesPluginItems: true); no plugin ticks added, no tool written.
+    const chosen = await saveProfile(box.context, { id: 'legacy', switchesPluginItems: true });
+    assert.equal(chosen.problem, undefined);
+    assert.deepEqual(await mixedPluginFiles(box), beforeFiles, 'choosing writes no tool file');
+    const saved = JSON.parse((await text(box, '.central-knot/profiles.json'))!);
+    assert.deepEqual(saved, { formatVersion: 3, profiles: [{ id: 'legacy', name: 'Legacy', items: ['skill:notes'], switchesPluginItems: true }] });
+
+    // Tick pdf-reader (keeping his own notes ticked) and switch: pdf-reader is on in both Codex and Copilot CLI.
+    await saveProfile(box.context, { id: 'legacy', items: ['skill:notes', pdfId2] });
+    const onBoth = await switchProfile(box.context, box.tools, 'legacy', (await sideNow(box)).side);
+    assert.equal(onBoth.stopped, undefined);
+    assert.equal(await text(box, '.codex/config.toml'), `${CODEX_BEFORE}\n[[skills.config]]\nname = "docs:spreadsheet"\nenabled = false\n\n[plugins."docs@team".mcp_servers.issues]\nenabled = false\n`, 'pdf-reader stays on in Codex while unticked items turn off');
+    assert.deepEqual(JSON.parse((await text(box, '.copilot/settings.json'))!).disabledSkills, ['docs:spreadsheet'], 'pdf-reader turned on in Copilot CLI; unticked spreadsheet turned off');
+
+    // Untick pdf-reader (keeping his own notes ticked) and switch: pdf-reader is off in both Codex and Copilot CLI.
+    await saveProfile(box.context, { id: 'legacy', items: ['skill:notes'] });
+    const offBoth = await switchProfile(box.context, box.tools, 'legacy', (await sideNow(box)).side);
+    assert.deepEqual([offBoth.stopped, offBoth.off], [undefined, ['pdf-reader']]);
+    assert.match((await text(box, '.codex/config.toml'))!, /name = "docs:pdf-reader"\nenabled = false/);
+    assert.deepEqual(JSON.parse((await text(box, '.copilot/settings.json'))!).disabledSkills.sort(), ['docs:pdf-reader', 'docs:spreadsheet']);
+
+    // Reopen (fresh read from disk): format 3 keeps switchesPluginItems: true, even if a save omits or passes false (no way back).
+    await saveProfile(box.context, { id: 'legacy', switchesPluginItems: false });
+    const reopened = (await readProfiles(box.home)).profiles[0]!;
+    assert.deepEqual(reopened, { id: 'legacy', name: 'Legacy', items: ['skill:notes'], switchesPluginItems: true });
+    await writeFile(join(box.home, '.codex/config.toml'), CODEX_BEFORE);
+    assert.ok(pluginPlan(reopened, (await sideNow(box)).plugins).some(turn => turn.id === pdfId2 && !turn.on && turn.turn.includes('codex-cli')));
+  } finally { await box.cleanup(); }
+});
+
+test('A new empty profile cannot be switched; ticking one item of his own lets an empty plugin selection turn every switchable plugin item off', async () => {
+  const { box } = await pluginHome({ copilot: true });
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('My notes.', 'notes') }, [], 'notes');
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]);
+    const freshId = (await saveProfile(box.context, { name: 'Fresh', items: [] })).id!;
+    const fresh = (await readProfiles(box.home)).profiles[0]!;
+    assert.equal(fresh.switchesPluginItems, true);
+    assert.equal(JSON.parse((await text(box, '.central-knot/profiles.json'))!).formatVersion, 3);
+    const before = await sideNow(box);
+    assert.equal(switchable(fresh, await live(box), before.plugins), false, 'empty profile is not offered to switch to');
+
+    // Tick his own `notes` (already On): now switchable, and the empty plugin selection turns every switchable plugin item off.
+    await saveProfile(box.context, { id: freshId, items: ['skill:notes'] });
+    const ready = (await readProfiles(box.home)).profiles[0]!;
+    assert.equal(switchable(ready, await live(box), before.plugins), true);
+    const plan = pluginPlan(ready, before.plugins);
+    assert.deepEqual(plan.filter(turn => !turn.on && turn.turn.length).map(turn => turn.id).sort(), [issuesId2, pdfId2, sheetId2]);
+    const switched = await switchProfile(box.context, box.tools, freshId, before.side);
+    assert.deepEqual([switched.stopped, switched.on, switched.off.sort()], [undefined, [], ['issues', 'pdf-reader', 'spreadsheet']]);
+    assert.deepEqual(JSON.parse((await text(box, '.copilot/settings.json'))!).disabledSkills.sort(), ['docs:pdf-reader', 'docs:spreadsheet']);
+    assert.deepEqual(await bytes(folderOf(box, 'pi-cli', 'pdf-reader')), undefined);
+    assert.deepEqual(await bytes(folderOf(box, 'pi-cli', 'spreadsheet')), undefined);
+    assert.deepEqual(JSON.parse((await text(box, '.claude/settings.json'))!).deniedMcpServers, [{ serverName: 'plugin:docs:issues' }]);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin installed after a managing and a non-managing profile: the managing one turns its items off at the next switch, the non-managing one leaves them', async () => {
+  const { box } = await pluginHome({ copilot: true });
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('My notes.', 'notes') }, [], 'notes');
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]);
+    await writeFile(join(box.home, '.central-knot/profiles.json'), `${JSON.stringify({ formatVersion: 3, profiles: [
+      { id: 'old', name: 'Old', items: ['skill:notes'], switchesPluginItems: false },
+      { id: 'modern', name: 'Modern', items: ['skill:notes', pdfId2, sheetId2, issuesId2], switchesPluginItems: true },
+    ] }, null, 2)}\n`);
+    // A second plugin `tracker` (with skill `triage`) is installed later in Codex and Copilot CLI.
+    const trackerCodex = join(box.home, '.codex/plugins/cache/team/tracker/1.0.0');
+    const trackerCopilot = join(box.home, '.copilot/installed-plugins/team/tracker');
+    for (const folder of [trackerCodex, trackerCopilot]) {
+      await putFile(join(folder, 'skills/triage/SKILL.md'), skillText('Triage.', 'triage'));
+      await putFile(join(folder, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'tracker', version: '1.0.0', skills: './skills' }));
+    }
+    await writeFile(join(box.home, '.codex/config.toml'), `${CODEX_BEFORE}\n[plugins."tracker@team"]\nenabled = true\n`);
+    const copilotCfg = JSON.parse((await text(box, '.copilot/config.json'))!);
+    copilotCfg.installedPlugins.push({ name: 'tracker', marketplace: 'team', version: '1.0.0', cache_path: trackerCopilot, enabled: true });
+    await writeFile(join(box.home, '.copilot/config.json'), JSON.stringify(copilotCfg));
+
+    const beforeCodex = await text(box, '.codex/config.toml'), beforeCopilot = await text(box, '.copilot/settings.json');
+    const now = await sideNow(box), [old, modern] = (await readProfiles(box.home)).profiles;
+    assert.deepEqual(pluginPlan(old!, now.plugins), [], 'Old leaves the newly installed plugin alone');
+    assert.deepEqual(await now.inUse(), ['Old'], 'Old stays in use; Modern does not until switched');
+    assert.deepEqual(pluginPlan(modern!, now.plugins).map(turn => [turn.id, turn.on, turn.turn]),
+      [['plugin:skill:tracker@team/triage', false, ['codex-cli', 'copilot-cli']]]);
+
+    // Switching to Old (with notes off first so the switch runs) leaves tracker's triage untouched.
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: false, except: [], seenOn: true }]);
+    await switchProfile(box.context, box.tools, 'old', (await sideNow(box)).side);
+    assert.deepEqual([await text(box, '.codex/config.toml'), await text(box, '.copilot/settings.json')], [beforeCodex, beforeCopilot]);
+
+    // Switching to Modern turns tracker's triage off in both Codex and Copilot CLI.
+    const switched = await switchProfile(box.context, box.tools, 'modern', (await sideNow(box)).side);
+    assert.deepEqual([switched.stopped, switched.off], [undefined, ['triage']]);
+    assert.match((await text(box, '.codex/config.toml'))!, /name = "tracker:triage"\nenabled = false/);
+    assert.deepEqual(JSON.parse((await text(box, '.copilot/settings.json'))!).disabledSkills, ['tracker:triage']);
+  } finally { await box.cleanup(); }
+});
+
+test('Renaming, ticking, or deleting and undoing a non-managing profile keeps it non-managing in format 3, with dormant ticks intact; format 1 migration stays format 2 non-managing', async () => {
+  const { box } = await mixedPluginHome();
+  try {
+    const format2 = `${JSON.stringify({ formatVersion: 2, profiles: [{ id: 'legacy', name: 'Legacy', items: ['skill:notes', 'skill:dormant'] }] }, null, 2)}\n`;
+    await writeFile(join(box.home, '.central-knot/profiles.json'), format2);
+
+    // Rename: file becomes format 3 and records switchesPluginItems: false; dormant tick stays.
+    await saveProfile(box.context, { id: 'legacy', name: 'Old work' });
+    assert.deepEqual(JSON.parse((await text(box, '.central-knot/profiles.json'))!),
+      { formatVersion: 3, profiles: [{ id: 'legacy', name: 'Old work', items: ['skill:notes', 'skill:dormant'], switchesPluginItems: false }] });
+
+    // Ticking his own items keeps switchesPluginItems: false.
+    await saveProfile(box.context, { id: 'legacy', items: ['skill:notes', 'skill:dormant', 'skill:extra'] });
+    assert.equal((await readProfiles(box.home)).profiles[0]?.switchesPluginItems, false);
+
+    // Delete -> Undo (restore) keeps switchesPluginItems: false and dormant ticks.
+    const gone = (await readProfiles(box.home)).profiles[0]!;
+    await deleteProfile(box.context, gone.id);
+    assert.deepEqual((await readProfiles(box.home)).profiles, []);
+    await saveProfile(box.context, { ...gone, restore: true });
+    assert.deepEqual((await readProfiles(box.home)).profiles, [gone]);
+  } finally { await box.cleanup(); }
+
+  // Format 1 migration writes format 2, and every moved profile is read as non-managing.
+  const { box: migrated } = await oldHome('dev');
+  try {
+    await migrateProfiles(migrated.context, migrated.tools);
+    assert.equal(JSON.parse((await text(migrated, '.central-knot/profiles.json'))!).formatVersion, 2);
+    assert.deepEqual((await readProfiles(migrated.home)).profiles.map(each => each.switchesPluginItems), [false, false]);
+  } finally { await migrated.cleanup(); }
+});
+
+test('Saving writes format 3 (above format 2), and this reader’s format > FORMAT_VERSION rule refuses a format 4 file without changing a byte', async () => {
+  const { box } = await home();
+  try {
+    await saveProfile(box.context, { name: 'Modern', items: ['skill:dev'] });
+    const raw = (await text(box, '.central-knot/profiles.json'))!;
+    assert.equal(JSON.parse(raw).formatVersion, 3, 'saved in format 3, so a format 2 reader refuses it under format > FORMAT_VERSION');
+    // The reader's own format > FORMAT_VERSION check refuses any file saved by a newer format without touching it.
+    const newer = `${JSON.stringify({ formatVersion: 4, profiles: [{ id: 'future', name: 'Future', items: ['skill:dev'], switchesPluginItems: true }] }, null, 2)}\n`;
+    await writeFile(join(box.home, '.central-knot/profiles.json'), newer);
+    assert.match((await readProfiles(box.home)).problem ?? '', /saved by a newer Central Knot.*Nothing in it was changed/);
+    assert.match((await saveProfile(box.context, { name: 'Other' })).problem ?? '', /saved by a newer Central Knot/);
+    assert.match((await switchProfile(box.context, box.tools, 'future', NO_PLUGINS)).stopped ?? '', /saved by a newer Central Knot/);
+    assert.equal(await text(box, '.central-knot/profiles.json'), newer, 'newer file left byte for byte');
+  } finally { await box.cleanup(); }
+});
+
+test('Choosing plugin items on a non-managing profile that already holds a plugin id drops plugin ids while keeping live and dormant personal ids', async () => {
+  const { box } = await mixedPluginHome();
+  try {
+    const format2 = `${JSON.stringify({ formatVersion: 2, profiles: [{ id: 'hand', name: 'Hand', items: ['skill:notes', 'skill:dormant', pdfId2] }] }, null, 2)}\n`;
+    await writeFile(join(box.home, '.central-knot/profiles.json'), format2);
+
+    // Choose (false -> true): drops plugin ids, keeps live and dormant personal ids, starts with zero plugin ticks.
+    assert.equal((await saveProfile(box.context, { id: 'hand', switchesPluginItems: true })).problem, undefined);
+    assert.deepEqual(JSON.parse((await text(box, '.central-knot/profiles.json'))!),
+      { formatVersion: 3, profiles: [{ id: 'hand', name: 'Hand', items: ['skill:notes', 'skill:dormant'], switchesPluginItems: true }] });
+
+    // Switching without ticking anything must not turn pdf-reader on in Copilot CLI; it turns unticked plugin items off.
+    const switched = await switchProfile(box.context, box.tools, 'hand', (await sideNow(box)).side);
+    assert.equal(switched.stopped, undefined);
+    assert.deepEqual(JSON.parse((await text(box, '.copilot/settings.json'))!).disabledSkills.sort(), ['docs:pdf-reader', 'docs:spreadsheet']);
+    assert.match((await text(box, '.codex/config.toml'))!, /name = "docs:pdf-reader"\nenabled = false/);
+
+    // Already managing: ticking a plugin id and saving again with switchesPluginItems: true keeps that plugin tick.
+    await saveProfile(box.context, { id: 'hand', items: ['skill:notes', 'skill:dormant', pdfId2] });
+    await saveProfile(box.context, { id: 'hand', switchesPluginItems: true });
+    assert.deepEqual((await readProfiles(box.home)).profiles[0]?.items, ['skill:notes', 'skill:dormant', pdfId2]);
+  } finally { await box.cleanup(); }
+});
+
+test('saveProfiles is the one writer of profiles.json: format 3 by default, format 2 (omitting switchesPluginItems) for the format 1 move', async () => {
+  const { box } = await home();
+  try {
+    const list: Profile[] = [{ id: 'a', name: 'A', items: ['skill:dev'], switchesPluginItems: true }];
+    await saveProfiles(box.home, list, 2);
+    assert.deepEqual(JSON.parse((await text(box, '.central-knot/profiles.json'))!),
+      { formatVersion: 2, profiles: [{ id: 'a', name: 'A', items: ['skill:dev'] }] });
+    await saveProfiles(box.home, list);
+    assert.deepEqual(JSON.parse((await text(box, '.central-knot/profiles.json'))!),
+      { formatVersion: 3, profiles: list });
+    assert.equal(PLUGIN_ITEMS_STAY, 'Plugin items stay as they are.');
+  } finally { await box.cleanup(); }
+});
+
+test('switchPreview gives the same line for the page header and both menus: managing and non-managing profiles across every state, and namedCount ignores plugin ids while non-managing', () => {
+  const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', false], ['skill', 'pager', true]]);
+  const liveList = homeItems(home), plugs = pluginLive(home);
+  const legacy = profile('Legacy', ['skill:notes'], false);
+  const legacyWithPluginId = profile('Legacy', [pdfId], false);
+  assert.deepEqual([namedCount(legacyWithPluginId, liveList, plugs), switchable(legacyWithPluginId, liveList, plugs)], [0, false], 'non-managing profile ignores plugin ids');
+  assert.equal(switchPreview(legacy, liveList, plugs), 'Switching turns 1 item on and 1 off. Plugin items stay as they are.');
+  assert.equal(switchPreview(profile('EmptyOld', [], false), liveList, plugs), '0 items. Plugin items stay as they are.');
+  assert.equal(switchPreview(profile('EmptyNew', [], true), liveList, plugs), '0 items');
+  assert.equal(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs), 'Switching turns 1 item on and 3 off');
+  // notes on, pager off: Legacy is in use (other personal item off, plugin items left alone); Modern is not (plugin items still on).
+  const notesOn = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', true], ['skill', 'pager', false]]);
+  assert.equal(switchPreview(legacy, homeItems(notesOn), pluginLive(notesOn)), 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.');
+  const onlyNotes = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', true]]);
+  assert.equal(switchPreview(legacy, homeItems(onlyNotes), pluginLive(onlyNotes)), 'In use · 1 item on. Plugin items stay as they are.');
+  // Managing profile with plugin off in Codex: held line from heldWords, no "Plugin items stay as they are."
+  const offInCodex = docsHome([docsIn('codex-cli', { off: true })], [], [['skill', 'notes', true]]);
+  assert.equal(switchPreview(profile('Docs', ['skill:notes', pdfId, sheetId], true), homeItems(offInCodex), pluginLive(offInCodex)),
+    'Not in use · document-tools is off in Codex, so 2 of its items can’t be switched from here');
 });

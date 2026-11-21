@@ -1092,15 +1092,26 @@ async function chooseFrom(a, value) {
   await a.settle();
 }
 /**
- * Whether the list `id` came to rest (still for six frames) within 3 s; it is found by its id each frame, as a redraw replaces it. A
- * scroll that animates (a mouse wheel's) adds its later steps to a scroll place written meanwhile, some after the place was read.
- * A check that writes a scroll place checks this first, so a list that never rests fails under its own name. A window the other groups' windows cover draws few frames or none for
- * a while (on the Mac, four groups at once): at the end of the 3 s, a list still where it started has rested too.
+ * Whether the list `id` came to rest within 3 s: six unchanged animation frames, or still where it last stood for 200 ms when the
+ * 3 s runs out. With `queued` (a one-frame move already queued ahead of this call, such as matrix.ts openRow), a window covered
+ * by the other groups' that draws slow frames also rests once one unchanged frame lands at least 200 ms after the last move. The
+ * list is found by its id each frame, as a redraw replaces it. A check that writes a scroll place checks this first, so a list
+ * that never rests fails under its own name.
  */
-const stillList = (a, id) => a.run(`new Promise(done => { const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop, first = at(); let last = first, still = 0, ended = false;
+const stillList = (a, id, { queued = false } = {}) => a.run(`new Promise(done => {
+  const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop;
+  let last = at(), still = 0, since = performance.now(), ended = false;
   const end = answer => { if (!ended) { ended = true; done(answer); } };
-  setTimeout(() => end(at() === first), 3000);
-  const look = () => { if (ended) return; still = at() === last ? still + 1 : 0; last = at(); if (still === 6) end(true); else requestAnimationFrame(look); }; requestAnimationFrame(look); })`);
+  setTimeout(() => end(at() === last && performance.now() - since >= 200), 3000);
+  const look = () => {
+    if (ended) return;
+    const now = performance.now(), cur = at();
+    if (cur === last) { still++; if (still === 6 || (${queued} && now - since >= 200)) { end(true); return; } }
+    else { still = 0; last = cur; since = now; }
+    requestAnimationFrame(look);
+  };
+  requestAnimationFrame(look);
+})`);
 
 /**
  * One mouse event at the point `at`, as a real mouse sends it: `buttons` 1 while the left button is held, and no button named on a
@@ -1273,7 +1284,7 @@ async function openedRowLook(a, kind, key) {
     const row = document.querySelector('${row}');
     return ${what};
   })()`);
-  await stillList(a, await a.run(`document.querySelector('${row}').closest('.scroll').id`));
+  await stillList(a, await a.run(`document.querySelector('${row}').closest('.scroll').id`), { queued: true });
   const [x, y] = await a.run(`(() => { const box = document.querySelector('${row}').getBoundingClientRect(); return [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)]; })()`);
   await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
   const underPointer = await read(`[row.matches(':hover') ? 'pointer on the row' : 'pointer elsewhere', drawn(row), drawn(row.nextElementSibling)]`);
@@ -6038,7 +6049,7 @@ async function crashFlow() {
 async function draftFlow() {
   const realHome = join(scratch, 'draft-real'), home = join(scratch, 'draft-home'), data = join(scratch, 'draft-data');
   const claudeMd = join(home, '.claude/CLAUDE.md'), agentsMd = join(home, '.codex/AGENTS.md'), copilotMd = join(home, '.copilot/copilot-instructions.md');
-  for (const folder of ['.claude', '.codex', '.copilot']) mkdirSync(join(home, folder), { recursive: true });
+  for (const folder of ['.claude/skills', '.codex', '.copilot']) mkdirSync(join(home, folder), { recursive: true });
   const claude0 = '# Style\nBe brief.\n\n# Claude\nUse the Task tool.\nDropped by the draft.\n', codex0 = 'Be brief.\nRun codex review before pushing.\n';
   writeFileSync(claudeMd, claude0);
   writeFileSync(agentsMd, codex0);
@@ -6055,15 +6066,19 @@ async function draftFlow() {
   writeFileSync(mode, 'fail');
 
   const a = await launch(data, [], realHome);
+  // A sync record (Synchronize everything off) lets background passes report changes made outside (homepass.ts pageSees).
+  await a.click('#setup-no');
   const says = async selector => (await a.text(selector)) ?? '';
-  const untilThere = async selector => { for (let tries = 0; tries < 80 && !(await a.exists(selector)); tries++) await wait(100); return a.exists(selector); };
-  // A change outside, read in the background: a skill folder written into the home until the page is drawn again (the mark
-  // placeThroughRedraw leaves on the header), then taken away.
+  const until = async (test, tries = 80) => { for (let count = 0; count < tries && !(await test()); count++) await wait(100); return test(); };
+  const untilThere = selector => until(() => a.exists(selector));
+  // A change outside, read in the background: a skill folder written into the home until the background refresh redraws the
+  // page with the new Library count (5 s at most), then taken away.
   const readInBackground = async () => {
-    const folder = join(home, '.claude/skills/read-in-the-background');
+    const before = Number(await says('#nav-library .nav-count')), folder = join(home, '.claude/skills/read-in-the-background');
     mkdirSync(folder, { recursive: true }); writeFileSync(join(folder, 'SKILL.md'), text('read-in-the-background'));
-    for (let tries = 0; tries < 50 && !(await a.run(`!document.querySelector('#header > *').ckDrawn`)); tries++) await wait(100);
+    const shown = await until(async () => Number(await says('#nav-library .nav-count')) > before, 50);
     rmSync(folder, { recursive: true, force: true });
+    if (!shown) await a.run(`document.querySelector('#header > *').ckDrawn = true`);
   };
   const typeModel = name => a.run(`(() => { const box = document.querySelector('#base-draft-model'); box.value = ${JSON.stringify(name)}; box.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const argsSent = () => readNow(ran).trim().split('\n');
@@ -6072,13 +6087,17 @@ async function draftFlow() {
   await a.click('#nav-instructions');
   check('with tools that can write one, the base card offers a draft', await untilThere('#base-draft'), await says('#base-card'));
   // A file with Windows line endings: a click puts the caret where it landed, and an edit keeps every other line's ending.
+  const codexText = '[aria-label="Codex instructions"] pre.ins-preview';
   const crlf = 'Run codex review before pushing.\r\nline one\r\nline two\r\nTARGET here\r\nlast line\r\n';
   writeFileSync(agentsMd, crlf);
   await a.click('#header-refresh');
-  const target = await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
+  const sawTarget = await until(async () => (await says(codexText)).includes('TARGET'));
+  check('Refresh shows the updated AGENTS.md', sawTarget, await says(codexText));
+  if (!sawTarget) { await a.quit(); return; }
+  const target = await pointAt(a, codexText, 'TARGET');
   // What is under the click's point, said if the check fails.
   const under = await a.run(`(() => { const hit = document.elementFromPoint(${target.x}, ${target.y}), at = document.caretRangeFromPoint(${target.x}, ${target.y}); return { point: ${JSON.stringify(target)}, hit: hit && (hit.id || hit.className || hit.tagName), at: at && [at.startContainer.nodeName, at.startOffset], scroll: document.querySelector('#instructions-scroll').scrollTop }; })()`);
-  await clickText(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
+  await clickText(a, codexText, 'TARGET');
   // The focused editor's id and the six characters at its caret.
   const atCaret = () => a.run(`(() => { const area = document.activeElement; return [area.id, area.value?.slice(area.selectionStart, area.selectionStart + 6)]; })()`);
   const landed = await atCaret();
@@ -6104,7 +6123,6 @@ async function draftFlow() {
   for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
   // A redraw landing between the press and the release replaces the text under the button, and the browser then sends no click:
   // the release opens the editor of the text now there, the caret where it was aimed, in that file too.
-  const codexText = '[aria-label="Codex instructions"] pre.ins-preview';
   let underPress;
   await clickText(a, codexText, 'TARGET', async () => { underPress = await redrawUnder(a, codexText); });
   same('a click on a tool’s text with a redraw between its press and its release: the text was replaced, and its editor opens with the caret where it was aimed',
@@ -6118,11 +6136,13 @@ async function draftFlow() {
     writeFileSync(agentsMd, savedText.replace('last line', 'last line, changed'));
     await a.run(`document.querySelector('#header-refresh').click()`);
     await a.settle();
+    await until(async () => (await says(codexText)).includes('changed'));
     underPress = await a.run(`(() => { const text = document.querySelector('${codexText}'); return [text.textContent.includes('changed'), text.matches('.ins-editable')]; })()`);
   });
   same('a press on a tool’s text, its text changed before the release: nothing opens', [...underPress, await a.exists('#ins-text-codex-cli')], [true, true, false]);
   writeFileSync(agentsMd, savedText);
   await a.click('#header-refresh');
+  await until(async () => !(await says(codexText)).includes('changed'));
 
   // Selecting a card's text keeps the selection, to copy it: a drag opens no editor. A double-click's first click is a plain
   // click, which opens the editor, and its second selects the word there.
@@ -6175,12 +6195,14 @@ async function draftFlow() {
   rmSync(agentsMd);
   await a.run(`document.querySelector('#header-refresh').click()`);
   await a.settle();
+  await until(async () => !(await a.exists(codexText)));
   const textGone = !(await a.exists(codexText)), dragEnd = { x: dragOn.x, y: dragOn.y + 80 };
   await mouse(a, 'mouseMoved', dragEnd, 1); await mouse(a, 'mouseReleased', dragEnd, 0);
   await a.settle();
   same('a drag whose text went away before its release selects nothing', [textGone, await a.run(`String(getSelection())`)], [true, '']);
   writeFileSync(agentsMd, codexNow);
   await a.click('#header-refresh');
+  await until(async () => (await says(codexText)).includes('last line'));
   const word = await pointAt(a, codexText, 'last line');
   for (const clickCount of [1, 2]) for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: word.x + 12, y: word.y, button: 'left', buttons, clickCount });
   await a.settle();
@@ -6189,10 +6211,12 @@ async function draftFlow() {
   same('and with nothing typed, its file replaced outside and read again shows the new text from its top', await placeThroughRedraw(a, '#ins-text-codex-cli', async () => {
     writeFileSync(agentsMd, Array.from({ length: 30 }, (_, line) => `Replaced outside, line ${line + 1}.`).join('\n'));
     await a.click('#header-refresh');
+    await until(() => a.run(`document.querySelector('#ins-text-codex-cli')?.value.includes('Replaced outside')`));
   }), [true, 0]);
   await a.press('Escape');
   writeFileSync(agentsMd, codex0);
   await a.click('#header-refresh'); await openKind(a, 'skills'); await a.click('#nav-instructions');
+  await until(async () => (await says(codexText)) === codex0.trimEnd());
 
   await a.shot('draft-entry');
   const page0 = await says('#instructions-scroll');
@@ -6386,6 +6410,7 @@ async function draftFlow() {
   const long = Array.from({ length: 200 }, (_, line) => `- Line ${line + 1} of a long CLAUDE.md, long enough to show how a text that runs for pages is edited.`).join('\n') + '\n';
   writeFileSync(claudeMd, long);
   await a.click('#header-refresh');
+  await untilThere('#ins-more-claude-cli');
   await sizeTo(a, 860, 600);
   await a.run(`document.querySelector('#ins-head-claude-cli').scrollIntoView({ block: 'start' })`);
   same('at 860×600 a 200-line text’s Edit is in view at its card’s head', await inView(['ins-edit-claude-cli']), [true]);
@@ -7372,7 +7397,7 @@ esac
 `, { mode: 0o755 });
   writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.167.0" && exit 0\necho "$*" >> "$HOME/codex-calls.txt"\nexit 9\n', { mode: 0o755 });
   writeFileSync(join(home, 'issue-next'), '2.0.0');
-  const versions = () => Object.fromEntries(Object.entries(JSON.parse(readFileSync(recordPath, 'utf8')).plugins).map(([id, [entry]]) => [id.split('@')[0], entry.version]));
+  const versions = () => Object.fromEntries(Object.entries(jsonOrNothing(recordPath)?.plugins ?? {}).map(([id, [entry]]) => [id.split('@')[0], entry.version]));
   const calls = () => (existsSync(join(home, 'claude-calls.txt')) ? readFileSync(join(home, 'claude-calls.txt'), 'utf8').trim().split('\n') : []);
   // The record kept for this home (the file holds one per home).
   const noted = () => { try { return JSON.parse(readFileSync(join(data, 'plugin-updates.json'), 'utf8')).find(record => record.home === home) ?? {}; } catch { return {}; } };
@@ -9596,7 +9621,7 @@ async function libraryFlow() {
   await c.click('#chip-attention');
   await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const top = () => c.run(`Math.round(document.querySelector('#table-library-all').scrollTop)`);
-  check('the Library’s list comes to rest once review’s row has opened', await stillList(c, 'table-library-all'));
+  check('the Library’s list comes to rest once review’s row has opened', await stillList(c, 'table-library-all', { queued: true }));
   await c.run(`document.querySelector('#table-library-all').scrollTop = 80`);
   const before = await top();
   await c.click(`#${rowPart('diff', 'skills', 'review')}`);
@@ -9618,7 +9643,7 @@ async function libraryFlow() {
   await c.click('#chip-attention');
   await c.click(`#${rowPart('open', 'skills', 'review')}`);
   const tabTop = () => c.run(`Math.round(document.querySelector('#table-skills-claude-cli')?.scrollTop ?? -1)`);
-  check('Claude Code’s Skills list comes to rest once review’s row has opened', await stillList(c, 'table-skills-claude-cli'));
+  check('Claude Code’s Skills list comes to rest once review’s row has opened', await stillList(c, 'table-skills-claude-cli', { queued: true }));
   await c.run(`document.querySelector('#table-skills-claude-cli').scrollTop = 30`);
   const tabBefore = await tabTop();
   await c.click(`#${rowPart('diff', 'skills', 'review')}`);
@@ -11334,9 +11359,10 @@ async function profilePluginsFlow() {
   writeFileSync(config, codexBefore);
   mkdirSync(join(home, '.pi/agent'), { recursive: true });
   mkdirSync(join(tools, '.local/bin'), { recursive: true });
-  for (const [name, output] of [['claude', '2.1.322 (Claude Code)'], ['codex', 'codex-cli 0.142.3'], ['copilot', 'GitHub Copilot CLI 1.0.107.']]) {
+  for (const [name, output] of [['claude', '2.1.322 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) {
     writeFileSync(join(tools, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`, { mode: 0o755 });
   }
+  writeFileSync(join(tools, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="skill"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`, { mode: 0o755 });
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
   const claudeSettings = () => readNow(join(home, '.claude/settings.json')), piTriage = () => (existsSync(join(home, '.pi/agent/skills/triage')) ? tree(join(home, '.pi/agent/skills/triage')) : undefined);
@@ -11396,7 +11422,7 @@ async function profilePluginsFlow() {
   if (a.inspect) {
     const menu = await mainHelpers(a.inspect);
     // A click on the profile in use changes nothing (main.ts switchFromMenu), so finding the ticked Quiet is a look, not a switch.
-    try { check('the menu bar’s Profile menu ticks Quiet, from the same read as the page', await menu.clickMenu('Quiet', true) >= 1); } finally { menu.close(); }
+    try { check('the menu bar’s Profile menu ticks Quiet, from the same read as the page', await menu.clickMenu('Quiet · In use · 1 item on, the other 1 off wherever they can be switched', true) >= 1); } finally { menu.close(); }
   } else console.log('No main-process inspector: skipping the menu bar’s Profile menu.');
   // Codex turned back by hand first: the Undo puts Pi's copy back, leaves Codex, and says so once.
   writeFileSync(config, codexBefore);
@@ -11412,7 +11438,7 @@ async function profilePluginsFlow() {
   same('the status bar’s menu switches to Quiet the same way', [files().codex, files().pi, (await a.text('#status-profile'))?.trim()], [`${codexBefore}\n[[skills.config]]\nname = "issue-tracker:triage"\nenabled = false\n`, undefined, 'Quiet']);
   if (a.inspect) {
     const menu = await mainHelpers(a.inspect);
-    try { await menu.clickMenu('Work', false); } finally { menu.close(); }
+    try { await menu.clickMenu('Work · Switching turns 1 item on', false); } finally { menu.close(); }
     for (let tries = 0; tries < 50 && readNow(config) !== codexBefore; tries++) await wait(100);
     await a.click('#header-refresh');
     same('the menu bar’s Work turns triage back on in Codex and Pi', [files(), (await a.text('#status-profile'))?.trim()], [before, 'Work']);
@@ -11497,6 +11523,197 @@ async function profilePluginsFlow() {
     [['Stays on in Copilot CLI: Copilot CLI turns a server off by its name alone, and a server of your own there is named “tracker” too.'], 'Turns off in Codex']);
   same('no page errors', a.pageErrors, []);
   await a.quit();
+
+  // Format 2 profiles (saved before plugin items could be ticked) leave plugin copies alone until chosen, say "Plugin items stay
+  // as they are." beside the count on the page and in both menus, keep format 2 untouched until saved, and once chosen switch
+  // plugin copies on and off in format 3 across app restarts.
+  const oldHome = join(scratch, 'home-old-profiles'), oldData = join(scratch, 'old-profiles-data');
+  const oldClaude = join(oldHome, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0');
+  const oldCodex = join(oldHome, '.codex/plugins/cache/ck-test-market/issue-tracker/2.0.0');
+  const oldCopilot = join(oldHome, '.copilot/installed-plugins/ck-test-market/issue-tracker');
+  writeClaudeInstall(oldHome, 'ck-test-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': triage, '.mcp.json': servers });
+  writeFileSync(join(oldHome, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'git', url: market } } }));
+  for (const [path, text] of [['skills/triage/SKILL.md', triage], ['.mcp.json', servers], ['.codex-plugin/plugin.json', JSON.stringify({ name: 'issue-tracker', version: '2.0.0', skills: './skills', mcpServers: './.mcp.json' })]]) {
+    for (const copy of [oldCodex, oldCopilot]) { mkdirSync(dirname(join(copy, path)), { recursive: true }); writeFileSync(join(copy, path), text); }
+  }
+  const oldCodexCfg = join(oldHome, '.codex/config.toml'), oldCodexInit = `[marketplaces.ck-test-market]\nsource = "${market}"\n\n[plugins."issue-tracker@ck-test-market"]\nenabled = true\n`;
+  writeFileSync(oldCodexCfg, oldCodexInit);
+  const oldCopilotSettings = join(oldHome, '.copilot/settings.json');
+  writeFileSync(join(oldHome, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'issue-tracker', marketplace: 'ck-test-market', version: '2.0.0', cache_path: oldCopilot, enabled: true }] }));
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: market } } }, disabledSkills: ['issue-tracker:triage'] }, null, 2)}\n`);
+  // His own skill `notes` taken into Central Knot and currently Off, so switching to Legacy turns it On.
+  mkdirSync(join(oldHome, '.claude/skills/notes'), { recursive: true });
+  writeFileSync(join(oldHome, '.claude/skills/notes/SKILL.md'), md('notes', 'Takes notes.'));
+  const oldProfilesFile = join(oldHome, '.central-knot/profiles.json');
+  const format2Text = `${JSON.stringify({ formatVersion: 2, profiles: [{ id: 'legacy', name: 'Legacy', items: ['skill:notes'] }, { id: 'empty-old', name: 'Empty old', items: [] }] }, null, 2)}\n`;
+  mkdirSync(dirname(oldProfilesFile), { recursive: true });
+  writeFileSync(oldProfilesFile, format2Text);
+  mkdirSync(oldData, { recursive: true });
+  writeFileSync(join(oldData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: oldHome }, closeExplained: true }));
+
+  let b = await launch(oldData, [], tools);
+  const bDone = async () => { for (let tries = 0; tries < 100 && await b.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await b.settle(); };
+  same('his own notes taken in, then turned off', [
+    await b.run(`window.centralKnot.applySkills([{ key: 'notes', on: true, except: [] }], false, ${JSON.stringify(oldHome)}).then(r => r.stopped ?? 'ok')`),
+    await b.run(`window.centralKnot.applySkills([{ key: 'notes', on: false, except: [], seenOn: true }], false, ${JSON.stringify(oldHome)}).then(r => r.stopped ?? 'ok')`),
+  ], ['ok', 'ok']);
+  const oldPluginFiles = () => ({ codex: readNow(oldCodexCfg), copilot: readNow(oldCopilotSettings), claude: readNow(join(oldHome, '.claude/settings.json')) });
+  const oldBefore = oldPluginFiles();
+  await b.click('#nav-profiles');
+  await b.click('#header-refresh');
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Legacy')).click()`); await b.settle();
+
+  const legacyPreview = 'Switching turns 1 item on. Plugin items stay as they are.';
+  const chooseNote = 'This profile leaves plugin items as they are, so they aren’t listed. Choosing them is for good: they are listed unticked, and from the next switch the ones left unticked turn off wherever they can be switched.';
+  const chooseTitle = 'Lists plugin items for Legacy, none ticked. This can’t be taken back. Only the profile changes now; tools change on Switch.';
+  same('a format 2 profile says Plugin items stay as they are, hides plugin rows behind Choose with exact note and tooltip, and lists only personal items',
+    [await b.text('.profile-header p'), await b.text('#profile-plugins-note .band-text'), await b.text('#profile-choose-plugins'),
+      await b.run(`document.querySelector('#profile-choose-plugins')?.title`), await b.all('.pf-row[data-item]', 'e.dataset.item')],
+    [legacyPreview, chooseNote, 'Choose plugin items for this profile', chooseTitle, ['skill:notes']]);
+  await sizeTo(b, 1316, 819);
+  if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+  await b.click('#status-profile');
+  const lastPreviewLine = () => b.run(`(() => {
+    const el = document.querySelector('#status-profile-legacy .pf-menu-preview'), node = el?.firstChild;
+    if (!node || node.nodeType !== 3) return '';
+    const text = node.textContent ?? '', r = document.createRange();
+    let lastTop = -1, start = 0;
+    for (let i = 0; i < text.length; i++) {
+      r.setStart(node, i); r.setEnd(node, i + 1);
+      const rect = r.getBoundingClientRect();
+      if (rect.width && Math.round(rect.top) > lastTop) { lastTop = Math.round(rect.top); start = i; }
+    }
+    return text.slice(start).trim();
+  })()`);
+  same('status bar menu shows preview for Legacy, (empty) for Empty old, max-width 400px without orphan "are.", and never fades the in-use row',
+    [await b.text('#status-profile-legacy .pf-menu-preview'), await b.text('#status-profile-empty-old .pf-menu-name'), await b.exists('#status-profile-empty-old .pf-menu-preview'),
+      await b.run(`getComputedStyle(document.querySelector('.pf-menu')).maxWidth`), await lastPreviewLine() !== 'are.',
+      await b.run(`getComputedStyle(document.querySelector('.pf-menu-item[aria-checked="true"]')).opacity`)],
+    [legacyPreview, 'Empty old (empty)', false, '400px', true, '1']);
+  if (b.inspect) {
+    const menu = await mainHelpers(b.inspect);
+    try { check('the menu bar menu shows Empty old as (empty)', await menu.clickMenu('Empty old (empty)', true) >= 1); } finally { menu.close(); }
+  }
+  await fullSize(b);
+  // Pictures of the non-managing profile page and menu line at 860x528 and 1316x819 with the sidebar open, light and dark.
+  if (shots) {
+    for (const theme of ['light', 'dark']) {
+      await b.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      for (const [width, height] of [[860, 528], [1316, 819]]) {
+        await sizeTo(b, width, height);
+        if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+        if (await b.exists('.pf-menu')) await b.click('#status-profile');
+        await b.shot(`old-profile-page-${theme}-${width}`);
+        await b.click('#status-profile');
+        await b.shot(`old-profile-menu-${theme}-${width}`);
+        const menuBox = await b.run(`(() => { const m = document.querySelector('.pf-menu').getBoundingClientRect(); return { left: m.left, right: m.right, top: m.top, bottom: m.bottom, w: window.innerWidth, h: window.innerHeight }; })()`);
+        check(`status menu fits inside ${width}×${height} (${theme})`, menuBox.left >= 0 && menuBox.right <= menuBox.w && menuBox.top >= 0 && menuBox.bottom <= menuBox.h, menuBox);
+      }
+    }
+    await b.run(`window.centralKnot.setAppearance('system')`);
+    await fullSize(b);
+  }
+  if (await b.exists('.pf-menu')) await b.click('#status-profile');
+
+  // Worked example 1: switch to Legacy from the menu, check mixed plugin copies and format 2 file byte for byte, then Undo.
+  if (b.inspect) {
+    const menu = await mainHelpers(b.inspect);
+    try { check('the menu bar menu shows Legacy with the shared preview line and switches to it', await menu.clickMenu(`Legacy · ${legacyPreview}`, false) >= 1); } finally { menu.close(); }
+    for (let tries = 0; tries < 80 && (!existsSync(join(oldHome, '.claude/skills/notes/SKILL.md')) || (await b.text('#status-profile'))?.trim() !== 'Legacy' || !(await b.exists('#outcome-undo'))); tries++) await wait(100);
+    await bDone();
+  } else {
+    await b.click('#status-profile');
+    await b.click('#status-profile-legacy');
+    await bDone();
+  }
+  const legacyInUse = 'In use · 1 item on. Plugin items stay as they are.';
+  same('menu switch turns notes on, leaves mixed plugin copies and format 2 file byte for byte, and marks Legacy in use',
+    [existsSync(join(oldHome, '.claude/skills/notes/SKILL.md')), oldPluginFiles(), readNow(oldProfilesFile), (await b.text('#status-profile'))?.trim(), await b.text('.profile-header p'),
+      await b.run(`document.querySelector('.profile-row.selected .profile-in-use')?.title`)],
+    [true, oldBefore, format2Text, 'Legacy', legacyInUse, 'Legacy is in use: what it has is on, and every other item of yours is off. Plugin items stay as they are.']);
+  if (b.inspect) {
+    const menu = await mainHelpers(b.inspect);
+    try { check('the menu bar menu ticks Legacy with the In use preview line', await menu.clickMenu(`Legacy · ${legacyInUse}`, true) >= 1); } finally { menu.close(); }
+  }
+  // Undo switch: notes turns back off; mixed plugin copies and format 2 file remain byte for byte.
+  await b.click('#outcome-undo');
+  await bDone();
+  same('Undo of the menu switch turns notes back off and still leaves mixed plugin copies and format 2 file byte for byte',
+    [existsSync(join(oldHome, '.claude/skills/notes/SKILL.md')), oldPluginFiles(), readNow(oldProfilesFile), (await b.text('#status-profile'))?.trim()],
+    [false, oldBefore, format2Text, 'Empty old']);
+
+  // Worked example 2: Choose plugin items -> tick triage -> switch (on in Codex & Copilot CLI) -> untick -> switch (off in both) -> reopen.
+  await b.click('#profile-choose-plugins');
+  await bDone();
+  same('Choose plugin items writes format 3 with switchesPluginItems true, touches no tool file, and reveals unticked plugin rows',
+    [oldPluginFiles(), JSON.parse(readNow(oldProfilesFile)), await b.exists('#profile-choose-plugins'), (await b.all('.pf-row[data-item]', 'e.dataset.item')).sort(),
+      await b.run(`[...document.querySelectorAll('.pf-row[data-item^="plugin:"] input[type="checkbox"]')].some(c => c.checked)`)],
+    [oldBefore, { formatVersion: 3, profiles: [{ id: 'legacy', name: 'Legacy', items: ['skill:notes'], switchesPluginItems: true }, { id: 'empty-old', name: 'Empty old', items: [], switchesPluginItems: false }] }, false, [issuesId, triageId, 'skill:notes'], false]);
+  check('after Choose, the header no longer says Plugin items stay as they are', !(await b.text('.profile-header p'))?.includes('Plugin items stay as they are'), await b.text('.profile-header p'));
+  if (shots) {
+    await sizeTo(b, 1316, 819);
+    if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+    await b.shot('old-profile-after-choose-1316');
+    await fullSize(b);
+  }
+  await b.click(byId(`pf-${triageId}`)); await bDone();
+  await b.click('#profile-switch'); await bDone();
+  same('after ticking triage and switching, triage is on in both Codex and Copilot CLI while unticked issues turned off',
+    [!(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"'), !(JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
+      (readNow(oldCodexCfg) ?? '').includes('[plugins."issue-tracker@ck-test-market".mcp_servers.issues]\nenabled = false')], [true, true, true]);
+  await b.click(byId(`pf-${triageId}`)); await bDone();
+  same('unticking triage (keeping notes ticked) counts 1 item turning off before Switch', await b.text('.profile-header p'), 'Switching turns 1 item off');
+  await b.click('#profile-switch'); await bDone();
+  same('switching with triage unticked turns triage off in both Codex and Copilot CLI, and format 3 keeps the flag',
+    [(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"\nenabled = false'), (JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
+      JSON.parse(readNow(oldProfilesFile)).profiles.find(p => p.id === 'legacy')],
+    [true, true, { id: 'legacy', name: 'Legacy', items: ['skill:notes'], switchesPluginItems: true }]);
+
+  // Reopen the app: Legacy still manages plugin items and counts turning triage off if turned back on in Codex.
+  same('no page errors before reopen', b.pageErrors, []);
+  await b.quit();
+  b = await launch(oldData, [], tools);
+  await b.click('#nav-profiles');
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Legacy')).click()`); await b.settle();
+  same('after reopening, Legacy still manages plugin items, shows plugin rows, and is in use',
+    [await b.exists('#profile-choose-plugins'), (await b.all('.pf-row[data-item]', 'e.dataset.item')).sort(), (await b.text('.profile-header p'))?.startsWith('In use · 1 item on')],
+    [false, [issuesId, triageId, 'skill:notes'], true]);
+  // Empty old profile: Start from what's on now ticks personal items only, and Delete -> Undo preserves switchesPluginItems: false through IPC.
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Empty old')).click()`); await b.settle();
+  await b.click('#profile-from-now'); await bDone();
+  same('Start from what’s on now on an empty old profile ticks personal items only and stays non-managing',
+    [await b.exists('#profile-choose-plugins'), JSON.parse(readNow(oldProfilesFile)).profiles.find(p => p.id === 'empty-old')],
+    [true, { id: 'empty-old', name: 'Empty old', items: ['skill:notes'], switchesPluginItems: false }]);
+  await b.click('#profile-delete'); await b.click('#profile-delete-confirm'); await bDone();
+  await b.click('#outcome-undo-delete-profile'); await bDone();
+  same('Delete -> Undo of a non-managing profile preserves switchesPluginItems: false through the save IPC',
+    [await b.exists('#profile-choose-plugins'), JSON.parse(readNow(oldProfilesFile)).profiles.find(p => p.id === 'empty-old')],
+    [true, { id: 'empty-old', name: 'Empty old', items: ['skill:notes'], switchesPluginItems: false }]);
+  // Mixed status menu: one managing profile (Legacy, not in use) and one non-managing profile (Old work, in use) side by side.
+  await b.run(`window.centralKnot.saveProfile({ id: 'empty-old', name: 'Old work' }, ${JSON.stringify(oldHome)})`);
+  await b.run(`window.centralKnot.saveProfile({ id: 'legacy', items: ['skill:notes', ${JSON.stringify(triageId)}] }, ${JSON.stringify(oldHome)})`);
+  await b.click('#header-refresh');
+  await sizeTo(b, 1316, 819);
+  if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+  await b.click('#status-profile');
+  const mixedMenu = await b.run(`(() => {
+    const inUse = document.querySelector('#status-profile-empty-old'), other = document.querySelector('#status-profile-legacy');
+    const s = el => getComputedStyle(el);
+    return {
+      inUseChecked: inUse.getAttribute('aria-checked'),
+      inUseOpacity: s(inUse).opacity,
+      inUsePreview: inUse.querySelector('.pf-menu-preview')?.textContent,
+      otherPreview: other.querySelector('.pf-menu-preview')?.textContent,
+      samePreviewColor: s(inUse.querySelector('.pf-menu-preview')).color === s(other.querySelector('.pf-menu-preview')).color,
+    };
+  })()`);
+  same('mixed status menu shows one profile of each kind, keeps the in-use row full contrast and matching summary colour', mixedMenu,
+    { inUseChecked: 'true', inUseOpacity: '1', inUsePreview: 'In use · 1 item on. Plugin items stay as they are.', otherPreview: 'Switching turns 1 item on', samePreviewColor: true });
+  if (shots) await b.shot('old-profile-menu-mixed-1316');
+  await b.click('#status-profile');
+  await fullSize(b);
+  same('no page errors after reopen', b.pageErrors, []);
+  await b.quit();
 }
 
 const groups = [

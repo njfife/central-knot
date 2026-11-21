@@ -1,9 +1,13 @@
 // Profiles' rules, pure (no files, no DOM). A profile names library items (library.ts) of the three kinds, as `skill:<key>`,
-// `agent:<key>` and `mcp:<key>`, and a plugin's items, as `plugin:<kind>:<key>` (pluginItemId). Switching to it turns each
-// library item it names On and every other Off (switchPlan), and each plugin's item, one tool at a time, on where it names it
-// and off where it doesn't, wherever that tool can switch that one item (pluginPlan); a profile is in use exactly while a
-// switch would change nothing and nothing it asks is held (inUse), so which one is in use is worked out, never stored; and a
-// switch's Undo turns back each item, and each plugin item's copy, still as the switch left it (undoPlan, pluginUndo). An id
+// `agent:<key>` and `mcp:<key>`, and, when `switchesPluginItems` is true, a plugin's items, as `plugin:<kind>:<key>`
+// (pluginItemId). Switching to it turns each library item it names On and every other Off (switchPlan), and when
+// `switchesPluginItems` is true each plugin's item, one tool at a time, on where it names it and off where it doesn't, wherever
+// that tool can switch that one item (pluginPlan); a profile with `switchesPluginItems` false (saved before plugin items could be
+// ticked, until chosen) leaves every plugin copy as it stands (`pluginPlan` returns none, the guard switches, previews and
+// `inUse` pass through; `namedCount` reads `switchesPluginItems` too, deciding whether Switch is offered). A profile is in use
+// exactly while a switch would change nothing and nothing it asks is held (inUse), so which one is in use is worked out, never
+// stored; a switch's preview line is `switchPreview` (using `PLUGIN_ITEMS_STAY`), shared by the page and both menus;
+// and a switch's Undo turns back each item, and each plugin item's copy, still as the switch left it (undoPlan, pluginUndo). An id
 // that names nothing live (an item only found in a tool, one deleted, a plugin's item no tool has now) is skipped by all of
 // them and stays in the profile, dormant. A library item linked to a plugin the home records (library.ts A PLUGIN) is not one of
 // the person's own (liveItems): it is that plugin's item, placed in Pi or OpenCode (pluginLive). What the Library lists that no
@@ -194,14 +198,17 @@ export function pluginLive(home: PluginHome): PluginLive[] {
 export interface PluginTurn { id: string; on: boolean; turn: HarnessId[]; held: { tool: HarnessId; why: string }[]; release?: HarnessId[] }
 
 /**
- * What switching to `profile` would turn of the plugins' items, one item in one tool at a time, never a whole plugin: each copy
- * that is not as the profile has the item (on for one it has, off for one it leaves out) is turned where its way is `switch`, and
- * held, with why, where it is `plugin-off` or `held`, or where its off would take one of his own servers the profile has on
- * with it (`sharesWith`: held on, and turned on where it is off now, `release`); an `unread` copy is held either way; a copy
- * that `stays` is left. Only items with something turned or held are listed; an id the profile names that no tool has now is in
- * none (dormant, as a deleted item's is).
+ * What switching to `profile` would turn of the plugins' items, one item in one tool at a time, never a whole plugin: nothing when
+ * `profile.switchesPluginItems` is false (the guard switches, previews and `inUse` pass through; `namedCount` reads the flag too,
+ * deciding whether Switch is offered); otherwise each copy that is
+ * not as the profile has the item (on for one it has, off for one it leaves out) is turned where its way is `switch`, and held,
+ * with why, where it is `plugin-off` or `held`, or where its off would take one of his own servers the profile has on with it
+ * (`sharesWith`: held on, and turned on where it is off now, `release`); an `unread` copy is held either way; a copy that `stays`
+ * is left. Only items with something turned or held are listed; an id the profile names that no tool has now is in none (dormant,
+ * as a deleted item's is).
  */
-export function pluginPlan(profile: Pick<Profile, 'items'>, items: PluginLive[]): PluginTurn[] {
+export function pluginPlan(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, items: PluginLive[]): PluginTurn[] {
+  if (!profile.switchesPluginItems) return [];
   return items.flatMap(item => {
     const on = profile.items.includes(item.id), takesHis = (copy: PluginCopy) => !on && !!copy.sharesWith?.ids.some(id => profile.items.includes(id));
     const differ = item.copies.filter(copy => copy.way === 'unread' || copy.on !== on || takesHis(copy));
@@ -213,7 +220,7 @@ export function pluginPlan(profile: Pick<Profile, 'items'>, items: PluginLive[])
 }
 
 /** Whether the plugins' items agree with a profile (their part of "in use"): a switch to it would turn none, and hold none. */
-export const pluginItemsAgree = (profile: Pick<Profile, 'items'>, items: PluginLive[]) => !pluginPlan(profile, items).length;
+export const pluginItemsAgree = (profile: Pick<Profile, 'items' | 'switchesPluginItems'>, items: PluginLive[]) => !pluginPlan(profile, items).length;
 
 /** One copy of a plugin's item to turn in one tool, toward `on`: a switch's (pluginPlan) or its Undo's (pluginUndo), as profiles.ts carries it out. */
 export interface CopyTurn { item: PluginLive; copy: PluginCopy; on: boolean }
@@ -270,14 +277,15 @@ export function switchPlan(profile: Pick<Profile, 'items'>, live: LiveItem[]): T
   return { on: live.filter(item => named.has(item.id) && !item.on), off: live.filter(item => !named.has(item.id) && item.on) };
 }
 
-/** How many of the live items and the plugins' items (pluginLive) a profile names: what it has now. */
-export const namedCount = (profile: Pick<Profile, 'items'>, live: LiveItem[], plugins: PluginLive[]) => [...live, ...plugins].filter(item => profile.items.includes(item.id)).length;
+/** How many of the live items, and when the profile switches them the plugins' items (pluginLive), a profile names: what it has now. */
+export const namedCount = (profile: Pick<Profile, 'items' | 'switchesPluginItems'>, live: LiveItem[], plugins: PluginLive[]) =>
+  (profile.switchesPluginItems ? [...live, ...plugins] : live).filter(item => profile.items.includes(item.id)).length;
 
 /**
  * Whether a profile is offered to switch to (the page's Switch, the status bar's and the menu bar's menus): one with nothing in
  * it would turn every item off, so it is offered once it has an item.
  */
-export const switchable = (profile: Pick<Profile, 'items'>, live: LiveItem[], plugins: PluginLive[]) => namedCount(profile, live, plugins) > 0;
+export const switchable = (profile: Pick<Profile, 'items' | 'switchesPluginItems'>, live: LiveItem[], plugins: PluginLive[]) => namedCount(profile, live, plugins) > 0;
 
 /**
  * The profiles in use: each one switching to which would change nothing and hold nothing, of its library items (switchPlan) and
@@ -330,4 +338,25 @@ export function turnsWords({ on, off }: { on: unknown[]; off: unknown[] }, tense
   if (tense === 'did') return [on.length && `${plural(on.length, 'item')} turned on`, off.length && `${on.length ? off.length : plural(off.length, 'item')} turned off`].filter(Boolean).join(' and ');
   const both = on.length && off.length;
   return [on.length && `turns ${plural(on.length, 'item')} on`, off.length && (both ? `${off.length} off` : `turns ${plural(off.length, 'item')} off`)].filter(Boolean).join(' and ');
+}
+
+/** Shown beside a non-managing profile's count and in its tooltips (switchPreview, profilespage.ts). */
+export const PLUGIN_ITEMS_STAY = 'Plugin items stay as they are.';
+
+/**
+ * What the Profiles page's header and both profile menus say for `profile`, from the same rules (switchPlan, pluginPlan, inUse):
+ * whether it is in use, empty, what switching turns on and off, or why it is held; for a profile that does not switch plugin
+ * items, `PLUGIN_ITEMS_STAY` sits beside it.
+ */
+export function switchPreview(profile: Profile, live: LiveItem[], plugins: PluginLive[]): string {
+  const turns = switchPlan(profile, live), plugs = pluginPlan(profile, plugins), counted = allTurns(turns, plugs);
+  const keep = profile.switchesPluginItems ? '' : `. ${PLUGIN_ITEMS_STAY}`;
+  const count = namedCount(profile, live, plugins);
+  if (!changes(turns) && !plugs.length) {
+    const others = live.length + (profile.switchesPluginItems ? plugins.length : 0) - count;
+    const rest = !others ? '' : profile.switchesPluginItems ? `, the other ${others} off wherever they can be switched` : `, the other ${others} of yours off`;
+    return `In use · ${plural(count, 'item')} on${rest}${keep}`;
+  }
+  if (!count) return `0 items${keep}`;
+  return changes(counted) ? `Switching ${turnsWords(counted, 'will')}${keep}` : `Not in use · ${heldWords(plugs, plugins).text}`;
 }
