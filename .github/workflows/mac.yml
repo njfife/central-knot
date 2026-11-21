@@ -68,31 +68,36 @@ jobs:
           path: light-tour
           if-no-files-found: ignore
           retention-days: 7
-      # However the run ended, only what runs made goes. A run's process is this user's, and its environment carries the job's
-      # TMPDIR=/private/tmp/ck-ci-<run>-<attempt> or its program is in the checkout's release/ or node_modules/electron/ (never
-      # this step's shell or its ancestors); a run's image has a path that begins with a run's folder or the checkout; a run's
-      # folder is a directory of this user's directly in /private/tmp named ck-ci-<digits>-<digits>. Each process is stopped by
-      # its id, each image detached, then each run folder and release/ made writable (a flow leaves a read-only folder) and
-      # removed, but for one that holds an image that would not detach. Each failure is said, and makes the step red.
+      # However the run ended, only what runs made goes, each failure said and making the step red. A run's process is this
+      # user's, not this step's shell or an ancestor, and runs from the checkout's release/ or node_modules/electron/ or shows the
+      # job's TMPDIR=/private/tmp/ck-ci-<digits>-<digits>. Its one known limit: macOS shows a process's arguments and environment
+      # as one string, so a process of this user with that whole word among its arguments is taken for a run's. A run's folder is
+      # a directory of this user's directly in /private/tmp named ck-ci-<digits>-<digits>; a run's image lies under one or under
+      # the checkout. Processes are stopped, images detached, then the folders and release/ made writable (a flow leaves a
+      # read-only folder) and removed, but for one that holds an image that would not detach.
       - if: always()
         run: |
           ws=$GITHUB_WORKSPACE user=$(id -un) red=0 removed= kept=()
-          ps -axEww -o pid=,ppid=,user=,command= > "$RUNNER_TEMP/ps.txt"
+          case $ws in /?*) ;; *) echo "GITHUB_WORKSPACE is '$ws', not an absolute folder other than /: nothing was cleaned"; exit 1;; esac
+          ps -axEww -o pid=,ppid=,user=,command= > "$RUNNER_TEMP/ps.txt" || { echo "could not list the processes"; red=1; }
           for pid in $(awk -v me=$$ -v user="$user" -v ws="$ws" '{ parent[$1] = $2; owner[$1] = $3; c = $0; sub(/^ *[0-9]+ +[0-9]+ +[^ ]+ +/, "", c); cmd[$1] = c }
             END { for (p = me; p in parent && !(p in spared); p = parent[p]) spared[p] = 1
               for (p in cmd) if (owner[p] == user && !(p in spared) && parent[p] != me && ((" " cmd[p] " ") ~ / TMPDIR=\/private\/tmp\/ck-ci-[0-9]+-[0-9]+[\/ ]/ ||
                 index(cmd[p], ws "/release/") == 1 || index(cmd[p], ws "/node_modules/electron/") == 1)) print p }' "$RUNNER_TEMP/ps.txt"); do
             what=$(ps -o command= -p "$pid" | cut -c1-150)
-            if kill -9 "$pid"; then echo "still running, stopped: $what"; else echo "still running, not stopped: $what"; red=1; fi
+            if [ -z "$what" ]; then continue; elif kill -9 "$pid" 2> /dev/null; then echo "still running, stopped: $what"
+            elif ps -p "$pid" > /dev/null; then echo "still running, not stopped: $what"; red=1; fi
           done
+          find /private/tmp -mindepth 1 -maxdepth 1 -type d -user "$user" -name 'ck-ci-*' -print0 > "$RUNNER_TEMP/found" || { echo "could not list /private/tmp"; red=1; }
+          while IFS= read -r -d '' folder; do [[ ${folder##*/} =~ ^ck-ci-[0-9]+-[0-9]+$ ]] && echo "$folder"; done < "$RUNNER_TEMP/found" > "$RUNNER_TEMP/runs"
           hdiutil info > "$RUNNER_TEMP/disks.txt" || { echo "could not list the attached disk images"; red=1; }
           while read -r disk image; do
-            if said=$(hdiutil detach -force "$disk" 2>&1); then echo "detached $disk ($image)"; else echo "could not detach $disk ($image): $said"; kept+=("$image"); red=1; fi
-          done < <(awk -v ws="$ws" '/^image-path/ { path = $0; sub(/^image-path *: */, "", path); ours = path ~ /^\/private\/tmp\/ck-ci-[0-9]+-[0-9]+\// || index(path, ws "/") == 1 }
-            ours && /^\/dev\/disk[0-9]+[ \t]/ { print $1, path; ours = 0 }' "$RUNNER_TEMP/disks.txt")
-          find /private/tmp -mindepth 1 -maxdepth 1 -type d -user "$user" -name 'ck-ci-*' -print0 > "$RUNNER_TEMP/found" || { echo "could not list /private/tmp"; red=1; }
-          { while IFS= read -r -d '' folder; do [[ ${folder##*/} =~ ^ck-ci-[0-9]+-[0-9]+$ ]] && printf '%s\0' "$folder"; done < "$RUNNER_TEMP/found"; printf '%s\0' "$ws/release"; } > "$RUNNER_TEMP/runs"
-          while IFS= read -r -d '' folder; do
+            if said=$(hdiutil detach -force "$disk" 2>&1 < /dev/null); then echo "detached $disk ($image)"; else echo "could not detach $disk ($image): $said"; kept+=("$image"); red=1; fi
+          done < <(awk -v ws="$ws" 'FILENAME == ARGV[1] { under[$0 "/"] = 1; next } /^image-path/ { path = $0; sub(/^image-path *: */, "", path)
+              ours = index(path, ws "/") == 1; for (folder in under) if (index(path, folder) == 1) ours = 1 }
+            ours && /^\/dev\/disk[0-9]+[ \t]/ { print $1, path; ours = 0 }' "$RUNNER_TEMP/runs" "$RUNNER_TEMP/disks.txt")
+          echo "$ws/release" >> "$RUNNER_TEMP/runs"
+          while IFS= read -r folder; do
             [ -d "$folder" ] && [ ! -L "$folder" ] || continue
             for image in "${kept[@]}"; do case $image in "$folder"/*) echo "left $folder: it holds $image"; continue 2;; esac; done
             chmod -R u+rwx "$folder" 2> /dev/null || true
