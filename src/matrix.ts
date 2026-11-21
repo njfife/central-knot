@@ -28,7 +28,7 @@ import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, gro
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
-import { homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
+import { copilotSharesYours, homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
@@ -46,8 +46,8 @@ import type { HarnessId, TakenInNotice, ThroughPlugin, UsageReading } from './ty
 import { pluginOf } from './sourcelink.ts';
 import { heldKinds } from './presence.ts';
 import { market } from './pluginstate.ts';
-import type { PluginDraft } from './pluginplan.ts';
-import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
+import { succeeded, type PluginDone, type PluginDraft } from './pluginplan.ts';
+import { alongWords, cantSwitch, click as clickPluginItem, clickWords, copilotByName, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { pageOfPart, partOfPage } from './pluginstatus.ts';
 import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, rowCount, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
@@ -1894,10 +1894,10 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
  * said as a problem. Its words are worked out on the table it was clicked on (`t`), wherever the page is once it has run; its
  * kind, name and key are its row's.
  */
-function mainClick(t: Table, row: ItemRow | PluginRow, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string[], focus?: () => string): Click {
+function mainClick(t: Table, row: ItemRow | PluginRow, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string[], focus?: () => string, note?: (done: PluginDone[]) => string): Click {
   const along = plugins.turned.map(item => alongWords(item, plugins.ops)).filter(Boolean).join(' ') || undefined, kind = kindOf(row), name = nameOf(row);
   const pluginsOnly = !changes.length, undone = pluginsOnly ? undoneWords(name, on, toolsPhrase(plugins.turned.map(item => item.tool), toolsFor(t, kind))) : undefined;
-  return { kind, items: [name], rows: [rowKey(row)], changes, said, also, focus, pluginsOnly, plugins: plugins.ops.length || pluginsOnly ? { ops: plugins.ops, said: along } : undefined, undone };
+  return { kind, items: [name], rows: [rowKey(row)], changes, said, also, focus, pluginsOnly, plugins: plugins.ops.length || pluginsOnly ? { ops: plugins.ops, said: along, ...(note ? { note } : {}) } : undefined, undone };
 }
 
 
@@ -1930,7 +1930,11 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
     const rowNow = () => plugged(t).rows.find(each => idOf(each) === idOf(row));
     queueClick({ kind, key: row.key, on: next }, row.name, () => {
       const now = rowNow(), turned = now && turnEvery(rowItems(now), next);
-      return now && turned?.ops.length ? mainClick(t, now, next, [], turned, () => `${named} is ${next ? 'on' : 'off'} in ${toolsPhrase(turned.turned.map(item => item.tool), tools())}.`, turned.left) : undefined;
+      const copilot = turned?.turned.find(item => item.tool === 'copilot-cli');
+      // Only when Copilot CLI's server switch moves (a whole-plugin Off leaves his own server on).
+      const shared = copilot && state.home && turned!.ops.some(op => op.tool === 'copilot-cli' && op.part?.kind === 'mcp' && op.part.name === now!.name) && copilotSharesYours(state.home, copilot)
+        ? (done: PluginDone[]) => (done.some(entry => entry.tool === 'copilot-cli' && entry.part?.kind === 'mcp' && entry.part.name === now!.name && entry.report.changed && succeeded(entry.report)) ? copilotByName(now!.name, next, true) : '') : undefined;
+      return now && turned?.ops.length ? mainClick(t, now, next, [], turned, () => `${named} is ${next ? 'on' : 'off'} in ${toolsPhrase(turned.turned.map(item => item.tool), tools())}.`, turned.left, undefined, shared) : undefined;
     }, () => { const now = rowNow(); return now && rowItems(now).some(itemOn); });
   } });
 }

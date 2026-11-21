@@ -30,7 +30,7 @@ import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSe
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { closeRun, endListNews, fadeRun, loadPlugins, overRun, resetMarket } from './pluginstate.ts';
-import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginOp } from './pluginplan.ts';
+import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
@@ -489,9 +489,10 @@ export interface Click {
   /**
    * Its part in the tools that have the item through a plugin (pluginswitch.ts turnEvery): run once the copies' part went
    * through, never beside a click refused as a whole; or, with no `changes`, all of it (a plugin's own row, a tool's switch for a
-   * plugin's item: carryOut). `said`: what that part brought with it, said when it all worked.
+   * plugin's item: carryOut). `said`: what that part brought with it, said when it all worked. `note`: appended from completed
+   * steps in switchesOnly even when another tool's step failed (not on Undo).
    */
-  plugins?: { ops: PluginOp[]; said?: string };
+  plugins?: { ops: PluginOp[]; said?: string; note?: (done: PluginDone[]) => string };
   /** A click of its `plugins` part alone, with no change of the person's own (a plugin's own row, a tool's switch for a plugin's
    * item): carryOut runs only those switches (switchesOnly); `undone` is what its Undo says once done ("Undone: triage is back on in Codex."). */
   pluginsOnly?: boolean;
@@ -604,7 +605,8 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
   const ran = await runSwitches(ops, click.undoing);
   setHome(await api().refresh());
   const worked = !ran.failed.length && !ran.stopped, said = typeof click.said === 'string' ? click.said : click.said([], []);
-  const text = (worked && said ? [said, click.plugins?.said].filter(Boolean).join(' ') : resultSentence(ran.lines, !!click.undoing)) || `${click.items.length ? `${fewNames(click.items)}: n` : 'N'}othing changed.`;
+  const base = worked && said ? [said, click.plugins?.said].filter(Boolean).join(' ') : resultSentence(ran.lines, !!click.undoing);
+  const text = [base, !click.undoing && base ? click.plugins?.note?.(ran.done) : ''].filter(Boolean).join(' ') || `${click.items.length ? `${fewNames(click.items)}: n` : 'N'}othing changed.`;
   const undo = ran.back.length ? { kind: click.kind, made: [], back: ran.back } : undefined;
   const back = { kind: click.kind, items: click.items, rows: click.rows, changes: [], said: click.undone ?? '', undoing: true, pluginsOnly: true, plugins: { ops: ran.back } };
   const reloads = pluginReloads(ran.done);
@@ -1872,15 +1874,16 @@ api().onProfileSwitched(result => void applyMenuSwitch(result));
 
 /**
  * Saves a profile: only the fields given change. A new or restored profile opens (a new one with its name field ready to type); an
- * edit leaves the page where it is.
+ * edit leaves the page where it is. Quiet by default; `band` shows `said` visibly on the page it was started on.
  */
-export const saveProfileDef = (profile: ProfileEdit, said?: string) => busy('Saving profile…', async () => {
+export const saveProfileDef = (profile: ProfileEdit, said?: string, band = false) => busy('Saving profile…', async page => {
   const result = await api().saveProfile(profile, state.home!.home);
   if (result.profiles) state.home = { ...state.home!, profiles: result.profiles };
   if (result.problem) { announce(result.problem); return; }
   if (result.id && (!profile.id || profile.restore)) profileState.open = result.id;
   if (result.id && !profile.id) profileState.renaming = result.id;
-  announce(said ?? 'Profile saved.', true);
+  if (band && said) tell({ page, band: true, text: said });
+  else announce(said ?? 'Profile saved.', true);
 });
 
 /** Deletes a profile's definition; one click on Undo saves it again. */

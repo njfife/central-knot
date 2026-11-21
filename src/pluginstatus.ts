@@ -527,6 +527,7 @@ const kindWords = (kind: PartKind, several: boolean) => (several ? partWords[kin
 /** What each reason says of `list` (its names; `several`), one plain sentence with the way to have the plugin's there instead. */
 const OUT = {
   own: (list: string, several: boolean, kind: PartKind, tool: string) => `${list}: ${tool} has ${kindWords(kind, several)} of its own by that name, never written over; turn ${several ? 'each' : 'it'} on in ${tool} on its row to put the plugin’s there, keeping ${tool}’s as a version.`,
+  shared: (list: string, several: boolean, _kind: PartKind, tool: string) => `${list}: ${tool} reads yours from the shared skills folder, which Central Knot never writes. Take ${several ? 'each' : 'it'} over on ${several ? 'their Library rows' : 'its Library row'} to use the plugin’s.`,
   kept: (list: string, several: boolean, _kind: PartKind, tool: string) => `${list} ${several ? 'are' : 'is'} kept out of ${tool}: tick to let ${several ? 'them' : 'it'} in, unless ${tool} has its own by that name.`,
   off: (list: string, several: boolean) => `${list} ${several ? 'were' : 'was'} turned off on ${several ? 'their rows' : 'its row'}: tick to turn ${several ? 'them' : 'it'} on.`,
   deleted: (list: string, several: boolean) => `${list} ${several ? 'were' : 'was'} deleted here: tick to bring ${several ? 'them' : 'it'} back.`,
@@ -535,9 +536,9 @@ const OUT = {
 };
 
 /**
- * Why none of a plugin's items is on in a tool with no installer, one plain sentence per reason (`outs`: each item's, from
- * pluginlibrary.ts outsIn; those alike together, a long list of names cut), which the page says under that tool's box and the
- * run's report after its lead; or, with no item at all, that the plugin brings nothing such a tool takes (`brings`: what it does).
+ * Why a plugin's items are not on in a tool with no installer, one plain sentence per reason (`outs`: each item's, from
+ * pluginlibrary.ts outsIn; those alike together, a long list of names cut), which the page says under that tool's box (`notIn`
+ * or `heldOut`) and the run's report after its lead; or, with no item at all, that the plugin brings nothing such a tool takes (`brings`: what it does).
  */
 export function notInWhy(tool: HarnessId, plugin: string, outs: { name: string; kind: PartKind; out: ItemOut }[], brings?: string): string[] {
   const where = names[tool];
@@ -554,7 +555,7 @@ export function notInWhy(tool: HarnessId, plugin: string, outs: { name: string; 
  */
 export function yourSaid({ name, kind, same, held }: YourName, tool: HarnessId): string {
   if (same) return `${name} is the same as yours, so yours stays.`;
-  if (held?.shared) return `${name}: ${names[tool]} reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.`;
+  if (held?.shared) return OUT.shared(name, false, kind, names[tool]);
   return [OUT.yours(name, false, kind), held?.why].filter(Boolean).join(' ');
 }
 /** Why none of a plugin's items is on in a tool, as its line and box say it: notInWhy's reasons, then each name of his (yourSaid). */
