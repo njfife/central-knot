@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathBeside } from './platform.ts';
 import { probeVersion } from './discovery.ts';
 import { configRoot, harnesses } from './harnesses.ts';
@@ -835,53 +835,82 @@ function copilotSkillsOff(settings: Record<string, unknown> | undefined, plugin:
   return [...off.values()];
 }
 
-/** The skill of the plugin in `folder` that a Codex switch picks, if it picks one: by `plugin:skill`, or by a SKILL.md path inside that copy. */
-async function skillPickedBy(entry: CodexSkillSwitch, plugin: string, folder: string): Promise<string | undefined> {
-  if (entry.name) return skillOf(plugin, entry.name);
-  if (!entry.path) return undefined;
-  // Codex's own /skills toggle writes the path, which names one version's copy: an update leaves it behind.
-  const file = basename(entry.path) === 'SKILL.md' ? resolve(entry.path) : join(resolve(entry.path), 'SKILL.md');
-  if (!(await inside(folder, file))) return undefined;
+/** The SKILL.md path a Codex `path` rule names. */
+const skillFileOf = (path: string) => (basename(path) === 'SKILL.md' ? resolve(path) : join(resolve(path), 'SKILL.md'));
+/** The skill in `root` that `file` names, if `file` resolves inside `root`. */
+async function skillAtPath(root: string, file: string): Promise<string | undefined> {
+  if (!(await inside(root, file))) return undefined;
   const body = await readFile(file, 'utf8').catch(() => undefined);
   return body === undefined ? undefined : skillName(body, dirname(file));
 }
-
+/** The skill in `folder` a Codex switch picks: by `plugin:skill` alone, or a SKILL.md path alone inside it (both keys: ignored). */
+async function skillPickedBy(entry: CodexSkillSwitch, plugin: string, folder: string): Promise<string | undefined> {
+  if (entry.name !== undefined && entry.path !== undefined) return undefined;
+  if (entry.name) return skillOf(plugin, entry.name);
+  if (!entry.path) return undefined;
+  // Codex's own /skills toggle writes the path, which names one version's copy: an update leaves it behind.
+  return skillAtPath(folder, skillFileOf(entry.path));
+}
+/** The skill a path-only Codex switch named in another cached version under `dirname(folder)`, or undefined if elsewhere or unreadable. */
+async function oldVersionSkill(entry: CodexSkillSwitch, folder: string): Promise<string | undefined> {
+  if (entry.name !== undefined || !entry.path) return undefined;
+  const file = skillFileOf(entry.path), cache = dirname(folder);
+  const tryReal = (path: string) => { try { return realpathSync(path); } catch { return path; } };
+  const target = tryReal(file);
+  for (const base of new Set([resolve(cache), tryReal(cache)])) {
+    const rel = relative(base, target);
+    if (!rel || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) continue;
+    const [ver, ...rest] = rel.split(sep);
+    if (ver && ver !== basename(folder) && rest.length) return (await skillAtPath(cache, file)) ?? skillAtPath(folder, join(folder, ...rest));
+  }
+  return undefined;
+}
 /** Of `skills` (the copy in `folder`), those Codex has turned off: for each skill, the last switch that picks it decides. */
 async function codexSkillsOff(switches: CodexSkillSwitch[], plugin: string, folder: string, skills: string[]): Promise<SkillOff[]> {
   const enabled = new Map<string, boolean>();
   for (const entry of switches) { const skill = await skillPickedBy(entry, plugin, folder); if (skill && skills.includes(skill)) enabled.set(skill, entry.enabled); }
   return [...enabled].filter(([, on]) => !on).map(([skill]) => ({ skill }));
 }
+/** Whether `text` keeps `plugin:skill` off by a `name`-only rule (surviving updates) and in `folder` now. */
+async function keepsOffByName(text: string, plugin: string, skill: string, folder: string): Promise<boolean> {
+  try {
+    const { switches, inline } = codexSkillSwitches(readTomlTables(text));
+    const last = !inline ? switches.findLast(entry => entry.name === qualified(plugin, skill) && entry.path === undefined) : undefined;
+    return last?.enabled === false && (await codexSkillsOff(switches, plugin, folder, [skill])).length > 0;
+  } catch { return false; }
+}
 
 /**
- * Each Codex skill switch written this session, by config.toml and `plugin:skill`: the file before and after, and which
- * way. Switching that skill back while the file is still exactly as written gives the earlier bytes back whole (a block
- * the person had for the skill, a path-form one, a missing final newline), which is what makes an Undo exact.
+ * Each Codex skill switch written this session, by config.toml and `plugin:skill`: before, after, and which way.
+ * Switching back while untouched gives the earlier bytes whole, except Off uses it only if those bytes keep the skill off by `name` alone (keepsOffByName).
  */
 const codexWrites = new Map<string, { before: string | null; after: string; on: boolean }>();
 
 /**
- * Codex's switch for one skill of the plugin in `folder`, in config.toml: turning it off sets `enabled = false` in place
- * in every `[[skills.config]]` block that already picks it, and appends one block by `name` alone at the end whenever none
- * of those picks by `name` alone (a `path` block stops matching after a plugin update, and Codex ignores a block with both
- * `name` and `path`). Turning it on removes a picking block only when nothing of the person's own touches it: no comment
- * on its header line, on or between its entries, on the lines directly above its header, or after its last entry up to the
- * next blank line, header or end of file; no key besides `name` or `path` and `enabled`; not both `name` and `path`; and
- * no sub-table of that element. Any other picking block stays, changing an explicit `enabled = false` to `true` in place
- * (one already on is left alone). Switching back what this session just wrote still restores the exact earlier bytes (see
- * codexWrites). Accepted limit: a bare block of the person's own (only `name` or `path` and optionally `enabled`, with no
- * comment touching it and no sub-table) turned off and then on in another session is taken out rather than restored (the
- * skill is on either way). A file changed meanwhile, or one that writes the list as a value, is left alone. Returns a
- * problem, or undefined once written.
+ * Codex's switch for one skill of the plugin in `folder`, in config.toml: Off sets `enabled = false` in place in every
+ * block that picks it (skillPickedBy; blocks carrying both `name` and `path` are ignored, as Codex ignores them, so they
+ * stay untouched), and appends one `name`-only block at EOF whenever none picks by `name` (a `path` block stops matching
+ * after an update). On drops a picking block only when nothing of his touches it (hasOwnContent: no comment on its header,
+ * on/between entries, directly above its header, or directly below its last entry up to a blank line, header or EOF; no
+ * key besides `name`/`path`/`enabled`; no sub-table). Any other picking block stays, setting explicit `enabled = false` to
+ * `true` in place, as does any path-only block of his with explicit `enabled = false` under another version in
+ * `dirname(folder)` tied to this skill (reading that old SKILL.md, or the same relative path in `folder` once the old copy
+ * is gone; otherwise it cannot be told surely and is left alone). Same-session way back restores exact bytes (codexWrites)
+ * except Off requires `keepsOffByName`. Accepted limits: a bare block turned off then on in another session or after
+ * another edit is dropped; a commented block with no `enabled` line keeps `enabled = true`; a comment directly under the
+ * app's block with no blank line keeps it as `enabled = true`; without stored state, a commented old-version path block for
+ * this skill that already said `false` before Off also becomes `true` on fresh On (Codex ignores it either way). A file
+ * changed meanwhile, or one writing `skills.config` as a value, is left alone. Returns a problem, or undefined once written.
  */
 async function switchCodexSkill(context: PluginContext, plugin: string, skill: string, on: boolean, folder: string): Promise<string | undefined> {
   const path = join(configRootOf(context, 'codex-cli'), 'config.toml');
   const key = `${path}\u0000${qualified(plugin, skill)}`;
   const before = await readOrNull(path);
   const last = codexWrites.get(key);
-  // Switching back what this session wrote, with the file untouched since: its earlier bytes, whole. (A file this session
-  // created is edited instead, so the skill's way back never deletes config.toml.)
-  const switchesBack = last && last.on !== on && last.before !== null && before === last.after;
+  // Switching back what this session wrote, with the file untouched since: its earlier bytes, whole (for Off, only when they
+  // already keep the skill off by `name` alone). A file this session created is edited instead so config.toml is never deleted.
+  const switchesBack = !!(last && last.on !== on && last.before !== null && before === last.after
+    && (on || await keepsOffByName(last.before, plugin, skill, folder)));
   const edit = switchesBack ? { text: last.before! } : await codexConfigSwitched(before ?? '', plugin, skill, on, folder);
   if ('problem' in edit) return edit.problem;
   const after = edit.text;
@@ -893,12 +922,10 @@ async function switchCodexSkill(context: PluginContext, plugin: string, skill: s
   return undefined;
 }
 
-const hasKey = (block: TomlTable, key: string) => block.entries.some(entry => entry.keys.length === 1 && entry.keys[0] === key);
-
 /** Whether anything of the person's own touches this `[[skills.config]]` block (see switchCodexSkill). */
 function hasOwnContent(text: string, tables: TomlTable[], block: TomlTable): boolean {
   const keys = block.entries.map(entry => (entry.keys.length === 1 ? entry.keys[0]! : ''));
-  if (keys.some(key => key !== 'name' && key !== 'path' && key !== 'enabled') || (keys.includes('name') && keys.includes('path'))) return true;
+  if (keys.some(key => key !== 'name' && key !== 'path' && key !== 'enabled')) return true;
   const prevEnd = block.start > 0 && text[block.start - 1] === '\n' ? block.start - 1 : block.start;
   if (block.start > 0 && /^[ \t]*#/.test(text.slice(prevEnd > 0 ? text.lastIndexOf('\n', prevEnd - 1) + 1 : 0, prevEnd))) return true;
   let cursor = text.indexOf('\n', block.start) + 1 || text.length;
@@ -928,18 +955,25 @@ async function codexConfigSwitched(text: string, plugin: string, skill: string, 
   const { switches, inline } = codexSkillSwitches(tables);
   if (inline) return { problem: INLINE_SKILLS_CONFIG };
   const blocks = arrayBlocks(tables, ['skills', 'config']);
+  const entryOf = (block: TomlTable) => switches.find(candidate => candidate.start === block.start);
   const picked: number[] = [];
   for (const [index, block] of blocks.entries()) {
-    const entry = switches.find(candidate => candidate.start === block.start);
+    const entry = entryOf(block);
     if (entry && (await skillPickedBy(entry, plugin, folder)) === skill) picked.push(index);
   }
   if (!on) {
     const edited = picked.length ? setTomlArrayKey(text, ['skills', 'config'], (_b, index) => picked.includes(index), 'enabled', false) : text;
-    const byName = picked.some(index => hasKey(blocks[index]!, 'name') && !hasKey(blocks[index]!, 'path'));
+    const byName = picked.some(index => entryOf(blocks[index]!)?.name !== undefined);
     return { text: byName ? edited : editTomlArray(edited, ['skills', 'config'], () => false, { name: qualified(plugin, skill), enabled: false }) };
   }
+  const isFalse = (block: TomlTable) => block.entries.findLast(entry => entry.keys.length === 1 && entry.keys[0] === 'enabled')?.value === false;
   const keep = picked.filter(index => hasOwnContent(text, tables, blocks[index]!)), drop = picked.filter(index => !keep.includes(index));
-  const toEnable = keep.filter(index => blocks[index]!.entries.findLast(entry => entry.keys.length === 1 && entry.keys[0] === 'enabled')?.value === false);
+  const toEnable = keep.filter(index => isFalse(blocks[index]!));
+  for (const [index, block] of blocks.entries()) {
+    if (picked.includes(index) || !isFalse(block) || !hasOwnContent(text, tables, block)) continue;
+    const entry = entryOf(block);
+    if (entry && (await oldVersionSkill(entry, folder)) === skill) toEnable.push(index);
+  }
   const edited = toEnable.length ? setTomlArrayKey(text, ['skills', 'config'], (_b, index) => toEnable.includes(index), 'enabled', true) : text;
   return { text: drop.length ? editTomlArray(edited, ['skills', 'config'], (_b, index) => drop.includes(index)) : edited };
 }

@@ -912,7 +912,7 @@ test('Codex: turning skills back on in a fresh process keeps his commented block
   } finally { await box.cleanup(); }
 });
 
-test('Codex: a path block or a name+path block is edited in place and gets a name-only rule on Off so an update keeps it off', async () => {
+test('Codex: a path block gets a name-only rule on Off, and fresh On after an update restores his old-version path block', async () => {
   const { box, copy, original, config, switchTo } = await codexHome();
   try {
     const byPath = `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = true\n`;
@@ -921,26 +921,30 @@ test('Codex: a path block or a name+path block is edited in place and gets a nam
     assert.equal(await readFile(config, 'utf8'),
       `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
     assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'second' }]);
-    // A plugin update to 2.0.0 leaves the 1.0.0 path pointing at nothing; the appended name-only rule keeps the skill off.
+    // A plugin update to 2.0.0 leaves the 1.0.0 path pointing at an older copy; the appended name-only rule keeps the skill off.
     const newer = join(box.home, '.codex/plugins/cache/ck-test-market/full/2.0.0');
     await put(join(newer, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nB\n');
     await put(join(newer, 'skills/two/SKILL.md'), '---\nname: second\ndescription: Named apart from its folder.\n---\nB\n');
     assert.deepEqual(await installState(box.context, 'codex-cli', 'ck-test-market', 'full'), { state: 'installed', path: newer, version: '2.0.0', skills: ['one', 'second'], skillsOff: [{ skill: 'second' }] });
-    await rm(newer, { recursive: true });
-    // Turning back on in a fresh process sets his path block true in place and drops the bare name block: byte for byte.
+    // Turning back on in a fresh process after the update sets his 1.0.0 path block true again and drops the bare name block: byte for byte.
     switchCodexFresh(box.context, 'second', true);
     assert.equal(await readFile(config, 'utf8'), byPath);
     assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
-    // A block carrying both `name` and `path` (matching or conflicting): Codex ignores it, so Off also appends a name-only block, and fresh On restores byte for byte.
-    for (const target of ['skills/one/SKILL.md', 'skills/two/SKILL.md']) {
-      const bothKeys = `${original}\n[[skills.config]]\nname = "full:one"\npath = ${tomlValue(join(copy, target))}\nenabled = true\n`;
-      await writeFile(config, bothKeys);
-      await switchTo('one', false);
-      assert.equal(await readFile(config, 'utf8'),
-        `${original}\n[[skills.config]]\nname = "full:one"\npath = ${tomlValue(join(copy, target))}\nenabled = false\n\n[[skills.config]]\nname = "full:one"\nenabled = false\n`);
-      switchCodexFresh(box.context, 'one', true);
-      assert.equal(await readFile(config, 'utf8'), bothKeys);
-    }
+    // Also when the update removed 1.0.0 on disk (same skill path exists in 2.0.0), while another skill's old-version false block stays untouched.
+    const otherSkillOld = `\n[[skills.config]]\n# keep one off\npath = ${tomlValue(join(copy, 'skills/one/SKILL.md'))}\nenabled = false\n`;
+    await writeFile(config, `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n${otherSkillOld}\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
+    await rm(copy, { recursive: true });
+    switchCodexFresh(box.context, 'second', true);
+    assert.equal(await readFile(config, 'utf8'), `${byPath}${otherSkillOld}`);
+    // When 1.0.0 is gone and 2.0.0 has no SKILL.md at that relative path, the old-version block cannot be told surely and is left alone;
+    // an old-version block for another plugin or one carrying both name and path is also left alone.
+    const untouchedOld = `${original}\n[[skills.config]]\n# moved in 2.0.0\npath = ${tomlValue(join(copy, 'skills/legacy/SKILL.md'))}\nenabled = false\n\n[[skills.config]]\n# other plugin\npath = ${tomlValue(join(box.home, '.codex/plugins/cache/ck-test-market/other/1.0.0/skills/two/SKILL.md'))}\nenabled = false\n\n[[skills.config]]\n# both keys on old path\nname = "full:second"\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n`;
+    await writeFile(config, `${untouchedOld}\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
+    switchCodexFresh(box.context, 'second', true);
+    assert.equal(await readFile(config, 'utf8'), untouchedOld);
+    await rm(newer, { recursive: true });
+    await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nB\n');
+    await put(join(copy, 'skills/two/SKILL.md'), '---\nname: second\ndescription: Named apart from its folder.\n---\nB\n');
     // Another key besides name/path and enabled keeps the block (name-only, so no extra block is appended on Off).
     const extraKey = `${original}\n[[skills.config]]\nname = "full:one"\nnote = "team default"\nenabled = true\n`;
     await writeFile(config, extraKey);
@@ -961,6 +965,81 @@ test('Codex: a path block or a name+path block is edited in place and gets a nam
     await writeFile(config, hashed);
     assert.equal((await switchTo('hashed', true)).outcome, 'skill-on');
     assert.equal(await readFile(config, 'utf8'), original);
+  } finally { await box.cleanup(); }
+});
+
+test('Codex: a block carrying both name and path is ignored as Codex ignores it; Off leaves it byte for byte and adds a name rule', async () => {
+  const { box, copy, original, config, switchTo } = await codexHome();
+  try {
+    for (const [nameVal, pathVal, enabled] of [
+      ['full:one', join(copy, 'skills/one/SKILL.md'), false],
+      ['full:one', join(copy, 'skills/two/SKILL.md'), false],
+      ['full:one', join(copy, 'skills/one/SKILL.md'), true],
+      ['full:one', join(copy, 'skills/two/SKILL.md'), true],
+      ['full:one', '', false],
+      ['', join(copy, 'skills/one/SKILL.md'), false],
+    ] as const) {
+      const bothKeys = `${original}\n[[skills.config]]\nname = ${tomlValue(nameVal)}\npath = ${tomlValue(pathVal)}\nenabled = ${enabled}\n`;
+      await writeFile(config, bothKeys);
+      assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
+      const off = await switchTo('one', false);
+      assert.deepEqual([off.outcome, off.changed], ['skill-off', true], off.message);
+      assert.equal(await readFile(config, 'utf8'), `${bothKeys}\n[[skills.config]]\nname = "full:one"\nenabled = false\n`);
+      assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'one' }]);
+      await switchTo('one', true);
+      assert.equal(await readFile(config, 'utf8'), bothKeys);
+      await switchTo('one', false);
+      switchCodexFresh(box.context, 'one', true);
+      assert.equal(await readFile(config, 'utf8'), bothKeys);
+    }
+    // A both-keys enabled=true block after a real name=false block does not override it (Codex ignores the both-keys block).
+    const realOffThenBoth = `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n\n[[skills.config]]\nname = "full:one"\npath = ${tomlValue(join(copy, 'skills/one/SKILL.md'))}\nenabled = true\n`;
+    await writeFile(config, realOffThenBoth);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'one' }]);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one"\npath = ${tomlValue(join(copy, 'skills/one/SKILL.md'))}\nenabled = true\n`);
+  } finally { await box.cleanup(); }
+});
+
+test('Codex: same-session On then Off ends with a name-only rule saying false, while a file with only the app’s own block still returns byte for byte', async () => {
+  const { box, copy, original, config, switchTo } = await codexHome();
+  try {
+    // Path-only enabled = false (Codex's /skills toggle form): On then Off in one process leaves a name-only rule so a 2.0.0 update stays off.
+    const pathOff = `${original}\n[[skills.config]]\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n`;
+    await writeFile(config, pathOff);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'second' }]);
+    await switchTo('second', true);
+    assert.equal(await readFile(config, 'utf8'), original);
+    await switchTo('second', false);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
+    const newer = join(box.home, '.codex/plugins/cache/ck-test-market/full/2.0.0');
+    await put(join(newer, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nB\n');
+    await put(join(newer, 'skills/two/SKILL.md'), '---\nname: second\ndescription: Named apart from its folder.\n---\nB\n');
+    assert.deepEqual(await installState(box.context, 'codex-cli', 'ck-test-market', 'full'), { state: 'installed', path: newer, version: '2.0.0', skills: ['one', 'second'], skillsOff: [{ skill: 'second' }] });
+    await rm(newer, { recursive: true });
+    // Commented path-only enabled = false: On edits it to true; same-session Off edits it back to false AND appends a name-only rule.
+    const commentedPathOff = `${original}\n[[skills.config]]\n# keep\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n`;
+    await writeFile(config, commentedPathOff);
+    await switchTo('second', true);
+    await switchTo('second', false);
+    assert.equal(await readFile(config, 'utf8'), `${commentedPathOff}\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
+    // A name=true rule before a path=false rule: On then Off in one process must not restore name=true + path=false (which would turn on after an update).
+    const nameTruePathFalse = `${original}\n[[skills.config]]\n# keep name\nname = "full:second"\nenabled = true\n\n[[skills.config]]\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n`;
+    await writeFile(config, nameTruePathFalse);
+    await switchTo('second', true);
+    await switchTo('second', false);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\n# keep name\nname = "full:second"\nenabled = false\n`);
+    // A file with only the app's own block: On then Off then On in one process stays byte for byte at every step (also without a final newline).
+    for (const appOff of [`${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n`, `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false`]) {
+      await writeFile(config, appOff);
+      await switchTo('one', true);
+      const afterOn = await readFile(config, 'utf8');
+      assert.equal(afterOn, original);
+      await switchTo('one', false);
+      assert.equal(await readFile(config, 'utf8'), appOff);
+      await switchTo('one', true);
+      assert.equal(await readFile(config, 'utf8'), afterOn);
+    }
   } finally { await box.cleanup(); }
 });
 
