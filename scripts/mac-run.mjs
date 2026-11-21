@@ -36,9 +36,9 @@ const phases = [
       { name: 'alpha check', command: 'node scripts/alpha-check.mjs' },
     ],
   ],
-  // The end-to-end checks against the packaged app, with nothing beside them: four copies of the script at once, each running
-  // one group of its flows (scripts/e2e.mjs runGroups).
-  [[{ name: 'e2e', command: 'npm run e2e', env: { CK_E2E_GROUPS_AT_ONCE: '4' } }]],
+  // The end-to-end checks against the packaged app, with nothing beside them: four copies of the script at once (or as many as
+  // CK_E2E_GROUPS_AT_ONCE says, which only mac-hosted.yml sets), each running one group of its flows (scripts/e2e.mjs runGroups).
+  [[{ name: 'e2e', command: 'npm run e2e', env: { CK_E2E_GROUPS_AT_ONCE: process.env.CK_E2E_GROUPS_AT_ONCE || '4' } }]],
 ];
 
 const root = resolve(import.meta.dirname, '..');

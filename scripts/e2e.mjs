@@ -20,6 +20,7 @@ import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { managedNow } from '../src/share.ts';
 import { writesRealHome } from '../src/machine.ts';
+import { executableCandidates } from '../src/platform.ts';
 import { STANDARD_BUILD } from '../src/values.ts';
 import { applySkills } from '../src/skills.ts';
 
@@ -5988,9 +5989,10 @@ async function crashFlow() {
   execChmod();
   rmSync(HOME, { recursive: true, force: true });
   mkdirSync(COPILOT, { recursive: true });
-  // Claude Code and Copilot CLI are here by their CLIs: on the Mac runner, the real ones installed outside any home; elsewhere
-  // (no tool installed there) the home's own stand-ins.
-  if (process.platform !== 'darwin') toolClis(HOME);
+  // Claude Code and Copilot CLI are here by their CLIs: on a Mac that has them installed outside any home (the owner's
+  // runner), the real ones; elsewhere (Linux, or a Mac without them, as GitHub's own are) the home's own stand-ins.
+  const installed = binary => executableCandidates(HOME, '', binary).some(path => existsSync(path));
+  if (process.platform !== 'darwin' || !installed('claude') || !installed('copilot')) toolClis(HOME);
   const expected = {};
   for (let number = 0; number < 40; number++) {
     const directory = skill(CLAUDE, `bulk-${number}`);

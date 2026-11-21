@@ -7,6 +7,10 @@ on:
   push:
     branches: ['ci/**']
   workflow_dispatch:
+    inputs:
+      groups_at_once:
+        description: How many groups of end-to-end checks run at once (scripts/mac-run.mjs; 4 on the owner's Mac)
+        default: '4'
 permissions:
   contents: read
 # A group of its own: groups are shared by every workflow in the repository, so mac.yml's would let the two cancel each other.
@@ -21,7 +25,10 @@ jobs:
     env:
       # Temporary folders, test homes and mounted disk images under /private/tmp, as on the owner's Mac.
       TMPDIR: /private/tmp
+      CK_E2E_GROUPS_AT_ONCE: ${{ inputs.groups_at_once || '4' }}
     steps:
+      # The machine, to compare runs by: cores, memory in bytes, macOS, the display.
+      - run: sysctl -n hw.ncpu hw.memsize && sw_vers -productVersion && system_profiler SPDisplaysDataType | grep -i resolution || true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
