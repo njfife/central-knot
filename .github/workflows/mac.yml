@@ -78,5 +78,7 @@ jobs:
           for disk in $(hdiutil info | ours '/^image-path/ { o = index($0, a) || index($0, b) } o && /^\/dev\/disk[0-9]+[ \t]/ { print $1; o = 0 }'); do
             hdiutil detach -force "$disk" > /dev/null && echo "detached $disk"; done
           folders=$(find /private/tmp -maxdepth 1 -name 'ck-ci-*' -user "$(id -un)")
+          # Made writable first: a flow leaves a read-only folder in its made-up home, which rm -rf alone can't remove.
+          chmod -R u+rwx $folders "$GITHUB_WORKSPACE/release" 2> /dev/null || true
           rm -rf $folders "$GITHUB_WORKSPACE/release"
           echo "removed $(echo $folders) and release/; $(echo $alive | wc -w | tr -d ' ') processes were still running"
