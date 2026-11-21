@@ -2925,7 +2925,7 @@ async function practiceFlow() {
   if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 50 && !(await a.exists('.plugin-items-section')); tries++) await wait(100);
   const migrated = await a.text('.plugin-items-section') ?? '';
-  check('the migrated plugin’s page lists Its items: pdf-reader his own, spreadsheet kept out of Pi', /skill pdf-reader\s*Not brought in: you have your own/.test(migrated) && /skill spreadsheet/.test(migrated), migrated);
+  check('the migrated plugin’s page lists Its items: pdf-reader his own, spreadsheet kept out of Pi', /skill pdf-reader\s*Not brought in: you keep your own/.test(migrated) && /skill spreadsheet/.test(migrated), migrated);
   await fitsAtMinimum(a, 'a migrated plugin’s page, with Its items');
   await a.shot('practice-plugin-migrated');
   // Pi joined just above: its folder goes once the pass bringing it up to date has ended, or that pass makes it again and the
@@ -6600,11 +6600,38 @@ esac
   if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-issue-tracker');
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && !(await a.exists('#pupdate-0-issue-tracker')); tries++) await wait(100);
-  check('its page says an update is ready for issues, and that triage is his own', /MCP server issues\s*An update is ready/.test(await a.text('.plugin-items-section') ?? '') && /skill triage\s*Not brought in: you have your own/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-items-section'));
+  check('its page says an update is ready for issues, and that triage is his own', /MCP server issues\s*An update is ready/.test(await a.text('.plugin-items-section') ?? '') && /skill triage\s*Not brought in: you keep your own/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-items-section'));
   await pictures('plugin-items-page');
   await a.click('#pupdate-0-issue-tracker');
   await done();
   same('Update brings issues up to date in Pi, and leaves triage as he has it', [(readNow(join(home, '.pi/agent/mcp.json')) ?? '').includes('--v2'), readFileSync(join(home, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.')], [true, true]);
+  // His triage meets the plugin's under Pi's box, its reason a state with Use the plugin's beside it (library.ts TAKE). The tool
+  // files it can touch, read before the click, after it and after the header's Undo.
+  const toolFiles = () => Object.fromEntries(['.pi/agent/skills/triage/SKILL.md', '.pi/agent/settings.json', '.pi/agent/mcp.json', '.claude.json', '.claude/settings.json', '.claude/plugins/installed_plugins.json'].map(path => [path, readNow(join(home, path))]));
+  const take = '#ptake-0-issue-tracker-pi-cli-skill-triage', piLine = () => a.text('.plugin-tool[data-tool="pi-cli"] .plugin-tool-text');
+  for (let tries = 0; tries < 50 && !(await a.exists(take)); tries++) await wait(100);
+  const piBox = () => a.run(`document.querySelector('#pbox-0-issue-tracker-pi-cli')?.getAttribute('aria-checked')`);
+  check('under Pi’s box: 1 of its 2 items, a part tick; triage his, said as a state, Use the plugin’s triage under it, and once what that keeps',
+    /1 of its 2 items is on in Pi\.\s*triage: you keep your own skill by that name, not the plugin’s\.\s*Use the plugin’s triage\s*Using the plugin’s keeps yours as a version, and your other tools keep their copies\./.test(await piLine() ?? '') && await piBox() === 'mixed', [await piLine(), await piBox()]);
+  if (shots) for (const theme of ['light', 'dark']) {
+    await a.run(`window.centralKnot.setAppearance('${theme}')`);
+    for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await a.shot(`name-conflict-${theme}-${width}`); }
+    await fullSize(a);
+  }
+  await a.run(`window.centralKnot.setAppearance('system')`);
+  const clashBefore = toolFiles();
+  await a.click(take);
+  await done();
+  const clashAfter = toolFiles(), changedFiles = Object.keys(clashAfter).filter(path => clashAfter[path] !== clashBefore[path]);
+  same('Use the plugin’s writes the plugin’s triage over his in Pi, and nothing else: Pi’s list and Claude Code as they were', [changedFiles, clashAfter['.pi/agent/skills/triage/SKILL.md'] === readFileSync(triage, 'utf8')], [['.pi/agent/skills/triage/SKILL.md'], true]);
+  check('then both its items are on in Pi, the tick full', /2 of its 2 items are on in Pi\./.test(await piLine() ?? '') && await piBox() === 'true', [await piLine(), await piBox()]);
+  if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await sizeTo(a, 1316, 819); await a.shot('name-conflict-after-click-1316'); await fullSize(a); await a.run(`window.centralKnot.setAppearance('system')`); }
+  check('one result, with Undo', /^Its items put in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
+  await a.click('#plugins-undo');
+  await done();
+  same('the header’s Undo leaves every tool file as before the click, his triage back in Pi', toolFiles(), clashBefore);
+  for (let tries = 0; tries < 50 && !(await a.exists(take)); tries++) await wait(100);
+  check('his own again: the clash and its action are back under Pi’s box', await a.exists(take), await piLine());
   await a.click('#plugin-back');
   // A tool's box, on its page: Pi unticked, Pi alone, at once; the switch is then partial, and the automatic updates leave it out.
   await a.click('#popen-0-issue-tracker');
@@ -6612,7 +6639,7 @@ esac
   const boxIs = tool => a.run(`(() => { const b = document.querySelector('${box(tool)}'); return b ? [b.getAttribute('aria-checked'), b.disabled, b.dataset.state] : null; })()`);
   for (let tries = 0; tries < 50 && !(await a.exists(box('pi-cli'))); tries++) await wait(100);
   same('each tool’s box is ticked where it is, and says what a click does', [await boxIs('claude-cli'), await boxIs('pi-cli'), /Click to take issue-tracker’s items out of Pi: it stays out until you tick it again\./.test(await a.run(`document.querySelector('${box('pi-cli')}').title`) ?? '')],
-    [['true', false, 'installed'], ['true', false, 'items'], true]);
+    [['true', false, 'installed'], ['mixed', false, 'items'], true]);
   await a.click(box('pi-cli'));
   await done();
   same('unticked, its items leave Pi alone (not triage, his own now), it is recorded, the row says so, and the switch shows partial', [inPi(), installed(), entry()?.except, await boxIs('pi-cli'), await a.text('.plugin-panel .plugin-click'), await switchIs('#pswitch-page-0-issue-tracker')],
@@ -6751,7 +6778,59 @@ esac
   await flipSkill(pdfSwitch, 'true');
   await flipSkill(sheetSwitch, 'true');
   same('turning them back on in another order than last-first restores config.toml byte for byte', readFileSync(codexConfig, 'utf8'), codexBefore);
+  // A lone block carrying both `name` and `path` with `enabled = false` is ignored by Codex: the page shows the skill On,
+  // Off leaves his block byte for byte and adds a name-only rule, and On removes only that rule.
+  const codexBoth = `# mine\n[marketplaces.ck-test-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."document-tools@ck-test-market"]\nenabled = true\n\n[[skills.config]]\nname = "document-tools:pdf-reader"\npath = ${JSON.stringify(join(codexCopy, 'skills/pdf-reader/SKILL.md'))}\nenabled = false\n`;
+  writeFileSync(codexConfig, codexBoth);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 60 && !((await a.text('#plugins-result')) ?? '').startsWith('Last change: '); tries++) await wait(100);
+  for (let tries = 0; tries < 60 && !(await a.exists(pdfSwitch)); tries++) await wait(100);
+  same('a lone name+path enabled=false block shows the skill On on the page (as Codex loads it)', await a.run(`document.querySelector(${JSON.stringify(pdfSwitch)})?.getAttribute('aria-checked')`), 'true');
+  await flipSkill(pdfSwitch, 'false');
+  same('Off leaves his name+path block byte for byte and adds a name-only rule', readFileSync(codexConfig, 'utf8'), `${codexBoth}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`);
+  await flipSkill(pdfSwitch, 'true');
+  same('On removes only the added rule, restoring his file byte for byte', readFileSync(codexConfig, 'utf8'), codexBoth);
   same('no page errors, a plugin’s switch', a.pageErrors, []);
+  await a.quit();
+  await nameClashPage();
+}
+
+/**
+ * Names of his under Pi's box on a plugin's page (pluginpage.ts yourLines), pictured with --shots at 1316×819, light, the sidebar
+ * open: three at once, one of the same content (its line and its row under Its items checked: his), one he has only through the
+ * shared skills folder.
+ */
+async function nameClashPage() {
+  const home = join(scratch, 'home-clash'), data = join(scratch, 'clash-data'), market = join(scratch, 'market-clash');
+  writeMarket(market, 'ck-clash-market');
+  writeFileSync(join(market, 'plugins/document-tools/.mcp.json'), JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['files-of-the-plugin'] } } }));
+  const his = (path, text) => { mkdirSync(dirname(join(home, path)), { recursive: true }); writeFileSync(join(home, path), text); }, mine = name => `---\nname: ${name}\ndescription: Mine.\n---\n\nMine.\n`;
+  for (const name of ['pdf-reader', 'spreadsheet']) his(`.claude/skills/${name}/SKILL.md`, mine(name));
+  his('.agents/skills/hello/SKILL.md', mine('hello'));
+  his('.claude.json', JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['my-files'] } } }));
+  his('.claude/agents/release-reviewer.md', readFileSync(join(market, 'plugins/release-helper/agents/release-reviewer.md'), 'utf8'));
+  mkdirSync(join(home, '.pi/agent'), { recursive: true });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true, appearance: 'light' }));
+  const a = await launch(data, [], join(scratch, 'clash-app-home'));
+  await a.run(`(async () => { const { home } = await window.centralKnot.refresh(), all = keys => keys.map(key => ({ key, on: true, except: [] }));
+    await window.centralKnot.applySkills(all(['pdf-reader', 'spreadsheet', 'hello']), false, home); await window.centralKnot.applyServers(all(['files']), false, home);
+    await window.centralKnot.applyAgents(all(['release-reviewer']), false, home); await window.centralKnot.addMarketplace(${JSON.stringify(market)}); })()`);
+  await a.click('#nav-plugins');
+  await sizeTo(a, 1316, 819);
+  for (const [plugin, name] of [['document-tools', 'three'], ['release-helper', 'same'], ['starter-skills', 'shared']]) {
+    for (let tries = 0; tries < 50 && !(await a.exists(`#popen-0-${plugin}`)); tries++) await wait(100);
+    await a.click(`#popen-0-${plugin}`);
+    for (let tries = 0; tries < 50 && !(await a.exists(`#pbox-0-${plugin}-pi-cli`)); tries++) await wait(100);
+    await a.click(`#pbox-0-${plugin}-pi-cli`);
+    for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+    for (let tries = 0; tries < 50 && !(await a.exists('.plugin-tool-yours')); tries++) await wait(100);
+    await a.settle();
+    if (name === 'same') same('his of the same content: a state under Pi’s box, and its row says it is his, not the switch’s', [await a.text('.plugin-tool[data-tool="pi-cli"] .plugin-tool-yours'), await a.text('.plugin-items-list [data-key="agent:release-reviewer"] .plugin-outcome-what')],
+      ['release-reviewer is the same as yours, so yours stays.', 'Yours, the same as the plugin’s: its switch leaves yours as it is']);
+    if (shots) await a.shot(`name-conflict-${name}-1316`);
+    await a.click('#plugin-back');
+  }
   await a.quit();
 }
 
@@ -11512,17 +11591,18 @@ async function profilePluginsFlow() {
     { name: 'document-tools', marketplace: 'ck-test-market', version: '1.2.0', cache_path: join(home, '.copilot/installed-plugins/ck-test-market/gone'), enabled: true }] }));
   writeFileSync(join(home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { issues: { command: 'mine' }, tracker: { command: 'mine' } } }));
   await a.click('#header-refresh');
-  same('Copilot CLI’s issues is held on its row, and its copy of document-tools not known on pdf’s', [await a.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await a.all(`${row('plugin:skill:document-tools@ck-test-market/pdf')} .pf-note`, 'e.textContent')],
-    [['Stays on in Copilot CLI: Copilot CLI turns a server off by its name alone, and a server of your own there is named “issues” too.'], ['Not known in Copilot CLI: its copy couldn’t be read.']]);
+  const trackerRow = row('plugin:mcp:issue-tracker@ck-test-market/tracker');
+  same('Copilot CLI’s found tracker shows the shared-name note on unticked tracker (not on ticked issues), and document-tools’s unread copy shows not known on pdf',
+    [await a.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await a.all(`${trackerRow} .pf-note`, 'e.textContent'), await a.all(`${row('plugin:skill:document-tools@ck-test-market/pdf')} .pf-note`, 'e.textContent')],
+    [[], ['Stays on in Copilot CLI, which runs the plugin’s “tracker” instead of yours (same name).'], ['Not known in Copilot CLI: its copy couldn’t be read.']]);
   await picture('profile-plugin-held-unread', 1316, 819);
-  // His tracker taken in for Copilot CLI alone, then Off: a profile that has it holds the plugin's tracker on there, said on its row.
+  // His tracker taken in for Copilot CLI alone, then Off: a profile that has it keeps the plugin's tracker on there (without holding), said on its row.
   for (const on of [true, false]) await a.run(`window.centralKnot.applyServers([{ key: 'tracker', on: ${on}, except: ['claude-cli', 'codex-cli', 'pi-cli'], ...(${on} ? {} : { seenOn: true }) }], false, ${JSON.stringify(home)})`);
   await a.click('#header-refresh');
   await newProfile(a, 'Mine');
   await a.click(byId('pf-mcp:tracker')); await done();
-  const trackerRow = row('plugin:mcp:issue-tracker@ck-test-market/tracker');
-  same('the plugin’s tracker, which Copilot CLI would take his with, is held there, said on its row, while Codex turns it off', [await a.all(`${trackerRow} .pf-note`, 'e.textContent'), await a.run(`document.querySelector('${trackerRow} .pf-state').dataset.state`)],
-    [['Stays on in Copilot CLI: Copilot CLI turns a server off by its name alone, and a server of your own there is named “tracker” too.'], 'Turns off in Codex']);
+  same('the plugin’s tracker, sharing its name with his tracker in Copilot CLI, shows the shared-name note while Codex turns it off', [await a.all(`${trackerRow} .pf-note`, 'e.textContent'), await a.run(`document.querySelector('${trackerRow} .pf-state').dataset.state`)],
+    [['Stays on in Copilot CLI, which runs the plugin’s “tracker” instead of yours (same name).'], 'Turns off in Codex']);
   same('no page errors', a.pageErrors, []);
   await a.quit();
 
@@ -11714,6 +11794,146 @@ async function profilePluginsFlow() {
   if (shots) await b.shot('old-profile-menu-mixed-1316');
   await b.click('#status-profile');
   await fullSize(b);
+
+  // Copilot CLI shared MCP server name (examples 1, 2 and 5 through the page and the status bar's menu, reading both Copilot CLI files).
+  const oldCopilotMcp = join(oldHome, '.copilot/mcp-config.json');
+  writeFileSync(oldCopilotMcp, `${JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'mine', tools: ['*'] } } }, null, 2)}\n`);
+  writeFileSync(oldCodexCfg, oldCodexInit);
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: market } } } }, null, 2)}\n`);
+  writeFileSync(join(oldHome, '.claude/settings.json'), `${JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: market } } }, enabledPlugins: { 'issue-tracker@ck-test-market': true } }, null, 2)}\n`);
+  await b.click('#header-refresh');
+  same('his own issues taken in for Copilot CLI alone', await b.run(`window.centralKnot.applyServers([{ key: 'issues', on: true, except: ['claude-cli', 'codex-cli'] }], false, ${JSON.stringify(oldHome)}).then(r => r.stopped ?? 'ok')`), 'ok');
+  await b.click('#header-refresh');
+
+  // Example 1: managing profile Mine has his issues and leaves out plugin's issues -> Copilot CLI files untouched, Claude Code & Codex off, Mine in use, row shows exact sentence, hover, tooltip and Now column.
+  await b.run(`window.centralKnot.saveProfile({ id: 'legacy', items: ['skill:notes', ${JSON.stringify(triageId)}, ${JSON.stringify(issuesId)}] }, ${JSON.stringify(oldHome)})`);
+  await b.run(`window.centralKnot.saveProfile({ name: 'Mine', items: ['skill:notes', 'mcp:issues', ${JSON.stringify(triageId)}] }, ${JSON.stringify(oldHome)})`);
+  await b.run(`window.centralKnot.saveProfile({ name: 'Quiet', items: ['skill:notes', ${JSON.stringify(triageId)}] }, ${JSON.stringify(oldHome)})`);
+  await b.click('#header-refresh');
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('Mine')).click()`); await b.settle();
+  const sharedRowNote = 'Stays on in Copilot CLI, which runs the plugin’s “issues” instead of yours (same name).';
+  const sharedRowTitle = 'To use yours there, rename one of the two or turn the plugin off in Copilot CLI.';
+  const sharedBoxTitle = 'Not in Mine: switching to it turns issues off in each tool that can switch it, except Copilot CLI (same name as yours). Click to put it in.';
+  same('Mine’s plugin server row shows the exact Copilot CLI shared-name sentence, hover title and unticked box tooltip',
+    [await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await b.run(`document.querySelector('${row(issuesId)} .pf-note')?.title`),
+      await b.run(`document.querySelector('${row(issuesId)} .pf-tick')?.title`)],
+    [[sharedRowNote], sharedRowTitle, sharedBoxTitle]);
+  // Standing disabledMcpServers while Claude Code & Codex are still on: "Turns on" row beside Switching column saying off in other tools.
+  const copilotBeforeEx1 = { settings: readNow(oldCopilotSettings), mcp: readNow(oldCopilotMcp) };
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ ...JSON.parse(copilotBeforeEx1.settings), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+  await b.click('#header-refresh');
+  same('standing rule on Mine shows Turns on note beside per-tool Switching column',
+    [await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await b.run(`document.querySelector('${row(issuesId)} .pf-state')?.dataset.state`)],
+    [['Turns on in Copilot CLI, which runs the plugin’s “issues” instead of yours (same name).'], 'Turns on in Copilot CLI; turns off in Claude Code and Codex']);
+  if (shots) {
+    await b.run(`window.centralKnot.setAppearance('light')`);
+    await sizeTo(b, 1316, 819);
+    if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+    await b.run(`document.querySelector('${row(issuesId)}')?.scrollIntoView({ block: 'center' })`);
+    await b.settle();
+    await b.shot('copilot-shared-turns-on-light-1316');
+    await b.run(`window.centralKnot.setAppearance('system')`);
+    await fullSize(b);
+  }
+  writeFileSync(oldCopilotSettings, copilotBeforeEx1.settings);
+  await b.click('#header-refresh');
+  await b.click('#profile-switch'); await bDone();
+  same('example 1: Copilot CLI’s two files are untouched, Claude Code and Codex turn plugin’s issues off, Mine is in use and Now reads Off · on in Copilot CLI',
+    [{ settings: readNow(oldCopilotSettings), mcp: readNow(oldCopilotMcp) }, (readNow(oldCodexCfg) ?? '').includes('[plugins."issue-tracker@ck-test-market".mcp_servers.issues]\nenabled = false'),
+      JSON.parse(readNow(join(oldHome, '.claude/settings.json'))).deniedMcpServers, (await b.text('#status-profile'))?.trim(), (await b.text('.profile-header p'))?.startsWith('In use · '),
+      await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await b.run(`document.querySelector('${row(issuesId)} .pf-state')?.dataset.state`)],
+    [copilotBeforeEx1, true, [{ serverName: 'plugin:issue-tracker:issues' }], 'Mine', true, [sharedRowNote], 'Off · on in Copilot CLI']);
+  await b.click('#status-profile');
+  same('example 1: status bar menu marks Mine checked as In use',
+    await b.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Mine'))?.getAttribute('aria-checked')`), 'true');
+  await b.click('#status-profile');
+  if (shots) {
+    await b.run(`window.centralKnot.setAppearance('light')`);
+    for (const [width, height] of [[1316, 819], [860, 560]]) {
+      await sizeTo(b, width, height);
+      if (width === 1316 && await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+      await b.run(`document.querySelector('${row(issuesId)}')?.scrollIntoView({ block: 'center' })`);
+      await b.settle();
+      const rowMetrics = await b.run(`(() => { const el = document.querySelector('${row(issuesId)} .pf-note'), r = document.createRange(); r.selectNodeContents(el); return { textWidth: Math.round(r.getBoundingClientRect().width), boxWidth: Math.round(el.getBoundingClientRect().width), height: Math.round(el.getBoundingClientRect().height), clipped: el.scrollWidth > el.clientWidth + 1 }; })()`);
+      console.log(`copilot row note (${width}):`, JSON.stringify(rowMetrics));
+      check(`copilot row note fits without clipping at ${width}`, !rowMetrics.clipped, rowMetrics);
+      await b.shot(`copilot-shared-row-light-${width}`);
+    }
+    await b.run(`window.centralKnot.setAppearance('system')`);
+    await fullSize(b);
+  }
+
+  // Example 2: switch to Quiet from the status bar's menu -> preview says 2 off, one switch removes his issues and writes disabledMcpServers, Quiet in use, Undo restores both files byte for byte.
+  await b.click('#status-profile');
+  same('example 2: status bar menu previews Quiet turning 2 items off',
+    await b.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Quiet'))?.querySelector('.pf-menu-preview')?.textContent`), 'Switching turns 2 items off');
+  await b.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Quiet')).click()`); await bDone();
+  same('example 2: one switch removes his issues and writes disabledMcpServers: ["issues"], and Quiet is in use',
+    [JSON.parse(readNow(oldCopilotMcp)).mcpServers.issues, JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, (await b.text('#status-profile'))?.trim()],
+    [undefined, ['issues'], 'Old work and Quiet']);
+  await b.click('#outcome-undo'); await bDone();
+  same('example 2: Undo restores both Copilot CLI files byte for byte and puts Mine back in use',
+    [{ settings: readNow(oldCopilotSettings), mcp: readNow(oldCopilotMcp) }, (await b.text('#status-profile'))?.trim()],
+    [copilotBeforeEx1, 'Mine']);
+  // Back to Quiet for example 5.
+  await b.click('#status-profile');
+  await b.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Quiet')).click()`); await bDone();
+
+  // Example 5: non-managing profile Old work (not touching his issues leaves rule intact; ticking mcp:issues carries preview exception, wraps cleanly in header and 400px menu, clears rule, says so in result, in use).
+  const quietFiles = { settings: readNow(oldCopilotSettings), mcp: readNow(oldCopilotMcp), codex: readNow(oldCodexCfg), claude: readNow(join(oldHome, '.claude/settings.json')) };
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('Old work')).click()`); await b.settle();
+  same('example 5: non-managing profile not touching his issues shows no exception and leaves rule intact',
+    await b.text('.profile-header p'), 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.');
+  await b.click(byId('pf-mcp:issues')); await bDone();
+  const ex5Preview = 'Switching turns 2 items on. Plugin items stay as they are, except the plugin’s “issues” turns on in Copilot CLI (same name as yours).';
+  same('example 5: ticking mcp:issues on the non-managing profile adds the Copilot CLI exception to the header preview', await b.text('.profile-header p'), ex5Preview);
+  if (shots) {
+    await b.run(`window.centralKnot.setAppearance('light')`);
+    await sizeTo(b, 1316, 819);
+    if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+    await b.settle();
+    const hdrMetrics = await b.run(`(() => { const el = document.querySelector('.profile-header p'); return { boxWidth: Math.round(el.getBoundingClientRect().width), height: Math.round(el.getBoundingClientRect().height), clipped: el.scrollWidth > el.clientWidth + 1 }; })()`);
+    console.log('copilot legacy header (1316):', JSON.stringify(hdrMetrics));
+    check('legacy exception header wraps without clipping at 1316', !hdrMetrics.clipped, hdrMetrics);
+    await b.shot('copilot-shared-legacy-header-light-1316');
+  }
+  await b.click('#status-profile');
+  same('example 5: status bar menu shows the same exception preview for Old work',
+    await b.run(`document.querySelector('#status-profile-empty-old .pf-menu-preview')?.textContent`), ex5Preview);
+  const menuMetrics = await b.run(`(() => { const m = document.querySelector('.pf-menu'), el = document.querySelector('#status-profile-empty-old .pf-menu-preview'); return { menuWidth: Math.round(m.getBoundingClientRect().width), boxWidth: Math.round(el.getBoundingClientRect().width), height: Math.round(el.getBoundingClientRect().height), clipped: el.scrollWidth > el.clientWidth + 1 }; })()`);
+  console.log('copilot legacy menu (1316):', JSON.stringify(menuMetrics));
+  check('legacy exception menu preview wraps within 400px without clipping', !menuMetrics.clipped && menuMetrics.menuWidth <= 400, menuMetrics);
+  if (shots) {
+    await b.shot('copilot-shared-legacy-menu-light-1316');
+    await b.run(`window.centralKnot.setAppearance('system')`);
+    await fullSize(b);
+  }
+  await b.click('#status-profile-empty-old'); await bDone();
+  same('example 5: switching to Old work from the status bar clears disabledMcpServers, restores his issues, leaves Claude & Codex untouched, says so in the result, and marks Old work in use',
+    [JSON.parse(readNow(oldCopilotMcp)).mcpServers.issues?.command, JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers,
+      readNow(oldCodexCfg), readNow(join(oldHome, '.claude/settings.json')),
+      (await b.text('.band-done'))?.includes('Copilot CLI’s off-switch for “issues” was cleared; there the plugin’s “issues” runs, not yours (same name).'),
+      await b.text('.profile-header p'), (await b.text('#status-profile'))?.trim()],
+    ['mine', undefined, quietFiles.codex, quietFiles.claude, true, 'In use · 2 items on. Plugin items stay as they are.', 'Old work and Mine']);
+
+  // Short-list item 1: after uninstall + external disabledMcpServers, background pass updates the native menu so Old work shows Switching (not In use) and clicking it clears the rule.
+  writeFileSync(join(oldHome, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }));
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ ...JSON.parse(readNow(oldCopilotSettings)), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+  if (b.inspect) {
+    const menu = await mainHelpers(b.inspect);
+    try {
+      let clicked = 0;
+      for (let tries = 0; tries < 60 && !clicked; tries++) {
+        clicked = await menu.clickMenu('Old work · Switching turns 1 item on. Plugin items stay as they are.', false);
+        if (!clicked) await wait(100);
+      }
+      check('native menu shows Old work turning 1 item on (not In use) after external disabledMcpServers, and clicking it switches', clicked >= 1);
+    } finally { menu.close(); }
+    for (let tries = 0; tries < 80 && JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers; tries++) await wait(100);
+    await bDone();
+    same('native menu switch to Old work clears the orphan disabledMcpServers rule', JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, undefined);
+  }
+
   same('no page errors after reopen', b.pageErrors, []);
   await b.quit();
 }
