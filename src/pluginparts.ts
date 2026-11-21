@@ -8,7 +8,7 @@ import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, resultLines, succeeded, type PluginOp } from './pluginplan.ts';
 import { applyPluginOps, clickOn, market, openLink, pluginBusy, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
-import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
+import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, itemsAllIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
@@ -102,8 +102,10 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   const does = box.ticked ? `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`
     : entry.switches?.[plugin.name]?.entry?.on ? `Click to put ${what} in ${where}. Undo takes it out again.` : `Click to turn ${plugin.name} on in ${where} alone. Undo turns it off again.`;
   const label = box.held ? words : `${words} ${box.off ?? does}`;
-  const { look, glyph } = box.ticked || box.held ? MARK_LOOKS[mark] : { look: 'cell-absent', glyph: () => null };
-  return workingCell(entry, plugin, tool, id) ?? waitingCell(entry, plugin, tool, id) ?? h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.cell-box.${look}`, { type: 'button', id, role: 'checkbox', 'aria-checked': String(box.ticked),
+  // Ticked with its items in full only where each is on there or the same as his (pluginstatus.ts itemsAllIn); else a dash, mixed.
+  const some = mark === 'items' && !itemsAllIn(entry, plugin.name, tool), shown = some ? { ...MARK_LOOKS[mark], glyph: () => icon('minus', 16) } : MARK_LOOKS[mark];
+  const { look, glyph } = box.ticked || box.held ? shown : { look: 'cell-absent', glyph: () => null };
+  return workingCell(entry, plugin, tool, id) ?? waitingCell(entry, plugin, tool, id) ?? h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.cell-box.${look}`, { type: 'button', id, role: 'checkbox', 'aria-checked': some ? 'mixed' : String(box.ticked),
     'aria-label': label, title: label, 'data-state': mark, disabled: !!box.off || pluginBusy(entry.source, plugin.name),
     onclick: () => turnPlugin(entry, plugin.name, box.ticked ? 'keep-out' : 'let-in', tool) }, glyph()));
 }
