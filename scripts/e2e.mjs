@@ -11115,12 +11115,18 @@ async function profilePluginsFlow() {
     for (let tries = 0; tries < 50 && readNow(config) !== codexBefore; tries++) await wait(100);
     await a.click('#header-refresh');
     same('the menu bar’s Work turns triage back on in Codex and Pi', [files(), (await a.text('#status-profile'))?.trim()], [before, 'Work']);
+  } else {
+    // The packaged app opens no main-process inspector: back to Work from the status bar's menu, so what follows starts the same.
+    await a.click('#status-profile');
+    await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Work')).click()`);
+    await done();
+    same('the status bar’s Work turns triage back on in Codex and Pi', [files(), (await a.text('#status-profile'))?.trim()], [before, 'Work']);
   }
   // The menu helper clicks every menu object still alive with that label, older ones too: each switch after the first plans from the
   // home as the one before left it (main.ts pluginSide), finds nothing to change, and writes no entry.
   await a.click('#nav-history');
   same('History has one entry per switch, newest first, each saying what it did', await a.all('.history-row[data-kind="profile"] .history-about', 'e.textContent'),
-    [...(a.inspect ? ['Switched to Work: 1 item turned on.'] : []), 'Switched to Quiet: 1 item turned off.', 'Switched to Quiet: 1 item turned off.']);
+    ['Switched to Work: 1 item turned on.', 'Switched to Quiet: 1 item turned off.', 'Switched to Quiet: 1 item turned off.']);
 
   // The whole plugin off in Codex: a switch can't turn its items on there, so the rows say so, with the way to its page.
   writeFileSync(config, readNow(config).replace('enabled = true', 'enabled = false'));
