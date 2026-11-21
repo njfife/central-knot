@@ -253,7 +253,8 @@
 // brings it into a tool, at its Update and at the automatic updates' check (pluginlibrary.ts says when); a skill of it is keyed by
 // its folder's name (A SOURCE says both key rules), and a plugin that is one skill at its root by the plugin's name, never by the
 // folder its files are read from, so an update to another pin, read from another copy, keeps the key (pluginlibrary.ts readPlugin,
-// the one read the page, a click, Update, the automatic check and Use the plugin's all use). Its read (SourceSeen
+// the one read the page, a click, Update, the automatic check and Use the plugin's all use; a tool's installed copy is named so
+// by its own read, pluginitems.ts readPluginItems). Its read (SourceSeen
 // `plugin`) meets the table above but for these rows, each decided in fromSource by that one field:
 //
 //   at the plugin                       the item                    what happens
@@ -273,6 +274,14 @@
 //                                                                   Before every other row, so the plugin's drop never turns it Off
 //   S changed                           linked, a tool's copy       nothing, until a read where it can be seen: no version of a
 //                                       can't be seen for sure      plugin ever waits, and no Merge, Replace or Keep mine is asked
+//
+// THE MOVE: a build before this one named that root skill for the folder it read the plugin from, the marketplace's folder for
+// it or its own copy's (earlierRootName). The plugin's next read moves it once, where the read's one skill is the root skill and
+// the one skill linked to the plugin has such a name: the root skill is made in its place, On or Off as it was and kept out of
+// what it was kept out of, and each profile that named it names the root skill (pluginlibrary.ts runItems). Otherwise the old
+// item is dropped as any other, and the result names each profile that still names it. Until that read, a copy under a copy's
+// name (24 hex digits) is keyed as that build keyed it, by the plugin's name where a tool has the plugin installed whole
+// (profileplan.ts pluginLive), so a profile switch meanwhile keeps or removes it as that build would.
 //
 // TAKE (librarypass.ts take): a take is one item, in one tool, by one click. It writes in that tool only (SourceSeen plugin `into`),
 // and only when that tool can hold the plugin's version (takeHeld; else nothing changes, and the click is told why); it never
@@ -765,6 +774,12 @@ export function removedBy<Read extends Pick<SourceSeen, 'id' | 'link' | 'names'>
   if (item.on || item.deleted || linkedSource(item, recorded)) return undefined;
   return reads.find(read => read.kind === kind && !read.names.has(item.key) && fromLinkSinceTakeIn(item, read.link));
 }
+
+/**
+ * Whether `name` is one a build before this one gave a plugin's root skill (the header's A PLUGIN, THE MOVE): the name of the
+ * folder it read the plugin from (`folder`), or of its copy of the plugin's own repository, 24 hex digits (plugins.ts remoteCopyFolder).
+ */
+export const earlierRootName = (name: string, folder?: string) => name === folder || /^[0-9a-f]{24}$/.test(name);
 
 /**
  * Whether one of an item's versions since it last came in from a tool (a take-in: `found` or `chosen`) came from this link: the

@@ -291,8 +291,9 @@ export async function serverAt(where: { folder: string; folderName: string; file
 // (as Claude Code finds a plugin's: the paths its plugin.json names, else skills/, agents/ and .mcp.json, or one skill at its root),
 // through the per-item checks a link's readers use (skillAt, agentInText, serverAt), never their place-finding; what is no agent
 // at a link (a README, a page with no front matter) is none here either. Each item is named as a link's are: its folder from
-// `root`, and that folder's own name, never Central Knot's copy's: for the root, `rootName` (the repository's name at a link;
-// the plugin's for a marketplace's plugin, whose root is the plugin's own folder). Two routes read with it, a
+// `root`, and that folder's own name, never Central Knot's copy's; the folder at `root` itself is named `rootName`: the
+// repository's name at a link, and for a marketplace's plugin, read from its own folder whatever that folder is called, the
+// plugin's name. Two routes read with it, a
 // marketplace's plugin in Pi and OpenCode (`marketplace`: pluginlibrary.ts readPlugin) and a plugin's own folder at a source's
 // link (`link`: holdsAt), and they differ only in a skill's key (library.ts A SOURCE says the two rules). What its files leave
 // unread (PluginFiles `unread`) is an unreadable line of that kind: one by name, or one line (`unread`) for a folder of them that

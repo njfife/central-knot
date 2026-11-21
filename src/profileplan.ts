@@ -15,14 +15,14 @@
 //   gives the header and menu line; `undoPlan`, `pluginUndo` and `copilotUndo` revert items still as left, never re-disabling a
 //   Copilot CLI name a server of his uses now (`onAfterUndo`, `copilotHasYours`). Dormant ids stay skipped; plugin-linked library
 //   items belong to `pluginLive` (`pluginItemKey`), not `liveItems`; found-only rows no profile can tick are counted by `leftOut`.
-import { itemKey, type ItemKind, type LibraryItem } from './library.ts';
+import { earlierRootName, itemKey, type ItemKind, type LibraryItem } from './library.ts';
 import { placeOf } from './libraryrow.ts';
 import { plural } from './model.ts';
 import { loadsKind, pageOfPart } from './pluginstatus.ts';
 import { cantSwitch, onNow, ownSwitch, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, kindNouns, toolNames } from './words.ts';
-import type { HarnessId, HistoryEvent, HomeView, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
+import type { HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
 
 /** What every screen calls the state where no profile is in use. */
 export const NO_PROFILE = 'No profile';
@@ -152,6 +152,16 @@ function installedWay(home: PluginHome, at: PluginItemAt): Pick<PluginCopy, 'way
 }
 
 /**
+ * A root skill an earlier build placed under its copy's name (library.ts earlierRootName, without the folder) keeps, until its
+ * plugin's next read moves it (library.ts A PLUGIN, THE MOVE), the key that build gave it: the plugin's name, where a tool has the
+ * plugin installed whole as one skill at its root (its PluginItem `keyName`, the plugin's).
+ */
+function keyedAsBefore(home: PluginHome, kind: ItemKind, item: LibraryItem, entry: { plugin: string; marketName: string }): boolean {
+  const atRoot = (install: InstalledPlugin) => install.items.some(part => part.kind === 'skill' && part.keyName === entry.plugin);
+  return kind === 'skill' && earlierRootName(item.name) && !!home.pluginItems?.some(install => install.plugin === entry.plugin && install.marketName === entry.marketName && atRoot(install));
+}
+
+/**
  * Every plugin's item a tool has now, one per pluginItemKey whichever way each tool has it: installed whole, then placed in Pi or
  * OpenCode, a library item linked to a plugin the home records, in each of those managed tools it isn't kept out of (Off too:
  * its On brings it back there; `plugin-off` while the plugin is Off on Plugins, whose Off turned the item Off:
@@ -174,7 +184,8 @@ export function pluginLive(home: PluginHome): PluginLive[] {
     for (const item of Object.values(library)) {
       const entry = !item.deleted && home.profiles.plugins?.find(each => each.id === item.source);
       if (!entry) continue;
-      const key = pluginItemKey(entry, { kind, name: item.name }), row = home[pageOfPart[kind]].items.find(each => each.key === item.key);
+      const name = keyedAsBefore(home, kind, item, entry) ? entry.plugin : item.name;
+      const key = pluginItemKey(entry, { kind, name }), row = home[pageOfPart[kind]].items.find(each => each.key === item.key);
       for (const tool of tools.filter(each => !takesPlugins(each) && !item.except.includes(each))) {
         const way = entry.on ? { way: 'switch' as const } : { way: 'plugin-off' as const, why: pluginOff(entry.plugin, tool) };
         const gone = item.on && !!item.applied[tool] && !row?.copies[tool] ? { gone: true as const } : {};
