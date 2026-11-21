@@ -197,7 +197,7 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
     await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); if (${closing} && e.matches('.switch, .add-item') && e.closest('[data-key], [data-plugin]') && !e.closest('.details')) document.querySelector('#outcome-dismiss, #report-dismiss')?.click(); e.click(); })()`);
     await settle();
   };
-  const settle = async () => { await wait(120); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s. ' + JSON.stringify({ ready: document.body.dataset.ready, busy: document.body.dataset.busy, ann: document.querySelector('#announcement')?.dataset.text, page: document.querySelector('.page-title')?.textContent }))) : setTimeout(c, 25); c(); })`); await wait(60); };
+  const settle = async () => { await wait(120); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s.')) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors, debugUrl: targets[0].webSocketDebuggerUrl,
     inspect, main: inspect && (() => mainProcess(inspect)),
@@ -671,10 +671,10 @@ async function backPlaceFlow() {
     await back();
     const backAt = await placeWhen(from, left), seenBack = await view();
     await forward();
-    const fwdAt = await placeWhen(to, there);
-    if (fwdAt !== there) console.log('[MEASURE backPlaceFlow.fwd]', JSON.stringify({ name, size, to, there, fwdAt, diag: await a.run(`(() => { const el = document.getElementById(${JSON.stringify(to)}); return { sh: el?.scrollHeight, ch: el?.clientHeight, readme: !!document.querySelector('.plugin-readme'), title: document.querySelector('.page-title')?.textContent }; })()`) }));
+    // A plugin's page loads its marketplace and README asynchronously outside busy(); wait for the README before reading its scroll place.
+    if (to === 'plugins-scroll') await until(() => a.exists('.plugin-readme'));
     same(`${name} at ${size}: both scrolled; Back to the place left, Find, chip and opened row ${viewBack ? 'let go as today' : 'as they were'}; Forward to the place reached`,
-      [left > 0, there > 0, backAt, seenBack, fwdAt], [true, true, left, viewBack ?? seen, there]);
+      [left > 0, there > 0, backAt, seenBack, await placeWhen(to, there)], [true, true, left, viewBack ?? seen, there]);
   };
   const library = 'table-library-skills', row = key => `.ov-row[data-key="${rowPart('', 'skills', key)}"]`;
   const pluginSkill = '[data-key$="/plugin-skill-04"]', pluginSkillOpen = '[id^="open-skills-"][id$="/plugin-skill-04"]', pack17 = '[data-plugin="pack-17"]';
@@ -1071,15 +1071,9 @@ const ROW_PIECES_CUT = `(() => {
 async function placeThroughRedraw(a, selector, redraw, { by = 40, sideways = false } = {}) {
   const box = `document.querySelector(${JSON.stringify(selector)})`, axis = sideways ? 'scrollLeft' : 'scrollTop';
   const short = `${selector} { ${sideways ? 'max-width' : 'max-height'}: 60px !important; overflow: auto !important; }`;
-  const preM = selector === '.market-list' ? await a.run(`(() => { const el = document.querySelector('.market-list'), cs = el && getComputedStyle(el); return { sh0: el?.scrollHeight, ch0: el?.clientHeight, dir0: cs?.flexDirection }; })()`) : null;
   await a.run(`(sheet => { window.ckShort = sheet.insertRule(${JSON.stringify(short)}, sheet.cssRules.length); ${box}.${axis} = ${by}; document.querySelector('#header > *').ckDrawn = true; })(document.styleSheets[0])`);
-  const setM = selector === '.market-list' ? await a.run(`(() => { const el = document.querySelector('.market-list'); return { shSet: el?.scrollHeight, chSet: el?.clientHeight, stSet: el?.scrollTop }; })()`) : null;
   await redraw();
   const after = await a.run(`[!document.querySelector('#header > *').ckDrawn, ${box}?.${axis} ?? null]`);
-  if (selector === '.market-list') {
-    const m = await a.run(`(() => { const el = document.querySelector('.market-list'), cs = el && getComputedStyle(el), main = document.querySelector('#main'); return { iw: innerWidth, ih: innerHeight, ow: outerWidth, oh: outerHeight, dpr: devicePixelRatio, scr: [screen.width, screen.height, screen.availWidth, screen.availHeight], mainW: main?.clientWidth, sh: el?.scrollHeight, ch: el?.clientHeight, sw: el?.scrollWidth, cw: el?.clientWidth, st: el?.scrollTop, dir: cs?.flexDirection, ovY: cs?.overflowY, kids: el ? [...el.children].map(c => [c.tagName + '.' + c.className, Math.round(c.getBoundingClientRect().height)]) : [] }; })()`);
-    console.log('[MEASURE practiceFlow.market-list]', JSON.stringify({ after, ...preM, ...setM, ...m }));
-  }
   await a.run(`document.styleSheets[0].deleteRule(window.ckShort)`);
   return after;
 }
@@ -1098,6 +1092,12 @@ async function fullSize(a) {
 /** Chooses `value` in the item list's From menu (matrix.ts fromChoice) as its menu chooses: a press opens a system menu on the Mac. */
 async function chooseFrom(a, value) {
   await a.run(`(select => { select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-from'))`);
+  await a.settle();
+}
+/** Opens History via `trigger` and waits for its async loadHistory() read (main's serial history:list queue) to finish and draw. */
+async function openHistory(a, trigger) {
+  await a.click(trigger);
+  await a.run(`window.centralKnot.history().then(() => new Promise(done => setTimeout(done, 0)))`);
   await a.settle();
 }
 /**
@@ -2478,6 +2478,8 @@ async function practiceFlow() {
   await a.click('#add-marketplace');
   for (let tries = 0; tries < 50 && !/already/.test(await addSaid()); tries++) await wait(100);
   same('added again, it is on this page already, with its plugin installed counted', await addSaid(), 'Marketplace already on this page: 5 plugins, 1 installed (ck-test-market).');
+  // .market-list is a vertical list from #main >= 880 px (style.css); size to 1280×800 so smaller displays don't fold it into its strip.
+  await sizeTo(a, 1280, 800);
   same('scrolled, the marketplaces’ list stays where it was through Refresh', await placeThroughRedraw(a, '.market-list', () => a.click('#header-refresh')), [true, 40]);
   await a.send('Emulation.setDeviceMetricsOverride', { width: SMALLEST[0], height: SMALLEST[1], deviceScaleFactor: 1, mobile: false });
   // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
@@ -4169,10 +4171,8 @@ async function updateFlow() {
     const clicked = Date.now();
     await a.run(`(setTimeout(() => document.getElementById('setting-update').click(), 100), true)`);
     check('Restart to update quits for the update', await Promise.race([exited.then(() => true), wait(15000).then(() => false)]));
-    const quitMs = Date.now() - clicked;
     const kept = JSON.parse(readNow(join(data, 'plugins/plugin-text.json')) || '{"plugins":[]}').plugins;
-    console.log('[MEASURE updateFlow.quit]', JSON.stringify({ quitMs, keptLen: kept.length }));
-    check('with a plugin read in flight, the restart waits for its stop and its save, not the 15 seconds', quitMs < 5000 && kept.length === 4, [quitMs, kept.length]);
+    check('with a plugin read in flight, the restart waits for its stop and its save, not the 15 seconds', Date.now() - clicked < 5000 && kept.length === 4, [Date.now() - clicked, kept.length]);
     const pending = JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).update;
     same('the update is recorded for the next launch', pending && [pending.tag, pending.from], ['v0.5.0-preview.5', 'v0.5.0-preview.4']);
     // The next launch is the new version: it says so once, with the release notes.
@@ -4279,9 +4279,8 @@ async function updateFlow() {
     await fitsBothWays('Update available');
     await typeDraft();
     await a.click('#update-control');
-    for (let i = 0; i < 40 && !/^Downloading… \d+%$/.test((await control()).label); i++) await wait(100);
-    const dlDiag = await a.run(`(() => { const b = document.getElementById('update-control'), g = b?.querySelector('.update-glyph'); return { label: b?.textContent?.trim(), look: b?.dataset.look, cls: g?.className, prop: g?.style.getPropertyValue('--progress') }; })()`);
-    console.log('[MEASURE updateFlow.progress]', JSON.stringify(dlDiag));
+    // Wait for a non-zero progress chunk: updateflow.ts emits 0% before newest() and download() begin sending bytes.
+    for (let i = 0; i < 40 && !/^Downloading… [1-9]\d*%$/.test((await control()).label); i++) await wait(100);
     same('while downloading, the icon is ringed by the progress', await a.run(`Number(document.querySelector('#update-control .update-glyph.with-progress')?.style.getPropertyValue('--progress')) > 0`), true);
     same('nor while downloading', [await sidebarFit(), await crowding()], [[], []]);
     await reaches('held');
@@ -5940,10 +5939,8 @@ async function firstSetupFlow() {
     check('a large Sync once shows two successful items, counts the rest and offers their History',
       (words?.match(/Took in guide-/g) ?? []).length === 2 && /took in 6 more items/i.test(words)
       && await d.exists('#outcome-history'), words);
-    await d.click('#outcome-history');
+    await openHistory(d, '#outcome-history');
     const guides = (await d.all('.history-row[data-kind="on"] .history-what strong')).filter(name => name.startsWith('guide-'));
-    const hEmpty = await d.text('.empty');
-    console.log('[MEASURE firstSetupFlow.history]', JSON.stringify({ guides0: new Set(guides).size, hEmpty, bands: await d.text('.bands') }));
     same('History lists all eight guides, including the six folded into the count', new Set(guides).size, 8);
     // On the Overview, its band says the same: the sentence, then each refusal on a line of its own.
     await d.click('#nav-overview');
@@ -6028,13 +6025,9 @@ async function crashFlow() {
   const onRecordNow = () => { try { return Object.values(JSON.parse(readFileSync(record, 'utf8')).items).filter(item => item.on).length; } catch { return -1; } };
   let interrupted = 0;
   for (let round = 0; round < crashRounds; round++) {
-    const t0 = Date.now();
     const a = await launch(join(scratch, 'crash-data'));
-    const t1 = Date.now();
     await a.click('#home-actual');
-    const t2 = Date.now();
   await openKind(a, 'skills');
-    const t3 = Date.now();
     // Each skill a click takes in is on record once it is carried out, one after another, so a kill leaves some taken in
     // (opening catches their copies up) and the rest still found: those are taken in again, in one request (no bulk switch on
     // the page), not waited for, so the kill lands while it copies.
@@ -6046,7 +6039,6 @@ async function crashFlow() {
     if (taking > 0) for (const before = Math.max(0, onRecordNow()), end = Date.now() + 15000; Date.now() < end && onRecordNow() <= before;) await wait(10);
     await wait(30 + Math.round(round * 700 / Math.max(1, crashRounds - 1)) + randomInt(40));
     await a.crash();
-    console.log('[MEASURE crashFlow.round]', JSON.stringify({ round, launchMs: t1 - t0, actualMs: t2 - t1, openMs: t3 - t2, taking, onRec: onRecordNow(), copilot: readdirSync(COPILOT).length }));
     if (readdirSync(COPILOT).length < 40) interrupted++;
     for (const name of readdirSync(COPILOT)) {
       check(`round ${round}: nothing half-written in a loaded folder (${name})`, !name.startsWith('.'), name);
@@ -6057,19 +6049,15 @@ async function crashFlow() {
   const onRecord = Math.max(0, onRecordNow());
   // A round killed before its take-in began tests nothing (every folder is merely absent): some skills must be on record.
   check('the kills landed while skills were taken in: some are on record before the last open', onRecord > 0, onRecord);
-  const tf0 = Date.now();
   const a = await launch(join(scratch, 'crash-data'));
-  console.log('[MEASURE crashFlow.finish.launch]', Date.now() - tf0);
-  const tf1 = Date.now();
   await a.click('#home-actual');
-  console.log('[MEASURE crashFlow.finish.actual]', Date.now() - tf1, 'onRec', onRecordNow(), 'copilot', readdirSync(COPILOT).length);
-  const tf2 = Date.now();
   await openKind(a, 'skills');
-  console.log('[MEASURE crashFlow.finish.open]', Date.now() - tf2);
-  const addMs = [];
-  // Opening catches up every skill on record; the ones a kill left found are turned on, each.
-  for (const key of await rowKeys(a, 'skills')) if (key.startsWith('bulk-') && await a.exists(`#${rowPart('add', 'skills', key)}`)) { const ta = Date.now(); console.log('[MEASURE crashFlow.add.start]', key); await a.click(`#${rowPart('add', 'skills', key)}`); const dt = Date.now() - ta; addMs.push(dt); if (dt > 3000) console.log('[MEASURE crashFlow.add.slow]', key, dt); }
-  console.log('[MEASURE crashFlow.finish]', JSON.stringify({ onRecord, launchMs: tf1 - tf0, actualMs: tf2 - tf1, adds: addMs.length, maxAddMs: Math.max(0, ...addMs), sumAddMs: addMs.reduce((x, y) => x + y, 0) }));
+  // Opening catches up every skill on record; the ones a kill left found are turned on: the first via its Add button, the
+  // rest in one applySkills pass so a slower machine with many still found doesn't re-hash all 40 skills twenty times over.
+  const leftFound = [];
+  for (const key of await rowKeys(a, 'skills')) if (key.startsWith('bulk-') && await a.exists(`#${rowPart('add', 'skills', key)}`)) leftFound.push(key);
+  if (leftFound.length) await a.click(`#${rowPart('add', 'skills', leftFound[0])}`);
+  if (leftFound.length > 1) await a.run(`window.centralKnot.applySkills(${JSON.stringify(leftFound.slice(1).map(key => ({ key, on: true, except: [] })))}, false, document.querySelector('.status-home').title)`);
   console.log(`crash finish: ${onRecord} of 40 on record before opening, caught up on open; the rest turned on again`);
   same('after crashes, opening again completes every copy', readdirSync(COPILOT).filter(name => name.startsWith('bulk-')).length, 40);
   for (const name of Object.keys(expected)) same(`final ${name} bytes`, tree(join(COPILOT, name)), expected[name]);
@@ -7680,11 +7668,10 @@ async function pluginTextFlow() {
   for (const args of [['init', '--quiet', '--initial-branch=main'], ['add', '-A'], ['-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', 'commit', '--quiet', '-m', 'spark'], ['config', 'uploadpack.allowFilter', 'true']]) spawnSync('git', ['-C', spark, ...args]);
   a = await launch(data, [], real, { CK_PLUGIN_TEXT: 'on', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
   await toSettings();
-  const said5 = await saying(/^Read 5 of 5 plugins\.$/);
-  console.log('[MEASURE pluginTextFlow.5th]', JSON.stringify({ said5, keptAtSaid: kept().map(e => e.plugin) }));
-  check('launched again, the fifth is read too', said5 && kept().some(entry => entry.plugin === 'spark' && entry.items.some(item => item.name === 'spark-app')), [await said(), kept().map(entry => entry.plugin)]);
-  // This home has nothing of its own: with a marketplace listed, the Library still offers Find, which finds what is read.
   const until = async (test, ms) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+  // plugintext.ts updates Settings (show) before run() finishes save() to plugin-text.json; wait for the saved fifth entry too.
+  check('launched again, the fifth is read too', await saying(/^Read 5 of 5 plugins\.$/) && await until(() => kept().some(entry => entry.plugin === 'spark' && entry.items.some(item => item.name === 'spark-app')), 10000), [await said(), kept().map(entry => entry.plugin)]);
+  // This home has nothing of its own: with a marketplace listed, the Library still offers Find, which finds what is read.
   await a.click('#nav-library');
   check('with nothing of any kind, on All, the Library’s own empty words, under Find', await until(() => a.exists('#find'), 10000) && (await a.text('.empty-title')) === 'Nothing in the Library yet', await a.text('.empty-title'));
   check('a Library with nothing yet offers Find, and finds spark-app in the plugin not installed, and no line once all are read', await until(async () => {
@@ -9031,7 +9018,7 @@ async function searchFlow() {
   await b.click('#setup-yes');
   check('Synchronize everything takes the made-up home in', await until(() => !!jsonOrNothing(join(S.home, '.central-knot/skills.json'))?.items?.['release-checklist']));
   await openKind(b, 'all');
-  // Wait for the background pass's view to reach the page with the taken-in switch (app.ts backgroundRefresh).
+  // Yes's background pass writes skills.json before its sync:changed refresh updates the page from Add to switch; wait for the switch.
   await until(() => b.exists(`#${rowPart('switch', 'skills', 'archive-notes')}`));
   await b.click(`#${rowPart('switch', 'skills', 'archive-notes')}`);
   await done();
@@ -9801,11 +9788,8 @@ async function libraryFlow() {
   check('Yes takes the twelve in', await until(() => Object.keys(JSON.parse(readNow(join(T.home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 12));
   await done(tb);
   await openKind(tb, 'all');
-  const tSw0 = Date.now();
-  const hasSw0 = await tb.exists(`#${rowPart('switch', 'skills', 'beta')}`);
-  // Yes's background pass writes skills.json before its sync:changed refresh reaches the page (app.ts backgroundRefresh); wait for the taken-in row's switch.
+  // Yes's background pass writes skills.json before its sync:changed refresh updates the page from Add to switch; wait for the switch.
   await until(() => tb.exists(`#${rowPart('switch', 'skills', 'beta')}`));
-  console.log('[MEASURE libraryFlow.setup-yes]', JSON.stringify({ hasSw0, waitMs: Date.now() - tSw0 }));
   const placeOf = () => tb.run(`[Math.round(document.querySelector('[id^="table-library-"]').getBoundingClientRect().top), Math.round(document.querySelector('${row('skills', 'beta')}').getBoundingClientRect().top)]`);
   const clickMovesNothing = async (where, refused) => {
     const before = await placeOf();
@@ -9887,24 +9871,19 @@ async function libraryFlow() {
     }
     await theme(tb, 'light'); await sizeTo(tb, ...SMALLEST); await fullSize(tb); await again();
   };
-  const tEdit = Date.now();
+  // Hosted macOS runs with Reduce Motion on, where style.css intentionally suppresses animations; emulate no-preference to test the arrival mark.
+  await tb.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   edit('alpha');
   check('alpha edited in Claude Code: its notice comes to the header’s lines', await until(async () => /alpha was edited in Claude Code/.test(await noticeInLines(tb) ?? ''), 30000), await tb.text('#header'));
-  const tSeen = Date.now() - tEdit;
   // It comes with a stronger fill that settles once into the line's own: each redraw carries it on from where it was, never from
   // the start (its animations, and how far along each is, in hundredths).
   const arriving = () => tb.run(`(line => line && line.getAnimations().map(each => [each.animationName, Math.round(each.effect.getComputedTiming().progress * 100)]))(document.querySelector('#header .header-notice'))`);
-  const animDiag = () => tb.run(`(() => { const line = document.querySelector('#header .header-notice'), cs = line && getComputedStyle(line); return { rm: matchMedia('(prefers-reduced-motion: reduce)').matches, focus: document.hasFocus(), vis: document.visibilityState, win: [innerWidth, innerHeight], inlineDelay: line?.style.animationDelay, comp: cs && [cs.animationName, cs.animationDuration, cs.animationDelay, cs.animationPlayState], anims: line?.getAnimations().map(x => ({ name: x.animationName, state: x.playState, cur: x.currentTime, start: x.startTime, prog: x.effect?.getComputedTiming()?.progress, dur: x.effect?.getComputedTiming()?.duration })) }; })()`);
-  const cameDiag = await animDiag();
   const came = await arriving();
   if (shots) await tb.shot('notices-arriving-full-light');
-  const tBeforeRedraw = Date.now();
-  await wait(600);
-  for (let twice = 0; twice < 2; twice++) await tb.click('#sidebar-toggle');
-  const redrawMs = Date.now() - tBeforeRedraw;
-  const carriedDiag = await animDiag();
+  await wait(500);
+  // Two synchronous redraws (no 180 ms settle() between clicks) so the 2.4 s arrival stays active while carried through them under load.
+  await tb.run(`for (let twice = 0; twice < 2; twice++) document.getElementById('sidebar-toggle').click()`);
   const carried = await arriving();
-  console.log('[MEASURE libraryFlow.notice]', JSON.stringify({ tSeen, redrawMs, came, carried, cameDiag, carriedDiag }));
   await wait(2600);
   same('a notice come to the lines is marked as it comes, the mark carried on through two redraws, not started again, then rests',
     [came?.[0]?.[0], carried?.[0]?.[1] - came?.[0]?.[1] >= 15, await arriving()], ['notice-arrives', true, []]);
@@ -9934,6 +9913,7 @@ async function libraryFlow() {
       [away, back[0], back[1]?.[0], back[1]?.[1] < 50], [[true, ['1', true]], ['1', false], 'notice-arrives', true]);
     await wait(2600);
   }
+  await tb.send('Emulation.setEmulatedMedia', { features: [] });
   same('said as an automatic change, with no result’s check; Notices counts it, unmarked: drawn in the lines, it is seen; the header 48px',
     [(await noticeInLines(tb))?.startsWith('Automatic change'), await tb.run(`document.querySelector('#header .header-notice .sync-notice')?.firstElementChild?.className`), await control(), await header48()], [true, 'notice-source', ['1', false], 48]);
   same('Notices is a button when closed: a border as Refresh has, its count on a fill of its own', await tb.run(`(([control, refresh, count]) => [getComputedStyle(control).borderTopColor === getComputedStyle(refresh).borderTopColor, getComputedStyle(control).borderTopWidth, !!count && getComputedStyle(count).backgroundColor !== 'rgba(0, 0, 0, 0)'])(['#notices', '#header-refresh', '#notices .notices-count'].map(id => document.querySelector(id)))`), [true, '1px', true]);
@@ -10520,7 +10500,7 @@ async function headerResultFlow() {
   check('Yes takes the eleven skills in', await until(() => Object.keys(JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 11));
   await done();
   await openKind(a, 'all');
-  // Wait for the background pass's view to reach the page with the taken-in switches (app.ts backgroundRefresh).
+  // Yes's background pass writes skills.json before its sync:changed refresh updates the page from Add to switch; wait for the switches.
   await until(() => a.exists(`#${rowPart('switch', 'skills', names[0])}`));
   const row = name => `.ov-row[data-key="${rowPart('', 'skills', name)}"]`, switchOf = name => `#${rowPart('switch', 'skills', name)}`;
   /** Switches clicked one after another, one run with one result (clicklist.ts runAt). */
@@ -11016,7 +10996,7 @@ async function fromFlow() {
 
   // ---------- One home: two marketplaces with a plugin called review each, a source, the person's own ----------
   const H = homeWith('from-home');
-  // Each marketplace lists review; market-one also twenty plugins installed nowhere, before it by name, so its list scrolls.
+  // Each marketplace lists review; market-one also twenty plugins installed nowhere, so its list scrolls.
   const listedOnly = name => (name === 'market-one' ? Array.from({ length: 20 }, (_, at) => ({ name: `aide-${String(at + 1).padStart(2, '0')}`, source: './plugins/aide', description: 'Listed only.' })) : []);
   const market = (name, files) => { const dir = join(scratch, `from-${name}`); put(dir, { '.claude-plugin/marketplace.json': JSON.stringify({ name, owner: { name: 'Team' }, plugins: [...listedOnly(name), { name: 'review', source: './plugins/review', description: `Review, from ${name}.` }] }), 'plugins/aide/README.md': '# aide\n', ...Object.fromEntries(Object.entries(files).map(([path, text]) => [`plugins/review/${path}`, text])) }); return dir; };
   const one = { 'skills/shared/SKILL.md': md('shared', 'skill', 'Check the ledger.'), 'skills/lint/SKILL.md': md('lint', 'skill', 'Lint the ledger.') };
@@ -11110,11 +11090,10 @@ async function fromFlow() {
   await until(() => a.exists('.market-item'));
   await a.run(`[...document.querySelectorAll('.market-item')].find(item => item.textContent.includes('market-one'))?.click()`);
   await until(() => a.exists('.plugin-row-library'));
-  // The list scrolled to review's row (once it rests: stillList), its place kept by the visit Back returns to (places.ts).
+  // The list scrolled so review (which sorts first as installed: pluginstate.ts shownPlugins) sits just under the sticky header,
+  // leaving the list scrolled at any window size; its place kept by the visit Back returns to (places.ts).
   for (let tries = 0; tries < 4 && !(await stillList(a, 'plugins-scroll')); tries++);
-  const fromDiag = await a.run(`(() => { const list = document.getElementById('plugins-scroll'), rev = list?.querySelector('[data-plugin="review"]'), rows = [...document.querySelectorAll('.plugin-row')]; return { iw: innerWidth, ih: innerHeight, ow: outerWidth, oh: outerHeight, dpr: devicePixelRatio, scr: [screen.width, screen.height, screen.availWidth, screen.availHeight], listSh: list?.scrollHeight, listCh: list?.clientHeight, listTop: Math.round(list?.getBoundingClientRect().top ?? -1), revTop: Math.round(rev?.getBoundingClientRect().top ?? -1), delta: rev && list ? Math.round(rev.getBoundingClientRect().top - list.getBoundingClientRect().top - 120) : null, revIdx: rows.indexOf(rev), rowCount: rows.length, first3: rows.slice(0, 3).map(r => r.dataset.plugin), hints: [...document.querySelectorAll('.market-hint')].map(h => [Math.round(h.getBoundingClientRect().height), h.textContent?.slice(0, 50)]) }; })()`);
-  const listAt = await a.run(`(list => { list.scrollTop += list.querySelector('[data-plugin="review"]').getBoundingClientRect().top - list.getBoundingClientRect().top - 120; return Math.round(list.scrollTop); })(document.getElementById('plugins-scroll'))`);
-  console.log('[MEASURE fromFlow.plugins-scroll]', JSON.stringify({ listAt, ...fromDiag }));
+  const listAt = await a.run(`(list => { const head = list.querySelector('.ov-head')?.getBoundingClientRect().height ?? 0; list.scrollTop += list.querySelector('[data-plugin="review"]').getBoundingClientRect().top - list.getBoundingClientRect().top - head - 4; return Math.round(list.scrollTop); })(document.getElementById('plugins-scroll'))`);
   const link = await a.run(`document.querySelector('[data-plugin="review"] .plugin-row-library')?.id`);
   await a.click(`#${link}`);
   same('Its items in the Library: the Library on All, From that review, Find and the chip let go, no row open',
@@ -11593,8 +11572,7 @@ async function profilePluginsFlow() {
   }
   // The menu helper clicks every menu object still alive with that label, older ones too: each switch after the first plans from the
   // home as the one before left it (main.ts pluginSide), finds nothing to change, and writes no entry.
-  await a.click('#nav-history');
-  console.log('[MEASURE profilePluginsFlow.history]', JSON.stringify({ rows: await a.all('.history-row[data-kind="profile"] .history-about', 'e.textContent'), bands: await a.text('.bands') }));
+  await openHistory(a, '#nav-history');
   same('History has one entry per switch and one for the Undo, newest first, each saying what it did, the switch it undid marked Undone',
     [await a.all('.history-row[data-kind="profile"] .history-about', 'e.textContent'), await a.all('.history-row[data-kind="profile"] .history-done', 'e.textContent')],
     [['Switched to Work: 1 item turned on.', 'Switched to Quiet: 1 item turned off.', 'Undid the switch to Quiet: 1 item turned on.', 'Switched to Quiet: 1 item turned off.'], ['Undone']]);
