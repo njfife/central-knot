@@ -9,7 +9,8 @@
 // the take-in answer); each step shows that item's row (matrix.ts showRow). Settings' Synchronize everything row
 // counts as the question does and leads in too (settingspage.ts). What Yes does in the engine, and its one Undo in History, are
 // everything.ts's.
-import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, runSwitches, setHome, showPage, state, switchReasons, syncNow, tell, whyReadOnly, type PageKind } from './app.ts';
+import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, runSwitches, setHome, showPage, state, switchReasons, syncNow, tell, tellWritten, whyReadOnly, type PageKind } from './app.ts';
+import { pluginReloads, reloadsFor } from './reload.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { rowClicks } from './libraryrow.ts';
 import { plural, tookInCount } from './model.ts';
@@ -82,7 +83,7 @@ const answer = (on: boolean) => busy(on ? 'Turning on Synchronize everything…'
   }
   const taken = KINDS.flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' ? told.items : [])));
   const waiting = waitingForChoice(home).length;
-  tell({ page: 'overview', band: true, carry: true, history: true, text: `Synchronize everything is on: it ${tookInCount(taken.length)}${waiting ? `, and ${plural(waiting, 'item')} with copies that differ ${waiting === 1 ? 'waits' : 'wait'} for your choice` : ''}. ${oneUndoCovers}` });
+  tellWritten({ page: 'overview', band: true, carry: true, history: true, text: `Synchronize everything is on: it ${tookInCount(taken.length)}${waiting ? `, and ${plural(waiting, 'item')} with copies that differ ${waiting === 1 ? 'waits' : 'wait'} for your choice` : ''}. ${oneUndoCovers}` }, set.reloads);
   walkIfWaiting();
 });
 const walkIfWaiting = () => { if (state.home && waitingForChoice(state.home).length) openWalkthrough(); };
@@ -125,10 +126,10 @@ const skip = (item: Waiting) => { walk.passed.push(walkId(item)); goOn(); };
 const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', async page => {
   const home = state.home!, dated = left.filter(item => item.latest), undated = left.filter(item => !item.latest);
   const send = { skills: window.centralKnot.applySkills, mcp: window.centralKnot.applyServers, agents: window.centralKnot.applyAgents };
-  const sent: { kind: PageKind; result: PassResult }[] = [];
+  const sent: { kind: PageKind; keys: Set<string>; result: PassResult }[] = [];
   for (const kind of KINDS) {
     const changes: Change[] = dated.filter(item => item.kind === kind).map(item => rowClicks.on({ key: item.key, hashes: { [item.latest!.tool]: item.latest!.hash } }, undefined, item.latest!.tool));
-    if (changes.length) sent.push({ kind, result: await send[kind](changes, clickResumes(home), home.home) });
+    if (changes.length) sent.push({ kind, keys: new Set(changes.map(change => change.key)), result: await send[kind](changes, clickResumes(home), home.home) });
   }
   setHome(await window.centralKnot.refresh());
   const still = waitingForChoice(state.home!), chosen = dated.filter(item => !still.some(other => walkId(other) === walkId(item)) && state.home?.[item.kind].library[item.key]?.on);
@@ -139,7 +140,8 @@ const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', asy
   walk.passed.push(...undated.map(walkId));
   passChosen(dated);
   const done = latestDone(dated, undated, sent, still), reasons = switchReasons(plugged, plugins.left);
-  tell({ page, band: true, history: true, ...done, warn: done.warn || reasons.length > 0, ...(reasons.length ? { reasons } : {}) });
+  tellWritten({ page, band: true, history: true, ...done, warn: done.warn || reasons.length > 0, ...(reasons.length ? { reasons } : {}) },
+    [...sent.flatMap(({ keys, result }) => reloadsFor(result.reloads, keys)), ...(plugged ? pluginReloads(plugged.done) : [])]);
 });
 
 /**

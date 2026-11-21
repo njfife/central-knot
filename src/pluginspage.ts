@@ -13,9 +13,10 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, shortOf, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
-import { listResult, problemLines, wholeToggle } from './matrix.ts';
+import { listResult, problemLines, reloadChips, reloadLines, wholeToggle } from './matrix.ts';
+import type { ReloadAdvice } from './reload.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
@@ -372,15 +373,21 @@ export function pluginsResult(): HTMLElement[] {
   // A result of the app's said in the run's place (pluginstate.ts overRun; a new run clears it: turnPlugin), as a list page's
   // result is, with its own reasons (matrix.ts listResult).
   if (overRun(app.outcome)) return listResult();
-  const lines = lastLines(), run = runLine(lines), problems = problemBand(lines, !run);
-  // With no problem line, Show all follows the sentence, for one the header's two lines cut (as matrix.ts listResult).
-  if (run && !problems) run.querySelector('.toolbar-result-text')!.after(wholeToggle(market.lastRun ?? app.outcome, 0));
-  return [run, problems].filter((part): part is HTMLElement => !!part);
+  const lines = lastLines(), last = market.lastRun;
+  const elsewhere = !!last && (last.reread || (!!market.nav.plugin && !lines.some(line => line.plugin === market.nav.plugin)));
+  const advice = elsewhere ? { text: '', items: [] } : runReloads();
+  const of = market.lastRun ?? app.outcome, whole = of !== undefined && app.shownWhole === of, hasAdvice = advice.items.length > 0;
+  const run = runLine(lines, advice, elsewhere);
+  const chips = run && !whole ? reloadChips(advice, of) : null;
+  const problems = problemBand(lines, !run, hasAdvice, chips);
+  // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
+  if (run && !problems) run.querySelector('.toolbar-result-text')!.after(wholeToggle(of, 0, hasAdvice));
+  return [run, run && whole && hasAdvice ? reloadLines(advice) : !problems ? chips : null, problems].filter((part): part is HTMLElement => !!part);
 }
 
 /** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */
-function runLine(lines: ResultLine[]): HTMLElement | null {
-  // A result is said here only while it offers something to do (Undo, or its own button); one that only tells is in the
+function runLine(lines: ResultLine[], advice: ReloadAdvice, elsewhere: boolean): HTMLElement | null {
+  // A result is said here only while it offers something to do (Undo, Copy, or its own button); one that only tells is in the
   // status bar (app.ts saidInStatusBar).
   const last = market.lastRun;
   const back = undoButton();
@@ -388,13 +395,12 @@ function runLine(lines: ResultLine[]): HTMLElement | null {
   const parts = last ? resultParts(lines, last.undo, { short: true, here: open && market.nav.plugin ? { plugin: market.nav.plugin, source: open.source } : undefined }) : [];
   // A run that left something undone counts it first, Undo or not (its reasons are the problem lines under it), so the cut never hides it.
   const short = last ? shortOf(lines, last.unreached) : { names: [], of: 0 }, failed = short.names;
-  if (last && (parts.length || failed.length) && (back || failed.length)) {
+  if (last && (parts.length || failed.length) && (back || failed.length || advice.items.length > 0)) {
     const link = (part: { plugin: string; source: string }, at: number) =>
       h('button.result-link', { type: 'button', id: `result-plugin-${at}`, title: `Open ${part.plugin}`, onclick: () => browse({ source: part.source, plugin: part.plugin, tab: 'plugins' }) }, part.plugin);
     // On another plugin's page the result is only named, so it never reads as being about the plugin on screen; an
     // Undo still says it was undone.
     // Once the tools were read again (Refresh) the run is only named, so its sentence never contradicts what the page now shows.
-    const elsewhere = last.reread || (market.nav.plugin && !lines.some(line => line.plugin === market.nav.plugin));
     // Each plugin the run changed, once, whether or not the sentence names it (it leaves out the plugin on screen).
     const changed = [...new Map(lines.filter(line => line.ok).map(line => [pluginKey(line.source, line.plugin), { plugin: line.plugin, source: line.source }])).values()];
     const sentence = elsewhere
@@ -415,12 +421,12 @@ function runLine(lines: ResultLine[]): HTMLElement | null {
 }
 
 /** What went wrong in the last run, or why a marketplace couldn't be added, with the result's × when it stands `alone`. */
-function problemBand(lines: ResultLine[], alone: boolean) {
+function problemBand(lines: ResultLine[], alone: boolean, hasAdvice = false, chips: HTMLElement | null = null) {
   const failures = lines.filter(line => !line.ok);
   if (!market.problem && !failures.length) return null;
-  return h('div.band.plugin-problems', { role: 'alert' }, icon('triangle-alert', 14, 'tone-warning'),
-    problemLines([...failures.map(line => [h('strong.item-name', {}, line.plugin), `: ${line.text}`]), ...(market.problem ? [market.problem] : [])], market.lastRun ?? market.problem),
-    alone ? dismiss(closeRun, 'report-dismiss') : null);
+  return h(`div.band.plugin-problems${chips ? '.result-row2' : ''}`, { role: 'alert' }, icon('triangle-alert', 14, 'tone-warning'),
+    problemLines([...failures.map(line => [h('strong.item-name', {}, line.plugin), `: ${line.text}`]), ...(market.problem ? [market.problem] : [])], market.lastRun ?? market.problem, hasAdvice),
+    chips, alone ? dismiss(closeRun, 'report-dismiss') : null);
 }
 
 /** The plugin whose page is open in this marketplace, if one is. */

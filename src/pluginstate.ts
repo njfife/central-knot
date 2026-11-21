@@ -16,6 +16,7 @@
 //   busy too.
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
 import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, saidInStatusBar, state as app, tell, type Outcome } from './app.ts';
+import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
@@ -485,6 +486,12 @@ export function lastLines(): ResultLine[] {
   if (!last || !ran.length) return last ? resultLines(last.done, last.undo) : [];
   return ran.flatMap(({ source, plugin, ran: { done, stopped } = { done: [] } }) => [...resultLines(done), ...(stopped ? [{ source, plugin, ok: false, text: stopped, short: stopped }] : [])]);
 }
+
+/** Reload advice for the Plugins page's current run, settled chronologically so a later removal cancels an earlier write. */
+export const runReloads = (): ReloadAdvice => {
+  const ran = market.clicks.filter(click => click.ran);
+  return reloadAdvice(settleReloads(pluginReloads(market.lastRun && ran.length ? ran.flatMap(click => click.ran!.done) : market.lastRun?.done ?? [])));
+};
 
 /** The Undo of a plugin's switch (or "Undo the rest" after it): its entry put back, then its steps run, in main. */
 const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act('undoing', async () => {

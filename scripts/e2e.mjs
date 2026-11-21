@@ -1584,9 +1584,9 @@ async function practiceFlow() {
   await a.click(`#${rowPart('delete', 'skills', 'same-everywhere')}`);
   await a.click(`#${rowPart('delete-confirm', 'skills', 'same-everywhere')}`);
   same('Delete from Central Knot takes it out of every tool and off the page', [sameStats(), (await rowKeys(a, 'skills')).includes('same-everywhere')], [[null, null, null], false]);
-  // Two Adds, the second soon after the first: one run, said once.
+  // Two Adds, the second soon after the first: one run, said once on Row 1, reload chip on Row 2.
   for (const key of ['release-notes', 'standup']) await a.clickInRun(`#${rowPart('add', 'skills', key)}`);
-  same('two Adds in a row are one run, said once', await a.text('#header [data-outcome] .band-text'), '2 skills are on: release-notes and standup.');
+  same('two Adds in a row are one run, said once', [await a.text('#header [data-outcome] .band-text'), await a.exists('#outcome-copy-copilot-cli')], ['2 skills are on: release-notes and standup.', true]);
   await a.click('#header-refresh');
   same('Refresh regroups the rows: the three are On', (await sectionsNow(a, 'skills'))[0], ['on', ['notes', 'release-notes', 'standup']]);
   same('copies written every way', [existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.claude/skills/standup/SKILL.md')), existsSync(join(practice, '.codex/skills/standup/SKILL.md'))], [true, true, true]);
@@ -1705,7 +1705,7 @@ async function practiceFlow() {
   // On History, the switch's Undo turns back only what is still as the switch left it: standup, turned on since, stays.
   await a.click('#nav-history');
   await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
-  check('its Undo from History says what it did, in the status bar', /^Undone: 2 items turned on\./.test(await statusShown() ?? ''), await statusShown());
+  check('its Undo from History says what it did with reload advice and Copy', /^Undone: 2 items turned on\..*In Copilot CLI, type \/skills reload\..*Codex picks it up/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-copy-copilot-cli'), await a.text('.bands'));
   same('…and every skill is on again', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
   await openKind(a, 'skills');
   // An armed Delete from Central Knot stays on the visit it was clicked on.
@@ -2219,7 +2219,9 @@ async function practiceFlow() {
   check('code-reviewer reached Copilot with name, description and prompt, without Claude Code’s own fields', taken[1].includes('description: Reviews a change') && taken[1].includes('You are a careful code reviewer.') && !taken[1].includes('tools:') && !taken[1].includes('model:'), taken[1]);
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', taken[2].includes('developer_instructions = """'));
-  same('taken in, they are On, and the two Adds, one soon after the other, are said once', [await switchOn(a, 'agents', 'code-reviewer'), await a.text('#header [data-outcome] .band-text')], [true, '2 agents are on: code-reviewer and release-notes.']);
+  same('taken in, they are On, and the two Adds, one soon after the other, are said once',
+    [await switchOn(a, 'agents', 'code-reviewer'), await a.text('#header [data-outcome] .band-text'), await a.all('#header .result-reloads .reload-chip')],
+    [true, '2 agents are on: code-reviewer and release-notes.', ['Copilot CLI: new session', 'Codex: new session']]);
   // Off takes the agent out of every harness. Central Knot keeps it: its row stays, off, with its description; On (here the
   // result's Undo) writes every harness's file back byte for byte, Claude Code's own fields included.
   await a.click(`#${rowPart('switch', 'agents', 'code-reviewer')}`);
@@ -3762,7 +3764,7 @@ async function sourcesFlow() {
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, gently.') });
   await a.click('#nav-sources');
   await a.click(`#source-check-${id}`);
-  check('Check now brings the change in, and the band says it was updated and where it went, with its Undo', /deslop was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists('#outcome-undo') && await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('gently'))), await a.text('.band-done'));
+  check('Check now brings the change in, and the band says it was updated and where it went, with its Undo and reload advice', /deslop was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists('#outcome-undo') && await a.exists('.band-done #outcome-copy-copilot-cli') && await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('gently'))), await a.text('.band-done'));
 
   // Edited in Claude Code (sync takes it in), then changed at the source: the source's version waits; Replace takes it.
   const inClaude = join(home, roots['claude-cli'], 'deslop/SKILL.md');
@@ -3786,9 +3788,9 @@ async function sourcesFlow() {
   await a.shot('skills-waiting');
   await a.click('#nav-sources');
   await a.click(`#source-replace-${id}-skill-deslop`);
-  check('Replace puts the source’s version in every tool, says the one it had is kept, and offers Undo the replace', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('firmly')))
+  check('Replace puts the source’s version in every tool, says the one it had is kept, and offers Undo the replace with reload advice', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('firmly')))
     && /deslop has the source’s version, now in all 3 tools; the one it had is kept as a version\./.test(await a.text('.band-done .band-text') ?? '') && (await a.text('#outcome-undo')) === 'Undo the replace'
-    && !(await a.exists(`#source-replace-${id}-skill-deslop`)), await a.text('.band-done'));
+    && await a.exists('.band-done #outcome-copy-copilot-cli') && !(await a.exists(`#source-replace-${id}-skill-deslop`)), await a.text('.band-done'));
 
   // Merge: a line added in Claude Code and the source's new description, lines apart, become one version in every tool.
   writeFileSync(inClaude, `${readNow(inClaude)}Use plain words.\n`);
@@ -5785,8 +5787,8 @@ async function firstSetupFlow() {
   for (let tries = 0; tries < 40 && !readNow(join(codex, 'notes/SKILL.md')); tries++) await wait(100);
   same('its Restore switches the rule on again and puts notes back', [readNow(join(codex, 'notes/SKILL.md')), record().syncEverything], [text('notes', 'Take notes.'), true]);
   same('the status bar says so, and the switch-on offers its Undo again, which takes back what the Restore put back',
-    [await a.run(`document.querySelector('#announcement').dataset.text`), await a.all(`${ruleRow} .history-actions button`), await a.all(`${ruleRow} .history-done`)],
-    ['Synchronize everything is on again. Restored 2 items; the switch-on’s Undo takes them back.', ['Undo'], ['Restored']]);
+    [await a.run(`document.querySelector('#announcement').dataset.text`), await a.all(`${ruleRow} .history-actions button`), await a.all(`${ruleRow} .history-done`), await a.exists('#outcome-copy-claude-cli')],
+    ['Synchronize everything is on again. Restored 2 items; the switch-on’s Undo takes them back. Restart Claude Code (claude --continue keeps the chat). Codex picks it up at the next turn; if not, start a new chat.', ['Undo'], ['Restored'], true]);
   same('no page errors, first setup', a.pageErrors, []);
   await a.quit();
 
@@ -6566,9 +6568,31 @@ esac
   await done();
   same('On installs it in Claude Code with its own command and puts its items in Pi', [calls(), installed(), inPi(), await marks(), await switchIs('#pswitch-0-issue-tracker')],
     [['plugin marketplace add ' + market, 'plugin install issue-tracker@ck-test-market --scope user'], true, [true, true], ['installed', 'items'], 'true']);
-  // With his pattern in Pi's list, what it added there too (pluginlibrary.ts reportIn's notes).
-  check('the result says what the switch did, with what it added to his Pi list, and Undo', /issue-tracker: installed in Claude Code; its items put in Pi; \+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
+  // With his pattern in Pi's list, Row 1 carries what the switch did (no reload sentence), Row 2 carries Pi's chip at 48px.
+  const pluginRow1 = await a.text('#plugins-result .toolbar-result-text') ?? '';
+  check('the result says what the switch did on Row 1 without reload text, Pi chip on Row 2, Undo and header 48px',
+    /issue-tracker: installed in Claude Code; its items put in Pi; \+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(pluginRow1)
+    && !/In Pi, type \/reload\./.test(pluginRow1) && await a.exists('#plugins-undo')
+    && await a.run(`(() => { const b = document.querySelector('#outcome-copy-pi-cli'); return !!b && b.textContent?.trim() === 'Pi: /reload' && b.dataset.copy === '/reload' && b.title === 'Type this in your Pi session.' && document.querySelector('#header').offsetHeight === 48; })()`),
+    await a.text('#header'));
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
+  if (shots) {
+    const pShots = async (name, size, railMode) => {
+      await sizeTo(a, ...size);
+      if (railMode !== undefined && await a.run(`document.body.classList.contains('rail')`) !== railMode) await a.click('#sidebar-toggle');
+      for (const look of ['light', 'dark']) { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] }); await a.shot(`${name}-${look}`); }
+      await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    };
+    await pShots('reload-plugins-860', SMALLEST);
+    await pShots('reload-plugins-1316-open', [1316, 819], false);
+    await pShots('reload-plugins-1316-rail', [1316, 819], true);
+    await sizeTo(a, 1316, 819);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.click('#problems-show-all');
+    await pShots('reload-plugins-1316-open-whole', [1316, 819], false);
+    await a.click('#problems-show-all');
+    await fullSize(a);
+  }
   await pictures('plugin-switch-list');
   // Sync once from the menu bar with the switch's result up: its own result takes the header, as on the item lists, and × lets it
   // go. The menu offers it only while Automatic sync is off (main.ts), so it is turned off first, as a person would have it, and
@@ -10551,6 +10575,235 @@ async function libraryFlow() {
   same('no page errors, the empty states and Resume', [...d.pageErrors, ...e.pageErrors, ...g.pageErrors], []);
   await g.quit();
 
+  {
+  // ---------- Reload words: per-tool chips on Row 2, Show all lines, Copy state and opened row ----------
+  const R = { home: join(scratch, 'reload-home'), data: join(scratch, 'reload-data'), tools: join(scratch, 'reload-tools') };
+  mkdirSync(join(R.tools, '.local/bin'), { recursive: true });
+  mkdirSync(join(R.tools, '.opencode/bin'), { recursive: true });
+  for (const [cli, ver] of [['claude', '2.1.327 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.113.'], ['codex', 'codex-cli 0.169.1'], ['pi', '1.5.2']]) {
+    writeFileSync(join(R.tools, '.local/bin', cli), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${ver}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  }
+  writeFileSync(join(R.tools, '.opencode/bin/opencode'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.19.6" && exit 0\nexit 9\n', { mode: 0o755 });
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills', '.claude/agents', '.copilot/agents', '.codex/agents', '.config/opencode/agents']) {
+    mkdirSync(join(R.home, dir), { recursive: true });
+  }
+  writeFileSync(join(R.home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { command: 'npx', args: ['docs'] } } }, null, 2)}\n`);
+  writeFileSync(join(R.home, '.copilot/mcp-config.json'), '{}\n');
+  writeFileSync(join(R.home, '.codex/config.toml'), '');
+  writeFileSync(join(R.home, '.pi/agent/settings.json'), '{}\n');
+  writeFileSync(join(R.home, '.config/opencode/opencode.json'), '{}\n');
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills']) skill(join(R.home, dir), 'pi-only');
+  for (const dir of ['.claude/skills', '.config/opencode/skills']) skill(join(R.home, dir), 'two-copy');
+  skill(join(R.home, '.claude/skills'), 'four-skill');
+  skill(join(R.home, '.claude/skills'), 'codex-only');
+  for (const dir of ['.copilot/skills', '.pi/agent/skills', '.config/opencode/skills']) skill(join(R.home, dir), 'codex-only');
+  agent(R.home, 'claude-cli', 'reviewer', agentText('reviewer', 'You review.'));
+  agent(R.home, 'copilot-cli', 'reviewer', agentText('reviewer', 'You review.'));
+  writeFileSync(join(R.home, '.config/opencode/agents/reviewer.md'), agentText('reviewer', 'You review.'));
+  mkdirSync(R.data, { recursive: true });
+  writeFileSync(join(R.data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: R.home }, closeExplained: true }));
+  const r = await launch(R.data, [], R.tools);
+  await r.click('#nav-overview');
+  await r.click('#setup-no');
+  await openKind(r, 'all');
+  const copyIds = () => r.all('.result-copies button[data-copy]', 'e.id.replace("outcome-copy-", "")');
+  const copyCmds = () => r.all('.result-copies button[data-copy]', 'e.dataset.copy');
+  const visibleChips = () => r.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].filter(e => !e.hidden).map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
+  const allChips = () => r.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
+  const moreChip = () => r.run(`(m => m && !m.hidden ? m.textContent?.trim() : null)(document.querySelector('#outcome-reload-more'))`);
+  const wholeLines = () => r.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text')?.textContent?.trim(), button: row.querySelector('button[data-copy]')?.textContent?.trim() ?? null, copy: row.querySelector('button[data-copy]')?.dataset.copy ?? null }))`);
+  const headerHeight = () => r.run(`document.querySelector('#header').offsetHeight`);
+  const row1Text = () => r.text('#header [data-outcome] .band-text');
+  const rShots = async (name, size, railMode) => {
+    if (!shots) return;
+    await sizeTo(r, ...size);
+    if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
+    for (const look of ['light', 'dark']) { await theme(r, look); await r.shot(`${name}-${look}`); }
+    await theme(r, 'light');
+  };
+  // Example 1: skill written only to Pi (OpenCode shares .claude/skills) -> Row 1 has no reload words, Row 2 has Pi chip, header is 48px.
+  await r.click(`#${rowPart('add', 'skills', 'pi-only')}`);
+  await done(r);
+  same('Example 1: Row 1 has no reload text, Row 2 carries only Pi button at 48px', [
+    /reload|restart|new session|next turn/i.test(await row1Text() ?? ''), await headerHeight(), await allChips(),
+  ], [false, 48, [
+    { text: 'Pi: /reload', title: 'Type this in your Pi session.', copy: '/reload' },
+  ]]);
+  await r.run(`(() => { window.__copied = []; Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: text => { window.__copied.push(text); return Promise.resolve(); } }); })()`);
+  await sizeTo(r, 1316, 819);
+  if (await r.run(`document.body.classList.contains('rail')`)) await r.click('#sidebar-toggle');
+  await r.click('#outcome-copy-pi-cli');
+  same('clicking Copy chip copies command, flashes check state, and announces Copied /reload.', [
+    await r.run(`window.__copied`),
+    await r.run(`document.querySelector('#outcome-copy-pi-cli')?.classList.contains('is-copied')`),
+    await r.run(`document.querySelector('#announcement')?.dataset.text`),
+  ], [['/reload'], true, 'Copied /reload.']);
+  if (shots) {
+    await theme(r, 'light'); await r.shot('reload-after-copy-1316-open-light');
+    await theme(r, 'dark'); await r.click('#outcome-copy-pi-cli'); await r.shot('reload-after-copy-1316-open-dark');
+    await theme(r, 'light');
+  }
+  await fullSize(r);
+  // Codex skill alone: no chip on Row 2, conditional sentence appears under Show all.
+  await r.click(`#${rowPart('add', 'skills', 'codex-only')}`);
+  await done(r);
+  same('Codex skill alone has no chip on Row 2, 48px header, and conditional sentence under Show all', [
+    await headerHeight(), await allChips(), await r.run(`!document.querySelector('#problems-show-all')?.hidden`),
+  ], [48, [], true]);
+  await r.click('#problems-show-all');
+  same('Codex skill under Show all shows conditional sentence with no button', await wholeLines(), [
+    { text: 'Codex picks it up at the next turn; if not, start a new chat.', button: null, copy: null },
+  ]);
+  await r.click('#problems-show-all');
+  // Item 1: skill turned On then Off in one run (clickInRun keeps the run open), then combined Undo -> no reload advice or chips.
+  await r.click('#outcome-dismiss');
+  await r.click(`#${rowPart('switch', 'skills', 'codex-only')}`);
+  await done(r);
+  await r.click('#outcome-dismiss');
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'codex-only')}`);
+  await done(r);
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'codex-only')}`);
+  await done(r);
+  same('Item 1: On then Off in one run leaves no reload chips or advice', [await allChips(), await r.run(`document.querySelector('#problems-show-all')?.hasAttribute('data-has-advice') ?? false`)], [[], false]);
+  await r.click('#outcome-undo');
+  await done(r);
+  same('Item 1: combined Undo of On then Off returns to Off with no reload chips or advice', [await allChips(), await r.run(`document.querySelector('#problems-show-all')?.hasAttribute('data-has-advice') ?? false`)], [[], false]);
+  // Example 2 & 5: MCP server written to all five -> 4 chips in tool order, nothing for Copilot CLI; opened row matches result and clears on dismiss.
+  await r.click(`#${rowPart('add', 'mcp', 'docs')}`);
+  await done(r);
+  await r.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+  await done(r);
+  await r.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+  await done(r);
+  same('Example 2: MCP server written to all five shows four chips in tool order (no Copilot CLI) at 48px', [
+    /reload|restart|new session/i.test(await row1Text() ?? ''), await headerHeight(), await allChips(),
+  ], [false, 48, [
+    { text: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.', copy: 'claude --continue' },
+    { text: 'Codex: /new', title: 'Type this in your Codex session, or restart Codex.', copy: '/new' },
+    { text: 'Pi: /reload', title: 'Type this in your Pi session.', copy: '/reload' },
+    { text: 'OpenCode: restart', title: 'Restart OpenCode.', copy: null },
+  ]]);
+  await r.click(`#${rowPart('open', 'mcp', 'docs')}`);
+  const rowLines = () => r.run(`Object.fromEntries([...document.querySelectorAll('.details-tool')].map(row => [row.querySelector('.details-tool-label strong')?.textContent?.trim(), row.querySelector('.details-tool-line')?.textContent ?? '']))`);
+  const openedWithResult = await rowLines();
+  same('Example 5: opened row lines match the result for each tool, nothing for Copilot CLI', [
+    openedWithResult['Claude Code']?.includes('Restart Claude Code (claude --continue keeps the chat).'),
+    /reload|restart|new session/i.test(openedWithResult['Copilot CLI'] ?? ''),
+    openedWithResult['Codex']?.includes('In Codex, type /new or restart it.'),
+    openedWithResult['Pi']?.includes('In Pi, type /reload.'),
+    openedWithResult['OpenCode']?.includes('Restart OpenCode.'),
+  ], [true, false, true, true, true]);
+  await rShots('reload-opened-row-1316-open', [1316, 819], false);
+  await rShots('reload-opened-row-1316-rail', [1316, 819], true);
+  await fullSize(r);
+  await r.click('#outcome-dismiss');
+  const openedAfterDismiss = await rowLines();
+  same('dismissing the result clears the transient reload lines from the opened row', Object.values(openedAfterDismiss).some(line => /reload|restart|new session/i.test(line)), false);
+  await r.click(`#${rowPart('open', 'mcp', 'docs')}`);
+  // Example 4: turning Off says no reload sentence and renders no chips.
+  await r.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+  await done(r);
+  same('Example 4: turning Off renders no reload chips or Copy button', [await allChips(), await copyIds(), await headerHeight()], [[], [], 48]);
+  // Example 6 & Pi agent rule: agent written to Codex and Pi -> Codex plain chip, Pi button.
+  await r.click(`#${rowPart('add', 'agents', 'reviewer')}`);
+  await done(r);
+  same('Example 6 and Pi agent: agent written to Codex and Pi gives Codex new session chip and Pi /reload button', [await headerHeight(), await allChips()], [48, [
+    { text: 'Codex: new session', title: 'In Codex, start a new session.', copy: null },
+    { text: 'Pi: /reload', title: 'Type this in your Pi session.', copy: '/reload' },
+  ]]);
+  // Two-chip result (Copilot CLI + Pi buttons; Codex skill has no chip, appears in Show all) folded & Show all at 860×528 and 1316×819 (open & rail).
+  await r.click(`#${rowPart('add', 'skills', 'two-copy')}`);
+  await done(r);
+  same('two-chip result: Copilot CLI + Pi buttons (no Codex chip), Undo, 48px header', [await allChips(), await r.exists('#outcome-undo'), await headerHeight()], [[
+    { text: 'Copilot CLI: /skills reload', title: 'Type this in your Copilot CLI session.', copy: '/skills reload' },
+    { text: 'Pi: /reload', title: 'Type this in your Pi session.', copy: '/reload' },
+  ], true, 48]);
+  for (const [label, size, railMode] of [['reload-two-chip-860', SMALLEST, undefined], ['reload-two-chip-1316-open', [1316, 819], false], ['reload-two-chip-1316-rail', [1316, 819], true]]) {
+    await sizeTo(r, ...size);
+    if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
+    same(`two-chip folded fits at ${label} with 48px header`, [await r.run(CUT_OFF), await headerHeight()], [[], 48]);
+    await rShots(label, size, railMode);
+    await r.click('#problems-show-all');
+    same(`two-chip Show all at ${label} lists Copilot CLI, Codex conditional and Pi in order`, [await r.run(CUT_OFF), await wholeLines()], [[], [
+      { text: 'In Copilot CLI, type /skills reload.', button: 'Copilot CLI: /skills reload', copy: '/skills reload' },
+      { text: 'Codex picks it up at the next turn; if not, start a new chat.', button: null, copy: null },
+      { text: 'In Pi, type /reload.', button: 'Pi: /reload', copy: '/reload' },
+    ]]);
+    await rShots(`${label}-whole`, size, railMode);
+    await r.click('#problems-show-all');
+  }
+  await fullSize(r);
+  // Five-chip result (skill + MCP server across all five tools) folded (+N more when overflowing) & Show all at 860×528 and 1316×819 (open & rail).
+  await r.click(`#${rowPart('add', 'skills', 'four-skill')}`);
+  await done(r);
+  await r.click(`#${rowPart('switch', 'skills', 'four-skill')}`);
+  await done(r);
+  await r.click('#outcome-dismiss');
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'four-skill')}`);
+  await r.clickInRun(`#${rowPart('switch', 'mcp', 'docs')}`);
+  await done(r);
+  same('five-chip result in tool order: four buttons + OpenCode plain chip + Undo', [await copyIds(), await copyCmds(), await allChips(), await r.exists('#outcome-undo')], [
+    ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'], ['claude --continue', '/skills reload', '/new', '/reload'], [
+      { text: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.', copy: 'claude --continue' },
+      { text: 'Copilot CLI: /skills reload', title: 'Type this in your Copilot CLI session.', copy: '/skills reload' },
+      { text: 'Codex: /new', title: 'Type this in your Codex session, or restart Codex.', copy: '/new' },
+      { text: 'Pi: /reload', title: 'Type this in your Pi session.', copy: '/reload' },
+      { text: 'OpenCode: restart', title: 'Restart OpenCode.', copy: null },
+    ], true,
+  ]);
+  for (const [label, size, railMode] of [['reload-five-chip-860', SMALLEST, undefined], ['reload-five-chip-1316-open', [1316, 819], false], ['reload-five-chip-1316-rail', [1316, 819], true]]) {
+    await sizeTo(r, ...size);
+    if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
+    same(`five-chip folded stays 48px without clipping at ${label}`, [await r.run(CUT_OFF), await headerHeight()], [[], 48]);
+    const more = await moreChip();
+    if (label === 'reload-five-chip-860') check('five-chip at 860×528 folds overflow into +N more', /^\+[1-5] more$/.test(more ?? ''), more);
+    await rShots(label, size, railMode);
+    await r.click(more ? '#outcome-reload-more' : '#problems-show-all');
+    same(`five-chip Show all at ${label} shows all five tool lines and four buttons`, [await r.run(CUT_OFF), await wholeLines()], [[], [
+      { text: 'Restart Claude Code (claude --continue keeps the chat).', button: 'Claude Code: claude --continue', copy: 'claude --continue' },
+      { text: 'In Copilot CLI, type /skills reload.', button: 'Copilot CLI: /skills reload', copy: '/skills reload' },
+      { text: 'In Codex, type /new or restart it.', button: 'Codex: /new', copy: '/new' },
+      { text: 'In Pi, type /reload.', button: 'Pi: /reload', copy: '/reload' },
+      { text: 'Restart OpenCode.', button: null, copy: null },
+    ]]);
+    await rShots(`${label}-whole`, size, railMode);
+    await r.click('#problems-show-all');
+  }
+  await fullSize(r);
+  // Five-chip result WITH a problem line: turning pi-only Off with .claude/skills read-only fails to remove it in Claude Code (problem line),
+  // while four-skill (On) and docs MCP (On) write to all five tools -> 5 chips + problem line on Row 2 at 48px!
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'four-skill')}`);
+  await r.clickInRun(`#${rowPart('switch', 'mcp', 'docs')}`);
+  await done(r);
+  await r.click('#outcome-dismiss');
+  chmodSync(join(R.home, '.claude/skills'), 0o555);
+  try {
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'pi-only')}`);
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'four-skill')}`);
+    await r.clickInRun(`#${rowPart('switch', 'mcp', 'docs')}`);
+    await done(r);
+    for (const [label, size, railMode] of [['reload-five-problem-860', SMALLEST, undefined], ['reload-five-problem-1316-open', [1316, 819], false], ['reload-five-problem-1316-rail', [1316, 819], true]]) {
+      await sizeTo(r, ...size);
+      if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
+      same(`five-chip + problem line keeps header 48px without clipping at ${label}`, [
+        await r.run(CUT_OFF), await headerHeight(), await r.exists('#header .result-row2'), /^\+[1-5] more$/.test(await moreChip() ?? ''),
+      ], [[], 48, true, true]);
+      await rShots(label, size, railMode);
+    }
+    await sizeTo(r, 1316, 819);
+    if (await r.run(`document.body.classList.contains('rail')`)) await r.click('#sidebar-toggle');
+    await r.click('#outcome-reload-more');
+    same('five-chip + problem line Show all shows all five lines and the problem line', [
+      await r.run(CUT_OFF), (await wholeLines()).length, await r.exists('#result-whole .problem-line'),
+    ], [[], 5, true]);
+    await rShots('reload-five-problem-1316-open-whole', [1316, 819], false);
+    await r.click('#problems-show-all');
+  } finally { chmodSync(join(R.home, '.claude/skills'), 0o755); }
+  await fullSize(r);
+  same('no page errors, reload words', r.pageErrors, []);
+  await r.quit();
+  }
+
   // ---------- Queued Add whose copies differ on disk, and Undo after refused / double clicks ----------
   const R = homeWith('library-result-true');
   const equalAdd = text('race-add', 'Equal at draw.'), changedAdd = text('race-add', 'Changed before turn.');
@@ -12120,7 +12373,7 @@ async function profilePluginsFlow() {
   await a.click('#outcome-undo');
   await done();
   same('Undo switch puts every file back, byte for byte, and Work is in use again', [files(), (await a.text('#status-profile'))?.trim()], [before, 'Work']);
-  same('the Undo’s result names what it left, and why, once', await a.run(`document.querySelector('#announcement').dataset.text`), 'Undone: 1 item turned on. Left as it is: triage in Codex, changed since the switch.');
+  same('the Undo’s result names what it left, and why, once', [await a.run(`document.querySelector('#announcement').dataset.text`), await a.exists('.band-done #outcome-copy-pi-cli')], ['Undone: 1 item turned on. Left as it is: triage in Codex, changed since the switch. In Pi, type /reload.', true]);
 
   // From the status bar to Quiet, then from the menu bar back to Work: the menus carry the plugin's items too.
   await a.click('#status-profile');

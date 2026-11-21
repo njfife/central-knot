@@ -103,7 +103,7 @@ const same = (first: unknown, second: unknown) => JSON.stringify(first) === JSON
  */
 const asPass = (done: SourceResult): PassResult => {
   const unmerged = (done.sourced ?? []).filter(entry => entry.merge && entry.merge !== 'merged' && entry.merge !== 'had');
-  return { ...(done.stopped ? { stopped: done.stopped } : {}), writes: 0, made: (done.sourced ?? []).flatMap(entry => (entry.history ? [entry.history] : [])),
+  return { ...(done.stopped ? { stopped: done.stopped } : {}), writes: 0, reloads: [], made: (done.sourced ?? []).flatMap(entry => (entry.history ? [entry.history] : [])),
     results: [...(done.results ?? []), ...unmerged.map(entry => ({ item: entry.name, outcome: 'held' as const, unchanged: true as const, message: `Merge changed nothing: ${JSON.stringify(entry.merge)}` }))] };
 };
 /** The skill's rich folder: a script that runs, a file of mode 0600, an empty folder. */
