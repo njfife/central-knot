@@ -6696,6 +6696,32 @@ esac
   await a.click('#nav-history');
   for (let tries = 0; tries < 50 && !/added to Pi’s skills list/.test(await a.text('.page') ?? ''); tries++) await wait(100);
   check('History says the On added triage to his Pi list', /\+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(await a.text('.page') ?? ''), (await a.text('.page'))?.slice(0, 600));
+  // Turning two plugin skills off and on in Codex in another order than last-first keeps his [[skills.config]] blocks and comments.
+  const codexConfig = join(home, '.codex/config.toml');
+  const codexCopy = join(home, '.codex/plugins/cache/ck-test-market/document-tools/1.2.0');
+  cpSync(join(market, 'plugins/document-tools/skills'), join(codexCopy, 'skills'), { recursive: true });
+  const codexBefore = `# mine\n[marketplaces.ck-test-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."document-tools@ck-test-market"]\nenabled = true\n\n[[skills.config]]\nname = "document-tools:pdf-reader" # keep pdf on\nenabled = true\n\n[[skills.config]]\nname = "document-tools:spreadsheet" # keep sheet on\nenabled = true`;
+  writeFileSync(codexConfig, codexBefore);
+  await a.click('#nav-plugins');
+  if (await a.exists('#plugin-back')) await a.click('#plugin-back');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 60 && !(await a.exists('#pcell-0-document-tools-codex-cli[data-state="installed"]')); tries++) await wait(100);
+  await a.click('#popen-0-document-tools');
+  const pdfSwitch = '#pskill-0-document-tools-pdf-reader-codex-cli', sheetSwitch = '#pskill-0-document-tools-spreadsheet-codex-cli';
+  for (let tries = 0; tries < 60 && !(await a.exists(pdfSwitch) && await a.exists(sheetSwitch)); tries++) await wait(100);
+  const flipSkill = async (selector, wanted) => {
+    await a.click(selector);
+    for (let tries = 0; tries < 60 && (await a.run(`document.querySelector(${JSON.stringify(selector)})?.getAttribute('aria-checked')`)) !== wanted; tries++) await wait(100);
+    await done();
+  };
+  await flipSkill(pdfSwitch, 'false');
+  await flipSkill(sheetSwitch, 'false');
+  same('turning both plugin skills off in Codex edits each of his blocks in place, keeping comments', readFileSync(codexConfig, 'utf8'),
+    codexBefore.replace('pdf-reader" # keep pdf on\nenabled = true', 'pdf-reader" # keep pdf on\nenabled = false')
+      .replace('spreadsheet" # keep sheet on\nenabled = true', 'spreadsheet" # keep sheet on\nenabled = false'));
+  await flipSkill(pdfSwitch, 'true');
+  await flipSkill(sheetSwitch, 'true');
+  same('turning them back on in another order than last-first restores config.toml byte for byte', readFileSync(codexConfig, 'utf8'), codexBefore);
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
 }

@@ -10,7 +10,7 @@ import { probeVersion } from './discovery.ts';
 import { configRoot, harnesses } from './harnesses.ts';
 import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, installedContents, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import { editTomlArray, readTomlTables, type TomlValue } from './textedit.ts';
+import { editTomlArray, readTomlTables, setTomlArrayKey, type TomlTable, type TomlValue } from './textedit.ts';
 import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
 import { partOff, serverHeld, withPartSwitch } from './partswitch.ts';
 import { DIRECTORY, INLINE_SKILLS_CONFIG, hasPartSwitch, heldReason, noCli, offByBareName, noSwitchReason } from './pluginstatus.ts';
@@ -861,11 +861,13 @@ async function codexSkillsOff(switches: CodexSkillSwitch[], plugin: string, fold
 const codexWrites = new Map<string, { before: string | null; after: string; on: boolean }>();
 
 /**
- * Codex's switch for one skill of the plugin in `folder`, in config.toml: every `[[skills.config]]` block that picks it is
- * taken out, and to turn it off one block naming it is added (by name, never by path, so an update keeps it off); or, to
- * switch back what this session just wrote, the file as it was before (see codexWrites). A file changed meanwhile, or one
- * that writes the list as a value (where a `[[skills.config]]` block would make the file invalid), is left alone.
- * Returns a problem, or undefined once written.
+ * Codex's switch for one skill of the plugin in `folder`, in config.toml: turning it off sets `enabled = false` in place
+ * in every `[[skills.config]]` block that already picks it (adding one block by name at the end only when none does);
+ * turning it on removes bare blocks that pick it (no comment, no key besides `name` or `path` and `enabled`) and sets
+ * `enabled = true` in place in any other. Switching back what this session just wrote still restores the exact earlier
+ * bytes (see codexWrites). Accepted limit: a bare block of the person's own (`name` and `enabled = true`, no comment)
+ * turned off and then on in another session is taken out rather than restored (the skill is on either way). A file
+ * changed meanwhile, or one that writes the list as a value, is left alone. Returns a problem, or undefined once written.
  */
 async function switchCodexSkill(context: PluginContext, plugin: string, skill: string, on: boolean, folder: string): Promise<string | undefined> {
   const path = join(configRootOf(context, 'codex-cli'), 'config.toml');
@@ -882,22 +884,42 @@ async function switchCodexSkill(context: PluginContext, plugin: string, skill: s
   try { await writeFileChecked(path, after, before ?? undefined); }
   catch (error) { return errorCode(error) === 'CK_CHANGED' ? 'Codex’s config.toml changed just then, so it was left as it is. Try again.' : `Codex’s config.toml couldn’t be written: ${error instanceof Error ? error.message : String(error)}`; }
   codexWrites.set(key, { before, after, on });
-  await keepRecord(context, 'codex-cli', `config.toml [[skills.config]] name = "${qualified(plugin, skill)}"${on ? ' removed' : ' enabled = false'}`, '', [{ path, before, after }]).catch(() => undefined);
+  await keepRecord(context, 'codex-cli', `config.toml [[skills.config]] ${qualified(plugin, skill)} turned ${on ? 'on' : 'off'}`, '', [{ path, before, after }]).catch(() => undefined);
   return undefined;
 }
 
+/** Whether a `[[skills.config]]` block holds something of the person's own: a comment in it, another key besides `name`/`path` and `enabled`, or both `name` and `path`. */
+function hasOwnContent(text: string, block: TomlTable): boolean {
+  const keys = block.entries.map(entry => (entry.keys.length === 1 ? entry.keys[0]! : ''));
+  if (keys.some(key => key !== 'name' && key !== 'path' && key !== 'enabled') || (keys.includes('name') && keys.includes('path'))) return true;
+  let cursor = text.indexOf('\n', block.start) + 1 || text.length;
+  const header = text.slice(block.start, cursor);
+  if (header.slice(header.indexOf(block.header) + block.header.length).includes('#')) return true;
+  return block.entries.some(entry => { const has = text.slice(cursor, entry.start).includes('#') || text.slice(entry.valueEnd, entry.end).includes('#'); cursor = entry.end; return has; });
+}
+
 /**
- * Codex's config.toml `text` with every block that picks this skill of the plugin in `folder` taken out and, to turn it
- * off, one block naming it added; or why it can't be edited: not TOML this reader follows, or the list written as a value.
+ * Codex's config.toml `text` with this skill of the plugin in `folder` turned off (in place in every block that picks it,
+ * or one block by name appended when none does) or on (bare picking blocks taken out, any block with a comment or another
+ * key set `enabled = true` in place); or why it can't be edited: unreadable TOML, or `skills.config` written as a value.
  */
 async function codexConfigSwitched(text: string, plugin: string, skill: string, on: boolean, folder: string): Promise<{ text: string } | { problem: string }> {
-  let read: ReturnType<typeof codexSkillSwitches>;
-  try { read = codexSkillSwitches(readTomlTables(text)); } catch { return { problem: 'Codex’s config.toml couldn’t be read, so it was left as it is.' }; }
-  const { switches, inline } = read;
+  let tables: TomlTable[];
+  try { tables = readTomlTables(text); } catch { return { problem: 'Codex’s config.toml couldn’t be read, so it was left as it is.' }; }
+  const { switches, inline } = codexSkillSwitches(tables);
   if (inline) return { problem: INLINE_SKILLS_CONFIG };
-  const picks = new Set<number>();
-  for (const entry of switches) if (entry.start !== undefined && (await skillPickedBy(entry, plugin, folder)) === skill) picks.add(entry.start);
-  return { text: editTomlArray(text, ['skills', 'config'], block => picks.has(block.start), on ? undefined : { name: qualified(plugin, skill), enabled: false }) };
+  const blocks = tables.filter(table => table.array && table.path.length === 2 && table.path[0] === 'skills' && table.path[1] === 'config');
+  const picked: number[] = [];
+  for (const [index, block] of blocks.entries()) {
+    const entry = switches.find(candidate => candidate.start === block.start);
+    if (entry && (await skillPickedBy(entry, plugin, folder)) === skill) picked.push(index);
+  }
+  if (!on) return { text: picked.length ? setTomlArrayKey(text, ['skills', 'config'], (_b, index) => picked.includes(index), 'enabled', false)
+    : editTomlArray(text, ['skills', 'config'], () => false, { name: qualified(plugin, skill), enabled: false }) };
+  const keep = picked.filter(index => hasOwnContent(text, blocks[index]!)), drop = picked.filter(index => !keep.includes(index));
+  const toEnable = keep.filter(index => blocks[index]!.entries.findLast(entry => entry.keys.length === 1 && entry.keys[0] === 'enabled')?.value === false);
+  const edited = toEnable.length ? setTomlArrayKey(text, ['skills', 'config'], (_b, index) => toEnable.includes(index), 'enabled', true) : text;
+  return { text: drop.length ? editTomlArray(edited, ['skills', 'config'], (_b, index) => drop.includes(index)) : edited };
 }
 
 /**

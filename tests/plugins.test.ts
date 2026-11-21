@@ -846,19 +846,132 @@ test('Codex turns one skill of a plugin off by name in config.toml and back on t
     const on = await switchTo('one', true);
     assert.deepEqual([on.outcome, on.changed], ['skill-on', true], on.message);
     assert.equal(await readFile(config, 'utf8'), original);
-    // Codex's own /skills toggle writes the SKILL.md path of one version's copy; it counts, and turning on removes every block that picks the skill.
+    // Codex's own /skills toggle writes the SKILL.md path of one version's copy; it counts, and turning on removes every bare block that picks the skill.
     await writeFile(config, `${original}\n[[skills.config]]\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
     assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'second' }]);
     assert.equal((await switchTo('second', true)).outcome, 'skill-on');
     assert.equal(await readFile(config, 'utf8'), original);
-    // Blocks the person kept for the skills, and a file with no final newline, come back exactly when Undo turns them
-    // back last first.
+    // Last-first Undo restores exact bytes through codexWrites, even for a bare block (full:second) with no final newline.
     const kept = `${original}\n[[skills.config]]\nname = "full:one" # keep on\nenabled = true\n\n[[skills.config]]\nname = "full:second"\nenabled = true`;
     await writeFile(config, kept);
     for (const skill of ['one', 'second']) await switchTo(skill, false);
     for (const skill of ['second', 'one']) await switchTo(skill, true);
     assert.equal(await readFile(config, 'utf8'), kept);
     assert.deepEqual(await files(copy), plugin);
+  } finally { await box.cleanup(); }
+});
+
+/** Runs setSkill in a fresh Node process so `codexWrites` is empty, as after a restart. */
+function switchCodexFresh(context: PluginContext, skill: string, on: boolean): void {
+  const pluginsUrl = new URL('../src/plugins.ts', import.meta.url).href;
+  const script = `import { setSkill } from ${JSON.stringify(pluginsUrl)};
+const r = await setSkill(${JSON.stringify(context)}, 'ck-test-market', 'full', ${JSON.stringify(skill)}, 'codex-cli', ${JSON.stringify(on)}, '/m');
+if (r.outcome !== ${JSON.stringify(on ? 'skill-on' : 'skill-off')} || !r.changed) { console.error(r); process.exit(1); }`;
+  execFileSync(process.execPath, ['--input-type=module', '-e', script], { stdio: 'pipe' });
+}
+
+test('Codex: turning two skills off and on in another order than last-first keeps his commented blocks byte for byte', async () => {
+  const { box, original, config, switchTo } = await codexHome();
+  try {
+    const before = `${original}\n[[skills.config]]\nname = "full:one" # keep on\nenabled = true\n\n[[skills.config]]\nname = "full:second"\nenabled = true # also keep`;
+    await writeFile(config, before);
+    await switchTo('one', false);
+    await switchTo('second', false);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one" # keep on\nenabled = false\n\n[[skills.config]]\nname = "full:second"\nenabled = false # also keep`);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'one' }, { skill: 'second' }]);
+    await switchTo('one', true);
+    await switchTo('second', true);
+    assert.equal(await readFile(config, 'utf8'), before);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
+  } finally { await box.cleanup(); }
+});
+
+test('Codex: turning skills back on in a fresh process keeps his commented blocks byte for byte, and drops a bare one', async () => {
+  const { box, original, config, switchTo } = await codexHome();
+  try {
+    const before = `${original}\n[[skills.config]]\nname = "full:one" # keep on\nenabled = true\n\n[[skills.config]]\nname = "full:second"\nenabled = true # also keep`;
+    await writeFile(config, before);
+    await switchTo('one', false);
+    await switchTo('second', false);
+    switchCodexFresh(box.context, 'one', true);
+    switchCodexFresh(box.context, 'second', true);
+    assert.equal(await readFile(config, 'utf8'), before);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
+    // Accepted limit: a bare block of his (`name` and `enabled = true`, no comment) turned off and then on in another session is taken out.
+    const bare = `${original}\n[[skills.config]]\nname = "full:one"\nenabled = true`;
+    await writeFile(config, bare);
+    await switchTo('one', false);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false`);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), original);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
+  } finally { await box.cleanup(); }
+});
+
+test('Codex: a path block with a comment, a block with another key, or a commented block with no enabled line is edited in place', async () => {
+  const { box, copy, original, config, switchTo } = await codexHome();
+  try {
+    const byPath = `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = true\n`;
+    await writeFile(config, byPath);
+    await switchTo('second', false);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n`);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'second' }]);
+    switchCodexFresh(box.context, 'second', true);
+    assert.equal(await readFile(config, 'utf8'), byPath);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
+    // Another key besides name/path and enabled, or both name and path together, keeps the block too.
+    const extraKey = `${original}\n[[skills.config]]\nname = "full:one"\nnote = "team default"\nenabled = true\n`;
+    await writeFile(config, extraKey);
+    await switchTo('one', false);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one"\nnote = "team default"\nenabled = false\n`);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), extraKey);
+    const bothKeys = `${original}\n[[skills.config]]\nname = "full:one"\npath = ${tomlValue(join(copy, 'skills/one/SKILL.md'))}\nenabled = true\n`;
+    await writeFile(config, bothKeys);
+    await switchTo('one', false);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), bothKeys);
+    // A commented block with no enabled line gains `enabled = false` in place on Off, then `enabled = true` on On.
+    const noEnabled = `${original}\n[[skills.config]] # keep\nname = "full:one"\n`;
+    await writeFile(config, noEnabled);
+    await switchTo('one', false);
+    assert.equal(await readFile(config, 'utf8'), `${noEnabled}enabled = false\n`);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), `${noEnabled}enabled = true\n`);
+    // A `#` inside a quoted path string is not a comment: a bare path block with `#` in its path is still taken out on On.
+    await put(join(copy, 'skills/hash#dir/SKILL.md'), '---\nname: hashed\ndescription: Hash.\n---\nB\n');
+    const hashed = `${original}\n[[skills.config]]\npath = ${tomlValue(join(copy, 'skills/hash#dir/SKILL.md'))}\nenabled = false\n`;
+    await writeFile(config, hashed);
+    assert.equal((await switchTo('hashed', true)).outcome, 'skill-on');
+    assert.equal(await readFile(config, 'utf8'), original);
+    // A comment directly above the next block belongs to that block, not to the bare block before it.
+    const nextComment = `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n\n# about second\n[[skills.config]]\nname = "full:second"\nenabled = false\n`;
+    await writeFile(config, nextComment);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n# about second\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
+  } finally { await box.cleanup(); }
+});
+
+test('Codex: two blocks picking one skill (his commented block and a bare one): Off edits his in place, On removes only the bare one', async () => {
+  const { box, original, config, switchTo } = await codexHome();
+  try {
+    // Bare `enabled = false` first, his commented `enabled = true` second: Codex starts with the skill on (last block wins).
+    const before = `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n\n[[skills.config]]\nname = "full:one" # keep on\nenabled = true\n`;
+    await writeFile(config, before);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
+    await switchTo('one', false);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n\n[[skills.config]]\nname = "full:one" # keep on\nenabled = false\n`);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'one' }]);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one" # keep on\nenabled = true\n`);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
+    // Reverse order: his commented block first, bare `enabled = false` second (starts off): On drops the bare one and keeps his.
+    const reverse = `${original}\n[[skills.config]]\nname = "full:one" # keep on\nenabled = true\n\n[[skills.config]]\nname = "full:one"\nenabled = false\n`;
+    await writeFile(config, reverse);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'one' }]);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one" # keep on\nenabled = true\n`);
+    assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
   } finally { await box.cleanup(); }
 });
 
