@@ -255,7 +255,7 @@ async function installedCopy({ item, copy, on }: CopyTurn, plugins: PluginSide):
   const draft: PluginDraft = new Map();
   if ('install' in copy.target) click(draft, copy.target);
   const report = (await plugins.run([...draft.values()]))[0]?.report;
-  if (report && succeeded(report)) return { changed: !!report.changed, reloads: report.changed ? report.reloads ?? [{ tool: copy.tool, kind: item.kind, key: itemKey(item.name), on }] : [] };
+  if (report && succeeded(report)) return { changed: !!report.changed, reloads: report.changed ? report.reloads ?? [] : [] };
   return { changed: false, reloads: [], failed: { item: item.name, harness: copy.tool, outcome: report?.outcome === 'held' ? 'held' : 'failed', message: `${item.name}: ${report?.message ?? `It was not turned ${on ? 'on' : 'off'} in ${toolNames[copy.tool]}.`}` } };
 }
 

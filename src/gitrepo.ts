@@ -766,7 +766,7 @@ export async function undoSettingsChange(context: ShareContext, eventId: string)
   const winner = past.winner ?? { tool: 'claude-cli' as HarnessId, hash: '' };
   await replaceHistory(context, [...history, { id, at: new Date().toISOString(), key: past.key, item: past.item, kind: 'restored', winner, losers: [{ tool: winner.tool, hash: winner.hash }], previous: winner.hash, orderProved: true,
     settingsFile: { path: past.settingsFile.path, kept: await keepWhole(context, past.key, now), wrote: sha(earlier) } }]);
-  return { results: [{ item: past.item, harness: winner.tool, outcome: 'written', message: 'Its earlier Claude Code settings are back.' }], harnessWrites: 1, reloads: [] };
+  return { results: [{ item: past.item, harness: winner.tool, outcome: 'written', message: 'Its earlier Claude Code settings are back.' }], harnessWrites: 1, reloads: [] }; // Claude Code agents need none.
 }
 
 /**
@@ -799,7 +799,7 @@ export async function undoPulledBase(context: ShareContext, snapshots: Snapshot[
     ...done.left.map(file => ({ item: past.item, harness: file.tool, outcome: 'held' as const, message: file.why === 'edited' ? `${harnesses[file.tool].name}’s file changed since, so it was left as it is.` : file.why === 'left-out' ? leftOutSentence(file.tool) : `${harnesses[file.tool].name}’s file could not be written.` })),
     ...(done.problem ? [notIn(past.item, done.problem)] : []),
   ];
-  return { results, harnessWrites: done.written.length, reloads: [] };
+  return { results, harnessWrites: done.written.length, reloads: [] }; // Base instructions outside reload table.
 }
 
 /**

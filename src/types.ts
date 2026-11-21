@@ -1332,7 +1332,7 @@ export type SourcedItem = NonNullable<PassResult['sourced']>[number] & { kind: I
  * table's order (`notWhole`: the source turned nothing of those kinds off, though a pass may have, for a copy deleted by hand;
  * the source's row says why), absent when every kind was read whole; and the page's view after.
  */
-export interface SourceResult { stopped?: string; sourced?: SourcedItem[]; results?: DestinationResult[]; notWhole?: ItemKind[]; view: SourcesView | null }
+export interface SourceResult { stopped?: string; sourced?: SourcedItem[]; results?: DestinationResult[]; reloads: ReloadChange[]; notWhole?: ItemKind[]; view: SourcesView | null }
 
 // ---------- Git repo ----------
 

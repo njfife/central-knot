@@ -1715,7 +1715,7 @@ app.whenReady().then(async () => {
   handle('repo:disconnect', async home => (home === current?.home ? disconnectRepo(context(), repoOptions()) : repoElsewhere()));
   // Sources (sources.ts): a Git link read on a click, never written. Look and Check now fetch outside the queue, so a slow
   // network never holds a sync pass up; what a check brings takes its turn with every other change (`queued`).
-  const sourceElsewhere = { stopped: elsewhere, view: null };
+  const sourceElsewhere = { stopped: elsewhere, reloads: [], view: null };
   handleNow('sources:view', async () => (current ? sourcesView(context(), await toolsNow()) : null));
   handleNow('sources:preview', async (link, home) => (home === current?.home && typeof link === 'string' ? previewSource(context(), await toolsNow(), link) : { refused: elsewhere, link: String(link ?? '') }));
   handle('sources:add', async (token, home) => (home === current?.home && typeof token === 'string' ? addSource(context(), await toolsNow(), token) : sourceElsewhere));

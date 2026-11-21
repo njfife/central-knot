@@ -1231,3 +1231,12 @@ test('Plugin runReloads settles tick Pi, tick OpenCode, untick Pi in one run to 
   await main.answer(step('pi-cli', false));
   assert.deepEqual(runReloads().items.map(item => [item.tool, item.chip]), [['opencode-cli', 'OpenCode: restart']]);
 });
+
+test('Resume with empty click.changes preserves confirmed writes from its pass for reload advice (Short list 1b)', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  applyClick({ kind: 'skills', changes: [], items: [], rows: [], said: 'Resumed: sync carries on from the record as it is.' });
+  await settled();
+  await main.pass({ results: [{ item: 'notes', harness: 'pi-cli', outcome: 'written', message: 'Added.' }], writes: 1, reloads: [{ tool: 'pi-cli', kind: 'skill', key: 'notes', on: true }] });
+  assert.deepEqual(app.outcome?.reloads, [{ tool: 'pi-cli', kind: 'skill', key: 'notes', on: true }]);
+});

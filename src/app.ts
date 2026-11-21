@@ -35,7 +35,7 @@ import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
-import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, type ReloadChange, type ReloadWrite } from './reload.ts';
+import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
@@ -576,7 +576,8 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const back = plugged?.back ?? [];
   const undo = !click.undoing && done && ((made.length && await allUndoable(made)) || back.length) ? { kind: click.kind, made, back } : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
-  const reloads = [...reloadsFor(result.reloads, new Set(click.changes.map(change => change.key))), ...(plugged ? pluginReloads(plugged.done) : [])];
+  const own = click.changes.length ? reloadsFor(result.reloads, new Set(click.changes.map(change => change.key))) : result.reloads;
+  const reloads = [...own, ...(plugged ? pluginReloads(plugged.done) : [])];
   return { kept, did: done, reloads, refused: done || !refusal ? undefined : refusal.message, changed, undo, along, focus: click.focus?.(),
     outcome: withReloads({ page, items: click.items, rows: click.rows, warn: warned || !!click.also?.length || !!refusal, band: true, fade: click.undoing && !warned,
       text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } }, reloads) };
@@ -1202,7 +1203,7 @@ export interface Outcome {
   /** A second button after `act`: the next step the result offers (the whole plugin's switch, "Turn its plugins off in Codex"). */
   next?: { label: string; id: string; run: () => void; title?: string };
   /** Confirmed writes for reload advice (Copy buttons and the opened row's join: reload.ts). */
-  reloads?: ReloadWrite[];
+  reloads?: ReloadChange[];
   /** When it was said (state.said.seq): a result newer than a table's pending changes still shows there. */
   said?: number;
 }

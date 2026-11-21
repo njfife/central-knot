@@ -16,13 +16,15 @@ import { pluginFiles } from '../src/catalogdetail.ts';
 import { runItems } from '../src/pluginlibrary.ts';
 import { newEntry } from '../src/pluginrecord.ts';
 import { setWhole, type PluginContext } from '../src/plugins.ts';
-import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
+import { NO_PLUGINS, saveProfile, switchProfile, type PluginSide } from '../src/profiles.ts';
 import { destinationReloads, hasReloadAdvice, pluginReloads, reloadAdvice, reloadLine, reloadTable, reloadsFor, rowReload, settleReloads } from '../src/reload.ts';
 import { applyServers, restoreServer } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, restoreSkill, takeOver } from '../src/skills.ts';
+import { addSource, checkSource, previewSource, removeSource, rowClick } from '../src/sources.ts';
 import type { HarnessId } from '../src/types.ts';
 import type { PluginDone } from '../src/pluginplan.ts';
+import { repository, standInHosts } from './sourcerepo.ts';
 
 const ALL_FIVE: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -337,17 +339,11 @@ test('Profile switch: skill and MCP server into Codex while Copilot CLI is held 
 });
 
 test('Item 7: every cell’s exact chip, title, command, tool order, ranking, and Codex skill no-chip rule', () => {
+  const on = (tool: HarnessId, kind: 'skill' | 'mcp' | 'agent') => ({ tool, kind, on: true });
   const allFive = reloadAdvice([
-    { tool: 'opencode-cli', kind: 'agent' },
-    { tool: 'opencode-cli', kind: 'skill' },
-    { tool: 'pi-cli', kind: 'skill' },
-    { tool: 'pi-cli', kind: 'mcp' },
-    { tool: 'codex-cli', kind: 'skill' },
-    { tool: 'codex-cli', kind: 'mcp' },
-    { tool: 'copilot-cli', kind: 'mcp' },
-    { tool: 'copilot-cli', kind: 'skill' },
-    { tool: 'claude-cli', kind: 'skill' },
-    { tool: 'claude-cli', kind: 'mcp' },
+    on('opencode-cli', 'agent'), on('opencode-cli', 'skill'), on('pi-cli', 'skill'), on('pi-cli', 'mcp'),
+    on('codex-cli', 'skill'), on('codex-cli', 'mcp'), on('copilot-cli', 'mcp'), on('copilot-cli', 'skill'),
+    on('claude-cli', 'skill'), on('claude-cli', 'mcp'),
   ]);
   assert.equal(allFive.text, 'Restart Claude Code (claude --continue keeps the chat). In Copilot CLI, type /skills reload. In Codex, type /new or restart it. In Pi, type /reload. Restart OpenCode.');
   assert.deepEqual(allFive.items, [
@@ -358,23 +354,23 @@ test('Item 7: every cell’s exact chip, title, command, tool order, ranking, an
     { tool: 'opencode-cli', text: 'Restart OpenCode.', chip: 'OpenCode: restart', title: 'Restart OpenCode.' },
   ]);
   // Plain-word agent chips and Codex skill alone (no chip, still a Show all line).
-  assert.deepEqual(reloadAdvice([{ tool: 'copilot-cli', kind: 'agent' }, { tool: 'codex-cli', kind: 'agent' }, { tool: 'opencode-cli', kind: 'agent' }]).items, [
+  assert.deepEqual(reloadAdvice([on('copilot-cli', 'agent'), on('codex-cli', 'agent'), on('opencode-cli', 'agent')]).items, [
     { tool: 'copilot-cli', text: 'In Copilot CLI, start a new session.', chip: 'Copilot CLI: new session', title: 'In Copilot CLI, start a new session.' },
     { tool: 'codex-cli', text: 'In Codex, start a new session.', chip: 'Codex: new session', title: 'In Codex, start a new session.' },
     { tool: 'opencode-cli', text: 'In OpenCode, start a new session.', chip: 'OpenCode: new session', title: 'In OpenCode, start a new session.' },
   ]);
-  assert.deepEqual(reloadAdvice([{ tool: 'codex-cli', kind: 'skill' }]), {
+  assert.deepEqual(reloadAdvice([on('codex-cli', 'skill')]), {
     text: 'Codex picks it up at the next turn; if not, start a new chat.',
     items: [{ tool: 'codex-cli', text: 'Codex picks it up at the next turn; if not, start a new chat.' }],
   });
   // Silence for Claude skill/agent and Copilot MCP -> hasReloadAdvice is false.
-  assert.equal(hasReloadAdvice([{ tool: 'claude-cli', kind: 'skill' }, { tool: 'claude-cli', kind: 'agent' }, { tool: 'copilot-cli', kind: 'mcp' }]), false);
-  assert.equal(hasReloadAdvice([{ tool: 'codex-cli', kind: 'skill' }]), true);
+  assert.equal(hasReloadAdvice([on('claude-cli', 'skill'), on('claude-cli', 'agent'), on('copilot-cli', 'mcp')]), false);
+  assert.equal(hasReloadAdvice([on('codex-cli', 'skill')]), true);
   assert.equal(reloadTable['claude-cli'].skill.text, '');
   assert.equal(reloadTable['claude-cli'].agent.text, '');
   assert.equal(reloadTable['copilot-cli'].mcp.text, '');
   // Copilot skill + agent -> new session outranks /skills reload.
-  assert.deepEqual(reloadAdvice([{ tool: 'copilot-cli', kind: 'skill' }, { tool: 'copilot-cli', kind: 'agent' }]), {
+  assert.deepEqual(reloadAdvice([on('copilot-cli', 'skill'), on('copilot-cli', 'agent')]), {
     text: 'In Copilot CLI, start a new session.',
     items: [{ tool: 'copilot-cli', text: 'In Copilot CLI, start a new session.', chip: 'Copilot CLI: new session', title: 'In Copilot CLI, start a new session.' }],
   });
@@ -449,4 +445,93 @@ test('Plugin item switches: confirmed enables advise, disables cancel prior enab
     { item: 'notes', harness: 'pi-cli', outcome: 'removed', message: 'Removed.' },
   ], 'skill');
   assert.deepEqual(settleReloads(changes), []);
+});
+
+test('Short list 1a: Library sources (Add, Check now, Replace, Bring back, Merge, Remove) carry required reloads', async () => {
+  const hosts = await standInHosts(), box = await tempHome(['claude-cli', 'pi-cli']);
+  try {
+    const link = 'https://github.com/team/reload-source';
+    const repo = await repository(hosts, link);
+    await repo.commit({ 'SKILL.md': skillText('deslop', 'First.') });
+    const preview = await previewSource(box.context, box.tools, link);
+    assert.ok('token' in preview);
+    const added = await addSource(box.context, box.tools, preview.token);
+    assert.deepEqual(added.reloads, [], 'Add brings items in Off with defined empty reloads');
+    const sourceId = added.view!.sources[0]!.id;
+    // Turn deslop On so subsequent source updates write to Pi.
+    await applySkills(box.context, box.tools, [{ key: 'deslop', on: true, except: [] }]);
+    await repo.commit({ 'SKILL.md': skillText('deslop', 'Second.') });
+    const checked = await checkSource(box.context, async () => box.tools, sourceId, fn => fn());
+    assert.deepEqual(reloadAdvice(settleReloads(checked.reloads)).items.map(item => [item.tool, item.command]), [
+      ['pi-cli', '/reload'],
+    ]);
+    // Local edit makes next source update wait; Replace writes source version to Pi and carries Pi reload.
+    await put(join(box.home, '.claude/skills/deslop/SKILL.md'), skillText('deslop', 'Local edit.'));
+    await applySkills(box.context, box.tools, []);
+    await repo.commit({ 'SKILL.md': skillText('deslop', 'Third.') });
+    await checkSource(box.context, async () => box.tools, sourceId, fn => fn());
+    const replaced = await rowClick(box.context, box.tools, sourceId, 'skill', 'deslop', 'replace');
+    assert.deepEqual(reloadAdvice(settleReloads(replaced.reloads)).items.map(item => [item.tool, item.command]), [
+      ['pi-cli', '/reload'],
+    ]);
+    // Delete then Bring back (comes in Off -> empty reloads) and Remove (forgets source -> empty reloads).
+    await applySkills(box.context, box.tools, [{ key: 'deslop', on: false, except: [], deleted: true }]);
+    const brought = await rowClick(box.context, box.tools, sourceId, 'skill', 'deslop', 'bringBack');
+    assert.deepEqual(brought.reloads, []);
+    const removed = await removeSource(box.context, box.tools, sourceId);
+    assert.deepEqual(removed.reloads, []);
+  } finally { await box.cleanup(); await hosts.cleanup(); }
+});
+
+test('Short list 2: setWhole keeps empty reloads array and profile switch never guesses when a plugin report has no reloads', async () => {
+  const box = await tempHome(['claude-cli']);
+  try {
+    const installDir = join(box.home, '.claude/plugins/cache/team/empty-kit/1.0.0');
+    await put(join(installDir, '.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['issues'] } } }));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      version: 2, plugins: { 'empty-kit@team': [{ scope: 'user', installPath: installDir, version: '1.0.0' }] },
+    }));
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: join(box.base, 'market') } } }));
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'empty-kit@team': false }, deniedMcpServers: [{ serverName: 'plugin:empty-kit:issues' }] }));
+    const fakeClaude = join(box.base, 'claude');
+    await put(fakeClaude, `#!/bin/sh
+node -e 'const fs = require("fs"), p = process.env.HOME + "/.claude/settings.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.enabledPlugins[process.argv[3]] = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
+`);
+    await chmod(fakeClaude, 0o755);
+    const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': fakeClaude } };
+    const report = await setWhole(pctx, 'team', 'empty-kit', 'claude-cli', true, join(box.base, 'market'));
+    assert.equal(report.changed, true);
+    assert.deepEqual(report.reloads, [], 'setWhole returns empty reloads array rather than omitting it');
+    // Profile switch turning on a plugin copy whose tool report has empty/omitted reloads must not guess a change.
+    let ran = 0;
+    const target = { kind: 'mcp' as const, name: 'issues', tool: 'claude-cli' as const,
+      install: { tool: 'claude-cli' as const, plugin: 'empty-kit', marketName: 'team', listed: true, source: join(box.base, 'market'), off: true, items: [{ kind: 'mcp' as const, name: 'issues', description: '' }] } };
+    const plugins: PluginSide = {
+      live: async () => [{ id: 'plugin:mcp:empty-kit@team/issues', kind: 'mcp', name: 'issues', plugin: 'empty-kit', marketName: 'team',
+        copies: [{ tool: 'claude-cli', on: false, way: 'switch' as const, target }] }],
+      run: async ops => { ran += ops.length; return ops.map(op => ({ ...op, report: { tool: op.tool, outcome: 'plugin-on' as const, changed: true, message: 'Turned on.', runs: [] } })); },
+    };
+    const saved = await saveProfile(box.context, { name: 'EmptyPlugin', items: ['plugin:mcp:empty-kit@team/issues'], switchesPluginItems: true });
+    const switched = await switchProfile(box.context, ['claude-cli'], saved.id!, plugins);
+    assert.equal(ran, 1, 'profile switch ran the installed plugin switch');
+    assert.deepEqual(switched.reloads, [], 'installedCopy must not guess a reload change when report.reloads is absent/empty');
+  } finally { await box.cleanup(); }
+});
+
+test('Short list 3: History giving Pi its own differing copy back while Pi keeps it switched off marks switchedOff and gives no reload advice', async () => {
+  const box = await tempHome(['claude-cli', 'pi-cli']);
+  try {
+    await put(join(box.home, '.claude/skills/notes/SKILL.md'), skillText('notes', 'Claude version.'));
+    await put(join(box.home, '.pi/agent/skills/notes/SKILL.md'), skillText('notes', 'Pi version.'));
+    await put(join(box.home, '.pi/agent/settings.json'), JSON.stringify({ skills: ['!*'] }));
+    // Choose Claude Code's copy on Add -> overwrites Pi's copy while Pi keeps it switched off, recording Pi's version in tookFrom.
+    const added = await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], use: 'claude-cli' }]);
+    assert.ok(added.made?.length === 1);
+    // Undo the Add -> giveBackCopy writes Pi's differing copy back while Pi still has skills: ['!*'] keeping it switched off.
+    const undone = await restoreSkill(box.context, box.tools, added.made![0]!);
+    const piResult = undone.results.find(entry => entry.harness === 'pi-cli' && entry.outcome === 'written');
+    assert.ok(piResult, 'Pi received its own differing copy back');
+    assert.equal(piResult?.switchedOff, true, 'giveBackCopy marks switchedOff when tool switch keeps it off');
+    assert.deepEqual(reloadAdvice(settleReloads(undone.reloads)), { text: '', items: [] }, 'switched-off give-back advises nothing');
+  } finally { await box.cleanup(); }
 });

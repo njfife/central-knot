@@ -1072,11 +1072,6 @@ async function switchWhole(context: PluginContext, tool: PluginTool, id: string,
   return { tool, command, ok: true, output: '', changed };
 }
 
-/**
- * Turns a whole installed plugin off (`on` false) or back on in one tool, with that tool's own switch (switchWhole), then
- * reads it again: only what the tool then records counts. Everything the plugin brings there goes with it. The plugin's
- * files are never touched.
- */
 /** Enabled items of an installed plugin copy, for reload advice when the whole plugin is installed, updated, switched or removed. */
 const wholeReloads = ({ plugin, marketplace, state, contents, serversOff, agentsOff }: InstalledCopyOf, tool: PluginTool, on: boolean): ReloadChange[] =>
   (state.state !== 'installed' || !contents ? [] : [
@@ -1089,6 +1084,11 @@ const installedReloads = async (context: PluginContext, tool: PluginTool, market
   return copy ? wholeReloads(copy, tool, on) : [];
 };
 
+/**
+ * Turns a whole installed plugin off (`on` false) or back on in one tool, with that tool's own switch (switchWhole), then
+ * reads it again: only what the tool then records counts. Everything the plugin brings there goes with it. The plugin's
+ * files are never touched.
+ */
 export async function setWhole(context: PluginContext, marketplace: string, plugin: string, tool: PluginTool, on: boolean, source: string): Promise<ActionReport> {
   const name = toolNames[tool];
   const outcome = on ? 'plugin-on' : 'plugin-off';
@@ -1101,7 +1101,7 @@ export async function setWhole(context: PluginContext, marketplace: string, plug
   if (!run) return { tool, outcome: 'failed', message: `Codex’s config.toml has no entry for ${id} to switch.`, runs: [] };
   if (!(await wholeOff(context, tool, id)) === on) {
     const reloads = await installedReloads(context, tool, marketplace, plugin, on);
-    return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs: [run], ...(reloads.length ? { reloads } : {}) };
+    return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs: [run], reloads };
   }
   return { tool, outcome: 'failed', message: `Still ${on ? 'off' : 'on'} in ${name}. ${lastLines(run.output)}`.trim(), runs: [run] };
 }

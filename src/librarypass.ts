@@ -822,7 +822,8 @@ async function giveBackCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here
   const refused = await pass.kind.write(pass.context, item, tool, here, content);
   if (refused && 'stopped' in refused) { result('held', refused.stopped); return false; }
   pass.writes++;
-  result('written', `${where} has its own copy back, as before.`);
+  const switchedOff = !!pass.disk.switchedOff?.get(item.key)?.includes(tool);
+  pass.results.push({ item: item.name, harness: tool, outcome: 'written', message: `${where} has its own copy back, as before.`, ...(switchedOff ? { switchedOff: true as const } : {}) });
   return true;
 }
 

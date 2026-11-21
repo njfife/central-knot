@@ -3756,7 +3756,7 @@ async function sourcesFlow() {
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, gently.') });
   await a.click('#nav-sources');
   await a.click(`#source-check-${id}`);
-  check('Check now brings the change in, and the band says it was updated and where it went, with its Undo', /deslop was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists('#outcome-undo') && await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('gently'))), await a.text('.band-done'));
+  check('Check now brings the change in, and the band says it was updated and where it went, with its Undo and reload advice', /deslop was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists('#outcome-undo') && await a.exists('.band-done #outcome-copy-copilot-cli') && await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('gently'))), await a.text('.band-done'));
 
   // Edited in Claude Code (sync takes it in), then changed at the source: the source's version waits; Replace takes it.
   const inClaude = join(home, roots['claude-cli'], 'deslop/SKILL.md');
@@ -3780,9 +3780,9 @@ async function sourcesFlow() {
   await a.shot('skills-waiting');
   await a.click('#nav-sources');
   await a.click(`#source-replace-${id}-skill-deslop`);
-  check('Replace puts the source’s version in every tool, says the one it had is kept, and offers Undo the replace', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('firmly')))
+  check('Replace puts the source’s version in every tool, says the one it had is kept, and offers Undo the replace with reload advice', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('firmly')))
     && /deslop has the source’s version, now in all 3 tools; the one it had is kept as a version\./.test(await a.text('.band-done .band-text') ?? '') && (await a.text('#outcome-undo')) === 'Undo the replace'
-    && !(await a.exists(`#source-replace-${id}-skill-deslop`)), await a.text('.band-done'));
+    && await a.exists('.band-done #outcome-copy-copilot-cli') && !(await a.exists(`#source-replace-${id}-skill-deslop`)), await a.text('.band-done'));
 
   // Merge: a line added in Claude Code and the source's new description, lines apart, become one version in every tool.
   writeFileSync(inClaude, `${readNow(inClaude)}Use plain words.\n`);
@@ -11774,7 +11774,7 @@ async function profilePluginsFlow() {
   await a.click('#outcome-undo');
   await done();
   same('Undo switch puts every file back, byte for byte, and Work is in use again', [files(), (await a.text('#status-profile'))?.trim()], [before, 'Work']);
-  same('the Undo’s result names what it left, and why, once', await a.run(`document.querySelector('#announcement').dataset.text`), 'Undone: 1 item turned on. Left as it is: triage in Codex, changed since the switch.');
+  same('the Undo’s result names what it left, and why, once', [await a.run(`document.querySelector('#announcement').dataset.text`), await a.exists('.band-done #outcome-copy-pi-cli')], ['Undone: 1 item turned on. Left as it is: triage in Codex, changed since the switch. In Pi, type /reload.', true]);
 
   // From the status bar to Quiet, then from the menu bar back to Work: the menus carry the plugin's items too.
   await a.click('#status-profile');

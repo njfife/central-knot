@@ -1,19 +1,18 @@
 // What a running session of each tool needs to pick up a skill, MCP server or agent written or turned on there: one table
 // (reloadTable), one chronological settler (settleReloads) and one reducer (reloadAdvice).
 // Travel: every writing engine returns required `reloads: ReloadChange[]` (librarypass.ts, skills.ts, everything.ts,
-// profiles.ts, homepass.ts, pluginlibrary.ts, plugins.ts via destinationReloads and pluginReloads); every writing page route
-// passes those changes through app.ts `withReloads` / `tellWritten` (or pluginstate.ts `runReloads`), which settles on/off
-// changes with `settleReloads` and sets `Outcome.reloads` only when `hasReloadAdvice` holds. Omitting `reloads` is a type error.
+// profiles.ts, homepass.ts, sources.ts, pluginlibrary.ts, plugins.ts via destinationReloads and pluginReloads); every writing
+// page route passes those changes through app.ts `withReloads` / `tellWritten` (or pluginstate.ts `runReloads`), which settles
+// on/off changes with `settleReloads` and sets `Outcome.reloads` only when `hasReloadAdvice` holds. Omitting `reloads` is a type error.
 // Facts: ck-one-switch-plan/judges/facts-signin-reload-2.md §1b (plan folder). No tool session is stopped, restarted or sent a command.
 import { itemKey, type ItemKind } from './library.ts';
-import type { PluginDone } from './pluginplan.ts';
+import { succeeded, type PluginDone } from './pluginplan.ts';
 import type { DestinationResult, HarnessId } from './types.ts';
 import { byToolOrder } from './words.ts';
 
 export interface ReloadStep { readonly text: string; readonly command?: string; readonly chip?: string; readonly title?: string; readonly rank: number }
 /** One confirmed change in order: `on: true` advises, a later `on: false` for the same slot cancels it. */
 export interface ReloadChange { tool: HarnessId; kind: ItemKind; key?: string; on: boolean; plugin?: string }
-export interface ReloadWrite { tool: HarnessId; kind: ItemKind; key?: string; plugin?: string }
 export interface ReloadItem { tool: HarnessId; text: string; command?: string; chip?: string; title?: string }
 export interface ReloadAdvice { text: string; items: ReloadItem[] }
 
@@ -47,20 +46,20 @@ export const reloadsFor = (changes: readonly ReloadChange[], keys: ReadonlySet<s
   changes.filter(change => change.key !== undefined && keys.has(change.key));
 
 /** Reduces chronological changes so the last confirmed change per (tool, kind, plugin, key) decides what stands. */
-export function settleReloads(changes: readonly ReloadChange[]): ReloadWrite[] {
-  const live = new Map<string, ReloadWrite>();
+export function settleReloads(changes: readonly ReloadChange[]): ReloadChange[] {
+  const live = new Map<string, ReloadChange>();
   for (const { tool, kind, key, on, plugin } of changes) {
     const slot = `${tool}\0${kind}\0${plugin ?? ''}\0${key ?? ''}`;
-    if (on) live.set(slot, { tool, kind, ...(key ? { key } : {}), ...(plugin ? { plugin } : {}) }); else live.delete(slot);
+    if (on) live.set(slot, { tool, kind, on: true, ...(key ? { key } : {}), ...(plugin ? { plugin } : {}) }); else live.delete(slot);
   }
   return [...live.values()];
 }
 
 export const pluginReloads = (done: readonly PluginDone[]): ReloadChange[] => done.flatMap(entry =>
-  (!entry.report.changed || ['held', 'failed', 'not-known'].includes(entry.report.outcome) ? [] : entry.report.reloads ?? []));
+  (!entry.report.changed || !succeeded(entry.report) ? [] : entry.report.reloads ?? []));
 
 /** One entry per tool needing an action (strongest rank per tool, in tool order) with its sentence, chip and Copy command. */
-export function reloadAdvice(writes: readonly ReloadWrite[]): ReloadAdvice {
+export function reloadAdvice(writes: readonly ReloadChange[]): ReloadAdvice {
   const best = new Map<HarnessId, ReloadStep>();
   for (const { tool, kind } of writes) { const step = reloadTable[tool][kind]; if (step.rank > (best.get(tool)?.rank ?? 0)) best.set(tool, step); }
   const items = [...best.entries()].sort(([first], [second]) => byToolOrder(first, second)).map(([tool, step]): ReloadItem =>
@@ -68,6 +67,6 @@ export function reloadAdvice(writes: readonly ReloadWrite[]): ReloadAdvice {
   return { text: items.map(item => item.text).join(' '), items };
 }
 
-export const hasReloadAdvice = (writes: readonly ReloadWrite[] | undefined): boolean => !!writes?.length && reloadAdvice(writes).items.length > 0;
-export const rowReload = (writes: readonly ReloadWrite[] | undefined, kind: ItemKind, key: string, tool: HarnessId, plugin?: string): string =>
+export const hasReloadAdvice = (writes: readonly ReloadChange[] | undefined): boolean => !!writes?.length && reloadAdvice(writes).items.length > 0;
+export const rowReload = (writes: readonly ReloadChange[] | undefined, kind: ItemKind, key: string, tool: HarnessId, plugin?: string): string =>
   writes ? reloadAdvice(writes.filter(write => write.kind === kind && write.key === key && write.tool === tool && (plugin ? write.plugin === plugin : !write.plugin))).text : '';
