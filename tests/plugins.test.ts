@@ -846,6 +846,10 @@ test('Codex turns one skill of a plugin off by name in config.toml and back on t
     const on = await switchTo('one', true);
     assert.deepEqual([on.outcome, on.changed], ['skill-on', true], on.message);
     assert.equal(await readFile(config, 'utf8'), original);
+    // The same round trip through codexConfigSwitched (fresh process, nothing in codexWrites).
+    await switchTo('one', false);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), original);
     // Codex's own /skills toggle writes the SKILL.md path of one version's copy; it counts, and turning on removes every bare block that picks the skill.
     await writeFile(config, `${original}\n[[skills.config]]\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
     assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'second' }]);
@@ -908,29 +912,42 @@ test('Codex: turning skills back on in a fresh process keeps his commented block
   } finally { await box.cleanup(); }
 });
 
-test('Codex: a path block with a comment, a block with another key, or a commented block with no enabled line is edited in place', async () => {
+test('Codex: a path block or a name+path block is edited in place and gets a name-only rule on Off so an update keeps it off', async () => {
   const { box, copy, original, config, switchTo } = await codexHome();
   try {
     const byPath = `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = true\n`;
     await writeFile(config, byPath);
     await switchTo('second', false);
-    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n`);
+    assert.equal(await readFile(config, 'utf8'),
+      `${original}\n[[skills.config]]\n# keep path block\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
     assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'second' }]);
+    // A plugin update to 2.0.0 leaves the 1.0.0 path pointing at nothing; the appended name-only rule keeps the skill off.
+    const newer = join(box.home, '.codex/plugins/cache/ck-test-market/full/2.0.0');
+    await put(join(newer, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nB\n');
+    await put(join(newer, 'skills/two/SKILL.md'), '---\nname: second\ndescription: Named apart from its folder.\n---\nB\n');
+    assert.deepEqual(await installState(box.context, 'codex-cli', 'ck-test-market', 'full'), { state: 'installed', path: newer, version: '2.0.0', skills: ['one', 'second'], skillsOff: [{ skill: 'second' }] });
+    await rm(newer, { recursive: true });
+    // Turning back on in a fresh process sets his path block true in place and drops the bare name block: byte for byte.
     switchCodexFresh(box.context, 'second', true);
     assert.equal(await readFile(config, 'utf8'), byPath);
     assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, []);
-    // Another key besides name/path and enabled, or both name and path together, keeps the block too.
+    // A block carrying both `name` and `path` (matching or conflicting): Codex ignores it, so Off also appends a name-only block, and fresh On restores byte for byte.
+    for (const target of ['skills/one/SKILL.md', 'skills/two/SKILL.md']) {
+      const bothKeys = `${original}\n[[skills.config]]\nname = "full:one"\npath = ${tomlValue(join(copy, target))}\nenabled = true\n`;
+      await writeFile(config, bothKeys);
+      await switchTo('one', false);
+      assert.equal(await readFile(config, 'utf8'),
+        `${original}\n[[skills.config]]\nname = "full:one"\npath = ${tomlValue(join(copy, target))}\nenabled = false\n\n[[skills.config]]\nname = "full:one"\nenabled = false\n`);
+      switchCodexFresh(box.context, 'one', true);
+      assert.equal(await readFile(config, 'utf8'), bothKeys);
+    }
+    // Another key besides name/path and enabled keeps the block (name-only, so no extra block is appended on Off).
     const extraKey = `${original}\n[[skills.config]]\nname = "full:one"\nnote = "team default"\nenabled = true\n`;
     await writeFile(config, extraKey);
     await switchTo('one', false);
     assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one"\nnote = "team default"\nenabled = false\n`);
     switchCodexFresh(box.context, 'one', true);
     assert.equal(await readFile(config, 'utf8'), extraKey);
-    const bothKeys = `${original}\n[[skills.config]]\nname = "full:one"\npath = ${tomlValue(join(copy, 'skills/one/SKILL.md'))}\nenabled = true\n`;
-    await writeFile(config, bothKeys);
-    await switchTo('one', false);
-    switchCodexFresh(box.context, 'one', true);
-    assert.equal(await readFile(config, 'utf8'), bothKeys);
     // A commented block with no enabled line gains `enabled = false` in place on Off, then `enabled = true` on On.
     const noEnabled = `${original}\n[[skills.config]] # keep\nname = "full:one"\n`;
     await writeFile(config, noEnabled);
@@ -944,11 +961,53 @@ test('Codex: a path block with a comment, a block with another key, or a comment
     await writeFile(config, hashed);
     assert.equal((await switchTo('hashed', true)).outcome, 'skill-on');
     assert.equal(await readFile(config, 'utf8'), original);
-    // A comment directly above the next block belongs to that block, not to the bare block before it.
-    const nextComment = `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n\n# about second\n[[skills.config]]\nname = "full:second"\nenabled = false\n`;
-    await writeFile(config, nextComment);
+  } finally { await box.cleanup(); }
+});
+
+test('Codex: comments directly above or after a block, or a sub-table of it, count as his and keep the block in place', async () => {
+  const { box, original, config, switchTo } = await codexHome();
+  try {
+    // Comment directly above a bare block's header: Off -> fresh On, and Off -> unrelated editor save -> On, both keep his block.
+    const above = `${original}\n# Pin this skill.\n[[skills.config]]\nname = "full:one"\nenabled = true\n\n[[skills.config]]\nname = "full:second"\nenabled = true\n`;
+    await writeFile(config, above);
+    await switchTo('one', false);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), above);
+    await switchTo('one', false);
+    await writeFile(config, `# edited externally\n${await readFile(config, 'utf8')}`);
+    await switchTo('one', true);
+    assert.equal(await readFile(config, 'utf8'), `# edited externally\n${above}`);
+    // Comment separated by a blank line above the header does NOT touch the bare block: fresh On still removes it.
+    const spacedAbove = `${original}\n# section note\n\n[[skills.config]]\nname = "full:one"\nenabled = false\n`;
+    await writeFile(config, spacedAbove);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n# section note\n`);
+    // Trailing comment line directly after the last entry at EOF: Off -> fresh On keeps the block byte for byte.
+    const trailing = `${original}\n[[skills.config]]\nname = "full:one"\nenabled = true\n# Pin PDF reader.\n`;
+    await writeFile(config, trailing);
+    await switchTo('one', false);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), trailing);
+    // A blank line before `# about second` separates it from the bare block above (dropped), while `# about second` is directly above the second block (kept as his).
+    const nextWithBlank = `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n\n# about second\n[[skills.config]]\nname = "full:second"\nenabled = false\n`;
+    await writeFile(config, nextWithBlank);
     switchCodexFresh(box.context, 'one', true);
     assert.equal(await readFile(config, 'utf8'), `${original}\n# about second\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
+    switchCodexFresh(box.context, 'second', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n# about second\n[[skills.config]]\nname = "full:second"\nenabled = true\n`);
+    // Without a blank line before `# about second`, the comment touches the block above it too, so that block is kept in place (taken on purpose).
+    const nextTouching = `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n# about second\n[[skills.config]]\nname = "full:second"\nenabled = false\n`;
+    await writeFile(config, nextTouching);
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one"\nenabled = true\n# about second\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
+    // A sub-table of a `[[skills.config]]` element keeps its parent block in place (never stranding the sub-table or attaching it to the block before).
+    const twoWithSubtable = `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n\n[[skills.config]]\nname = "full:second"\nenabled = false\n[skills.config.notes]\nreason = "keep the annotation"\n`;
+    await writeFile(config, twoWithSubtable);
+    switchCodexFresh(box.context, 'second', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n\n[[skills.config]]\nname = "full:second"\nenabled = true\n[skills.config.notes]\nreason = "keep the annotation"\n`);
+    // Meanwhile the bare first block (no sub-table of its own) is still dropped cleanly.
+    switchCodexFresh(box.context, 'one', true);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:second"\nenabled = true\n[skills.config.notes]\nreason = "keep the annotation"\n`);
   } finally { await box.cleanup(); }
 });
 

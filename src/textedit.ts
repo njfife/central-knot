@@ -1,6 +1,6 @@
 // Preserving edits (FIL-02): change one entry in a config file's text and leave every other byte as it was. JSON (and JSONC):
 // a member of an object at a path (setJsonMember). TOML: a table and its subtables (setTomlTable: an MCP server's
-// [mcp_servers.<name>]), or the tables of an array (editTomlArray, setTomlArrayKey: Codex's [[skills.config]]). Text only: which entry changes
+// [mcp_servers.<name>]), or the tables of an array (arrayBlocks, editTomlArray, setTomlArrayKey: Codex's [[skills.config]]). Text only: which entry changes
 // is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts, plugins.ts, agentfiles.ts), and writing the file,
 // checked, is share.ts writeFileChecked.
 
@@ -413,17 +413,19 @@ export function setTomlTable(text: string, prefix: string[], name: string, body:
   return cutTables(text, mine, body, { endGap, eol });
 }
 
-const arrayBlocks = (text: string, path: string[]) =>
-  readTomlTables(text).filter(table => table.array && table.path.length === path.length && table.path.every((part, index) => part === path[index]));
+/** Every `[[path]]` block in `tables`, in document order (the order `editTomlArray` and `setTomlArrayKey` index them by). */
+export const arrayBlocks = (tables: TomlTable[], path: string[]): TomlTable[] =>
+  tables.filter(table => table.array && table.path.length === path.length && table.path.every((part, index) => part === path[index]));
 
 /**
- * Removes the `[[path]]` blocks `drop` picks and, with `add`, appends one more `[[path]]` block holding those entries.
- * Other blocks, comments and tables stay byte for byte (the order of blocks matters to their readers: Codex lets the last
- * `[[skills.config]]` that matches a skill decide), so a block added and then dropped leaves the file as it was, apart
- * from a final newline the file lacked. A block's own subtables (`[path.sub]`) are not handled; Codex writes none.
+ * Removes the `[[path]]` blocks `drop` picks (given each block and its index in `arrayBlocks`) and, with `add`, appends one
+ * more `[[path]]` block holding those entries. Other blocks, comments and tables stay byte for byte (the order of blocks
+ * matters to their readers: Codex lets the last `[[skills.config]]` that matches a skill decide), so a block added and then
+ * dropped leaves the file as it was, apart from a final newline the file lacked. A block's own subtables (`[path.sub]`) are
+ * not handled; Codex writes none.
  */
 export function editTomlArray(text: string, path: string[], drop: (table: TomlTable, index: number) => boolean, add?: Record<string, TomlValue>): string {
-  const dropped = arrayBlocks(text, path).filter(drop);
+  const dropped = arrayBlocks(readTomlTables(text), path).filter(drop);
   // A file written with Windows line endings keeps them.
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const kept = dropped.length ? cutTables(text, dropped, undefined, { endGap: true, eol }) : text;
@@ -432,14 +434,15 @@ export function editTomlArray(text: string, path: string[], drop: (table: TomlTa
 }
 
 /**
- * Sets `key` to `value` in place in each `[[path]]` block `pick` selects: an existing `key = …` line changes only its
- * value (keeping indentation, spacing, inline comment and line ending); a block without `key` gets a `key = value` line
- * after its last entry (or header), keeping line endings and a missing final newline. Every other byte stays unchanged.
+ * Sets `key` to `value` in place in each `[[path]]` block `pick` selects (given each block and its index in `arrayBlocks`):
+ * an existing `key = …` line changes only its value (keeping indentation, spacing, inline comment and line ending); a block
+ * without `key` gets a `key = value` line after its last entry (or header), keeping line endings and a missing final
+ * newline. Every other byte stays unchanged.
  */
 export function setTomlArrayKey(text: string, path: string[], pick: (table: TomlTable, index: number) => boolean, key: string, value: TomlValue): string {
   const eol = text.includes('\r\n') ? '\r\n' : '\n', formatted = tomlValue(value);
   let out = text;
-  for (const block of arrayBlocks(text, path).filter(pick).reverse()) {
+  for (const block of arrayBlocks(readTomlTables(text), path).filter(pick).reverse()) {
     const entry = block.entries.findLast(candidate => candidate.keys.length === 1 && candidate.keys[0] === key);
     if (entry) { if (entry.value !== value) out = out.slice(0, entry.valueStart) + formatted + out.slice(entry.valueEnd); continue; }
     const at = block.entries.at(-1)?.end ?? (text.indexOf('\n', block.start) + 1 || text.length);

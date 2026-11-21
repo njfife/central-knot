@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { editTomlArray, readTomlTables, setJsonMember, setTomlArrayKey, setTomlTable, tomlHeader, tomlValue } from '../src/textedit.ts';
+import { arrayBlocks, editTomlArray, readTomlTables, setJsonMember, setTomlArrayKey, setTomlTable, tomlHeader, tomlValue } from '../src/textedit.ts';
 
 const claudeJson = `{
   "numStartups": 42,
@@ -122,8 +122,9 @@ test('TOML: setTomlArrayKey edits a key in place across picked blocks, keeping c
   assert.equal(setTomlArrayKey(noKey, ['skills', 'config'], () => true, 'enabled', false),
     '[[skills.config]]\r\n  name = "a:one"\r\n  enabled = false\r\n\r\n[[skills.config]]\r\nname = "a:two"\r\nenabled = false');
   assert.equal(setTomlArrayKey('[[skills.config]]', ['skills', 'config'], () => true, 'enabled', false), '[[skills.config]]\nenabled = false');
-  // Unpicked blocks and other arrays stay untouched.
+  // Unpicked blocks and other arrays stay untouched; index matches arrayBlocks(tables, path).
   const mixed = '[[other.list]]\nenabled = true\n\n[[skills.config]]\nname = "a:one"\nenabled = true\n\n[[skills.config]]\nname = "a:two"\nenabled = true\n';
-  assert.equal(setTomlArrayKey(mixed, ['skills', 'config'], block => block.entries[0]!.value === 'a:one', 'enabled', false),
+  assert.deepEqual(arrayBlocks(readTomlTables(mixed), ['skills', 'config']).map(block => block.entries[0]!.value), ['a:one', 'a:two']);
+  assert.equal(setTomlArrayKey(mixed, ['skills', 'config'], (_block, index) => index === 0, 'enabled', false),
     '[[other.list]]\nenabled = true\n\n[[skills.config]]\nname = "a:one"\nenabled = false\n\n[[skills.config]]\nname = "a:two"\nenabled = true\n');
 });
