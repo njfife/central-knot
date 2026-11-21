@@ -1258,5 +1258,12 @@ test('With the plugin installed whole in Claude Code and placed in Pi, its root 
     assert.deepEqual(items.map(item => [item.id, item.copies.map(copy => copy.tool)]), [[rootId('root-fixture'), ['claude-cli', 'pi-cli']]]);
     await saveProfile(box.share, { name: 'Roots', items: [rootId('root-fixture')] });
     assert.deepEqual(await box.inUseNow(), ['Roots']);
+    // The marketplace moves to a pin whose one skill is in a folder, notes, while Claude Code keeps the root skill it installed:
+    // Pi's copy is another item, by the name its item records, never taken for the installed root skill.
+    await box.list({ 'root-fixture': pinOf('b') });
+    await box.copy('root-fixture', pinOf('b'), { 'skills/notes/SKILL.md': skill('notes') });
+    await box.updateOf('root-fixture');
+    assert.deepEqual((await box.live()).filter(item => item.plugin === 'root-fixture').map(item => [item.id, item.copies.map(copy => copy.tool)]),
+      [[rootId('root-fixture'), ['claude-cli']], [rootId('root-fixture', 'notes'), ['pi-cli']]]);
   } finally { await box.cleanup(); }
 });
