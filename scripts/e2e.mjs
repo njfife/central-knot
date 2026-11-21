@@ -9864,16 +9864,19 @@ async function libraryFlow() {
   const noticesWide = () => tb.run(`Math.round(document.querySelector('#notices').getBoundingClientRect().width * 10) / 10`);
   const wideUnseenOne = await noticesWide();
   await noticePictures('with-result');
-  chmodSync(T.claude, 0o755);
+  // Claude Code's folder stays read-only until the problem line has been read back on the Library: leaving the page lets the
+  // click's own result go (app.ts showPage), and what is said there on return is the background pass's line, kept while beta's
+  // removal is still owed (matrix.ts backgroundProblems). Writable, the next pass would remove the copy and the line with it.
   await tb.click('#nav-overview');
   same('away from the Library, the dot counts delta alone: gamma, folded before it was ever seen, is not unseen', await dotSays(), '1 automatic change: delta');
   await tb.click('#nav-history');
   const editsInHistory = () => tb.all('.history-row', 'e.querySelector(".history-what strong")?.textContent + ": " + e.textContent.includes("Edited in Claude Code")');
   check('History has both edits', await until(async () => (rows => ['gamma: true', 'delta: true'].every(entry => rows.includes(entry)))(await editsInHistory())), await editsInHistory());
   await openKind(tb, 'all');
-  same('back on the Library, the click’s problem line still has the lines, delta’s notice unseen', [await tb.exists('#header .problem-line'), await noticeInLines(tb), await control()], [true, null, ['1', true]]);
+  same('back on the Library, the removal still owed: the background pass’s problem line has the lines, delta’s notice unseen', [await tb.exists('#header .problem-line'), await noticeInLines(tb), await control()], [true, null, ['1', true]]);
   await tb.run(`document.querySelector('#outcome-dismiss, #problems-dismiss')?.click()`); await tb.settle();
   same('its × closes it: delta’s notice has the lines, and is seen', [/delta was edited/.test(await noticeInLines(tb) ?? ''), await control()], [true, ['1', false]]);
+  chmodSync(T.claude, 0o755);
   same('…Notices resting as Refresh is, once its notice is seen', (await filled())?.[0], false);
   const wideSeenOne = await noticesWide();
   if (!(await switchOn(tb, 'skills', 'beta'))) { await tb.click(`#${rowPart('switch', 'skills', 'beta')}`); await done(tb); }
