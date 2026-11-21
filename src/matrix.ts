@@ -1844,7 +1844,10 @@ function turnOn(t: Table, skill: ItemRow, use?: Tool, seen?: boolean): Click {
 // ---------- Items tools have through a plugin ----------
 
 /** The items a person's own row has through a plugin: in each tool with no copy of its own that has it through an installed plugin. */
-const throughItems = (t: Table, skill: ItemRow): PluginItemAt[] => toolsFor(t, skill.kind).flatMap(tool => { const item = itemThrough(skill, tool); return item ? [item] : []; });
+const rowThroughItems = (skill: ItemRow, tools: readonly Tool[]): PluginItemAt[] => tools.flatMap(tool => { const item = itemThrough(skill, tool); return item ? [item] : []; });
+const throughItems = (t: Table, skill: ItemRow): PluginItemAt[] => rowThroughItems(skill, toolsFor(t, skill.kind));
+/** The same for one row looked up by kind and key (firstsetup.ts "Use the latest for the rest"). */
+export const throughItemsFor = (kind: PageKind, key: string): PluginItemAt[] => { const skill = rowByKey(kind, key); return skill && state.home ? rowThroughItems(skill, kindSource(state.home, kind).tools) : []; };
 /** The items a plugin's row stands for: one in each tool that has it through the plugin. */
 const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(tool => (row.installs[tool] ? [{ kind: row.kind, name: row.name, tool, install: row.installs[tool]! }] : []));
 
