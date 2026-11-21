@@ -14,9 +14,9 @@
 // only once they are (pluginstatus.ts waitsToMove). Kept elsewhere: the table (library.ts), the held answer in the tools with an
 // installer (plugins.ts pluginHolds), the switch's table (pluginrecord.ts owedTo), and the let-go of an item changed here, in
 // every pass (librarypass.ts letGo).
-// Known miss: a skill keyed by its folder (library.ts A SOURCE, the two key rules) whose SKILL.md names it otherwise is loaded
+// Known miss: a skill keyed by its folder, or by its plugin's name at the plugin's root (library.ts A SOURCE, the two key rules),
+// whose SKILL.md names it otherwise is loaded
 // by Pi and OpenCode under that name, so it can meet a skill of that name there unmarked, and through a Git link is a second item.
-import { basename } from 'node:path';
 import { pluginItems, wasRead } from './atlink.ts';
 import type { PluginFiles } from './catalogdetail.ts';
 import { fromLinkSinceTakeIn, itemKey, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
@@ -43,13 +43,15 @@ export interface ItemState { kind: ItemKind; key: string; on: boolean; except: H
 
 /**
  * A plugin's files read as one SourceRead per kind (library.ts A PLUGIN): each name with its content, or why it can't be read
- * or is left out. A kind is read whole as a link's kind is (library.ts "Read whole"; atlink.ts wasRead): something in the plugin
+ * or is left out; a skill at the plugin's own folder (a plugin that is one skill at its root) named for the plugin, never for
+ * the folder its files are read from, which may be a copy Central Knot keeps under a name of its own (plugins.ts
+ * remoteCopyFolder). A kind is read whole as a link's kind is (library.ts "Read whole"; atlink.ts wasRead): something in the plugin
  * was read (a plugin's folder missing from the marketplace's copy reads as empty, so it is not), its files left nothing of that
  * kind unread (PluginFiles `unread`), and every item of it was read. `outOf`: the tools a name it
  * makes is kept out of (pluginOutOf); `into`: those it brings its items into. `commitAt`: when its marketplace was read.
  */
 export async function readPlugin(files: PluginFiles, entry: PluginEntry, commitAt: string, recorded: ReadonlySet<string>, outOf: HarnessId[], into: HarnessId[] = []): Promise<SourceRead<unknown>[]> {
-  const read = await pluginItems(files, files.folder, basename(files.folder), 'marketplace');
+  const read = await pluginItems(files, files.folder, entry.plugin, 'marketplace');
   const any = Object.values(read).some(each => each.items.some(wasRead));
   return sourceKinds().map((kind): SourceRead<unknown> => {
     const { items, unread } = read[kind.kind.kind], names: SourceRead<unknown>['names'] = new Map();

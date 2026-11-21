@@ -31,9 +31,9 @@ export const NO_PROFILE = 'No profile';
 export const itemId = (kind: ItemKind, key: string) => `${kind}:${key}`;
 /**
  * A plugin's item's plan key, one rule for each tool's copy, installed whole (a PluginItem, by its `keyName`) or placed in Pi or
- * OpenCode (a library item linked to the plugin, by placedKeyName): `plugin@marketplace/item`, a skill by its folder's name (one at
- * the plugin's root by the plugin's) and an agent by its file's, compared as library keys are (itemKey), an MCP server by its name
- * as written. Not the name a tool's switch takes (PluginItem `name`).
+ * OpenCode (a library item linked to the plugin, by its name, as pluginlibrary.ts readPlugin named it): `plugin@marketplace/item`,
+ * a skill by its folder's name (one at the plugin's root by the plugin's) and an agent by its file's, compared as library keys
+ * are (itemKey), an MCP server by its name as written. Not the name a tool's switch takes (PluginItem `name`).
  */
 export const pluginItemKey = ({ plugin, marketName }: { plugin: string; marketName: string }, item: Pick<PluginItem, 'kind' | 'name' | 'keyName'>) =>
   `${plugin}@${marketName}/${item.kind === 'mcp' ? item.name : itemKey(item.keyName ?? item.name)}`;
@@ -151,20 +151,6 @@ function installedWay(home: PluginHome, at: PluginItemAt): Pick<PluginCopy, 'way
   return { way: 'switch', ...(own.length || plugins.length || found ? { sharesWith: { own, plugins, ...(found ? { found: true as const } : {}) } } : {}) };
 }
 
-/** A plugin as the home records it (types.ts ProfilesView `plugins`). */
-type Recorded = NonNullable<HomeView['profiles']['plugins']>[number];
-/**
- * The name a placed copy's plan key is made of: its library item's name, which is its key's (as atlink.ts pluginItems named it),
- * or the plugin's for a plugin that is one skill at its root. Placed, that skill is named by the plugin's folder in the
- * marketplace's copy; the plan knows it is the root skill when a tool's installed copy of the plugin read its one skill at the
- * root (PluginItem `root`) and the plugin has one skill placed. With no tool having it installed, it keeps its own name.
- */
-function placedKeyName(home: PluginHome, kind: ItemKind, item: LibraryItem, entry: Recorded): string {
-  const atRoot = (home.pluginItems ?? []).some(install => install.plugin === entry.plugin && install.marketName === entry.marketName && install.items.some(part => part.root));
-  const placed = Object.values(home.skills.library).filter(skill => !skill.deleted && skill.source === entry.id).length;
-  return kind === 'skill' && atRoot && placed === 1 ? entry.plugin : item.name;
-}
-
 /**
  * Every plugin's item a tool has now, one per pluginItemKey whichever way each tool has it: installed whole, then placed in Pi or
  * OpenCode, a library item linked to a plugin the home records, in each of those managed tools it isn't kept out of (Off too:
@@ -188,7 +174,7 @@ export function pluginLive(home: PluginHome): PluginLive[] {
     for (const item of Object.values(library)) {
       const entry = !item.deleted && home.profiles.plugins?.find(each => each.id === item.source);
       if (!entry) continue;
-      const key = pluginItemKey(entry, { kind, name: placedKeyName(home, kind, item, entry) }), row = home[pageOfPart[kind]].items.find(each => each.key === item.key);
+      const key = pluginItemKey(entry, { kind, name: item.name }), row = home[pageOfPart[kind]].items.find(each => each.key === item.key);
       for (const tool of tools.filter(each => !takesPlugins(each) && !item.except.includes(each))) {
         const way = entry.on ? { way: 'switch' as const } : { way: 'plugin-off' as const, why: pluginOff(entry.plugin, tool) };
         const gone = item.on && !!item.applied[tool] && !row?.copies[tool] ? { gone: true as const } : {};

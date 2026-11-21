@@ -6791,6 +6791,53 @@ esac
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
   await nameClashPage();
+  await rootSkillPage();
+}
+
+/**
+ * A plugin kept in a repository of its own, pinned to a commit, whose root is one skill (library.ts A PLUGIN: named for the
+ * plugin, never for the folder Central Knot copies it into): ticked for Pi on its page, Pi's folder and Its items name it
+ * root-fixture; with its marketplace moved to another pin, Refresh and its Update write the new text into the same folder. The
+ * repository is a local one standing in for its https address (git's url.<base>.insteadOf, given to the app's git).
+ */
+async function rootSkillPage() {
+  const home = join(scratch, 'home-root'), data = join(scratch, 'root-data'), market = join(scratch, 'market-root'), repo = join(scratch, 'repo-root');
+  const git = (...rest) => spawnSync('git', ['-C', repo, '-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', '-c', 'commit.gpgsign=false', ...rest], { encoding: 'utf8' }).stdout.trim();
+  spawnSync('git', ['init', '--quiet', '--initial-branch=main', repo]);
+  const commit = text => {
+    mkdirSync(join(repo, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(repo, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'root-fixture' }));
+    writeFileSync(join(repo, 'SKILL.md'), `---\nname: root-fixture\ndescription: A root skill.\n---\n\n${text}\n`);
+    git('add', '.'); git('commit', '--quiet', '-m', text);
+    return git('rev-parse', 'HEAD');
+  };
+  const pins = [commit('First root text.'), commit('Second root text.')], url = 'https://root.example.test/repo.git';
+  const list = sha => { mkdirSync(join(market, '.claude-plugin'), { recursive: true }); writeFileSync(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ck-root-market', plugins: [{ name: 'root-fixture', source: { source: 'url', url, sha } }] })); };
+  list(pins[0]);
+  mkdirSync(join(home, '.pi/agent'), { recursive: true });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  const a = await launch(data, [], join(scratch, 'root-app-home'), { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${repo}.insteadOf`, GIT_CONFIG_VALUE_0: url });
+  const busy = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const seen = async () => [readdirSync(join(home, '.pi/agent/skills')).sort(), await a.run(`[...document.querySelectorAll('.plugin-items-list [data-key]')].map(row => row.dataset.key)`),
+    readFileSync(join(home, '.pi/agent/skills/root-fixture/SKILL.md'), 'utf8').trim().split('\n').at(-1)];
+  same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists('#popen-0-root-fixture')); tries++) await wait(100);
+  await a.click('#popen-0-root-fixture');
+  for (let tries = 0; tries < 100 && !(await a.exists('#pbox-0-root-fixture-pi-cli')); tries++) await wait(100);
+  await a.click('#pbox-0-root-fixture-pi-cli');
+  await busy();
+  for (let tries = 0; tries < 50 && !(await a.exists('.plugin-items-list [data-key]')); tries++) await wait(100);
+  same('ticked for Pi: its root skill is in Pi under the plugin’s name, as Its items says', await seen(), [['root-fixture'], ['skill:root-fixture'], 'First root text.']);
+  list(pins[1]);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await a.exists('#pupdate-0-root-fixture')); tries++) await wait(100);
+  await a.click('#pupdate-0-root-fixture');
+  await busy();
+  same('its Update to another pin writes the new text into the same folder', await seen(), [['root-fixture'], ['skill:root-fixture'], 'Second root text.']);
+  same('no page errors, a root skill’s pin', a.pageErrors, []);
+  await a.quit();
 }
 
 /**

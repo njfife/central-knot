@@ -738,12 +738,10 @@ export interface PartRef { kind: PartKind; name: string }
 export interface PluginItem { kind: PartKind; name: string; description: string; /** MCP servers: what it runs or connects to. */ runs?: string;
   /**
    * Skills and agents: the name its plan key is made of (profileplan.ts pluginItemKey): a skill's folder's and an agent's file's
-   * without .md (values.ts nameOfFile), as Pi and OpenCode name its placed copy; for the skill of a plugin that is one skill
-   * (`root`), the plugin's. An MCP server has none: its name is both.
+   * without .md (values.ts nameOfFile), as Pi and OpenCode name its placed copy; for the skill of a plugin that is one skill,
+   * SKILL.md at its root (catalogdetail.ts skillsIn: its path is "."), the plugin's. An MCP server has none: its name is both.
    */
-  keyName?: string;
-  /** A skill that is the whole plugin, SKILL.md at its root (catalogdetail.ts skillsIn: its path is "."). */
-  root?: true }
+  keyName?: string }
 /** A plugin installed whole in one tool, read from that tool's own records and its copy of the plugin. */
 export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
   /** The whole plugin is turned off in that tool. */ off?: boolean;
