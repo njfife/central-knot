@@ -22,6 +22,8 @@ export interface SigninChecks { home: string; columns: Partial<Record<HarnessId,
 const askedAs = (row: SigninRow, cell: SigninCell) => JSON.stringify([row.id, cell.name ?? null, cell.off]);
 /** The tools with a column: the managed tools that have one of the servers, in the tools' order. */
 const columnsOf = (home: HomeView, rows: SigninRow[]) => home.mcp.tools.filter(tool => rows.some(row => row.cells[tool]));
+/** Why every Check waits: the check running, if one is. */
+const waitsFor = () => (state.mcpSignin.checking ? `Checking ${toolNames[state.mcpSignin.checking]}…` : false);
 
 /**
  * Checks each of `tools` in turn, one at a time: a press while a check runs does nothing. Each answer is kept in the checks of the
@@ -51,11 +53,10 @@ function answerFor(tool: HarnessId, row: SigninRow, cell: SigninCell): SigninAns
 function columnHead(tool: HarnessId) {
   const checks = state.mcpSignin, column = checks.columns[tool], note = columnNote(tool), answer = column?.answer;
   const when = checks.checking === tool ? 'Checking…' : column ? `Checked ${clockTime(column.at)}` : '';
-  const busy = checks.checking ? `Checking ${toolNames[checks.checking]}…` : false;
   return h('th.signin-head', { scope: 'col', 'data-tool': tool },
     h('span.signin-tool', {}, brandMark(tool, 14), toolNames[tool]),
     listCommand[tool] ? h('span.signin-check', {},
-      button({ size: 'small', label: 'Check', name: `Check: run ${toolNames[tool]}’s own command for its MCP servers`, id: `signin-check-${tool}`, disabled: busy, onclick: () => void checkColumns([tool]) }),
+      button({ size: 'small', label: 'Check', name: `Check: run ${toolNames[tool]}’s own command for its MCP servers`, id: `signin-check-${tool}`, disabled: waitsFor(), onclick: () => void checkColumns([tool]) }),
       when ? h('span.signin-when', { id: `signin-when-${tool}` }, when) : null) : null,
     answer && 'unreadable' in answer ? h('span.signin-raw', { id: `signin-raw-${tool}` }, answer.unreadable ? `It printed: ${answer.unreadable}` : 'It printed nothing.') : null,
     note ? h('span.signin-note', {}, note) : null);
@@ -67,8 +68,9 @@ function cellView(tool: HarnessId, row: SigninRow, index: number) {
   const answer = answerFor(tool, row, cell), said = cell.off ? undefined : saidOf(cell, answer);
   const command = said?.is === 'needs-sign-in' && cell.name !== undefined ? signInCommand(tool, cell.name) : undefined;
   return h(`td.signin-cell${said?.is === 'needs-sign-in' ? '.tone-warning' : !answer || cell.off ? '.tone-muted' : ''}`, { id: `signin-cell-${tool}-${index}` },
-    h('span.signin-words', {}, cellWords(tool, cell, answer)),
-    command ? h('span.signin-command', {}, h('code', {}, command), copyButton(command, command, `signin-copy-${tool}-${index}`, undefined, 'Copied. Run it in a terminal; then Check again.')) : null);
+    // The command under the words, with the cell's whole width; Copy beside the words.
+    h('span.signin-words', {}, cellWords(tool, cell, answer), command ? copyButton(command, command, `signin-copy-${tool}-${index}`, undefined, 'Copied. Run it in a terminal; then Check again.') : null),
+    command ? h('code.signin-command', {}, command) : null);
 }
 
 export function mcpSigninPage() {
@@ -77,11 +79,11 @@ export function mcpSigninPage() {
   if (!home.sync.managed.length) return h('div.page', {}, noToolsState('mcpsignin'));
   const rows = signinRows(home), tools = columnsOf(home, rows), checked = tools.filter(tool => listCommand[tool]);
   if (!rows.length) return h('div.page', {}, emptyState('plug', 'No MCP servers in your tools', 'When a tool here has an MCP server, it is listed here with a Check for that tool.'));
-  const intro = h('p.signin-intro', {}, 'What each tool’s own command says of its MCP servers, kept only until Central Knot quits. Nothing runs until you press Check. Check runs each tool’s own command, which may write its own logs.');
+  const intro = h('p.signin-intro', {}, 'What each tool’s own command says of its MCP servers, kept until Central Knot quits or another home is opened. Nothing runs until you press Check. Check runs each tool’s own command, which may write its own logs.');
   return h('div.page', {}, h('div.scroll.signin-scroll', { id: 'mcpsignin-scroll' },
     h('div.signin-top', {}, intro, button({ label: 'Check all', name: 'Check all: run each tool’s own command, one after another', id: 'signin-check-all',
-      disabled: state.mcpSignin.checking ? `Checking ${toolNames[state.mcpSignin.checking]}…` : false, onclick: () => void checkColumns(checked) })),
-    h('table.signin-table', { 'data-columns': String(tools.length) },
+      disabled: waitsFor(), onclick: () => void checkColumns(checked) })),
+    h('table.signin-table', {},
       h('thead', {}, h('tr', {}, h('th.signin-name', { scope: 'col' }, 'MCP server'), ...tools.map(columnHead))),
       h('tbody', {}, ...rows.map((row, index) => h('tr', { 'data-row': row.id },
         h('th.signin-name', { scope: 'row' }, h('span.signin-server', {}, row.name), row.plugin ? h('span.signin-plugin', {}, `In the plugin ${row.plugin}`) : null),

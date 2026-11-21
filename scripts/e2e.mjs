@@ -8531,6 +8531,7 @@ async function mcpSigninFlow() {
   const called = () => readNow(calls).split('\n').filter(Boolean).map(line => line.split('|'));
   const started = () => called().filter(([what]) => what === 'start');
   const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(',') });
+  await a.click('#home-actual');
   const page = async () => {
     const tools = await a.all('.signin-head', 'e.dataset.tool');
     const rows = await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', ...[...row.querySelectorAll('td')].map(cell => cell.querySelector('.signin-words')?.textContent ?? '')])`);
@@ -8542,7 +8543,8 @@ async function mcpSigninFlow() {
   const column = async tool => { const { tools, rows } = await page(); return Object.fromEntries(rows.map(row => [rowName(row), row[2 + tools.indexOf(tool)]])); };
   const head = tool => a.run(`document.querySelector('.signin-head[data-tool="${tool}"]')?.innerText ?? null`);
   const until = async (ready, what) => { for (let tries = 0; tries < 200; tries++) { if (await ready()) return; await wait(100); } check(`in time: ${what}`, false); };
-  const shoot = async name => { if (!shots) return; for (const theme of ['light', 'dark']) { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await a.shot(`mcp-signin-${name}-${theme}`); } };
+  // Each theme's picture once its colours have finished changing (the rows' and buttons' transitions).
+  const shoot = async name => { if (!shots) return; for (const theme of ['light', 'dark']) { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await wait(300); await a.shot(`mcp-signin-${name}-${theme}`); } };
   /** At each size: nothing cut off (the sidebar open, then as a rail), and the table no wider than its page; pictures with --shots. */
   const fits = async name => {
     for (const [width, height] of [SMALLEST, [1280, 800], [1316, 819], [1728, 1117], [2560, 1440]]) {
@@ -8570,7 +8572,7 @@ async function mcpSigninFlow() {
   same('a plugin’s server is its own row, beside the direct one of its name', opened.rows.filter(([name]) => name === 'issues').map(([name, plugin, claude]) => [plugin, claude]), [['', 'Not checked'], ['In the plugin tracker', 'Not checked']]);
   same('Copilot CLI runs nothing: no Check, its sentence once at its head', [await a.exists('#signin-check-copilot-cli'), await head('copilot-cli')], [false, 'Copilot CLI\nCopilot CLI shows sign-in only inside a session: type /mcp auth <name> there.']);
   same('a tool that can’t tell a sign-in from none says so at its head', await head('pi-cli'), 'Pi\nCheck\nConnected means the server answered; Pi does not say whether it needed a sign-in.');
-  check('the page says nothing is kept and that a check runs the tool’s own command', (await a.text('.signin-intro')).includes('kept only until Central Knot quits') && (await a.text('.signin-intro')).includes('Check runs each tool’s own command, which may write its own logs.'), await a.text('.signin-intro'));
+  check('the page says nothing is kept and that a check runs the tool’s own command', (await a.text('.signin-intro')).includes('kept until Central Knot quits or another home is opened') && (await a.text('.signin-intro')).includes('Check runs each tool’s own command, which may write its own logs.'), await a.text('.signin-intro'));
   await fits('not-checked');
 
   // Check on Codex: one call, from an empty folder gone after; nothing of Central Knot's written.
