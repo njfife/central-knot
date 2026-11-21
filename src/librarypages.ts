@@ -44,7 +44,7 @@ export const libraryPages: Record<PageKind, LibraryPage> = {
     version: (key, hash) => window.centralKnot.serverVersion(key, hash).then(server => server && serverParts(server)),
   },
   agents: {
-    words: libraryWords.agents, say: sentences(libraryWords.agents), own: asSkillNote,
+    words: libraryWords.agents, say: sentences(libraryWords.agents), own: asSkillNote, tool: skillToolActions,
     version: (key, hash) => window.centralKnot.agentVersion(key, hash)
       .then(agent => agent && [{ name: 'description', text: agent.description }, { name: 'prompt', text: agent.prompt, block: true as const }]),
   },
@@ -77,8 +77,8 @@ function asSkillNote(agent: ItemRow) {
 /** A take-over that asks to be confirmed (it removes a copy other apps may read): its skill and tool, until another click. */
 let armed: string | undefined;
 /**
- * A skill's own actions on one tool's line: "Let <tool> load it", which clears that tool's own switch where it turns the skill
- * off (its line says so; History can undo it); Take over, for a skill in Central Knot, where the tool has it through a link or
+ * A skill's own actions on one tool's line, and an agent's in Pi (a skill there): "Let <tool> load it", which clears that tool's
+ * own switch where it turns the item off (its line says so; History can undo it); and, for a skill, Take over, for a skill in Central Knot, where the tool has it through a link or
  * a copy in ~/.agents/skills (two clicks for the shared copy, which other apps may read; it has no Undo, and says so).
  */
 function skillToolActions(row: ItemRow, tool: HarnessId): HTMLElement | null {
@@ -92,7 +92,7 @@ function skillToolActions(row: ItemRow, tool: HarnessId): HTMLElement | null {
   };
   const clear = row.switchedOff?.includes(tool) ? action(`Let ${where} load it`, partId('clear-switch', rowId(row.kind, row.key), tool),
     `Clear ${where}’s own switch for ${name}, so ${where} loads it again from its next session. History can undo it.`,
-    () => void skillAction('clear-switch', row.key, tool, name)) : null;
+    () => void skillAction('clear-switch', row.key, tool, name, row.kind === 'agents' ? 'agents' : 'skills')) : null;
   // Only a skill in Central Knot takes a copy over: a found one is taken in first, by its switch.
   const outside = item && !item.deleted ? row.takeOver?.[tool] : undefined, key = `${row.key}:${tool}`;
   const take = !outside ? null : outside.kind === 'link'

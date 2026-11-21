@@ -194,7 +194,10 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off) });
   await appendHistory(context, [event]);
   const { results, done } = await turnTogether(context, tools, turns, true);
-  return { name: profile.name, ...outcome(turns, done, results), event: event.id };
+  // What its passes changed in a tool's own settings (Pi's list: librarypass.ts Kind.follow), said by its entry and its result.
+  const settingsChanged = results.flatMap(result => (result.settingsChanged ? [result.settingsChanged] : []));
+  if (settingsChanged.length) await replaceHistory(context, (await readHistory(context)).map(entry => (entry.id === event.id ? { ...entry, settingsChanged } : entry)));
+  return { name: profile.name, ...outcome(turns, done, results), event: event.id, ...(settingsChanged.length ? { settingsChanged } : {}) };
 }
 
 /**

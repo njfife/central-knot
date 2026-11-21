@@ -1,13 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { existsSync, writeFileSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { readHistory } from '../src/history.ts';
-import { applySkills, clearSwitch, skillsView } from '../src/skills.ts';
+import { agentsView, applyAgents } from '../src/agents.ts';
+import { applySkills, clearSwitch, restoreSkill, skillsView, takeOver } from '../src/skills.ts';
 import { isDisabled, readSwitchFile, setDisabled, switchPath } from '../src/skillswitch.ts';
+import { setSyncEverything } from '../src/everything.ts';
+import { saveProfile, switchProfile } from '../src/profiles.ts';
+import { libraryWords, sentences } from '../src/libraryrow.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -77,6 +81,227 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
     await writeFile(claude, '\uFEFF{ "model": "opus" }\n');
     await setDisabled(box.context, 'claude-cli', target, true);
     assert.ok((await readFile(claude, 'utf8')).startsWith('\uFEFF{'));
+  } finally { await box.cleanup(); }
+});
+
+// Pi's `skills` list, each row measured on Pi 1.5.2 (2026-11-20, docs/capability-data.md): whether Pi loads its own copy of
+// product-context (~/.pi/agent/skills) and the shared copy of shared-one (~/.agents/skills), read as off or on.
+test('Pi: a copy reads as off exactly where Pi keeps it out, by its exclusions, its patterns and its inclusions', async () => {
+  const box = await sandbox(['pi-cli']);
+  try {
+    const H = box.home, own = '.pi/agent/skills/product-context', shared = '.agents/skills/shared-one';
+    const mine = { folder: 'product-context', name: 'product-context', skillFile: join(H, own, 'SKILL.md') };
+    const theirs = { folder: 'shared-one', name: 'shared-one', skillFile: join(H, shared, 'SKILL.md') };
+    const all = ['!*', '!**', '!**/*', '!*/*', '!skills/*', '!skills/**', '!**/SKILL.md', '!SKILL.md', '!!other-skill'];
+    const rows: [unknown, [boolean, boolean]][] = [
+      [undefined, [false, false]],
+      [['-skills/product-context/SKILL.md'], [true, false]],
+      // The shared folder's copies are named from ~/.agents, so the same words name a shared copy.
+      [['-skills/shared-one/SKILL.md'], [false, true]],
+      ...all.map((pattern): [unknown, [boolean, boolean]] => [[pattern], [true, true]]),
+      [['!~/.pi/agent/skills/*'], [true, false]], [[`!${H}/.agents/skills/*`], [false, true]],
+      [['!product-context'], [true, false]], [['!product-*'], [true, false]], [['!skills/product-context/SKILL.md'], [true, false]],
+      // Letters match with their case, on every platform, as Pi matches them: a negated class too.
+      [['!Product-*'], [false, false]], [['!PRODUCT-CONTEXT'], [false, false]], [['![!P]roduct-context'], [true, false]], [['![!p]roduct-context'], [false, false]],
+      // Not exclusions: a plain entry adds a place to load from, `-` is exact, `!` alone and `./` before a pattern match nothing.
+      ...['*', '-*', '-**', '!', '!./skills/*'].map((entry): [unknown, [boolean, boolean]] => [[entry], [false, false]]),
+      [{ '*': '*' }, [false, false]],
+      // An exact `+` lets a copy back in past any pattern, in each form Pi reads, wherever it stands in the list.
+      ...['skills/product-context/SKILL.md', 'skills/product-context', './skills/product-context/SKILL.md', `${H}/${own}/SKILL.md`, `${H}/${own}`, `~/${own}/SKILL.md`, `~/${own}`]
+        .map((form): [unknown, [boolean, boolean]] => [['!*', `+${form}`], [false, true]]),
+      [['+skills/product-context/SKILL.md', '!*'], [false, true]],
+      ...['skills/product-context/', 'skills/*', 'product-context'].map((form): [unknown, [boolean, boolean]] => [['!*', `+${form}`], [true, true]]),
+      ...['skills/shared-one/SKILL.md', 'skills/shared-one', `${H}/${shared}/SKILL.md`, `~/${shared}`].map((form): [unknown, [boolean, boolean]] => [['!*', `+${form}`], [true, false]]),
+      ...['../../.agents/skills/shared-one/SKILL.md', '.agents/skills/shared-one/SKILL.md'].map((form): [unknown, [boolean, boolean]] => [['!*', `+${form}`], [true, true]]),
+      // An exact `-` wins over a `+`, in either order.
+      [['!*', '+skills/product-context/SKILL.md', '-skills/product-context/SKILL.md'], [true, true]],
+      [['-skills/product-context/SKILL.md', '+skills/product-context/SKILL.md'], [true, false]],
+      // The owner's form: every skill kept out, another let back in.
+      [['!*', '+skills/other-skill/SKILL.md'], [true, true]],
+      // An entry that isn't text: Pi stops before it loads anything.
+      [[{ '*': '*' }], [true, true]],
+    ];
+    for (const [skills, expected] of rows) {
+      await writeFile(switchPath(box.context, 'pi-cli'), JSON.stringify(skills === undefined ? {} : { skills }));
+      const file = await readSwitchFile(box.context, 'pi-cli');
+      assert.deepEqual([isDisabled(box.context, file, mine), isDisabled(box.context, file, theirs)], expected, JSON.stringify(skills));
+    }
+    assert.match((await readSwitchFile(box.context, 'pi-cli')).problem?.reason ?? '', /isn’t text/);
+    // An agent in Pi is a loose file (agents.ts), named by its own path; a folder of one name in Pi's own folder and in the
+    // shared one is two copies, named apart by their absolute paths and together by the path from either folder.
+    const at = (path: string) => ({ folder: 'x', name: 'x', skillFile: join(H, path) });
+    const agent = at('.pi/agent/skills/code-reviewer.md'), dupOwn = at('.pi/agent/skills/dup/SKILL.md'), dupShared = at('.agents/skills/dup/SKILL.md');
+    const more: [unknown, boolean[]][] = [
+      [['!*'], [true, true, true]],
+      ...['+skills/code-reviewer.md', `+${H}/.pi/agent/skills/code-reviewer.md`, '+~/.pi/agent/skills/code-reviewer.md'].map((form): [unknown, boolean[]] => [['!*', form], [false, true, true]]),
+      [['!*', '+skills/code-reviewer'], [true, true, true]], [['-skills/code-reviewer.md'], [true, false, false]], [['!code-reviewer.md'], [true, false, false]],
+      [['-~/.pi/agent/skills/dup/SKILL.md'], [false, true, false]], [['-~/.agents/skills/dup/SKILL.md'], [false, false, true]], [['-skills/dup/SKILL.md'], [false, true, true]],
+      [['!*', `+${H}/.pi/agent/skills/dup/SKILL.md`], [true, false, true]], [['!*', `+${H}/.agents/skills/dup/SKILL.md`], [true, true, false]], [['!*', '+skills/dup/SKILL.md'], [true, false, false]],
+    ];
+    for (const [skills, expected] of more) {
+      await writeFile(switchPath(box.context, 'pi-cli'), JSON.stringify({ skills }));
+      const file = await readSwitchFile(box.context, 'pi-cli');
+      assert.deepEqual([agent, dupOwn, dupShared].map(copy => isDisabled(box.context, file, copy)), expected, JSON.stringify(skills));
+    }
+  } finally { await box.cleanup(); }
+});
+
+test('Pi: turned on under a pattern, a copy gets the inclusion pi config writes; turned off, it goes; every other entry stays in its place', async () => {
+  const box = await sandbox(['pi-cli']);
+  try {
+    const file = switchPath(box.context, 'pi-cli');
+    const mine = { folder: 'product-context', name: 'product-context', skillFile: join(box.home, '.pi/agent/skills/product-context/SKILL.md') };
+    const theirs = { folder: 'shared-one', name: 'shared-one', skillFile: join(box.home, '.agents/skills/shared-one/SKILL.md') };
+    const skills = async () => JSON.parse(await readFile(file, 'utf8')).skills;
+    await writeFile(file, '{\n  "theme": "dark",\n  "skills": ["!*", "+skills/other-skill/SKILL.md"]\n}\n');
+    await setDisabled(box.context, 'pi-cli', mine, false);
+    assert.deepEqual(await skills(), ['!*', '+skills/other-skill/SKILL.md', '+skills/product-context/SKILL.md']);
+    // A shared copy by its absolute path: from ~/.agents, its path would name Pi's own copy of that folder too.
+    await setDisabled(box.context, 'pi-cli', theirs, false);
+    assert.deepEqual(await skills(), ['!*', '+skills/other-skill/SKILL.md', '+skills/product-context/SKILL.md', `+${theirs.skillFile}`]);
+    // Off takes the inclusion out and adds no exclusion: the pattern keeps it out already.
+    await setDisabled(box.context, 'pi-cli', mine, true);
+    await setDisabled(box.context, 'pi-cli', theirs, true);
+    assert.equal(await readFile(file, 'utf8'), '{\n  "theme": "dark",\n  "skills": [\n    "!*",\n    "+skills/other-skill/SKILL.md"\n  ]\n}\n');
+    // Its own exclusion goes and its inclusion comes; a pattern is never rewritten or taken out.
+    await writeFile(file, '{ "skills": ["!product-*", "-skills/product-context/SKILL.md"] }');
+    await setDisabled(box.context, 'pi-cli', mine, false);
+    assert.deepEqual(await skills(), ['!product-*', '+skills/product-context/SKILL.md']);
+    // With no pattern, an inclusion the person wrote stays through Off and On, and Off is an exclusion.
+    await writeFile(file, '{ "skills": ["+skills/product-context/SKILL.md"] }');
+    await setDisabled(box.context, 'pi-cli', mine, true);
+    assert.deepEqual(await skills(), ['+skills/product-context/SKILL.md', '-skills/product-context/SKILL.md']);
+    await setDisabled(box.context, 'pi-cli', mine, false);
+    assert.deepEqual(await skills(), ['+skills/product-context/SKILL.md']);
+    // His entries are his. Let Pi load it leaves a pattern, a literal path included, and adds the `+` that overrides it; its
+    // Undo takes back that `+` alone.
+    await writeFile(file, '{ "skills": ["!*", "!skills/product-context/SKILL.md"] }');
+    const added = (await setDisabled(box.context, 'pi-cli', mine, false)).edit;
+    assert.deepEqual([added, await skills()], [{ added: ['+skills/product-context/SKILL.md'], removed: [] }, ['!*', '!skills/product-context/SKILL.md', '+skills/product-context/SKILL.md']]);
+    await setDisabled(box.context, 'pi-cli', mine, true, added);
+    assert.deepEqual(await skills(), ['!*', '!skills/product-context/SKILL.md']);
+    // His exact `-`, in his own form, wins over any `+`: Let Pi load it takes it out and answers it, and its Undo puts it back.
+    await writeFile(file, '{ "skills": ["!*", "-~/.agents/skills/shared-one", "+skills/spare/SKILL.md"] }');
+    const { edit } = await setDisabled(box.context, 'pi-cli', theirs, false);
+    assert.deepEqual([edit, await skills()], [{ added: [`+${theirs.skillFile}`], removed: ['-~/.agents/skills/shared-one'] }, ['!*', '+skills/spare/SKILL.md', `+${theirs.skillFile}`]]);
+    await setDisabled(box.context, 'pi-cli', theirs, true, edit);
+    assert.deepEqual(await skills(), ['!*', '+skills/spare/SKILL.md', '-~/.agents/skills/shared-one']);
+    // A folder of that name in the shared folder too: Pi's own copy is let in by its absolute path, which names it alone.
+    await mkdir(join(box.home, '.agents/skills/product-context'), { recursive: true });
+    await writeFile(file, '{ "skills": ["!*"] }');
+    await setDisabled(box.context, 'pi-cli', mine, false);
+    assert.deepEqual(await skills(), ['!*', `+${mine.skillFile}`]);
+    // That folder gone from the shared one, the absolute `+` is still Central Knot's own, and Off takes it out.
+    await rm(join(box.home, '.agents/skills/product-context'), { recursive: true });
+    await setDisabled(box.context, 'pi-cli', mine, true);
+    assert.deepEqual(await skills(), ['!*']);
+    // `skills` written twice: Pi reads the last, the edit lands on the first, and the read-back says the change didn't take.
+    await writeFile(file, '{ "skills": ["!*"], "skills": ["!*"] }');
+    await assert.rejects(setDisabled(box.context, 'pi-cli', mine, false), /did not take the change/);
+    // An entry that isn't text: nothing is written.
+    await writeFile(file, '{ "skills": [{ "*": "*" }] }');
+    await assert.rejects(setDisabled(box.context, 'pi-cli', mine, false), /isn’t text/);
+    assert.equal(await readFile(file, 'utf8'), '{ "skills": [{ "*": "*" }] }');
+  } finally { await box.cleanup(); }
+});
+
+test('Pi under a pattern: an item’s On puts its copy in with the inclusion Pi needs, Off takes both out, and the person’s own exclusion stays', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli']);
+  const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
+  try {
+    const file = switchPath(box.context, 'pi-cli'), copy = join(box.home, '.pi/agent/skills/notes/SKILL.md');
+    const skills = async () => JSON.parse(await readFile(file, 'utf8')).skills;
+    const offInPi = async () => (await skillsView(box.context, tools)).items.find(item => item.key === 'notes')!.loads?.['pi-cli']?.switchedOff;
+    await skill(box.home, 'claude-cli', 'notes');
+    await writeFile(file, '{ "skills": ["!*", "+skills/other-skill/SKILL.md"] }');
+    await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
+    assert.deepEqual([existsSync(copy), await skills(), await offInPi()], [true, ['!*', '+skills/other-skill/SKILL.md', '+skills/notes/SKILL.md'], false]);
+    // A shared copy comes (an installer's): Central Knot's copy in Pi gives way to it, and its `+`, which names the shared copy
+    // too, stays for it; Off then takes it out.
+    await mkdir(join(box.home, '.agents/skills/notes'), { recursive: true });
+    await writeFile(join(box.home, '.agents/skills/notes/SKILL.md'), text('notes'));
+    await applySkills(box.context, tools, []);
+    assert.deepEqual([existsSync(copy), await skills(), await offInPi()], [false, ['!*', '+skills/other-skill/SKILL.md', '+skills/notes/SKILL.md'], false]);
+    await rm(join(box.home, '.agents/skills/notes'), { recursive: true });
+    await applySkills(box.context, tools, []);
+    await applySkills(box.context, tools, [{ key: 'notes', on: false, except: [] }]);
+    assert.deepEqual([existsSync(copy), await skills()], [false, ['!*', '+skills/other-skill/SKILL.md']]);
+    // His own exclusion of this copy is his switch for it: On leaves it, and the row says Pi doesn't load it.
+    await writeFile(file, '{ "skills": ["!*", "-skills/notes/SKILL.md"] }');
+    await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
+    assert.deepEqual([existsSync(copy), await skills(), await offInPi()], [true, ['!*', '-skills/notes/SKILL.md'], true]);
+    // His entries are his: Off and On leave his `+` in his own form, and his `+` beside his `-`, which decides.
+    for (const his of [['!*', '+./skills/notes'], ['!*', '+skills/notes/SKILL.md', '-skills/notes/SKILL.md']]) {
+      await writeFile(file, JSON.stringify({ skills: his }));
+      await applySkills(box.context, tools, [{ key: 'notes', on: false, except: [] }]);
+      assert.deepEqual([existsSync(copy), await skills()], [false, his]);
+      await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
+      assert.deepEqual([existsSync(copy), await skills()], [true, his]);
+    }
+    // A shared copy his list keeps out arrives: Pi doesn't load it, so Central Knot's copy, which Pi loads, stays.
+    await writeFile(file, '{ "skills": ["!*", "-~/.agents/skills/notes/SKILL.md", "+skills/notes/SKILL.md"] }');
+    await mkdir(join(box.home, '.agents/skills/notes'), { recursive: true });
+    await writeFile(join(box.home, '.agents/skills/notes/SKILL.md'), text('notes'));
+    await applySkills(box.context, tools, []);
+    assert.deepEqual([existsSync(copy), await offInPi()], [true, false]);
+    // Both copies there, his `-` on Pi's own alone: Pi loads the shared one, and the row says so.
+    await writeFile(file, '{ "skills": ["-~/.pi/agent/skills/notes/SKILL.md"] }');
+    assert.equal(await offInPi(), false);
+    await rm(join(box.home, '.agents/skills/notes'), { recursive: true });
+    // A link in Pi's folder to a shared skill: Pi loads it by the link's own path.
+    await mkdir(join(box.home, '.agents/skills/linked'), { recursive: true });
+    await writeFile(join(box.home, '.agents/skills/linked/SKILL.md'), text('linked'));
+    await symlink('../../../.agents/skills/linked', join(box.home, '.pi/agent/skills/linked'));
+    await writeFile(file, '{ "skills": ["!*", "+~/.pi/agent/skills/linked/SKILL.md"] }');
+    assert.equal((await skillsView(box.context, tools)).items.find(item => item.key === 'linked')!.loads?.['pi-cli']?.switchedOff, false);
+    // Let Pi load it takes out his own `-`, in his form, and History's Undo of it puts that entry back as it was.
+    await writeFile(file, '{ "skills": ["!*", "-~/.pi/agent/skills/notes/SKILL.md"] }');
+    const cleared = await clearSwitch(box.context, tools, 'notes', 'pi-cli');
+    assert.deepEqual(await skills(), ['!*', '+skills/notes/SKILL.md']);
+    await restoreSkill(box.context, tools, cleared.made![0]);
+    assert.deepEqual(await skills(), ['!*', '-~/.pi/agent/skills/notes/SKILL.md']);
+    // Its folder deleted by hand in Pi: the skill goes Off, and its `+` goes with it.
+    await writeFile(file, '{ "skills": ["!*"] }');
+    await applySkills(box.context, tools, [{ key: 'notes', on: false, except: [] }]);
+    const on = await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
+    assert.deepEqual(await skills(), ['!*', '+skills/notes/SKILL.md']);
+    // The app says it changed his list: in the click's result for Pi, and in its History entry.
+    assert.match(on.results.find(result => result.harness === 'pi-cli')?.message ?? '', /\+skills\/notes\/SKILL\.md added to Pi’s skills list/);
+    assert.match((await readHistory(box.context)).filter(event => event.key === 'notes').at(-1)?.settingsChanged?.join(' ') ?? '', /added to Pi’s skills list/);
+    await rm(join(box.home, '.pi/agent/skills/notes'), { recursive: true });
+    const gone = (await applySkills(box.context, tools, [])).notices?.find(notice => notice.kind === 'deleted-by-hand');
+    assert.deepEqual(await skills(), ['!*']);
+    // Its notice says so too.
+    assert.match(gone && gone.kind === 'deleted-by-hand' ? sentences(libraryWords.skills).noticeWords(gone).text : '', /notes was deleted in Pi, so it is off.* \+skills\/notes\/SKILL\.md taken out of Pi’s skills list \(settings\.json\) with its copy\./);
+  } finally { await box.cleanup(); }
+});
+
+test('Pi under a pattern: a skill Synchronize everything takes in and puts in Pi is let in, and its notice says so', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli']);
+  const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
+  try {
+    await skill(box.home, 'claude-cli', 'found-one');
+    await writeFile(switchPath(box.context, 'pi-cli'), '{ "skills": ["!*"] }');
+    assert.deepEqual(await setSyncEverything(box.context, true), {});
+    const notice = (await applySkills(box.context, tools, [], { background: true })).notices?.find(each => each.kind === 'taken-in');
+    assert.deepEqual(JSON.parse(await readFile(switchPath(box.context, 'pi-cli'), 'utf8')).skills, ['!*', '+skills/found-one/SKILL.md']);
+    assert.equal(notice && notice.kind === 'taken-in' ? sentences(libraryWords.skills).takenInWords(notice) : '',
+      'Synchronize everything took in 1 skill, found in Claude Code: found-one. +skills/found-one/SKILL.md added to Pi’s skills list (settings.json), where a pattern keeps skills out. History can undo it.');
+  } finally { await box.cleanup(); }
+});
+
+test('Pi under a pattern: an agent, a loose file in its skills folder, is let in as a skill is, and its `+` goes with it', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli']);
+  const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
+  try {
+    const file = switchPath(box.context, 'pi-cli');
+    await mkdir(join(box.home, '.claude/agents'), { recursive: true });
+    await writeFile(join(box.home, '.claude/agents/writer.md'), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
+    await writeFile(file, '{ "skills": ["!*"] }');
+    await applyAgents(box.context, tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
+    assert.deepEqual([existsSync(join(box.home, '.pi/agent/skills/writer.md')), JSON.parse(await readFile(file, 'utf8')).skills], [true, ['!*', '+skills/writer.md']]);
+    await applyAgents(box.context, tools, [{ key: 'writer', on: false, except: [], seenOn: true }]);
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).skills, ['!*']);
   } finally { await box.cleanup(); }
 });
 
@@ -176,5 +401,82 @@ test('Clear the switch puts back a Claude Code override 0.4.0-preview.1 recorded
     await writeFile(join(box.home, '.central-knot/history.json'), JSON.stringify({ events: [{ id: 'd', at: new Date().toISOString(), key: 'pager', item: 'pager', kind: 'switched', switched: [{ tool: 'claude-cli', disabled: true, target, before: 'name-only' }], losers: [], orderProved: true }] }));
     await clearSwitch(box.context, ['claude-cli'], 'pager', 'claude-cli');
     assert.equal(await readFile(switchPath(box.context, 'claude-cli'), 'utf8'), original);
+  } finally { await box.cleanup(); }
+});
+
+test('Pi: the Undo of Let Pi load it takes back only what the click did: his own `+` beside his `-` stays', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli']);
+  const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
+  try {
+    const file = switchPath(box.context, 'pi-cli'), skills = async () => JSON.parse(await readFile(file, 'utf8')).skills;
+    await skill(box.home, 'claude-cli', 'notes');
+    await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
+    await writeFile(file, '{ "skills": ["!*", "+skills/notes/SKILL.md", "-skills/notes/SKILL.md"] }');
+    // The click takes out his `-` alone: his `+` lets the copy in, so it adds nothing.
+    const cleared = await clearSwitch(box.context, tools, 'notes', 'pi-cli');
+    assert.deepEqual(await skills(), ['!*', '+skills/notes/SKILL.md']);
+    await restoreSkill(box.context, tools, cleared.made![0]);
+    assert.deepEqual(await skills(), ['!*', '+skills/notes/SKILL.md', '-skills/notes/SKILL.md']);
+  } finally { await box.cleanup(); }
+});
+
+test('Pi: Take over of a shared copy leaves his entry for the folder that goes, and says what it changes in his list', async () => {
+  const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
+  for (const [his, after, said] of [
+    // His pattern keeps both out: the copy Central Knot puts in stays out too, and its `+` a pass added goes again.
+    [['!*', '-~/.agents/skills/notes/SKILL.md'], ['!*', '-~/.agents/skills/notes/SKILL.md'], /\+skills\/notes\/SKILL\.md taken out of Pi’s skills list/],
+    // His own `-` on the shared copy alone: Central Knot's copy is switched off as that one was.
+    [['-~/.agents/skills/notes/SKILL.md'], ['-~/.agents/skills/notes/SKILL.md', '-skills/notes/SKILL.md'], /-skills\/notes\/SKILL\.md added to Pi’s skills list/],
+  ] as const) {
+    const box = await sandbox(tools);
+    try {
+      const file = switchPath(box.context, 'pi-cli');
+      await mkdir(join(box.home, '.agents/skills/notes'), { recursive: true });
+      await writeFile(join(box.home, '.agents/skills/notes/SKILL.md'), text('notes'));
+      await writeFile(file, JSON.stringify({ skills: his }));
+      await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
+      const done = await takeOver(box.context, tools, 'notes', 'pi-cli');
+      assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).skills, after, JSON.stringify(his));
+      assert.equal((await skillsView(box.context, tools)).items.find(item => item.key === 'notes')!.loads?.['pi-cli']?.switchedOff, true);
+      assert.match(done.results[0].message, said);
+      assert.match((await readHistory(box.context)).find(event => event.kind === 'took-over')?.settingsChanged?.join(' ') ?? '', said);
+    } finally { await box.cleanup(); }
+  }
+});
+
+test('Pi: an agent its list keeps out is shown so, and Let Pi load it lets it in, with its Undo', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli']);
+  const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
+  try {
+    const file = switchPath(box.context, 'pi-cli'), skills = async () => JSON.parse(await readFile(file, 'utf8')).skills;
+    await mkdir(join(box.home, '.claude/agents'), { recursive: true });
+    await writeFile(join(box.home, '.claude/agents/writer.md'), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
+    // Put in Pi before his pattern (as before this change): no `+` for it.
+    await applyAgents(box.context, tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
+    await writeFile(file, '{ "skills": ["!*"] }');
+    const row = async () => (await agentsView(box.context, tools)).items.find(item => item.key === 'writer')!;
+    assert.deepEqual((await row()).switchedOff, ['pi-cli']);
+    assert.match(sentences(libraryWords.agents).harnessLine(await row(), undefined, 'pi-cli', 'Pi'), /It is switched off in Pi’s own settings: Pi doesn’t load it\./);
+    const cleared = await clearSwitch(box.context, tools, 'writer', 'pi-cli', false, 'agent');
+    assert.deepEqual([cleared.stopped, await skills(), (await row()).switchedOff], [undefined, ['!*', '+skills/writer.md'], undefined]);
+    await restoreSkill(box.context, tools, cleared.made![0]);
+    assert.deepEqual([await skills(), (await row()).switchedOff, (await readHistory(box.context)).at(-1)?.of], [['!*'], ['pi-cli'], 'agent']);
+    // His own `-` for it: shown off too.
+    await writeFile(file, '{ "skills": ["-skills/writer.md"] }');
+    assert.deepEqual((await row()).switchedOff, ['pi-cli']);
+  } finally { await box.cleanup(); }
+});
+
+test('Pi: a profile switch that changes his list says so, in its result and its History entry', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli']);
+  const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
+  try {
+    await skill(box.home, 'claude-cli', 'notes');
+    await writeFile(switchPath(box.context, 'pi-cli'), '{ "skills": ["!*"] }');
+    await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
+    const none = (await saveProfile(box.context, { name: 'None', items: [] })).id!;
+    const switched = await switchProfile(box.context, tools, none);
+    assert.match(switched.settingsChanged?.join(' ') ?? '', /\+skills\/notes\/SKILL\.md taken out of Pi’s skills list/);
+    assert.match((await readHistory(box.context)).find(event => event.kind === 'profile')?.settingsChanged?.join(' ') ?? '', /\+skills\/notes\/SKILL\.md taken out of Pi’s skills list/);
   } finally { await box.cleanup(); }
 });

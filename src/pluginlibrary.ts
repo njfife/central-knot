@@ -173,7 +173,9 @@ function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linke
   const on = onIn(after, tool), has = on > 0, name = toolNames[tool];
   const changed = has !== onIn(before, tool) > 0 || wroteIn(results, tool);
   const said = `${on} of its ${after.length} items ${on === 1 ? 'is' : 'are'} on in ${name}.`;
-  const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message, runs: [], changed });
+  // Its notes: what the run also changed in the tool's own settings with its items' copies (Pi's list: librarypass.ts Kind.follow).
+  const notes = results.flatMap(({ result }) => result.results.flatMap(each => (each.harness === tool && each.settingsChanged ? [each.settingsChanged] : [])));
+  const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message, runs: [], changed, ...(notes.length ? { notes } : {}) });
   if ('outOf' in ask) return report(has ? 'failed' : 'uninstalled');
   if (!has && 'into' in ask) return report('held', why);
   if (unread && 'read' in ask) return report('failed', why);
@@ -228,6 +230,9 @@ export type KindLooks = Awaited<ReturnType<typeof lookAtKinds>>;
 export function itemsView(tools: readonly HarnessId[], looks: KindLooks, entry: PluginEntry, reads: SourceRead<unknown>[] | undefined, problem?: string): PluginItemsView {
   const lines: PluginItemLine[] = [], linked = linkedIn(looks.map(({ kind, look }) => ({ kind: kind.kind.kind, library: look.library })), entry.id);
   const on = Object.fromEntries(itemTools(tools).map(tool => [tool, onIn(linked, tool)]));
+  // Of those, the ones a tool's own settings keep out (librarypass.ts Disk.switchedOff: Pi's list, say), which it doesn't load.
+  const switchedOff = (kind: ItemKind, key: string) => looks.find(each => each.kind.kind.kind === kind)!.look.disk.switchedOff?.get(key) ?? [];
+  const keptOut = Object.fromEntries(itemTools(tools).map(tool => [tool, linked.filter(({ kind, item }) => wantedIn(item, tool) && switchedOff(kind, item.key).includes(tool)).length]).filter(([, out]) => out));
   let ready = false;
   for (const { kind, look } of looks) {
     const items = look.library.items, read = reads?.find(each => each.kind === kind.kind.kind);
@@ -251,7 +256,7 @@ export function itemsView(tools: readonly HarnessId[], looks: KindLooks, entry: 
     const why = outsIn(tool, lines, linked, item => !!disk(linked.find(each => each.item === item)!.kind).get(item.key)?.[tool] && item.applied[tool] === undefined);
     return [tool, { reasons: notInWhy(tool, entry.plugin, why), tickHelps: why.some(({ out }) => out === 'kept' || out === 'off' || out === 'deleted') }] as const;
   }) : [];
-  return { lines, on, of: linked.length, ...(ready ? { ready: true as const } : {}), ...(problem ? { problem } : {}), ...(away.length ? { notIn: Object.fromEntries(away) } : {}) };
+  return { lines, on, of: linked.length, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(problem ? { problem } : {}), ...(away.length ? { notIn: Object.fromEntries(away) } : {}) };
 }
 
 /** A name not brought in, as its line says why: his own item of that name, or another source's. */

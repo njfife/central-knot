@@ -16,3 +16,8 @@ test('A click reads only its own results out of the pass: another skill held or 
   const partly = clickResults([{ item: 'bar', harness: 'codex-cli', outcome: 'switched', disabled: true, message: '' }, { item: 'bar', harness: 'pi-cli', outcome: 'failed', message: 'Could not write.' }, ...results], ['bar']);
   assert.deepEqual([partly.did, partly.failed, partly.notIn], [true, true, ['pi-cli']]);
 });
+
+test('A copy written where the tool’s own settings keep it out is not called on there: that tool is among those it is not in', () => {
+  const written = (harness: DestinationResult['harness'], more: Partial<DestinationResult> = {}): DestinationResult => ({ item: 'kept-note', harness, outcome: 'written', message: 'Added.', ...more });
+  assert.deepEqual(clickResults([written('claude-cli'), written('pi-cli', { switchedOff: true })], ['kept-note']).notIn, ['pi-cli']);
+});

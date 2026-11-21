@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, realpath, rm, utimes, writeFile } from 'node:fs/promise
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setSyncEverything } from '../src/everything.ts';
-import { homePass } from '../src/homepass.ts';
+import { homePass, syncOnceReport } from '../src/homepass.ts';
 import { withPartSwitch } from '../src/partswitch.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -146,4 +146,10 @@ test('A plugin read that throws makes no value and says why, for the log', async
     const done = await homePass({ ...box.context, reads }, tools, true);
     assert.deepEqual([done.seen, (done.seenFailed as Error | undefined)?.message], [undefined, 'the copies could not be listed']);
   } finally { await box.cleanup(); }
+});
+
+test('Sync once says what a copy it wrote also changed in a tool’s own settings, after what it did with the item', () => {
+  const said = '+skills/notes/SKILL.md added to Pi’s skills list (settings.json), where a pattern keeps skills out.';
+  const skills = { results: [{ item: 'notes', harness: 'pi-cli' as const, outcome: 'written' as const, message: 'Added.', settingsChanged: said }], writes: 1 };
+  assert.equal(syncOnceReport([{ skills, crashes: [] }]).text, `Copied notes to Pi. ${said}`);
 });

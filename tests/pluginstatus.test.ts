@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { clickRuns, owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
@@ -192,4 +192,10 @@ test('A tool’s plugins are counted from its own record, each install once, the
   // Claude Code's installed_plugins.json can't be read: its count is not known, the others' are still theirs.
   const unread = { ...home, pluginRecordsUnread: ['claude-cli' as HarnessId] };
   assert.deepEqual([pluginsInstalled(unread, 'claude-cli'), pluginsInstalled(unread, 'copilot-cli')], [{ state: 'unknown' }, { state: 'read', count: 1 }]);
+});
+
+test('A plugin’s items in Pi are counted as Pi loads them: one its own settings keep out is said apart', () => {
+  const entry = { items: { maps: { lines: [], on: { 'pi-cli': 2 }, keptOut: { 'pi-cli': 1 }, of: 2 } } } as unknown as MarketplaceView;
+  assert.equal(itemsOnWords(entry, 'maps', 'pi-cli', ' there'), '1 of its 2 items is on there (Pi’s own settings keep 1 out)');
+  assert.equal(itemsOnWords({ items: { maps: { lines: [], on: { 'pi-cli': 2 }, of: 2 } } } as unknown as MarketplaceView, 'maps', 'pi-cli'), '2 of its 2 items are on');
 });

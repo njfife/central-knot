@@ -31,7 +31,8 @@
 //   (c) every action the page and History offer does something: none is refused as stale, and each changes a folder or the record;
 //   (d) from a settled home, Off then On puts every tool's folder back byte for byte;
 //   (e) a tool Central Knot doesn't manage, the shared folder (but for Take over) and each tool's own switch (but for Clear
-//       the switch) are never written;
+//       the switch) are never written; even walks start Pi's list with a pattern that keeps every skill out ("!*") and another
+//       skill's `+`, where Central Knot writes only the `+` of the walk's own items (skillswitch.ts piSwitched), and the other stays;
 //   (f) every click made a History entry, after a crash too, and from a settled home its Undo puts every folder back as it was;
 //   (h) the agent's files are as they were in every managed tool, but for its own Off and On, which puts them back byte for byte;
 //   (i) the source's agent: each file of it Central Knot wrote over or removed held a version of it, or is still in a tool;
@@ -39,7 +40,7 @@
 //       current in every managed tool, an Off or deleted one has nothing applied. Its line's clicks are among (c)'s;
 //   (k) the plugin's skill: a content of it Central Knot wrote over or removed in Pi is a version of it or still in Pi; while it
 //       is linked to kit, nothing of it is applied in a tool with an installer; and in a copy put back after, two plain passes,
-//       then a linked tome On and wanted in Pi is current there;
+//       then a linked tome On and wanted in Pi is current there, and Pi's list lets it in;
 //   (j) the source's server, the same: each entry of it Central Knot wrote over or removed held a version of it, or is still in
 //       a tool; and in a copy put back after, a second plain pass over the servers writes nothing, then an On relay is current
 //       in every managed tool, an Off or deleted one has nothing applied. Its line's clicks too.
@@ -66,7 +67,7 @@ import { DAY_MS } from '../src/model.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import type { LibraryItem } from '../src/library.ts';
 import { applySkills, clearSwitch, skillKind, takeOver } from '../src/skills.ts';
-import { setDisabled } from '../src/skillswitch.ts';
+import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult, SourceResult } from '../src/types.ts';
 import { bytes, folderOf, historyActions, put, roots, sandbox, seen, skillText, tools as clickTools, trial, undo, type Tool } from './skillclicks.ts';
@@ -148,6 +149,12 @@ async function walk(seed: number): Promise<Finding[]> {
   // Codex keeps its MCP servers in that same file: their tables are the servers' to write, not the switch.
   const switchesNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, switchFiles[tool as keyof typeof switchFiles]), 'utf8')
     .then(text => (tool === 'codex-cli' ? text.replace(/^\[mcp_servers[^\n]*\n(?:(?!\[)[^\n]*\n?)*/gm, '').trimEnd() || undefined : text), () => undefined)] as const)));
+  // (e) in Pi under the pattern: the `+` of the walk's own items, in Central Knot's forms, is its to write; nothing else there.
+  const ours = (entry: string) => ['notes/SKILL.md', 'tome/SKILL.md', 'writer.md', 'critic.md'].some(name => entry === `+skills/${name}` || entry === `+${join(box.home, roots['pi-cli'], name)}`);
+  const withoutInclusions = (switches: Record<string, string | undefined>) => {
+    const pi = switches['pi-cli'] === undefined ? undefined : JSON.parse(switches['pi-cli']);
+    return { ...switches, 'pi-cli': pi && JSON.stringify({ ...pi, skills: pi.skills?.filter((entry: string) => !ours(entry)) }) };
+  };
   const historyCount = async () => (await readHistory(context())).filter(event => event.key === 'notes').length;
   const readOnly = (tool: Tool, on: boolean) => chmod(join(box.home, roots[tool]), on ? 0o555 : 0o755).catch(() => undefined);
   let agentAsWritten: Record<string, string | undefined> = {};
@@ -207,6 +214,7 @@ async function walk(seed: number): Promise<Finding[]> {
     await pass(); await pass();
     const item = await tome(), entry = await kitEntry();
     if (item && entry && item.source === entry.id && wantedIn(item, 'pi-cli') && tools.includes('pi-cli') && await contentAt(tomeInPi) !== item.hash) fail('(k) after quiet passes the plugin’s tome, On in Pi, is not current there');
+    else if (item && entry && item.source === entry.id && wantedIn(item, 'pi-cli') && tools.includes('pi-cli') && isDisabled(context(), await readSwitchFile(context(), 'pi-cli'), { folder: 'tome', name: 'tome', skillFile: join(tomeInPi, 'SKILL.md') })) fail('(k) after quiet passes the plugin’s tome, put in Pi, is kept out by Pi’s list');
   });
   const sourceNow = async () => (await sourcesView(context(), tools)).sources[0];
   const checkNow = (id: string, more: Partial<ShareContext> = {}) => checkSource(context(more), async () => tools, id, work => work());
@@ -231,6 +239,7 @@ async function walk(seed: number): Promise<Finding[]> {
   });
 
   try {
+    if (!(seed % 2)) { await mkdir(join(box.home, '.pi/agent'), { recursive: true }); await writeFile(join(box.home, switchFiles['pi-cli']), '{ "skills": ["!*", "+skills/another/SKILL.md"] }\n'); }
     if (seed % 2) {
       await put(box, 'claude-cli', rich(), ['empty']);
       await send(rowClicks.on((await seen(box)).row, undefined));
@@ -483,7 +492,7 @@ async function walk(seed: number): Promise<Finding[]> {
         const was = contentsBefore[where];
         if (was && !act.byHand) taken.add(was);
       }
-      if (act.app && act.writes !== 'switch' && !same(await switchesNow(), switchesBefore)) fail(`(e) ${act.name} wrote a tool’s own switch`);
+      if (act.app && act.writes !== 'switch' && !same(withoutInclusions(await switchesNow()), withoutInclusions(switchesBefore))) fail(`(e) ${act.name} wrote a tool’s own switch`);
       for (const content of taken) if (!versions.has(content) && !here.has(content)) { taken.delete(content); fail('(a) a content Central Knot wrote over or removed is neither a version nor in any folder'); }
       if (act.writes !== 'agent') { const agent = await agentNow(); for (const tool of managedBefore) if (agent[tool] !== agentAsWritten[tool]) fail(`(h) ${act.name} changed the agent’s file in ${tool}`); }
       // (i) A file of the source's agent that Central Knot wrote over or removed held a version of it, or is still in a tool.
