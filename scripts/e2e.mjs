@@ -11539,11 +11539,37 @@ async function profilePluginsFlow() {
   await b.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Legacy')).click()`); await b.settle();
 
   const legacyPreview = 'Switching turns 1 item on. Plugin items stay as they are.';
-  same('a format 2 profile says Plugin items stay as they are, hides plugin rows behind Choose, and lists only personal items',
-    [await b.text('.profile-header p'), await b.text('#profile-choose-plugins'), await b.all('.pf-row[data-item]', 'e.dataset.item')],
-    [legacyPreview, 'Choose plugin items for this profile', ['skill:notes']]);
+  const chooseNote = 'This profile leaves plugin items as they are, so they aren’t listed. Choosing them is for good: they are listed unticked, and from the next switch the ones left unticked turn off wherever they can be switched.';
+  const chooseTitle = 'Lists plugin items for Legacy, none ticked. This can’t be taken back. Only the profile changes now; tools change on Switch.';
+  same('a format 2 profile says Plugin items stay as they are, hides plugin rows behind Choose with exact note and tooltip, and lists only personal items',
+    [await b.text('.profile-header p'), await b.text('#profile-plugins-note .band-text'), await b.text('#profile-choose-plugins'),
+      await b.run(`document.querySelector('#profile-choose-plugins')?.title`), await b.all('.pf-row[data-item]', 'e.dataset.item')],
+    [legacyPreview, chooseNote, 'Choose plugin items for this profile', chooseTitle, ['skill:notes']]);
+  await sizeTo(b, 1316, 819);
+  if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
   await b.click('#status-profile');
-  same('the status bar menu shows the same preview line for Legacy', await b.text('#status-profile-legacy .pf-menu-preview'), legacyPreview);
+  const lastPreviewLine = () => b.run(`(() => {
+    const el = document.querySelector('#status-profile-legacy .pf-menu-preview'), node = el?.firstChild;
+    if (!node || node.nodeType !== 3) return '';
+    const text = node.textContent ?? '', r = document.createRange();
+    let lastTop = -1, start = 0;
+    for (let i = 0; i < text.length; i++) {
+      r.setStart(node, i); r.setEnd(node, i + 1);
+      const rect = r.getBoundingClientRect();
+      if (rect.width && Math.round(rect.top) > lastTop) { lastTop = Math.round(rect.top); start = i; }
+    }
+    return text.slice(start).trim();
+  })()`);
+  same('status bar menu shows preview for Legacy, (empty) for Empty old, max-width 400px without orphan "are.", and never fades the in-use row',
+    [await b.text('#status-profile-legacy .pf-menu-preview'), await b.text('#status-profile-empty-old .pf-menu-name'), await b.exists('#status-profile-empty-old .pf-menu-preview'),
+      await b.run(`getComputedStyle(document.querySelector('.pf-menu')).maxWidth`), await lastPreviewLine() !== 'are.',
+      await b.run(`getComputedStyle(document.querySelector('.pf-menu-item[aria-checked="true"]')).opacity`)],
+    [legacyPreview, 'Empty old (empty)', false, '400px', true, '1']);
+  if (b.inspect) {
+    const menu = await mainHelpers(b.inspect);
+    try { check('the menu bar menu shows Empty old as (empty)', await menu.clickMenu('Empty old (empty)', true) >= 1); } finally { menu.close(); }
+  }
+  await fullSize(b);
   // Pictures of the non-managing profile page and menu line at 860x528 and 1316x819 with the sidebar open, light and dark.
   if (shots) {
     for (const theme of ['light', 'dark']) {
@@ -11595,9 +11621,16 @@ async function profilePluginsFlow() {
   await b.click('#profile-choose-plugins');
   await bDone();
   same('Choose plugin items writes format 3 with switchesPluginItems true, touches no tool file, and reveals unticked plugin rows',
-    [oldPluginFiles(), JSON.parse(readNow(oldProfilesFile)), await b.exists('#profile-choose-plugins'), (await b.all('.pf-row[data-item]', 'e.dataset.item')).sort()],
-    [oldBefore, { formatVersion: 3, profiles: [{ id: 'legacy', name: 'Legacy', items: ['skill:notes'], switchesPluginItems: true }, { id: 'empty-old', name: 'Empty old', items: [], switchesPluginItems: false }] }, false, [issuesId, triageId, 'skill:notes']]);
+    [oldPluginFiles(), JSON.parse(readNow(oldProfilesFile)), await b.exists('#profile-choose-plugins'), (await b.all('.pf-row[data-item]', 'e.dataset.item')).sort(),
+      await b.run(`[...document.querySelectorAll('.pf-row[data-item^="plugin:"] input[type="checkbox"]')].some(c => c.checked)`)],
+    [oldBefore, { formatVersion: 3, profiles: [{ id: 'legacy', name: 'Legacy', items: ['skill:notes'], switchesPluginItems: true }, { id: 'empty-old', name: 'Empty old', items: [], switchesPluginItems: false }] }, false, [issuesId, triageId, 'skill:notes'], false]);
   check('after Choose, the header no longer says Plugin items stay as they are', !(await b.text('.profile-header p'))?.includes('Plugin items stay as they are'), await b.text('.profile-header p'));
+  if (shots) {
+    await sizeTo(b, 1316, 819);
+    if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+    await b.shot('old-profile-after-choose-1316');
+    await fullSize(b);
+  }
   await b.click(byId(`pf-${triageId}`)); await bDone();
   await b.click('#profile-switch'); await bDone();
   same('after ticking triage and switching, triage is on in both Codex and Copilot CLI while unticked issues turned off',
@@ -11631,6 +11664,29 @@ async function profilePluginsFlow() {
   same('Delete -> Undo of a non-managing profile preserves switchesPluginItems: false through the save IPC',
     [await b.exists('#profile-choose-plugins'), JSON.parse(readNow(oldProfilesFile)).profiles.find(p => p.id === 'empty-old')],
     [true, { id: 'empty-old', name: 'Empty old', items: ['skill:notes'], switchesPluginItems: false }]);
+  // Mixed status menu: one managing profile (Legacy, not in use) and one non-managing profile (Old work, in use) side by side.
+  await b.run(`window.centralKnot.saveProfile({ id: 'empty-old', name: 'Old work' }, ${JSON.stringify(oldHome)})`);
+  await b.run(`window.centralKnot.saveProfile({ id: 'legacy', items: ['skill:notes', ${JSON.stringify(triageId)}] }, ${JSON.stringify(oldHome)})`);
+  await b.click('#header-refresh');
+  await sizeTo(b, 1316, 819);
+  if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+  await b.click('#status-profile');
+  const mixedMenu = await b.run(`(() => {
+    const inUse = document.querySelector('#status-profile-empty-old'), other = document.querySelector('#status-profile-legacy');
+    const s = el => getComputedStyle(el);
+    return {
+      inUseChecked: inUse.getAttribute('aria-checked'),
+      inUseOpacity: s(inUse).opacity,
+      inUsePreview: inUse.querySelector('.pf-menu-preview')?.textContent,
+      otherPreview: other.querySelector('.pf-menu-preview')?.textContent,
+      samePreviewColor: s(inUse.querySelector('.pf-menu-preview')).color === s(other.querySelector('.pf-menu-preview')).color,
+    };
+  })()`);
+  same('mixed status menu shows one profile of each kind, keeps the in-use row full contrast and matching summary colour', mixedMenu,
+    { inUseChecked: 'true', inUseOpacity: '1', inUsePreview: 'In use · 1 item on. Plugin items stay as they are.', otherPreview: 'Switching turns 1 item on', samePreviewColor: true });
+  if (shots) await b.shot('old-profile-menu-mixed-1316');
+  await b.click('#status-profile');
+  await fullSize(b);
   same('no page errors after reopen', b.pageErrors, []);
   await b.quit();
 }

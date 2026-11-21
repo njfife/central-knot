@@ -9,7 +9,7 @@
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
-import { allTurns, changes, heldWords, homeItems, inUse, inUseName, leftOut, leftOutWords, namedCount, pluginItemOn, pluginLive, pluginPlan, switchable, switchPlan, switchPreview, turnsWords, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { allTurns, changes, heldWords, homeItems, inUse, inUseName, leftOut, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, switchable, switchPlan, switchPreview, turnsWords, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
 import { noSingleSwitch } from './pluginstatus.ts';
 import { andList, toolNames } from './words.ts';
 import type { ItemKind } from './library.ts';
@@ -56,7 +56,7 @@ function listRow(profile: Profile, { count, isInUse, selected }: { count: number
     h('span.list-fraction', {}, plural(count, 'item')),
     isInUse ? h('span.profile-in-use', { title: profile.switchesPluginItems
       ? `${profile.name} is in use: what it has is on, and every other item is off wherever it can be switched`
-      : `${profile.name} is in use: what it has is on, and every other item of yours is off. Plugin items stay as they are.` }, icon('check', 12), 'In use') : null);
+      : `${profile.name} is in use: what it has is on, and every other item of yours is off. ${PLUGIN_ITEMS_STAY}` }, icon('check', 12), 'In use') : null);
 }
 
 /** The list column: New profile, then each profile, with `open` shown as selected. */
@@ -240,9 +240,9 @@ function renameField(profile: Profile) {
 /** Shown on an older profile until chosen: plugin rows stay hidden and untouched until the person opts in. */
 function choosePluginsBand(profile: Profile) {
   return h('div.band.band-help', { role: 'note', id: 'profile-plugins-note' }, icon('info', 14, 'tone-muted'),
-    h('span.band-text', {}, 'Plugin items stay as they are, so they aren’t listed here. Once chosen, this profile always switches them: from the next switch, ticked ones turn on and unticked ones turn off wherever they can be switched.'),
+    h('span.band-text', {}, 'This profile leaves plugin items as they are, so they aren’t listed. Choosing them is for good: they are listed unticked, and from the next switch the ones left unticked turn off wherever they can be switched.'),
     button({ variant: 'outline', size: 'small', label: 'Choose plugin items for this profile', id: 'profile-choose-plugins', disabled: !canEditProfiles(),
-      attrs: { title: `Show plugin items for ${profile.name} with none ticked yet. Only the profile changes; tools change on Switch.` },
+      attrs: { title: `Lists plugin items for ${profile.name}, none ticked. This can’t be taken back. Only the profile changes now; tools change on Switch.` },
       onclick: () => void saveProfileDef({ id: profile.id, switchesPluginItems: true }, `${profile.name} now switches plugin items; tick the ones you want on before switching.`) }));
 }
 
@@ -264,7 +264,7 @@ function switchButton(profile: Profile, plan: Plan, all: LiveItem[], plugged: Pl
     onclick: () => openPlugin({ source: 'install' in off.copy.target ? off.copy.target.install.source : undefined, plugin: off.item.plugin, marketplace: off.item.marketName }) });
   if (!changes(plan.counted) || !switchable(profile, all, plugged)) return null;
   const label = profile.name.length > 18 ? 'Switch to this profile' : `Switch to ${profile.name}`;
-  const title = whyReadOnly(state.home!) ?? `Use ${profile.name}: ${turnsWords(plan.counted, 'will')}.${profile.switchesPluginItems ? '' : ' Plugin items stay as they are.'} One step in History, with Undo.`;
+  const title = whyReadOnly(state.home!) ?? `Use ${profile.name}: ${turnsWords(plan.counted, 'will')}.${profile.switchesPluginItems ? '' : ` ${PLUGIN_ITEMS_STAY}`} One step in History, with Undo.`;
   return button({ variant: 'primary', size: 'small', label, id: 'profile-switch', disabled: !canEditProfiles(), attrs: { title }, onclick: () => void switchToProfile(profile.id) });
 }
 
@@ -337,7 +337,7 @@ function menuKeys(event: KeyboardEvent, close: () => void) {
  * switchable: nothing in it) is shown disabled, as on the page.
  */
 function menuChoice(profile: Profile, isInUse: boolean, all: LiveItem[], plugged: PluginLive[]) {
-  const empty = !switchable(profile, all, plugged), preview = switchPreview(profile, all, plugged);
+  const empty = !switchable(profile, all, plugged), preview = empty ? '' : switchPreview(profile, all, plugged);
   return h('button.pf-menu-item', { type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(isInUse), id: `status-profile-${profile.id}`, disabled: !canEditProfiles() || empty,
     title: empty ? `${profile.name} has nothing in it yet. Tick what it should have on, on the Profiles page.` : `${profile.name} · ${preview}`,
     onclick: (event: MouseEvent) => {
@@ -347,7 +347,8 @@ function menuChoice(profile: Profile, isInUse: boolean, all: LiveItem[], plugged
       if (!isInUse) void switchToProfile(profile.id); else rerender();
     } },
     h('span.pf-menu-tick', {}, isInUse ? icon('check', 14) : null),
-    h('span.pf-menu-body', {}, h('span.pf-menu-name', {}, profile.name), h('span.pf-menu-preview', {}, preview)));
+    h('span.pf-menu-body', {}, h('span.pf-menu-name', {}, empty ? `${profile.name} (empty)` : profile.name),
+      preview ? h('span.pf-menu-preview', {}, preview) : null));
 }
 
 /** The status bar's profile item: the profile in use (worked out: profileplan.ts inUse), and a menu to switch in one click. */

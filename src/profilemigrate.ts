@@ -30,7 +30,7 @@ import { itemKey } from './library.ts';
 import { ownText } from './mcp.ts';
 import { mcpSwitchPath, ownWithoutSwitch, withMcpSwitch } from './mcpswitch.ts';
 import { itemId } from './profileplan.ts';
-import { profileEvent, profilesPath, readProfileFile } from './profiles.ts';
+import { profileEvent, readProfileFile, saveProfiles } from './profiles.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
 import { keepOwn, keptOwn } from './serverstore.ts';
 import { libraryGate, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
@@ -91,7 +91,8 @@ export async function migrateProfiles(context: ShareContext, tools: HarnessId[])
   await applyServers(context, tools, [], offNow('mcp'));
   const agentsOn = Object.values(agents.library.items).filter(item => item.on && !item.deleted).map(item => itemId('agent', item.key));
   await writeDurably(join(storeDirectory(context.home), 'profiles.v1.json'), file.text!);
-  await writeDurably(profilesPath(context.home), `${JSON.stringify({ formatVersion: 2, profiles: file.view.profiles.map(({ id, name, items }) => ({ id, name, items: [...new Set([...items, ...agentsOn])] })) }, null, 2)}\n`);
+  // Format 2: this pass runs without a click, so it must not write a file the released build refuses.
+  await saveProfiles(context.home, file.view.profiles.map(profile => ({ ...profile, items: [...new Set([...profile.items, ...agentsOn])] })), 2);
 }
 
 /**
