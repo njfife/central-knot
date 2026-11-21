@@ -5,6 +5,7 @@
 //   items (atlink.ts pluginItems, its `marketplace` route), and whether each kind was read whole;
 // - running it (runItems): each kind's pass (sources.ts sourceKinds) with that read and the clicks the plugin's switch makes on
 //   its items, one pass per kind, as a profile switch makes them, or Use the plugin's (library.ts TAKE); and its Undo (itemsBack);
+//   with the one-time move of a root skill an earlier build named otherwise (movedFrom, movedTicks: library.ts A PLUGIN, THE MOVE);
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool), from one look at the home that every
 //   plugin of a view shares (lookAtKinds), with why none of them is on in such a tool, which the run's report says too
 //   (pluginstatus.ts notInWhy), and each name he has under each tool's box (`clashes`).
@@ -14,16 +15,19 @@
 // only once they are (pluginstatus.ts waitsToMove). Kept elsewhere: the table (library.ts), the held answer in the tools with an
 // installer (plugins.ts pluginHolds), the switch's table (pluginrecord.ts owedTo), and the let-go of an item changed here, in
 // every pass (librarypass.ts letGo).
-// Known miss: a skill keyed by its folder (library.ts A SOURCE, the two key rules) whose SKILL.md names it otherwise is loaded
-// by Pi and OpenCode under that name, so it can meet a skill of that name there unmarked, and through a Git link is a second item.
+// Known miss: a skill keyed by its folder, or by its plugin's name at the plugin's root (library.ts A SOURCE, the two key rules),
+// whose SKILL.md names it otherwise is loaded by Pi and OpenCode under that name, so it can meet a skill of that name there
+// unmarked, and through a Git link is a second item.
 import { basename } from 'node:path';
 import { pluginItems, wasRead } from './atlink.ts';
 import type { PluginFiles } from './catalogdetail.ts';
 import { keptBack } from './clickplan.ts';
-import { fromLinkSinceTakeIn, itemKey, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
+import { earlierRootName, fromLinkSinceTakeIn, itemKey, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
 import { copiesOf, lookFor, restoreAll, takeHeld, type KindLibrary, type SourceRead } from './librarypass.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry } from './pluginrecord.ts';
+import { pluginItemId, pluginItemKey } from './profileplan.ts';
+import { profilesNaming } from './profiles.ts';
 import { takesPlugins } from './presence.ts';
 import type { ShareContext } from './share.ts';
 import { pluginLink } from './sourcelink.ts';
@@ -32,7 +36,7 @@ import { recordedIds } from './sourcestore.ts';
 import type { Change, HarnessId, PassResult, PluginItemLine, PluginItemsView, SyncNotice, YourName } from './types.ts';
 import { harnessIds } from './harnesses.ts';
 import { notInWhy, type ItemOut } from './pluginstatus.ts';
-import { toolNames } from './words.ts';
+import { andList, toolNames } from './words.ts';
 
 /** The managed tools a plugin's items go to as library items: those with no plugin installer (Pi, OpenCode). */
 export const itemTools = (tools: readonly HarnessId[]) => tools.filter(tool => !takesPlugins(tool));
@@ -44,13 +48,15 @@ export interface ItemState { kind: ItemKind; key: string; on: boolean; except: H
 
 /**
  * A plugin's files read as one SourceRead per kind (library.ts A PLUGIN): each name with its content, or why it can't be read
- * or is left out. A kind is read whole as a link's kind is (library.ts "Read whole"; atlink.ts wasRead): something in the plugin
+ * or is left out; a skill at the plugin's own folder (a plugin that is one skill at its root) named for the plugin, never for
+ * the folder its files are read from, which may be a copy Central Knot keeps under a name of its own (plugins.ts
+ * remoteCopyFolder). A kind is read whole as a link's kind is (library.ts "Read whole"; atlink.ts wasRead): something in the plugin
  * was read (a plugin's folder missing from the marketplace's copy reads as empty, so it is not), its files left nothing of that
  * kind unread (PluginFiles `unread`), and every item of it was read. `outOf`: the tools a name it
  * makes is kept out of (pluginOutOf); `into`: those it brings its items into. `commitAt`: when its marketplace was read.
  */
 export async function readPlugin(files: PluginFiles, entry: PluginEntry, commitAt: string, recorded: ReadonlySet<string>, outOf: HarnessId[], into: HarnessId[] = []): Promise<SourceRead<unknown>[]> {
-  const read = await pluginItems(files, files.folder, basename(files.folder), 'marketplace');
+  const read = await pluginItems(files, files.folder, entry.plugin, 'marketplace');
   const any = Object.values(read).some(each => each.items.some(wasRead));
   return sourceKinds().map((kind): SourceRead<unknown> => {
     const { items, unread } = read[kind.kind.kind], names: SourceRead<unknown>['names'] = new Map();
@@ -134,7 +140,9 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   const recorded = (await recordedIds(context.home)).ids, plain = files.files && !('outOf' in ask) ? await readPlugin(files.files, entry, files.commitAt, recorded, [], brought) : [];
   // His items of the same content put the plugin in each tool they are wanted in, as its own items do.
   const alike = await alikeIn(context, plain), outOf = pluginOutOf(entry, tools, [...before, ...alike], brought);
-  const read = plain.map(each => ({ ...each, plugin: { ...each.plugin!, outOf } }));
+  // THE MOVE (library.ts A PLUGIN): the root skill is made where the earlier build's copy was.
+  const folder = files.files && basename(files.files.folder), moved = 'take' in ask ? undefined : movedFrom(before, plain, entry, folder);
+  const read = plain.map(each => ({ ...each, plugin: { ...each.plugin!, ...(moved && each.kind === 'skill' ? { on: moved.on, outOf: moved.except } : { outOf }) } }));
   // A click that turns its items On (its On, Add, a box ticked) brings back a name of its own he deleted; the background never does (library.ts A PLUGIN).
   // Use the plugin's reads its one name, as not read whole, so nothing else of the plugin changes.
   const taken = 'take' in ask && ask.take, bringsBack = ('into' in ask && ask.on) || ('read' in ask && ask.click);
@@ -172,9 +180,34 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   // A take that can't land says why, and nothing changed. What is on in each tool is counted as the box counts it (onThere).
   const refused = sourced.find(({ said }) => said.held)?.said, looks = await lookAtKinds(context, tools), his = sourced.filter(({ said }) => said.answer === 'differs').length;
   const on = (tool: HarnessId) => onThere(looks, [...after, ...(!('outOf' in ask) && entry.on && !entry.except.includes(tool) ? alike : [])], tool);
+  const ticks = await movedTicks(context, entry, before, after, moved, folder);
   const done = named.map((tool): PluginDone => ({ ...op, tool, report: refused ? { tool, outcome: 'held', message: `${refused.name}: ${refused.held}`, runs: [], changed: false }
-    : reportIn(tool, ask, before, after, results, why(tool), !!files.problem, on(tool), after.length + alike.length + his) }));
+    : reportIn(tool, ask, before, after, results, why(tool), !!files.problem, on(tool), after.length + alike.length + his, ticks) }));
   return { ...ran(done, results), ...(undo.length ? { back: undo } : {}) };
+}
+/**
+ * THE MOVE (library.ts A PLUGIN): the one skill linked to the plugin, under a name an earlier build gave its root skill (`folder`:
+ * the folder the plugin is read from), where the whole read's one skill is that root skill under the plugin's name; else none.
+ */
+function movedFrom(before: Linked[], reads: SourceRead<unknown>[], entry: PluginEntry, folder?: string): LibraryItem | undefined {
+  const skills = reads.find(read => read.kind === 'skill'), linked = before.filter(({ kind }) => kind === 'skill'), root = itemKey(entry.plugin);
+  if (!skills?.whole || skills.names.size !== 1 || !skills.names.has(root) || linked.length !== 1) return undefined;
+  return linked[0]!.item.key !== root && earlierRootName(linked[0]!.item.name, folder) ? linked[0]!.item : undefined;
+}
+
+/**
+ * THE MOVE's profiles (library.ts A PLUGIN): where the root skill was made in `moved`'s place, each profile that named `moved`
+ * names the root skill; where an earlier build's root skill was dropped otherwise, the sentence naming each profile that still
+ * names it, for the result (else none).
+ */
+async function movedTicks(context: ShareContext, entry: PluginEntry, before: Linked[], after: Linked[], moved?: LibraryItem, folder?: string): Promise<string | undefined> {
+  const id = (name: string) => pluginItemId('skill', pluginItemKey(entry, { kind: 'skill', name }));
+  const linked = (key: string) => after.some(each => each.kind === 'skill' && each.item.key === key);
+  const dropped = before.filter(({ kind, item }) => kind === 'skill' && !linked(item.key) && earlierRootName(item.name, folder)).map(({ item }) => item.name);
+  const made = !!moved && dropped.includes(moved.name) && linked(itemKey(entry.plugin));
+  const named = dropped.length ? await profilesNaming(context, dropped.map(id), made ? id(entry.plugin) : undefined) : [];
+  if (made || !named.length) return undefined;
+  return `${andList(named)} still ${named.length === 1 ? 'names' : 'name'} ${dropped.join(', ')}, the name an earlier version gave ${entry.plugin}’s skill: tick ${entry.plugin} there instead.`;
 }
 type Op = Pick<PluginOp, 'source' | 'marketName' | 'plugin' | 'action'>;
 /** A plugin's files as its marketplace's copy gives them now (none: not listed, or unreadable, `problem` says why), and when that copy was read. */
@@ -200,9 +233,10 @@ function clickOn(ask: ItemsAsk, item: LibraryItem, own: (tool: HarnessId) => boo
 
 /**
  * One tool's report of a run on a plugin's items: how many of its `of` are on there now (onThere), and whether the run changed what
- * it has. `why`: why none is on there, the plugin's files unreadable (`unread`) or each item's reason (notInWhy).
+ * it has. `why`: why none is on there, the plugin's files unreadable (`unread`) or each item's reason (notInWhy). `ticks`: what the
+ * run says of profiles after every message (movedTicks).
  */
-function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], why: string, unread: boolean, on: number, of: number): PluginDone['report'] {
+function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], why: string, unread: boolean, on: number, of: number, ticks?: string): PluginDone['report'] {
   const has = on > 0, name = toolNames[tool];
   const changed = onIn(after, tool) > 0 !== onIn(before, tool) > 0 || wroteIn(results, tool);
   // Why an item its pass held in the tool isn't there yet (it waits for the shared skills folder, say), each reason once.
@@ -211,7 +245,7 @@ function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linke
   // Its notes: what the run also changed in the tool's own settings with its items' copies (Pi's list: librarypass.ts Kind.follow).
   const notes = results.flatMap(({ result }) => result.results.flatMap(each => (each.harness === tool && each.settingsChanged ? [each.settingsChanged] : [])));
   const reloads = reloadsIn(results, tool);
-  const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message, runs: [], changed, ...(notes.length ? { notes } : {}), ...(reloads.length ? { reloads } : {}) });
+  const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message: ticks ? `${message} ${ticks}` : message, runs: [], changed, ...(notes.length ? { notes } : {}), ...(reloads.length ? { reloads } : {}) });
   if ('outOf' in ask) return report(has ? 'failed' : 'uninstalled');
   if (!has && 'into' in ask) return report('held', held.size ? said : why);
   if (unread && 'read' in ask) return report('failed', why);

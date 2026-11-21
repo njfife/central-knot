@@ -124,6 +124,18 @@ export async function saveProfile(context: ShareContext, input: ProfileEdit): Pr
   return { id };
 }
 
+/**
+ * The names of the profiles that name any of `ids`; with `to`, each of those ids becomes `to` in them (a plugin's root skill moved
+ * by its read: library.ts A PLUGIN, THE MOVE). Profiles that can't be changed here are named by none and left as they are.
+ */
+export async function profilesNaming(context: ShareContext, ids: string[], to?: string): Promise<string[]> {
+  const opened = await openProfiles(context);
+  const naming = 'stop' in opened ? [] : opened.profiles.filter(profile => profile.items.some(item => ids.includes(item)));
+  const moved = (profile: Profile) => ({ ...profile, items: [...new Set(profile.items.map(item => (ids.includes(item) ? to! : item)))] });
+  if (to && naming.length && !('stop' in opened)) await saveProfiles(context.home, opened.profiles.map(moved));
+  return naming.map(profile => profile.name);
+}
+
 /** Deletes a profile's definition. Nothing in the library or the tools changes. */
 export async function deleteProfile(context: ShareContext, id: string): Promise<{ problem?: string }> {
   const opened = await openProfiles(context);
