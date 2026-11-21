@@ -35,7 +35,7 @@ import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { turnsWords } from './profileplan.ts';
-import { pluginReloads, reloadAdvice, toItemKind, writtenReloads, type ReloadWrite } from './reload.ts';
+import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, type ReloadChange, type ReloadWrite } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
@@ -226,8 +226,8 @@ export function tell(outcome: Outcome | undefined, otherwise = ''): void {
   fadeLater();
 }
 
-/** A result as the status bar and screen readers say it: its sentence, then its reasons. */
-const spoken = (outcome: Outcome) => [outcome.text, ...(outcome.reasons ?? []).map(reason => (typeof reason === 'string' ? reason : reason.join('')))].join(' ');
+/** A result as the status bar and screen readers say it: its sentence, reload advice, then its reasons. */
+const spoken = (outcome: Outcome) => [outcome.text, outcome.reloads ? reloadAdvice(outcome.reloads).text : '', ...(outcome.reasons ?? []).map(reason => (typeof reason === 'string' ? reason : reason.join('')))].filter(Boolean).join(' ');
 /** One click's own result: where it left something undone it says so first, before its name can take the header's room. */
 export const notDoneFirst = (outcome: Outcome): Outcome => (outcome.warn ? { ...outcome, text: `Didn’t go through in every tool: ${outcome.text}` } : outcome);
 
@@ -491,9 +491,9 @@ export interface Click {
 
 /** Each kind's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
 const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, home: string) => Promise<PassResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
-  skills: { send: (...args) => api().applySkills(...args), keep: (results, notices) => { state.skillsResult = { results, writes: 0, notices }; } },
-  mcp: { send: (...args) => api().applyServers(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
-  agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
+  skills: { send: (...args) => api().applySkills(...args), keep: (results, notices) => { state.skillsResult = { results, writes: 0, reloads: [], notices }; } },
+  mcp: { send: (...args) => api().applyServers(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, reloads: [], notices }; } },
+  agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, reloads: [], notices }; } },
 };
 /** Each kind's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, toldNotices). */
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
@@ -529,6 +529,8 @@ const received = <Result extends { notices?: SyncNotice[] }>(result: Result) => 
 export interface Done {
   outcome: Outcome;
   did: boolean;
+  /** Confirmed changes in execution order, so multi-click runs settle final state across clicks (reload.ts settleReloads). */
+  reloads: ReloadChange[];
   /** Why it did nothing, where it was refused whole or stopped: its outcome's text then (applyByKind names its kind by it). */
   refused?: string;
   /** The rows it changed (carryOut): all of its rows but one whose own change was refused whole (clickplan.ts heldWhole). */
@@ -555,7 +557,7 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const { ours, did, refusal, failed, differs, notIn } = clickResults(result.results, names);
   // A refusal is the click's result, or else one of its reasons: said once, not again among the failures.
   const kept = { kind: click.kind, results: ours.filter(entry => entry !== refusal), notices: result.notices };
-  if (result.stopped) return { kept, did: false, refused: result.stopped, changed: [], outcome: { page, items: click.items, rows: click.rows, warn: true, band: true, text: result.stopped } };
+  if (result.stopped) return { kept, did: false, reloads: [], refused: result.stopped, changed: [], outcome: { page, items: click.items, rows: click.rows, warn: true, band: true, text: result.stopped } };
   const made = result.made ?? [];
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
@@ -574,10 +576,10 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const back = plugged?.back ?? [];
   const undo = !click.undoing && done && ((made.length && await allUndoable(made)) || back.length) ? { kind: click.kind, made, back } : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
-  return { kept, did: done, refused: done || !refusal ? undefined : refusal.message, changed, undo, along, focus: click.focus?.(),
+  const reloads = [...reloadsFor(result.reloads, new Set(click.changes.map(change => change.key))), ...(plugged ? pluginReloads(plugged.done) : [])];
+  return { kept, did: done, reloads, refused: done || !refusal ? undefined : refusal.message, changed, undo, along, focus: click.focus?.(),
     outcome: withReloads({ page, items: click.items, rows: click.rows, warn: warned || !!click.also?.length || !!refusal, band: true, fade: click.undoing && !warned,
-      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } },
-      [...writtenReloads(ours, toItemKind(click.kind)), ...(plugged ? pluginReloads(plugged.done, toItemKind(click.kind), click.rows[0]?.key) : [])]) };
+      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } }, reloads) };
 }
 
 /**
@@ -592,9 +594,10 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
   const text = (worked && said ? [said, click.plugins?.said].filter(Boolean).join(' ') : resultSentence(ran.lines, !!click.undoing)) || `${click.items.length ? `${fewNames(click.items)}: n` : 'N'}othing changed.`;
   const undo = ran.back.length ? { kind: click.kind, made: [], back: ran.back } : undefined;
   const back = { kind: click.kind, items: click.items, rows: click.rows, changes: [], said: click.undone ?? '', undoing: true, pluginsOnly: true, plugins: { ops: ran.back } };
-  return { did: ran.done.some(entry => succeeded(entry.report)), along: worked ? click.plugins?.said : undefined, undo,
+  const reloads = pluginReloads(ran.done);
+  return { did: ran.done.some(entry => succeeded(entry.report)), reloads, along: worked ? click.plugins?.said : undefined, undo,
     outcome: withReloads({ page, items: click.items, rows: click.rows, text, reasons: switchReasons(ran, click.also), warn: !worked || !!click.also?.length, band: true, fade: click.undoing && worked,
-      act: undo && { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyClick(back) } }, pluginReloads(ran.done, toItemKind(click.kind), click.rows[0]?.key)) };
+      act: undo && { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyClick(back) } }, reloads) };
 }
 
 /** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Resume, a copy chosen (Turn these off: applyByKind). */
@@ -632,9 +635,9 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[]) => stri
   const through = changed.filter(row => !left.some(each => sameRow(each, row)));
   const lead = left.length ? notAllThrough(rowNames(left, asked.map(({ row }) => row)), asked.length) : '';
   const after = !changed.length ? 'Nothing changed.' : through.length ? said(through) : `${countedAs(changed.length, asked.length, false)}.`;
-  tell(withReloads({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
+  tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
     text: [lead, after].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? [])],
-    act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.outcome.reloads ?? [])));
+    act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads));
   for (const row of changed) flashRow(row);
   if (regroups) unpin();
 });
@@ -670,8 +673,8 @@ export function queueClick(row: ItemTurn['row'], name: string, make: () => Click
   const turn: ItemTurn = { state: 'waiting', row, name, page: state.page, isOn, run: runAt(placeNow()), work: async () => {
     const click = make();
     // Nothing left to change in its turn (the click before it took its whole plugin with it, say): as asked already.
-    if (!click) turn.done = { did: false, outcome: { page: turn.page, items: [name], rows: [row], text: `${name}: nothing left to change.` } };
-    else turn.done = await carryOut(click, turn.page).catch((): Done => ({ did: false, refused: `${name}: ${couldNotFinish()}`, outcome: { page: turn.page, items: [name], rows: [row], warn: true, band: true, text: `${name}: ${couldNotFinish()}` } }));
+    if (!click) turn.done = { did: false, reloads: [], outcome: { page: turn.page, items: [name], rows: [row], text: `${name}: nothing left to change.` } };
+    else turn.done = await carryOut(click, turn.page).catch((): Done => ({ did: false, reloads: [], refused: `${name}: ${couldNotFinish()}`, outcome: { page: turn.page, items: [name], rows: [row], warn: true, band: true, text: `${name}: ${couldNotFinish()}` } }));
     sayRun(turn);
   } };
   join(turn);
@@ -729,7 +732,7 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   return withReloads({ page: turns[0]!.page, items: rowNames(among), rows: turns.map(turn => turn.row), band: true, warn: left.length > 0,
     reasons: each.flatMap((turn): Reason[] => [...(turn.done!.refused ? [turn.done!.refused] : []), ...turn.done!.outcome.reasons ?? []]),
     text: [lead, `${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along, ...stayed, waiting.length ? copiesDiffer(rowNames(waiting.map(named), among)) : ''].filter(Boolean).join(' '),
-    act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything these clicks did', run: undo } }, each.flatMap(turn => turn.done!.outcome.reloads ?? []));
+    act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything these clicks did', run: undo } }, ended.flatMap(turn => turn.done!.reloads));
 }
 
 /** Whether each History entry a click made still offers its own action, so the click's Undo can run them all. */
@@ -760,11 +763,12 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const events = (await api().history()).events.filter(event => kindOfEntry.has(event.id)).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
   const results = new Map(parts.map(part => [part.kind, [] as DestinationResult[]])), stops = new Map<PageKind, string>();
+  const reloads: ReloadChange[] = unswitched ? pluginReloads(unswitched.done) : [];
   for (const event of events) {
     const kind = kindOfEntry.get(event.id)!;
     if (stops.has(kind)) continue;
     const result = await api().restore(event.id, home.home);
-    if (result.stopped) stops.set(kind, result.stopped); else results.get(kind)!.push(...result.results);
+    if (result.stopped) stops.set(kind, result.stopped); else { results.get(kind)!.push(...result.results); reloads.push(...result.reloads); }
   }
   setHome(await api().refresh());
   focusAfterBusy = about.focus?.();
@@ -779,9 +783,8 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const switchesShort = new Set(unswitched && switchProblems(unswitched).length ? parts.filter(part => part.back.length).map(part => part.kind) : []);
   const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
-  const reloads = [...[...results].flatMap(([kind, list]) => writtenReloads(list, toItemKind(kind))), ...(unswitched ? pluginReloads(unswitched.done) : [])];
-  tell(withReloads({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
-    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(all)} could be put back.` }, reloads));
+  tellWritten({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
+    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(all)} could be put back.` }, reloads);
   for (const row of about.rows) flashRow(row);
   if (about.regroups) unpin();
 });
@@ -1118,7 +1121,7 @@ function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult) {
   const back = made && libraryAction(made, item, entriesNow(state.home!)(made).now);
   const notDone = result.results.filter(keptBack).map(entry => entry.message);
   const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].join(' ');
-  tell(withReloads({ page, item: past.item, rows, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined }, writtenReloads(result.results, toItemKind(entry.kind))));
+  tellWritten({ page, item: past.item, rows, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined }, result.reloads);
   flashRow(entry);
 }
 
@@ -1133,7 +1136,7 @@ function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, swit
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
   const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
-  tell(withReloads({ page, item: past.item, warn: notDone.length > 0, history: true, text: [text, ...notDone.slice(0, 3)].join(' ') }, writtenReloads(result.results)));
+  tellWritten({ page, item: past.item, warn: notDone.length > 0, history: true, text: [text, ...notDone.slice(0, 3)].join(' ') }, result.reloads);
 }
 
 // ---------- A skill's own two actions ----------
@@ -1154,8 +1157,8 @@ export const skillAction = (action: 'clear-switch' | 'take-over', key: string, t
     // Letting a tool load it again has an Undo (its History entry's: the switch set again); a take-over has none, and says so.
     const said = `${name}: ${result.results[0]?.message ?? 'done.'}${action === 'take-over' ? ' This has no Undo.' : ''}`;
     const entry = action === 'clear-switch' ? result.made?.[0] : undefined;
-    tell(withReloads({ page, item: name, rows: [row], band: true, text: said,
-      act: entry ? { label: 'Undo', id: 'outcome-undo', title: `Turn ${name} off again in ${toolName(tool)}’s own settings`, run: () => void restoreEvent(entry) } : undefined }, writtenReloads(result.results, of)));
+    tellWritten({ page, item: name, rows: [row], band: true, text: said,
+      act: entry ? { label: 'Undo', id: 'outcome-undo', title: `Turn ${name} off again in ${toolName(tool)}’s own settings`, run: () => void restoreEvent(entry) } : undefined }, result.reloads);
     flashRow(row);
   });
 
@@ -1204,16 +1207,13 @@ export interface Outcome {
   said?: number;
 }
 
-/** Filters confirmed writes against the refreshed view, dropping any copy switched off in its tool's own settings. */
-export const liveReloads = (writes: readonly ReloadWrite[] | undefined): ReloadWrite[] => (writes ?? []).filter(({ tool, kind, key }) => {
-  const row = key ? state.home?.[kind === 'skill' ? 'skills' : kind === 'agent' ? 'agents' : 'mcp']?.items.find(item => item.key === key) : undefined;
-  return !row?.switchedOff?.includes(tool) && !row?.loads?.[tool]?.switchedOff;
-});
-/** Appends reload advice to a result from its confirmed writes, keeping the live writes for Copy buttons and the opened row. */
-export function withReloads(outcome: Outcome, writes: readonly ReloadWrite[] | undefined): Outcome {
-  const live = liveReloads(writes), { text } = reloadAdvice(live);
-  return text ? { ...outcome, text: `${outcome.text} ${text}`, reloads: live } : outcome;
+/** Settles chronological reload changes and attaches them only when at least one tool needs a reload action (reload.ts). */
+export function withReloads(outcome: Omit<Outcome, 'reloads'>, changes: readonly ReloadChange[]): Outcome {
+  const reloads = settleReloads(changes);
+  return hasReloadAdvice(reloads) ? { ...outcome, reloads } : outcome;
 }
+/** The one door for every writing route's result: settles its required reload changes and tells the page. */
+export const tellWritten = (outcome: Omit<Outcome, 'reloads'>, changes: readonly ReloadChange[]): void => tell(withReloads(outcome, changes));
 
 /**
  * Whether a result is said in the status bar rather than as a band: it offers nothing to do (no button, Undo, Copy or History
@@ -1646,7 +1646,7 @@ export async function syncNow(home = state.home?.home) {
     setHome(result.view);
     // A new result: no click's reasons from before stay under it.
     keepOwn([]);
-    tell(withReloads({ page, band: true, history: result.history, text: result.text, reasons: result.reasons, warn: result.warn }, result.reloads));
+    tellWritten({ page, band: true, history: result.history, text: result.text, reasons: result.reasons, warn: result.warn }, result.reloads);
   });
 }
 api().onSyncRequest(() => { if (acting()) menuSyncHome = state.home?.home; else void syncNow(); });
@@ -1771,12 +1771,12 @@ export const profileState = {
 };
 
 /** What a switch or its Undo did, as its band says it: what it turned On and Off, and what could not change. */
-function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], act?: Outcome['act'], reloads?: ReloadWrite[]) {
+function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], act: Outcome['act'], reloads: readonly ReloadChange[]) {
   const leftSaid = `${turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : ''}${(turned.settingsChanged ?? []).map(said => ` ${said}`).join('')}`;
   // An Undo's plugin copies changed since the switch (profiles.ts undoSwitch), left as they are.
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}: ${turned.since.join('; ')}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
-  tell(withReloads({ page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0 || !!turned.since?.length, act }, reloads));
+  tellWritten({ page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0 || !!turned.since?.length, act }, reloads);
 }
 
 /** What a switch did, with Undo switch (from the page or, next time the window shows, the menu bar). */

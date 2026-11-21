@@ -524,7 +524,7 @@ export function settingsPage(): HTMLElement {
   // Why it can't be changed here replaces the hint; why the system has it off (it can be changed) shows beneath, with the way to fix it.
   const cannot = signIn?.available ? undefined : signIn?.reason?.text;
   const systemSays: RowMessage | undefined = signIn?.reason && signIn.place ? { text: signIn.reason.text, tone: 'system', action: openSignInPlace(signIn.place) } : undefined;
-  const done = state.outcome?.page === 'settings' ? outcomeBand() : null;
+  const done = state.outcome?.page === 'settings' && !!state.outcome.reloads?.length ? outcomeBand() : null;
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.settings-scroll', { id: 'settings-scroll' },
     state.home?.settingsUnread ? keptNote(state.home.settingsUnread) : null,
     settingsSection('general', 'General',

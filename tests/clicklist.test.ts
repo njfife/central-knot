@@ -28,7 +28,7 @@ const api = {
   history: async () => ({ events: [{ id: 'delete-bar', key: 'bar', kind: 'deleted' }], days: 30 }),
   applyAgents: (changes: Change[]) => { main.sent.push(`agent ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
   applyServers: (changes: Change[]) => { main.sent.push(`server ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
-  restore: async (id: string) => { main.restored.push(id); return { results: [] }; },
+  restore: async (id: string) => { main.restored.push(id); return { results: [], reloads: [] }; },
   plugins: async () => { main.reads.plugins++; return view; },
   refresh: async (): Promise<HomeView | null> => { main.reads.home++; main.duringHomeRead?.(); return null; },
   setPluginSkill: async () => ({ reports: [report('skill-off', 'Turned off.')] }),
@@ -55,7 +55,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh'
 await import('../src/settingspage.ts');
 const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
-const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
+const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, runReloads, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
 const { backgroundProblems, headerNotices, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
@@ -294,10 +294,10 @@ function flip(name: string, on: boolean, made = () => {}, kind: PageKind = 'skil
   }, () => onNow.get(id) ?? true);
 }
 /** What main did of one click on `kind`'s row: the item written or removed in Claude Code, or the click refused as a whole, or a write that failed. */
-const did = (name: string, on = false, kind: PageKind = 'skills'): PassResult => { onNow.set(rowId(kind, name), on); return { results: [{ item: name, harness: 'claude-cli', outcome: on ? 'written' : 'removed', message: '' }], writes: 1 }; };
-const refusedAsStale = (name: string): PassResult => ({ results: [{ item: name, outcome: 'held', unchanged: true, message: `${name} changed since the page was read. Nothing was changed; read again.` }], writes: 0 });
+const did = (name: string, on = false, kind: PageKind = 'skills'): PassResult => { onNow.set(rowId(kind, name), on); return { results: [{ item: name, harness: 'claude-cli', outcome: on ? 'written' : 'removed', message: '' }], writes: 1, reloads: [] }; };
+const refusedAsStale = (name: string): PassResult => ({ results: [{ item: name, outcome: 'held', unchanged: true, message: `${name} changed since the page was read. Nothing was changed; read again.` }], writes: 0, reloads: [] });
 
-const failedWrite = (name: string): PassResult => ({ results: [{ item: name, harness: 'claude-cli', outcome: 'failed', message: 'Its folder couldn’t be written.' }], writes: 0 });
+const failedWrite = (name: string): PassResult => ({ results: [{ item: name, harness: 'claude-cli', outcome: 'failed', message: 'Its folder couldn’t be written.' }], writes: 0, reloads: [] });
 
 function onLibrary() {
   start();
@@ -498,7 +498,7 @@ test('A click that failed is said first as not gone through in every tool, and n
 });
 
 // Off in Central Knot and in Codex, but Claude Code's folder couldn't be written: the click did part of its work.
-const partly = (name: string): PassResult => { onNow.set(rowId('skills', name), false); return { results: [{ item: name, harness: 'codex-cli', outcome: 'removed', message: '' }, { item: name, harness: 'claude-cli', outcome: 'failed', message: 'Its folder couldn’t be written.' }], writes: 1 }; };
+const partly = (name: string): PassResult => { onNow.set(rowId('skills', name), false); return { results: [{ item: name, harness: 'codex-cli', outcome: 'removed', message: '' }, { item: name, harness: 'claude-cli', outcome: 'failed', message: 'Its folder couldn’t be written.' }], writes: 1, reloads: [] }; };
 
 test('One click that left something undone says so first, before its name can take the header’s room', async () => {
   onLibrary();
@@ -553,7 +553,7 @@ function linkedHome(keys: string[], linked: string[]) {
     skills: { ...empty, items: [...keys.map(key => ({ key, name: key, copies: {}, ...reads(key) })), draft], library: Object.fromEntries(keys.map(key => [key, newItem(key, key)])) }, mcp: empty, agents: empty } as unknown as HomeView;
 }
 /** draft's Add in its turn: its copies differ, so the pass waits for a choice (librarypass.ts addClicked). */
-const waitsForChoice: PassResult = { results: [{ item: 'draft', outcome: 'held', differs: true, message: 'Copies differ. Choose which copy to use.' }], writes: 0 };
+const waitsForChoice: PassResult = { results: [{ item: 'draft', outcome: 'held', differs: true, message: 'Copies differ. Choose which copy to use.' }], writes: 0, reloads: [] };
 
 test('A run of four Offs, two of them still read by Codex and Pi through links: after what went through, one sentence names the two and the tools that still read them', async () => {
   onLibrary();
@@ -597,7 +597,7 @@ test('Sync once is a new result too: a refused Off’s line from before goes whe
   await settled();
   await main.pass(failedWrite('a'));
   assert.equal(app.skillsResult?.results.filter(keptBack).length, 1);
-  t.mock.method(api, 'syncNow', async () => ({ view: app.home, text: 'Synced once.', reasons: [], warn: false, history: false }));
+  t.mock.method(api, 'syncNow', async () => ({ view: app.home, text: 'Synced once.', reasons: [], warn: false, history: false, reloads: [] }));
   await syncNow();
   assert.deepEqual([app.outcome?.text, app.skillsResult?.results.filter(keptBack) ?? []], ['Synced once.', []]);
 });
@@ -775,7 +775,7 @@ test('Turn these off where one skill’s Off is refused as stale: the result say
   turnTheseOff([itemRow('skills', 'notes'), itemRow('skills', 'spare')]);
   await settled();
   app.home!.skills.library.notes!.on = false;
-  await main.pass({ results: [...did('notes').results, ...refusedAsStale('spare').results], writes: 1, made: ['off-skills-notes'] });
+  await main.pass({ results: [...did('notes').results, ...refusedAsStale('spare').results], writes: 1, reloads: [], made: ['off-skills-notes'] });
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, flashRequests.has('skills-notes'), flashRequests.has('skills-spare')],
     ['1 of 2 didn’t go through in every tool: spare. Turned off 1 skill with no use seen in the last 30 days: notes. Central Knot keeps it, and turning it on puts it back as it was.',
       ['spare changed since the page was read. Nothing was changed; read again.'], true, false]);
@@ -793,7 +793,7 @@ test('An Undo across kinds whose plugin switch can’t be turned back and whose 
   // A plugin's skill switched off in Claude Code; its Undo, turning it back on there, fails.
   let calls = 0;
   t.mock.method(api, 'setPluginSkill', async () => ({ reports: [calls++ ? report('failed', 'Couldn’t turn it on.') : report('skill-off', 'Turned off.')] }));
-  t.mock.method(api, 'restore', async (id: string) => { main.restored.push(id); return { stopped: 'The agents record is damaged.', results: [] }; });
+  t.mock.method(api, 'restore', async (id: string) => { main.restored.push(id); return { stopped: 'The agents record is damaged.', results: [], reloads: [] }; });
   queueClick({ kind: 'skills', key: 'bar', on: false }, 'bar', () => ({ kind: 'skills', items: ['bar'], rows: [{ kind: 'skills', key: 'bar' }], changes: [], said: 'bar is off in Claude Code.', pluginsOnly: true,
     plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', skill: 'bar', action: 'skill-off' }] } }), () => false);
   flip('review', false, undefined, 'agents');
@@ -822,8 +822,8 @@ test('Turn these off where every kind refuses: nothing is turned off; the result
   homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'mcp', key: 'github' }], { on: true });
   turnTheseOff([itemRow('skills', 'notes'), itemRow('mcp', 'github')]);
   await settled();
-  await main.pass({ stopped: 'The skills record is damaged.', results: [], writes: 0 });
-  await main.pass({ stopped: 'The MCP record is damaged.', results: [], writes: 0 });
+  await main.pass({ stopped: 'The skills record is damaged.', results: [], writes: 0, reloads: [] });
+  await main.pass({ stopped: 'The MCP record is damaged.', results: [], writes: 0, reloads: [] });
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.act, flashRequests.size],
     ['2 of 2 didn’t go through in every tool: notes and github. Nothing changed.', ['Skills: The skills record is damaged.', 'MCP servers: The MCP record is damaged.'], undefined, 0]);
 });
@@ -889,7 +889,7 @@ test('Turn these off across kinds, from the No use seen chip: a skill only some 
   app.home!.skills.library.notes!.on = app.home!.agents.library.planner!.on = false;
   await main.pass(offMade('skills', 'notes'));
   // Kind by kind, in turn: the servers' click goes once the skills' is done, and main refuses it; the agents' goes after it.
-  await main.pass({ stopped: 'The MCP record is damaged. Nothing was written or deleted.', results: [], writes: 0 });
+  await main.pass({ stopped: 'The MCP record is damaged. Nothing was written or deleted.', results: [], writes: 0, reloads: [] });
   await main.pass(offMade('agents', 'planner'));
   assert.deepEqual(main.sent, ['notes off, seen on', 'server github off', 'agent planner off']);
   assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn, app.outcome?.act?.label],
@@ -918,7 +918,7 @@ test('Turn these off where every row it turned off is kept back by a tool: the l
   turnTheseOff([itemRow('skills', 'notes'), itemRow('skills', 'spare')]);
   await settled();
   app.home!.skills.library.notes!.on = app.home!.skills.library.spare!.on = false;
-  await main.pass({ results: [...partly('notes').results, ...partly('spare').results], writes: 2, made: ['off-skills-notes', 'off-skills-spare'] });
+  await main.pass({ results: [...partly('notes').results, ...partly('spare').results], writes: 2, reloads: [], made: ['off-skills-notes', 'off-skills-spare'] });
   assert.equal(app.outcome?.text, '2 of 2 didn’t go through in every tool: notes and spare. Both are off.');
 });
 
@@ -926,7 +926,7 @@ test('An Undo across kinds whose agent’s entry is stopped: the agents’ entri
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'review' }, { kind: 'agents', key: 'review' }, { kind: 'agents', key: 'notes' }, { kind: 'mcp', key: 'github' }]);
   const stop = 'The agents record is damaged. Nothing was written or deleted.';
-  t.mock.method(api, 'restore', async (id: string) => { main.restored.push(id); return id === 'off-agents-notes' ? { stopped: stop, results: [] } : { results: [] }; });
+  t.mock.method(api, 'restore', async (id: string) => { main.restored.push(id); return id === 'off-agents-notes' ? { stopped: stop, results: [], reloads: [] } : { results: [], reloads: [] }; });
   flip('review', false);
   flip('review', false, undefined, 'agents');
   flip('notes', false, undefined, 'agents');
@@ -1179,4 +1179,55 @@ for (const stale of [false, true]) test(`a plugin link left during a read return
   await settled();
   const { source, plugin } = fullPlace();
   assert.deepEqual([source, plugin], ['/beta', 'gamma']);
+});
+
+test('Reload advice settles on final state across one run and its combined Undo (Item 1a: On then Off, then Undo)', async t => {
+  onLibrary();
+  const events = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: false });
+  events.splice(0, events.length,
+    { id: 'on-skills-notes', key: 'notes', kind: 'on', at: '2026-11-21T10:00:00.000Z' },
+    { id: 'off-skills-notes', key: 'notes', kind: 'off', at: '2026-11-21T10:00:01.000Z' });
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    // Undo replays newest first: undoing Off writes the skill, then undoing On removes it again.
+    return id === 'off-skills-notes'
+      ? { results: [], reloads: [{ tool: 'pi-cli', kind: 'skill', key: 'notes', on: true }, { tool: 'codex-cli', kind: 'skill', key: 'notes', on: true }] }
+      : { results: [], reloads: [{ tool: 'pi-cli', kind: 'skill', key: 'notes', on: false }, { tool: 'codex-cli', kind: 'skill', key: 'notes', on: false }] };
+  });
+  onNow.set(rowId('skills', 'notes'), false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.notes!.on = true;
+  onNow.set(rowId('skills', 'notes'), true);
+  await main.pass({ results: [{ item: 'notes', harness: 'pi-cli', outcome: 'written', message: '' }], writes: 1, made: ['on-skills-notes'], reloads: [{ tool: 'pi-cli', kind: 'skill', key: 'notes', on: true }, { tool: 'codex-cli', kind: 'skill', key: 'notes', on: true }] });
+  assert.deepEqual(app.outcome?.reloads?.map(each => each.tool), ['pi-cli', 'codex-cli']);
+  flip('notes', false);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  onNow.set(rowId('skills', 'notes'), false);
+  await main.pass({ results: [{ item: 'notes', harness: 'pi-cli', outcome: 'removed', message: '' }], writes: 1, made: ['off-skills-notes'], reloads: [{ tool: 'pi-cli', kind: 'skill', key: 'notes', on: false }, { tool: 'codex-cli', kind: 'skill', key: 'notes', on: false }] });
+  assert.equal(app.outcome?.reloads, undefined, 'turning Off in the same run cancels the earlier On reload advice');
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual(main.restored, ['off-skills-notes', 'on-skills-notes']);
+  assert.equal(app.outcome?.reloads, undefined, 'combined Undo of On then Off ends back at Off and advises nothing');
+});
+
+test('Plugin runReloads settles tick Pi, tick OpenCode, untick Pi in one run to OpenCode only (Item 1b)', async () => {
+  start();
+  resetMarket();
+  const step = (tool: 'pi-cli' | 'opencode-cli', on: boolean): PluginTurnResult => ({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool, action: on ? 'install-items' : 'remove-items',
+      report: { tool, outcome: on ? 'installed' : 'uninstalled', changed: true, message: on ? 'Installed.' : 'Removed.', runs: [],
+        reloads: [{ tool, kind: 'skill', key: 'helper', on, plugin: 'alpha@team' }] } }],
+    before: null, back: [],
+  });
+  turnPlugin(entry, 'alpha', 'on', 'pi-cli');
+  turnPlugin(entry, 'alpha', 'on', 'opencode-cli');
+  turnPlugin(entry, 'alpha', 'off', 'pi-cli');
+  await settled();
+  await main.answer(step('pi-cli', true));
+  await main.answer(step('opencode-cli', true));
+  await main.answer(step('pi-cli', false));
+  assert.deepEqual(runReloads().items.map(item => [item.tool, item.chip]), [['opencode-cli', 'OpenCode: restart']]);
 });

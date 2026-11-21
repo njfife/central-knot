@@ -32,7 +32,6 @@ import { recordedIds } from './sourcestore.ts';
 import type { Change, HarnessId, PassResult, PluginItemLine, PluginItemsView, SyncNotice, YourName } from './types.ts';
 import { harnessIds } from './harnesses.ts';
 import { notInWhy, type ItemOut } from './pluginstatus.ts';
-import { writtenReloads } from './reload.ts';
 import { toolNames } from './words.ts';
 
 /** The managed tools a plugin's items go to as library items: those with no plugin installer (Pi, OpenCode). */
@@ -231,7 +230,7 @@ function outsIn(tool: HarnessId, lines: PluginItemLine[], linked: Linked[], own:
   ...linked.filter(({ item }) => !wantedIn(item, tool)).map(({ kind, item }): Out => ({ name: item.name, kind, out: !item.on ? 'off' : own(item) ? 'own' : 'kept' }))];
 }
 const wroteIn = (results: Passed[], tool: HarnessId) => results.some(({ result }) => result.results.some(each => each.harness === tool && (each.outcome === 'written' || each.outcome === 'removed')));
-const reloadsIn = (results: Passed[], tool: HarnessId) => results.flatMap(({ kind, result }) => writtenReloads(result.results.filter(each => each.harness === tool), kind));
+const reloadsIn = (results: Passed[], tool: HarnessId) => results.flatMap(({ result }) => result.reloads.filter(each => each.tool === tool));
 
 /**
  * The Undo of a run on a plugin's items (runItems' `back`): each item as it was, by the same clicks, taken only while it is

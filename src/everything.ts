@@ -28,6 +28,7 @@ import { appendHistory, clock, readHistory, replaceHistory } from './history.ts'
 import { everythingAction, everythingPlan, libraryEntry, restorePlan, type EntryItem, type LeftIn } from './historyactions.ts';
 import { itemsNow, restoreAll, type Kind, type Seen } from './librarypass.ts';
 import { serverKind } from './servers.ts';
+import { destinationReloads } from './reload.ts';
 import { libraryGate, readRecord, saveRecord, type ShareContext, type SyncRecord } from './share.ts';
 import { skillKind } from './skills.ts';
 import type { ApplyResult, DestinationResult, HarnessId, HistoryEvent } from './types.ts';
@@ -91,12 +92,12 @@ async function ownActions(context: ShareContext, tools: HarnessId[], entries: Hi
 /** A Synchronize everything entry's History action: a switch-on's one Undo, or that Undo's Restore (historyactions.ts everythingAction says which). */
 export async function everythingEntryAction(context: ShareContext, tools: HarnessId[], eventId: string): Promise<ApplyResult> {
   const gate = await libraryGate(context);
-  if ('refused' in gate) return { stopped: gate.refused, results: [], harnessWrites: 0 };
+  if ('refused' in gate) return { stopped: gate.refused, results: [], harnessWrites: 0, reloads: [] };
   const history = await readHistory(context), event = history.find(each => each.id === eventId), about = await entryItems(context, tools);
   const action = event && everythingAction(event, history, about);
-  if (!action) return { stopped: 'That change has nothing left to undo.', results: [], harnessWrites: 0 };
+  if (!action) return { stopped: 'That change has nothing left to undo.', results: [], harnessWrites: 0, reloads: [] };
   const did = action.label === 'Undo' ? await takeBack(context, tools, event, history, about) : await putBack(context, tools, event, history, about);
-  return { results: did.results, harnessWrites: did.writes, made: did.made };
+  return { results: did.results, harnessWrites: did.writes, made: did.made, reloads: destinationReloads(did.results) };
 }
 
 /**

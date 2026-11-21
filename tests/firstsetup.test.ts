@@ -384,8 +384,8 @@ test('“Use the latest for the rest” says what happened to each: taken in, sk
   const item = (key: string, kind: Waiting['kind'] = 'skills'): Waiting => ({ kind, key, name: key, latest: { tool: 'codex-cli', hash: key } });
   const [notes, review, plan] = [item('notes'), item('review'), item('plan', 'agents')], docs: Waiting = { kind: 'mcp', key: 'docs', name: 'docs' };
   const done = latestDone([notes, review, plan], [docs], [
-    { kind: 'skills', result: { writes: 1, results: [{ item: 'review', outcome: 'held', unchanged: true, chooseAgain: true, message: 'The copy you chose changed since you chose it.' }] } },
-    { kind: 'agents', result: { stopped: 'The sync record is damaged. Nothing was written or deleted. Put the record back, then try again.', results: [], writes: 0 } },
+    { kind: 'skills', result: { writes: 1, reloads: [], results: [{ item: 'review', outcome: 'held', unchanged: true, chooseAgain: true, message: 'The copy you chose changed since you chose it.' }] } },
+    { kind: 'agents', result: { stopped: 'The sync record is damaged. Nothing was written or deleted. Put the record back, then try again.', results: [], writes: 0, reloads: [] } },
   ], [review, plan, docs]);
   assert.deepEqual(done, { warn: true, text: 'Used the latest copy for 1 item, each with its own Undo in History. Skipped 1 with no dates to go by (docs): it stays found, and its row asks which copy. '
     + 'review changed meanwhile, so it is asked again. plan wasn’t chosen: The sync record is damaged. Nothing was written or deleted. Put the record back, then try again.' });

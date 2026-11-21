@@ -15,8 +15,8 @@
 //   which also says why), so a click on one lands on a disabled control and is dropped, never run twice. A switch is off under
 //   busy too.
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
-import { noteMove, showPage, announce, busy, focusWhenDone, liveReloads, oweHomeRead, pinnedRows, readHomeOnce, rerender, saidInStatusBar, state as app, tell, type Outcome } from './app.ts';
-import { pluginReloads, reloadAdvice, type ReloadAdvice } from './reload.ts';
+import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, saidInStatusBar, state as app, tell, type Outcome } from './app.ts';
+import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
@@ -487,10 +487,10 @@ export function lastLines(): ResultLine[] {
   return ran.flatMap(({ source, plugin, ran: { done, stopped } = { done: [] } }) => [...resultLines(done), ...(stopped ? [{ source, plugin, ok: false, text: stopped, short: stopped }] : [])]);
 }
 
-/** Reload advice for the Plugins page's current run (pluginlibrary.ts writes and confirmed item switches), skipping switched-off copies. */
+/** Reload advice for the Plugins page's current run, settled chronologically so a later removal cancels an earlier write. */
 export const runReloads = (): ReloadAdvice => {
   const ran = market.clicks.filter(click => click.ran);
-  return reloadAdvice(liveReloads(pluginReloads(market.lastRun && ran.length ? ran.flatMap(click => click.ran!.done) : market.lastRun?.done ?? [])));
+  return reloadAdvice(settleReloads(pluginReloads(market.lastRun && ran.length ? ran.flatMap(click => click.ran!.done) : market.lastRun?.done ?? [])));
 };
 
 /** The Undo of a plugin's switch (or "Undo the rest" after it): its entry put back, then its steps run, in main. */

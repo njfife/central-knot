@@ -53,7 +53,7 @@ import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, rowCount
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
-import { reloadAdvice, rowReload, toItemKind, type ReloadAction } from './reload.ts';
+import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice, type ReloadItem } from './reload.ts';
 import { pageData, readPageData, resetPageData } from './pagedata.ts';
 
 const names = toolNames as Record<Tool, string>;
@@ -180,9 +180,11 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
     h('div.details-tools', {}, toolsFor(t, kindOf(row)).map(tool => {
       const install = row.copies[tool as HarnessId] ? row.installs[tool as HarnessId] : undefined;
       const item: PluginItemAt | undefined = install && { kind: row.kind, name: row.name, tool: tool as HarnessId, install };
+      const reload = state.outcome && outcomeShown(state.outcome, t)
+        ? rowReload(state.outcome.reloads, row.kind, itemKey(row.name), tool as HarnessId, `${row.plugin}@${row.marketName}`) : '';
       return h('div.details-tool', {}, h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
-        h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? cantSwitch(item) ?? switchWords(item) : ''].filter(Boolean).join(' ')),
+        h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? cantSwitch(item) ?? switchWords(item) : '', reload].filter(Boolean).join(' ')),
         item ? pluginItemControls(item, row) : null), usageLine(t, row, tool));
     })),
     row.kind === 'mcp' ? null : h('div.details-file', {}, h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, elId('pfile', row), () => toggleFile(row))), fileShown));
@@ -925,6 +927,31 @@ function outcomeShown(outcome: Outcome, t: Table | undefined): boolean {
 export const resultInHeader = () => state.page === 'library' || state.page === 'plugins'
   || (state.page === 'harnesses' && !(state.harness && state.harnessTab === 'instructions'));
 
+/** One tool's Copy button (icon and title carry "Copy"); flashes check and announces on click. */
+function reloadButton(item: ReloadItem): HTMLElement {
+  const control = button({ variant: 'outline', size: 'micro', icon: 'copy', label: item.chip!, name: `${item.chip}. ${item.title}`, id: `outcome-copy-${item.tool}`,
+    attrs: { title: item.title!, 'data-copy': item.command! }, onclick: (event: Event) => {
+      event.stopPropagation();
+      void navigator.clipboard.writeText(item.command!).then(() => {
+        control.classList.add('is-copied'); control.firstElementChild?.replaceWith(icon('copy-check', 14)); announce(`Copied ${item.command}.`);
+        setTimeout(() => { control.classList.remove('is-copied'); control.firstElementChild?.replaceWith(icon('copy', 14)); }, 1500);
+      }, () => announce('Could not copy. Select the text instead.'));
+    } });
+  return control;
+}
+
+/** One non-wrapping line of per-tool reload chips for the folded header, with +N more opening Show all on overflow. */
+export function reloadChips(advice: ReloadAdvice, of: typeof state.shownWhole): HTMLElement | null {
+  const chips = advice.items.filter(item => item.chip);
+  return chips.length ? h('div.result-reloads', {},
+    h('span.result-copies', {}, chips.map(item => (item.command ? reloadButton(item) : h('span.reload-chip', { title: item.title! }, item.chip!)))),
+    h('button.inline-link.reload-more', { type: 'button', id: 'outcome-reload-more', hidden: true, onclick: (event: Event) => { event.stopPropagation(); state.shownWhole = of; rerender(); } }, '')) : null;
+}
+
+/** Per-tool reload lines for Show all and off-header bands: the table's sentence, then its Copy button if it has one. */
+export const reloadLines = (advice: ReloadAdvice): HTMLElement | null => (advice.items.length
+  ? h('div.reload-list.result-copies', {}, advice.items.map(item => h('div.reload-row', {}, h('span.reload-row-text', {}, item.text), item.command ? reloadButton(item) : null))) : null);
+
 /**
  * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar. While a
  * table is on screen (useTableShown), its open copy choice hides an older result. On a list page it is drawn in the header only
@@ -932,23 +959,6 @@ export const resultInHeader = () => state.page === 'library' || state.page === '
  * acted on was (noticeLines), whatever the page shows; unmarked so the status bar says it too (app.ts paintStatusMessage), with no
  * ×, its actions only while it is the last result.
  */
-/** A wrapping line of Copy buttons for reload commands inside an existing result (header, card or off-header band). */
-export function copyLine(actions: readonly ReloadAction[]): HTMLElement | null {
-  if (!actions.length) return null;
-  return h('div.result-copies', {}, actions.map(({ tool, command }) => {
-    const control = button({ variant: 'outline', size: 'micro', icon: 'copy', label: `Copy ${command}`, name: `Copy ${command} for ${names[tool]}`, id: `outcome-copy-${tool}`,
-      attrs: { title: `Copy ${command} for ${names[tool]}`, 'data-copy': command },
-      onclick: (event: Event) => {
-        event.stopPropagation();
-        void navigator.clipboard.writeText(command).then(() => {
-          control.firstElementChild?.replaceWith(icon('copy-check', 14)); announce(`Copied ${command}.`);
-          setTimeout(() => control.firstElementChild?.replaceWith(icon('copy', 14)), 1500);
-        }, () => announce('Could not copy. Select the text instead.'));
-      } });
-    return control;
-  }));
-}
-
 export function outcomeBand(cardResult?: Outcome): HTMLElement | null {
   const outcome = cardResult ?? state.outcome;
   if (!outcome || (!cardResult && !outcomeShown(outcome, useTableShown())) || saidInStatusBar(outcome)) return null;
@@ -977,7 +987,7 @@ export function outcomeBand(cardResult?: Outcome): HTMLElement | null {
         : outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
     cardResult ? null : closeButton(closeResult, { id: 'outcome-dismiss' }),
-    outcome === state.outcome && !resultInHeader() && outcome.reloads ? copyLine(reloadAdvice(outcome.reloads).actions) : null);
+    outcome === state.outcome && !resultInHeader() && outcome.reloads ? reloadLines(reloadAdvice(outcome.reloads)) : null);
 }
 
 /**
@@ -1063,10 +1073,15 @@ export function listResult(): HTMLElement[] {
     ...(done ? state.outcome?.reasons ?? [] : []).map(reason => (typeof reason === 'string' ? reason : [h('strong.item-name', {}, reason[0]), reason[1]]))];
   // With no result above them, their × closes them and the click's result they belong to.
   const close = () => { for (const { problem } of background) state.dismissed.add(problemKey(problem)); closeResult(); };
-  // With no problem line, Show all follows the sentence, for one the header's two lines cut.
-  if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0));
-  const copies = done && state.outcome?.reloads ? copyLine(reloadAdvice(state.outcome.reloads).actions) : null;
-  return [done, copies, lines.length ? h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, done ? state.outcome : kept.length ? lastResult(kept[0]!.kind) : background[0]?.problem), done ? null : closeButton(close, { id: 'problems-dismiss' })) : null]
+  const of = done ? state.outcome : kept.length ? lastResult(kept[0]!.kind) : background[0]?.problem;
+  const whole = of !== undefined && state.shownWhole === of;
+  const advice = done && state.outcome?.reloads ? reloadAdvice(state.outcome.reloads) : undefined;
+  const hasAdvice = !!advice?.items.length;
+  // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
+  if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0, hasAdvice));
+  const chips = !whole && advice ? reloadChips(advice, of) : null;
+  const problem = lines.length ? h(`div.band${chips ? '.result-row2' : ''}`, { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, hasAdvice), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
+  return [done, whole && advice ? reloadLines(advice) : !problem ? chips : null, problem]
     .filter((band): band is HTMLElement => !!band);
 }
 
@@ -1090,19 +1105,19 @@ export const backgroundProblems = () => (state.home?.sync.caughtUp ?? [])
  * Show all; shown whole (`of`, their result: app.ts state.shownWhole), every line whole. A line given in parts is what leads it,
  * its item's name (`.item-name`), then what happened to it (the last part): folded, only the name gives way (style.css).
  */
-export function problemLines(lines: (Child | Child[])[], of: typeof state.shownWhole): HTMLElement {
+export function problemLines(lines: (Child | Child[])[], of: typeof state.shownWhole, hasAdvice = false): HTMLElement {
   const whole = of !== undefined && state.shownWhole === of, shown = whole ? lines : lines.slice(0, 1);
   const text = (line: Child | Child[]) => h('span.problem-text', {}, Array.isArray(line) ? [...line.slice(0, -1).map(part => (typeof part === 'string' ? h('span', {}, part) : part)), h('span.problem-rest', {}, line.at(-1))] : line);
-  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, text(line), at === shown.length - 1 ? wholeToggle(of, lines.length) : null)));
+  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, text(line), at === shown.length - 1 ? wholeToggle(of, lines.length, hasAdvice) : null)));
 }
 
 /**
  * The one Show all of a result in the header, after the last thing it shows (the sentence, or a problem line): "Show all 3 reasons"
- * where `count` lines wait, else drawn only when the header cuts what it shows (renderer.ts, data-when-cut); Show less on the card.
+ * where `count` lines wait, else drawn only when the header cuts what it shows or holds reload lines under Show all (renderer.ts, data-when-cut); Show less on the card.
  */
-export function wholeToggle(of: typeof state.shownWhole, count: number): HTMLElement {
+export function wholeToggle(of: typeof state.shownWhole, count: number, hasAdvice = false): HTMLElement {
   const whole = of !== undefined && state.shownWhole === of, more = count > 1;
-  return h('button.inline-link', { type: 'button', id: 'problems-show-all', 'aria-expanded': String(whole), 'data-when-cut': whole || more ? undefined : '', onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
+  return h('button.inline-link', { type: 'button', id: 'problems-show-all', 'aria-expanded': String(whole), 'data-when-cut': whole || more ? undefined : '', 'data-has-advice': hasAdvice && !whole ? '' : undefined, onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
     whole ? 'Show less' : `Show all${more ? ` ${count} reasons` : ''}`);
 }
 
@@ -2382,10 +2397,10 @@ const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skil
 
 /** What one tool has, for its row in the item's details: what its copy is, then whether its own switch has it off, and any reload step from the active click result. */
 function harnessLine(skill: ItemRow, tool: Tool): string {
-  const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
-    ? rowReload(state.outcome.reloads, toItemKind(skill.kind), skill.key, tool as HarnessId) : '';
-  // Through a plugin: where it comes from, then why its switch can't be used here, or that it is the whole plugin's.
   const through = itemThrough(skill, tool);
+  const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
+    ? rowReload(state.outcome.reloads, toItemKind(skill.kind), through ? itemKey(through.name) : skill.key, tool as HarnessId, through ? `${through.install.plugin}@${through.install.marketName}` : undefined) : '';
+  // Through a plugin: where it comes from, then why its switch can't be used here, or that it is the whole plugin's.
   if (through) return [skill.cannot?.[tool], cantSwitch(through) ?? switchWords(through), reload].filter(Boolean).join(' ');
   const lib = libraryPages[skill.kind], own = skill.ownPart?.[tool];
   return [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : '', reload].filter(Boolean).join(' ');
