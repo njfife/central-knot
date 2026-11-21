@@ -19,6 +19,7 @@
 import { basename } from 'node:path';
 import { pluginItems, wasRead } from './atlink.ts';
 import type { PluginFiles } from './catalogdetail.ts';
+import { keptBack } from './clickplan.ts';
 import { fromLinkSinceTakeIn, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
 import { copiesOf, lookFor, type KindLibrary, type SourceRead } from './librarypass.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
@@ -80,8 +81,10 @@ export async function withItemsOf(context: ShareContext, entries: PluginEntry[])
 /**
  * How many items linked to the plugin are wanted in a tool with no installer (none in one with an installer): the one place
  * "has it" there is worked out, one or more (pluginrecord.ts); the page reads it from itemsView (pluginstatus.ts itemsIn).
+ * `held`: the names a run's pass held in that tool, which aren't there yet (reportIn).
  */
-const onIn = (linked: Linked[], tool: HarnessId) => (takesPlugins(tool) ? 0 : linked.filter(({ item }) => wantedIn(item, tool)).length);
+const onIn = (linked: Linked[], tool: HarnessId, held: string[] = []) =>
+  (takesPlugins(tool) ? 0 : linked.filter(({ item }) => wantedIn(item, tool) && !held.includes(item.name)).length);
 
 /**
  * The tools a name the plugin makes is kept out of (library.ts A PLUGIN): each managed tool with no installer where the plugin
@@ -170,14 +173,16 @@ function clickOn(ask: ItemsAsk, item: LibraryItem, own: (tool: HarnessId) => boo
  * none is on there, the plugin's files unreadable (`unread`) or each item's reason (notInWhy).
  */
 function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], why: string, unread: boolean): PluginDone['report'] {
-  const on = onIn(after, tool), has = on > 0, name = toolNames[tool];
+  // What is there: an item its pass held in the tool (it waits for the shared skills folder, say) isn't, and the report says why.
+  const held = results.flatMap(({ result }) => result.results.filter(each => each.harness === tool && keptBack(each) && after.some(({ item }) => item.name === each.item)));
+  const on = onIn(after, tool, held.map(each => each.item)), has = on > 0, name = toolNames[tool];
   const changed = has !== onIn(before, tool) > 0 || wroteIn(results, tool);
-  const said = `${on} of its ${after.length} items ${on === 1 ? 'is' : 'are'} on in ${name}.`;
+  const said = [`${on} of its ${after.length} items ${on === 1 ? 'is' : 'are'} on in ${name}.`, ...new Set(held.map(each => each.message))].join(' ');
   // Its notes: what the run also changed in the tool's own settings with its items' copies (Pi's list: librarypass.ts Kind.follow).
   const notes = results.flatMap(({ result }) => result.results.flatMap(each => (each.harness === tool && each.settingsChanged ? [each.settingsChanged] : [])));
   const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message, runs: [], changed, ...(notes.length ? { notes } : {}) });
   if ('outOf' in ask) return report(has ? 'failed' : 'uninstalled');
-  if (!has && 'into' in ask) return report('held', why);
+  if (!has && 'into' in ask) return report('held', held.length ? said : why);
   if (unread && 'read' in ask) return report('failed', why);
   return report('read' in ask && !ask.bring ? 'updated' : 'installed', unread ? `${said} ${why}` : said);
 }

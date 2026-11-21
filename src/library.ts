@@ -84,14 +84,17 @@
 // managed, when its folder is made again or it is managed again (librarypass.ts guardFolders, cameBack), and by Take over of that
 // folder (skills.ts runTakeOver). With it, no copy there now is the table's deletion by hand, settled as any (librarypass.ts
 // copyIn); the kind says how (`sharedWay`: `copy`, its folder there gone, said "in the shared folder"; `link`, its link gone).
-// While the shared folder can't be vouched for, nothing is concluded from it and nothing is written because of it: it is missing
-// where it held skills, can't be listed, or lists none of the folders the record names (skills.ts sharedListing). Then a harness
-// that may have had the item through it (it reads that folder, holds a link that leads nowhere, or had it so) is unseen: nothing
-// turns Off, and nothing is written there, a new item's first copy included, until the folder is back. The problems say it once.
+// While the shared folder can't be vouched for, nothing is concluded from it, nothing is written because of it, and nothing is
+// taken from it: it can't be listed, or, of the folders it is known to hold (the record's, and those a link in a harness's own
+// folder leads to, there or not), it is missing or lists none (skills.ts sharedListing); known to hold none, nothing can say it
+// held any, and it is as it lists. Then nothing in it is a way or a copy found (skills.ts readAlsoRead), and a harness that may
+// have had the item through it (it reads that folder, holds a link that leads nowhere, or had it so) is unseen: nothing turns
+// Off, and nothing is written there, a new item's first copy included, until the folder is back. The problems say it once, with
+// the way out for a person who did remove those skills: turn them off, and remove the links to them.
 // A harness that reads that folder is unseen for an item even with a copy of its own (skills.ts readDisk), since that copy may be
-// beside one away: not written over, taken in, recorded or removed, and a found key with such a copy waits (FOUND, below: held
-// back). The
-// price: a skill only ever in such a harness's own folder (Codex's, say) waits too until the folder is back; one in a harness
+// beside one away: not written over, taken in, recorded or removed; a found key with such a copy waits (FOUND, below: held back),
+// and so does an Undo that would give such a copy back (librarypass.ts click). A click's result names each harness that waits.
+// The price: a skill only ever in such a harness's own folder (Codex's, say) waits too until the folder is back; one in a harness
 // that doesn't read it, with no link into it (Claude Code's own folder), is taken in as on any day.
 //
 // Other marks a harness's line can carry are a kind's own, worked out at each look from what it read and never stored, and

@@ -4,8 +4,8 @@
 // (tests/skillclicks.ts), edits, files added, modes changed and folders deleted by hand, copies made by hand, a copy in
 // ~/.agents/skills (which Copilot CLI, Codex and Pi read; beside the installer's other skill, on too) coming and going (gone
 // while a tool had the skill only there: a deletion by hand, after which no pass writes a copy there), the whole shared folder
-// away, unreadable or replaced by a folder of other things for a pass, or away for two passes beside a reader's own copy (no
-// folder of any tool changes), Take over of it,
+// away, unreadable or replaced by a folder of other things for a pass, by one with a skill of its own for two passes with
+// Synchronize everything on, or away for two passes beside a reader's own copy (no folder of any tool changes), Take over of it,
 // a tool's own switch set by hand and cleared, Automatic sync off and on, History's days passing, a folder that can't be
 // written during a click, a crash at each step of a write or a removal, a tool uninstalled or left out, the agent turned off and on, and a source (a made-up
 // repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own in its notes/ folder: added, changed
@@ -67,7 +67,7 @@ import { applyServers, serversView } from '../src/servers.ts';
 import { wantedIn } from '../src/library.ts';
 import { asItIs, asksWhichCopy, harnessIs, placeOf, rowClicks } from '../src/libraryrow.ts';
 import { DAY_MS } from '../src/model.ts';
-import { readTree, type ShareContext } from '../src/share.ts';
+import { readRecord, readTree, saveRecord, type ShareContext } from '../src/share.ts';
 import type { LibraryItem } from '../src/library.ts';
 import { applySkills, clearSwitch, skillKind, takeOver } from '../src/skills.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
@@ -497,6 +497,19 @@ async function walk(seed: number): Promise<Finding[]> {
         whole('replaced by a folder of other things', async () => { await rename(root, aside); await mkdir(root); await writeFile(join(root, 'README.md'), 'Not mounted.\n'); },
           async () => { await rm(root, { recursive: true }); await rename(aside, root); });
         if (process.getuid?.() !== 0) whole('unreadable', () => chmod(root, 0), () => chmod(root, 0o755));
+        // Another skills folder in its place, with a skill of its own, for two passes with Synchronize everything on: nothing in it
+        // is found or taken in, so no folder of any tool changes (library.ts THE SHARED FOLDER).
+        add(1, { name: 'the shared folder replaced by one with a skill of its own, two passes, Synchronize everything on', app: true, byHand: true, run: async () => {
+          const { record } = await readRecord(box.home), before = await folders();
+          await rename(root, aside);
+          await mkdir(join(root, 'stranger'), { recursive: true });
+          await writeFile(join(root, 'stranger/SKILL.md'), skillText('Another folder’s.', 'stranger'));
+          await saveRecord(box.home, { ...record!, syncEverything: true });
+          try {
+            for (const _ of [1, 2]) await applySkills(context(), tools, [], { background: true });
+            if (!same(await folders(), before) || (await seen(box, context(), 'stranger')).item) fail('a folder of other skills in the shared folder’s place had something taken in or a tool’s folder changed');
+          } finally { await saveRecord(box.home, record!); await rm(root, { recursive: true }); await rename(aside, root); }
+        } });
         // A reader that had it only there gets a differing folder of its own, then the shared folder is away for two passes: its
         // own copy may be beside one away, so no folder of any tool changes (library.ts THE SHARED FOLDER).
         const reader = (['codex-cli', 'copilot-cli'] as Tool[]).find(tool => held.throughShared?.[tool]);

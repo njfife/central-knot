@@ -740,10 +740,11 @@ async function syncItem(pass: Pass, item: LibraryItem) {
     remove: harness => (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
   });
   if (held.length) await untell(pass, told, held);
-  // A click's item that waits in a tool for the shared folder (library.ts THE SHARED FOLDER) is held there, so its result doesn't
-  // count it as on there, and says why.
+  // A click's item that waits in a tool for the shared folder (library.ts THE SHARED FOLDER) is held there, so its result names the
+  // tool and says why: wanted there, it isn't on there yet; else its own copy stays, or what it had through that folder (no other way now).
   if (clicked) for (const harness of pass.managed) {
-    const waits = copies[harness]?.is === 'unseen' && wantedIn(item, harness) ? pass.disk.lostShared?.(item, harness) : undefined;
+    const copy = copies[harness], had = copy?.is === 'absent' && !wantedIn(item, harness) && hadThroughShared.includes(harness) && !pass.disk.held(item, harness);
+    const waits = copy?.is === 'unseen' || had ? pass.disk.lostShared?.(item, harness) : undefined;
     if (typeof waits === 'object') pass.results.push({ item: item.name, harness, outcome: 'held', message: waits.unseen });
   }
   // A copy found gone (deleted by hand: plan `forget`), or the shared folder's that a harness had it only through and has it no
@@ -1031,6 +1032,9 @@ async function click(pass: Pass, asked: Change) {
   if (asked.forPlugin && known?.source !== asked.forPlugin) return;
   const stale = asked.seenOn !== undefined && !!item?.on !== asked.seenOn;
   if (stale) return refuse(`${name} changed since the page was read. Nothing was changed; read again.`);
+  // An Undo that gives a harness its own copy back waits, as Add does, while that copy is held back (library.ts THE SHARED FOLDER).
+  const waits = Object.keys(asked.giveBack ?? {}).map(harness => pass.disk.holdsBack?.get(`${harness}:${asked.key}`)).find(Boolean);
+  if (waits) return refuse(`${waits} It can be undone once the folder is back.`);
   if (asked.giveBack) pass.giveBack.set(asked.key, asked.giveBack);
   if (asked.deleted === false) {
     if (!known?.deleted) return;
@@ -1074,7 +1078,7 @@ async function addClicked(pass: Pass, asked: Change, refuse: Refuse) {
     pass.results.push({ item: foundCopies(pass, asked.key, asked.except)[0].name, outcome: 'held', differs: true, message: 'Copies differ. Choose which copy to use.' });
     return;
   }
-  refuse(answer.leave === 'held-back' ? found.heldBack! : refusedAdd[answer.leave] ?? '', answer.leave === 'choice-changed' ? { chooseAgain: true } : {});
+  refuse(answer.leave === 'held-back' ? `${found.heldBack!} It can be added once the folder is back.` : refusedAdd[answer.leave] ?? '', answer.leave === 'choice-changed' ? { chooseAgain: true } : {});
 }
 
 /**
