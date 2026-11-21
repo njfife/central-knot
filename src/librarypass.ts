@@ -733,9 +733,15 @@ async function syncItem(pass: Pass, item: LibraryItem) {
     log: async () => { told = logItem(pass, item, made, slot, copies); await appendHistory(context, told.events); },
     write: harness => writeCopy(pass, item, harness, slot[harness]),
     // An Undo gives a harness back the copy its click took over, as that harness's own, instead of removing what is there.
-    remove: harness => (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
+    remove: harness => (giveBack[harness] ? giveBackCopy(pass, item, harness, slot[harness], giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
   });
   if (held.length) await untell(pass, told, held);
+  // Where the plan neither writes nor removes (the harness can't take the current version, or has no copy now), an Undo gives
+  // the copy back all the same, so the harness holds what it held before the click.
+  for (const [harness, hash] of Object.entries(giveBack) as [HarnessId, string][]) {
+    const copy = copies[harness], untouched = !made.write.includes(harness) && !made.remove.includes(harness);
+    if (untouched && (copy?.is === 'held' || copy?.is === 'absent') && await giveBackCopy(pass, item, harness, slot[harness], hash)) delete item.applied[harness];
+  }
   // A click's item that waits in a tool for the shared folder (library.ts THE SHARED FOLDER) is held there, so its result doesn't
   // count it as on there, and says why.
   if (clicked) for (const harness of pass.managed) {
@@ -794,15 +800,15 @@ async function removeCopy(pass: Pass, item: LibraryItem, here: Seen): Promise<bo
 }
 
 /**
- * Gives a harness back its own copy (`hash`, a version) over the one Central Knot applied there, which carryOut then no
- * longer counts as applied: the harness's copy is its own again, as before the click this undoes. True when it is there.
+ * Gives a harness back its own copy (`hash`, a version) over the one Central Knot applied there, or where it has none now, which
+ * carryOut then no longer counts as applied: the harness's copy is its own again, as before the click this undoes. True when it is there.
  */
-async function giveBackCopy(pass: Pass, item: LibraryItem, here: Seen, hash: string): Promise<boolean> {
-  const where = toolName(here.tool), result = (outcome: 'written' | 'held', message: string) => pass.results.push({ item: item.name, harness: here.tool, outcome, message });
-  if (here.hash === hash) { result('written', `${where} keeps its own copy, as before.`); return true; }
+async function giveBackCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: Seen | undefined, hash: string): Promise<boolean> {
+  const where = toolName(tool), result = (outcome: 'written' | 'held', message: string) => pass.results.push({ item: item.name, harness: tool, outcome, message });
+  if (here?.hash === hash) { result('written', `${where} keeps its own copy, as before.`); return true; }
   const content = await pass.kind.readVersion(pass.context, item.key, hash);
   if (!content) { result('held', `${where}’s own copy is no longer in Central Knot’s store, so it can’t be given back.`); return false; }
-  const refused = await pass.kind.write(pass.context, item, here.tool, here, content);
+  const refused = await pass.kind.write(pass.context, item, tool, here, content);
   if (refused && 'stopped' in refused) { result('held', refused.stopped); return false; }
   pass.writes++;
   result('written', `${where} has its own copy back, as before.`);
@@ -1261,22 +1267,35 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
 }
 
 /**
- * Take (library.ts TAKE), for an item of his the table answered `take`: the plugin's version current, his kept among the versions,
- * the item linked with the plugin's On; let into the tools the read brings the plugin into, and kept out of every other managed
- * tool with a copy, what was applied there let go so that copy stays the tool's own. Its entry (an `edit`, cause `plugin-taken`)
- * records his On and `except` before it (`took`), which its Undo puts back (untake).
+ * Take (library.ts TAKE), for an item of his the table answered `take`: in its click's tool only (`into`), and only where that tool
+ * can hold the plugin's version (takeHeld: else nothing changes, and the sourced answer says why). The plugin's version current,
+ * his kept among the versions, the item linked with the plugin's On; every other tool with something of his, managed or not, kept
+ * out and let go. Where the click's tool holds other than his current version, that copy is let go too, so the plan keeps it and
+ * its entry names it (`tookFrom`) for the Undo to give back. The entry (an `edit`, cause `plugin-taken`) records his On and `except`.
  */
 async function take(pass: Pass, item: LibraryItem, there: { hash: string; content: unknown; own?: Partial<Record<HarnessId, string>> }, read: SourceRead<unknown>) {
-  const into = read.plugin?.into ?? [], took = { on: item.on, except: item.except }, previous = item.hash;
-  const copies = copiesOf(pass, item), his = pass.managed.filter(tool => { const copy = copies[tool];
-    return !into.includes(tool) && (copy?.is === 'present' || copy?.is === 'unseen' || (copy?.is === 'held' && !!copy.throughShared)); });
-  for (const tool of his) delete item.applied[tool];
+  const into = read.plugin?.into ?? [], took = { on: item.on, except: item.except }, previous = item.hash, copies = copiesOf(pass, item);
+  for (const tool of into) { const held = await takeHeld(pass, item, tool, there.content); if (held) { pass.sourced.get(item.key)!.held = held.why; return; } }
+  const his = [...new Set([...Object.keys(item.applied) as HarnessId[], ...pass.managed.filter(tool => copies[tool]?.is !== 'absent')])].filter(tool => !into.includes(tool));
+  for (const tool of [...his, ...into.filter(tool => (pass.disk.byKey.get(item.key)?.[tool]?.hash ?? previous) !== previous)]) delete item.applied[tool];
   const except = [...new Set([...item.except, ...(read.plugin?.outOf ?? []), ...his])].filter(tool => !into.includes(tool)).sort(byToolOrder);
   Object.assign(item, { on: !!read.plugin?.on, except, source: read.id, seen: there.hash } satisfies Partial<LibraryItem>);
-  if (there.hash === previous) pass.sourced.get(item.key)!.same = true;
-  else await setCurrent(pass.shelf, item, { hash: there.hash, at: read.commitAt, from: { how: 'source', link: read.link } }, there.content);
+  await setCurrent(pass.shelf, item, { hash: there.hash, at: read.commitAt, from: { how: 'source', link: read.link } }, there.content);
   pass.asked.set(item.key, { kind: 'edit', cause: 'plugin-taken', previous, version: there.hash, link: read.link, fill: 'written', took });
   await keepSourceOwn(pass, item, there);
+}
+
+/**
+ * Why the plugin's version of `item` can't land in `tool` by a take (library.ts TAKE), if it can't: the tool holds the item there
+ * (Disk.held, asked as the take would leave it: wanted there, at the plugin's version; his through the shared folder,
+ * `throughShared`; an agent's name a skill of Pi's has; a folder it can't write), or won't load that version (Kind.refusesToLoad). The page asks it before offering Use the
+ * plugin's (pluginlibrary.ts itemsView), the pass before it takes.
+ */
+export async function takeHeld(look: AnyLook, item: LibraryItem, tool: HarnessId, content: unknown): Promise<{ why: string; throughShared?: string } | undefined> {
+  const taken = { ...item, hash: look.kind.hashOf(content), on: true, except: item.except.filter(each => each !== tool) };
+  const held = look.disk.held(taken, tool) ?? look.disk.locked.get(tool);
+  const wont = held ? undefined : await look.kind.refusesToLoad?.(look.context, item, tool, content);
+  return held ?? (wont ? { why: wont } : undefined);
 }
 
 /**

@@ -15,7 +15,7 @@ import { itemTools, itemsBack, itemsView, lookAtKinds, readPlugin, runItems, wit
 import { recordedIds } from './sourcestore.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ItemKind } from './library.ts';
-import type { ActionReport, BundledView, Catalog, Clash, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice, YourName } from './types.ts';
 import { harnessIds } from './harnesses.ts';
 import { errorCode, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
@@ -380,7 +380,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * Each listed plugin with items (pluginlibrary.ts withItemsOf), read from its marketplace's copy as the table reads it
    * (itemsView): its page's "Its items", and what Pi and OpenCode have of it (pluginstatus.ts toolNow). A plugin that is On with
    * nothing linked is read too, and listed only where none of it can be on in a tool it is wanted in (itemsView `notIn`) or a
-   * name it has is his (`clashes`), so its page says why. A plugin whose parts wait to be moved (pluginstatus.ts waitsToMove) is not read: it has no Its items, so
+   * name it has is his (`yours`), so its page says why. A plugin whose parts wait to be moved (pluginstatus.ts waitsToMove) is not read: it has no Its items, so
    * Update and Update all bring it nothing. The home is looked at once for them all (pluginlibrary.ts lookAtKinds), when the first is read.
    */
   async function withItems(ctx: engine.PluginContext, share: ShareContext, tools: HarnessId[], marketplaces: MarketplaceView[], entries: PluginEntry[]) {
@@ -393,8 +393,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const at: Awaited<ReturnType<typeof itemFiles>> = plugin.gone ? { commitAt: '', problem: MARKET_UNREAD } : await itemFiles(ctx, market.source, plugin.name);
       const reads = at.files && await readPlugin(at.files, entry, at.commitAt, recorded, []);
       looks ??= await lookAtKinds(share, tools);
-      const shown = itemsView(tools, looks, entry, reads || undefined, at.problem);
-      if (read.includes(entry) || shown.notIn || shown.clashes) (market.items ??= {})[plugin.name] = shown;
+      const shown = await itemsView(tools, looks, entry, reads || undefined, at.problem);
+      if (read.includes(entry) || shown.notIn || shown.yours) (market.items ??= {})[plugin.name] = shown;
     }
   }
 
@@ -820,7 +820,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * the plugin (pluginlibrary.ts runItems, ItemsAsk `take`); its record doesn't change. Answers as a turn does, so its Undo is
    * a turn's (undoTurn: pluginlibrary.ts itemsBack, by the take's own Undo).
    */
-  async function take(source: string, plugin: string, item: Pick<Clash, 'kind' | 'key'>, tool: HarnessId, home: unknown): Promise<PluginTurnResult> {
+  async function take(source: string, plugin: string, item: Pick<YourName, 'kind' | 'key'>, tool: HarnessId, home: unknown): Promise<PluginTurnResult> {
     const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, done: [] };
     const share = host.share?.(), entry = entryOf((await readPluginRecord(String(home))).record, source, plugin);
@@ -948,7 +948,7 @@ const isSource = (value: unknown): value is string => value === '' || isText(val
 const isItemState = (value: unknown): value is ItemState => {
   const state = record(value);
   return !!state && ['skill', 'agent', 'mcp'].includes(state.kind as string) && isText(state.key, 300) && typeof state.on === 'boolean'
-    && Array.isArray(state.except) && state.except.every(tool => harnessIds.includes(tool as HarnessId)) && (state.took === undefined || isText(state.took, 100));
+    && Array.isArray(state.except) && state.except.every(tool => harnessIds.includes(tool as HarnessId)) && (state.entry === undefined || isText(state.entry, 100));
 };
 /** A marketplace or plugin name as the tools accept it; anything else never reaches a command line. */
 const isName = (value: unknown): value is string => typeof value === 'string' && engine.SAFE_NAME.test(value);

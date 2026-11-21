@@ -164,7 +164,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.previous !== undefined && event.previous === event.version) {
         return { glyph: 'undo-2', text: 'Undone: yours stays current; the source’s version is no longer marked as declined or taken, and the source’s row says whether an update waits.' };
       }
-      if (event.cause === 'plugin-taken') return { glyph: 'undo-2', text: `Undone: yours is current again${also(', in')}, and your own, no longer the plugin’s.` };
+      if (event.cause === 'plugin-taken') return { glyph: 'undo-2', text: `Undone: ${event.item} is yours again, as it was in every tool.` };
       if (undid) return { glyph: 'undo-2', text: `Undone: ${when ? `the version from ${when}` : 'the version before'} is current again${also(', in')}.` };
       return { glyph: 'undo-2', text: `${made ? `T${theVersion(made.from).slice(1)} (${when})` : 'An earlier version'} was made current${also(', in')}.` };
     }
@@ -197,8 +197,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.cause === 'source-kept') {
         return { glyph: 'link-2', text: `Yours stays current over ${source}’s version, which no longer waits: it is kept as a version, and the source’s next change is compared with it.` };
       }
-      if (event.cause === 'plugin-taken') return { glyph: 'link-2', text: event.previous === event.version ? `The plugin ${plugin}’s is the same as yours, so it follows the plugin now; ${THEIRS}`
-        : `Use the plugin’s: the plugin ${plugin}’s version became current${tools ? `, in ${tools}` : ''}; yours is kept as a version, and ${THEIRS}` };
+      if (event.cause === 'plugin-taken') return { glyph: 'link-2', text: `Use the plugin’s: the plugin ${plugin}’s version became current${tools ? `, in ${tools}` : ''};`
+        + ' yours is kept as a version, and each other tool with your copy keeps it as its own.' };
       if (event.cause === 'own-now') return { glyph: 'link-2-off', text: `Yours now: it was changed here, so it no longer follows ${source}, which never writes over it. It stays in the tools that had it, and its row lets it into the others. Its versions stay.` };
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'switched': {
@@ -324,9 +324,6 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   const replaced = event.seen !== undefined ? { seen: event.seen } : {};
   return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous, ...replaced } };
 }
-
-/** What a take's entry says of his copies in the tools it doesn't bring the plugin's into (library.ts TAKE). */
-const THEIRS = 'each other tool with your copy keeps it as its own.';
 
 /**
  * A take's Undo (library.ts TAKE; Change untake): his version current, his own, On or Off and kept out as before it, each tool's

@@ -252,12 +252,10 @@
 //                                                                   arriving On writes over nothing
 //   a name of its own he deleted        deleted, linked             stays deleted (`deleted`) but at a click that turns its
 //                                                                   items On (`bringBack`: its On, Add, a box ticked, Update)
-//   a name the library has              not linked: at Use the      taken (`take`: TAKE, below)
-//                                       plugin's for it; or the same
-//                                       content, at a read that
-//                                       brings the plugin into a tool
-//   a name the library has              not linked, otherwise       his stays (`differs`), said beside Use the plugin's
-//                                                                   (pluginlibrary.ts itemsView `clashes`)
+//   a name the library has              not linked, same content    nothing: no link, no write, his in every tool (`alike`)
+//   a name the library has              not linked, other content   his stays (`differs`), said beside Use the plugin's
+//                                                                   (pluginlibrary.ts itemsView `yours`); taken at that click
+//                                                                   alone (`take`: TAKE, below)
 //   anything, read or not               linked, changed here        let go (`let-go`): unlinked, the person's own item from then on,
 //                                                                   kept where it is (On, out of each managed tool with no copy
 //                                                                   of it then); never linked again or written over while it differs.
@@ -265,12 +263,13 @@
 //   S changed                           linked, a tool's copy       nothing, until a read where it can be seen: no version of a
 //                                       can't be seen for sure      plugin ever waits, and no Merge, Replace or Keep mine is asked
 //
-// TAKE (librarypass.ts take): his version stays a version, the plugin's becomes current, and the item is linked, with the plugin's
-// On; let into the tools the read brings the plugin into (SourceSeen plugin `into`: the box ticked, or Use the plugin's one), where
-// the plan writes the plugin's over his copy; kept out of every other managed tool with a copy (or one unseen, or his through the
-// shared folder), what was applied there let go, so that copy stays the tool's own and the plugin's Off never removes it. The same
-// content goes this road too, writing nothing. Its entry (an `edit`, cause `plugin-taken`) records his On and `except` before
-// it, which its Undo (historyactions.ts, librarypass.ts untake) puts back with his version, the item unlinked.
+// TAKE (librarypass.ts take): a take is one item, in one tool, by one click. It writes in that tool only (SourceSeen plugin `into`),
+// and only when that tool can hold the plugin's version (takeHeld; else nothing changes, and the click is told why); it never
+// writes, removes or re-reads as its own a copy in any other tool, whatever that tool is doing: each, managed or not, with a copy
+// or something applied, is kept out and let go, so the plugin's Off or an untick never removes it. His version stays a version,
+// the plugin's becomes current, the item is linked with the plugin's On. Its entry (an `edit`, cause `plugin-taken`) records his
+// On and `except` before it, and where the click's tool held other than his current version, that copy (`tookFrom`); its Undo
+// (historyactions.ts, librarypass.ts untake) gives back exactly what the click changed: his version, unlinked, those two, that copy.
 //
 // "Changed here" for a plugin's item is CHANGED HERE but for a copy that can't be seen for sure, which lets nothing go
 // (editedHere). Every pass takes the let-go row for each item linked to a recorded plugin, whether or not it reads the plugin
@@ -650,18 +649,17 @@ export function linkedTo(item: LibraryItem | undefined, { id, link }: { id: stri
  * answer alone, never a row's), S is kept as a version and the current one stays (`keep`: Keep mine's alone), the item turns
  * Off and is let go (`drop`), or `nothing`. A name the library has that is not brought in says why: its content differs
  * (`differs`; for a plugin, a name it has that the library has unlinked and doesn't take), it is another source's (`another`),
- * or it is deleted (`deleted`). A plugin's item changed here is let go (`let-go`), and a plugin takes a name he has (`take`:
- * A PLUGIN, TAKE).
+ * or it is deleted (`deleted`). A plugin's item changed here is let go (`let-go`); a name he has of the same content is left as
+ * it is (`alike`), and one of other content taken at Use the plugin's (`take`: A PLUGIN, TAKE).
  */
-export type SourceAnswer = 'make' | 'link' | 'same' | 'update' | 'wait' | 'merge' | 'keep' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted' | 'let-go' | 'take';
+export type SourceAnswer = 'make' | 'link' | 'same' | 'update' | 'wait' | 'merge' | 'keep' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted' | 'let-go' | 'take' | 'alike';
 
 /**
  * What the table is told of one name besides the item and S: what each managed tool holds of the item now (librarypass.ts
  * copiesOf; none, for what the record alone says), and a click on the source's row for it, Add on a deleted one (`bringBack`),
- * or Replace, Merge or Keep mine on one whose version waits (`replace`, `merge`, `keep`). For a plugin: Use the plugin's on a
- * name he has (`take`), and whether the read brings the plugin's items into some tool (`brings`: SourceSeen plugin `into`).
+ * or Replace, Merge or Keep mine on one whose version waits (`replace`, `merge`, `keep`); for a plugin, Use the plugin's (`take`).
  */
-export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean; merge?: boolean; keep?: boolean; plugin?: boolean; take?: boolean; brings?: boolean }
+export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean; merge?: boolean; keep?: boolean; plugin?: boolean; take?: boolean }
 
 /**
  * The header's A SOURCE table for one name: `item` is the library's for its key (deleted or not), `here` what the source holds.
@@ -676,7 +674,7 @@ export function fromSource(item: LibraryItem | undefined, here: AtSource, linked
   if (item.deleted) return asked.bringBack || (plugin && linked !== 'this') ? 'make' : 'deleted';
   if (linked === 'another') return 'another';
   if (linked === 'none' && !plugin) return here.hash === item.hash ? 'link' : 'differs';
-  if (linked === 'none') return asked.take || (asked.brings && here.hash === item.hash) ? 'take' : 'differs';
+  if (linked === 'none') return here.hash === item.hash ? 'alike' : asked.take ? 'take' : 'differs';
   // Its current version is the one this same link gave, so only an edit a tool holds can have changed it since: then it differs.
   if (linked === 'once') return here.hash === item.hash ? 'link' : changedHere(item, item.hash, copies) ? 'differs' : 'update';
   if (here.hash === item.seen) return 'nothing';
@@ -718,7 +716,7 @@ export interface SourceSeen {
   id: string; link: string; commitAt: string; whole: boolean; names: Map<string, { hash: string } | { unreadable: string }>;
   /**
    * The read is a plugin's (A PLUGIN): its On, which a name it makes arrives with, the tools that name is kept out of, and the
-   * tools the read brings its items into, which a name it takes is let into (TAKE).
+   * tools its click brings its items into, which a name it takes is let into (TAKE).
    */
   plugin?: { on: boolean; outOf: HarnessId[]; into: HarnessId[] };
 }
@@ -738,7 +736,7 @@ export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSe
     const entry = read.names.get(key), item = items[key];
     const here: AtSource = !entry ? (read.whole ? 'gone' : 'unreadable') : 'hash' in entry ? { hash: entry.hash } : 'unreadable';
     const about: SourceAsked = { copies: item && asked.copies?.(item), bringBack: asked.bringBack?.has(key), replace: asked.replace?.has(key),
-      merge: asked.merge?.has(key), keep: asked.keep?.has(key), plugin: !!read.plugin, take: asked.take?.has(key), brings: !!read.plugin?.into.length };
+      merge: asked.merge?.has(key), keep: asked.keep?.has(key), plugin: !!read.plugin, take: asked.take?.has(key) };
     return [key, fromSource(item, here, linkedTo(item, read, recorded), about)];
   }));
 }

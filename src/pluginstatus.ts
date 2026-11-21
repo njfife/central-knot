@@ -2,7 +2,7 @@
 // it, whether it is installed there, how many plugins a tool has installed (pluginsInstalled; for one that takes none, takesItemsOnly)
 // and how many of a marketplace's are installed (installedFrom), whether it is installed in none (installedNowhere, for Find), and
 // a short summary of what it holds.
-import type { Clash, Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView, YourName } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -187,6 +187,9 @@ export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Direc
 
 /** Whether the tool has the plugin's items: "has it" for Pi and OpenCode, as pluginlibrary.ts onIn counted it for the view. */
 export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => !!entry.items?.[plugin]?.on[tool];
+/** Whether every one of a plugin's items is on in a tool, as it loads them, or the same as his: the tool's box is ticked in full. */
+export const itemsAllIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => { const items = entry.items?.[plugin];
+  return !!items && (items.on[tool] ?? 0) - (items.keptOut?.[tool] ?? 0) >= items.of; };
 /** "2 of its 3 items are on", in one tool (`where`: " there"), as the tool loads them: those its own settings keep out said apart. */
 export const itemsOnWords = (entry: MarketplaceView, plugin: string, tool: HarnessId, where = '') => {
   const items = entry.items?.[plugin], out = items?.keptOut?.[tool] ?? 0, on = (items?.on[tool] ?? 0) - out;
@@ -544,16 +547,17 @@ export function notInWhy(tool: HarnessId, plugin: string, outs: { name: string; 
 }
 
 /**
- * One name of his under a tool's box (types.ts PluginItemsView clashes), beside Use the plugin's: OUT's `yours` for it alone; or,
- * had there through the shared skills folder, why that tool has no Use the plugin's.
+ * One name of his under a tool's box (types.ts PluginItemsView yours): the same as the plugin's; his through the shared skills
+ * folder; or OUT's `yours` for it alone, then why the plugin's can't land there (`held`) or, offered, Use the plugin's beside it.
  */
-export const clashSaid = (clash: Clash, tool: HarnessId) => (clash.shared
-  ? `${clash.name}: ${names[tool]} has your own skill by that name through the shared skills folder, which Central Knot never writes;`
-    + ' Take over on its row lets Central Knot change it there.'
-  : OUT.yours(clash.name, false, clash.kind));
-/** Why none of a plugin's items is on in a tool, as its line and box say it: notInWhy's reasons, then each name of his (clashSaid). */
+export function yourSaid({ name, kind, same, held }: YourName, tool: HarnessId): string {
+  if (same) return `${name} is the same as yours, so yours stays.`;
+  if (held?.shared) return `${name}: ${names[tool]} reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.`;
+  return [OUT.yours(name, false, kind), held?.why].filter(Boolean).join(' ');
+}
+/** Why none of a plugin's items is on in a tool, as its line and box say it: notInWhy's reasons, then each name of his (yourSaid). */
 export const whyNoneIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) =>
-  [...entry.items?.[plugin]?.notIn?.[tool]?.reasons ?? [], ...(entry.items?.[plugin]?.clashes?.[tool] ?? []).map(clash => clashSaid(clash, tool))];
+  [...entry.items?.[plugin]?.notIn?.[tool]?.reasons ?? [], ...(entry.items?.[plugin]?.yours?.[tool] ?? []).map(name => yourSaid(name, tool))];
 
 /** Words a tool's result or line says, starting with the tool's name unless they already do ("Codex: …", never "Codex: Codex’s …"). */
 export const toolSaid = (tool: HarnessId, words: string) => (words.startsWith(names[tool]) ? words : `${names[tool]}: ${words}`);

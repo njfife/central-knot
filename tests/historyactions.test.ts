@@ -235,10 +235,7 @@ test('Use the plugin’s (library.ts TAKE): its entry says what happened; its Un
   assert.deepEqual(offered(took, item({ source: 'geo-id', hash: 'x' })), ['Go back before this', back], 'the plugin updated meanwhile');
   assert.deepEqual(offered(took, item())?.[0], 'Go back before this', 'let go by an edit: his first version is not current');
   assert.equal(offered(took, item({ hash: 'a' })), undefined, 'his own again at his version: nothing to go back to');
-  const same = { ...took, previous: 'b' };
-  assert.equal(librarySentence(same, libraryWords.agents, tools)?.text, 'The plugin geo’s is the same as yours, so it follows the plugin now; each other tool with your copy keeps it as its own.');
-  assert.deepEqual(offered(same, item({ source: 'geo-id' })), ['Undo', { ...back, version: 'b' }], 'the same content: no version changes, the link and his placement go back');
   const undone = entry({ kind: 'current', cause: 'plugin-taken', previous: 'b', version: 'a', losers: [{ tool: 'claude-cli', hash: 'b' }] });
-  assert.equal(librarySentence(undone, libraryWords.agents, tools, item(), true)?.text, 'Undone: yours is current again, in Claude Code, and your own, no longer the plugin’s.');
+  assert.equal(librarySentence(undone, libraryWords.agents, tools, item(), true)?.text, 'Undone: reviewer is yours again, as it was in every tool.');
   assert.equal(offered(undone, item({ hash: 'a' })), undefined);
 });

@@ -259,7 +259,7 @@ export interface DesktopApi {
   /** The Undo of a turn: its record put back, then `back` run (marketplaces.ts undoTurn). */
   undoPluginTurn(source: string, plugin: string, before: PluginEntry | null, back: PluginOp[], home: string): Promise<{ stopped?: string; done: PluginDone[] }>;
   /** Use the plugin's: one name he has, the plugin's taken over his in one tool (marketplaces.ts take); its Undo is a turn's (undoPluginTurn). */
-  takePluginItem(source: string, plugin: string, item: Pick<Clash, 'kind' | 'key'>, tool: HarnessId, home: string): Promise<PluginTurnResult>;
+  takePluginItem(source: string, plugin: string, item: Pick<YourName, 'kind' | 'key'>, tool: HarnessId, home: string): Promise<PluginTurnResult>;
   /** The git repo the Managed set lives in, if any. `check` asks the repo for its latest commit first. */
   repo(check?: boolean): Promise<RepoView | null>;
   connectRepo(url: string, branch: string, home: string): Promise<RepoResult>;
@@ -812,19 +812,24 @@ export interface MarketplaceView {
 /**
  * One line of a plugin's "Its items" (pluginlibrary.ts itemsView): an item linked to it (`linked`; its update ready: `update`;
  * no longer in the plugin, so its Update turns it Off: `going`), a name Update brings in (`new`), one its update removed, Off
- * and no longer linked (`removed`), one of its own he deleted (`deleted`), or one not brought in, with why (`not-brought`).
+ * and no longer linked (`removed`), one of its own he deleted (`deleted`), one not brought in, with why (`not-brought`), or one he
+ * has of the same content, his as it is (`alike`).
  */
-export interface PluginItemLine { kind: ItemKind; key: string; name: string; state: 'linked' | 'update' | 'going' | 'new' | 'removed' | 'deleted' | 'not-brought'; on?: boolean; except?: HarnessId[]; why?: string }
+export interface PluginItemLine { kind: ItemKind; key: string; name: string; state: 'linked' | 'update' | 'going' | 'new' | 'removed' | 'deleted' | 'not-brought' | 'alike'; on?: boolean; except?: HarnessId[]; why?: string }
 /**
- * A plugin's items as its page shows them: its lines, how many of its `of` items linked to it are on in each tool with no installer
- * (`on`), whether Update has something to do, and why the plugin can't be read now. `notIn`: for a plugin On, each tool it is
- * wanted in where none is on, why, one sentence per reason but a name of his (pluginstatus.ts notInWhy), and whether a tick on that
- * tool's box brings some in (`tickHelps`). `clashes`: for a plugin On, each tool with no installer it is wanted in, each name it
- * has that he has his own of (`differs`), whatever else is so, each with its action under that tool's box (pluginstatus.ts clashSaid).
+ * A plugin's items as its page shows them: its lines; of its `of` items (those linked to it and the names he has), how many are
+ * there in each tool with no installer, as the page's look reads them, his of the same content counting (`on`); whether Update has
+ * something to do, and why the plugin can't be read now. `notIn`: for a plugin On, each tool it is wanted in where none is on, why,
+ * one sentence per reason but a name of his (pluginstatus.ts notInWhy), and whether a tick on that tool's box brings some in
+ * (`tickHelps`). `yours`: for a plugin On, each tool with no installer it is wanted in, each name it has that he has his own of,
+ * whatever else is so, said under that tool's box (pluginstatus.ts yourSaid).
  */
-export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; /** Of those on, how many the tool's own settings keep out (it doesn't load them). */ keptOut?: Partial<Record<HarnessId, number>>; of: number; ready?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean }>>; clashes?: Partial<Record<HarnessId, Clash[]>> }
-/** A name of a plugin's he has his own of, in one tool (PluginItemsView clashes), and whether he has it there through the shared skills folder. */
-export interface Clash { kind: ItemKind; key: string; name: string; shared?: true }
+export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; /** Of those on, how many the tool's own settings keep out (it doesn't load them). */ keptOut?: Partial<Record<HarnessId, number>>; of: number; ready?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean }>>; yours?: Partial<Record<HarnessId, YourName[]>> }
+/**
+ * A name of a plugin's he has his own of, in one tool (PluginItemsView yours): Use the plugin's is offered there, but where it is
+ * the same content (`same`) or the take can't land there (`held`: why, librarypass.ts takeHeld; `shared`: his through the shared skills folder).
+ */
+export interface YourName { kind: ItemKind; key: string; name: string; same?: true; held?: { why: string; shared?: true } }
 
 /**
  * One named part of a plugin (a skill, command, agent or instruction file): what it says it does, its whole file (SKILL.md,
@@ -1054,7 +1059,7 @@ export interface PassResult {
    * (which change nothing a person sees), with the History entry that says it, whether the item is On once the step is done
    * (`on`), and for the item a click on Merge asked for, what Merge did (`merge`).
    */
-  sourced?: { name: string; answer: SourceAnswer; history?: string; on?: true; merge?: MergeDone; /** A take of the same content as his (library.ts TAKE). */ same?: true }[];
+  sourced?: { name: string; answer: SourceAnswer; history?: string; on?: true; merge?: MergeDone; /** A take that can't land in its tool: why, and nothing changed (library.ts TAKE). */ held?: string }[];
 }
 /**
  * What a click on Merge did (library.ts MERGE; librarypass.ts mergeIn): the merged version made current (`merged`); merged to
