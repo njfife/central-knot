@@ -34,7 +34,7 @@ import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, t
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { turnsWords } from './profileplan.ts';
+import { turnsWords, undoOffered } from './profileplan.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
@@ -240,15 +240,16 @@ export const notDoneFirst = (outcome: Outcome): Outcome => (outcome.warn ? { ...
  */
 export const FADE_MS = 8000;
 let fading: ReturnType<typeof setTimeout> | undefined;
-/** The result's time starts again from now; none runs while the page acts, whose end starts it (afterActing). */
+const windowVisible = () => windowShown && !document.hidden;
+/** The result's time starts again from now; none runs while the page acts (afterActing) or while the window is hidden. */
 function fadeLater(): void {
   clearTimeout(fading);
-  if (!acting()) fading = setTimeout(fadeNow, FADE_MS);
+  if (!acting() && windowVisible()) fading = setTimeout(fadeNow, FADE_MS);
 }
 /** The pointer or the focus is in the header's result, or it is open as a card: it stays while so, and its time starts again after. */
 const heldInHeader = () => !!document.querySelector('.header-result:hover, .header-result:focus-within, .result-whole');
 function fadeNow(): void {
-  if (acting()) return;
+  if (acting() || !windowVisible()) return;
   if (heldInHeader()) { fading = setTimeout(() => (heldInHeader() ? fadeNow() : fadeLater()), 250); return; }
   const outcome = state.outcome;
   if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length)) state.outcome = undefined;
@@ -287,8 +288,8 @@ export function paintStatusMessage() {
  * page follows: a page whose kind is no longer here gives way to the Overview, saying why, and a page with its own data
  * reads it again (unless `reload` is false: the caller reads it itself).
  */
-export function setHome(view: HomeView | null | undefined, { reload = true, say, background = false }: {
-  reload?: boolean; say?: (view: HomeView) => void; background?: boolean;
+export function setHome(view: HomeView | null | undefined, { reload = true, say, background = false, sayNews = true }: {
+  reload?: boolean; say?: (view: HomeView) => void; background?: boolean; sayNews?: boolean;
 } = {}): void {
   if (!view) return;
   const held = setAside?.home === view.home ? setAside : undefined;
@@ -303,7 +304,7 @@ export function setHome(view: HomeView | null | undefined, { reload = true, say,
   state.home = keepUnshown(state.home, view);
   // A cell an MCP sign-in check was asked about that this view shows gone, switched off or as another copy is held for no more.
   followView(state.mcpSignin, view);
-  if (news && !acting()) sayBackgroundNews();
+  if (news && !acting() && sayNews) sayBackgroundNews();
   // A closed background problem stays closed while reads report it, and is forgotten once one doesn't (matrix.ts listResult).
   for (const key of state.dismissed) if (key.startsWith('problem:') && !view.sync.caughtUp.some(entry => problemKey(entry) === key)) state.dismissed.delete(key);
   // A record taken over at this view's look (types.ts HomeView tookOver), after whatever the read itself said.
@@ -421,7 +422,8 @@ function accept(view: HomeView): HomeView {
 
 /** Whether the window has shown: false only after a start at sign-in with no window (main.ts startedHidden, the page's `start`), until it first shows. */
 let windowShown = new URLSearchParams(globalThis.location?.search).get('start') !== 'hidden';
-api().onWindowShown(() => { if (windowShown) return; windowShown = true; void collectUsage(); });
+api().onWindowShown(() => { const first = !windowShown; windowShown = true; if (first) void collectUsage(); fadeLater(); });
+document.addEventListener('visibilitychange', () => { if (windowVisible()) fadeLater(); else clearTimeout(fading); });
 
 /**
  * Collects usage: main's usage:read reads the tools' own session history on this computer, and nothing leaves it. By itself
@@ -1130,7 +1132,8 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if ((past?.kind !== 'profile' && past?.kind !== 'everything') || result.stopped) keepOwn([{ kind: (past && libraryEntry(past)?.kind) || 'agents', results: result.results, notices: result.notices }]);
   if (past?.kind === 'profile') {
     // Each item it turned back has its own History entry, with its own action: the band offers no Undo of the Undo.
-    if (result.stopped || !result.switched) tell(undefined, result.stopped); else turnedOutcome(page, 'Undone', result.switched, result.results);
+    if (result.stopped) tell({ page, text: `Undo switch to ${past.profile?.toName ?? past.item}: nothing was undone. ${result.stopped.replace(/ Nothing was undone\.$/, '')}`, warn: true, band: true, history: page !== 'history', refused: true });
+    else if (result.switched) turnedOutcome(page, 'Undone', result.switched, result.results, { fade: true });
     return;
   }
   const everywhere = touchedToolsPhrase(where);
@@ -1688,6 +1691,8 @@ let refreshing = false;
 let refreshOwed = false;
 /** A background reply that landed while the page acted. The next view of its home takes it in (setHome). */
 let setAside: HomeView | undefined;
+/** A menu-bar profile switch that arrived while the page acted or refreshed, applied once that ends (drainOwedRefresh). */
+let pendingSwitch: ProfileSwitchResult | undefined;
 /** Whether the home waits to be read once the page's run of clicks is done: a background refresh asked for meanwhile, or a plugin's click (oweHomeRead). */
 export const homeReadOwed = () => refreshOwed;
 /** A plugin's click changed what the item lists show: the home is read once at the run's end (clicklist.ts), not after each click. */
@@ -1713,7 +1718,8 @@ api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings
 
 // A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
 // The Sources page reads its view again too: a read by itself (the daily check) changes what each name there is to the library.
-api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); if (state.page === 'sources') void loadSources(); });
+function syncFollowUps() { loadRepoSoon(); if (state.page === 'sources') void loadSources(); }
+api().onSyncChanged(() => { syncFollowUps(); void backgroundRefresh(); });
 api().onSaid(text => announce(text));
 
 /** Each kind's sync notices in a view: what changed on its own, with its History event. */
@@ -1781,9 +1787,11 @@ function sayBackgroundNews() {
   announce(`Sync changed ${andList(items)}.`, true, undefined, news.map(({ notice }) => notice.history));
 }
 
-/** A background refresh asked for while the page acted or while another ran: run it now, once, if nothing is running. */
+/** A background refresh or menu-bar switch asked for while the page acted or while another ran: run it now, once, if nothing is running. */
 function drainOwedRefresh() {
-  if (!refreshOwed || acting() || refreshing) return;
+  if (acting() || refreshing) return;
+  if (pendingSwitch) { const next = pendingSwitch; pendingSwitch = undefined; void applyMenuSwitch(next); return; }
+  if (!refreshOwed) return;
   refreshOwed = false;
   void backgroundRefresh();
 }
@@ -1803,19 +1811,20 @@ export const profileState = {
 };
 
 /** What a switch or its Undo did, as its band says it: what it turned On and Off, and what could not change. */
-function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], act?: Outcome['act']) {
+function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], { act, fade }: { act?: Outcome['act']; fade?: boolean } = {}) {
   const leftSaid = `${turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : ''}${(turned.settingsChanged ?? []).map(said => ` ${said}`).join('')}`;
   // An Undo's plugin copies changed since the switch (profiles.ts undoSwitch), left as they are.
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}: ${turned.since.join('; ')}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
-  tell({ page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0 || !!turned.since?.length, act });
+  const warn = results.length > 0 || turned.left.length > 0 || !!turned.since?.length;
+  tell({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn, act });
 }
 
-/** What a switch did, with Undo switch (from the page or, next time the window shows, the menu bar). */
-const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, result, result.results,
-  result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined);
+/** What a switch did, with Undo switch only where History would offer it (profileplan.ts undoOffered, over the view already in state.home). */
+const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, result, result.results, { act: result.event && state.home && undoOffered(result, state.home)
+  ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined });
 
-/** Switches to a profile. The band says what changed, with Undo; the menu bar follows. */
+/** Switches to a profile. The band says what changed, with Undo where History offers it; the menu bar follows. */
 export const switchToProfile = (id: string) => busy('Switching profile…', async page => {
   const result = await api().switchProfile(id, state.home!.home);
   if (result.view) setHome(result.view);
@@ -1823,13 +1832,22 @@ export const switchToProfile = (id: string) => busy('Switching profile…', asyn
   switchOutcome(result, page);
   if (state.page === 'history') await putHistory();
 });
-// A switch from the menu bar: its result and Undo are on the page the next time the window shows.
-api().onProfileSwitched(async result => {
-  switchOutcome(result, state.page);
-  // History lists the new switch at once when it is the page open (it reads History only when opened).
-  if (state.page === 'history') await putHistory();
-  rerender();
-});
+// A switch from the menu bar: its fresh view and result land together so switchOutcome asks undoOffered against the post-switch home, waiting while busy like backgroundRefresh.
+async function applyMenuSwitch(result: ProfileSwitchResult) {
+  if (!state.home || (result.view && result.view.home !== state.home.home)) return;
+  if (acting() || refreshing) { pendingSwitch = pendingSwitch?.view && result.view ? { ...result, view: withSetAside(pendingSwitch.view, result.view) } : result; return; }
+  refreshing = true;
+  try {
+    if (result.view) setHome(result.view, { background: true, sayNews: false });
+    switchOutcome(result, state.page);
+    sayBackgroundNews();
+    // History lists the new switch at once when it is the page open (it reads History only when opened).
+    if (state.page === 'history') await putHistory();
+    syncFollowUps();
+    rerender();
+  } finally { refreshing = false; drainOwedRefresh(); }
+}
+api().onProfileSwitched(result => void applyMenuSwitch(result));
 
 /**
  * Saves a profile: only the fields given change. A new or restored profile opens (a new one with its name field ready to type); an

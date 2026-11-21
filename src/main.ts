@@ -463,7 +463,8 @@ const showNews = () => (unseenPlugins && !unseen ? showPage('plugins') : showWin
 /**
  * A choice in the Profile menu: a switch, unless the profile is in use already (an empty switch would replace the last band's
  * Undo; the menu is only drawn again, since a checkbox item ticks itself when clicked). A switch that couldn't start waits on the
- * page with sync's results; one that changed something goes to the page's band with Undo. The menus then follow the library.
+ * page with sync's results; one that changed something goes to the page's band with a fresh view (and Undo where History offers
+ * it). The menus then follow the library.
  */
 function switchFromMenu(id: string) {
   if (inUse(lastProfiles.profiles, lastItems, lastPlugins).some(profile => profile.id === id)) { refreshTray(); return; }
@@ -471,8 +472,9 @@ function switchFromMenu(id: string) {
     if (!current) return;
     const tools = await toolsNow(), result = await switchProfile(context(), tools, id, pluginSide(tools));
     if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
-    else if (result.event && window && !window.isDestroyed()) window.webContents.send('profile:switched', result);
     pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
+    // Return true so fromTray knows the fresh view already reached the page and skips the redundant sync:changed reread.
+    if (result.event && window && !window.isDestroyed()) { window.webContents.send('profile:switched', { ...result, view: await syncThenView() }); return true; }
     await refreshMenus(tools);
   });
 }
@@ -551,11 +553,11 @@ async function syncOnce(home: unknown) {
     });
   } finally { syncOnceRunning = false; refreshTray(); }
 }
-/** Menu bar actions take their turn like the page's, then tell the page. */
-async function fromTray(work: () => Promise<void>) {
-  await queued(work).catch(() => undefined);
+/** Menu bar actions take their turn like the page's, then tell the page (unless `work` already sent a fresh view). */
+async function fromTray(work: () => Promise<boolean | void>) {
+  const told = await queued(work).catch(() => undefined);
   refreshTray();
-  send('sync:changed');
+  if (!told) send('sync:changed');
 }
 /**
  * The app menu carries the menu bar's controls too, so they are always reachable: a crowded menu bar (or the notch) can hide the
