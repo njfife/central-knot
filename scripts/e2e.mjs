@@ -197,7 +197,7 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
     await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); if (${closing} && e.matches('.switch, .add-item') && e.closest('[data-key], [data-plugin]') && !e.closest('.details')) document.querySelector('#outcome-dismiss, #report-dismiss')?.click(); e.click(); })()`);
     await settle();
   };
-  const settle = async () => { await wait(120); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s.')) : setTimeout(c, 25); c(); })`); await wait(60); };
+  const settle = async () => { await wait(120); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s. ' + JSON.stringify({ ready: document.body.dataset.ready, busy: document.body.dataset.busy, ann: document.querySelector('#announcement')?.dataset.text, page: document.querySelector('.page-title')?.textContent }))) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors, debugUrl: targets[0].webSocketDebuggerUrl,
     inspect, main: inspect && (() => mainProcess(inspect)),
@@ -6059,15 +6059,17 @@ async function crashFlow() {
   check('the kills landed while skills were taken in: some are on record before the last open', onRecord > 0, onRecord);
   const tf0 = Date.now();
   const a = await launch(join(scratch, 'crash-data'));
+  console.log('[MEASURE crashFlow.finish.launch]', Date.now() - tf0);
   const tf1 = Date.now();
   await a.click('#home-actual');
+  console.log('[MEASURE crashFlow.finish.actual]', Date.now() - tf1, 'onRec', onRecordNow(), 'copilot', readdirSync(COPILOT).length);
   const tf2 = Date.now();
   await openKind(a, 'skills');
-  const tf3 = Date.now();
+  console.log('[MEASURE crashFlow.finish.open]', Date.now() - tf2);
   const addMs = [];
   // Opening catches up every skill on record; the ones a kill left found are turned on, each.
-  for (const key of await rowKeys(a, 'skills')) if (key.startsWith('bulk-') && await a.exists(`#${rowPart('add', 'skills', key)}`)) { const ta = Date.now(); await a.click(`#${rowPart('add', 'skills', key)}`); addMs.push(Date.now() - ta); }
-  console.log('[MEASURE crashFlow.finish]', JSON.stringify({ onRecord, launchMs: tf1 - tf0, actualMs: tf2 - tf1, openMs: tf3 - tf2, adds: addMs.length, maxAddMs: Math.max(0, ...addMs), sumAddMs: addMs.reduce((x, y) => x + y, 0) }));
+  for (const key of await rowKeys(a, 'skills')) if (key.startsWith('bulk-') && await a.exists(`#${rowPart('add', 'skills', key)}`)) { const ta = Date.now(); console.log('[MEASURE crashFlow.add.start]', key); await a.click(`#${rowPart('add', 'skills', key)}`); const dt = Date.now() - ta; addMs.push(dt); if (dt > 3000) console.log('[MEASURE crashFlow.add.slow]', key, dt); }
+  console.log('[MEASURE crashFlow.finish]', JSON.stringify({ onRecord, launchMs: tf1 - tf0, actualMs: tf2 - tf1, adds: addMs.length, maxAddMs: Math.max(0, ...addMs), sumAddMs: addMs.reduce((x, y) => x + y, 0) }));
   console.log(`crash finish: ${onRecord} of 40 on record before opening, caught up on open; the rest turned on again`);
   same('after crashes, opening again completes every copy', readdirSync(COPILOT).filter(name => name.startsWith('bulk-')).length, 40);
   for (const name of Object.keys(expected)) same(`final ${name} bytes`, tree(join(COPILOT, name)), expected[name]);
@@ -9029,7 +9031,8 @@ async function searchFlow() {
   await b.click('#setup-yes');
   check('Synchronize everything takes the made-up home in', await until(() => !!jsonOrNothing(join(S.home, '.central-knot/skills.json'))?.items?.['release-checklist']));
   await openKind(b, 'all');
-  console.log('[MEASURE searchFlow.setup-yes]', JSON.stringify({ hasSwitch: await b.exists(`#${rowPart('switch', 'skills', 'archive-notes')}`), hasAdd: await b.exists(`#${rowPart('add', 'skills', 'archive-notes')}`) }));
+  // Wait for the background pass's view to reach the page with the taken-in switch (app.ts backgroundRefresh).
+  await until(() => b.exists(`#${rowPart('switch', 'skills', 'archive-notes')}`));
   await b.click(`#${rowPart('switch', 'skills', 'archive-notes')}`);
   await done();
   await b.run(`(window.ckPublished = [], window.centralKnot.onSearchPublished((home, readId) => window.ckPublished.push(readId)), true)`);
@@ -9716,8 +9719,10 @@ async function libraryFlow() {
   await find(c, 'triage');
   if (await c.exists('#chip-attention')) await c.click('#chip-attention');
   await c.click('#nav-plugins');
+  // Plugins loads its marketplaces asynchronously outside busy() (app.ts loadPageData); wait for the list or open plugin page.
+  await until(() => c.exists('#plugin-back, [id^="popen-"][id$="-issue-tracker"]'));
   if (await c.exists('#plugin-back')) await c.click('#plugin-back');
-  console.log('[MEASURE libraryFlow.nav-plugins]', JSON.stringify({ hasPopen: await c.exists('[id^="popen-"][id$="-issue-tracker"]'), text: (await c.text('main') ?? '').slice(0, 80) }));
+  await until(() => c.exists('[id^="popen-"][id$="-issue-tracker"]'));
   await c.click('[id^="popen-"][id$="-issue-tracker"]');
   check('the plugin’s page lists its items', await until(() => c.exists('.plugin-part-link')), await c.text('.plugin-page'));
   await c.click('.plugin-part-link');
@@ -9796,7 +9801,11 @@ async function libraryFlow() {
   check('Yes takes the twelve in', await until(() => Object.keys(JSON.parse(readNow(join(T.home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 12));
   await done(tb);
   await openKind(tb, 'all');
-  console.log('[MEASURE libraryFlow.setup-yes]', JSON.stringify({ hasSwitch: await tb.exists(`#${rowPart('switch', 'skills', 'beta')}`), hasAdd: await tb.exists(`#${rowPart('add', 'skills', 'beta')}`), busy: await tb.run(`document.body.dataset.busy`) }));
+  const tSw0 = Date.now();
+  const hasSw0 = await tb.exists(`#${rowPart('switch', 'skills', 'beta')}`);
+  // Yes's background pass writes skills.json before its sync:changed refresh reaches the page (app.ts backgroundRefresh); wait for the taken-in row's switch.
+  await until(() => tb.exists(`#${rowPart('switch', 'skills', 'beta')}`));
+  console.log('[MEASURE libraryFlow.setup-yes]', JSON.stringify({ hasSw0, waitMs: Date.now() - tSw0 }));
   const placeOf = () => tb.run(`[Math.round(document.querySelector('[id^="table-library-"]').getBoundingClientRect().top), Math.round(document.querySelector('${row('skills', 'beta')}').getBoundingClientRect().top)]`);
   const clickMovesNothing = async (where, refused) => {
     const before = await placeOf();
@@ -10511,7 +10520,8 @@ async function headerResultFlow() {
   check('Yes takes the eleven skills in', await until(() => Object.keys(JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items).length === 11));
   await done();
   await openKind(a, 'all');
-  console.log('[MEASURE headerResultFlow.setup-yes]', JSON.stringify({ hasSwitch: await a.exists(`#${rowPart('switch', 'skills', names[0])}`), hasAdd: await a.exists(`#${rowPart('add', 'skills', names[0])}`) }));
+  // Wait for the background pass's view to reach the page with the taken-in switches (app.ts backgroundRefresh).
+  await until(() => a.exists(`#${rowPart('switch', 'skills', names[0])}`));
   const row = name => `.ov-row[data-key="${rowPart('', 'skills', name)}"]`, switchOf = name => `#${rowPart('switch', 'skills', name)}`;
   /** Switches clicked one after another, one run with one result (clicklist.ts runAt). */
   const clickRun = async list => { await a.run(`${JSON.stringify(list.map(switchOf))}.forEach(selector => document.querySelector(selector).click())`); await done(); };
