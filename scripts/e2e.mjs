@@ -8612,10 +8612,12 @@ async function mcpSigninFlow() {
   const piWords = await column('pi-cli');
   same('Pi’s answers read though it ended with exit code 1', ['plain', 'oauth', 'down', 'silent', 'tickets', 'calendar'].map(name => piWords[name]), ['Connected', 'Needs sign-in', 'Couldn’t reach: fetch failed', 'Couldn’t reach: MCP request timed out after 60000ms', 'Connected', 'Needs sign-in']);
 
-  // Check all: the four columns one after another, never two at once.
+  // Check all: the four columns one after another, never two at once (each tool takes a moment, so two at once would overlap).
   const allFrom = called().length;
+  for (const binary of ['claude', 'codex', 'pi', 'opencode']) writeFileSync(join(said, `${binary}.wait`), '0.4');
   await a.click('#signin-check-all');
   await until(async () => called().slice(allFrom).filter(([what]) => what === 'end').length === 4 && !(await a.run(`document.querySelector('#signin-check-all').disabled`)), 'Check all');
+  for (const binary of ['claude', 'codex', 'pi', 'opencode']) rmSync(join(said, `${binary}.wait`));
   same('Check all runs each tool in turn, each ending before the next starts', called().slice(allFrom).map(([what, tool]) => `${what} ${tool}`),
     ['start claude', 'end claude', 'start codex', 'end codex', 'start pi', 'end pi', 'start opencode', 'end opencode']);
   const claudeWords = await column('claude-cli'), openCodeWords = await column('opencode-cli');

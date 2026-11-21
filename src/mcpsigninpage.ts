@@ -26,12 +26,12 @@ const columnsOf = (home: HomeView, rows: SigninRow[]) => home.mcp.tools.filter(t
 const waitsFor = () => (state.mcpSignin.checking ? `Checking ${toolNames[state.mcpSignin.checking]}…` : false);
 
 /**
- * Checks each of `tools` in turn, one at a time: a press while a check runs does nothing. Each answer is kept in the checks of the
- * home it was asked in, so one that comes back after another home was opened is shown nowhere, and the rest of a Check all is not run.
+ * Checks each of `tools` in turn. One check runs at a time: while one does, every Check is off (waitsFor). Each answer is kept in
+ * the checks of the home it was asked in, so one that comes back after another home was opened is shown nowhere, and the rest of a
+ * Check all is not run.
  */
 async function checkColumns(tools: HarnessId[]) {
   const checks = state.mcpSignin;
-  if (checks.checking) return;
   for (const tool of tools.filter(each => listCommand[each])) {
     if (state.mcpSignin !== checks || !state.home) return;
     const asked = signinRows(state.home).flatMap(row => (row.cells[tool] ? [askedAs(row, row.cells[tool]!)] : []));
