@@ -1199,19 +1199,19 @@ for (const stale of [false, true]) test(`a plugin link left during a read return
 
 test('A refused profile Undo says that nothing was undone, naming the profile, without doubling it on a gate refusal', async t => {
   start();
-  homeWith(t, []);
-  const profileEvent = { id: 'sw-1', kind: 'profile', item: 'PluginOnly', at: '2026-11-21T00:00:00.000Z',
-    profile: { toName: 'PluginOnly', on: [], off: [], copilotCleared: [{ id: 'mcp:issues', name: 'issues', server: 'issues' }] } };
-  t.mock.method(api, 'history', async () => ({ events: [profileEvent], days: 30 }));
+  const events = homeWith(t, []);
+  (events as unknown[]).splice(0, events.length, { id: 'sw-1', kind: 'profile', item: 'PluginOnly', at: '2026-11-21T00:00:00.000Z',
+    profile: { toName: 'PluginOnly', on: [], off: [], copilotCleared: [{ id: 'mcp:issues', name: 'issues', server: 'issues' }] } });
   app.page = 'profiles';
-  t.mock.method(api, 'restore', async () => ({
+  let reply: { results: never[]; stopped?: string; harnessWrites: number } = {
     stopped: 'Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.',
     results: [], harnessWrites: 0,
-  }));
+  };
+  t.mock.method(api, 'restore', async () => reply);
   await restoreEvent('sw-1');
   assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.refused, app.outcome?.history],
     ['Undo switch to PluginOnly: nothing was undone. Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.', true, true, true]);
-  t.mock.method(api, 'restore', async () => ({ stopped: 'Automatic sync is paused. Nothing was undone.', results: [], harnessWrites: 0 }));
+  reply = { stopped: 'Automatic sync is paused. Nothing was undone.', results: [], harnessWrites: 0 };
   await restoreEvent('sw-1');
   assert.equal(app.outcome?.text, 'Undo switch to PluginOnly: nothing was undone. Automatic sync is paused.');
 });
@@ -1279,25 +1279,25 @@ test('A clean profile Undo confirmation fades on Profiles as other Undo confirma
   mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   try {
     start();
-    homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+    const events = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
     const outcome = () => app.outcome;
-    const sw = { id: 'sw-2', kind: 'profile', item: 'Focus', at: '2026-11-21T00:00:00.000Z',
-      profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] } };
-    t.mock.method(api, 'history', async () => ({ events: [sw], days: 30 }));
+    (events as unknown[]).splice(0, events.length, { id: 'sw-2', kind: 'profile', item: 'Focus', at: '2026-11-21T00:00:00.000Z',
+      profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] } });
     app.page = 'profiles';
-    t.mock.method(api, 'restore', async () => ({ results: [], harnessWrites: 1, switched: { on: [], off: ['notes'], left: [] } }));
+    let reply: { results: never[]; harnessWrites: number; stopped?: string; switched?: { on: string[]; off: string[]; left: string[] } } = { results: [], harnessWrites: 1, switched: { on: [], off: ['notes'], left: [] } };
+    t.mock.method(api, 'restore', async () => reply);
     await restoreEvent('sw-2');
     assert.deepEqual([outcome()?.text, outcome()?.fade], ['Undone: 1 item turned off.', true]);
     mock.timers.tick(7999);
     assert.equal(outcome()?.text, 'Undone: 1 item turned off.');
     mock.timers.tick(1);
     assert.equal(outcome(), undefined);
-    t.mock.method(api, 'restore', async () => ({ results: [], harnessWrites: 0, switched: { on: [], off: ['notes'], left: ['standup'] } }));
+    reply = { results: [], harnessWrites: 0, switched: { on: [], off: ['notes'], left: ['standup'] } };
     await restoreEvent('sw-2');
     mock.timers.tick(60_000);
     assert.equal(outcome()?.warn, true);
     assert.match(outcome()?.text ?? '', /^Undone:/);
-    t.mock.method(api, 'restore', async () => ({ stopped: 'Automatic sync is paused. Nothing was undone.', results: [], harnessWrites: 0 }));
+    reply = { stopped: 'Automatic sync is paused. Nothing was undone.', results: [], harnessWrites: 0 };
     await restoreEvent('sw-2');
     mock.timers.tick(60_000);
     assert.equal(outcome()?.refused, true);
