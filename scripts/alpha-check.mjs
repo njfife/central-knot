@@ -13,6 +13,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSy
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { connect, debugPorts } from './cdp.mjs';
+import { whileAttached } from './mac-dmg.mjs';
 import { launched, scratchFolder, tempPlaces } from './scratch.ts';
 import { serveReleases } from './update-fixture.mjs';
 import { discover } from '../src/discovery.ts';
@@ -75,13 +76,12 @@ check('release/ then holds the alpha’s two downloads and no other', left.join(
 const removedLine = said.split('\n').find(line => line.startsWith('Removed from release/, as not this package\'s: ')) ?? '';
 check('and packaging names the standard downloads it removed, and what to upload', standardDownloads.every(file => removedLine.includes(file)) && said.includes(`Upload exactly these: ${dmg} ${zip}`), said.split('\n').filter(line => /Removed|Upload/.test(line)));
 const mount = join(scratch, 'volume');
-execFileSync('/usr/bin/hdiutil', ['attach', dmg, '-readonly', '-nobrowse', '-noautoopen', '-mountpoint', mount], { stdio: 'ignore' });
-try {
+whileAttached(dmg, mount, ['-readonly'], () => {
   const volume = /<key>VolumeName<\/key>\s*<string>([^<]*)<\/string>/.exec(execFileSync('/usr/sbin/diskutil', ['info', '-plist', mount], { encoding: 'utf8' }))?.[1];
   check('the disk image’s volume is named for the alpha', volume === 'Central Knot Alpha', volume);
   check('it holds the alpha app beside the Applications shortcut', existsSync(join(mount, 'Central Knot Alpha.app')) && readlinkSync(join(mount, 'Applications')) === '/Applications');
   check('its window is the alpha’s own layout', hash(join(mount, '.DS_Store')) === hash('assets/dmg/Central-Knot-Alpha/DS_Store'));
-} finally { execFileSync('/usr/bin/hdiutil', ['detach', mount, '-force'], { stdio: 'ignore' }); }
+});
 
 // ---------- The two apps on one home ----------
 // A skill in Claude Code's folder, and a stand-in for its CLI so the tool counts as installed.
