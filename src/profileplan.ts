@@ -7,12 +7,14 @@
 //   while both his own and a plugin's are configured, Copilot CLI runs the plugin's). The same rule applies for each copy of a
 //   name from what the switch will leave configured: kept on when the profile names it or another live member (`copilotKeptOnBy`),
 //   or an unmanaged found entry holds that name; off otherwise. With `switchesPluginItems` false, `pluginPlan` includes only
-//   Copilot CLI copies toward on sharing a named server (never held). With no enabled plugin copy of that name, a standing rule
-//   rides on `LiveItem.copilotOff` so `switchPlan`, `inUse`, `switchPreview` and Undo handle it in one place.
+//   Copilot CLI copies toward on sharing a named server (never held). Two writers share this rule without overlap (`withCopilotOff`):
+//   when a switchable Copilot CLI plugin copy covers a name, `pluginPlan` / `pluginUndo` owns it and `plugins.ts setPart` writes it;
+//   otherwise a standing rule rides on `LiveItem.copilotOff` (`switchPlan`, `inUse`, `switchPreview`, `copilotUndo`) and
+//   `profiles.ts runCopilotRules` writes it.
 // - `inUse` holds while a switch changes and holds nothing (never stored); `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`)
-//   gives the header and menu line; `undoPlan` and `pluginUndo` revert items still as left, never re-disabling a Copilot CLI name
-//   a server of his uses now (`onAfterUndo`, `copilotHasYours`). Dormant ids stay skipped; plugin-linked library items belong to
-//   `pluginLive` (`pluginItemKey`), not `liveItems`; found-only rows no profile can tick are counted by `leftOut`.
+//   gives the header and menu line; `undoPlan`, `pluginUndo` and `copilotUndo` revert items still as left, never re-disabling a
+//   Copilot CLI name a server of his uses now (`onAfterUndo`, `copilotHasYours`). Dormant ids stay skipped; plugin-linked library
+//   items belong to `pluginLive` (`pluginItemKey`), not `liveItems`; found-only rows no profile can tick are counted by `leftOut`.
 import { itemKey, type ItemKind, type LibraryItem } from './library.ts';
 import { placeOf } from './libraryrow.ts';
 import { plural } from './model.ts';
@@ -20,7 +22,7 @@ import { loadsKind, pageOfPart } from './pluginstatus.ts';
 import { cantSwitch, onNow, ownSwitch, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, kindNouns, toolNames } from './words.ts';
-import type { HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
+import type { HarnessId, HistoryEvent, HomeView, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
 
 /** What every screen calls the state where no profile is in use. */
 export const NO_PROFILE = 'No profile';
@@ -61,19 +63,20 @@ export function liveItems(libraries: Libraries, plugins: ReadonlySet<string>): L
     .map(({ key, name, on, except }) => ({ id: itemId(kind, key), kind, key, name, on, except })));
 }
 
-/** Exact Copilot CLI server name for a library server (`row`: its LibraryFacts, if read). */
-const copilotSpell = (row: LibraryFacts | undefined, name: string) => row?.copies['copilot-cli']?.folder ?? row?.plugin?.['copilot-cli']?.name ?? row?.copilotName ?? name;
+/** Exact Copilot CLI server name for a library server (`row`: its LibraryFacts, if read). Shared with servers.ts rowFacts. */
+export const copilotServerName = (row: Pick<LibraryFacts, 'copies' | 'plugin' | 'copilotName'> | undefined, name: string) => row?.copies['copilot-cli']?.folder ?? row?.plugin?.['copilot-cli']?.name ?? row?.copilotName ?? name;
 /** Whether `row` holds an unmanaged found entry of exact name `server` in Copilot CLI (not On or applied there). */
 const isFoundCopilot = (row: LibraryFacts, server: string, lib: LibraryItem | undefined, managed: boolean) =>
   row.copies['copilot-cli']?.folder === server && !(managed && (lib?.on || !!lib?.applied?.['copilot-cli']));
-
-/** A home view's live items that profiles act on, with any orphan Copilot CLI `disabledMcpServers` block (`copilotOff`, not covered by an enabled plugin). */
-export function homeItems(home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 'profiles'> & { pluginItems?: InstalledPlugin[] }): LiveItem[] {
-  const covered = new Set((home.pluginItems ?? []).flatMap(install => (install.tool === 'copilot-cli' && !install.off ? install.items.filter(part => part.kind === 'mcp').map(part => part.name) : [])));
-  const off = new Map(home.mcp.items.flatMap(row => (row.copilotOff && !covered.has(row.copilotOff) ? [[row.key, row.copilotOff]] : [])));
-  return liveItems({ skill: home.skills.library, mcp: home.mcp.library, agent: home.agents.library }, recordedPlugins(home))
-    .map(item => (item.kind === 'mcp' && off.has(item.key) ? { ...item, copilotOff: off.get(item.key) } : item));
+const ownHomeItems = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 'profiles'>) => liveItems({ skill: home.skills.library, mcp: home.mcp.library, agent: home.agents.library }, recordedPlugins(home));
+/** Attaches uncovered Copilot CLI `disabledMcpServers` blocks (`copilotOff`) to live MCP items, excluding names a switchable Copilot CLI plugin copy covers (`plugins`: pluginLive). */
+export function withCopilotOff(items: LiveItem[], rows: readonly LibraryFacts[], plugins: readonly PluginLive[]): LiveItem[] {
+  const covered = new Set(plugins.flatMap(item => (item.kind === 'mcp' && item.copies.some(copy => copy.tool === 'copilot-cli' && copy.way === 'switch') ? [item.name] : [])));
+  const off = new Map(rows.flatMap(row => (row.copilotOff && !covered.has(row.copilotOff) ? [[row.key, row.copilotOff]] : [])));
+  return items.map(item => (item.kind === 'mcp' && off.has(item.key) ? { ...item, copilotOff: off.get(item.key) } : item));
 }
+/** A home view's live items that profiles act on, with any uncovered Copilot CLI `disabledMcpServers` block (`withCopilotOff`). */
+export const homeItems = (home: PluginHome, plugins: readonly PluginLive[] = pluginLive(home)): LiveItem[] => withCopilotOff(ownHomeItems(home), home.mcp.items, plugins);
 /** The ids of the plugins the home records. */
 const recordedPlugins = (home: Pick<HomeView, 'profiles'>) => new Set(home.profiles.plugins?.map(entry => entry.id));
 
@@ -139,9 +142,9 @@ function installedWay(home: PluginHome, at: PluginItemAt): Pick<PluginCopy, 'way
   if (why) return { way: 'held', why };
   if (at.tool !== 'copilot-cli' || at.kind !== 'mcp') return { way: 'switch' };
   const rows = new Map(home.mcp.items.map(row => [row.key, row]));
-  const managed = homeItems(home).filter(item => item.kind === 'mcp' && !item.except.includes(at.tool));
+  const managed = ownHomeItems(home).filter(item => item.kind === 'mcp' && !item.except.includes(at.tool));
   const managedKeys = new Set(managed.map(item => item.key));
-  const own = managed.filter(item => copilotSpell(rows.get(item.key), item.name) === at.name).map(item => item.id);
+  const own = managed.filter(item => copilotServerName(rows.get(item.key), item.name) === at.name).map(item => item.id);
   const plugins = (home.pluginItems ?? []).flatMap(install => install !== at.install && install.tool === at.tool && !install.off
     ? install.items.filter(part => part.kind === 'mcp' && part.name === at.name).map(part => ({ id: pluginItemId('mcp', pluginItemKey(install, part)), plugin: install.plugin })) : []);
   const found = home.mcp.items.some(row => isFoundCopilot(row, at.name, home.mcp.library[row.key], managedKeys.has(row.key)));
@@ -220,9 +223,22 @@ export function copilotKeptOnBy(profile: Pick<Profile, 'items' | 'switchesPlugin
 }
 
 /** Whether a personal server of exact name `server` (found, or his own On in `afterOn`) sits in Copilot CLI after Undo's turns. */
-export const copilotHasYours = (server: string, rows: LibraryFacts[], library: Record<string, LibraryItem>, afterOn: ReadonlySet<string>) =>
+export const copilotHasYours = (server: string, rows: readonly LibraryFacts[], library: Record<string, LibraryItem>, afterOn: ReadonlySet<string>) =>
   rows.some(row => isFoundCopilot(row, server, library[row.key], !!library[row.key] && !library[row.key]!.deleted)
-    || (afterOn.has(itemId('mcp', row.key)) && !library[row.key]?.except.includes('copilot-cli') && copilotSpell(row, library[row.key]?.name ?? row.name) === server));
+    || (afterOn.has(itemId('mcp', row.key)) && !library[row.key]?.except.includes('copilot-cli') && copilotServerName(row, library[row.key]?.name ?? row.name) === server));
+
+/** An uncovered Copilot CLI off-switch cleared by a profile switch, as History keeps it. */
+export type CopilotRule = { id: string; name: string; server: string };
+/** Which uncovered Copilot CLI rules (`copilotCleared`) Undo puts back (`back`) or leaves off (`keptOff`, personal server present now); shared by `undoTurns` and `profiles.ts undoSwitch`. */
+export function copilotUndo(event: Pick<HistoryEvent, 'profile'>, rows: readonly LibraryFacts[], library: Record<string, LibraryItem>, afterOn: ReadonlySet<string>): { back: CopilotRule[]; keptOff: string[] } {
+  const back: CopilotRule[] = [], keptOff: string[] = [];
+  for (const rule of event.profile?.copilotCleared ?? []) {
+    if (rows.some(row => row.copilotOff === rule.server)) continue;
+    if (copilotHasYours(rule.server, rows, library, afterOn)) { if (!keptOff.includes(rule.server)) keptOff.push(rule.server); }
+    else back.push(rule);
+  }
+  return { back, keptOff };
+}
 
 /**
  * What a switch to a profile would do to one plugin's item: the tools it turns on (`on`), those it turns off (`off`), and
@@ -377,10 +393,10 @@ export function entryTurns(was: NonNullable<HistoryEvent['profile']>) {
     off: [...add(was.off, was.undoOf ? was.copilotCleared ?? [] : []), ...itemsToward(was.plugins ?? [], false)] };
 }
 
-/** What the Undo of a switch's entry will turn back, each item once: its library items (undoPlan), orphan Copilot CLI rules and plugins' items (pluginUndo). */
-export function undoTurns(event: Pick<HistoryEvent, 'profile'>, live: LiveItem[], plugins: PluginLive[]) {
+/** What the Undo of a switch's entry will turn back, each item once: its library items (undoPlan), uncovered Copilot CLI rules (`copilotUndo`) and plugins' items (pluginUndo). */
+export function undoTurns(event: Pick<HistoryEvent, 'profile'>, live: LiveItem[], plugins: PluginLive[], mcp: Pick<HomeView['mcp'], 'items' | 'library'> = { items: [], library: {} }) {
   const library = undoPlan(event, live), afterOn = onAfterUndo(live, library), back = pluginUndo(event, plugins, afterOn).back.map(turn => ({ id: turn.item.id, on: turn.on }));
-  const rules = (event.profile?.copilotCleared ?? []).filter(rule => !library.off.some(item => item.id === rule.id) && !afterOn.has(rule.id) && !live.some(item => item.id === rule.id && item.copilotOff === rule.server));
+  const rules = copilotUndo(event, mcp.items, mcp.library, afterOn).back.filter(rule => !library.off.some(item => item.id === rule.id));
   return { on: [...library.on, ...itemsToward(back, true)], off: [...library.off, ...rules, ...itemsToward(back, false)] };
 }
 

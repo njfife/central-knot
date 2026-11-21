@@ -11902,6 +11902,24 @@ async function profilePluginsFlow() {
       await b.text('.profile-header p'), (await b.text('#status-profile'))?.trim()],
     ['mine', undefined, quietFiles.codex, quietFiles.claude, true, 'In use · 2 items on. Plugin items stay as they are.', 'Old work and Mine']);
 
+  // Short-list item 1: after uninstall + external disabledMcpServers, background pass updates the native menu so Old work shows Switching (not In use) and clicking it clears the rule.
+  writeFileSync(join(oldHome, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }));
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ ...JSON.parse(readNow(oldCopilotSettings)), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+  if (b.inspect) {
+    const menu = await mainHelpers(b.inspect);
+    try {
+      let clicked = 0;
+      for (let tries = 0; tries < 60 && !clicked; tries++) {
+        clicked = await menu.clickMenu('Old work · Switching turns 1 item on. Plugin items stay as they are.', false);
+        if (!clicked) await wait(100);
+      }
+      check('native menu shows Old work turning 1 item on (not In use) after external disabledMcpServers, and clicking it switches', clicked >= 1);
+    } finally { menu.close(); }
+    for (let tries = 0; tries < 80 && JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers; tries++) await wait(100);
+    await bDone();
+    same('native menu switch to Old work clears the orphan disabledMcpServers rule', JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, undefined);
+  }
+
   same('no page errors after reopen', b.pageErrors, []);
   await b.quit();
 }

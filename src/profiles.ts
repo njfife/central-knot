@@ -2,10 +2,11 @@
 // switch changes, which profile is in use, what its Undo turns back) are profileplan.ts's. A switch is the library's own clicks,
 // Turn on and Turn off, made together in one pass per kind (skills.ts applySkills, servers.ts applyServers, agents.ts
 // applyAgents), and for a plugin's items each copy's own switch: an installed copy's in its tool (pluginswitch.ts click, run
-// through the main process: PluginSide), a copy placed in Pi or OpenCode by its library item's On or Off in a pass of its own;
+// through the main process: PluginSide), a copy placed in Pi or OpenCode by its library item's On or Off in a pass of its own,
+// and any uncovered Copilot CLI `disabledMcpServers` rule cleared on switch or Undo and restored on Undo (`runCopilotRules`);
 // all of it told to History in one entry of its own, written first (librarypass.ts PassOptions told) and then left holding only
-// the plugin copies each tool confirmed. Its Undo is each library item's own Turn on or Turn off, each with its own entry, and
-// each plugin copy's own switch back, all told in one entry of the Undo's own, which marks the switch's entry undone. Nothing per
+// the plugin copies and Copilot CLI rules each tool confirmed. Its Undo is each library item's own Turn on or Turn off, each with its own entry, and
+// each plugin copy's own switch back (plus any uncovered Copilot CLI rule), all told in one entry of the Undo's own, which marks the switch's entry undone. Nothing per
 // tool is kept here but those entries, and which profile is in use is never stored. A file from before profiles were sets of items (format 1) is read here for the page and moved once by
 // profilemigrate.ts.
 //
@@ -24,7 +25,7 @@ import type { KindLibrary } from './librarypass.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
 import { succeeded, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { click } from './pluginswitch.ts';
-import { changes, copilotHasYours, copilotKeptOnBy, heldWords, liveItems, onAfterUndo, pluginPlan, pluginUndo, switchPlan, undoPlan, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { changes, copilotKeptOnBy, copilotUndo, heldWords, liveItems, onAfterUndo, pluginPlan, pluginUndo, switchPlan, undoPlan, withCopilotOff, type CopilotRule, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
 import { errorCode, libraryGate, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
@@ -150,10 +151,10 @@ export async function readLibraries(context: ShareContext): Promise<{ libraries:
   return { libraries, plugins: new Set((await recordedIds(context.home)).plugins.map(entry => entry.id)) };
 }
 
-/** The live library items now, for the menus (main.ts), which have no page view to read them from; none when a record can't be read. */
-export async function liveNow(context: ShareContext): Promise<LiveItem[]> {
+/** The live library items now (with uncovered Copilot CLI off-switches when `tools` has Copilot CLI), for the menus (main.ts); none when a record can't be read. */
+export async function liveNow(context: ShareContext, tools: HarnessId[] = [], plugins: readonly PluginLive[] = []): Promise<LiveItem[]> {
   const read = await readLibraries(context);
-  return 'stop' in read ? [] : liveItems(read.libraries, read.plugins);
+  return 'stop' in read ? [] : (await withCopilot(context, tools, liveItems(read.libraries, read.plugins), plugins)).items;
 }
 
 /**
@@ -276,31 +277,31 @@ function outcome(turns: Turns, done: Turns, results: DestinationResult[], copies
     left: [...names(left), ...itemNames(copies.filter(turn => !confirmed.includes(turn)))], results: results.filter(result => result.outcome === 'failed' || result.outcome === 'held') };
 }
 
-type CopilotRule = { id: string; name: string; server: string };
+const orphanClearedNote = (rule: CopilotRule) => `Copilot CLI’s off-switch for “${rule.server}” was cleared, so yours is on there.`;
 
-/** Attaches uncovered Copilot CLI `disabledMcpServers` blocks (`copilotOff`) to `items` and returns Copilot CLI's server rows. */
-async function withCopilot(context: ShareContext, tools: HarnessId[], items: LiveItem[], live: PluginLive[]) {
+/** Attaches uncovered Copilot CLI `disabledMcpServers` blocks (`profileplan.ts withCopilotOff`) to `items` and returns Copilot CLI's server rows. */
+async function withCopilot(context: ShareContext, tools: HarnessId[], items: LiveItem[], live: readonly PluginLive[]) {
   if (!tools.includes('copilot-cli')) return { items, rows: [] as LibraryFacts[] };
-  const covered = new Set(live.flatMap(item => (item.kind === 'mcp' && item.copies.some(copy => copy.tool === 'copilot-cli' && copy.way === 'switch') ? [item.name] : [])));
   const { items: rows } = await serversView(context, ['copilot-cli']);
-  const off = new Map(rows.flatMap(row => (row.copilotOff && !covered.has(row.copilotOff) ? [[row.key, row.copilotOff]] : [])));
-  return { items: items.map(item => (item.kind === 'mcp' && off.has(item.key) ? { ...item, copilotOff: off.get(item.key) } : item)), rows };
+  return { items: withCopilotOff(items, rows, live), rows };
 }
 
 /** Sets or clears exact server names in Copilot CLI's `disabledMcpServers`, confirmed by reading the file back. */
 async function runCopilotRules(context: ShareContext, rules: CopilotRule[], disabled: boolean) {
   const confirmed: CopilotRule[] = [], results: DestinationResult[] = [], left: string[] = [], path = mcpSwitchPath(context, 'copilot-cli');
+  const fail = (rule: CopilotRule, why: string) => { results.push({ item: rule.name, harness: 'copilot-cli', outcome: 'failed', message: `${rule.server}: ${why}` }); left.push(rule.name); };
   for (const rule of rules) {
+    let before: string | null, after: string;
     try {
-      const before = await readFile(path, 'utf8').catch(error => { if (errorCode(error) === 'ENOENT') return ''; throw error; });
-      if (mcpDisabled('copilot-cli', before, rule.server) === disabled) continue;
-      await writeFileChecked(path, withMcpSwitch('copilot-cli', before, rule.server, disabled), before || undefined);
-      if (mcpDisabled('copilot-cli', await readFile(path, 'utf8'), rule.server) === disabled) confirmed.push(rule);
-      else throw new Error(`Still ${disabled ? 'on' : 'off'} in Copilot CLI: its settings.json did not take the change.`);
-    } catch (error) {
-      results.push({ item: rule.name, harness: 'copilot-cli', outcome: 'failed', message: `${rule.server}: ${error instanceof Error ? error.message : String(error)}` });
-      left.push(rule.name);
-    }
+      before = await readFile(path, 'utf8').catch(error => { if (errorCode(error) === 'ENOENT') return null; throw error; });
+      if (mcpDisabled('copilot-cli', before ?? '', rule.server) === disabled) continue;
+      after = withMcpSwitch('copilot-cli', before ?? '', rule.server, disabled);
+    } catch { fail(rule, 'Copilot CLI’s settings.json couldn’t be read, so it was left as it is.'); continue; }
+    try { await writeFileChecked(path, after, before ?? undefined); }
+    catch (error) { fail(rule, errorCode(error) === 'CK_CHANGED' ? 'Copilot CLI’s settings.json changed just then, so it was left as it is. Try again.' : `Copilot CLI’s settings.json couldn’t be written: ${error instanceof Error ? error.message : String(error)}`); continue; }
+    const now = await readFile(path, 'utf8').catch(() => null);
+    if (now !== null && mcpDisabled('copilot-cli', now, rule.server) === disabled) confirmed.push(rule);
+    else fail(rule, `Still ${disabled ? 'on' : 'off'} in Copilot CLI: its settings.json did not take the change.`);
   }
   return { confirmed, results, left };
 }
@@ -344,14 +345,14 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   await appendHistory(context, [event]);
   const done = await turnTogether(context, tools, turns, true, copies, read.libraries, plugins), rules = await runCopilotRules(context, clears, false);
   const settingsChanged = [...done.results.flatMap(result => (result.settingsChanged ? [result.settingsChanged] : [])), ...clearedForHis(profile, done.copies),
-    ...rules.confirmed.map(rule => `Copilot CLI’s off-switch for “${rule.server}” was cleared, so yours is on there.`)];
+    ...rules.confirmed.map(orphanClearedNote)];
   if (done.copies.length < copies.length || rules.confirmed.length < clears.length || settingsChanged.length) await settleEntry(context, event.id, done.copies, settingsChanged, clears.length ? rules.confirmed : undefined);
   const out = outcome(turns, done.done, [...held, ...done.results, ...rules.results], copies.filter(turn => !done.asAsked.includes(turn)), done.copies);
   return { name: profile.name, on: [...out.on, ...rules.confirmed.filter(rule => !done.done.on.some(item => item.id === rule.id)).map(rule => rule.name)],
     off: out.off, left: [...new Set([...out.left, ...rules.left])], results: out.results, event: event.id, ...(settingsChanged.length ? { settingsChanged } : {}) };
 }
 
-/** Undo of a profile entry: turns back library items, plugin copies and orphan Copilot CLI rules still as left, never re-disabling a name his server uses now. */
+/** Undo of a profile entry: turns back library items, plugin copies and uncovered Copilot CLI rules still as left, never re-disabling a name his server uses now, and clears any uncovered rule blocking a server it turns back on. */
 export async function undoSwitch(context: ShareContext, tools: HarnessId[], eventId: string, plugins: PluginSide): Promise<ApplyResult> {
   const stop = (why: string): ApplyResult => ({ stopped: why, results: [], harnessWrites: 0 });
   const history = await readHistory(context);
@@ -360,28 +361,26 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const read = await readLibraries(context);
   if ('stop' in read) return stop(read.stop);
   const livePlugins = await plugins.live(), { items, rows } = await withCopilot(context, tools, liveItems(read.libraries, read.plugins), livePlugins);
-  const turns = undoPlan(past, items), afterOn = onAfterUndo(items, turns), { back, left, keptOff } = pluginUndo(past, livePlugins, afterOn);
-  const copilotBack: CopilotRule[] = [];
-  for (const rule of past.profile.copilotCleared ?? []) {
-    if (rows.some(row => row.copilotOff === rule.server)) continue;
-    if (copilotHasYours(rule.server, rows, read.libraries.mcp, afterOn)) { if (!keptOff.includes(rule.server)) keptOff.push(rule.server); }
-    else copilotBack.push(rule);
-  }
-  const keptNotes = keptOff.map(name => `Copilot CLI’s off-switch for “${name}” was left off: a server of yours has that name there now.`);
+  const turns = undoPlan(past, items), afterOn = onAfterUndo(items, turns), { back, left, keptOff: pluginKept } = pluginUndo(past, livePlugins, afterOn);
+  const { back: copilotBack, keptOff: ruleKept } = copilotUndo(past, rows, read.libraries.mcp, afterOn);
+  const copilotClear: CopilotRule[] = turns.on.filter(item => item.copilotOff).map(item => ({ id: item.id, name: item.name, server: item.copilotOff! }));
+  const keptNotes = [...new Set([...pluginKept, ...ruleKept])].map(name => `Copilot CLI’s off-switch for “${name}” was left off: a server of yours has that name there now.`);
   if (!changes(turns) && !back.length && !copilotBack.length) return stop(keptNotes.join(' ') || 'Nothing to undo: each item that switch changed was changed again since.');
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);
-  const undo = back.length || copilotBack.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, on: named(turns.on), off: named(turns.off),
+  const undo = back.length || copilotBack.length || copilotClear.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, on: named(turns.on), off: named(turns.off),
     ...(back.length ? { plugins: back.map(switched) } : {}), ...(copilotBack.length ? { copilotCleared: copilotBack } : {}) }) : undefined;
   if (undo) await appendHistory(context, [undo]);
-  const { results, made, done, copies, letGo, asAsked } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins), rules = await runCopilotRules(context, copilotBack, true);
-  if (undo && (copies.length < back.length || rules.confirmed.length < copilotBack.length || keptNotes.length)) await settleEntry(context, undo.id, copies, keptNotes, copilotBack.length ? rules.confirmed : undefined);
-  const by = (undo && (copies.length || rules.confirmed.length) ? undo.id : undefined) ?? made[0];
+  const { results, made, done, copies, letGo, asAsked } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins);
+  const rules = await runCopilotRules(context, copilotBack, true), cleared = await runCopilotRules(context, copilotClear, false);
+  const undoNotes = [...keptNotes, ...cleared.confirmed.map(orphanClearedNote)];
+  if (undo && (copies.length < back.length || rules.confirmed.length < copilotBack.length || undoNotes.length)) await settleEntry(context, undo.id, copies, undoNotes, copilotBack.length ? rules.confirmed : undefined);
+  const by = (undo && (copies.length || rules.confirmed.length || cleared.confirmed.length) ? undo.id : undefined) ?? made[0];
   if (by) { const now = await readHistory(context), entry = now.find(each => each.id === eventId); if (entry) { entry.undoneBy = by; await replaceHistory(context, now); } }
-  const { results: notDone, ...switchedBack } = outcome(turns, done, [...results, ...rules.results], back.filter(turn => !asAsked.includes(turn) && !letGo.includes(turn)), copies);
+  const { results: notDone, ...switchedBack } = outcome(turns, done, [...results, ...rules.results, ...cleared.results], back.filter(turn => !asAsked.includes(turn) && !letGo.includes(turn)), copies);
   const since = [...left.map(({ copy, why }) => `${copy.name} in ${toolNames[copy.tool]}, ${why}`),
     ...[...groupBy(letGo, turn => turn.item.id).values()].map(list => `${list[0]!.item.name} in ${andList(list.map(turn => toolNames[turn.copy.tool]))}, edited by hand since, so it is your own now`)];
-  return { results: notDone, harnessWrites: changes(done) + copies.length + rules.confirmed.length, made,
+  return { results: notDone, harnessWrites: changes(done) + copies.length + rules.confirmed.length + cleared.confirmed.length, made,
     switched: { on: switchedBack.on, off: [...switchedBack.off, ...rules.confirmed.filter(rule => !done.off.some(item => item.id === rule.id)).map(rule => rule.name)],
-      left: [...new Set([...switchedBack.left, ...rules.left])], ...(since.length ? { since } : {}), ...(keptNotes.length ? { settingsChanged: keptNotes } : {}) } };
+      left: [...new Set([...switchedBack.left, ...rules.left, ...cleared.left])], ...(since.length ? { since } : {}), ...(undoNotes.length ? { settingsChanged: undoNotes } : {}) } };
 }

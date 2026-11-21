@@ -11,7 +11,7 @@ import { newItem, type ItemKind } from '../src/library.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, copilotKeptOnBy, entryTurns, homeItems, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, switchable, switchPlan, switchPreview, turnsWords, undoPlan, undoTurns, type Libraries } from '../src/profileplan.ts';
+import { allTurns, copilotKeptOnBy, copilotServerName, entryTurns, homeItems, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, switchable, switchPlan, switchPreview, turnsWords, undoPlan, undoTurns, withCopilotOff, type Libraries } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, liveNow, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { runPlan, type PlanApi } from '../src/pluginplan.ts';
@@ -1756,4 +1756,103 @@ test('Copilot shared name fix 4: pluginRowState lives in profileplan.ts and retu
   const bothHome = docsHome([docsIn('copilot-cli', { items: [issues] }), tracker], [], [['mcp', 'issues', true]], [mine]);
   const trackerItem = pluginLive(bothHome).find(each => each.id === 'plugin:mcp:tracker@team-tools/issues')!;
   assert.deepEqual(copilotKeptOnBy(profile('BothAndHis', ['mcp:issues', issuesId]), trackerItem, trackerItem.copies[0]!), { by: 'plugin', plugin: 'document-tools' });
+});
+
+test('Copilot shared name short 1: liveNow carries uncovered copilotOff so menus agree with the page', async () => {
+  const { box, made } = await pluginHome({ copilot: true });
+  try {
+    await takeInCopilotServer(box);
+    await writeFile(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }));
+    const settingsPath = join(box.home, '.copilot/settings.json');
+    await writeFile(settingsPath, `${JSON.stringify({ ...JSON.parse((await text(box, '.copilot/settings.json'))!), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+    const mineId = await made('Mine', ['mcp:issues', pdfId2, sheetId2, issuesId2]);
+    const mineProfile = (await readProfiles(box.home)).profiles.find(each => each.id === mineId)!;
+    const { plugins } = await sideNow(box);
+    const menuItems = await liveNow(box.context, box.tools, plugins);
+    assert.equal(menuItems.find(item => item.id === 'mcp:issues')?.copilotOff, 'issues');
+    assert.deepEqual(inUse([mineProfile], menuItems, plugins), [], 'menu must not say In use while off-switch stands');
+    assert.equal(switchPreview(mineProfile, menuItems, plugins), 'Switching turns 1 item on');
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot shared name short 2: Undo clears an orphan disabledMcpServers rule when plugin was uninstalled or turned off whole since the switch', async () => {
+  for (const mode of ['uninstalled', 'whole-off'] as const) {
+    const { box, made } = await pluginHome({ copilot: true });
+    try {
+      await writeFile(join(box.home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'mine', tools: ['*'] } } }, null, 2)}\n`);
+      await takeInCopilotServer(box);
+      const quiet = await made('Quiet', [pdfId2, sheetId2]);
+      const toQuiet = await switchProfile(box.context, box.tools, quiet, (await sideNow(box)).side);
+      assert.deepEqual([JSON.parse((await text(box, '.copilot/mcp-config.json'))!).mcpServers.issues, JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers],
+        [undefined, ['issues']], mode);
+      const cfgPath = join(box.home, '.copilot/config.json'), cfg = JSON.parse((await text(box, '.copilot/config.json'))!);
+      if (mode === 'uninstalled') cfg.installedPlugins = []; else cfg.installedPlugins[0].enabled = false;
+      await writeFile(cfgPath, JSON.stringify(cfg));
+      const undone = await undoSwitch(box.context, box.tools, toQuiet.event!, (await sideNow(box)).side);
+      assert.deepEqual([undone.stopped, undone.results, JSON.parse((await text(box, '.copilot/mcp-config.json'))!).mcpServers.issues?.command,
+        JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers, undone.switched?.settingsChanged],
+        [undefined, [], 'mine', undefined, ['Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.']], mode);
+      assert.ok(undone.switched?.on.includes('issues'), mode);
+      const undoEntry = (await history(box)).find(entry => entry.profile?.undoOf === toQuiet.event);
+      assert.deepEqual(undoEntry?.settingsChanged, ['Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.'], mode);
+    } finally { await box.cleanup(); }
+  }
+});
+
+test('Copilot shared name short 3: History undoTurns uses the same found-entry guard as undoSwitch and offers no Undo that can only refuse', async () => {
+  const { box, made } = await pluginHome({ copilot: true });
+  try {
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'mine', tools: ['*'] } } }, null, 2)}\n`);
+    await takeInCopilotServer(box);
+    const quiet = await made('Quiet', [pdfId2, sheetId2]);
+    await switchProfile(box.context, box.tools, quiet, (await sideNow(box)).side);
+    await writeFile(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }));
+    await saveProfile(box.context, { name: 'OldMine', items: ['mcp:issues'], switchesPluginItems: false });
+    const oldMine = (await readProfiles(box.home)).profiles.find(each => each.name === 'OldMine')!;
+    const switched = await switchProfile(box.context, box.tools, oldMine.id, (await sideNow(box)).side);
+    const event = (await history(box)).find(entry => entry.id === switched.event)!;
+    // Turn mcp:issues Off in the library (so undoPlan is empty) and hand-add personal `issues` in Copilot CLI.
+    await applyServers(box.context, box.tools, [{ key: 'issues', on: false, except: box.tools.filter(t => t !== 'copilot-cli'), seenOn: true }]);
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'hand', tools: ['*'] } } }, null, 2)}\n`);
+    const now = await sideNow(box);
+    const mcp = await serversView(box.context, box.tools);
+    const planned = undoTurns(event, now.live, now.plugins, mcp);
+    assert.deepEqual(planned, { on: [], off: [] }, 'History must not offer an Undo that can only leave the off-switch off');
+    const refused = await undoSwitch(box.context, box.tools, event.id, now.side);
+    assert.equal(refused.stopped, 'Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.');
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot shared name short 4: one withCopilotOff & copilotServerName helper; runCopilotRules writes existing empty settings.json and refuses unreadable JSON in plain words', async () => {
+  // Single spelling helper and single covered/uncovered attach helper.
+  assert.equal(copilotServerName({ copies: { 'copilot-cli': { folder: 'Hand' } as never }, plugin: { 'copilot-cli': { plugin: 'p', marketplace: 'm', name: 'plug' } }, copilotName: 'kept' }, 'fallback'), 'Hand');
+  assert.equal(copilotServerName({ copies: {}, plugin: { 'copilot-cli': { plugin: 'p', marketplace: 'm', name: 'plug' } }, copilotName: 'kept' }, 'fallback'), 'plug');
+  assert.equal(copilotServerName({ copies: {}, copilotName: 'kept' }, 'fallback'), 'kept');
+  assert.equal(copilotServerName(undefined, 'fallback'), 'fallback');
+  const blocked = { ...row('issues'), copilotOff: 'issues' }, ownItem = [{ id: 'mcp:issues', kind: 'mcp' as const, key: 'issues', name: 'issues', on: true, except: [] }];
+  const switchablePlugin = pluginLive(docsHome([docsIn('copilot-cli', { items: [{ kind: 'mcp', name: 'issues', description: '' }] })]));
+  const offPlugin = pluginLive(docsHome([docsIn('copilot-cli', { off: true, items: [{ kind: 'mcp', name: 'issues', description: '' }] })]));
+  assert.equal(withCopilotOff(ownItem, [blocked], switchablePlugin)[0]!.copilotOff, undefined, 'covered by switchable Copilot CLI plugin');
+  assert.equal(withCopilotOff(ownItem, [blocked], offPlugin)[0]!.copilotOff, 'issues', 'uncovered when plugin is off whole');
+  // Empty existing settings.json + malformed JSON refusal through runCopilotRules on Undo of an orphan clear.
+  const { box, made } = await pluginHome({ copilot: true });
+  try {
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'mine', tools: ['*'] } } }, null, 2)}\n`);
+    await takeInCopilotServer(box);
+    await switchProfile(box.context, box.tools, await made('Quiet', [pdfId2, sheetId2]), (await sideNow(box)).side);
+    await writeFile(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }));
+    await saveProfile(box.context, { name: 'OldMine', items: ['mcp:issues'], switchesPluginItems: false });
+    const oldMine = (await readProfiles(box.home)).profiles.find(each => each.name === 'OldMine')!;
+    const switched = await switchProfile(box.context, box.tools, oldMine.id, (await sideNow(box)).side);
+    // Replace settings.json with an existing empty (0-byte) file: Undo must still write disabledMcpServers: ['issues'].
+    await writeFile(join(box.home, '.copilot/settings.json'), '');
+    const undone = await undoSwitch(box.context, box.tools, switched.event!, (await sideNow(box)).side);
+    assert.deepEqual([undone.results, JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers], [[], ['issues']], 'empty existing settings.json written cleanly');
+    // Malformed settings.json: refusal uses plain words, not raw SyntaxError.
+    const switched2 = await switchProfile(box.context, box.tools, oldMine.id, (await sideNow(box)).side);
+    await writeFile(join(box.home, '.copilot/settings.json'), '{');
+    const bad = await undoSwitch(box.context, box.tools, switched2.event!, (await sideNow(box)).side);
+    assert.deepEqual(bad.results.map(r => [r.harness, r.outcome, r.message]),
+      [['copilot-cli', 'failed', 'issues: Copilot CLI’s settings.json couldn’t be read, so it was left as it is.']]);
+  } finally { await box.cleanup(); }
 });
