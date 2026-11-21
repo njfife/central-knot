@@ -30,7 +30,7 @@ import { itemKey } from './library.ts';
 import { ownText } from './mcp.ts';
 import { mcpSwitchPath, ownWithoutSwitch, withMcpSwitch } from './mcpswitch.ts';
 import { itemId } from './profileplan.ts';
-import { profileEvent, readProfileFile, saveProfiles } from './profiles.ts';
+import { profileEvent, profilesPath, readProfileFile } from './profiles.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
 import { keepOwn, keptOwn } from './serverstore.ts';
 import { libraryGate, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
@@ -67,7 +67,7 @@ function holdsOf(offByProfile: unknown, skills: LibraryView, servers: LibraryVie
 /** Where a held server's switch in a tool is released: in its file, or in its kept own part. */
 type ServerRelease = 'file' | 'own';
 
-/** Moves a format 1 profiles file to format 2 (the header says how). Does nothing for any other file, or where a pass may not write. */
+/** Moves a format 1 profiles file to format 2 (the header says how), so moved profiles leave plugin items alone until chosen. Does nothing for any other file, or where a pass may not write. */
 export async function migrateProfiles(context: ShareContext, tools: HarnessId[]): Promise<void> {
   const file = await readProfileFile(context.home);
   if (file.format !== 1 || !file.raw) return;
@@ -91,7 +91,7 @@ export async function migrateProfiles(context: ShareContext, tools: HarnessId[])
   await applyServers(context, tools, [], offNow('mcp'));
   const agentsOn = Object.values(agents.library.items).filter(item => item.on && !item.deleted).map(item => itemId('agent', item.key));
   await writeDurably(join(storeDirectory(context.home), 'profiles.v1.json'), file.text!);
-  await saveProfiles(context.home, file.view.profiles.map(profile => ({ ...profile, items: [...new Set([...profile.items, ...agentsOn])] })));
+  await writeDurably(profilesPath(context.home), `${JSON.stringify({ formatVersion: 2, profiles: file.view.profiles.map(({ id, name, items }) => ({ id, name, items: [...new Set([...items, ...agentsOn])] })) }, null, 2)}\n`);
 }
 
 /**

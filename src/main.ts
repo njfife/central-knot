@@ -47,7 +47,7 @@ import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { homePass, passTells, syncOnceReport, type HomePass } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
-import { homeItems, inUse, inUseName, pluginLive, switchable, type LiveItem, type PluginLive } from './profileplan.ts';
+import { homeItems, inUse, inUseName, pluginLive, switchable, switchPreview, type LiveItem, type PluginLive } from './profileplan.ts';
 import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
 import { keepEntries, linuxPlaces, placeAutostart, readAutostart, signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
@@ -488,7 +488,7 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     // One not offered (nothing in it: profileplan.ts switchable) is shown disabled, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => {
       const empty = !switchable(profile, lastItems, lastPlugins);
-      return { label: empty ? `${profile.name} (empty)` : profile.name, type: 'checkbox' as const, checked: inUseNow.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
+      return { label: `${profile.name} · ${switchPreview(profile, lastItems, lastPlugins)}`, type: 'checkbox' as const, checked: inUseNow.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
     }),
     { type: 'separator' },
     { label: 'Edit profiles…', click: () => showPage('profiles') },
@@ -1628,8 +1628,8 @@ app.whenReady().then(async () => {
   // Profiles: their definitions are Central Knot's own file; a switch is the library's own On and Off clicks (profiles.ts).
   handle('profiles:save', async (profile, home) => {
     if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
-    const input = profile as { id?: unknown; name?: unknown; items?: unknown; restore?: unknown };
-    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : undefined, items: strings(input.items), restore: input.restore === true });
+    const input = profile as { id?: unknown; name?: unknown; items?: unknown; switchesPluginItems?: unknown; restore?: unknown };
+    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : undefined, items: strings(input.items), switchesPluginItems: typeof input.switchesPluginItems === 'boolean' ? input.switchesPluginItems : undefined, restore: input.restore === true });
     return saved.problem ? saved : { ...saved, profiles: await profilesSaved() };
   });
   handle('profiles:delete', async (id, home) => {

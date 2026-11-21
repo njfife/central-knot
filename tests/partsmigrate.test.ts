@@ -383,7 +383,7 @@ test('An item linked to a plugin is outside profiles: a switch never turns it Of
     await box.migrate();
     const read = await readLibraries(box.context);
     assert.ok('libraries' in read);
-    assert.deepEqual(inUse([{ id: made.id!, name: 'Focus', items: ['skill:notes'] }], liveItems(read.libraries, read.plugins), []).map(profile => profile.name), ['Focus']);
+    assert.deepEqual(inUse([{ id: made.id!, name: 'Focus', items: ['skill:notes'], switchesPluginItems: true }], liveItems(read.libraries, read.plugins), []).map(profile => profile.name), ['Focus']);
     await switchProfile(box.context, box.managed, made.id!, NO_PLUGINS);
     assert.equal((await box.library()).pdf.on, true);
   } finally { await box.cleanup(); }
