@@ -13,7 +13,7 @@ const customIconFlag = '00000000000000000400000000000000000000000000000000000000
 const run = (command, args, options) => execFileSync(command, args, { stdio: ['ignore', 'ignore', 'inherit'], ...options });
 // hdiutil is taken from PATH (/usr/bin on every Mac), so a test can stand one in (tests/macdmg.test.ts).
 // macOS can still be holding an image it was just handed ("Resource busy"); a moment later it mounts. Returns the device the
-// image is attached as: the whole disk, which hdiutil names first ("/dev/disk5	GUID_partition_scheme").
+// image is attached as: the whole disk, which hdiutil names first ("/dev/disk5  GUID_partition_scheme").
 const attach = (image, mount, flags) => {
   let said;
   for (let tries = 1; said === undefined; tries++) {
