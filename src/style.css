@@ -1798,7 +1798,7 @@ span.ins-confirm { margin-top: 0; }
 /* Profiles table: each library item with its box, and what a switch does to it */
 .pf-scroll { display: flex; flex-direction: column; container-type: inline-size; }
 .pf-table { display: flex; flex-direction: column; }
-.pf-row { display: grid; grid-template-columns: minmax(0, 1fr) clamp(112px, 20cqi, 240px); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--control-line); }
+.pf-row { display: grid; grid-template-columns: minmax(0, 1fr) clamp(208px, 26cqi, 280px); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--control-line); }
 .pf-row:not(.pf-head):hover { background: var(--hover); }
 .pf-row:not(.pf-head):focus-within { background: var(--hover); }
 .pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
@@ -1819,10 +1819,9 @@ span.ins-confirm { margin-top: 0; }
 .pf-tick:has(.hidden-input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
 .pf-included .pf-tick { color: var(--ink); }
 /* What a switch does to the row: quiet where nothing changes, the ink's own weight where it turns on or off (the blue is a link's);
-   a plugin item's tools wrap within the column */
+   wide enough at 1316 with the sidebar open for "Turns off in Codex and Pi" on one line, wrapping only past that */
 .pf-state { padding: 6px 16px; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .pf-state-moves { color: var(--ink); font-weight: 500; }
-.pf-state-also { display: block; color: var(--ink-soft); font-weight: 400; }
 /* At the head of a kind, once: a tool that keeps a plugin's items of that kind on */
 .pf-kind-note { padding: 6px 16px; font-size: 12px; line-height: 16px; color: var(--ink-soft); box-shadow: inset 0 -1px 0 var(--control-line); }
 .pf-section { display: flex; align-items: center; height: 33px; padding: 0 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); position: sticky; top: 40px; z-index: 1; }

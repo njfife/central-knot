@@ -126,9 +126,10 @@ function installedWay(home: PluginHome, at: PluginItemAt): Pick<PluginCopy, 'way
   if (!ownSwitch(at)) return { way: 'stays' };
   const why = cantSwitch(at) ?? sharesName(at, home.mcp.items.flatMap(row => row.copies['copilot-cli']?.folder ?? []), home.pluginItems ?? []);
   if (why) return { way: 'held', why };
-  // His own servers as Copilot CLI's file spells them once a switch puts them there: as it has them now, else by their name.
-  const spelled = (item: LiveItem) => home.mcp.items.find(row => row.key === item.key)?.copies[at.tool]?.folder ?? item.name;
-  const ids = at.tool === 'copilot-cli' && at.kind === 'mcp' ? homeItems(home).filter(item => item.kind === 'mcp' && spelled(item) === at.name && !item.except.includes(at.tool)).map(item => item.id) : [];
+  // His own servers named as Copilot CLI will have them: as its file spells one there now; one not there by its key, since the
+  // spelling it gets back there (its kept own part: servers.ts writeServer) isn't known until it is written.
+  const named = (item: LiveItem) => { const there = home.mcp.items.find(row => row.key === item.key)?.copies[at.tool]?.folder; return there === undefined ? item.key === itemKey(at.name) : there === at.name; };
+  const ids = at.tool === 'copilot-cli' && at.kind === 'mcp' ? homeItems(home).filter(item => item.kind === 'mcp' && named(item) && !item.except.includes(at.tool)).map(item => item.id) : [];
   return { way: 'switch', ...(ids.length ? { sharesWith: { ids, why: sharesName(at, [at.name], [])! } } : {}) };
 }
 
@@ -185,23 +186,29 @@ export function pluginLive(home: PluginHome): PluginLive[] {
   return [...found.values()];
 }
 
-/** What a switch to a profile would do to one plugin's item: toward `on` (the profile has it), the tools it turns (`turn`), and those it can't (`held`). */
-export interface PluginTurn { id: string; on: boolean; turn: HarnessId[]; held: { tool: HarnessId; why: string }[] }
+/**
+ * What a switch to a profile would do to one plugin's item: toward `on` (the profile has it), the tools it turns (`turn`), and
+ * those it can't (`held`); `release`, Copilot CLI's server turned on though the profile leaves it out, so its rule doesn't turn
+ * off his own server of that name, which the switch turns on (`sharesWith`; also in `held`).
+ */
+export interface PluginTurn { id: string; on: boolean; turn: HarnessId[]; held: { tool: HarnessId; why: string }[]; release?: HarnessId[] }
 
 /**
  * What switching to `profile` would turn of the plugins' items, one item in one tool at a time, never a whole plugin: each copy
  * that is not as the profile has the item (on for one it has, off for one it leaves out) is turned where its way is `switch`, and
- * held, with why, where it is `plugin-off` or `held`, or where turning it off would take one of his own servers the profile
- * has on with it (`sharesWith`); an `unread` copy is held either way; a copy that `stays` is left. Only items with something
- * turned or held are listed; an id the profile names that no tool has now is in none (dormant, as a deleted item's is).
+ * held, with why, where it is `plugin-off` or `held`, or where its off would take one of his own servers the profile has on
+ * with it (`sharesWith`: held on, and turned on where it is off now, `release`); an `unread` copy is held either way; a copy
+ * that `stays` is left. Only items with something turned or held are listed; an id the profile names that no tool has now is in
+ * none (dormant, as a deleted item's is).
  */
 export function pluginPlan(profile: Pick<Profile, 'items'>, items: PluginLive[]): PluginTurn[] {
   return items.flatMap(item => {
-    const on = profile.items.includes(item.id), differ = item.copies.filter(copy => copy.way === 'unread' || copy.on !== on);
-    const why = (copy: PluginCopy) => ('why' in copy ? copy.why : !on && copy.sharesWith?.ids.some(id => profile.items.includes(id)) ? copy.sharesWith.why : undefined);
-    const turn = differ.filter(copy => copy.way === 'switch' && !why(copy)).map(copy => copy.tool);
+    const on = profile.items.includes(item.id), takesHis = (copy: PluginCopy) => !on && !!copy.sharesWith?.ids.some(id => profile.items.includes(id));
+    const differ = item.copies.filter(copy => copy.way === 'unread' || copy.on !== on || takesHis(copy));
+    const why = (copy: PluginCopy) => ('why' in copy ? copy.why : takesHis(copy) ? copy.sharesWith!.why : undefined);
+    const turn = differ.filter(copy => copy.way === 'switch' && !why(copy)).map(copy => copy.tool), release = differ.filter(copy => takesHis(copy) && !copy.on).map(copy => copy.tool);
     const held = differ.flatMap(copy => { const reason = why(copy); return reason ? [{ tool: copy.tool, why: reason }] : []; });
-    return turn.length || held.length ? [{ id: item.id, on, turn, held }] : [];
+    return turn.length || held.length ? [{ id: item.id, on, turn, held, ...(release.length ? { release } : {}) }] : [];
   });
 }
 

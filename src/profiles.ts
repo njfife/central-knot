@@ -151,10 +151,10 @@ export interface PluginSide { live: () => Promise<PluginLive[]>; run: (ops: Plug
 /** A home read with no plugins' items, for a caller whose home has none (tests of the library's part alone). */
 export const NO_PLUGINS: PluginSide = { live: async () => [], run: async () => [] };
 
-/** The copies a plugin plan turns (pluginPlan `turn`), each toward what the profile has. */
+/** The copies a plugin plan turns (pluginPlan `turn`), each toward what the profile has, and those it turns on to keep his own server on (`release`). */
 const copiesTurned = (plan: PluginTurn[], live: PluginLive[]): CopyTurn[] => plan.flatMap(turn => {
-  const item = live.find(each => each.id === turn.id)!;
-  return turn.turn.map(tool => ({ item, copy: item.copies.find(copy => copy.tool === tool)!, on: turn.on }));
+  const item = live.find(each => each.id === turn.id)!, at = (tool: HarnessId, on: boolean) => ({ item, copy: item.copies.find(copy => copy.tool === tool)!, on });
+  return [...turn.turn.map(tool => at(tool, turn.on)), ...(turn.release ?? []).map(tool => at(tool, true))];
 });
 /** A plan's held copies (pluginPlan `held`), as a result says them: the item, its tool and why. */
 const heldResults = (plan: PluginTurn[], live: PluginLive[]): DestinationResult[] => plan.flatMap(turn => turn.held.map(({ tool, why }) => {
@@ -305,7 +305,7 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
  * Undo of a profile entry (a switch's, or the migration's): each library item it turned On that is still On is turned Off, each
  * it turned Off that is still Off is turned On (profileplan.ts undoPlan), by the items' own clicks, each with its own History
  * entry; each plugin copy it turned that is still as it left it goes back by its own switch, all of them told in one entry of
- * the Undo's own, written first (`undoOf`), and each copy left is named, with why (`switched.since`). The switch's entry is
+ * the Undo's own, written first (`undoOf`), which counts his items too, and each copy left is named, with why (`switched.since`). The switch's entry is
  * marked undone by the Undo's entry, or where it turned back no plugin copy, by its first library item's. No copies are given
  * back. An entry from before profiles were sets of items, and an Undo's own, have nothing to undo.
  */
@@ -313,14 +313,14 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const stop = (why: string): ApplyResult => ({ stopped: why, results: [], harnessWrites: 0 });
   const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
-  if (!past?.profile?.on || past.undoneBy) return stop('That switch has nothing to undo.');
+  if (!past?.profile?.on || past.profile.undoOf || past.undoneBy) return stop('That switch has nothing to undo.');
   const read = await readLibraries(context);
   if ('stop' in read) return stop(read.stop);
   const turns = undoPlan(past, liveItems(read.libraries, read.plugins)), { back, left } = pluginUndo(past, await plugins.live());
   if (!changes(turns) && !back.length) return stop('Nothing to undo: each item that switch changed was changed again since.');
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);
-  const undo = back.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, plugins: back.map(switched) }) : undefined;
+  const undo = back.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, on: named(turns.on), off: named(turns.off), plugins: back.map(switched) }) : undefined;
   if (undo) await appendHistory(context, [undo]);
   const { results, made, done, copies, letGo, asAsked } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins);
   if (undo && copies.length < back.length) await settleEntry(context, undo.id, copies, []);

@@ -288,6 +288,13 @@ test('The Undo of a switch turns back each plugin copy still as the switch left 
   assert.deepEqual(pluginUndo(entry, pluginLive(pluginOff)).back.map(turn => turn.copy.tool), ['pi-cli']);
 });
 
+test('His own server not in Copilot CLI now is compared with a plugin’s by its key: the spelling it gets back there isn’t known until it is written', () => {
+  const issues = { kind: 'mcp' as const, name: 'issues', description: '' }, issuesId = 'plugin:mcp:document-tools@team-tools/issues';
+  const home = docsHome([docsIn('copilot-cli', { items: [issues] }), docsIn('codex-cli', { items: [issues] })], [], [['mcp', 'issues', false]]);
+  home.mcp.library.issues!.name = 'Issues';
+  assert.deepEqual(pluginPlan(profile('Mine', ['mcp:issues']), pluginLive(home)).map(each => [each.id, each.turn, each.held.map(held => held.tool)]), [[issuesId, ['codex-cli'], ['copilot-cli']]]);
+});
+
 test('A plugin’s item is on, for Start from what’s on now and the row alike, where a tool switches it: Claude Code’s copy that stays on doesn’t count while Codex has it off', () => {
   const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { skillsOff: ['pdf-reader'] })]);
   assert.deepEqual(pluginLive(home).map(item => [item.id, pluginItemOn(item)]), [[pdfId, false], [sheetId, true]]);
@@ -750,6 +757,36 @@ test('A profile whose every difference is held is not switched, and says why in 
     await writeFile(join(box.home, '.codex/config.toml'), CODEX_BEFORE.replace('enabled = true', 'enabled = false'));
     const switched = await switchProfile(box.context, box.tools, await made('Docs', [pdfId2, sheetId2, issuesId2]), (await sideNow(box)).side);
     assert.equal(switched.stopped, 'docs is off in Codex, so 3 of its items can’t be switched from here. Nothing was switched.');
+  } finally { await box.cleanup(); }
+});
+
+test('A disable rule an earlier switch wrote for the plugin’s server goes when a switch turns his own server of that name on: Quiet, then Dev, then Undo, and his server is never both there and disabled', async () => {
+  const { box, made } = await pluginHome({ copilot: true });
+  try {
+    const others: HarnessId[] = ['claude-cli', 'codex-cli', 'pi-cli'];
+    await applyServers(box.context, box.tools, [{ key: 'issues', on: true, except: others }]);
+    await applyServers(box.context, box.tools, [{ key: 'issues', on: false, except: others, seenOn: true }]);
+    const copilot = async () => ({ his: !!JSON.parse((await text(box, '.copilot/mcp-config.json'))!).mcpServers.issues, disabled: JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers ?? [] });
+    await switchProfile(box.context, box.tools, await made('Quiet', [pdfId2, sheetId2]), (await sideNow(box)).side);
+    assert.deepEqual(await copilot(), { his: false, disabled: ['issues'] }, 'Quiet: neither, so the plugin’s goes off by its name');
+    const dev = await switchProfile(box.context, box.tools, await made('Dev', ['mcp:issues', pdfId2, sheetId2]), (await sideNow(box)).side);
+    assert.deepEqual([await copilot(), dev.results.map(result => [result.harness, result.outcome])], [{ his: true, disabled: [] }, [['copilot-cli', 'held']]], 'Dev: his back, and the rule gone');
+    await undoSwitch(box.context, box.tools, dev.event!, (await sideNow(box)).side);
+    const after = await copilot();
+    assert.ok(!(after.his && after.disabled.includes('issues')), JSON.stringify(after));
+  } finally { await box.cleanup(); }
+});
+
+test('An Undo’s History row counts all it put back, his own items and the plugins’', async () => {
+  const { box, made } = await pluginHome();
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Notes.', 'notes') }, [], 'notes');
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]);
+    const switched = await switchProfile(box.context, box.tools, await made('Other', [sheetId2, issuesId2]), (await sideNow(box)).side);
+    await undoSwitch(box.context, box.tools, switched.event!, (await sideNow(box)).side);
+    const undo = (await history(box)).find(entry => entry.profile?.undoOf === switched.event)!;
+    assert.equal(turnsWords(entryTurns(undo.profile!), 'did'), '2 items turned on');
+    assert.match((await undoSwitch(box.context, box.tools, undo.id, (await sideNow(box)).side)).stopped ?? '', /nothing to undo/i, 'an Undo’s own row has no Undo');
   } finally { await box.cleanup(); }
 });
 

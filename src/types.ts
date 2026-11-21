@@ -558,7 +558,8 @@ export interface HistoryEvent {
    * `toName` the profile last switched to before it, written when it turns something Off): the library items it turned On and
    * Off, and a switch's plugins' items' copies it turned (`plugins`: written as planned before the switch, then as each tool
    * confirmed). Its Undo turns back each item and copy still as it left it (profileplan.ts undoPlan, pluginUndo), the copies told
-   * in an entry of the Undo's own (`undoOf`: the switch's entry; `plugins`: what it turned them back to), which has no Undo. An
+   * in an entry of the Undo's own (`undoOf`: the switch's entry; `plugins`: what it turned them back to; `on` and `off`: his items
+   * it turned back too, which have entries of their own as well), which has no Undo. An
    * entry from before profiles were sets of items has neither `on` nor `off`: it is past.
    */
   profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; migrated?: true; undoOf?: string };
