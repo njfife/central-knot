@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { editTomlArray, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue } from '../src/textedit.ts';
+import { arrayBlocks, editTomlArray, readTomlTables, setJsonMember, setTomlArrayKey, setTomlTable, tomlHeader, tomlValue } from '../src/textedit.ts';
 
 const claudeJson = `{
   "numStartups": 42,
@@ -109,4 +109,22 @@ test('TOML: each [[array]] block is read as its own table, and blocks are droppe
   const windows = codexToml.replace(/\n/g, '\r\n');
   const added = editTomlArray(windows, ['skills', 'config'], () => false, { name: 'b:two', enabled: false });
   assert.ok(!/[^\r]\n/.test(added) && editTomlArray(added, ['skills', 'config'], () => true) === windows, 'a file with Windows line endings keeps them');
+});
+
+test('TOML: setTomlArrayKey edits a key in place across picked blocks, keeping comments, spacing, line endings and a missing final newline', () => {
+  const doc = `${codexToml}\n[[skills.config]]\n  name = "a:one" # keep\n  enabled  =  true  # pinned\n\n[[skills.config]]\nname = "a:two"\nenabled = true # last`;
+  const off = setTomlArrayKey(doc, ['skills', 'config'], () => true, 'enabled', false);
+  assert.equal(off, `${codexToml}\n[[skills.config]]\n  name = "a:one" # keep\n  enabled  =  false  # pinned\n\n[[skills.config]]\nname = "a:two"\nenabled = false # last`);
+  assert.equal(setTomlArrayKey(off, ['skills', 'config'], () => true, 'enabled', false), off, 'already at the value leaves every byte alone');
+  assert.equal(setTomlArrayKey(off, ['skills', 'config'], () => true, 'enabled', true), doc, 'switching back restores byte for byte');
+  // A block without the key gets it right after its last entry (or header), matching indentation, CRLF and a missing final newline.
+  const noKey = '[[skills.config]]\r\n  name = "a:one"\r\n\r\n[[skills.config]]\r\nname = "a:two"';
+  assert.equal(setTomlArrayKey(noKey, ['skills', 'config'], () => true, 'enabled', false),
+    '[[skills.config]]\r\n  name = "a:one"\r\n  enabled = false\r\n\r\n[[skills.config]]\r\nname = "a:two"\r\nenabled = false');
+  assert.equal(setTomlArrayKey('[[skills.config]]', ['skills', 'config'], () => true, 'enabled', false), '[[skills.config]]\nenabled = false');
+  // Unpicked blocks and other arrays stay untouched; index matches arrayBlocks(tables, path).
+  const mixed = '[[other.list]]\nenabled = true\n\n[[skills.config]]\nname = "a:one"\nenabled = true\n\n[[skills.config]]\nname = "a:two"\nenabled = true\n';
+  assert.deepEqual(arrayBlocks(readTomlTables(mixed), ['skills', 'config']).map(block => block.entries[0]!.value), ['a:one', 'a:two']);
+  assert.equal(setTomlArrayKey(mixed, ['skills', 'config'], (_block, index) => index === 0, 'enabled', false),
+    '[[other.list]]\nenabled = true\n\n[[skills.config]]\nname = "a:one"\nenabled = false\n\n[[skills.config]]\nname = "a:two"\nenabled = true\n');
 });
