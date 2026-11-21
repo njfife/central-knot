@@ -81,6 +81,7 @@ const api: DesktopApi = {
   updatePlugin: (source, marketName, plugin, tools, home) => ipcRenderer.invoke('plugins:update', source, marketName, plugin, tools, home),
   turnPlugin: (source, plugin, what, tool, home) => ipcRenderer.invoke('plugins:turn', source, plugin, what, tool ?? null, home),
   undoPluginTurn: (source, plugin, before, back, home) => ipcRenderer.invoke('plugins:undo-turn', source, plugin, before, back, home),
+  takePluginItem: (source, plugin, item, tool, home) => ipcRenderer.invoke('plugins:take', source, plugin, item, tool, home),
   repo: check => ipcRenderer.invoke('repo:view', check),
   connectRepo: (url, branch, home) => ipcRenderer.invoke('repo:connect', url, branch, home),
   pullRepo: home => ipcRenderer.invoke('repo:pull', home),

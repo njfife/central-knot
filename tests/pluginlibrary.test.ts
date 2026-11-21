@@ -6,17 +6,20 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
-import { agentKind } from '../src/agents.ts';
+import { agentKind, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { pluginFiles } from '../src/catalogdetail.ts';
+import type { ItemKind } from '../src/library.ts';
+import { readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
+import { pluginLive } from '../src/profileplan.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
 import { notInWhy } from '../src/pluginstatus.ts';
 import { readHistory } from '../src/history.ts';
 import * as engine from '../src/plugins.ts';
-import { serverKind } from '../src/servers.ts';
+import { applyServers, restoreServer, serverKind, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
-import { applySkills, skillKind } from '../src/skills.ts';
-import type { HarnessId, PluginTurn } from '../src/types.ts';
+import { applySkills, restoreSkill, skillKind, skillsView } from '../src/skills.ts';
+import type { HarnessId, HomeView, PluginTurn } from '../src/types.ts';
 import { execFileSync } from 'node:child_process';
 import { connectRepo, pushRepo } from '../src/gitrepo.ts';
 import { addSource, previewSource } from '../src/sources.ts';
@@ -115,7 +118,7 @@ test('The read: each kind’s items as the tools’ own layout gives them, a ski
     assert.deepEqual(names('skill'), ['notes', 'review', 'tools'], 'skills/ and the folder its plugin.json lists');
     assert.deepEqual(names('agent'), ['helper']);
     assert.deepEqual(names('mcp'), ['relay', 'local: it names a plugin’s own folder or settings, which only Claude Code fills in, for a plugin']);
-    assert.deepEqual(read.map(each => [each.kind, each.whole, each.link, each.plugin]), [['skill', true, 'plugin:kit@team', { on: true, outOf: [] }], ['agent', true, 'plugin:kit@team', { on: true, outOf: [] }], ['mcp', true, 'plugin:kit@team', { on: true, outOf: [] }]], 'a left-out server holds back no drop');
+    assert.deepEqual(read.map(each => [each.kind, each.whole, each.link, each.plugin]), [['skill', true, 'plugin:kit@team', { on: true, outOf: [], into: [] }], ['agent', true, 'plugin:kit@team', { on: true, outOf: [], into: [] }], ['mcp', true, 'plugin:kit@team', { on: true, outOf: [], into: [] }]], 'a left-out server holds back no drop');
     // A folder named apart from its SKILL.md's name is keyed by its folder, as every tool's copy is; two folders of one name are both left out.
     await put(join(box.kit, 'skills/pdf-tools/SKILL.md'), skill('pdf'));
     await put(join(box.kit, 'more/notes/SKILL.md'), skill('notes', 'another'));
@@ -201,7 +204,7 @@ test('Arriving On writes over nothing: Pi’s own skill review keeps Pi out of t
     assert.equal(await readFile(box.pi('skills/review/SKILL.md'), 'utf8'), skill('review', 'mine'), 'his own copy, byte for byte');
     const items = (await box.library()).skill;
     assert.deepEqual([items.review!.except, items.review!.on, items.notes!.source], [['pi-cli'], true, undefined]);
-    assert.deepEqual((await box.lines())['skill:notes'], 'not-brought', 'Its items says the name is his');
+    assert.deepEqual((await box.lines())['skill:notes'], 'alike', 'Its items says the name is his, the same as the plugin’s');
     await box.turn('off');
     assert.deepEqual([(await box.library()).skill.notes!.on, await exists(box.pi('skills/notes/SKILL.md'))], [true, true], 'his own notes stays On, in Pi');
     // A tick on one tool's box changes its except alone, and still not where Pi has a copy of its own.
@@ -510,7 +513,8 @@ test('Every item of a plugin let go: its page still lists them, Pi says why none
     await applySkills(box.share, box.tools, []);
     assert.deepEqual(await box.lines(), { 'skill:notes': 'not-brought' });
     const pi = (await box.view()).switches!.kit!.tools['pi-cli']!;
-    assert.deepEqual([pi.act, pi.held], [undefined, 'notes: you have a skill of your own by that name; delete yours on its row to take the plugin’s.']);
+    assert.deepEqual([pi.act, pi.held], [undefined, KEEPS_NOTES], 'his own now: kept, said as a state, with Use the plugin’s beside it on the page');
+    assert.deepEqual((await box.view()).items!.kit!.yours, { 'pi-cli': [{ kind: 'skill', key: 'notes', name: 'notes' }] });
     assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops, []);
   } finally { await box.cleanup(); }
 });
@@ -549,6 +553,8 @@ async function notesOnly() {
 const LEAD = 'Nothing of kit is on in Pi.';
 const OWN = 'notes: Pi has a skill of its own by that name, never written over; turn it on in Pi on its row to put the plugin’s there, keeping Pi’s as a version.';
 const KEPT = 'notes is kept out of Pi: tick to let it in, unless Pi has its own by that name.';
+/** His own notes in the Library, the plugin's of other content: kept, said as a state (pluginstatus.ts notInWhy `yours`, yourSaid). */
+const KEEPS_NOTES = 'notes: you keep your own skill by that name, not the plugin’s.';
 
 test('Pi has a skill of its own named as the plugin’s: never written over; the report and its box, off, name it and the way', async () => {
   const box = await notesOnly();
@@ -572,13 +578,12 @@ test('Pi’s own copy gone since, the plugin Off and On again: kept out of Pi, s
   } finally { await box.cleanup(); }
 });
 
-test('His own skill of that name already in Central Knot: the plugin’s isn’t brought in; Its items lists it, and the report and its box, off, say why and the way', async () => {
+test('His own skill of that name already in Central Knot: the plugin’s isn’t brought in; Its items lists it, and the report and its box, off, say he keeps his', async () => {
   const box = await notesOnly();
   try {
     await put(box.pi('skills/notes/SKILL.md'), skill('notes', 'mine'));
     await applySkills(box.share, box.tools, [{ key: 'notes', on: true, except: [] }]);
-    const yours = 'notes: you have a skill of your own by that name; delete yours on its row to take the plugin’s.';
-    assert.deepEqual(await box.piSays(await box.turn('on')), { report: [`held: ${LEAD} ${yours}`], box: `off: ${yours}` });
+    assert.deepEqual(await box.piSays(await box.turn('on')), { report: [`held: ${LEAD} ${KEEPS_NOTES}`], box: `off: ${KEEPS_NOTES}` });
     assert.deepEqual(await box.lines(), { 'skill:notes': 'not-brought' });
   } finally { await box.cleanup(); }
 });
@@ -611,4 +616,422 @@ test('Each reason said once for the names it holds, a long list cut, the reasons
     'a, b, c and 2 more: OpenCode has skills of its own by that name, never written over; turn each on in OpenCode on its row to put the plugin’s there, keeping OpenCode’s as a version.',
     'charts and sheets were deleted here: tick to bring them back.']);
   assert.deepEqual(notInWhy('pi-cli', 'kit', names({ cannot: 'Its SKILL.md isn’t valid.' }, 'skill', 'broken')), ['broken: Its SKILL.md isn’t valid.']);
+});
+
+// ---------- A name he has: Use the plugin's (library.ts A PLUGIN, the take row; pluginlibrary.ts ItemsAsk `take`) ----------
+
+/**
+ * His case: kit holds the MCP server maps alone (`same`: of the same content as his, else other), and his own maps, found in
+ * Claude Code and Added, is On in Claude Code, Pi and OpenCode. `take`: Use the plugin's for one name under one tool's box.
+ * `toolFiles`: every file those tools keep his items in, as an Undo must leave them.
+ */
+async function mapsHome(same = false, kitMaps: object = { command: 'npx', args: [same ? 'maps' : 'maps-of-kit'] }) {
+  const box = await kitHome({ tools: ['claude-cli', 'pi-cli', 'opencode-cli'] });
+  await mkdir(join(box.home, '.config/opencode'), { recursive: true });
+  for (const path of ['skills', 'extra', 'agents']) await rm(join(box.kit, path), { recursive: true, force: true });
+  await put(join(box.kit, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'kit' }));
+  await put(join(box.kit, '.mcp.json'), JSON.stringify({ mcpServers: { maps: kitMaps } }));
+  await put(join(box.home, '.claude.json'), `${JSON.stringify({ mcpServers: { maps: { command: 'npx', args: ['maps'] } } }, null, 2)}\n`);
+  await applyServers(box.share, box.tools, [{ key: 'maps', on: true, except: [] }]);
+  const take = (kind: ItemKind, key: string, tool: HarnessId = 'pi-cli') => box.markets.take(box.root, 'kit', { kind, key }, tool, box.home);
+  const toolFiles = async (): Promise<Record<string, string>> => ({ claude: await readFile(join(box.home, '.claude.json'), 'utf8'),
+    ...Object.fromEntries(Object.entries(await files(box.pi(''))).map(([path, text]) => [`pi/${path}`, text])),
+    ...Object.fromEntries(Object.entries(await files(join(box.home, '.config/opencode'))).map(([path, text]) => [`opencode/${path}`, text])) });
+  const taken = async () => (await readHistory(box.share)).filter(event => event.cause === 'plugin-taken' && event.kind === 'edit');
+  return { ...box, take, toolFiles, taken, maps: async () => (await box.library()).mcp.maps! };
+}
+const piMaps = (files: Record<string, string>) => JSON.parse(files['pi/mcp.json']!).mcpServers.maps;
+
+test('His case: his server maps meets the plugin’s maps of other content in Pi; doing nothing keeps his, said as a state; Use the plugin’s puts the plugin’s in Pi alone and lets his copies elsewhere go; the header’s Undo gives every file back, his own again', async () => {
+  const box = await mapsHome();
+  try {
+    const before = await box.toolFiles(), his = (await box.maps()).hash;
+    const ticked = await box.turn('let-in', 'pi-cli');
+    // Doing nothing: the plugin on, his maps untouched in every tool, the reason a state beside its action.
+    assert.deepEqual([await box.toolFiles(), (await box.maps()).source, (await box.view()).items!.kit!.yours], [before, undefined, { 'pi-cli': [{ kind: 'mcp', key: 'maps', name: 'maps' }] }]);
+    assert.deepEqual([(await box.view()).items!.kit!.on, (await box.view()).items!.kit!.of], [{ 'pi-cli': 0, 'opencode-cli': 0 }, 1], 'its items for Pi: maps, not on there');
+    assert.deepEqual([ticked.done.map(step => step.report.message), (await box.view()).switches!.kit!.tools['pi-cli']!.held],
+      [['Nothing of kit is on in Pi. maps: you keep your own MCP server by that name, not the plugin’s.'], 'maps: you keep your own MCP server by that name, not the plugin’s.']);
+    const took = await box.take('mcp', 'maps');
+    assert.deepEqual(took.done.map(step => `${step.tool} ${step.report.outcome}: ${step.report.message}`), ['pi-cli installed: 1 of its 1 items is on in Pi.']);
+    const after = await box.toolFiles();
+    assert.deepEqual([piMaps(after).args, after.claude, after['opencode/opencode.json']], [['maps-of-kit'], before.claude, before['opencode/opencode.json']],
+      'Pi has the plugin’s entry; Claude Code and OpenCode keep his, untouched');
+    const maps = await box.maps();
+    assert.deepEqual([!!maps.source, maps.on, maps.except, Object.keys(maps.applied), maps.versions.some(version => version.hash === his)], [true, true, ['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli'], ['pi-cli'], true],
+      'the plugin’s, linked; his version kept; kept out of every tool but Pi, his copies there theirs now');
+    assert.deepEqual((await box.taken()).map(event => [event.previous, event.version, event.took, event.losers.map(loser => loser.tool)]),
+      [[his, maps.hash, { on: true, except: [], copies: { 'claude-cli': his, 'opencode-cli': his } }, ['pi-cli']]], 'one History entry, with the copy each let-go tool held');
+    assert.deepEqual([(await box.view()).items!.kit!.yours, (await box.view()).items!.kit!.on['pi-cli']], [undefined, 1], 'no clash left to say; the plugin’s maps is on in Pi');
+    await box.undo(took);
+    assert.deepEqual(await box.toolFiles(), before, 'every file as before the click');
+    const back = await box.maps();
+    assert.deepEqual([back.source, back.on, back.except, back.hash], [undefined, true, [], his], 'his own again, On everywhere: not Off and still linked');
+    assert.deepEqual([(await box.view()).switches!.kit!.tools['pi-cli']!.has, (await box.view()).items!.kit!.yours], ['none', { 'pi-cli': [{ kind: 'mcp', key: 'maps', name: 'maps' }] }], 'Pi’s box unticked, the clash said again');
+  } finally { await box.cleanup(); }
+});
+
+test('Synchronize everything after Use the plugin’s: his copies in Claude Code and OpenCode are no found item (maps is in Central Knot), so nothing is taken in or written', async () => {
+  const box = await mapsHome();
+  try {
+    const { setSyncEverything } = await import('../src/everything.ts');
+    await box.turn('let-in', 'pi-cli');
+    await box.take('mcp', 'maps');
+    const before = [await box.toolFiles(), await box.maps()];
+    assert.deepEqual(await setSyncEverything(box.share, true), {});
+    await applyServers(box.share, box.tools, [], { background: true });
+    assert.deepEqual([await box.toolFiles(), await box.maps()], before);
+  } finally { await box.cleanup(); }
+});
+
+test('The plugin’s maps the same as his: nothing changes, no link, no write, no History; the box counts it on and says so with no action; Off and a later read leave it his; once the plugin’s differs, the clash and its action', async () => {
+  const box = await mapsHome(true);
+  try {
+    const mine = async () => { const { source, hash, on, except, versions } = await box.maps(); return { source, hash, on, except, versions }; };
+    const before = await box.toolFiles(), his = await mine();
+    assert.deepEqual((await box.turn('let-in', 'pi-cli')).done.map(step => [step.report.outcome, step.report.message]), [['installed', '1 of its 1 items is on in Pi.']], 'the tick goes through: his counts on');
+    await box.update();
+    const items = (await box.view()).items!.kit!;
+    assert.deepEqual([await box.toolFiles(), await mine(), await box.taken()], [before, his, []], 'his, as he had it, in every tool');
+    assert.deepEqual([items.yours, items.on['pi-cli'], items.of, (await box.view()).switches!.kit!.tools['pi-cli']!.has], [{ 'pi-cli': [{ kind: 'mcp', key: 'maps', name: 'maps', same: true }] }, 1, 1, 'items']);
+    const { yourSaid } = await import('../src/pluginstatus.ts');
+    assert.equal(yourSaid(items.yours!['pi-cli']![0]!, 'pi-cli'), 'maps is the same as yours, so yours stays.');
+    await box.turn('off');
+    assert.deepEqual([await box.toolFiles(), await mine()], [before, his], 'the plugin’s Off removes nothing of his');
+    await box.turn('on');
+    await put(join(box.kit, '.mcp.json'), JSON.stringify({ mcpServers: { maps: { command: 'npx', args: ['maps', '--v2'] } } }));
+    assert.deepEqual((await box.view()).items!.kit!.yours, { 'pi-cli': [{ kind: 'mcp', key: 'maps', name: 'maps' }] }, 'the plugin’s now differs: Use the plugin’s is offered');
+  } finally { await box.cleanup(); }
+});
+
+test('A skill and an agent of his meet the plugin’s in Pi: each has its action; the plugin’s goes over his at the same path, Pi’s list as he had it; History’s Undo of each gives Pi his back, byte for byte', async () => {
+  const box = await mapsHome();
+  try {
+    await put(join(box.kit, 'skills/mapper/SKILL.md'), skill('mapper', 'of kit'));
+    await put(join(box.kit, 'agents/cartographer.md'), '---\nname: cartographer\ndescription: Draws.\n---\nOf kit.\n');
+    await put(join(box.home, '.claude/skills/mapper/SKILL.md'), skill('mapper', 'mine'));
+    await put(join(box.home, '.claude/agents/cartographer.md'), '---\nname: cartographer\ndescription: Draws.\n---\nMine.\n');
+    // Pi's settings with a pattern that keeps every skill out: the pass lets his in by name.
+    await put(box.pi('settings.json'), `${JSON.stringify({ skills: ['!*'] }, null, 2)}\n`);
+    await applySkills(box.share, box.tools, [{ key: 'mapper', on: true, except: [] }]);
+    await applyAgents(box.share, box.tools, [{ key: 'cartographer', on: true, except: [] }]);
+    await box.turn('let-in', 'pi-cli');
+    const before = await box.toolFiles();
+    assert.deepEqual((await box.view()).items!.kit!.yours!['pi-cli']!.map(clash => `${clash.kind} ${clash.name}`).sort(), ['agent cartographer', 'mcp maps', 'skill mapper']);
+    await box.take('skill', 'mapper');
+    await box.take('agent', 'cartographer');
+    const after = await box.toolFiles(), changed = Object.keys(after).filter(path => after[path] !== before[path]).sort();
+    assert.deepEqual(changed, ['pi/skills/cartographer.md', 'pi/skills/mapper/SKILL.md'], 'Pi’s two copies alone: its list, Claude Code and OpenCode as they were');
+    assert.deepEqual([after['pi/skills/mapper/SKILL.md'], /Of kit/.test(after['pi/skills/cartographer.md']!)], [skill('mapper', 'of kit'), true]);
+    const [skillTook, agentTook] = (await box.taken()).map(event => event.id);
+    await restoreSkill(box.share, box.tools, skillTook!);
+    await restoreAgent(box.share, box.tools, agentTook!);
+    assert.deepEqual(await box.toolFiles(), before);
+    assert.deepEqual([(await box.library()).skill.mapper!.source, (await box.library()).agent.cartographer!.source], [undefined, undefined]);
+  } finally { await box.cleanup(); }
+});
+
+test('His skill kept out of Pi under Pi’s pattern: Use the plugin’s places a fresh copy and lets it in by name; its Undo takes the copy and exactly that entry out again', async () => {
+  const box = await mapsHome();
+  try {
+    await put(join(box.kit, 'skills/mapper/SKILL.md'), skill('mapper', 'of kit'));
+    await put(join(box.home, '.claude/skills/mapper/SKILL.md'), skill('mapper', 'mine'));
+    await put(box.pi('settings.json'), `${JSON.stringify({ skills: ['!*', '+skills/other/SKILL.md'] }, null, 2)}\n`);
+    await applySkills(box.share, box.tools, [{ key: 'mapper', on: true, except: ['pi-cli'] }]);
+    await box.turn('let-in', 'pi-cli');
+    const before = await box.toolFiles();
+    await box.take('skill', 'mapper');
+    const after = await box.toolFiles();
+    assert.deepEqual([after['pi/skills/mapper/SKILL.md'], JSON.parse(after['pi/settings.json']!).skills], [skill('mapper', 'of kit'), ['!*', '+skills/other/SKILL.md', '+skills/mapper/SKILL.md']]);
+    await restoreSkill(box.share, box.tools, (await box.taken())[0]!.id);
+    assert.deepEqual(await box.toolFiles(), before);
+  } finally { await box.cleanup(); }
+});
+
+test('Three names of his at once: each has its action and its own way back; taking one back leaves the other two the plugin’s', async () => {
+  const box = await mapsHome();
+  try {
+    await put(join(box.kit, 'skills/mapper/SKILL.md'), skill('mapper', 'of kit'));
+    await put(join(box.kit, 'skills/globe/SKILL.md'), skill('globe', 'of kit'));
+    for (const name of ['mapper', 'globe']) await put(join(box.home, `.claude/skills/${name}/SKILL.md`), skill(name, 'mine'));
+    await applySkills(box.share, box.tools, [{ key: 'mapper', on: true, except: [] }, { key: 'globe', on: true, except: [] }]);
+    await box.turn('let-in', 'pi-cli');
+    assert.equal((await box.view()).items!.kit!.yours!['pi-cli']!.length, 3);
+    for (const [kind, key] of [['mcp', 'maps'], ['skill', 'mapper'], ['skill', 'globe']] as const) await box.take(kind, key);
+    const entries = await box.taken();
+    assert.deepEqual(entries.map(event => event.item), ['maps', 'mapper', 'globe']);
+    await restoreSkill(box.share, box.tools, entries[1]!.id);
+    const library = await box.library();
+    assert.deepEqual([!!library.mcp.maps!.source, !!library.skill.mapper!.source, !!library.skill.globe!.source], [true, false, true]);
+    assert.equal(await readFile(box.pi('skills/mapper/SKILL.md'), 'utf8'), skill('mapper', 'mine'));
+    assert.deepEqual((await box.view()).items!.kit!.yours, { 'pi-cli': [{ kind: 'skill', key: 'mapper', name: 'mapper' }] });
+  } finally { await box.cleanup(); }
+});
+
+test('Edited in Pi after Use the plugin’s: his own again, by the let-go, with the plugin’s version and his first both kept; History’s Undo then makes his first current everywhere, Pi’s edit kept too', async () => {
+  const box = await mapsHome();
+  try {
+    const his = (await box.maps()).hash, before = await box.toolFiles();
+    await box.turn('let-in', 'pi-cli');
+    await box.take('mcp', 'maps');
+    const plugins = (await box.maps()).hash;
+    await put(box.pi('mcp.json'), `${JSON.stringify({ mcpServers: { maps: { command: 'npx', args: ['edited-in-pi'] } } }, null, 2)}\n`);
+    await applyServers(box.share, box.tools, []);
+    const edited = await box.maps();
+    assert.deepEqual([edited.source, [his, plugins].every(hash => edited.versions.some(version => version.hash === hash)), edited.hash === plugins], [undefined, true, false]);
+    const took = (await box.taken())[0]!;
+    await restoreServer(box.share, box.tools, took.id);
+    const back = await box.maps(), after = await box.toolFiles();
+    assert.deepEqual([back.hash, back.except, back.versions.some(version => version.hash === edited.hash)], [his, [], true], 'his first current, in every tool again; Pi’s edit is a version');
+    assert.deepEqual([piMaps(after), after.claude, after['opencode/opencode.json']], [piMaps(before), before.claude, before['opencode/opencode.json']]);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo after the plugin’s update: History offers Go back before this, which makes his current again, his own, in every tool; both of the plugin’s versions are kept', async () => {
+  const box = await mapsHome();
+  try {
+    const his = (await box.maps()).hash, before = await box.toolFiles();
+    await box.turn('let-in', 'pi-cli');
+    await box.take('mcp', 'maps');
+    const first = (await box.maps()).hash;
+    await put(join(box.kit, '.mcp.json'), JSON.stringify({ mcpServers: { maps: { command: 'npx', args: ['maps-of-kit', '--v2'] } } }));
+    await box.update();
+    const updated = await box.maps();
+    assert.deepEqual([!!updated.source, piMaps(await box.toolFiles()).args], [true, ['maps-of-kit', '--v2']]);
+    const took = (await box.taken())[0]!, { libraryAction } = await import('../src/historyactions.ts');
+    assert.equal(libraryAction(took, updated, { managed: box.tools, pending: [], linked: true })?.label, 'Go back before this');
+    await restoreServer(box.share, box.tools, took.id);
+    const back = await box.maps();
+    assert.deepEqual([back.hash, back.source, back.except, [first, updated.hash].every(hash => back.versions.some(version => version.hash === hash))], [his, undefined, [], true]);
+    assert.deepEqual(await box.toolFiles(), before);
+  } finally { await box.cleanup(); }
+});
+
+test('Use the plugin’s, then the plugin Off, or Pi unticked: the plugin’s copy leaves Pi; Claude Code and OpenCode keep his, untouched', async () => {
+  for (const what of ['off', 'keep-out'] as const) {
+    const box = await mapsHome();
+    try {
+      const before = await box.toolFiles();
+      await box.turn('let-in', 'pi-cli');
+      await box.take('mcp', 'maps');
+      await box.turn(what, what === 'off' ? undefined : 'pi-cli');
+      const after = await box.toolFiles();
+      assert.deepEqual([piMaps(after), after.claude, after['opencode/opencode.json']], [undefined, before.claude, before['opencode/opencode.json']], what);
+    } finally { await box.cleanup(); }
+  }
+});
+
+test('A skill he has in Pi and OpenCode only through the shared folder: no Use the plugin’s under either box, each saying so', async () => {
+  const box = await mapsHome();
+  try {
+    await put(join(box.kit, 'skills/mapper/SKILL.md'), skill('mapper', 'of kit'));
+    await put(join(box.home, '.agents/skills/mapper/SKILL.md'), skill('mapper', 'mine'));
+    await applySkills(box.share, box.tools, [{ key: 'mapper', on: true, except: [] }]);
+    assert.deepEqual(Object.keys((await box.library()).skill.mapper!.throughShared ?? {}), ['pi-cli', 'opencode-cli'], 'Pi and OpenCode read his from the shared folder');
+    await box.turn('let-in', 'pi-cli');
+    await box.turn('let-in', 'opencode-cli');
+    const clashes = (await box.view()).items!.kit!.yours!;
+    assert.deepEqual([clashes['pi-cli']!, clashes['opencode-cli']!].map(names => names.find(name => name.key === 'mapper')?.held?.shared), [true, true]);
+    const { yourSaid } = await import('../src/pluginstatus.ts');
+    assert.equal(yourSaid(clashes['pi-cli']!.find(name => name.key === 'mapper')!, 'pi-cli'), 'mapper: Pi reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.');
+  } finally { await box.cleanup(); }
+});
+
+test('A profile that named his maps before Use the plugin’s: its id is dormant while maps is the plugin’s, so a switch to it turns the plugin’s out of Pi, Claude Code and OpenCode keeping his; one naming the plugin’s maps turns it on in Pi; after the Undo his id is live again', async () => {
+  const box = await mapsHome();
+  try {
+    const mine = (await saveProfile(box.share, { name: 'Mine', items: ['mcp:maps'] })).id!, plugins = (await saveProfile(box.share, { name: 'Plugin’s', items: ['plugin:mcp:kit@team/maps'] })).id!;
+    const before = await box.toolFiles();
+    await box.turn('let-in', 'pi-cli');
+    const took = await box.take('mcp', 'maps');
+    const side = { live: async () => pluginLive({ pluginItems: [], profiles: await readProfiles(box.home), skills: await skillsView(box.share, box.tools), mcp: await serversView(box.share, box.tools), agents: await agentsView(box.share, box.tools) } as unknown as HomeView), run: async () => [] };
+    await switchProfile(box.share, box.tools, mine, side);
+    let now = await box.toolFiles();
+    assert.deepEqual([piMaps(now), now.claude, now['opencode/opencode.json'], (await box.maps()).on], [undefined, before.claude, before['opencode/opencode.json'], false], 'Mine leaves the plugin’s maps out: Off, so out of Pi');
+    await switchProfile(box.share, box.tools, plugins, side);
+    assert.deepEqual(piMaps(await box.toolFiles()).args, ['maps-of-kit'], 'the plugin’s maps by its own id');
+    await box.undo(took);
+    now = await box.toolFiles();
+    assert.deepEqual([(await box.maps()).source, (await box.maps()).except, now], [undefined, [], before], 'the Undo gives his back as before the click, in every tool');
+    await switchProfile(box.share, box.tools, mine, side);
+    assert.deepEqual([(await box.maps()).on, await box.toolFiles()], [true, before], 'his id is live again: Mine has it on');
+  } finally { await box.cleanup(); }
+});
+
+// ---------- A take is one item, in one tool, by one click (library.ts TAKE): the cases the break-it pass reached ----------
+
+test('A tool not managed at the click that holds his copy: managed again, its copy stays his, untouched', async () => {
+  const box = await mapsHome();
+  try {
+    const { chooseTools } = await import('../src/toolchoice.ts');
+    const before = await box.toolFiles();
+    await box.turn('let-in', 'pi-cli');
+    await chooseTools(box.share, 'opencode-cli', false);
+    box.tools.splice(box.tools.indexOf('opencode-cli'), 1);
+    await box.take('mcp', 'maps');
+    await chooseTools(box.share, 'opencode-cli', true);
+    box.tools.push('opencode-cli');
+    await applyServers(box.share, box.tools, []);
+    assert.equal((await box.toolFiles())['opencode/opencode.json'], before['opencode/opencode.json']);
+  } finally { await box.cleanup(); }
+});
+
+test('His maps changed in Claude Code to a form Pi and OpenCode can’t hold, so they keep the older one: the take in Pi leaves OpenCode’s as it is, and its Undo gives Pi back what it held', async () => {
+  const box = await mapsHome();
+  try {
+    await put(join(box.home, '.claude.json'), `${JSON.stringify({ mcpServers: { maps: { type: 'sse', url: 'https://example.invalid/sse' } } }, null, 2)}\n`);
+    await applyServers(box.share, box.tools, []);
+    const before = await box.toolFiles();
+    await box.turn('let-in', 'pi-cli');
+    await box.take('mcp', 'maps');
+    const after = await box.toolFiles();
+    assert.deepEqual([piMaps(after).args, after['opencode/opencode.json'], after.claude], [['maps-of-kit'], before['opencode/opencode.json'], before.claude]);
+    await restoreServer(box.share, box.tools, (await box.taken())[0]!.id);
+    assert.deepEqual(await box.toolFiles(), before);
+  } finally { await box.cleanup(); }
+});
+
+test('A take that can’t land is not offered and changes nothing: the plugin’s server in a form Pi can’t hold, said in the action’s place; clicked anyway, refused with why', async () => {
+  const box = await mapsHome(false, { type: 'sse', url: 'https://example.invalid/sse' });
+  try {
+    await box.turn('let-in', 'pi-cli');
+    const before = await box.toolFiles(), his = await box.maps(), yours = (await box.view()).items!.kit!.yours!['pi-cli']!;
+    const { yourSaid } = await import('../src/pluginstatus.ts');
+    assert.deepEqual(yours.map(name => yourSaid(name, 'pi-cli')), ['maps: you keep your own MCP server by that name, not the plugin’s. Pi has no SSE transport.']);
+    const took = await box.take('mcp', 'maps');
+    assert.deepEqual(took.done.map(step => [step.report.outcome, step.report.message]), [['held', 'maps: Pi has no SSE transport.']]);
+    assert.deepEqual([await box.toolFiles(), await box.maps(), await box.taken()], [before, his, []]);
+  } finally { await box.cleanup(); }
+});
+
+test('An agent of his that a skill of Pi’s holds out of Pi: no Use the plugin’s, the hold said; clicked anyway, nothing changes', async () => {
+  const box = await mapsHome();
+  try {
+    await put(join(box.kit, 'agents/cartographer.md'), '---\nname: cartographer\ndescription: Draws.\n---\nOf kit.\n');
+    await put(join(box.home, '.claude/agents/cartographer.md'), '---\nname: cartographer\ndescription: Draws.\n---\nMine.\n');
+    await put(box.pi('skills/cartographer/SKILL.md'), skill('cartographer', 'a skill of his in Pi'));
+    await applyAgents(box.share, box.tools, [{ key: 'cartographer', on: true, except: [] }]);
+    await box.turn('let-in', 'pi-cli');
+    const before = await box.toolFiles(), name = (await box.view()).items!.kit!.yours!['pi-cli']!.find(each => each.key === 'cartographer')!;
+    assert.ok(name.held && !name.held.shared, 'held, with the hold’s reason');
+    const took = await box.take('agent', 'cartographer');
+    assert.deepEqual([took.done[0]!.report.outcome, await box.toolFiles(), (await box.library()).agent.cartographer!.source], ['held', before, undefined]);
+  } finally { await box.cleanup(); }
+});
+
+test('A skill he has only through the shared folder and keeps out of Pi: no Use the plugin’s for Pi; clicked anyway, nothing changes', async () => {
+  const box = await mapsHome();
+  try {
+    await put(join(box.kit, 'skills/mapper/SKILL.md'), skill('mapper', 'of kit'));
+    await put(join(box.home, '.agents/skills/mapper/SKILL.md'), skill('mapper', 'mine'));
+    await applySkills(box.share, box.tools, [{ key: 'mapper', on: true, except: ['pi-cli'] }]);
+    await box.turn('let-in', 'pi-cli');
+    const before = await box.toolFiles(), name = (await box.view()).items!.kit!.yours!['pi-cli']!.find(each => each.key === 'mapper')!;
+    assert.equal(name.held?.shared, true);
+    const took = await box.take('skill', 'mapper');
+    assert.deepEqual([took.done[0]!.report.outcome, await box.toolFiles(), (await box.library()).skill.mapper!.source], ['held', before, undefined]);
+  } finally { await box.cleanup(); }
+});
+
+test('Pi’s own copy written over by the take, then the plugin Off: History’s Undo gives Pi its own copy back', async () => {
+  const box = await mapsHome();
+  try {
+    await applyServers(box.share, box.tools, [{ key: 'maps', on: true, except: ['pi-cli'] }]);
+    await put(box.pi('mcp.json'), `${JSON.stringify({ mcpServers: { maps: { command: 'npx', args: ['pi-independent'] } } }, null, 2)}\n`);
+    const before = await box.toolFiles();
+    await box.turn('let-in', 'pi-cli');
+    await box.take('mcp', 'maps');
+    await box.turn('off');
+    await restoreServer(box.share, box.tools, (await box.taken())[0]!.id);
+    // His entry back, written in Pi's form (a give-back writes the version, as Pi's own: librarypass.ts giveBackCopy).
+    const after = await box.toolFiles();
+    assert.deepEqual([{ ...after, 'pi/mcp.json': '' }, piMaps(after)], [{ ...before, 'pi/mcp.json': '' }, { type: 'stdio', ...piMaps(before) }]);
+  } finally { await box.cleanup(); }
+});
+
+test('The click brings in its item alone: another item’s update waits for Update, and the header’s Undo leaves Pi as before the click; the box counts 1 of its 2 items on in Pi', async () => {
+  const box = await mapsHome();
+  try {
+    await put(join(box.kit, 'skills/globe/SKILL.md'), skill('globe', 'v1'));
+    await box.turn('let-in', 'pi-cli');
+    await put(join(box.kit, 'skills/globe/SKILL.md'), skill('globe', 'v2'));
+    const before = await box.toolFiles(), took = await box.take('mcp', 'maps');
+    assert.equal(await readFile(box.pi('skills/globe/SKILL.md'), 'utf8'), skill('globe', 'v1'));
+    await box.undo(took);
+    const { itemsAllIn, itemsOnWords } = await import('../src/pluginstatus.ts'), view = await box.view();
+    assert.deepEqual([await box.toolFiles(), itemsOnWords(view, 'kit', 'pi-cli', ' in Pi'), itemsAllIn(view, 'kit', 'pi-cli')], [before, '1 of its 2 items is on in Pi', false], 'a part tick');
+  } finally { await box.cleanup(); }
+});
+
+// ---------- After the confirming read: one count, the plugin there through his own, the click's one tool, a copy unseen ----------
+
+test('His identical maps kept out of Pi: ticking Pi lands nothing there, and the report says so as the box does, his the same and his', async () => {
+  const box = await mapsHome(true);
+  try {
+    await applyServers(box.share, box.tools, [{ key: 'maps', on: true, except: ['pi-cli'] }]);
+    const ticked = await box.turn('let-in', 'pi-cli');
+    assert.deepEqual(ticked.done.map(step => [step.report.outcome, step.report.message]), [['held', 'Nothing of kit is on in Pi. maps: the same as yours, so yours stays.']]);
+    assert.equal((await box.view()).items!.kit!.on['pi-cli'], 0);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin whose only item in Pi is his of the same content is in Pi: a name its Update brings goes into Pi', async () => {
+  const box = await mapsHome(true);
+  try {
+    await box.turn('let-in', 'pi-cli');
+    await put(join(box.kit, 'skills/globe/SKILL.md'), skill('globe', 'new'));
+    await box.update();
+    assert.deepEqual([(await box.library()).skill.globe!.except.includes('pi-cli'), await exists(box.pi('skills/globe/SKILL.md'))], [false, true]);
+  } finally { await box.cleanup(); }
+});
+
+test('His maps Off, the plugin on in OpenCode with another item: Use the plugin’s for Pi brings maps into Pi alone', async () => {
+  const box = await mapsHome();
+  try {
+    await put(join(box.kit, 'skills/globe/SKILL.md'), skill('globe', 'of kit'));
+    await applyServers(box.share, box.tools, [{ key: 'maps', on: false, except: [] }]);
+    await box.turn('let-in', 'pi-cli');
+    await box.turn('let-in', 'opencode-cli');
+    const before = (await box.toolFiles())['opencode/opencode.json'];
+    await box.take('mcp', 'maps');
+    assert.deepEqual([piMaps(await box.toolFiles()).args, (await box.toolFiles())['opencode/opencode.json']], [['maps-of-kit'], before]);
+  } finally { await box.cleanup(); }
+});
+
+test('Use the plugin’s in Pi, then his OpenCode copy edited: the Undo leaves that copy as it is, kept out, and says so', async () => {
+  const box = await mapsHome();
+  try {
+    await box.turn('let-in', 'pi-cli');
+    await box.take('mcp', 'maps');
+    const edited = `${JSON.stringify({ mcp: { maps: { type: 'local', command: ['npx', 'edited-in-opencode'] } } }, null, 2)}\n`;
+    await put(join(box.home, '.config/opencode/opencode.json'), edited);
+    const done = await restoreServer(box.share, box.tools, (await box.taken())[0]!.id);
+    assert.deepEqual([(await box.toolFiles())['opencode/opencode.json'], (await box.maps()).except, (await box.maps()).source], [edited, ['opencode-cli'], undefined]);
+    assert.ok(done.results.some(each => each.harness === 'opencode-cli' && each.message === 'OpenCode’s copy was changed since, so it stays as it is, kept out.'), JSON.stringify(done.results));
+  } finally { await box.cleanup(); }
+});
+
+test('Pi’s settings file can’t be read: Use the plugin’s is held there, with Pi’s own reason; clicked anyway, nothing changes', async () => {
+  const box = await mapsHome();
+  try {
+    await box.turn('let-in', 'pi-cli');
+    await put(box.pi('mcp.json'), '{ not json');
+    const name = (await box.view()).items!.kit!.yours!['pi-cli']![0]!;
+    assert.ok(name.held && !name.held.shared, JSON.stringify(name));
+    const took = await box.take('mcp', 'maps');
+    assert.deepEqual([took.done[0]!.report.outcome, (await box.maps()).source, await box.taken()], ['held', undefined, []]);
+  } finally { await box.cleanup(); }
+});
+
+test('The same through the header’s Undo: his OpenCode copy edited since stays as it is, and the Undo’s report says so', async () => {
+  const box = await mapsHome();
+  try {
+    await box.turn('let-in', 'pi-cli');
+    const took = await box.take('mcp', 'maps');
+    const edited = `${JSON.stringify({ mcp: { maps: { type: 'local', command: ['npx', 'edited-in-opencode'] } } }, null, 2)}\n`;
+    await put(join(box.home, '.config/opencode/opencode.json'), edited);
+    const undone = await box.undo(took);
+    assert.deepEqual([(await box.toolFiles())['opencode/opencode.json'], undone.done.find(step => step.tool === 'opencode-cli')?.report.message],
+      [edited, 'Its items are as they were in OpenCode. maps: OpenCode’s copy was changed since, so it stays as it is, kept out.']);
+  } finally { await box.cleanup(); }
 });
