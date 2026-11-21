@@ -1180,3 +1180,162 @@ for (const stale of [false, true]) test(`a plugin link left during a read return
   const { source, plugin } = fullPlace();
   assert.deepEqual([source, plugin], ['/beta', 'gamma']);
 });
+
+// ---------- Results that say what happened: queued Add waiting for a choice, and superseded Undo problems ----------
+
+test('A queued Add whose copies differ on disk says the copy question alone and runs no plugin switches', async t => {
+  onLibrary();
+  linkedHome(['a'], []);
+  const pluginCalls = t.mock.method(api, 'setPluginSkill', async () => ({ reports: [report('skill-off', 'Turned off.')] }));
+  queueClick({ kind: 'skills', key: 'draft', on: true }, 'draft', () => ({
+    kind: 'skills', items: ['draft'], rows: [{ kind: 'skills', key: 'draft' }],
+    changes: [{ key: 'draft', on: true, except: [], seenOn: false }],
+    said: () => 'draft is in Central Knot now, and on in all 3 tools.',
+    also: ['A plugin note that should not appear before a choice.'],
+    plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', skill: 'draft', action: 'skill-on' }], said: 'Turned on alpha.' },
+  }), () => false);
+  await settled();
+  await main.pass(waitsForChoice);
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons, app.outcome?.act, pluginCalls.mock.callCount()],
+    ['draft has differing copies. Choose which copy every tool uses.', false, undefined, undefined, 0]);
+});
+
+test('A run of three clicks (an On, a queued Add whose copies differ, an Off): the On and Off are counted, the Add’s wait is said once, and its plugin switches do not run', async t => {
+  onLibrary();
+  linkedHome(['a', 'b'], []);
+  onNow.set(rowId('skills', 'a'), false);
+  onNow.set(rowId('skills', 'b'), true);
+  const pluginCalls = t.mock.method(api, 'setPluginSkill', async () => ({ reports: [report('skill-off', 'Turned off.')] }));
+  flip('a', true);
+  queueClick({ kind: 'skills', key: 'draft', on: true }, 'draft', () => ({
+    kind: 'skills', items: ['draft'], rows: [{ kind: 'skills', key: 'draft' }],
+    changes: [{ key: 'draft', on: true, except: [], seenOn: false }],
+    said: () => 'draft is in Central Knot now, and on in all 3 tools.',
+    plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', skill: 'draft', action: 'skill-on' }], said: 'Turned on alpha.' },
+  }), () => false);
+  flip('b', false);
+  await settled();
+  await main.pass(did('a', true));
+  await main.pass(waitsForChoice);
+  await main.pass(did('b', false));
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons, pluginCalls.mock.callCount()],
+    ['1 skill is off: b; 1 skill is on: a. draft has differing copies. Choose which copy every tool uses.', false, [], 0]);
+});
+
+test('An Undo after two clicks on one item drops an earlier tool failure once a later restore of that item puts it right', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  history.push({ id: 'on-skills-notes', key: 'notes', kind: 'on', at: '2026-11-18T09:00:02.000Z' });
+  const claudeFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'Could not remove Claude Code’s copy yet. Central Knot will try again.' };
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    if (id === 'on-skills-notes') {
+      app.home!.skills.library.notes!.on = false;
+      return { results: [{ item: 'notes', harness: 'codex-cli' as const, outcome: 'removed' as const, message: '' }, claudeFail] };
+    }
+    // Turning notes back On finds Claude Code already holding the current version, so restore emits no result for Claude Code.
+    app.home!.skills.library.notes!.on = true;
+    return { results: [{ item: 'notes', harness: 'codex-cli' as const, outcome: 'written' as const, message: '' }] };
+  });
+  flip('notes', false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ results: [{ item: 'notes', harness: 'codex-cli', outcome: 'removed', message: '' }, claudeFail], writes: 1, made: ['off-skills-notes'] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes'] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([main.restored, app.outcome?.text, app.outcome?.warn, app.outcome?.reasons, app.skillsResult?.results.filter(keptBack)],
+    [['on-skills-notes', 'off-skills-notes'], 'Undone: notes is as before.', false, [], []]);
+});
+
+test('An Undo keeps an earlier tool failure when the refreshed view still shows that tool unsettled', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  history.push({ id: 'on-skills-notes', key: 'notes', kind: 'on', at: '2026-11-18T09:00:02.000Z' });
+  const claudeFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'Could not remove Claude Code’s copy yet. Central Knot will try again.' };
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    if (id === 'on-skills-notes') return { results: [claudeFail] };
+    // The refreshed view still owes a removal in Claude Code, so the earlier failure was not put right.
+    (app.home!.skills.items[0] as unknown as { plan: { write: string[]; remove: string[] } }).plan = { write: [], remove: ['claude-cli'] };
+    return { results: [] };
+  });
+  flip('notes', false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ results: [claudeFail], writes: 1, made: ['off-skills-notes'] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes'] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack).map(entry => [entry.item, entry.harness])],
+    ['Not all of notes could be put back.', true, [['notes', 'claude-cli']]]);
+});
+
+test('A real failure at Undo stays warned and names the tool and copy', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  const claudeFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'Could not remove Claude Code’s copy yet. Central Knot will try again.' };
+  t.mock.method(api, 'restore', async (id: string) => { main.restored.push(id); return { results: [claudeFail] }; });
+  flip('notes', false);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass(offMade('skills', 'notes'));
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack)],
+    ['Not all of notes could be put back.', true, [claudeFail]]);
+});
+
+test('An Undo over two different items warns only about the one that truly could not be undone', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'spare' }], { on: true });
+  history.push({ id: 'on-skills-notes', key: 'notes', kind: 'on', at: '2026-11-18T09:00:05.000Z' });
+  const failFor = (item: string) => ({ item, harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'Could not remove Claude Code’s copy yet. Central Knot will try again.' });
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    if (id === 'on-skills-notes') return { results: [failFor('notes')] };
+    if (id === 'off-skills-notes') return { results: [{ item: 'notes', harness: 'codex-cli' as const, outcome: 'written' as const, message: '' }] };
+    return { results: [failFor('spare')] };
+  });
+  flip('spare', false);
+  flip('notes', false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.spare!.on = false;
+  await main.pass(offMade('skills', 'spare'));
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ results: [failFor('notes')], writes: 1, made: ['off-skills-notes'] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes'] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack).map(entry => [entry.item, entry.harness])],
+    ['Not all of spare and notes could be put back.', true, [['spare', 'claude-cli']]]);
+});
+
+test('An Undo whose two restores of one item both fail in the same tool keeps only the latest failure', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  history.push({ id: 'on-skills-notes', key: 'notes', kind: 'on', at: '2026-11-18T09:00:02.000Z' });
+  const firstFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'First failure.' };
+  const secondFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'held' as const, message: 'Second failure.' };
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    return { results: [id === 'on-skills-notes' ? firstFail : secondFail] };
+  });
+  flip('notes', false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ ...did('notes', false), made: ['off-skills-notes'] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes'] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack)],
+    ['Not all of notes could be put back.', true, [secondFail]]);
+});

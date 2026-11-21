@@ -556,6 +556,9 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const kept = { kind: click.kind, results: ours.filter(entry => entry !== refusal), notices: result.notices };
   if (result.stopped) return { kept, did: false, refused: result.stopped, changed: [], outcome: { page, items: click.items, rows: click.rows, warn: true, band: true, text: result.stopped } };
   const made = result.made ?? [];
+  // An Add held because its copies differ on disk: nothing was added, so say the question alone and leave its plugins' part unrun.
+  if (differs && !did && !made.length) return { kept, did: false, changed: [], focus: click.focus?.(),
+    outcome: { page, items: click.items, rows: click.rows, warn: failed, band: true, text: copiesDiffer(click.items) } };
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
   if (plugged) setHome(await api().refresh());
@@ -746,8 +749,9 @@ interface Undoable { kind: PageKind; made: string[]; back: PluginOp[] }
  * Undo of one click, or of several as one (a run, Turn these off): their plugin items' switches first, then every History entry
  * they made, newest first, each by its own action (historyactions.ts). An entry History no longer holds, or one whose Undo is
  * stopped (its kind's record, say), is said once as a problem line (words.ts saidByKind: led by its kind where the Undo spans several), and
- * the later entries of a stopped kind are left; the other kinds' still go back, and the result names them. Each kind's last result
- * becomes what its own entries' Undo did.
+ * the later entries of a stopped kind are left; the other kinds' still go back, and the result names them. A tool problem from an
+ * earlier restore that a later restore of the same item put right, confirmed against the refreshed view, is dropped. Each kind's
+ * last result becomes what its own entries' Undo did.
  */
 const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async page => {
   const home = state.home!, several = new Set(parts.map(part => part.kind)).size > 1;
@@ -755,16 +759,39 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const switchedBack = parts.flatMap(part => part.back);
   const unswitched = switchedBack.length ? await runSwitches(switchedBack, true) : undefined;
   const kindOfEntry = new Map(parts.flatMap(part => part.made.map(id => [id, part.kind] as const)));
-  const events = (await api().history()).events.filter(event => kindOfEntry.has(event.id)).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
+  const events = (await api().history()).events.filter(event => kindOfEntry.has(event.id)).reverse()
+    .sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
-  const results = new Map(parts.map(part => [part.kind, [] as DestinationResult[]])), stops = new Map<PageKind, string>();
+  type UndoEntry = { key?: string; entry: DestinationResult; superseded?: boolean };
+  const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), stops = new Map<PageKind, string>();
   for (const event of events) {
     const kind = kindOfEntry.get(event.id)!;
     if (stops.has(kind)) continue;
     const result = await api().restore(event.id, home.home);
-    if (result.stopped) stops.set(kind, result.stopped); else results.get(kind)!.push(...result.results);
+    if (result.stopped) { stops.set(kind, result.stopped); continue; }
+    const key = libraryEntry(event)?.key, list = raw.get(kind)!;
+    // A later restore of the same item in this Undo supersedes an earlier tool problem: replaced if that tool failed again,
+    // or dropped below once the refreshed view confirms the tool is in its final state.
+    if (key) {
+      const failedNow = new Set(result.results.filter(entry => entry.harness && keptBack(entry)).map(entry => entry.harness!));
+      for (let at = list.length - 1; at >= 0; at--) {
+        const earlier = list[at]!;
+        if (earlier.key !== key || !earlier.entry.harness || !keptBack(earlier.entry)) continue;
+        if (failedNow.has(earlier.entry.harness)) list.splice(at, 1); else earlier.superseded = true;
+      }
+    }
+    list.push(...result.results.map(entry => ({ key, entry })));
   }
   setHome(await api().refresh());
+  const settledIn = (kind: PageKind, key: string, tool: HarnessId) => {
+    const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
+    const live = item && !item.deleted;
+    return !!view?.tools.includes(tool) && !row?.unseen?.[tool]
+      && (live ? !row?.cannot?.[tool] && !row?.plan?.write.includes(tool) && !row?.plan?.remove.includes(tool) : item?.applied[tool] === undefined);
+  };
+  const results = new Map([...raw].map(([kind, list]) => [kind, list
+    .filter(each => !(each.superseded && each.key && each.entry.harness && settledIn(kind, each.key, each.entry.harness)))
+    .map(each => each.entry)]));
   focusAfterBusy = about.focus?.();
   await putHistory();
   keepOwn([...results].map(([kind, kept]) => ({ kind, results: kept, notices: [] })));

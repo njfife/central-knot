@@ -10199,6 +10199,153 @@ async function libraryFlow() {
   same('the last skill deleted from Files on Skills: no skills here yet, Find empty', [await g.text('.empty-title'), await g.run(`document.querySelector('#find')?.value ?? ''`)], ['No skills here yet', '']);
   same('no page errors, the empty states and Resume', [...d.pageErrors, ...e.pageErrors, ...g.pageErrors], []);
   await g.quit();
+
+  // ---------- Queued Add whose copies differ on disk, and Undo after refused / double clicks ----------
+  const R = homeWith('library-result-true');
+  const equalAdd = text('race-add', 'Equal at draw.'), changedAdd = text('race-add', 'Changed before turn.');
+  const equalMid = text('race-mid', 'Equal mid.'), changedMid = text('race-mid', 'Changed mid.');
+  for (const dir of [R.claude, R.copilot]) {
+    skill(dir, 'race-add', equalAdd);
+    skill(dir, 'race-mid', equalMid);
+  }
+  for (const name of ['off-one', 'on-one', 'double-ok', 'real-fail', 'item-stuck']) skill(R.claude, name, text(name, `Skill ${name}.`));
+  const r = await launch(R.data, [], R.real);
+  await r.click('#nav-overview');
+  await r.click('#setup-no');
+  await openKind(r, 'skills');
+  for (const name of ['off-one', 'on-one', 'double-ok', 'real-fail', 'item-stuck']) { await r.click(`#${rowPart('add', 'skills', name)}`); await done(r); }
+  for (const name of ['off-one', 'real-fail', 'item-stuck']) { await r.click(`#${rowPart('switch', 'skills', name)}`); await done(r); }
+  await r.click('#header-refresh');
+  const readSkillsRecord = () => JSON.parse(readNow(join(R.home, '.central-knot/skills.json')) || '{"items":{}}').items;
+  const readHistory = () => JSON.parse(readNow(join(R.home, '.central-knot/history.json')) || '{"events":[]}').events;
+  const pairFiles = name => [readNow(join(R.claude, `${name}/SKILL.md`)), readNow(join(R.copilot, `${name}/SKILL.md`))];
+  const headerState = async () => {
+    if (await r.exists('#problems-show-all') && /^Show all \d+/.test(await r.text('#problems-show-all') ?? '')) await r.click('#problems-show-all');
+    return {
+      text: await r.text('#header [data-outcome] .band-text'),
+      warn: await r.exists('#header [data-outcome] .tone-warning'),
+      undo: await r.exists('#outcome-undo'),
+      problems: await r.all('#header .problem-text'),
+    };
+  };
+  const dismissOutcome = async () => { if (await r.exists('#outcome-dismiss')) await r.click('#outcome-dismiss'); };
+  // 1. Measured Add: found in two tools with equal copies when drawn, one changed on disk before the click's turn.
+  same('race-add starts found with no Copies differ tag', [await r.exists(`#${rowPart('add', 'skills', 'race-add')}`), await r.exists(`#${rowPart('decide', 'skills', 'race-add')}`)], [true, false]);
+  await dismissOutcome();
+  if (r.main) {
+    const inspector = await r.main(), held = await holdQueue(inspector, r);
+    try {
+      await r.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'race-add'))}).click()`);
+      writeFileSync(join(R.copilot, 'race-add/SKILL.md'), changedAdd);
+    } finally { await held.release(); inspector.close(); }
+  } else {
+    writeFileSync(join(R.copilot, 'race-add/SKILL.md'), changedAdd);
+    await r.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'race-add'))}).click()`);
+  }
+  await done(r);
+  same('queued Add whose copies differ says the copy question alone, with no warning, no Undo and no record',
+    [await headerState(), await r.exists(`#${rowPart('add', 'skills', 'race-add')}`), await r.exists(`#${rowPart('decide', 'skills', 'race-add')}`),
+      await r.all(`${row('skills', 'race-add')} .row-tag`), !!readSkillsRecord()['race-add'], readHistory().some(entry => entry.key === 'race-add'), pairFiles('race-add')],
+    [{ text: 'race-add has differing copies. Choose which copy every tool uses.', warn: false, undo: false, problems: [] },
+      true, true, ['Copies differ', 'not in Central Knot'], false, false, [equalAdd, changedAdd]]);
+  // Choosing a copy then adds it, writes both tools, records History, and says so.
+  await r.click(`#${rowPart('add', 'skills', 'race-add')}`);
+  check('Add on the differing row opens its copy question', await r.exists(`#${rowPart('use', 'skills', 'race-add', 'copilot-cli')}`), await r.text('#page'));
+  await r.click(`#${rowPart('use', 'skills', 'race-add', 'copilot-cli')}`);
+  await done(r);
+  same('choosing Copilot CLI’s copy adds race-add everywhere and says so',
+    [(await headerState()).text, await switchOn(r, 'skills', 'race-add'), !!readSkillsRecord()['race-add']?.on,
+      readHistory().some(entry => entry.key === 'race-add' && entry.kind === 'chosen'), pairFiles('race-add')],
+    ['race-add is in Central Knot now, with Copilot CLI’s copy, and on in Claude Code and Copilot CLI. The other copies are kept as its versions.',
+      true, true, true, [changedAdd, changedAdd]]);
+  // 2. The same inside a run of three clicks (On, Add, Off): On and Off are counted, Add's wait is said once.
+  await dismissOutcome();
+  if (r.main) {
+    const inspector = await r.main(), held = await holdQueue(inspector, r);
+    try {
+      await r.run(`for (const id of ${JSON.stringify([rowPart('switch', 'skills', 'off-one'), rowPart('add', 'skills', 'race-mid'), rowPart('switch', 'skills', 'on-one')])}) document.getElementById(id).click()`);
+      writeFileSync(join(R.copilot, 'race-mid/SKILL.md'), changedMid);
+    } finally { await held.release(); inspector.close(); }
+  } else {
+    writeFileSync(join(R.copilot, 'race-mid/SKILL.md'), changedMid);
+    await r.run(`for (const id of ${JSON.stringify([rowPart('switch', 'skills', 'off-one'), rowPart('add', 'skills', 'race-mid'), rowPart('switch', 'skills', 'on-one')])}) document.getElementById(id).click()`);
+  }
+  await done(r);
+  same('three-click run with a differing queued Add counts On and Off, says the wait once, and leaves race-mid found',
+    [await headerState(), await switchOn(r, 'skills', 'off-one'), await switchOn(r, 'skills', 'on-one'),
+      await r.exists(`#${rowPart('add', 'skills', 'race-mid')}`), !!readSkillsRecord()['race-mid'], readHistory().some(entry => entry.key === 'race-mid'), pairFiles('race-mid')],
+    [{ text: '1 skill is off: on-one; 1 skill is on: off-one. race-mid has differing copies. Choose which copy every tool uses.', warn: false, undo: true, problems: [] },
+      true, false, true, false, false, [equalMid, changedMid]]);
+  // 3. Measured Undo: two clicks on double-ok while Claude Code's folder refuses the first; Undo puts every file back with no warning.
+  await dismissOutcome();
+  const doubleBefore = pairFiles('double-ok'), historyBeforeDouble = readHistory().length;
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    const clickEntries = readHistory().slice(historyBeforeDouble).filter(entry => entry.key === 'double-ok');
+    await r.click('#outcome-undo');
+    await done(r);
+    const afterHistory = readHistory(), undoneEntries = clickEntries.map(entry => afterHistory.find(now => now.id === entry.id));
+    const doubleRec = readSkillsRecord()['double-ok'];
+    same('Undo after two clicks on double-ok with Claude Code locked: plain confirmation, no warning, files byte-for-byte back, record On and both entries marked undone',
+      [await headerState(), pairFiles('double-ok'), doubleRec?.on, Object.keys(doubleRec?.applied ?? {}).sort(),
+        undoneEntries.length, undoneEntries.every(entry => !!entry?.undoneBy), clickEntries[0]?.losers.map(loser => loser.tool)],
+      [{ text: 'Undone: double-ok is as before.', warn: false, undo: false, problems: [] }, doubleBefore, true, ['claude-cli', 'copilot-cli'], 2, true, ['copilot-cli']]);
+  } finally { chmodSync(R.claude, 0o755); }
+  // 4. Real failure at Undo stays said: real-fail turned On unlocked, then Claude Code locked before Undo.
+  await dismissOutcome();
+  await r.click(`#${rowPart('switch', 'skills', 'real-fail')}`);
+  await done(r);
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.click('#outcome-undo');
+    await done(r);
+    const failHead = await headerState();
+    same('real Undo failure warns and names Claude Code and real-fail',
+      [failHead.text, failHead.warn, failHead.problems, pairFiles('real-fail').map(Boolean), readSkillsRecord()['real-fail']?.on, !!readSkillsRecord()['real-fail']?.applied?.['claude-cli']],
+      ['Not all of real-fail could be put back.', true, ['real-fail (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], [true, false], false, true]);
+  } finally { chmodSync(R.claude, 0o755); }
+  await r.click('#header-refresh');
+  // 5. Two different items, one truly cannot be undone: warning names only item-stuck (both after double-ok's superseded failure and after a single click on double-ok).
+  await dismissOutcome();
+  const doubleBefore5 = pairFiles('double-ok');
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'item-stuck')}`);
+  await done(r);
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.click('#outcome-undo');
+    await done(r);
+    const fiveHead = await headerState();
+    same('Undo over two different items drops double-ok’s superseded failure and names only item-stuck',
+      [fiveHead.warn, fiveHead.problems, pairFiles('double-ok'), readSkillsRecord()['double-ok']?.on, !!readSkillsRecord()['item-stuck']?.applied?.['claude-cli']],
+      [true, ['item-stuck (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], doubleBefore5, true, true]);
+  } finally { chmodSync(R.claude, 0o755); }
+  await r.click('#header-refresh');
+  // Two single clicks on two different items (item-stuck On unlocked, lock Claude Code, double-ok Off): Undo puts double-ok back cleanly and names only item-stuck.
+  await dismissOutcome();
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'item-stuck')}`);
+  await done(r);
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.click('#outcome-undo');
+    await done(r);
+    const twoHead = await headerState();
+    same('Undo over two clicks on two different items warns only about item-stuck',
+      [twoHead.warn, twoHead.problems, pairFiles('double-ok'), readSkillsRecord()['double-ok']?.on, !!readSkillsRecord()['item-stuck']?.applied?.['claude-cli']],
+      [true, ['item-stuck (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], doubleBefore5, true, true]);
+  } finally { chmodSync(R.claude, 0o755); }
+  await r.click('#header-refresh');
+  same('no page errors, queued Add and Undo checks', r.pageErrors, []);
+  await r.quit();
 }
 
 /**
