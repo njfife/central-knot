@@ -46,8 +46,8 @@ import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { homePass, passTells, syncOnceReport, type HomePass } from './homepass.ts';
-import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
-import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
+import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
+import { homeItems, inUse, inUseName, pluginLive, switchable, type LiveItem, type PluginLive } from './profileplan.ts';
 import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
 import { keepEntries, linuxPlaces, placeAutostart, readAutostart, signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
@@ -57,7 +57,7 @@ import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
 import { pluginTextJob, type PluginTextJob } from './plugintext.ts';
-import type { PluginDone } from './pluginplan.ts';
+import { failedFor, runPlan, type PluginDone } from './pluginplan.ts';
 import { CARRIED_FOLDER, STANDARD_BUILD, aboutBuild, openBundle, readCustomBuildSync, releaseDate, releaseLabel, type ActiveBundle } from './bundle.ts';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -117,6 +117,8 @@ let lastManagedCount = 0;
 let lastProfiles: ProfilesView = { profiles: [] };
 /** The library's live items as last read (profileplan.ts LiveItem): which profile is in use is worked out from them. */
 let lastItems: LiveItem[] = [];
+/** The plugins' items as the last view read them (profileplan.ts pluginLive), the page's own read: which profile is in use is worked out from them too. */
+let lastPlugins: PluginLive[] = [];
 let practiceHome: string | undefined;
 
 /** Files in the package are read-only, so practice happens on a throwaway copy made for this launch. */
@@ -463,10 +465,10 @@ const showNews = () => (unseenPlugins && !unseen ? showPage('plugins') : showWin
  * page with sync's results; one that changed something goes to the page's band with Undo. The menus then follow the library.
  */
 function switchFromMenu(id: string) {
-  if (inUse(lastProfiles.profiles, lastItems).some(profile => profile.id === id)) { refreshTray(); return; }
+  if (inUse(lastProfiles.profiles, lastItems, lastPlugins).some(profile => profile.id === id)) { refreshTray(); return; }
   void fromTray(async () => {
     if (!current) return;
-    const result = await switchProfile(context(), await toolsNow(), id);
+    const tools = await toolsNow(), result = await switchProfile(context(), tools, id, pluginSide(tools));
     if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
     else if (result.event && window && !window.isDestroyed()) window.webContents.send('profile:switched', result);
     pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
@@ -481,11 +483,11 @@ function switchFromMenu(id: string) {
  */
 function profileMenu(): Electron.MenuItemConstructorOptions {
   if (!lastProfiles.profiles.length) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
-  const usable = homeWritable && !heldReason() && !!current, inUseNow = inUse(lastProfiles.profiles, lastItems);
-  return { label: `Profile: ${inUseName(lastProfiles.profiles, lastItems)}`, submenu: [
+  const usable = homeWritable && !heldReason() && !!current, inUseNow = inUse(lastProfiles.profiles, lastItems, lastPlugins);
+  return { label: `Profile: ${inUseName(lastProfiles.profiles, lastItems, lastPlugins)}`, submenu: [
     // One not offered (nothing in it: profileplan.ts switchable) is shown disabled, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => {
-      const empty = !switchable(profile, lastItems);
+      const empty = !switchable(profile, lastItems, lastPlugins);
       return { label: empty ? `${profile.name} (empty)` : profile.name, type: 'checkbox' as const, checked: inUseNow.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
     }),
     { type: 'separator' },
@@ -525,7 +527,7 @@ function refreshTray() {
   appMenu();
   if (!tray) return;
   tray.setContextMenu(trayMenu());
-  const profile = lastProfiles.profiles.length ? inUseName(lastProfiles.profiles, lastItems) : undefined;
+  const profile = lastProfiles.profiles.length ? inUseName(lastProfiles.profiles, lastItems, lastPlugins) : undefined;
   tray.setToolTip(`Central Knot${profile ? ` · Profile: ${profile}` : ''}${unseen ? ': sync made changes' : unseenPlugins === 'updated' ? ': plugins were updated' : unseenPlugins ? ': a plugin couldn’t be updated' : ''}`);
   // The profile in use is always in sight: its name sits beside the menu bar icon (No profile when none is).
   // Shortened past 20 characters, so a long name can't crowd the menu bar (the full name is in the tooltip and the menu).
@@ -715,7 +717,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
     made.otherBuilds = others;
     if (outside) made.runsOutside = outside;
   }
-  followProfiles(made.profiles, homeItems(made));
+  followProfiles(made.profiles, homeItems(made), pluginLive(made));
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
   handoff = { id: readId, home: current!.home, snapshots };
   // Word search's index follows the view, gathered from it and built beside the queue: the view never waits for it.
@@ -968,13 +970,31 @@ function lookAgainSoon(passed: BackgroundPass) {
   if (settling(passed)) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, AFTER_SETTLE_MS); }
 }
 
-/** The menus follow the open home's profiles and the library's items, which say which profile is in use. */
-function followProfiles(profiles: ProfilesView, items = lastItems) {
-  if (JSON.stringify([profiles, items]) === JSON.stringify([lastProfiles, lastItems])) return;
+/** The menus follow the open home's profiles, the library's items and the plugins' items, which say which profile is in use. */
+function followProfiles(profiles: ProfilesView, items = lastItems, plugins = lastPlugins) {
+  if (JSON.stringify([profiles, items, plugins]) === JSON.stringify([lastProfiles, lastItems, lastPlugins])) return;
   lastProfiles = profiles;
   lastItems = items;
+  lastPlugins = plugins;
   refreshTray();
 }
+
+/**
+ * What a profile switch and its Undo are given of the plugins' items (profiles.ts PluginSide): each as it is now in `tools`, read
+ * as a view reads it (so a switch queued behind another plans from what that one left), and a run of one item's own switch in its
+ * tool, through the Plugins page's own steps (marketplaces.ts setSkill, setPart); a profile installs and uninstalls nothing.
+ */
+const pluginSide = (tools: HarnessId[]): PluginSide => ({ live: async () => {
+  const shared: ShareContext = { ...context(), reads: new Map() };
+  return pluginLive({ pluginItems: await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), tools), profiles: await readProfiles(current!.home),
+    skills: await skillsView(shared, tools), mcp: await serversView(shared, tools), agents: await agentsView(shared, tools) });
+}, run: async ops => {
+  const markets = carriedMarket, home = current?.home;
+  if (!markets || !home) return [];
+  // No setWhole is given, so a whole plugin's step fails for its tool (pluginplan.ts runPlan); no install or uninstall runs either.
+  const never = async (tools: HarnessId[]) => ({ reports: failedFor(tools, 'A profile never installs or uninstalls a plugin.') });
+  return (await runPlan(ops, { install: (...args) => never(args[3]), uninstall: (...args) => never([args[3]]), setSkill: markets.setSkill, setPart: markets.setPart }, home)).done;
+} });
 
 /** After a profile is made, changed or deleted (Central Knot's own file only, no tool changes): the profiles for the page, and the menus. */
 async function profilesSaved(): Promise<ProfilesView> {
@@ -1587,7 +1607,7 @@ app.whenReady().then(async () => {
   handle('history:restore', async (eventId, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const past = (await readHistory(context())).find(entry => entry.id === eventId);
-      if (past?.kind === 'profile') return undoSwitch(context(), await toolsNow(), eventId);
+      if (past?.kind === 'profile') { const tools = await toolsNow(); return undoSwitch(context(), tools, eventId, pluginSide(tools)); }
       // A tool's Manage switch has no Undo (History offers none): the switch on its card is the way back.
       if (past?.kind === 'managing') return { stopped: 'Turning a tool’s Manage switch has no Undo: turn it back on the tool’s Harnesses card.', results: [], harnessWrites: 0 };
       // Synchronize everything switched on: its one Undo; that Undo's entry: its Restore (everything.ts).
@@ -1619,7 +1639,7 @@ app.whenReady().then(async () => {
   });
   handle('profiles:switch', async (id, home) => {
     if (home !== current?.home || typeof id !== 'string') return { stopped: elsewhere, on: [], off: [], left: [], results: [] };
-    const result = await switchProfile(context(), await toolsNow(), id);
+    const tools = await toolsNow(), result = await switchProfile(context(), tools, id, pluginSide(tools));
     return { ...result, view: await syncThenView() };
   });
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? syncThenView() : null; });

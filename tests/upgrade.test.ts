@@ -248,7 +248,7 @@ for (const old of homes) for (const sync of ['off', 'on'] as const) {
 
     test('keeps Focus the profile in use', async () => {
       const profiles = await readProfiles(box.home);
-      assert.deepEqual(inUse(profiles.profiles, homeItems({ ...first[0].pages, profiles })).map(profile => profile.name), ['Focus']);
+      assert.deepEqual(inUse(profiles.profiles, homeItems({ ...first[0].pages, profiles }), []).map(profile => profile.name), ['Focus']);
     });
 
     // First setup's question, after the passes above (it changes the home's record, so these two come last): asked at each start

@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { saveProfile, switchProfile } from '../src/profiles.ts';
+import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import { libraryGate, newRecord, remember, saveRecord, syncGate, type Entering, type ShareContext } from '../src/share.ts';
 import { writesRealHome } from '../src/machine.ts';
 import { applySkills, clearSwitch, restoreSkill, takeOver } from '../src/skills.ts';
@@ -178,7 +178,7 @@ test('A click refused for a reason of its own, or that changes nothing, makes no
     ['Clear the switch, with no switch set', box => clearSwitch(box.context, box.tools, 'notes', 'codex-cli', true), /doesn’t turn notes off any more\. Nothing was changed\./],
     ['Take over, with no copy to take', box => takeOver(box.context, box.tools, 'notes', 'codex-cli', true), /Nothing was changed|Turn it on first/],
     ['a Manage switch that is so already', box => chooseTools(box.context, 'codex-cli', true, true), undefined],
-    ['a profile switch that changes nothing', async box => { const { id } = await saveProfile(box.context, { name: 'None' }); return switchProfile(box.context, box.tools, id!); }, undefined],
+    ['a profile switch that changes nothing', async box => { const { id } = await saveProfile(box.context, { name: 'None' }); return switchProfile(box.context, box.tools, id!, NO_PLUGINS); }, undefined],
   ];
   for (const [click, run, says] of clicks) for (const home of ['no record', 'waiting for Resume'] as const) {
     const box = await sandbox();

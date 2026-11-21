@@ -993,7 +993,7 @@ if (wanted('profiles')) {
   await a.click('#pf-skill\\:notes'); await a.click('#pf-mcp\\:files');
   await atEverySize('incident-ticked', 'Ticked notes and files: before any switch, each row says what switching to Incident does to it; the header counts it, the line wrapping whole', true);
   await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
-  await atEverySize('incident-switched', 'Clicked "Switch to Incident": the result says what it turned off, with Undo switch; Incident is in use (the list, the header: "2 items on, the other 5 off", the status bar)', true);
+  await atEverySize('incident-switched', 'Clicked "Switch to Incident": the result says what it turned off, with Undo switch; Incident is in use (the list, the header: "2 items on, the other 5 off wherever they can be switched", the status bar)', true);
   await a.click('#profile-new'); await name('Development');
   await a.click('#profile-from-now');
   await a.click('#pf-skill\\:standup'); await a.click('#pf-agent\\:code-reviewer');

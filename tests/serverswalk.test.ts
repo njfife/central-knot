@@ -37,7 +37,7 @@ import { wantedIn, type LibraryItem } from '../src/library.ts';
 import { asksWhichCopy, harnessIs, placeOf, rowClicks, type LibraryRow } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { changes, switchPlan, undoPlan } from '../src/profileplan.ts';
-import { liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
+import { NO_PLUGINS, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
 import { applyServers, restoreServer, serversView } from '../src/servers.ts';
 import { everythingEntryAction, setSyncEverything } from '../src/everything.ts';
 import { readRecord, type ShareContext } from '../src/share.ts';
@@ -177,8 +177,8 @@ async function walk(seed: number): Promise<Finding[]> {
         add(docs ? 2 : action.weight, { name: `History: ${action.label} (${action.event.kind}${docs ? '' : ` of ${action.event.item}`})`, app: true, whole: action.whole, brings, run: () => action.run() });
       }
       add(1, { name: `Settings: Synchronize everything ${await ruleOn() ? 'off' : 'on'}`, app: true, run: async () => setSyncEverything(context(), !(await ruleOn())) });
-      for (const profile of await switches()) add(2, { name: `switch to ${profile.name}`, app: true, click: true, profile: true, run: more => switchProfile(context(more), tools, profile.id) });
-      for (const event of await switchUndos()) add(2, { name: `History: Undo switch to ${event.item}`, app: true, profile: true, run: more => undoSwitch(context(more), tools, event.id) });
+      for (const profile of await switches()) add(2, { name: `switch to ${profile.name}`, app: true, click: true, profile: true, run: more => switchProfile(context(more), tools, profile.id, NO_PLUGINS) });
+      for (const event of await switchUndos()) add(2, { name: `History: Undo switch to ${event.item}`, app: true, profile: true, run: more => undoSwitch(context(more), tools, event.id, NO_PLUGINS) });
       for (const tool of three) {
         const text = await readFile(file(tool), 'utf8').catch(() => undefined), has = (await entries())[tool];
         if (has) {
@@ -273,8 +273,8 @@ async function walk(seed: number): Promise<Finding[]> {
       // turn an item Off again, as a copy deleted by hand, which its record and History say).
       type Offered = { name: string; run: () => Promise<{ stopped?: string; results: DestinationResult[] }>; moves?: boolean };
       const offered: Offered[] = (await historyActions()).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run, moves: action.whole }));
-      for (const profile of await switches()) offered.push({ name: `the Profiles page’s Switch to ${profile.name}`, moves: true, run: () => switchProfile(context(), tools, profile.id) });
-      for (const event of await switchUndos()) offered.push({ name: `History’s Undo switch to ${event.item}`, moves: true, run: () => undoSwitch(context(), tools, event.id) });
+      for (const profile of await switches()) offered.push({ name: `the Profiles page’s Switch to ${profile.name}`, moves: true, run: () => switchProfile(context(), tools, profile.id, NO_PLUGINS) });
+      for (const event of await switchUndos()) offered.push({ name: `History’s Undo switch to ${event.item}`, moves: true, run: () => undoSwitch(context(), tools, event.id, NO_PLUGINS) });
       const page = (name: string, change: Change) => offered.push({ name: `the page’s ${name}`, run: () => send(change) });
       if (live) page(live.on ? 'Off' : 'On', live.on ? rowClicks.off(now.row, live) : rowClicks.on(now.row, live));
       if (live) page('Delete', rowClicks.remove(now.row, live));

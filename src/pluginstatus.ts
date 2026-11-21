@@ -213,13 +213,16 @@ export const partWords: Record<PartKind, [string, string]> = { skill: ['skill', 
 /** "version 1.2", or nothing when the catalog gave none. */
 export const versionWord = (version?: string) => (version ? `version ${version}` : '');
 
+/** That a tool has no switch for one item of a plugin of this kind, in the words the plugin's page and the Profiles page both say it in. */
+export const noSingleSwitch = (tool: HarnessId, kind: PartKind) => `${names[tool]} has no switch for a single ${partWords[kind][0]} of a plugin`;
+
 /**
  * Tools with no switch for one skill of a plugin, and why (ENB-06). Claude Code's skillOverrides leave plugin skills alone,
  * so only the whole plugin turns off there; a deny rule only fails the call and is not Disable. Codex keeps the switch in
  * config.toml (`[[skills.config]]` by name, which outlives an update) and Copilot CLI behind its own `skill disable`.
  */
 export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
-  'claude-cli': 'Claude Code has no switch for a single skill of a plugin: only the whole plugin turns off there.',
+  'claude-cli': `${noSingleSwitch('claude-cli', 'skill')}: only the whole plugin turns off there.`,
 };
 
 /**
@@ -227,6 +230,9 @@ export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
  * tool that takes plugins, an agent in Claude Code alone (Copilot CLI has none; Codex loads no plugin's agents).
  */
 export const hasPartSwitch = (tool: HarnessId, kind: PartKind) => (kind === 'mcp' ? takesPlugins(tool) : kind === 'agent' && tool === 'claude-cli');
+
+/** Whether a tool that takes plugins loads a plugin's items of this kind: each its skills and MCP servers, all but Codex its agents. */
+export const loadsKind = (tool: HarnessId, kind: PartKind) => kind !== 'agent' || tool !== 'codex-cli';
 
 /** Why a skill is off that Copilot CLI turned off by its bare name, for every skill so named: not this plugin's own switch. */
 export const offByBareName = (skill: string) => `Can’t be turned on here: Copilot CLI has every skill named “${skill}” turned off, not only this plugin’s. To turn them all on: \`copilot skill enable ${skill}\``;

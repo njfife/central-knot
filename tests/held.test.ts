@@ -14,7 +14,7 @@ import { pruneHistory } from '../src/history.ts';
 import { homePass } from '../src/homepass.ts';
 import { saveInstruction } from '../src/instructions.ts';
 import { createMarketplaces, type MarketplaceEngine } from '../src/marketplaces.ts';
-import { saveProfile, switchProfile } from '../src/profiles.ts';
+import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import { applyServers } from '../src/servers.ts';
 import { takeOverSync, writeAccess, type ShareContext } from '../src/share.ts';
 import { checkSource } from '../src/sources.ts';
@@ -58,7 +58,7 @@ test('A held build writes nothing in the home or the tools, by any route: each i
       ['a click on Skills', async () => (await send(box, { key: 'found', on: true, except: [] }, held)).stopped],
       ['a click on MCP servers', async () => (await applyServers(held, tools, [{ key: 'server', on: true, except: [] }])).stopped],
       ['a click on Agents', async () => (await applyAgents(held, tools, [{ key: 'agent', on: true, except: [] }])).stopped],
-      ['a profile switch', async () => (await switchProfile(held, tools, profile)).stopped],
+      ['a profile switch', async () => (await switchProfile(held, tools, profile, NO_PLUGINS)).stopped],
       ['a profile saved', async () => (await saveProfile(held, { name: 'Another', items: [] })).problem],
       ['a tool’s Manage switch', async () => (await chooseTools(held, 'codex-cli', false)).stopped],
       ['Synchronize everything', async () => (await setSyncEverything(held, true, true)).stopped],
