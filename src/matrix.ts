@@ -2403,7 +2403,7 @@ function libraryDelete(t: Table, lib: LibraryPage, skill: ItemRow) {
     arm.classList.add('delete-quiet');
     return h('span.delete-offer', {}, arm, h('span.delete-offer-note', {}, lib.say.said.deleteOffer));
   }
-  const said = lib.say.said.deleted(name, item.on, stillIn(skill, item, [], tools), tools);
+  const said = (notIn: HarnessId[]) => lib.say.said.deleted(name, item.on, stillIn(skill, item, notIn, tools), tools);
   const run = () => { view.confirmDelete = undefined; click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.remove(skill, item)], said }); };
   // Armed, it is still a button (outlined in red); Cancel beside it is a link.
   const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: elId('delete-confirm', skill), disabled: writeOff(kindStops(skill.kind)), onclick: run });
