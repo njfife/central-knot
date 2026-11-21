@@ -18,7 +18,7 @@ import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { Reason, ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice, UsageReading } from './types.ts';
 import { anyOn, kindSource, noPins, pinsOn, rowId, sameRow, type NamedRow, type Pinned, type RowKey } from './itemrow.ts';
-import { itemKey } from './library.ts';
+import { itemKey, wantedIn } from './library.ts';
 import { caughtUpNames, groupBy, noticeNames, plural, withSetAside } from './model.ts';
 import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -759,42 +759,56 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const switchedBack = parts.flatMap(part => part.back);
   const unswitched = switchedBack.length ? await runSwitches(switchedBack, true) : undefined;
   const kindOfEntry = new Map(parts.flatMap(part => part.made.map(id => [id, part.kind] as const)));
+  // History is stored newest-last (history.ts); reversing first keeps entries written in the same millisecond newest-first.
   const events = (await api().history()).events.filter(event => kindOfEntry.has(event.id)).reverse()
     .sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
-  type UndoEntry = { key?: string; entry: DestinationResult; superseded?: boolean };
-  const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), stops = new Map<PageKind, string>();
+  type UndoEntry = { key?: string; entry: DestinationResult; answeredLater?: boolean };
+  const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Set<string>()])), stops = new Map<PageKind, string>();
   for (const event of events) {
     const kind = kindOfEntry.get(event.id)!;
     if (stops.has(kind)) continue;
     const result = await api().restore(event.id, home.home);
     if (result.stopped) { stops.set(kind, result.stopped); continue; }
     const key = libraryEntry(event)?.key, list = raw.get(kind)!;
-    // A later restore of the same item in this Undo supersedes an earlier tool problem: replaced if that tool failed again,
-    // or dropped below once the refreshed view confirms the tool is in its final state.
+    // A later restore of the same item in this Undo answers an earlier tool problem: replaced if that tool failed again,
+    // or dropped below once settled. restore runs with `only`, so every result in result.results belongs to this item.
     if (key) {
+      restored.get(kind)!.add(key);
       const failedNow = new Set(result.results.filter(entry => entry.harness && keptBack(entry)).map(entry => entry.harness!));
       for (let at = list.length - 1; at >= 0; at--) {
         const earlier = list[at]!;
         if (earlier.key !== key || !earlier.entry.harness || !keptBack(earlier.entry)) continue;
-        if (failedNow.has(earlier.entry.harness)) list.splice(at, 1); else earlier.superseded = true;
+        if (failedNow.has(earlier.entry.harness)) list.splice(at, 1); else earlier.answeredLater = true;
       }
     }
     list.push(...result.results.map(entry => ({ key, entry })));
   }
   setHome(await api().refresh());
+  // Settled: managed, readable, and matching what the library now wants (not held or owed a write/removal; nothing applied if deleted).
   const settledIn = (kind: PageKind, key: string, tool: HarnessId) => {
     const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
     const live = item && !item.deleted;
     return !!view?.tools.includes(tool) && !row?.unseen?.[tool]
-      && (live ? !row?.cannot?.[tool] && !row?.plan?.write.includes(tool) && !row?.plan?.remove.includes(tool) : item?.applied[tool] === undefined);
+      && (live ? !(row?.cannot?.[tool] && !row?.plugin?.[tool]) && !row?.plan?.write.includes(tool) && !row?.plan?.remove.includes(tool) : item?.applied[tool] === undefined);
   };
-  const results = new Map([...raw].map(([kind, list]) => [kind, list
-    .filter(each => !(each.superseded && each.key && each.entry.harness && settledIn(kind, each.key, each.entry.harness)))
-    .map(each => each.entry)]));
+  // One look at the refreshed view, both ways: drop answered problems now settled, and add any wanted or owed tool still unsettled.
+  const kept = new Map([...raw].map(([kind, list]) => {
+    const entries = list.filter(each => !(each.answeredLater && each.key && each.entry.harness && settledIn(kind, each.key, each.entry.harness)));
+    if (!stops.has(kind)) for (const key of restored.get(kind)!) {
+      const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
+      if (view && item) for (const tool of view.tools) {
+        if (!((!item.deleted && wantedIn(item, tool)) || item.applied[tool] !== undefined) || settledIn(kind, key, tool)) continue;
+        if (entries.some(each => each.key === key && each.entry.harness === tool && keptBack(each.entry))) continue;
+        entries.push({ key, entry: { item: item.name, harness: tool, outcome: 'held', message: row?.cannot?.[tool] ?? row?.unseen?.[tool] ?? `Could not put ${toolName(tool)}’s copy back yet.` } });
+      }
+    }
+    return [kind, entries] as const;
+  }));
+  const results = new Map([...kept].map(([kind, list]) => [kind, list.map(each => each.entry)]));
   focusAfterBusy = about.focus?.();
   await putHistory();
-  keepOwn([...results].map(([kind, kept]) => ({ kind, results: kept, notices: [] })));
+  keepOwn([...results].map(([kind, list]) => ({ kind, results: list, notices: [] })));
   const missing = [...groupBy(gone, ([, kind]) => kind)].map(([kind, of]): [PageKind, string] =>
     [kind, `${plural(of.length, 'History entry', 'History entries')} it was to put back ${of.length === 1 ? 'is' : 'are'} no longer in History.`]);
   const reasons = [...saidByKind([...stops, ...missing], several), ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
@@ -803,9 +817,10 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const short = new Set([...stops.keys(), ...gone.map(([, kind]) => kind)]), names = (rows: NamedRow[]) => [...new Set(rowNames(rows, about.rows))];
   const switchesShort = new Set(unswitched && switchProblems(unswitched).length ? parts.filter(part => part.back.length).map(part => part.kind) : []);
   const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
+  const failed = names(about.rows.filter(row => switchesShort.has(row.kind) || kept.get(row.kind)?.some(each => keptBack(each.entry) && (each.key ? each.key === row.key : each.entry.item.toLowerCase() === row.name.toLowerCase()))));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
   tell({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
-    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(all)} could be put back.` });
+    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` });
   for (const row of about.rows) flashRow(row);
   if (about.regroups) unpin();
 });
@@ -813,7 +828,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
 /** What a run of plugin switches couldn't do, each in its own words ("issue-tracker: couldn’t turn it on in Codex."). */
 const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [...(ran.stopped ? [ran.stopped] : []), ...ran.failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)];
 /** A click's reasons (Outcome) from its plugin switches' run, one for each failure: what it couldn't do, then `also`, what the click left as it is. */
-const switchReasons = (ran: Awaited<ReturnType<typeof runSwitches>> | undefined, also: string[] = []) => [...(ran ? switchProblems(ran) : []), ...also];
+export const switchReasons = (ran: Awaited<ReturnType<typeof runSwitches>> | undefined, also: string[] = []) => [...(ran ? switchProblems(ran) : []), ...also];
 /** The key under which a background pass's problem the person closed is remembered (state.dismissed). */
 export const problemKey = (entry: DestinationResult) => `problem:${entry.of ?? ''}:${entry.item}:${entry.harness ?? ''}:${entry.message}`;
 
@@ -822,7 +837,7 @@ export const problemKey = (entry: DestinationResult) => `problem:${entry.of ?? '
  * switched off for it: those written before it are put back. Returns what ran, in lines, the tools where something didn't,
  * and the choices that turn it all back.
  */
-async function runSwitches(ops: PluginOp[], undo = false) {
+export async function runSwitches(ops: PluginOp[], undo = false) {
   // A plugin changes here as it does on its own page: the Plugins list's rows from before are no longer true (pluginstate.ts).
   endListNews();
   const home = state.home!.home;

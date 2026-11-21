@@ -5984,6 +5984,35 @@ async function firstSetupFlow() {
       await page.quit();
     }
   }
+
+  // Settings -> Choose copies -> "Use the latest for the rest" runs the plugin switch for chosen items held off through a plugin.
+  const bulk = homeFor('setup-bulk-plugin'), bulkCopilot = join(bulk.home, '.copilot/skills'), bulkCodexToml = join(bulk.home, '.codex/config.toml');
+  writeFileSync(join(bulk.home, '.local/bin/copilot'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\nexit 9\n');
+  chmodSync(join(bulk.home, '.local/bin/copilot'), 0o755);
+  saved(skill(bulk.claude, 'plug-bulk', text('plug-bulk', 'Newer Claude copy.')), 2);
+  saved(skill(bulkCopilot, 'plug-bulk', text('plug-bulk', 'Older Copilot copy.')), 48);
+  const bulkPluginDir = join(bulk.home, '.codex/plugins/cache/ck-test-market/team-pack/1.0.0/skills/plug-bulk');
+  mkdirSync(bulkPluginDir, { recursive: true });
+  writeFileSync(join(bulkPluginDir, 'SKILL.md'), text('plug-bulk', 'Newer Claude copy.'));
+  writeFileSync(bulkCodexToml, '[plugins."team-pack@ck-test-market"]\nenabled = true\n\n[[skills.config]]\nname = "team-pack:plug-bulk"\nenabled = false\n');
+  const bulkData = join(scratch, 'setup-data-bulk-plugin');
+  opened(bulk.home, bulkData);
+  const p = await launch(bulkData, [], real);
+  try {
+    await p.click('#nav-settings');
+    for (let tries = 0; tries < 40 && !(await p.exists('#setting-sync-everything-notice button')); tries++) await wait(100);
+    await p.click('#setting-sync-everything-notice button');
+    for (let tries = 0; tries < 40 && !(await p.exists('#walk-use-latest')); tries++) await wait(100);
+    same('before Use the latest for the rest, Codex’s plugin skill is off',
+      [/name = "team-pack:plug-bulk"[^[]*enabled = false/.test(readNow(bulkCodexToml)), await cellState(p, 'skills', 'plug-bulk', 'codex-cli')], [true, 'plugin-off']);
+    await p.click('#walk-use-latest');
+    for (let tries = 0; tries < 40 && readNow(join(bulkCopilot, 'plug-bulk/SKILL.md')) !== text('plug-bulk', 'Newer Claude copy.'); tries++) await wait(100);
+    same('Use the latest for the rest takes plug-bulk in with Claude Code’s copy and turns Codex’s plugin skill on',
+      [readNow(join(bulk.claude, 'plug-bulk/SKILL.md')), readNow(join(bulkCopilot, 'plug-bulk/SKILL.md')),
+        existsSync(join(bulk.codex, 'plug-bulk')), /name = "team-pack:plug-bulk"[^[]*enabled = false/.test(readNow(bulkCodexToml)), await cellState(p, 'skills', 'plug-bulk', 'codex-cli')],
+      [text('plug-bulk', 'Newer Claude copy.'), text('plug-bulk', 'Newer Claude copy.'), false, false, 'plugin']);
+    same('no page errors, bulk Choose copies with plugin switch', p.pageErrors, []);
+  } finally { await p.quit(); }
 }
 
 /**
@@ -10334,8 +10363,8 @@ async function libraryFlow() {
     await done(r);
     const fiveHead = await headerState();
     same('Undo over two different items drops double-ok’s superseded failure and names only item-stuck',
-      [fiveHead.warn, fiveHead.problems, pairFiles('double-ok'), readSkillsRecord()['double-ok']?.on, !!readSkillsRecord()['item-stuck']?.applied?.['claude-cli']],
-      [true, ['item-stuck (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], doubleBefore5, true, true]);
+      [fiveHead.text, fiveHead.warn, fiveHead.problems, pairFiles('double-ok'), readSkillsRecord()['double-ok']?.on, !!readSkillsRecord()['item-stuck']?.applied?.['claude-cli']],
+      ['Not all of item-stuck could be put back.', true, ['item-stuck (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], doubleBefore5, true, true]);
   } finally { chmodSync(R.claude, 0o755); }
   await r.click('#header-refresh');
   // Two single clicks on two different items (item-stuck On unlocked, lock Claude Code, double-ok Off): Undo puts double-ok back cleanly and names only item-stuck.
@@ -10350,12 +10379,126 @@ async function libraryFlow() {
     await done(r);
     const twoHead = await headerState();
     same('Undo over two clicks on two different items warns only about item-stuck',
-      [twoHead.warn, twoHead.problems, pairFiles('double-ok'), readSkillsRecord()['double-ok']?.on, !!readSkillsRecord()['item-stuck']?.applied?.['claude-cli']],
-      [true, ['item-stuck (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], doubleBefore5, true, true]);
+      [twoHead.text, twoHead.warn, twoHead.problems, pairFiles('double-ok'), readSkillsRecord()['double-ok']?.on, !!readSkillsRecord()['item-stuck']?.applied?.['claude-cli']],
+      ['Not all of item-stuck could be put back.', true, ['item-stuck (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], doubleBefore5, true, true]);
   } finally { chmodSync(R.claude, 0o755); }
   await r.click('#header-refresh');
   same('no page errors, queued Add and Undo checks', r.pageErrors, []);
   await r.quit();
+
+  // Three-tool home (Claude Code, Copilot CLI, Codex): Undo with a locked destination folder holding no file (single Off,
+  // 3-click alternating, 4-click alternating), and row copy choice running the plugin switch after a queued differing Add.
+  const R3 = homeWith('library-result-true-three');
+  const codex3 = join(R3.home, '.codex/skills'), codexToml3 = join(R3.home, '.codex/config.toml');
+  mkdirSync(codex3, { recursive: true });
+  writeFileSync(join(R3.home, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.142.3" && exit 0\nexit 9\n');
+  chmodSync(join(R3.home, '.local/bin/codex'), 0o755);
+  for (const name of ['single-lock', 'alt-three', 'alt-four']) skill(R3.claude, name, text(name, `Skill ${name}.`));
+  const plugRowEqual = text('plug-row', 'Equal at draw.'), plugRowNew = text('plug-row', 'Newer in Copilot.');
+  for (const dir of [R3.claude, R3.copilot]) skill(dir, 'plug-row', plugRowEqual);
+  const plugRowCache = join(R3.home, '.codex/plugins/cache/ck-test-market/team-pack/1.0.0/skills/plug-row');
+  mkdirSync(plugRowCache, { recursive: true });
+  writeFileSync(join(plugRowCache, 'SKILL.md'), plugRowEqual);
+  writeFileSync(codexToml3, '[plugins."team-pack@ck-test-market"]\nenabled = true\n\n[[skills.config]]\nname = "team-pack:plug-row"\nenabled = false\n');
+  const r3 = await launch(R3.data, [], R3.real);
+  await r3.click('#nav-overview');
+  await r3.click('#setup-no');
+  await openKind(r3, 'skills');
+  for (const name of ['single-lock', 'alt-three', 'alt-four']) { await r3.click(`#${rowPart('add', 'skills', name)}`); await done(r3); }
+  await r3.click('#header-refresh');
+  const r3Record = () => JSON.parse(readNow(join(R3.home, '.central-knot/skills.json')) || '{"items":{}}').items;
+  const r3Files = name => [readNow(join(R3.claude, `${name}/SKILL.md`)), readNow(join(R3.copilot, `${name}/SKILL.md`)), readNow(join(codex3, `${name}/SKILL.md`))];
+  const r3Head = async () => {
+    if (await r3.exists('#problems-show-all') && /^Show all \d+/.test(await r3.text('#problems-show-all') ?? '')) await r3.click('#problems-show-all');
+    return { text: await r3.text('#header [data-outcome] .band-text'), warn: await r3.exists('#header [data-outcome] .tone-warning'), problems: await r3.all('#header .problem-text') };
+  };
+  const r3Dismiss = async () => { if (await r3.exists('#outcome-dismiss')) await r3.click('#outcome-dismiss'); };
+  // Single Off, then Copilot CLI locked before Undo: Copilot CLI has no file and restore emits no result for it, yet Undo warns and names Copilot CLI.
+  await r3Dismiss();
+  await r3.click(`#${rowPart('switch', 'skills', 'single-lock')}`);
+  await done(r3);
+  chmodSync(R3.copilot, 0o555);
+  try {
+    await r3.click('#outcome-undo');
+    await done(r3);
+    const head = await r3Head(), rec = r3Record()['single-lock'];
+    same('single Off then locked Copilot CLI before Undo: warns and names Copilot CLI, with Copilot CLI missing and record applied only to Claude Code and Codex',
+      [head.text, head.warn, head.problems.length, head.problems.some(line => line.startsWith('single-lock (Copilot CLI): ')),
+        r3Files('single-lock').map(Boolean), rec?.on, Object.keys(rec?.applied ?? {}).sort()],
+      ['Not all of single-lock could be put back.', true, 1, true, [true, false, true], true, ['claude-cli', 'codex-cli']]);
+  } finally { chmodSync(R3.copilot, 0o755); }
+  await r3.click('#header-refresh');
+  // 3-click and 4-click alternating locks across clicks and restores: drops the settled tool's earlier failure and names the tool missing its file.
+  if (r3.main) {
+    const stepChannel = async (inspector, channel, steps) => inspector.run(`(() => {
+      const handlers = electron.ipcMain._invokeHandlers, real = handlers.get(${JSON.stringify(channel)});
+      const fs = process.mainModule.require('node:fs'), steps = ${JSON.stringify(steps)};
+      globalThis.ckPrev = globalThis.ckPrev ?? {}; globalThis.ckPrev[${JSON.stringify(channel)}] = real;
+      let at = 0;
+      handlers.set(${JSON.stringify(channel)}, async (...args) => {
+        const step = steps[at++];
+        if (step) for (const [path, mode] of step) fs.chmodSync(path, mode);
+        return real(...args);
+      });
+      return true;
+    })()`);
+    const restoreChannel = async (inspector, channel) => inspector.run(`(() => {
+      const prev = globalThis.ckPrev?.[${JSON.stringify(channel)}];
+      if (prev) { electron.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, prev); delete globalThis.ckPrev[${JSON.stringify(channel)}]; }
+      return true;
+    })()`);
+    for (const [name, count, missingTool, missingName, expectedFiles, expectedApplied] of [
+      ['alt-three', 3, 'copilot-cli', 'Copilot CLI', [true, false, true], ['claude-cli', 'codex-cli']],
+      ['alt-four', 4, 'claude-cli', 'Claude Code', [false, true, true], ['codex-cli', 'copilot-cli']],
+    ]) {
+      await r3Dismiss();
+      const inspector = await r3.main();
+      try {
+        await stepChannel(inspector, 'skills:apply', Array.from({ length: count }, (_, i) => [[R3.claude, i % 2 ? 0o755 : 0o555], [R3.copilot, i % 2 ? 0o555 : 0o755]]));
+        for (let i = 0; i < count; i++) { await r3.clickInRun(`#${rowPart('switch', 'skills', name)}`); await done(r3); }
+        await restoreChannel(inspector, 'skills:apply');
+        await stepChannel(inspector, 'history:restore', Array.from({ length: count }, (_, i) => [[R3.claude, i % 2 ? 0o555 : 0o755], [R3.copilot, i % 2 ? 0o755 : 0o555]]));
+        await r3.click('#outcome-undo');
+        await done(r3);
+        const head = await r3Head(), rec = r3Record()[name];
+        same(`${count}-click alternating Undo warns and names only ${missingName} (${missingTool} missing)`,
+          [head.text, head.warn, head.problems.length, head.problems.every(line => line.startsWith(`${name} (${missingName}): `)),
+            r3Files(name).map(Boolean), rec?.on, Object.keys(rec?.applied ?? {}).sort()],
+          [`Not all of ${name} could be put back.`, true, 1, true, expectedFiles, true, expectedApplied]);
+      } finally {
+        await restoreChannel(inspector, 'skills:apply');
+        await restoreChannel(inspector, 'history:restore');
+        inspector.close();
+        chmodSync(R3.claude, 0o755); chmodSync(R3.copilot, 0o755);
+      }
+      await r3.click('#header-refresh');
+    }
+  }
+  // Row choice road: queued Add on plug-row whose copies diverge leaves Codex's plugin skill off; choosing Copilot CLI's copy turns it on.
+  await r3Dismiss();
+  if (r3.main) {
+    const inspector = await r3.main(), held = await holdQueue(inspector, r3);
+    try {
+      await r3.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'plug-row'))}).click()`);
+      writeFileSync(join(R3.copilot, 'plug-row/SKILL.md'), plugRowNew);
+    } finally { await held.release(); inspector.close(); }
+  } else {
+    writeFileSync(join(R3.copilot, 'plug-row/SKILL.md'), plugRowNew);
+    await r3.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'plug-row'))}).click()`);
+  }
+  await done(r3);
+  same('queued Add whose copies differ leaves Codex’s plugin skill off until a copy is chosen',
+    [(await r3Head()).text, /name = "team-pack:plug-row"[^[]*enabled = false/.test(readNow(codexToml3)), await cellState(r3, 'skills', 'plug-row', 'codex-cli')],
+    ['plug-row has differing copies. Choose which copy every tool uses.', true, 'plugin-off']);
+  await r3.click(`#${rowPart('add', 'skills', 'plug-row')}`);
+  await r3.click(`#${rowPart('use', 'skills', 'plug-row', 'claude-cli')}`);
+  await done(r3);
+  same('choosing Claude Code’s copy on the row takes plug-row in and turns Codex’s plugin skill on',
+    [readNow(join(R3.claude, 'plug-row/SKILL.md')), readNow(join(R3.copilot, 'plug-row/SKILL.md')),
+      existsSync(join(codex3, 'plug-row')), /name = "team-pack:plug-row"[^[]*enabled = false/.test(readNow(codexToml3)), await cellState(r3, 'skills', 'plug-row', 'codex-cli')],
+    [plugRowEqual, plugRowEqual, false, false, 'plugin']);
+  same('no page errors, three-tool Undo and row-choice plugin checks', r3.pageErrors, []);
+  await r3.quit();
 }
 
 /**
