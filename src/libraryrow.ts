@@ -447,7 +447,7 @@ export function ruleSays(answer: TakeInAnswer): string {
   if ('wait' in answer) return 'Synchronize everything leaves it for you to choose: its copies differ.';
   return { deleted: 'It was deleted from Central Knot, so it will not be added by itself again. Add, or Restore in History, brings it back.',
     'switched-off': 'Synchronize everything leaves it: every tool that has it has it switched off in its own settings, so only Add takes it in.',
-    settling: '', 'no-copy': '', 'choice-changed': '' }[answer.leave];
+    settling: '', 'held-back': '', 'no-copy': '', 'choice-changed': '' }[answer.leave];
 }
 /** Where a found item is: "in Claude Code and Codex", or, with no copy of a harness's own, "Pi has it another way". */
 function foundWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
