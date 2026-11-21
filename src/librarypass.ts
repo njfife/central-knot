@@ -716,6 +716,7 @@ async function syncItem(pass: Pass, item: LibraryItem) {
   // Central Knot's before any file changes, so the next pass removes it (telling History) and an Undo meanwhile gives it back.
   for (const { tool, hash } of pass.asked.get(item.key)?.tookFrom ?? []) item.applied[tool] = hash;
   let told: Told = { events: [], named: new Map() };
+  const hadThroughShared = Object.keys(item.throughShared ?? {}) as HarnessId[];
   const held = await carryOut(item, made, {
     ...pass.shelf,
     copy: harness => { const here = slot[harness]!; return { hash: here.hash, at: here.at, content: kind.contentOf(here) }; },
@@ -732,8 +733,10 @@ async function syncItem(pass: Pass, item: LibraryItem) {
     remove: harness => (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
   });
   if (held.length) await untell(pass, told, held);
-  // A copy found gone (deleted by hand: plan `forget`): its settings follow it out too.
-  for (const harness of made.forget) await follow(pass, item, harness, false);
+  // A copy found gone (deleted by hand: plan `forget`), or the shared folder's that a harness had it only through and has it no
+  // more (library.ts THE SHARED FOLDER): its settings follow it out too.
+  const outThere = hadThroughShared.filter(harness => !made.throughShared?.[harness] && copies[harness]?.is === 'absent');
+  for (const harness of [...made.forget, ...outThere]) await follow(pass, item, harness, false);
   const changed = pass.followed.get(item.key);
   if (!changed) return;
   for (const said of [...told.named.keys(), ...pass.takenIn.filter(taken => taken.name === item.name)]) said.settingsChanged = changed;
