@@ -12,10 +12,10 @@ import { addsText, componentsFrom, outcomes, sessionHooksAbout } from './plugino
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
+import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
-import { applyPluginOps, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
-import type { Components, DeclaredHook, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView } from './types.ts';
+import { applyPluginOps, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
+import type { Components, DeclaredHook, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
 import { hookLine } from './sessionhooks.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, toolNames as names } from './words.ts';
@@ -78,7 +78,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
         state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '']);
     }
     if (mark === 'waits' && !updatesRun()) return 'Waits for automatic updates';
-    if (mark === 'items') return itemsOnWords(entry, plugin.name, tool);
+    if (mark === 'items') return `${itemsOnWords(entry, plugin.name, tool, ` in ${names[tool]}`)}.`;
     return [MARK_WORDS[mark], mark === 'absent' || mark === 'missing' ? limitNote(limits(tool)) : ''].filter(Boolean).join(' · ');
   };
   const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
@@ -99,16 +99,31 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo), box = boxOf(view, entry, plugin.name, tool, { mark, words });
       // Under the box: what it has, or what the box says more (why it is off, that he unticked it); in Pi and OpenCode, where none
-      // of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its run's report says.
-      const reasons = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons;
+      // of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its run's report says; then each name of his
+      // (yourLines), whatever else is so, which say why on their own where the box is held by those alone.
+      const why = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons ?? [], yours = entry.items?.[plugin.name]?.yours?.[tool] ?? [];
+      const state = why.length ? why.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason))
+        : box.held && yours.length ? null : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark));
       return h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]),
-          reasons ? reasons.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason)) : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark)),
+          state, yourLines(view, entry, plugin, tool, yours, marketIndex),
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
           view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null));
     })), view.tools.length),
     // Cowork has no box: with Claude desktop here, one line says which plugins it uses instead.
     hasCowork(app.home?.snapshots ?? []) ? h('p.plugin-panel-note', { id: 'plugin-cowork-note' }, coworkWords.plugin) : null);
+}
+
+/**
+ * Each name of his under a tool's box (pluginstatus.ts yourSaid), with Use the plugin's under it where its take can land there
+ * (pluginstate.ts usePlugins), then once what that keeps.
+ */
+function yourLines(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, yours: YourName[], marketIndex: number) {
+  const offered = (name: YourName) => !name.same && !name.held, title = (name: YourName) => `Put the plugin’s ${name.name} in ${names[tool]} in place of yours. Undo gives yours back.`;
+  const use = (name: YourName) => button({ size: 'small', label: `Use the plugin’s ${name.name}`, id: `ptake-${marketIndex}-${plugin.name}-${tool}-${name.kind}-${name.key}`,
+    disabled: acting() || !view.canWrite, attrs: { title: title(name) }, onclick: () => void usePlugins(entry, plugin.name, tool, name) });
+  return [...yours.map(name => h('span.plugin-tool-state.plugin-tool-why.plugin-tool-yours', {}, yourSaid(name, tool), offered(name) ? use(name) : null)),
+    yours.some(offered) ? h('span.plugin-tool-state.plugin-tool-why', {}, 'Using the plugin’s keeps yours as a version, and your other tools keep their copies.') : null];
 }
 
 /**
@@ -124,7 +139,7 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const where = line.on === false ? 'Off' : out.length ? `Kept out of ${andList(out)}` : '';
     const said = { linked: where, update: 'An update is ready: Update brings it in', going: 'No longer in the plugin: Update turns it off', new: 'New in the plugin: Update brings it in',
       removed: 'Removed by the plugin’s update, so it is off. Turning it on keeps it as yours', deleted: 'Deleted here: tick to bring it back',
-      'not-brought': `Not brought in: ${line.why ?? ''}` }[line.state];
+      'not-brought': `Not brought in: ${line.why ?? ''}`, alike: 'Yours, the same as the plugin’s: its switch leaves yours as it is' }[line.state];
     return [said, line.state === 'update' ? where : ''].filter(Boolean).join(' · ');
   };
   const linked = (line: PluginItemLine) => line.state !== 'new' && line.state !== 'not-brought' && line.state !== 'deleted';
