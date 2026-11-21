@@ -1092,15 +1092,26 @@ async function chooseFrom(a, value) {
   await a.settle();
 }
 /**
- * Whether the list `id` came to rest (still for six frames) within 3 s; it is found by its id each frame, as a redraw replaces it. A
- * scroll that animates (a mouse wheel's) adds its later steps to a scroll place written meanwhile, some after the place was read.
- * A check that writes a scroll place checks this first, so a list that never rests fails under its own name. A window the other groups' windows cover draws few frames or none for
- * a while (on the Mac, four groups at once): at the end of the 3 s, a list still where it started has rested too.
+ * Whether the list `id` came to rest within 3 s: unchanged across animation frames (six at full rate, or at least one frame after
+ * 200 ms without moving when a window covered by the other groups' draws few frames), or still where it last stood for 200 ms
+ * when the 3 s runs out. It is found by its id each frame, as a redraw replaces it. A scroll that animates (a mouse wheel's) or
+ * an opening row's next-frame move (matrix.ts openRow) moves scrollTop until it settles; a check that writes a scroll place
+ * checks this first, so a list that never rests fails under its own name.
  */
-const stillList = (a, id) => a.run(`new Promise(done => { const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop, first = at(); let last = first, still = 0, ended = false;
+const stillList = (a, id) => a.run(`new Promise(done => {
+  const at = () => document.getElementById(${JSON.stringify(id)})?.scrollTop;
+  let last = at(), still = 0, since = performance.now(), ended = false;
   const end = answer => { if (!ended) { ended = true; done(answer); } };
-  setTimeout(() => end(at() === first), 3000);
-  const look = () => { if (ended) return; still = at() === last ? still + 1 : 0; last = at(); if (still === 6) end(true); else requestAnimationFrame(look); }; requestAnimationFrame(look); })`);
+  setTimeout(() => end(at() === last && performance.now() - since >= 200), 3000);
+  const look = () => {
+    if (ended) return;
+    const now = performance.now(), cur = at();
+    if (cur === last) { still++; if (still === 6 || now - since >= 200) { end(true); return; } }
+    else { still = 0; last = cur; since = now; }
+    requestAnimationFrame(look);
+  };
+  requestAnimationFrame(look);
+})`);
 
 /**
  * One mouse event at the point `at`, as a real mouse sends it: `buttons` 1 while the left button is held, and no button named on a
@@ -6038,7 +6049,7 @@ async function crashFlow() {
 async function draftFlow() {
   const realHome = join(scratch, 'draft-real'), home = join(scratch, 'draft-home'), data = join(scratch, 'draft-data');
   const claudeMd = join(home, '.claude/CLAUDE.md'), agentsMd = join(home, '.codex/AGENTS.md'), copilotMd = join(home, '.copilot/copilot-instructions.md');
-  for (const folder of ['.claude', '.codex', '.copilot']) mkdirSync(join(home, folder), { recursive: true });
+  for (const folder of ['.claude/skills', '.codex', '.copilot']) mkdirSync(join(home, folder), { recursive: true });
   const claude0 = '# Style\nBe brief.\n\n# Claude\nUse the Task tool.\nDropped by the draft.\n', codex0 = 'Be brief.\nRun codex review before pushing.\n';
   writeFileSync(claudeMd, claude0);
   writeFileSync(agentsMd, codex0);
@@ -6055,15 +6066,24 @@ async function draftFlow() {
   writeFileSync(mode, 'fail');
 
   const a = await launch(data, [], realHome);
+  // A sync record (Synchronize everything off) lets background passes report changes made outside (homepass.ts pageSees).
+  await a.click('#setup-no');
+  await a.run(`(window.ckSyncs = 0, window.centralKnot.onSyncChanged(() => {
+    window.ckSyncs++;
+    const head = document.querySelector('#header > *');
+    if (head) head.ckAfterSync = true;
+  }), true)`);
   const says = async selector => (await a.text(selector)) ?? '';
-  const untilThere = async selector => { for (let tries = 0; tries < 80 && !(await a.exists(selector)); tries++) await wait(100); return a.exists(selector); };
-  // A change outside, read in the background: a skill folder written into the home until the page is drawn again (the mark
-  // placeThroughRedraw leaves on the header), then taken away.
+  const until = async test => { for (let tries = 0; tries < 80 && !(await test()); tries++) await wait(100); return test(); };
+  const untilThere = selector => until(() => a.exists(selector));
+  // A change outside, read in the background: a skill folder written into the home until the background pass tells the page
+  // (sync:changed) and its refresh redraws the header, then taken away.
   const readInBackground = async () => {
-    const folder = join(home, '.claude/skills/read-in-the-background');
+    const before = await a.run(`window.ckSyncs`), folder = join(home, '.claude/skills/read-in-the-background');
     mkdirSync(folder, { recursive: true }); writeFileSync(join(folder, 'SKILL.md'), text('read-in-the-background'));
-    for (let tries = 0; tries < 50 && !(await a.run(`!document.querySelector('#header > *').ckDrawn`)); tries++) await wait(100);
+    const redrew = await until(() => a.run(`window.ckSyncs > ${before} && !document.querySelector('#header > *')?.ckAfterSync`));
     rmSync(folder, { recursive: true, force: true });
+    if (!redrew) await a.run(`document.querySelector('#header > *').ckDrawn = true`);
   };
   const typeModel = name => a.run(`(() => { const box = document.querySelector('#base-draft-model'); box.value = ${JSON.stringify(name)}; box.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const argsSent = () => readNow(ran).trim().split('\n');
@@ -6072,13 +6092,15 @@ async function draftFlow() {
   await a.click('#nav-instructions');
   check('with tools that can write one, the base card offers a draft', await untilThere('#base-draft'), await says('#base-card'));
   // A file with Windows line endings: a click puts the caret where it landed, and an edit keeps every other line's ending.
+  const codexText = '[aria-label="Codex instructions"] pre.ins-preview';
   const crlf = 'Run codex review before pushing.\r\nline one\r\nline two\r\nTARGET here\r\nlast line\r\n';
   writeFileSync(agentsMd, crlf);
   await a.click('#header-refresh');
-  const target = await pointAt(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
+  await until(async () => (await says(codexText)).includes('TARGET'));
+  const target = await pointAt(a, codexText, 'TARGET');
   // What is under the click's point, said if the check fails.
   const under = await a.run(`(() => { const hit = document.elementFromPoint(${target.x}, ${target.y}), at = document.caretRangeFromPoint(${target.x}, ${target.y}); return { point: ${JSON.stringify(target)}, hit: hit && (hit.id || hit.className || hit.tagName), at: at && [at.startContainer.nodeName, at.startOffset], scroll: document.querySelector('#instructions-scroll').scrollTop }; })()`);
-  await clickText(a, '[aria-label="Codex instructions"] pre.ins-preview', 'TARGET');
+  await clickText(a, codexText, 'TARGET');
   // The focused editor's id and the six characters at its caret.
   const atCaret = () => a.run(`(() => { const area = document.activeElement; return [area.id, area.value?.slice(area.selectionStart, area.selectionStart + 6)]; })()`);
   const landed = await atCaret();
@@ -6104,7 +6126,6 @@ async function draftFlow() {
   for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
   // A redraw landing between the press and the release replaces the text under the button, and the browser then sends no click:
   // the release opens the editor of the text now there, the caret where it was aimed, in that file too.
-  const codexText = '[aria-label="Codex instructions"] pre.ins-preview';
   let underPress;
   await clickText(a, codexText, 'TARGET', async () => { underPress = await redrawUnder(a, codexText); });
   same('a click on a tool’s text with a redraw between its press and its release: the text was replaced, and its editor opens with the caret where it was aimed',
@@ -6118,11 +6139,13 @@ async function draftFlow() {
     writeFileSync(agentsMd, savedText.replace('last line', 'last line, changed'));
     await a.run(`document.querySelector('#header-refresh').click()`);
     await a.settle();
+    await until(async () => (await says(codexText)).includes('changed'));
     underPress = await a.run(`(() => { const text = document.querySelector('${codexText}'); return [text.textContent.includes('changed'), text.matches('.ins-editable')]; })()`);
   });
   same('a press on a tool’s text, its text changed before the release: nothing opens', [...underPress, await a.exists('#ins-text-codex-cli')], [true, true, false]);
   writeFileSync(agentsMd, savedText);
   await a.click('#header-refresh');
+  await until(async () => !(await says(codexText)).includes('changed'));
 
   // Selecting a card's text keeps the selection, to copy it: a drag opens no editor. A double-click's first click is a plain
   // click, which opens the editor, and its second selects the word there.
@@ -6175,12 +6198,14 @@ async function draftFlow() {
   rmSync(agentsMd);
   await a.run(`document.querySelector('#header-refresh').click()`);
   await a.settle();
+  await until(async () => !(await a.exists(codexText)));
   const textGone = !(await a.exists(codexText)), dragEnd = { x: dragOn.x, y: dragOn.y + 80 };
   await mouse(a, 'mouseMoved', dragEnd, 1); await mouse(a, 'mouseReleased', dragEnd, 0);
   await a.settle();
   same('a drag whose text went away before its release selects nothing', [textGone, await a.run(`String(getSelection())`)], [true, '']);
   writeFileSync(agentsMd, codexNow);
   await a.click('#header-refresh');
+  await until(async () => (await says(codexText)).includes('last line'));
   const word = await pointAt(a, codexText, 'last line');
   for (const clickCount of [1, 2]) for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: word.x + 12, y: word.y, button: 'left', buttons, clickCount });
   await a.settle();
@@ -6189,10 +6214,12 @@ async function draftFlow() {
   same('and with nothing typed, its file replaced outside and read again shows the new text from its top', await placeThroughRedraw(a, '#ins-text-codex-cli', async () => {
     writeFileSync(agentsMd, Array.from({ length: 30 }, (_, line) => `Replaced outside, line ${line + 1}.`).join('\n'));
     await a.click('#header-refresh');
+    await until(() => a.run(`document.querySelector('#ins-text-codex-cli')?.value.includes('Replaced outside')`));
   }), [true, 0]);
   await a.press('Escape');
   writeFileSync(agentsMd, codex0);
   await a.click('#header-refresh'); await openKind(a, 'skills'); await a.click('#nav-instructions');
+  await until(async () => (await says(codexText)) === codex0.trimEnd());
 
   await a.shot('draft-entry');
   const page0 = await says('#instructions-scroll');
@@ -6386,6 +6413,7 @@ async function draftFlow() {
   const long = Array.from({ length: 200 }, (_, line) => `- Line ${line + 1} of a long CLAUDE.md, long enough to show how a text that runs for pages is edited.`).join('\n') + '\n';
   writeFileSync(claudeMd, long);
   await a.click('#header-refresh');
+  await untilThere('#ins-more-claude-cli');
   await sizeTo(a, 860, 600);
   await a.run(`document.querySelector('#ins-head-claude-cli').scrollIntoView({ block: 'start' })`);
   same('at 860×600 a 200-line text’s Edit is in view at its card’s head', await inView(['ins-edit-claude-cli']), [true]);
@@ -7372,7 +7400,7 @@ esac
 `, { mode: 0o755 });
   writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.167.0" && exit 0\necho "$*" >> "$HOME/codex-calls.txt"\nexit 9\n', { mode: 0o755 });
   writeFileSync(join(home, 'issue-next'), '2.0.0');
-  const versions = () => Object.fromEntries(Object.entries(JSON.parse(readFileSync(recordPath, 'utf8')).plugins).map(([id, [entry]]) => [id.split('@')[0], entry.version]));
+  const versions = () => Object.fromEntries(Object.entries(jsonOrNothing(recordPath)?.plugins ?? {}).map(([id, [entry]]) => [id.split('@')[0], entry.version]));
   const calls = () => (existsSync(join(home, 'claude-calls.txt')) ? readFileSync(join(home, 'claude-calls.txt'), 'utf8').trim().split('\n') : []);
   // The record kept for this home (the file holds one per home).
   const noted = () => { try { return JSON.parse(readFileSync(join(data, 'plugin-updates.json'), 'utf8')).find(record => record.home === home) ?? {}; } catch { return {}; } };
