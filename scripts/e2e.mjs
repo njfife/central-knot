@@ -6786,6 +6786,18 @@ esac
   await flipSkill(pdfSwitch, 'true');
   await flipSkill(sheetSwitch, 'true');
   same('turning them back on in another order than last-first restores config.toml byte for byte', readFileSync(codexConfig, 'utf8'), codexBefore);
+  // A lone block carrying both `name` and `path` with `enabled = false` is ignored by Codex: the page shows the skill On,
+  // Off leaves his block byte for byte and adds a name-only rule, and On removes only that rule.
+  const codexBoth = `# mine\n[marketplaces.ck-test-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."document-tools@ck-test-market"]\nenabled = true\n\n[[skills.config]]\nname = "document-tools:pdf-reader"\npath = ${JSON.stringify(join(codexCopy, 'skills/pdf-reader/SKILL.md'))}\nenabled = false\n`;
+  writeFileSync(codexConfig, codexBoth);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 60 && !((await a.text('#plugins-result')) ?? '').startsWith('Last change: '); tries++) await wait(100);
+  for (let tries = 0; tries < 60 && !(await a.exists(pdfSwitch)); tries++) await wait(100);
+  same('a lone name+path enabled=false block shows the skill On on the page (as Codex loads it)', await a.run(`document.querySelector(${JSON.stringify(pdfSwitch)})?.getAttribute('aria-checked')`), 'true');
+  await flipSkill(pdfSwitch, 'false');
+  same('Off leaves his name+path block byte for byte and adds a name-only rule', readFileSync(codexConfig, 'utf8'), `${codexBoth}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`);
+  await flipSkill(pdfSwitch, 'true');
+  same('On removes only the added rule, restoring his file byte for byte', readFileSync(codexConfig, 'utf8'), codexBoth);
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
   await nameClashPage();
