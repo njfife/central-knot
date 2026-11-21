@@ -19,7 +19,7 @@
 // are kept and the migration from the earlier record, skillstore.ts and skillmigrate.ts; the row and its words,
 // libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
 import { randomUUID } from 'node:crypto';
-import { readFile, readdir, unlink } from 'node:fs/promises';
+import { lstat, readFile, readdir, unlink } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
@@ -95,7 +95,7 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
   const disk: SkillDisk = {
     byKey: new Map(), unseen: new Map(), uncopied: new Set(), locked: new Map(), problems: [], outside: new Map(), ways: new Map(), readsFrom: {},
     through: await throughPlugins(context, managed, 'skill'), shapes: new Map(), switches: new Map(), switchedOff: new Map(),
-    sharedNow: new Set(), dangling: new Map(),
+    sharedNow: new Set(), dangling: new Map(), holdsBack: new Map(),
     linked: await pluginHolds(context, managed),
     anotherWay: (item, tool) => anotherWay(disk, managed, item, tool)?.why,
     cannotTake: (item, tool) => cannotTake(context, disk, item, tool),
@@ -111,8 +111,17 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
   };
   const sound: HarnessId[] = [];
   for (const tool of managed) if (await readOwnFolder(context, disk, tool, sharedAt)) sound.push(tool);
-  disk.sharedNow = await sharedListing(context, recorded, [...disk.dangling.values()].some(Boolean));
+  // Where the links in the tools' own folders lead in the shared folder, there or not: folders it is known to hold.
+  const linked = [...disk.dangling.values(), ...[...disk.ways.values()].flatMap(ways => Object.values(ways).map(way => way?.throughShared))];
+  disk.sharedNow = await sharedListing(context, recorded, linked.filter((folder): folder is string => !!folder));
   if (typeof disk.sharedNow === 'string') disk.problems.push(disk.sharedNow);
+  // While it can't be vouched for, a tool that reads it may have any skill through it: its own copies are unseen too, so nothing
+  // is taken in from them, written over or removed (library.ts THE SHARED FOLDER). copyRead and the found copies read this.
+  if (typeof disk.sharedNow === 'string') for (const [key, slot] of disk.byKey) for (const tool of managed) {
+    if (!slot[tool] || !readsShared(context, tool)) continue;
+    const at = `${tool}:${key}`, why = waitsForShared(context, tool);
+    disk.unseen.set(at, why); disk.holdsBack!.set(at, why);
+  }
   await readAlsoRead(context, disk, managed, sound, sharedAt);
   // A skill's shape: its current version's SKILL.md where the library has it, else a copy's.
   for (const item of recorded) {
@@ -193,6 +202,10 @@ async function readAlsoRead(context: ShareContext, disk: SkillDisk, managed: Har
       const why = away ? `${nameOf(tool)} loads the copy in ${nameOf(away)}’s skills folder (${pathWords(context, path)}), which Central Knot doesn’t manage here.`
         : `${nameOf(tool)} also reads a copy at ${pathWords(context, path)}, which is not Central Knot’s.`;
       for (const copy of copiesIn(await readSkillsFolder(tool, path, label))) {
+        // In the shared folder itself, or through a link in another tool's folder that leads there (OpenCode reads Claude Code's):
+        // while that folder can't be vouched for, no way and no copy found (library.ts THE SHARED FOLDER).
+        const throughShared = landing === shared ? copy.name : await sharedName(copy.skill.realDirectory, shared);
+        if (throughShared && typeof disk.sharedNow === 'string') continue;
         // A copy its own switch keeps out is no way to the skill while the copy in its own folder is let in (Pi's list goes by
         // path): that one stays, rather than give way to one the tool doesn't load.
         const here = disk.byKey.get(copy.key)?.[tool];
@@ -201,8 +214,6 @@ async function readAlsoRead(context: ShareContext, disk: SkillDisk, managed: Har
         // the link would be one too many while the tool still reads this one (library.ts), and go again. Pi loads such a skill
         // by the link's path, which it finds first (measured), so for Pi the link's copy stays the one its switch names.
         if (disk.ways.get(copy.key)?.[tool]?.take === 'link') { delete disk.ways.get(copy.key)![tool]; if (tool !== 'pi-cli') delete disk.outside.get(copy.key)![tool]; }
-        // In the shared folder itself, or through a link in another tool's folder that leads there (OpenCode reads Claude Code's).
-        const throughShared = landing === shared ? copy.name : await sharedName(copy.skill.realDirectory, shared);
         add(disk.ways, copy.key, tool, { why, path: copy.directory, take, ...(throughShared ? { throughShared } : {}) });
         add(disk.outside, copy.key, tool, copy);
       }
@@ -239,13 +250,15 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
 
 /**
  * The shared skills folder's folders by key when it can be vouched for; else why not (library.ts THE SHARED FOLDER), said once
- * among the problems: it can't be listed; it is missing where it held skills (the record names folders there, or a link in a
- * tool's folder leads there: `linkedThere`), a folder never there being one that holds none; or it lists none of the folders the
- * record names (a volume not mounted, another folder in its place; and a person who removed every one of them: the line names them).
+ * among the problems: it can't be listed; or, of the folders it is known to hold (the record's, and those a link in a tool's own
+ * folder leads to: `linked`), it is missing, or lists none of them (a volume not mounted, another folder in its place; and a
+ * person who removed every one: the line names them, and the way out). Known to hold none, it is as it lists.
  */
-async function sharedListing(context: ShareContext, recorded: LibraryItem[], linkedThere: boolean): Promise<Set<string> | string> {
+async function sharedListing(context: ShareContext, recorded: LibraryItem[], linked: string[]): Promise<Set<string> | string> {
   const had = recorded.filter(item => !item.deleted && Object.keys(item.throughShared ?? {}).length);
-  const names = had.length ? ` (${andList(had.map(item => item.name))})` : '';
+  const known = new Map(had.flatMap(item => Object.values(item.throughShared!).map(folder => [itemKey(folder), item.name] as const)));
+  for (const folder of linked) if (!known.has(itemKey(folder))) known.set(itemKey(folder), folder);
+  const names = known.size ? ` (${andList([...new Set(known.values())])})` : '';
   const at = pathWords(context, sharedFolder(context));
   const why = (state: string, until: string) =>
     `The shared skills folder (${at}) ${state}, so Central Knot changes nothing for the skills tools read there${names} until ${until}.`;
@@ -253,13 +266,18 @@ async function sharedListing(context: ShareContext, recorded: LibraryItem[], lin
   try { listed = new Set((await readdir(sharedFolder(context))).map(itemKey)); }
   catch (error) {
     if (errorCode(error) !== 'ENOENT') return why('can’t be read', 'it can be');
-    const missing = why('isn’t there', 'it is back; a skill turned on meanwhile waits for it too (if you removed it, turn them off)');
-    return had.length || linkedThere ? missing : new Set();
+    const missing = why('isn’t there', 'it is back; a skill turned on meanwhile waits for it too (if you removed it, turn them off and remove any link into it)');
+    return known.size ? missing : new Set();
   }
-  const folders = had.flatMap(item => Object.values(item.throughShared!)).map(itemKey);
-  const noneOfThem = folders.length && !folders.some(folder => listed.has(folder));
-  return noneOfThem ? why('holds none of them', 'they are back (if you removed them, turn them off)') : listed;
+  const noneOfThem = known.size && ![...known.keys()].some(folder => listed.has(folder));
+  return noneOfThem ? why('holds none of them', 'they are back (if you removed them, turn them off and remove any link to them)') : listed;
 }
+
+/** Whether a tool reads the shared skills folder itself (Copilot CLI, Codex, Pi and OpenCode do; Claude Code doesn't). */
+const readsShared = (context: ShareContext, tool: HarnessId) => alsoReads(context, tool).some(root => root.path === sharedFolder(context));
+/** Why a tool that may have a skill through the shared folder is unseen while that folder can't be vouched for. */
+const waitsForShared = (context: ShareContext, tool: HarnessId) =>
+  `${nameOf(tool)} waits for the shared skills folder (${pathWords(context, sharedFolder(context))}) to be back: nothing is written there until then.`;
 
 /**
  * Disk.lostShared for skills, for a tool with no copy and no other way. While the shared folder can't be vouched
@@ -269,11 +287,8 @@ async function sharedListing(context: ShareContext, recorded: LibraryItem[], lin
  * that doesn't read the shared folder (Claude Code) had it by a link, now gone (`link`).
  */
 function lostShared(context: ShareContext, disk: SkillDisk, item: Wanted, tool: HarnessId): 'copy' | 'link' | { unseen: string } | undefined {
-  const folder = item.throughShared?.[tool], dangling = disk.dangling.has(`${tool}:${item.key}`);
-  const reads = alsoReads(context, tool).some(root => root.path === sharedFolder(context));
-  const at = pathWords(context, sharedFolder(context));
-  const waits = `${nameOf(tool)} waits for the shared skills folder (${at}) to be back: nothing is written there until then.`;
-  if (typeof disk.sharedNow === 'string') return folder || dangling || reads ? { unseen: waits } : undefined;
+  const folder = item.throughShared?.[tool], dangling = disk.dangling.has(`${tool}:${item.key}`), reads = readsShared(context, tool);
+  if (typeof disk.sharedNow === 'string') return folder || dangling || reads ? { unseen: waitsForShared(context, tool) } : undefined;
   if (!folder) return undefined;
   if (!disk.sharedNow.has(itemKey(folder))) return 'copy';
   if (!reads && !dangling) return 'link';
@@ -495,7 +510,7 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   // Each tool that read the copy, and whether its own switch had it off (whoever set it).
   const readers = look.managed.filter(each => look.disk.ways.get(key)?.[each]?.path === way.path);
   const heldOff = readers.flatMap(each => { const target = loadTarget(look, key, item.name, each); return target && isDisabled(context, look.disk.switches.get(each)!, target) ? [{ tool: each, target }] : []; });
-  const result = await runTakeOver(context, item, keep, way);
+  const result = await runTakeOver(context, look.managed, item, keep, way);
   if (result) return stop(result);
   // Told once it happened: a take-over has no Undo, so an entry must never claim one that didn't.
   const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, of: 'skill', item: item.name, kind: 'took-over', losers: [loser], orderProved: true };
@@ -516,9 +531,10 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
 
 /**
  * Takes over one copy (takeOver): the version first (library.ts keepVersion), with what tools had through the shared folder let
- * go, then only the link or the shared copy goes. Why not, if it couldn't.
+ * go, then only the link or the shared copy goes, with the links in the `managed` tools' folders that lead to it (one left leading
+ * nowhere would say the shared folder still held it: sharedListing). Why not, if it couldn't.
  */
-async function runTakeOver(context: ShareContext, item: LibraryItem, keep: Version | undefined, way: Way): Promise<string | undefined> {
+async function runTakeOver(context: ShareContext, managed: HarnessId[], item: LibraryItem, keep: Version | undefined, way: Way): Promise<string | undefined> {
   const { library, problem } = await skillKind.open(context, true);
   const held = library.items[item.key];
   if (problem || !held) return problem ?? 'It changed since the page was read. Nothing was changed; read again.';
@@ -531,9 +547,15 @@ async function runTakeOver(context: ShareContext, item: LibraryItem, keep: Versi
     if (each === held || Object.values(each.throughShared ?? {}).some(folder => itemKey(folder) === removed)) delete each.throughShared;
   }
   if (keep) await keepVersion(shelf, held, keep, { directory: way.path, hash: keep.hash }); else await shelf.save();
+  const at = await landingOf(way.path), links: string[] = [];
+  for (const root of way.take === 'shared' ? managed.map(tool => rootOf(context, tool)) : []) for (const name of await readdir(root).catch(() => [] as string[])) {
+    const path = join(root, name);
+    if ((await lstat(path).catch(() => undefined))?.isSymbolicLink() && await landingOf(path) === at) links.push(path);
+  }
   try {
     if (way.take === 'link') await unlink(way.path);
     else await removeFolder(context, way.path, keep?.hash ?? (await readTree(way.path)).hash);
+    for (const link of links) await unlink(link);
   } catch (error) { return `Could not take it over: ${plainError(error)}`; }
   return undefined;
 }
