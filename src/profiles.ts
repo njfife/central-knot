@@ -26,6 +26,7 @@ import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
 import { succeeded, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { click } from './pluginswitch.ts';
 import { changes, copilotKeptOnBy, copilotUndo, heldWords, liveItems, onAfterUndo, pluginPlan, pluginUndo, switchPlan, undoPlan, withCopilotOff, type CopilotRule, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import type { ReloadChange } from './reload.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
 import { errorCode, libraryGate, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
@@ -220,7 +221,7 @@ function placedClicks(kind: ItemKind, copies: CopyTurn[], libraries: Libraries):
  * asked already (`asAsked`), which are neither turned nor failed.
  */
 async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Turns, told: boolean, copies: CopyTurn[], libraries: Libraries, plugins: PluginSide) {
-  const results: DestinationResult[] = [], made: string[] = [], placedResults: { kind: ItemKind; result: DestinationResult }[] = [];
+  const results: DestinationResult[] = [], made: string[] = [], placedResults: { kind: ItemKind; result: DestinationResult }[] = [], reloads: ReloadChange[] = [];
   for (const { kind, pass } of KINDS) {
     const asked = [...turns.on.filter(item => item.kind === kind).map(item => [item, true] as const), ...turns.off.filter(item => item.kind === kind).map(item => [item, false] as const)];
     const clicks = asked.map(([item, on]): Change => ({ key: item.key, on, except: [...item.except], seenOn: !on }));
@@ -229,6 +230,7 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
       const done = await pass(context, tools, list, { only: new Set(list.map(each => each.key)), told: toldHere });
       const names = list.map(click => libraries[kind][click.key]?.name ?? click.key).join(', ');
       results.push(...done.results, ...(done.stopped ? [{ item: names, outcome: 'failed' as const, message: done.stopped }] : []));
+      reloads.push(...done.reloads);
       if (mine) placedResults.push(...done.results.map(result => ({ kind, result }))); else made.push(...(done.made ?? []));
     }
   }
@@ -237,9 +239,9 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
     // Two plugins sharing an exact MCP server name in Copilot CLI share one switch: once the first confirmed it, the second did too.
     const shared = turn.item.kind === 'mcp' && turn.copy.tool === 'copilot-cli' ? `${turn.item.name}\u0000${turn.on}` : undefined;
     if (shared && copilotDone.has(shared)) { confirmed.push(turn); continue; }
-    const { changed, failed } = await installedCopy(turn, plugins);
+    const { changed, failed, reloads: stepReloads } = await installedCopy(turn, plugins);
     if (failed) results.push(failed);
-    else { (changed ? confirmed : asAsked).push(turn); if (changed && shared) copilotDone.add(shared); }
+    else { (changed ? confirmed : asAsked).push(turn); if (changed && shared) copilotDone.add(shared); if (changed) reloads.push(...stepReloads); }
   }
   const after = await readLibraries(context), records = 'stop' in after ? undefined : after.libraries;
   const now = (item: LiveItem) => records && !records[item.kind][item.key]?.deleted ? records[item.kind][item.key]?.on : undefined;
@@ -251,7 +253,7 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
     return wanted === turn.on && !letGo.includes(turn) && !placedResults.some(({ kind, result }) => kind === turn.item.kind && result.item === record?.name
       && result.harness === turn.copy.tool && (result.outcome === 'failed' || result.outcome === 'held'));
   };
-  return { results, made, done: { on: turns.on.filter(item => now(item) === true), off: turns.off.filter(item => now(item) === false) },
+  return { results, made, reloads, done: { on: turns.on.filter(item => now(item) === true), off: turns.off.filter(item => now(item) === false) },
     copies: copies.filter(turn => (placedKey(turn) ? placedDone(turn) : confirmed.includes(turn))), letGo, asAsked };
 }
 
@@ -261,18 +263,18 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
  * (profileplan.ts installedWay). Answers whether the tool confirmed a change (`changed`; not when it was as asked already), or
  * what went wrong (`failed`).
  */
-async function installedCopy({ item, copy, on }: CopyTurn, plugins: PluginSide): Promise<{ changed: boolean; failed?: DestinationResult }> {
+async function installedCopy({ item, copy, on }: CopyTurn, plugins: PluginSide): Promise<{ changed: boolean; failed?: DestinationResult; reloads: ReloadChange[] }> {
   const draft: PluginDraft = new Map();
   if ('install' in copy.target) click(draft, copy.target);
   const report = (await plugins.run([...draft.values()]))[0]?.report;
-  if (report && succeeded(report)) return { changed: !!report.changed };
-  return { changed: false, failed: { item: item.name, harness: copy.tool, outcome: report?.outcome === 'held' ? 'held' : 'failed', message: `${item.name}: ${report?.message ?? `It was not turned ${on ? 'on' : 'off'} in ${toolNames[copy.tool]}.`}` } };
+  if (report && succeeded(report)) return { changed: !!report.changed, reloads: report.changed ? report.reloads ?? [] : [] };
+  return { changed: false, reloads: [], failed: { item: item.name, harness: copy.tool, outcome: report?.outcome === 'held' ? 'held' : 'failed', message: `${item.name}: ${report?.message ?? `It was not turned ${on ? 'on' : 'off'} in ${toolNames[copy.tool]}.`}` } };
 }
 
 /** History keys every profile entry with this. */
 const SWITCH_KEY = 'profiles:switch';
 const named = (items: LiveItem[]) => items.map(({ id, name }) => ({ id, name }));
-const stopped = (why: string): ProfileSwitchResult => ({ stopped: why, on: [], off: [], left: [], results: [] });
+const stopped = (why: string): ProfileSwitchResult => ({ stopped: why, on: [], off: [], left: [], results: [], reloads: [] });
 
 /** A profile entry (types.ts HistoryEvent `profile`): a switch's, its Undo's, or the migration's (profilemigrate.ts). `item`: the profile's name. */
 export const profileEvent = (context: ShareContext, item: string, profile: NonNullable<HistoryEvent['profile']>): HistoryEvent =>
@@ -320,14 +322,15 @@ async function runCopilotRules(context: ShareContext, rules: CopilotRule[], disa
   return { confirmed, results, left };
 }
 
-/** A switch's or Undo's entry once its passes ran: keeping only confirmed plugin copies and orphan Copilot CLI clears, plus settings notes. */
-async function settleEntry(context: ShareContext, eventId: string, confirmed: CopyTurn[], settingsChanged: string[], copilotCleared?: CopilotRule[]) {
+/** A switch's or Undo's entry once its passes ran: keeping only confirmed plugin copies and orphan Copilot CLI clears, plus settings notes. Returns the settled profile payload written to History. */
+async function settleEntry(context: ShareContext, eventId: string, confirmed: CopyTurn[], settingsChanged: string[], copilotCleared?: CopilotRule[]): Promise<HistoryEvent['profile']> {
   const history = await readHistory(context), entry = history.find(each => each.id === eventId);
-  if (!entry?.profile) return;
+  if (!entry?.profile) return undefined;
   if (entry.profile.plugins) entry.profile.plugins = confirmed.map(switched);
   if (copilotCleared) { if (copilotCleared.length) entry.profile.copilotCleared = copilotCleared; else delete entry.profile.copilotCleared; }
   if (settingsChanged.length) entry.settingsChanged = settingsChanged;
   await replaceHistory(context, history);
+  return entry.profile;
 }
 
 /** Confirmed Copilot CLI off-switches cleared solely because the profile names his own server of that exact name (said in result and History). */
@@ -351,7 +354,7 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const planned = switchPlan(profile, items), turns: Turns = { on: planned.on.filter(item => !item.on), off: planned.off };
   const clears: CopilotRule[] = planned.on.filter(item => item.copilotOff).map(item => ({ id: item.id, name: item.name, server: item.copilotOff! }));
   const plan = pluginPlan(profile, live), copies = copiesTurned(plan, live), held = heldResults(plan, live);
-  if (!changes(planned) && !copies.length) return held.length ? stopped(`${heldWords(plan, live).text}. Nothing was switched.`) : { name: profile.name, on: [], off: [], left: [], results: [] };
+  if (!changes(planned) && !copies.length) return held.length ? stopped(`${heldWords(plan, live).text}. Nothing was switched.`) : { name: profile.name, on: [], off: [], left: [], results: [], reloads: [] };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
   const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off),
@@ -360,15 +363,17 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const done = await turnTogether(context, tools, turns, true, copies, read.libraries, plugins), rules = await runCopilotRules(context, clears, false);
   const settingsChanged = [...done.results.flatMap(result => (result.settingsChanged ? [result.settingsChanged] : [])), ...clearedForHis(profile, done.copies),
     ...rules.confirmed.map(orphanClearedNote)];
-  if (done.copies.length < copies.length || rules.confirmed.length < clears.length || settingsChanged.length) await settleEntry(context, event.id, done.copies, settingsChanged, clears.length ? rules.confirmed : undefined);
+  const settled = done.copies.length < copies.length || rules.confirmed.length < clears.length || settingsChanged.length
+    ? await settleEntry(context, event.id, done.copies, settingsChanged, clears.length ? rules.confirmed : undefined)
+    : event.profile;
   const out = outcome(turns, done.done, [...held, ...done.results, ...rules.results], copies.filter(turn => !done.asAsked.includes(turn)), done.copies);
   return { name: profile.name, on: [...out.on, ...rules.confirmed.filter(rule => !done.done.on.some(item => item.id === rule.id)).map(rule => rule.name)],
-    off: out.off, left: [...new Set([...out.left, ...rules.left])], results: out.results, event: event.id, ...(settingsChanged.length ? { settingsChanged } : {}) };
+    off: out.off, left: [...new Set([...out.left, ...rules.left])], results: out.results, event: event.id, profile: settled, ...(settingsChanged.length ? { settingsChanged } : {}), reloads: done.reloads };
 }
 
 /** Undo of a profile entry: turns back library items, plugin copies and uncovered Copilot CLI rules still as left, never re-disabling a name his server uses now, and clears any uncovered rule blocking a server it turns back on. */
 export async function undoSwitch(context: ShareContext, tools: HarnessId[], eventId: string, plugins: PluginSide): Promise<ApplyResult> {
-  const stop = (why: string): ApplyResult => ({ stopped: why, results: [], harnessWrites: 0 });
+  const stop = (why: string): ApplyResult => ({ stopped: why, results: [], harnessWrites: 0, reloads: [] });
   const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (!past?.profile?.on || past.profile.undoOf || past.undoneBy) return stop('That switch has nothing to undo.');
@@ -385,7 +390,7 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const undo = back.length || copilotBack.length || copilotClear.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, on: named(turns.on), off: named(turns.off),
     ...(back.length ? { plugins: back.map(switched) } : {}), ...(copilotBack.length ? { copilotCleared: copilotBack } : {}) }) : undefined;
   if (undo) await appendHistory(context, [undo]);
-  const { results, made, done, copies, letGo, asAsked } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins);
+  const { results, made, reloads, done, copies, letGo, asAsked } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins);
   const rules = await runCopilotRules(context, copilotBack, true), cleared = await runCopilotRules(context, copilotClear, false);
   const undoNotes = [...keptNotes, ...cleared.confirmed.map(orphanClearedNote)];
   if (undo && (copies.length < back.length || rules.confirmed.length < copilotBack.length || undoNotes.length)) await settleEntry(context, undo.id, copies, undoNotes, copilotBack.length ? rules.confirmed : undefined);
@@ -396,5 +401,6 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
     ...[...groupBy(letGo, turn => turn.item.id).values()].map(list => `${list[0]!.item.name} in ${andList(list.map(turn => toolNames[turn.copy.tool]))}, edited by hand since, so it is your own now`)];
   return { results: notDone, harnessWrites: changes(done) + copies.length + rules.confirmed.length + cleared.confirmed.length, made,
     switched: { on: switchedBack.on, off: [...switchedBack.off, ...rules.confirmed.filter(rule => !done.off.some(item => item.id === rule.id)).map(rule => rule.name)],
-      left: [...new Set([...switchedBack.left, ...rules.left, ...cleared.left])], ...(since.length ? { since } : {}), ...(undoNotes.length ? { settingsChanged: undoNotes } : {}) } };
+      left: [...new Set([...switchedBack.left, ...rules.left, ...cleared.left])], ...(since.length ? { since } : {}), ...(undoNotes.length ? { settingsChanged: undoNotes } : {}) },
+    reloads };
 }

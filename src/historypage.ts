@@ -7,7 +7,7 @@ import { DAY_MS, plural, timesApart } from './model.ts';
 import { acting, noToolManaged, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
-import { changes, entryTurns, homeItems, NO_PROFILE, pluginLive, turnsWords, undoTurns } from './profileplan.ts';
+import { entryTurns, NO_PROFILE, turnsWords, undoInHome, undoOffered } from './profileplan.ts';
 import { changePanel, openKind, outcomeBand, seeChangeLink } from './matrix.ts';
 import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
@@ -85,13 +85,13 @@ function pulledBase(event: HistoryEvent, tools: string): { glyph: IconName; text
 /**
  * A profile entry (profiles.ts): a switch, or the profiles migration (profilemigrate.ts), with the items it turned On and Off, a
  * plugin's item once however many tools it was turned in. Its Undo is offered while an item, or a plugin item's copy, is still as
- * it left it (profileplan.ts undoTurns). One from before profiles were sets of items has neither list, and is past: it offers nothing.
+ * it left it (profileplan.ts undoOffered). One from before profiles were sets of items has neither list, and is past: it offers nothing.
  */
 function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const was = event.profile!, glyph: IconName = 'sliders-horizontal';
   if (was.undoOf) return { glyph, text: `Undid the switch to ${was.toName}: ${turnsWords(entryTurns(was), 'did') || 'nothing changed'}.` };
   if (!was.on && !was.off) return { glyph, text: `Switched to ${was.toName ?? NO_PROFILE} with each tool’s own switches, before profiles were sets of items.` };
-  const action = state.home && changes(undoNow(event)) ? 'Undo' : undefined;
+  const action = state.home && undoOffered(event, state.home) ? 'Undo' : undefined;
   if (was.migrated) {
     const off = was.off ?? [];
     return { glyph, text: `Profiles are sets of items now: ${plural(off.length, 'item')} ${was.toName ?? 'a profile'} held off in every tool ${off.length === 1 ? 'is' : 'are'} off now, and the switches profiles had set in tools are released.`, action };
@@ -99,7 +99,7 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
   return { glyph, text: `Switched to ${was.toName}: ${turnsWords(entryTurns(was), 'did') || 'nothing changed'}.`, action };
 }
 /** What a profile entry's Undo would turn back now, from the home as the page read it. */
-const undoNow = (event: HistoryEvent) => undoTurns(event, homeItems(state.home!), pluginLive(state.home!), state.home!.mcp);
+const undoNow = (event: HistoryEvent) => undoInHome(event, state.home!);
 
 /**
  * A tool's Manage switch turned (toolchoice.ts), said as what holds from then on. It offers nothing: the switch on the tool's
@@ -175,8 +175,8 @@ export function historyPage() {
   if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or turning something on adds or replaces a copy, it shows up here with Undo. Turn a skill on to begin.', button({ variant: 'outline', label: 'Open the Library', id: 'history-open-library', onclick: () => openKind('all') })));
   const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   const reread = rereadBand(state.history);
-  // A refused Undo made here is a warning band, as on the other pages; other results here are in the status bar.
-  const refused = state.outcome?.page === 'history' && state.outcome.warn ? outcomeBand() : null;
+  // A refused Undo, or a Restore with reload advice, shows in a band; other results here are in the status bar.
+  const refused = state.outcome?.page === 'history' && (state.outcome.warn || !!state.outcome.reloads?.length) ? outcomeBand() : null;
   return h('div.page', {}, reread || refused ? h('div.bands', {}, reread, refused) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     // What it also changed in a tool's own settings (Pi's skills list: HistoryEvent settingsChanged) follows its words.
     const about = (said => (event.settingsChanged ? { ...said, text: `${said.text} ${event.settingsChanged.join(' ')}` } : said))(describe(event));

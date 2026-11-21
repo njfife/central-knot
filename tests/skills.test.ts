@@ -606,7 +606,7 @@ test('The shared copy deleted by hand, Claude Code’s entry a link to it: two p
     for (const tool of box.tools as Tool[]) assert.equal(await readFile(join(folderOf(box, tool), 'SKILL.md'), 'utf8'), skillText('In the shared folder.'), tool);
     assert.equal((await bytes(folderOf(box, 'claude-cli')))?.[''], undefined, 'a folder, not the link');
     assert.deepEqual(on.results.filter(result => result.outcome === 'written').map(result => result.harness).sort(), [...box.tools].sort());
-    assert.equal(on.results.find(result => result.harness === 'claude-cli')?.message, 'Added, in place of a link that led nowhere. Start a new session to use it.');
+    assert.equal(on.results.find(result => result.harness === 'claude-cli')?.message, 'Added, in place of a link that led nowhere.');
     assert.equal(await bytes(shared), undefined);
   } finally { await box.cleanup(); }
 });

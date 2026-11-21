@@ -190,7 +190,7 @@ const turnOnRow = async (kind, key) => {
 if (only ? only.includes('light') : !full) {
   begin('light');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  for (const name of ['overview', 'harnesses', 'library', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']) {
+  for (const name of ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']) {
     if (!(await a.has(`#nav-${name}`))) throw new Error(`The sidebar has no ${name} page.`);
     await a.click(`#nav-${name}`);
     if (!(await waitFor(a, `document.querySelector('#nav-${name}')?.getAttribute('aria-current') === 'page'`))) throw new Error(`The ${name} page did not open.`);

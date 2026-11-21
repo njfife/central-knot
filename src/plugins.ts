@@ -13,8 +13,9 @@ import { componentsFrom } from './pluginoutcomes.ts';
 import { arrayBlocks, editTomlArray, readTomlTables, setTomlArrayKey, type TomlTable, type TomlValue } from './textedit.ts';
 import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
 import { partOff, serverHeld, withPartSwitch } from './partswitch.ts';
-import { DIRECTORY, INLINE_SKILLS_CONFIG, hasPartSwitch, heldReason, noCli, offByBareName, noSwitchReason } from './pluginstatus.ts';
+import { DIRECTORY, INLINE_SKILLS_CONFIG, hasPartSwitch, heldReason, loadsKind, noCli, offByBareName, noSwitchReason } from './pluginstatus.ts';
 import { takesPlugins, type PluginTool } from './presence.ts';
+import type { ReloadChange } from './reload.ts';
 import type { LibraryItem } from './library.ts';
 import { readPluginRecord } from './pluginrecord.ts';
 import { errorCode, itemKey, writeFileChecked } from './share.ts';
@@ -90,13 +91,13 @@ export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; max
  * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` its output byte for
  * byte. A run stopped by its `signal` reads as one that timed out (`'timeout'`).
  */
-type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer };
+export type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer };
 
 /**
- * Runs a command, stopped at its timeout or its `signal`. `group` (git's runs, off Windows): it runs in a process group of its
- * own, and stopping it stops the whole group, the helpers it started (git's remote-http) with it.
+ * Runs a command, stopped at its timeout or its `signal`. `group` (git's runs and mcpsigninrun.ts's, off Windows): it runs in a
+ * process group of its own, and stopping it stops the whole group, the helpers it started (git's remote-http) with it.
  */
-function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
+export function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
   const maxBytes = options.maxBytes ?? 4 * 1024 * 1024, group = !!options.group && process.platform !== 'win32';
   return new Promise(done => {
     const out: Buffer[] = [], err: Buffer[] = [];
@@ -983,7 +984,7 @@ export async function setSkill(context: PluginContext, marketplace: string, plug
   if (tool === 'codex-cli') { const problem = await switchCodexSkill(context, plugin, skill, on, before.path); if (problem) return fail(problem); }
   else runs.push(await native(context, tool, ['skill', on ? 'enable' : 'disable', qualified(plugin, skill)]));
   const after = await now();
-  if (after?.on === on) return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs };
+  if (after?.on === on) return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs, reloads: [{ tool, kind: 'skill', key: itemKey(skill), on, plugin: `${plugin}@${marketplace}` }] };
   return fail(`Still ${on ? 'off' : 'on'} in ${name}. ${after?.held ?? lastLines(runs[0]?.output ?? '')}`.trim(), runs);
 }
 
@@ -1024,7 +1025,7 @@ export async function setPart(context: PluginContext, marketplace: string, plugi
   const took = partsOffIn(tool, (await readOrNull(path)) ?? '', plugin, marketplace, part.kind, [part.name]).length === (on ? 0 : 1);
   const run: NativeRun = { tool, command, ok: took, output: '', changed };
   if (!took) return fail(`Still ${on ? 'off' : 'on'} in ${name}: its ${file} did not take the change.`, [run]);
-  return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs: [run] };
+  return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs: [run], reloads: [{ tool, kind: part.kind, key: itemKey(part.name), on, plugin: `${plugin}@${marketplace}` }] };
 }
 
 // ---------- A whole plugin turned off ----------
@@ -1071,6 +1072,18 @@ async function switchWhole(context: PluginContext, tool: PluginTool, id: string,
   return { tool, command, ok: true, output: '', changed };
 }
 
+/** Enabled items of an installed plugin copy, for reload advice when the whole plugin is installed, updated, switched or removed. */
+const wholeReloads = ({ plugin, marketplace, state, contents, serversOff, agentsOff }: InstalledCopyOf, tool: PluginTool, on: boolean): ReloadChange[] =>
+  (state.state !== 'installed' || !contents ? [] : [
+    ...contents.skills.filter(skill => !state.skillsOff?.some(off => off.skill === skill.name)).map(skill => ({ tool, kind: 'skill' as const, key: itemKey(skill.name), on, plugin: `${plugin}@${marketplace}` })),
+    ...contents.mcpServers.filter(server => !serversOff?.includes(server.name)).map(server => ({ tool, kind: 'mcp' as const, key: itemKey(server.name), on, plugin: `${plugin}@${marketplace}` })),
+    ...(loadsKind(tool, 'agent') ? contents.agents.filter(agent => !agentsOff?.includes(agent.name)).map(agent => ({ tool, kind: 'agent' as const, key: itemKey(agent.name), on, plugin: `${plugin}@${marketplace}` })) : []),
+  ]);
+const installedReloads = async (context: PluginContext, tool: PluginTool, marketplace: string, plugin: string, on: boolean): Promise<ReloadChange[]> => {
+  const copy = (await installedCopies({ ...context, reads: new Map() }, tool)).find(each => each.plugin === plugin && each.marketplace === marketplace);
+  return copy ? wholeReloads(copy, tool, on) : [];
+};
+
 /**
  * Turns a whole installed plugin off (`on` false) or back on in one tool, with that tool's own switch (switchWhole), then
  * reads it again: only what the tool then records counts. Everything the plugin brings there goes with it. The plugin's
@@ -1086,7 +1099,10 @@ export async function setWhole(context: PluginContext, marketplace: string, plug
   if (!(await wholeOff(context, tool, id)) === on) return { tool, outcome, message: `Already ${on ? 'on' : 'off'} in ${name}.`, runs: [] };
   const run = await switchWhole(context, tool, id, on);
   if (!run) return { tool, outcome: 'failed', message: `Codex’s config.toml has no entry for ${id} to switch.`, runs: [] };
-  if (!(await wholeOff(context, tool, id)) === on) return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs: [run] };
+  if (!(await wholeOff(context, tool, id)) === on) {
+    const reloads = await installedReloads(context, tool, marketplace, plugin, on);
+    return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs: [run], reloads };
+  }
   return { tool, outcome: 'failed', message: `Still ${on ? 'off' : 'on'} in ${name}. ${lastLines(run.output)}`.trim(), runs: [run] };
 }
 
@@ -1210,7 +1226,7 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   const installed = await native(context, tool, installArgs(tool, id));
   runs.push(installed);
   const state = await installState(context, tool, catalog.name, plugin);
-  if (state.state === 'installed') return { tool, outcome: 'installed', changed: true, message: `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder' : ''}. ${nextStepFor(tool)}`.trim(), runs };
+  if (state.state === 'installed') return { tool, outcome: 'installed', changed: true, message: `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder' : ''}. ${nextStepFor(tool)}`.trim(), runs, reloads: await installedReloads(context, tool, catalog.name, plugin, true) };
   if (state.state === 'not-known') return { tool, outcome: 'not-known', message: state.reason, runs };
   // A marketplace the tool already had is used as the tool last fetched it, which may predate what this page shows.
   // A tool that says it has the same plugin from elsewhere has it: an older copy of this marketplace isn't why.
@@ -1292,7 +1308,7 @@ async function ownUpdate(context: PluginContext, catalog: Catalog, plugin: strin
   if (after.state !== 'installed') return { tool, outcome: 'failed', message: `It is no longer installed in ${name}. ${lastLines(updated.output)}`.trim(), runs };
   if (contentOnly) return contentUpdate(context, catalog, plugin, tool, differs!, runs, lastLines(updated.output), { reinstall, next });
   const moved = after.version !== before.version || after.path !== before.path;
-  if (moved && (current(after.version) || !offered)) return { tool, outcome: 'updated', changed: true, version: after.version, message: `Updated${after.version ? ` to ${after.version}` : ''}. ${next}`.trim(), runs };
+  if (moved && (current(after.version) || !offered)) return { tool, outcome: 'updated', changed: true, version: after.version, message: `Updated${after.version ? ` to ${after.version}` : ''}. ${next}`.trim(), runs, reloads: await installedReloads(context, tool, catalog.name, plugin, true) };
   return { tool, outcome: 'failed', message: `Still ${after.version ?? 'the earlier copy'} in ${name}${offered ? `; the marketplace has ${offered}` : ''}. ${lastLines(updated.output)}`.trim(), runs };
 }
 
@@ -1308,7 +1324,7 @@ async function contentUpdate(context: PluginContext, catalog: Catalog, plugin: s
     const version = state.state === 'installed' ? state.version : undefined;
     const copy = `the marketplace’s copy${version ? ` of ${version}` : ''}`;
     const how = byContent === 'update' ? `Updated to ${copy}.` : `Reinstalled from ${copy}: ${name}’s own update kept the copy it had.`;
-    return { tool, outcome: 'updated', changed: true, version, byContent, message: `${how} ${next}`.trim(), runs };
+    return { tool, outcome: 'updated', changed: true, version, byContent, message: `${how} ${next}`.trim(), runs, reloads: await installedReloads(context, tool, catalog.name, plugin, true) };
   };
   if (!(await differs())) return done('update');
   if (!reinstall) return { tool, outcome: 'failed', kept: true, message: `${name}’s own update kept the copy it had, which still differs from the marketplace’s. Update it on its page to reinstall it. ${said}`.trim(), runs };
@@ -1330,10 +1346,10 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
   if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
   const before = await installState(context, tool, marketplace, plugin);
   if (before.state === 'not-installed') return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
-  const id = `${plugin}@${marketplace}`;
+  const id = `${plugin}@${marketplace}`, beforeReloads = await installedReloads(context, tool, marketplace, plugin, false);
   const removed = await native(context, tool, uninstallArgs(tool, id));
   const state = await installState(context, tool, marketplace, plugin);
-  if (state.state === 'not-installed') return { tool, outcome: 'uninstalled', changed: true, message: `Uninstalled from ${name}. The marketplace stays added there.${before.state === 'installed' && before.live ? ' Its folder is the marketplace’s own and stays.' : ''}`, runs: [removed] };
+  if (state.state === 'not-installed') return { tool, outcome: 'uninstalled', changed: true, message: `Uninstalled from ${name}. The marketplace stays added there.${before.state === 'installed' && before.live ? ' Its folder is the marketplace’s own and stays.' : ''}`, runs: [removed], reloads: beforeReloads };
   return { tool, outcome: 'failed', message: `Still installed. ${lastLines(removed.output)}`.trim(), runs: [removed] };
 }
 

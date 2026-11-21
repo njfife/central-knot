@@ -91,7 +91,7 @@ function skillToolActions(row: ItemRow, tool: HarnessId): HTMLElement | null {
     return control;
   };
   const clear = row.switchedOff?.includes(tool) ? action(`Let ${where} load it`, partId('clear-switch', rowId(row.kind, row.key), tool),
-    `Clear ${where}’s own switch for ${name}, so ${where} loads it again from its next session. History can undo it.`,
+    `Clear ${where}’s own switch for ${name}, so ${where} loads it again. History can undo it.`,
     () => void skillAction('clear-switch', row.key, tool, name, row.kind === 'agents' ? 'agents' : 'skills')) : null;
   // Only a skill in Central Knot takes a copy over: a found one is taken in first, by its switch.
   const outside = item && !item.deleted ? row.takeOver?.[tool] : undefined, key = `${row.key}:${tool}`;

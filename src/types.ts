@@ -8,6 +8,7 @@ import type { ItemKind, LibraryItem, Plan, SourceAnswer, TakeInAnswer, VersionCh
 import type { NeutralServer } from './mcp.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry, PluginSwitch } from './pluginrecord.ts';
+import type { ReloadChange } from './reload.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli';
@@ -128,13 +129,13 @@ export interface DesktopApi {
   /** The home last opened, else this computer's home (dev builds: the practice copy). */
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
-  syncNow(home: string): Promise<{ view: HomeView; text: string; reasons: Reason[]; warn: boolean; history: boolean } | null>;
+  syncNow(home: string): Promise<{ view: HomeView; text: string; reasons: Reason[]; warn: boolean; history: boolean; reloads: ReloadChange[] } | null>;
   onSyncRequest(callback: () => void): void;
   /**
    * Turns the open home's standing rule, Synchronize everything, on or off (everything.ts setSyncEverything), then reads and syncs
    * the home. `answering`: first setup's question answers it, which is refused once the home has an answer (another window's).
    */
-  setSyncEverything(on: boolean, home: string, answering?: boolean): Promise<{ stopped?: string; view: HomeView | null }>;
+  setSyncEverything(on: boolean, home: string, answering?: boolean): Promise<{ stopped?: string; view: HomeView | null; reloads: ReloadChange[] }>;
   /**
    * A tool's Manage switch (toolchoice.ts chooseTools): Central Knot's care of it turned on or off, then the home read and synced.
    * `resume`: the page showed a home that waits for Resume, which the switch resumes as a click does. `did`: what that pass did in
@@ -206,6 +207,8 @@ export interface DesktopApi {
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
   /** Reads which skills, agents and MCP servers the tools' session history shows were used (usage.ts readUsage), when the page collects usage (app.ts collectUsage); null for another home than the open one. */
   readUsage(home: string): Promise<UsageReading | null>;
+  /** Runs one tool's own MCP list command for the open home and reads its answer of the servers `names` (mcpsigninrun.ts checkSignin); null for another home, or a tool with no such command. */
+  checkSignin(tool: HarnessId, home: string, names: string[]): Promise<SigninAnswer | null>;
   /**
    * Word search over what the Library holds and the items of listed plugins installed in no managed tool (search.ts), answered
    * beside main's queue from the index last published; `shown`: how many of those plugins' items the page draws (search.ts drawnAtOnce).
@@ -330,6 +333,8 @@ export interface ToolCopy {
   name?: string;
   /** A library kind: the names in this harness's own part of its copy (an agent's settings in its file: tools, model, …), which never leave it. */
   ownPart?: string[];
+  /** MCP servers: the hash of this tool's own part of the copy (mcp.ts ownPartOf: its own fields, `extras`, with its name and place), which `hash` leaves out. */
+  ownHash?: string;
 }
 
 /** The plugin a tool has an item through: its name, the marketplace as that tool added it, and the installed copy's version. `off`: turned off there. */
@@ -428,7 +433,7 @@ export interface Change {
   untake?: Partial<Record<HarnessId, string>>;
 }
 
-export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'settingsChanged'> & { since?: string[] }; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'settingsChanged'> & { since?: string[] }; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
  * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
@@ -723,7 +728,8 @@ export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninsta
   /** An update: the version the tool records now. */ version?: string;
   /** An update of a copy that differed at the same version: done by the tool's own update, or by uninstalling and installing again. */ byContent?: 'update' | 'reinstall';
   /** A failed update with nobody watching: the tool's own update kept its copy, and only a reinstall (never made unasked) would change that. */ kept?: true;
-  /** Said beside what a step did, to be read (an update that turned a server on and couldn't turn it off again: plugins.ts; what a run on a plugin's items changed in a tool's own settings: pluginlibrary.ts reportIn). */ notes?: string[] }
+  /** Said beside what a step did, to be read (an update that turned a server on and couldn't turn it off again: plugins.ts; what a run on a plugin's items changed in a tool's own settings: pluginlibrary.ts reportIn). */ notes?: string[];
+  /** Confirmed item changes for reload advice (plugins.ts, pluginlibrary.ts). */ reloads?: ReloadChange[] }
 
 // ---------- A plugin's parts: the skills, MCP servers and agents it holds, installed with it ----------
 export type PartKind = 'skill' | 'mcp' | 'agent';
@@ -934,6 +940,10 @@ export interface ToolUsage {
   /** Its session files that are there and couldn't be read: skipped, the rest counted. */
   skipped?: number;
 }
+/** What a tool's own MCP list command said of one server (mcpsignin.ts readAnswer). `connected`: it answered, which Claude Code, Pi and OpenCode say without telling a sign-in from none needed. `unread`: its line, in a state the reader doesn't know. */
+export type SigninSaid = { is: 'no-sign-in' | 'signed-in' | 'connected' | 'needs-sign-in' | 'not-known' } | { is: 'unreachable'; why: string } | { is: 'unread'; line: string };
+/** One tool's MCP sign-in check: what it said of each server, by its own name for it; or that it couldn't be run or didn't end in time; or the first line of an answer in a shape not known. */
+export type SigninAnswer = { servers: Record<string, SigninSaid> } | { failed: 'missing' | 'timeout' } | { unreadable: string };
 /** One reading of a home's session history, made when the page collects usage (app.ts collectUsage): when, and every tool's. */
 export interface UsageReading { at: string; tools: ToolUsage[] }
 
@@ -1050,7 +1060,7 @@ export interface LibraryFacts {
 export interface PassResult {
   /** Owed copies skipped at read time in this whole-home pass. Sync once reports the final read. */
   unread?: DestinationResult[];
-  stopped?: string; results: DestinationResult[]; writes: number; made?: string[]; notices?: SyncNotice[];
+  stopped?: string; results: DestinationResult[]; writes: number; reloads: ReloadChange[]; made?: string[]; notices?: SyncNotice[];
   /** A deletion is inside its settle window: look again shortly. */
   settling?: boolean;
   /**
@@ -1328,7 +1338,7 @@ export type SourcedItem = NonNullable<PassResult['sourced']>[number] & { kind: I
  * table's order (`notWhole`: the source turned nothing of those kinds off, though a pass may have, for a copy deleted by hand;
  * the source's row says why), absent when every kind was read whole; and the page's view after.
  */
-export interface SourceResult { stopped?: string; sourced?: SourcedItem[]; results?: DestinationResult[]; notWhole?: ItemKind[]; view: SourcesView | null }
+export interface SourceResult { stopped?: string; sourced?: SourcedItem[]; results?: DestinationResult[]; reloads: ReloadChange[]; notWhole?: ItemKind[]; view: SourcesView | null }
 
 // ---------- Git repo ----------
 
@@ -1430,4 +1440,4 @@ export interface PluginSwitched { id: string; name: string; tool: HarnessId; on:
  * was turned in; and what could not be done in a tool (`results`: a plugin item's copy held or failed there too). `event`: its
  * History entry; none when nothing changed.
  */
-export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[] }
+export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; /** The settled profile entry written to History, so the header asks profileplan.ts undoOffered without rereading History. */ profile?: HistoryEvent['profile']; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[]; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[] }

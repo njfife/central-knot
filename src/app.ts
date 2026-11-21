@@ -34,15 +34,17 @@ import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, t
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { turnsWords } from './profileplan.ts';
+import { turnsWords, undoOffered } from './profileplan.ts';
+import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
+import { followView, type SigninChecks } from './mcpsignin.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 /** Every page, in the sidebar's order. The Library lists every kind of item (matrix.ts libraryTable), its segment `state.libraryKind`. */
-export const pages = ['overview', 'harnesses', 'library', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings'] as const;
+export const pages = ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings'] as const;
 export type Page = typeof pages[number];
 
 /** This computer's names, and what its platform offers (machine.ts). */
@@ -164,6 +166,8 @@ export const state = {
   sidebar: undefined as 'open' | 'rail' | undefined,
   /** The rows a click pins where they were, on the list on screen (pinnedRows). */
   pinned: noPins(),
+  /** MCP sign-in: what each column's last Check said in the open home (mcpsigninpage.ts), made again when a home opens; never stored. */
+  mcpSignin: { home: '', columns: {} } as SigninChecks,
 };
 
 /**
@@ -225,8 +229,8 @@ export function tell(outcome: Outcome | undefined, otherwise = ''): void {
   fadeLater();
 }
 
-/** A result as the status bar and screen readers say it: its sentence, then its reasons. */
-const spoken = (outcome: Outcome) => [outcome.text, ...(outcome.reasons ?? []).map(reason => (typeof reason === 'string' ? reason : reason.join('')))].join(' ');
+/** A result as the status bar and screen readers say it: its sentence, reload advice, then its reasons. */
+const spoken = (outcome: Outcome) => [outcome.text, outcome.reloads ? reloadAdvice(outcome.reloads).text : '', ...(outcome.reasons ?? []).map(reason => (typeof reason === 'string' ? reason : reason.join('')))].filter(Boolean).join(' ');
 /** One click's own result: where it left something undone it says so first, before its name can take the header's room. */
 export const notDoneFirst = (outcome: Outcome): Outcome => (outcome.warn ? { ...outcome, text: `Didn’t go through in every tool: ${outcome.text}` } : outcome);
 
@@ -237,15 +241,16 @@ export const notDoneFirst = (outcome: Outcome): Outcome => (outcome.warn ? { ...
  */
 export const FADE_MS = 8000;
 let fading: ReturnType<typeof setTimeout> | undefined;
-/** The result's time starts again from now; none runs while the page acts, whose end starts it (afterActing). */
+const windowVisible = () => windowShown && !document.hidden;
+/** The result's time starts again from now; none runs while the page acts (afterActing) or while the window is hidden. */
 function fadeLater(): void {
   clearTimeout(fading);
-  if (!acting()) fading = setTimeout(fadeNow, FADE_MS);
+  if (!acting() && windowVisible()) fading = setTimeout(fadeNow, FADE_MS);
 }
 /** The pointer or the focus is in the header's result, or it is open as a card: it stays while so, and its time starts again after. */
 const heldInHeader = () => !!document.querySelector('.header-result:hover, .header-result:focus-within, .result-whole');
 function fadeNow(): void {
-  if (acting()) return;
+  if (acting() || !windowVisible()) return;
   if (heldInHeader()) { fading = setTimeout(() => (heldInHeader() ? fadeNow() : fadeLater()), 250); return; }
   const outcome = state.outcome;
   if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length)) state.outcome = undefined;
@@ -284,8 +289,8 @@ export function paintStatusMessage() {
  * page follows: a page whose kind is no longer here gives way to the Overview, saying why, and a page with its own data
  * reads it again (unless `reload` is false: the caller reads it itself).
  */
-export function setHome(view: HomeView | null | undefined, { reload = true, say, background = false }: {
-  reload?: boolean; say?: (view: HomeView) => void; background?: boolean;
+export function setHome(view: HomeView | null | undefined, { reload = true, say, background = false, sayNews = true }: {
+  reload?: boolean; say?: (view: HomeView) => void; background?: boolean; sayNews?: boolean;
 } = {}): void {
   if (!view) return;
   const held = setAside?.home === view.home ? setAside : undefined;
@@ -298,7 +303,9 @@ export function setHome(view: HomeView | null | undefined, { reload = true, say,
   // Each notice's place in the order of arrival is given as its view is taken: the newest is the last to arrive, of any kind.
   for (const [, notices] of noticesByKind(view)) for (const notice of notices) noticeArrived(notice.history);
   state.home = keepUnshown(state.home, view);
-  if (news && !acting()) sayBackgroundNews();
+  // A cell an MCP sign-in check was asked about that this view shows gone, switched off or as another copy is held for no more.
+  followView(state.mcpSignin, view);
+  if (news && !acting() && sayNews) sayBackgroundNews();
   // A closed background problem stays closed while reads report it, and is forgotten once one doesn't (matrix.ts listResult).
   for (const key of state.dismissed) if (key.startsWith('problem:') && !view.sync.caughtUp.some(entry => problemKey(entry) === key)) state.dismissed.delete(key);
   // A record taken over at this view's look (types.ts HomeView tookOver), after whatever the read itself said.
@@ -394,6 +401,8 @@ function accept(view: HomeView): HomeView {
   resetPageData(state.history);
   resetPageData(state.usage);
   state.usageBand = false;
+  // What the MCP sign-in checks said is the last home's; one still running there is dropped when it answers.
+  state.mcpSignin = { home: view.home, columns: {} };
   drop(turn => turn.state === 'waiting');
   endRun();
   resetMarket();
@@ -414,7 +423,8 @@ function accept(view: HomeView): HomeView {
 
 /** Whether the window has shown: false only after a start at sign-in with no window (main.ts startedHidden, the page's `start`), until it first shows. */
 let windowShown = new URLSearchParams(globalThis.location?.search).get('start') !== 'hidden';
-api().onWindowShown(() => { if (windowShown) return; windowShown = true; void collectUsage(); });
+api().onWindowShown(() => { const first = !windowShown; windowShown = true; if (first) void collectUsage(); fadeLater(); });
+document.addEventListener('visibilitychange', () => { if (windowVisible()) fadeLater(); else clearTimeout(fading); });
 
 /**
  * Collects usage: main's usage:read reads the tools' own session history on this computer, and nothing leaves it. By itself
@@ -490,9 +500,9 @@ export interface Click {
 
 /** Each kind's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
 const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, home: string) => Promise<PassResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
-  skills: { send: (...args) => api().applySkills(...args), keep: (results, notices) => { state.skillsResult = { results, writes: 0, notices }; } },
-  mcp: { send: (...args) => api().applyServers(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
-  agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
+  skills: { send: (...args) => api().applySkills(...args), keep: (results, notices) => { state.skillsResult = { results, writes: 0, reloads: [], notices }; } },
+  mcp: { send: (...args) => api().applyServers(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, reloads: [], notices }; } },
+  agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, reloads: [], notices }; } },
 };
 /** Each kind's last click's result, as kindPages keeps it: what its problem lines and notices read (matrix.ts listResult, toldNotices). */
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
@@ -528,6 +538,8 @@ const received = <Result extends { notices?: SyncNotice[] }>(result: Result) => 
 export interface Done {
   outcome: Outcome;
   did: boolean;
+  /** Confirmed changes in execution order, so multi-click runs settle final state across clicks (reload.ts settleReloads). */
+  reloads: ReloadChange[];
   /** Why it did nothing, where it was refused whole or stopped: its outcome's text then (applyByKind names its kind by it). */
   refused?: string;
   /** The rows it changed (carryOut): all of its rows but one whose own change was refused whole (clickplan.ts heldWhole). */
@@ -554,10 +566,10 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const { ours, did, refusal, failed, differs, notIn } = clickResults(result.results, names);
   // A refusal is the click's result, or else one of its reasons: said once, not again among the failures.
   const kept = { kind: click.kind, results: ours.filter(entry => entry !== refusal), notices: result.notices };
-  if (result.stopped) return { kept, did: false, refused: result.stopped, changed: [], outcome: { page, items: click.items, rows: click.rows, warn: true, band: true, text: result.stopped } };
+  if (result.stopped) return { kept, did: false, reloads: [], refused: result.stopped, changed: [], outcome: { page, items: click.items, rows: click.rows, warn: true, band: true, text: result.stopped } };
   const made = result.made ?? [];
   // An Add held because its copies differ on disk: nothing was added, so say the question alone and leave its plugins' part unrun.
-  if (differs && !did && !made.length) return { kept, did: false, changed: [], focus: click.focus?.(),
+  if (differs && !did && !made.length) return { kept, did: false, reloads: [], changed: [], focus: click.focus?.(),
     outcome: { page, items: click.items, rows: click.rows, warn: failed, band: true, text: copiesDiffer(click.items) } };
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
@@ -576,9 +588,11 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const back = plugged?.back ?? [];
   const undo = !click.undoing && done && ((made.length && await allUndoable(made)) || back.length) ? { kind: click.kind, made, back } : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
-  return { kept, did: done, refused: done || !refusal ? undefined : refusal.message, changed, undo, along, focus: click.focus?.(),
-    outcome: { page, items: click.items, rows: click.rows, warn: warned || !!click.also?.length || !!refusal, band: true, fade: click.undoing && !warned,
-      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } } };
+  const own = click.changes.length ? reloadsFor(result.reloads, new Set(click.changes.map(change => change.key))) : result.reloads;
+  const reloads = [...own, ...(plugged ? pluginReloads(plugged.done) : [])];
+  return { kept, did: done, reloads, refused: done || !refusal ? undefined : refusal.message, changed, undo, along, focus: click.focus?.(),
+    outcome: withReloads({ page, items: click.items, rows: click.rows, warn: warned || !!click.also?.length || !!refusal, band: true, fade: click.undoing && !warned,
+      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } }, reloads) };
 }
 
 /**
@@ -593,9 +607,10 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
   const text = (worked && said ? [said, click.plugins?.said].filter(Boolean).join(' ') : resultSentence(ran.lines, !!click.undoing)) || `${click.items.length ? `${fewNames(click.items)}: n` : 'N'}othing changed.`;
   const undo = ran.back.length ? { kind: click.kind, made: [], back: ran.back } : undefined;
   const back = { kind: click.kind, items: click.items, rows: click.rows, changes: [], said: click.undone ?? '', undoing: true, pluginsOnly: true, plugins: { ops: ran.back } };
-  return { did: ran.done.some(entry => succeeded(entry.report)), along: worked ? click.plugins?.said : undefined, undo,
-    outcome: { page, items: click.items, rows: click.rows, text, reasons: switchReasons(ran, click.also), warn: !worked || !!click.also?.length, band: true, fade: click.undoing && worked,
-      act: undo && { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyClick(back) } } };
+  const reloads = pluginReloads(ran.done);
+  return { did: ran.done.some(entry => succeeded(entry.report)), reloads, along: worked ? click.plugins?.said : undefined, undo,
+    outcome: withReloads({ page, items: click.items, rows: click.rows, text, reasons: switchReasons(ran, click.also), warn: !worked || !!click.also?.length, band: true, fade: click.undoing && worked,
+      act: undo && { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyClick(back) } }, reloads) };
 }
 
 /** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Resume, a copy chosen (Turn these off: applyByKind). */
@@ -633,9 +648,9 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[]) => stri
   const through = changed.filter(row => !left.some(each => sameRow(each, row)));
   const lead = left.length ? notAllThrough(rowNames(left, asked.map(({ row }) => row)), asked.length) : '';
   const after = !changed.length ? 'Nothing changed.' : through.length ? said(through) : `${countedAs(changed.length, asked.length, false)}.`;
-  tell({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
+  tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
     text: [lead, after].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? [])],
-    act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } });
+    act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads));
   for (const row of changed) flashRow(row);
   if (regroups) unpin();
 });
@@ -671,8 +686,8 @@ export function queueClick(row: ItemTurn['row'], name: string, make: () => Click
   const turn: ItemTurn = { state: 'waiting', row, name, page: state.page, isOn, run: runAt(placeNow()), work: async () => {
     const click = make();
     // Nothing left to change in its turn (the click before it took its whole plugin with it, say): as asked already.
-    if (!click) turn.done = { did: false, outcome: { page: turn.page, items: [name], rows: [row], text: `${name}: nothing left to change.` } };
-    else turn.done = await carryOut(click, turn.page).catch((): Done => ({ did: false, refused: `${name}: ${couldNotFinish()}`, outcome: { page: turn.page, items: [name], rows: [row], warn: true, band: true, text: `${name}: ${couldNotFinish()}` } }));
+    if (!click) turn.done = { did: false, reloads: [], outcome: { page: turn.page, items: [name], rows: [row], text: `${name}: nothing left to change.` } };
+    else turn.done = await carryOut(click, turn.page).catch((): Done => ({ did: false, reloads: [], refused: `${name}: ${couldNotFinish()}`, outcome: { page: turn.page, items: [name], rows: [row], warn: true, band: true, text: `${name}: ${couldNotFinish()}` } }));
     sayRun(turn);
   } };
   join(turn);
@@ -727,10 +742,10 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: did.map(named) }, undos) : undefined;
   const lead = left.length ? notAllThrough(rowNames(once(left).map(named), among), once(each).length) : '';
   // A click refused whole gives its refusal as a reason; a click that failed is said by its problem lines, never "Nothing changed".
-  return { page: turns[0]!.page, items: rowNames(among), rows: turns.map(turn => turn.row), band: true, warn: left.length > 0,
+  return withReloads({ page: turns[0]!.page, items: rowNames(among), rows: turns.map(turn => turn.row), band: true, warn: left.length > 0,
     reasons: each.flatMap((turn): Reason[] => [...(turn.done!.refused ? [turn.done!.refused] : []), ...turn.done!.outcome.reasons ?? []]),
     text: [lead, `${said || 'Nothing changed'}${toGo ? `; ${toGo} to go` : ''}.`, ...along, ...stayed, waiting.length ? copiesDiffer(rowNames(waiting.map(named), among)) : ''].filter(Boolean).join(' '),
-    act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything these clicks did', run: undo } };
+    act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything these clicks did', run: undo } }, ended.flatMap(turn => turn.done!.reloads));
 }
 
 /** Whether each History entry a click made still offers its own action, so the click's Undo can run them all. */
@@ -765,11 +780,13 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
   type UndoEntry = { key?: string; entry: DestinationResult; answeredLater?: boolean };
   const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Set<string>()])), stops = new Map<PageKind, string>();
+  const reloads: ReloadChange[] = unswitched ? pluginReloads(unswitched.done) : [];
   for (const event of events) {
     const kind = kindOfEntry.get(event.id)!;
     if (stops.has(kind)) continue;
     const result = await api().restore(event.id, home.home);
     if (result.stopped) { stops.set(kind, result.stopped); continue; }
+    reloads.push(...result.reloads);
     const key = libraryEntry(event)?.key, list = raw.get(kind)!;
     // A later restore of the same item in this Undo answers an earlier tool problem: replaced if that tool failed again,
     // or dropped below once settled. restore runs with `only`, so every result in result.results belongs to this item.
@@ -819,8 +836,8 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
   const failed = names(about.rows.filter(row => switchesShort.has(row.kind) || kept.get(row.kind)?.some(each => keptBack(each.entry) && (each.key ? each.key === row.key : each.entry.item.toLowerCase() === row.name.toLowerCase()))));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
-  tell({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
-    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` });
+  tellWritten({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
+    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads);
   for (const row of about.rows) flashRow(row);
   if (about.regroups) unpin();
 });
@@ -971,7 +988,8 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
 
 /** When the open page's kind is no longer in this home (its last tool went; the Library's, every kind it lists), the Overview opens instead. */
 function leaveAbsentPage() {
-  const gone = state.page === 'library' ? (state.home && !heldKinds(state.home).length ? KINDS : []) : absentKinds().filter(kind => kind === state.page);
+  // MCP sign-in is about MCP servers, as the Library's MCP segment is.
+  const gone = state.page === 'library' ? (state.home && !heldKinds(state.home).length ? KINDS : []) : absentKinds().filter(kind => kind === (state.page === 'mcpsignin' ? 'mcp' : state.page));
   if (!gone.length) return;
   // What the status bar said (a Refresh's summary, say) stays, with the reason the page moved.
   const said = state.said.text;
@@ -1122,7 +1140,8 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if ((past?.kind !== 'profile' && past?.kind !== 'everything') || result.stopped) keepOwn([{ kind: (past && libraryEntry(past)?.kind) || 'agents', results: result.results, notices: result.notices }]);
   if (past?.kind === 'profile') {
     // Each item it turned back has its own History entry, with its own action: the band offers no Undo of the Undo.
-    if (result.stopped || !result.switched) tell(undefined, result.stopped); else turnedOutcome(page, 'Undone', result.switched, result.results);
+    if (result.stopped) tell({ page, text: `Undo switch to ${past.profile?.toName ?? past.item}: nothing was undone. ${result.stopped.replace(/ Nothing was undone\.$/, '')}`, warn: true, band: true, history: page !== 'history', refused: true });
+    else if (result.switched) turnedOutcome(page, 'Undone', result.switched, result.results, result.reloads, { fade: true });
     return;
   }
   const everywhere = touchedToolsPhrase(where);
@@ -1157,7 +1176,7 @@ function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult) {
   const back = made && libraryAction(made, item, entriesNow(state.home!)(made).now);
   const notDone = result.results.filter(keptBack).map(entry => entry.message);
   const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].join(' ');
-  tell({ page, item: past.item, rows, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined });
+  tellWritten({ page, item: past.item, rows, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined }, result.reloads);
   flashRow(entry);
 }
 
@@ -1172,7 +1191,7 @@ function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, swit
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
   const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
-  tell({ page, item: past.item, warn: notDone.length > 0, history: true, text: [text, ...notDone.slice(0, 3)].join(' ') });
+  tellWritten({ page, item: past.item, warn: notDone.length > 0, history: true, text: [text, ...notDone.slice(0, 3)].join(' ') }, result.reloads);
 }
 
 // ---------- A skill's own two actions ----------
@@ -1193,8 +1212,8 @@ export const skillAction = (action: 'clear-switch' | 'take-over', key: string, t
     // Letting a tool load it again has an Undo (its History entry's: the switch set again); a take-over has none, and says so.
     const said = `${name}: ${result.results[0]?.message ?? 'done.'}${action === 'take-over' ? ' This has no Undo.' : ''}`;
     const entry = action === 'clear-switch' ? result.made?.[0] : undefined;
-    tell({ page, item: name, rows: [row], band: true, text: said,
-      act: entry ? { label: 'Undo', id: 'outcome-undo', title: `Turn ${name} off again in ${toolName(tool)}’s own settings`, run: () => void restoreEvent(entry) } : undefined });
+    tellWritten({ page, item: name, rows: [row], band: true, text: said,
+      act: entry ? { label: 'Undo', id: 'outcome-undo', title: `Turn ${name} off again in ${toolName(tool)}’s own settings`, run: () => void restoreEvent(entry) } : undefined }, result.reloads);
     flashRow(row);
   });
 
@@ -1237,15 +1256,25 @@ export interface Outcome {
   };
   /** A second button after `act`: the next step the result offers (the whole plugin's switch, "Turn its plugins off in Codex"). */
   next?: { label: string; id: string; run: () => void; title?: string };
+  /** Confirmed writes for reload advice (Copy buttons and the opened row's join: reload.ts). */
+  reloads?: ReloadChange[];
   /** When it was said (state.said.seq): a result newer than a table's pending changes still shows there. */
   said?: number;
 }
 
+/** Settles chronological reload changes and attaches them only when at least one tool needs a reload action (reload.ts). */
+export function withReloads(outcome: Omit<Outcome, 'reloads'>, changes: readonly ReloadChange[]): Outcome {
+  const reloads = settleReloads(changes);
+  return hasReloadAdvice(reloads) ? { ...outcome, reloads } : outcome;
+}
+/** The one door for every writing route's result: settles its required reload changes and tells the page. */
+export const tellWritten = (outcome: Omit<Outcome, 'reloads'>, changes: readonly ReloadChange[]): void => tell(withReloads(outcome, changes));
+
 /**
- * Whether a result is said in the status bar rather than as a band: it offers nothing to do (no button, Undo or History
+ * Whether a result is said in the status bar rather than as a band: it offers nothing to do (no button, Undo, Copy or History
  * link), so it needs no room of its own.
  */
-export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note || outcome.band);
+export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note || outcome.band || outcome.reloads?.length);
 
 // ---------- Instructions ----------
 
@@ -1656,6 +1685,8 @@ export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synch
   const set = await api().setSyncEverything(on, state.home!.home);
   if (set.view) setHome(set.view);
   if (set.stopped) { announce(`Synchronize everything was not changed. ${set.stopped}`); return; }
+  const out = on && state.home?.syncOn ? withReloads({ page: 'settings', band: true, text: 'Synchronize everything is on.' }, set.reloads) : undefined;
+  if (out?.reloads?.length) { tell(out); return; }
   announce(!on ? 'Synchronize everything is off: what turns up in a tool waits for Add.' : state.home?.syncOn ? 'Synchronize everything is on.' : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', true);
 });
 
@@ -1670,7 +1701,7 @@ export async function syncNow(home = state.home?.home) {
     setHome(result.view);
     // A new result: no click's reasons from before stay under it.
     keepOwn([]);
-    tell({ page, band: true, history: result.history, text: result.text, reasons: result.reasons, warn: result.warn });
+    tellWritten({ page, band: true, history: result.history, text: result.text, reasons: result.reasons, warn: result.warn }, result.reloads);
   });
 }
 api().onSyncRequest(() => { if (acting()) menuSyncHome = state.home?.home; else void syncNow(); });
@@ -1680,6 +1711,8 @@ let refreshing = false;
 let refreshOwed = false;
 /** A background reply that landed while the page acted. The next view of its home takes it in (setHome). */
 let setAside: HomeView | undefined;
+/** A menu-bar profile switch that arrived while the page acted or refreshed, applied once that ends (drainOwedRefresh). */
+let pendingSwitch: ProfileSwitchResult | undefined;
 /** Whether the home waits to be read once the page's run of clicks is done: a background refresh asked for meanwhile, or a plugin's click (oweHomeRead). */
 export const homeReadOwed = () => refreshOwed;
 /** A plugin's click changed what the item lists show: the home is read once at the run's end (clicklist.ts), not after each click. */
@@ -1705,7 +1738,8 @@ api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings
 
 // A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
 // The Sources page reads its view again too: a read by itself (the daily check) changes what each name there is to the library.
-api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); if (state.page === 'sources') void loadSources(); });
+function syncFollowUps() { loadRepoSoon(); if (state.page === 'sources') void loadSources(); }
+api().onSyncChanged(() => { syncFollowUps(); void backgroundRefresh(); });
 api().onSaid(text => announce(text));
 
 /** Each kind's sync notices in a view: what changed on its own, with its History event. */
@@ -1773,9 +1807,11 @@ function sayBackgroundNews() {
   announce(`Sync changed ${andList(items)}.`, true, undefined, news.map(({ notice }) => notice.history));
 }
 
-/** A background refresh asked for while the page acted or while another ran: run it now, once, if nothing is running. */
+/** A background refresh or menu-bar switch asked for while the page acted or while another ran: run it now, once, if nothing is running. */
 function drainOwedRefresh() {
-  if (!refreshOwed || acting() || refreshing) return;
+  if (acting() || refreshing) return;
+  if (pendingSwitch) { const next = pendingSwitch; pendingSwitch = undefined; void applyMenuSwitch(next); return; }
+  if (!refreshOwed) return;
   refreshOwed = false;
   void backgroundRefresh();
 }
@@ -1795,19 +1831,21 @@ export const profileState = {
 };
 
 /** What a switch or its Undo did, as its band says it: what it turned On and Off, and what could not change. */
-function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], act?: Outcome['act']) {
+function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], reloads: readonly ReloadChange[], { act, fade }: { act?: Outcome['act']; fade?: boolean } = {}) {
   const leftSaid = `${turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : ''}${(turned.settingsChanged ?? []).map(said => ` ${said}`).join('')}`;
   // An Undo's plugin copies changed since the switch (profiles.ts undoSwitch), left as they are.
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}: ${turned.since.join('; ')}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
-  tell({ page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0 || !!turned.since?.length, act });
+  const warn = results.length > 0 || turned.left.length > 0 || !!turned.since?.length;
+  tellWritten({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn, act }, reloads);
 }
 
-/** What a switch did, with Undo switch (from the page or, next time the window shows, the menu bar). */
-const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, result, result.results,
-  result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined);
+/** What a switch did, with Undo switch only where History would offer it (profileplan.ts undoOffered, over the view already in state.home). */
+const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, result, result.results, result.reloads,
+  { act: result.event && state.home && undoOffered(result, state.home)
+    ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined });
 
-/** Switches to a profile. The band says what changed, with Undo; the menu bar follows. */
+/** Switches to a profile. The band says what changed, with Undo where History offers it; the menu bar follows. */
 export const switchToProfile = (id: string) => busy('Switching profile…', async page => {
   const result = await api().switchProfile(id, state.home!.home);
   if (result.view) setHome(result.view);
@@ -1815,13 +1853,22 @@ export const switchToProfile = (id: string) => busy('Switching profile…', asyn
   switchOutcome(result, page);
   if (state.page === 'history') await putHistory();
 });
-// A switch from the menu bar: its result and Undo are on the page the next time the window shows.
-api().onProfileSwitched(async result => {
-  switchOutcome(result, state.page);
-  // History lists the new switch at once when it is the page open (it reads History only when opened).
-  if (state.page === 'history') await putHistory();
-  rerender();
-});
+// A switch from the menu bar: its fresh view and result land together so switchOutcome asks undoOffered against the post-switch home, waiting while busy like backgroundRefresh.
+async function applyMenuSwitch(result: ProfileSwitchResult) {
+  if (!state.home || (result.view && result.view.home !== state.home.home)) return;
+  if (acting() || refreshing) { pendingSwitch = pendingSwitch ? { ...result, ...(pendingSwitch.view && result.view ? { view: withSetAside(pendingSwitch.view, result.view) } : {}), reloads: [...pendingSwitch.reloads, ...result.reloads] } : result; return; }
+  refreshing = true;
+  try {
+    if (result.view) setHome(result.view, { background: true, sayNews: false });
+    switchOutcome(result, state.page);
+    sayBackgroundNews();
+    // History lists the new switch at once when it is the page open (it reads History only when opened).
+    if (state.page === 'history') await putHistory();
+    syncFollowUps();
+    rerender();
+  } finally { refreshing = false; drainOwedRefresh(); }
+}
+api().onProfileSwitched(result => void applyMenuSwitch(result));
 
 /**
  * Saves a profile: only the fields given change. A new or restored profile opens (a new one with its name field ready to type); an

@@ -150,6 +150,6 @@ test('A plugin read that throws makes no value and says why, for the log', async
 
 test('Sync once says what a copy it wrote also changed in a tool’s own settings, after what it did with the item', () => {
   const said = '+skills/notes/SKILL.md added to Pi’s skills list (settings.json), where a pattern keeps skills out.';
-  const skills = { results: [{ item: 'notes', harness: 'pi-cli' as const, outcome: 'written' as const, message: 'Added.', settingsChanged: said }], writes: 1 };
+  const skills = { results: [{ item: 'notes', harness: 'pi-cli' as const, outcome: 'written' as const, message: 'Added.', settingsChanged: said }], writes: 1, reloads: [{ tool: 'pi-cli' as const, kind: 'skill' as const, key: 'notes', on: true }] };
   assert.equal(syncOnceReport([{ skills, crashes: [] }]).text, `Copied notes to Pi. ${said}`);
 });
