@@ -2,7 +2,7 @@
 // it, whether it is installed there, how many plugins a tool has installed (pluginsInstalled; for one that takes none, takesItemsOnly)
 // and how many of a marketplace's are installed (installedFrom), whether it is installed in none (installedNowhere, for Find), and
 // a short summary of what it holds.
-import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView, YourName } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -142,7 +142,7 @@ export function toolNow(view: PluginsView, entry: MarketplaceView, plugin: strin
   const brings = (entry.items?.[plugin]?.lines.some(line => line.state !== 'not-brought' && line.state !== 'removed') ?? true) && (notIn?.tickHelps ?? true);
   const route: ToolNow['route'] = takesPlugins(tool) && !why ? 'whole'
     : items && !elsewhere && brings ? 'items'
-    : { cannot: elsewhere ?? (items ? notIn?.reasons.join(' ') ?? `${names[tool]} gets none of its items: Its items, below, says why each isn’t brought in.` : notInWhy(tool, plugin, [], components && andList(summaryOf(components).split(' · ').filter(Boolean)))[0]!) };
+    : { cannot: elsewhere ?? (items ? whyNoneIn(entry, plugin, tool).join(' ') || `${names[tool]} gets none of its items: Its items, below, says why each isn’t brought in.` : notInWhy(tool, plugin, [], components && andList(summaryOf(components).split(' · ').filter(Boolean)))[0]!) };
   // What is installed whole is known from the tool's own record; items only once the record of parts from before is read.
   if (unknown && !(whole && takesPlugins(tool))) return { has: 'unknown', route };
   return { has: whole ? 'whole' : itemsIn(entry, plugin, tool) ? 'items' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool) } : {}) };
@@ -187,6 +187,9 @@ export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Direc
 
 /** Whether the tool has the plugin's items: "has it" for Pi and OpenCode, as pluginlibrary.ts onIn counted it for the view. */
 export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => !!entry.items?.[plugin]?.on[tool];
+/** Whether every one of a plugin's items is on in a tool, as it loads them, or the same as his: the tool's box is ticked in full. */
+export const itemsAllIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => { const items = entry.items?.[plugin];
+  return !!items && (items.on[tool] ?? 0) - (items.keptOut?.[tool] ?? 0) >= items.of; };
 /** "2 of its 3 items are on", in one tool (`where`: " there"), as the tool loads them: those its own settings keep out said apart. */
 export const itemsOnWords = (entry: MarketplaceView, plugin: string, tool: HarnessId, where = '') => {
   const items = entry.items?.[plugin], out = items?.keptOut?.[tool] ?? 0, on = (items?.on[tool] ?? 0) - out;
@@ -463,7 +466,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
     if (owed.background) return { mark: 'waits', words: `Not in ${name} yet: ${what} ${goes} in ${when}.` };
     const offIn = view.tools.filter(other => { const there = stateOf(entry, plugin, other); return there.state === 'installed' && !!there.off; }).map(other => names[other]);
     if (owed.offElsewhere) return { mark: 'not-brought', words: `Not in ${name}: the plugin is off in ${andList(offIn)}’s own settings, so it isn’t brought to a tool new here by itself.` };
-    return { mark: 'missing', words: [`Not in ${name}, though the plugin is on.`, ...entry.items?.[plugin]?.notIn?.[tool]?.reasons ?? []].join(' ') };
+    return { mark: 'missing', words: [`Not in ${name}, though the plugin is on.`, ...whyNoneIn(entry, plugin, tool)].join(' ') };
   }
   // A tool that can't take it says why, kept out of it or not.
   const why = unavailable(view, entry, plugin, tool);
@@ -527,7 +530,7 @@ const OUT = {
   kept: (list: string, several: boolean, _kind: PartKind, tool: string) => `${list} ${several ? 'are' : 'is'} kept out of ${tool}: tick to let ${several ? 'them' : 'it'} in, unless ${tool} has its own by that name.`,
   off: (list: string, several: boolean) => `${list} ${several ? 'were' : 'was'} turned off on ${several ? 'their rows' : 'its row'}: tick to turn ${several ? 'them' : 'it'} on.`,
   deleted: (list: string, several: boolean) => `${list} ${several ? 'were' : 'was'} deleted here: tick to bring ${several ? 'them' : 'it'} back.`,
-  yours: (list: string, several: boolean, kind: PartKind) => `${list}: you have ${kindWords(kind, several)} of your own by that name; delete yours on ${several ? 'their rows' : 'its row'} to take the plugin’s.`,
+  yours: (list: string, several: boolean, kind: PartKind) => `${list}: you keep your own ${partWords[kind][several ? 1 : 0]} by ${several ? 'those names' : 'that name'}, not the plugin’s.`,
   another: (list: string, several: boolean, kind: PartKind) => `${list}: another source has ${kindWords(kind, several)} by that name here; delete ${several ? 'them' : 'it'} on ${several ? 'their rows' : 'its row'} to take the plugin’s.`,
 };
 
@@ -544,6 +547,19 @@ export function notInWhy(tool: HarnessId, plugin: string, outs: { name: string; 
     return typeof out === 'string' ? OUT[out](named, list.length > 1, kind, where) : `${named}: ${out.cannot}`;
   });
 }
+
+/**
+ * One name of his under a tool's box (types.ts PluginItemsView yours): the same as the plugin's; his through the shared skills
+ * folder; or OUT's `yours` for it alone, then why the plugin's can't land there (`held`) or, offered, Use the plugin's beside it.
+ */
+export function yourSaid({ name, kind, same, held }: YourName, tool: HarnessId): string {
+  if (same) return `${name} is the same as yours, so yours stays.`;
+  if (held?.shared) return `${name}: ${names[tool]} reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.`;
+  return [OUT.yours(name, false, kind), held?.why].filter(Boolean).join(' ');
+}
+/** Why none of a plugin's items is on in a tool, as its line and box say it: notInWhy's reasons, then each name of his (yourSaid). */
+export const whyNoneIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) =>
+  [...entry.items?.[plugin]?.notIn?.[tool]?.reasons ?? [], ...(entry.items?.[plugin]?.yours?.[tool] ?? []).map(name => yourSaid(name, tool))];
 
 /** Words a tool's result or line says, starting with the tool's name unless they already do ("Codex: …", never "Codex: Codex’s …"). */
 export const toolSaid = (tool: HarnessId, words: string) => (words.startsWith(names[tool]) ? words : `${names[tool]}: ${words}`);
