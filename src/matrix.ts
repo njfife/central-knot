@@ -1885,8 +1885,9 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
     // Nothing it can turn: every tool's switch held (said first, a reason for each tool), or it is that way already.
     const already = { page: state.page, item: row.name, rows: [rowKey(row)], warn: true, band: true, text: `${row.name}: nothing changed.` };
     if (wanted === undefined && !plugins.ops.length) { tell(plugins.left ? notDoneFirst({ ...already, reasons: plugins.left }) : { ...already, text: `${already.text} It is ${next ? 'on' : 'off'} already.` }); rerender(); return; }
-    // Its part in each tool is worked out in its turn, from the plugins as the clicks before it left them.
-    const rowNow = () => plugged(t).rows.find(each => each.key === row.key);
+    // Its part in each tool is worked out in its turn, from the plugins as the clicks before it left them. Its row is found again
+    // by its kind and key (idOf): a plugin's skill and MCP server of one name have one key, and the Library's All lists both.
+    const rowNow = () => plugged(t).rows.find(each => idOf(each) === idOf(row));
     queueClick({ kind, key: row.key, on: next }, row.name, () => {
       const now = rowNow(), turned = now && turnEvery(rowItems(now), next);
       return now && turned?.ops.length ? mainClick(t, now, next, [], turned, () => `${row.name} is ${next ? 'on' : 'off'} in ${toolsPhrase(turned.turned.map(item => item.tool), tools())}.`, turned.left) : undefined;
