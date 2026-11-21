@@ -1,8 +1,8 @@
 // Drives the real app end to end over its debug port, in a throwaway HOME, so "This Mac's home" is disposable too.
-// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,…]
-// `--flows` runs only the named flows, here, on one HOME, for working on one. Without it the run is every flow that can run here
-// (crashFlow needs a home the app writes and --crash-rounds above 0: `runs`): this script once per group (`groups`, at the end)
-// with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time (runGroups).
+// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,… | --group n/total]
+// `--flows` runs only the named flows, here, on one HOME, for working on one. Otherwise the run goes through `runGroups` (each
+// selected group as a supervised copy of this script with that group's `--flows`): every group when neither is given (crashFlow
+// needs a home the app writes and --crash-rounds above 0: `runs`), or group n alone with `--group n/total` (refused if total != groups.length).
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, closeSync, constants as fsConstants, cpSync, existsSync, openSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -28,6 +28,10 @@ const flag = name => args.includes(name);
 const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
 const shots = option('--shots');
 const named = option('--flows')?.split(',');
+const groupAt = args.indexOf('--group');
+const groupArg = groupAt >= 0 ? args[groupAt + 1] : undefined;
+const groupMatch = groupArg?.match(/^(\d+)\/(\d+)$/);
+const group = groupMatch ? Number(groupMatch[1]) : undefined;
 const crashRounds = Number(option('--crash-rounds', 6));
 const canWriteRealHome = writesRealHome(process.platform);
 // The packaged app on Linux is the AppImage, which starts at sign-in from its first open (signin.ts): appImageSignIn.
@@ -158,7 +162,7 @@ let app;
 // failed or interrupted run must not leave an app holding a debug port that a later run could attach to, or a stand-in for ever.
 const launched = new Set();
 process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
-// A grouped run's parent passes these on to its copies and waits for them instead (runGroups).
+// A --flows child exits on signals; a parent running one or all groups passes them on to its copies and waits instead (runGroups).
 if (named) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
@@ -5984,6 +5988,35 @@ async function firstSetupFlow() {
       await page.quit();
     }
   }
+
+  // Settings -> Choose copies -> "Use the latest for the rest" runs the plugin switch for chosen items held off through a plugin.
+  const bulk = homeFor('setup-bulk-plugin'), bulkCopilot = join(bulk.home, '.copilot/skills'), bulkCodexToml = join(bulk.home, '.codex/config.toml');
+  writeFileSync(join(bulk.home, '.local/bin/copilot'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\nexit 9\n');
+  chmodSync(join(bulk.home, '.local/bin/copilot'), 0o755);
+  saved(skill(bulk.claude, 'plug-bulk', text('plug-bulk', 'Newer Claude copy.')), 2);
+  saved(skill(bulkCopilot, 'plug-bulk', text('plug-bulk', 'Older Copilot copy.')), 48);
+  const bulkPluginDir = join(bulk.home, '.codex/plugins/cache/ck-test-market/team-pack/1.0.0/skills/plug-bulk');
+  mkdirSync(bulkPluginDir, { recursive: true });
+  writeFileSync(join(bulkPluginDir, 'SKILL.md'), text('plug-bulk', 'Newer Claude copy.'));
+  writeFileSync(bulkCodexToml, '[plugins."team-pack@ck-test-market"]\nenabled = true\n\n[[skills.config]]\nname = "team-pack:plug-bulk"\nenabled = false\n');
+  const bulkData = join(scratch, 'setup-data-bulk-plugin');
+  opened(bulk.home, bulkData);
+  const p = await launch(bulkData, [], real);
+  try {
+    await p.click('#nav-settings');
+    for (let tries = 0; tries < 40 && !(await p.exists('#setting-sync-everything-notice button')); tries++) await wait(100);
+    await p.click('#setting-sync-everything-notice button');
+    for (let tries = 0; tries < 40 && !(await p.exists('#walk-use-latest')); tries++) await wait(100);
+    same('before Use the latest for the rest, Codex’s plugin skill is off',
+      [/name = "team-pack:plug-bulk"[^[]*enabled = false/.test(readNow(bulkCodexToml)), await cellState(p, 'skills', 'plug-bulk', 'codex-cli')], [true, 'plugin-off']);
+    await p.click('#walk-use-latest');
+    for (let tries = 0; tries < 40 && readNow(join(bulkCopilot, 'plug-bulk/SKILL.md')) !== text('plug-bulk', 'Newer Claude copy.'); tries++) await wait(100);
+    same('Use the latest for the rest takes plug-bulk in with Claude Code’s copy and turns Codex’s plugin skill on',
+      [readNow(join(bulk.claude, 'plug-bulk/SKILL.md')), readNow(join(bulkCopilot, 'plug-bulk/SKILL.md')),
+        existsSync(join(bulk.codex, 'plug-bulk')), /name = "team-pack:plug-bulk"[^[]*enabled = false/.test(readNow(bulkCodexToml)), await cellState(p, 'skills', 'plug-bulk', 'codex-cli')],
+      [text('plug-bulk', 'Newer Claude copy.'), text('plug-bulk', 'Newer Claude copy.'), false, false, 'plugin']);
+    same('no page errors, bulk Choose copies with plugin switch', p.pageErrors, []);
+  } finally { await p.quit(); }
 }
 
 /**
@@ -9340,8 +9373,9 @@ async function searchFlow() {
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
-// Every flow, in groups. A run with no --flows starts this script once per group, so each group has a throwaway home, data
-// folders, stand-ins and debug ports of its own, and several run at once (runGroups). Four groups, as the Mac runner was
+// Every flow, in groups. A run with neither --flows nor --group starts this script once per group (and --group <n>/<total> starts
+// one copy for that group), so each group has a throwaway home, data folders, stand-ins and debug ports of its own, and several
+// run at once (runGroups). Four groups, as the Mac runner was
 // measured with four apps at once, balanced by each flow's seconds there with four at once (each flow's line in a run gives
 // them): practiceFlow, the longest, has little beside it. realHomeFlow is in its group, as both open the default data folder
 // (launch) and realHomeFlow's preview-only branch reads the History window practiceFlow set there. crashFlow comes last in its
@@ -10260,6 +10294,267 @@ async function libraryFlow() {
   same('the last skill deleted from Files on Skills: no skills here yet, Find empty', [await g.text('.empty-title'), await g.run(`document.querySelector('#find')?.value ?? ''`)], ['No skills here yet', '']);
   same('no page errors, the empty states and Resume', [...d.pageErrors, ...e.pageErrors, ...g.pageErrors], []);
   await g.quit();
+
+  // ---------- Queued Add whose copies differ on disk, and Undo after refused / double clicks ----------
+  const R = homeWith('library-result-true');
+  const equalAdd = text('race-add', 'Equal at draw.'), changedAdd = text('race-add', 'Changed before turn.');
+  const equalMid = text('race-mid', 'Equal mid.'), changedMid = text('race-mid', 'Changed mid.');
+  for (const dir of [R.claude, R.copilot]) {
+    skill(dir, 'race-add', equalAdd);
+    skill(dir, 'race-mid', equalMid);
+  }
+  for (const name of ['off-one', 'on-one', 'double-ok', 'real-fail', 'item-stuck']) skill(R.claude, name, text(name, `Skill ${name}.`));
+  const r = await launch(R.data, [], R.real);
+  await r.click('#nav-overview');
+  await r.click('#setup-no');
+  await openKind(r, 'skills');
+  for (const name of ['off-one', 'on-one', 'double-ok', 'real-fail', 'item-stuck']) { await r.click(`#${rowPart('add', 'skills', name)}`); await done(r); }
+  for (const name of ['off-one', 'real-fail', 'item-stuck']) { await r.click(`#${rowPart('switch', 'skills', name)}`); await done(r); }
+  await r.click('#header-refresh');
+  const readSkillsRecord = () => JSON.parse(readNow(join(R.home, '.central-knot/skills.json')) || '{"items":{}}').items;
+  const readHistory = () => JSON.parse(readNow(join(R.home, '.central-knot/history.json')) || '{"events":[]}').events;
+  const pairFiles = name => [readNow(join(R.claude, `${name}/SKILL.md`)), readNow(join(R.copilot, `${name}/SKILL.md`))];
+  const headerState = async () => {
+    if (await r.exists('#problems-show-all') && /^Show all \d+/.test(await r.text('#problems-show-all') ?? '')) await r.click('#problems-show-all');
+    return {
+      text: await r.text('#header [data-outcome] .band-text'),
+      warn: await r.exists('#header [data-outcome] .tone-warning'),
+      undo: await r.exists('#outcome-undo'),
+      problems: await r.all('#header .problem-text'),
+    };
+  };
+  const dismissOutcome = async () => { if (await r.exists('#outcome-dismiss')) await r.click('#outcome-dismiss'); };
+  // 1. Measured Add: found in two tools with equal copies when drawn, one changed on disk before the click's turn.
+  same('race-add starts found with no Copies differ tag', [await r.exists(`#${rowPart('add', 'skills', 'race-add')}`), await r.exists(`#${rowPart('decide', 'skills', 'race-add')}`)], [true, false]);
+  await dismissOutcome();
+  if (r.main) {
+    const inspector = await r.main(), held = await holdQueue(inspector, r);
+    try {
+      await r.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'race-add'))}).click()`);
+      writeFileSync(join(R.copilot, 'race-add/SKILL.md'), changedAdd);
+    } finally { await held.release(); inspector.close(); }
+  } else {
+    writeFileSync(join(R.copilot, 'race-add/SKILL.md'), changedAdd);
+    await r.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'race-add'))}).click()`);
+  }
+  await done(r);
+  same('queued Add whose copies differ says the copy question alone, with no warning, no Undo and no record',
+    [await headerState(), await r.exists(`#${rowPart('add', 'skills', 'race-add')}`), await r.exists(`#${rowPart('decide', 'skills', 'race-add')}`),
+      await r.all(`${row('skills', 'race-add')} .row-tag`), !!readSkillsRecord()['race-add'], readHistory().some(entry => entry.key === 'race-add'), pairFiles('race-add')],
+    [{ text: 'race-add has differing copies. Choose which copy every tool uses.', warn: false, undo: false, problems: [] },
+      true, true, ['Copies differ', 'not in Central Knot'], false, false, [equalAdd, changedAdd]]);
+  // Choosing a copy then adds it, writes both tools, records History, and says so.
+  await r.click(`#${rowPart('add', 'skills', 'race-add')}`);
+  check('Add on the differing row opens its copy question', await r.exists(`#${rowPart('use', 'skills', 'race-add', 'copilot-cli')}`), await r.text('#page'));
+  await r.click(`#${rowPart('use', 'skills', 'race-add', 'copilot-cli')}`);
+  await done(r);
+  same('choosing Copilot CLI’s copy adds race-add everywhere and says so',
+    [(await headerState()).text, await switchOn(r, 'skills', 'race-add'), !!readSkillsRecord()['race-add']?.on,
+      readHistory().some(entry => entry.key === 'race-add' && entry.kind === 'chosen'), pairFiles('race-add')],
+    ['race-add is in Central Knot now, with Copilot CLI’s copy, and on in Claude Code and Copilot CLI. The other copies are kept as its versions.',
+      true, true, true, [changedAdd, changedAdd]]);
+  // 2. The same inside a run of three clicks (On, Add, Off): On and Off are counted, Add's wait is said once.
+  await dismissOutcome();
+  if (r.main) {
+    const inspector = await r.main(), held = await holdQueue(inspector, r);
+    try {
+      await r.run(`for (const id of ${JSON.stringify([rowPart('switch', 'skills', 'off-one'), rowPart('add', 'skills', 'race-mid'), rowPart('switch', 'skills', 'on-one')])}) document.getElementById(id).click()`);
+      writeFileSync(join(R.copilot, 'race-mid/SKILL.md'), changedMid);
+    } finally { await held.release(); inspector.close(); }
+  } else {
+    writeFileSync(join(R.copilot, 'race-mid/SKILL.md'), changedMid);
+    await r.run(`for (const id of ${JSON.stringify([rowPart('switch', 'skills', 'off-one'), rowPart('add', 'skills', 'race-mid'), rowPart('switch', 'skills', 'on-one')])}) document.getElementById(id).click()`);
+  }
+  await done(r);
+  same('three-click run with a differing queued Add counts On and Off, says the wait once, and leaves race-mid found',
+    [await headerState(), await switchOn(r, 'skills', 'off-one'), await switchOn(r, 'skills', 'on-one'),
+      await r.exists(`#${rowPart('add', 'skills', 'race-mid')}`), !!readSkillsRecord()['race-mid'], readHistory().some(entry => entry.key === 'race-mid'), pairFiles('race-mid')],
+    [{ text: '1 skill is off: on-one; 1 skill is on: off-one. race-mid has differing copies. Choose which copy every tool uses.', warn: false, undo: true, problems: [] },
+      true, false, true, false, false, [equalMid, changedMid]]);
+  // 3. Measured Undo: two clicks on double-ok while Claude Code's folder refuses the first; Undo puts every file back with no warning.
+  await dismissOutcome();
+  const doubleBefore = pairFiles('double-ok'), historyBeforeDouble = readHistory().length;
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    const clickEntries = readHistory().slice(historyBeforeDouble).filter(entry => entry.key === 'double-ok');
+    await r.click('#outcome-undo');
+    await done(r);
+    const afterHistory = readHistory(), undoneEntries = clickEntries.map(entry => afterHistory.find(now => now.id === entry.id));
+    const doubleRec = readSkillsRecord()['double-ok'];
+    same('Undo after two clicks on double-ok with Claude Code locked: plain confirmation, no warning, files byte-for-byte back, record On and both entries marked undone',
+      [await headerState(), pairFiles('double-ok'), doubleRec?.on, Object.keys(doubleRec?.applied ?? {}).sort(),
+        undoneEntries.length, undoneEntries.every(entry => !!entry?.undoneBy), clickEntries[0]?.losers.map(loser => loser.tool)],
+      [{ text: 'Undone: double-ok is as before.', warn: false, undo: false, problems: [] }, doubleBefore, true, ['claude-cli', 'copilot-cli'], 2, true, ['copilot-cli']]);
+  } finally { chmodSync(R.claude, 0o755); }
+  // 4. Real failure at Undo stays said: real-fail turned On unlocked, then Claude Code locked before Undo.
+  await dismissOutcome();
+  await r.click(`#${rowPart('switch', 'skills', 'real-fail')}`);
+  await done(r);
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.click('#outcome-undo');
+    await done(r);
+    const failHead = await headerState();
+    same('real Undo failure warns and names Claude Code and real-fail',
+      [failHead.text, failHead.warn, failHead.problems, pairFiles('real-fail').map(Boolean), readSkillsRecord()['real-fail']?.on, !!readSkillsRecord()['real-fail']?.applied?.['claude-cli']],
+      ['Not all of real-fail could be put back.', true, ['real-fail (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], [true, false], false, true]);
+  } finally { chmodSync(R.claude, 0o755); }
+  await r.click('#header-refresh');
+  // 5. Two different items, one truly cannot be undone: warning names only item-stuck (both after double-ok's superseded failure and after a single click on double-ok).
+  await dismissOutcome();
+  const doubleBefore5 = pairFiles('double-ok');
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'item-stuck')}`);
+  await done(r);
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.click('#outcome-undo');
+    await done(r);
+    const fiveHead = await headerState();
+    same('Undo over two different items drops double-ok’s superseded failure and names only item-stuck',
+      [fiveHead.text, fiveHead.warn, fiveHead.problems, pairFiles('double-ok'), readSkillsRecord()['double-ok']?.on, !!readSkillsRecord()['item-stuck']?.applied?.['claude-cli']],
+      ['Not all of item-stuck could be put back.', true, ['item-stuck (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], doubleBefore5, true, true]);
+  } finally { chmodSync(R.claude, 0o755); }
+  await r.click('#header-refresh');
+  // Two single clicks on two different items (item-stuck On unlocked, lock Claude Code, double-ok Off): Undo puts double-ok back cleanly and names only item-stuck.
+  await dismissOutcome();
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'item-stuck')}`);
+  await done(r);
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.click('#outcome-undo');
+    await done(r);
+    const twoHead = await headerState();
+    same('Undo over two clicks on two different items warns only about item-stuck',
+      [twoHead.text, twoHead.warn, twoHead.problems, pairFiles('double-ok'), readSkillsRecord()['double-ok']?.on, !!readSkillsRecord()['item-stuck']?.applied?.['claude-cli']],
+      ['Not all of item-stuck could be put back.', true, ['item-stuck (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], doubleBefore5, true, true]);
+  } finally { chmodSync(R.claude, 0o755); }
+  await r.click('#header-refresh');
+  same('no page errors, queued Add and Undo checks', r.pageErrors, []);
+  await r.quit();
+
+  // Three-tool home (Claude Code, Copilot CLI, Codex): Undo with a locked destination folder holding no file (single Off,
+  // 3-click alternating, 4-click alternating), and row copy choice running the plugin switch after a queued differing Add.
+  const R3 = homeWith('library-result-true-three');
+  const codex3 = join(R3.home, '.codex/skills'), codexToml3 = join(R3.home, '.codex/config.toml');
+  mkdirSync(codex3, { recursive: true });
+  writeFileSync(join(R3.home, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.142.3" && exit 0\nexit 9\n');
+  chmodSync(join(R3.home, '.local/bin/codex'), 0o755);
+  for (const name of ['single-lock', 'alt-three', 'alt-four']) skill(R3.claude, name, text(name, `Skill ${name}.`));
+  const plugRowEqual = text('plug-row', 'Equal at draw.'), plugRowNew = text('plug-row', 'Newer in Copilot.');
+  for (const dir of [R3.claude, R3.copilot]) skill(dir, 'plug-row', plugRowEqual);
+  const plugRowCache = join(R3.home, '.codex/plugins/cache/ck-test-market/team-pack/1.0.0/skills/plug-row');
+  mkdirSync(plugRowCache, { recursive: true });
+  writeFileSync(join(plugRowCache, 'SKILL.md'), plugRowEqual);
+  writeFileSync(codexToml3, '[plugins."team-pack@ck-test-market"]\nenabled = true\n\n[[skills.config]]\nname = "team-pack:plug-row"\nenabled = false\n');
+  const r3 = await launch(R3.data, [], R3.real);
+  await r3.click('#nav-overview');
+  await r3.click('#setup-no');
+  await openKind(r3, 'skills');
+  for (const name of ['single-lock', 'alt-three', 'alt-four']) { await r3.click(`#${rowPart('add', 'skills', name)}`); await done(r3); }
+  await r3.click('#header-refresh');
+  const r3Record = () => JSON.parse(readNow(join(R3.home, '.central-knot/skills.json')) || '{"items":{}}').items;
+  const r3Files = name => [readNow(join(R3.claude, `${name}/SKILL.md`)), readNow(join(R3.copilot, `${name}/SKILL.md`)), readNow(join(codex3, `${name}/SKILL.md`))];
+  const r3Head = async () => {
+    if (await r3.exists('#problems-show-all') && /^Show all \d+/.test(await r3.text('#problems-show-all') ?? '')) await r3.click('#problems-show-all');
+    return { text: await r3.text('#header [data-outcome] .band-text'), warn: await r3.exists('#header [data-outcome] .tone-warning'), problems: await r3.all('#header .problem-text') };
+  };
+  const r3Dismiss = async () => { if (await r3.exists('#outcome-dismiss')) await r3.click('#outcome-dismiss'); };
+  // Single Off, then Copilot CLI locked before Undo: Copilot CLI has no file and restore emits no result for it, yet Undo warns and names Copilot CLI.
+  await r3Dismiss();
+  await r3.click(`#${rowPart('switch', 'skills', 'single-lock')}`);
+  await done(r3);
+  chmodSync(R3.copilot, 0o555);
+  try {
+    await r3.click('#outcome-undo');
+    await done(r3);
+    const head = await r3Head(), rec = r3Record()['single-lock'];
+    same('single Off then locked Copilot CLI before Undo: warns and names Copilot CLI, with Copilot CLI missing and record applied only to Claude Code and Codex',
+      [head.text, head.warn, head.problems.length, head.problems.some(line => line.startsWith('single-lock (Copilot CLI): ')),
+        r3Files('single-lock').map(Boolean), rec?.on, Object.keys(rec?.applied ?? {}).sort()],
+      ['Not all of single-lock could be put back.', true, 1, true, [true, false, true], true, ['claude-cli', 'codex-cli']]);
+  } finally { chmodSync(R3.copilot, 0o755); }
+  await r3.click('#header-refresh');
+  // 3-click and 4-click alternating locks across clicks and restores: drops the settled tool's earlier failure and names the tool missing its file.
+  if (r3.main) {
+    const stepChannel = async (inspector, channel, steps) => inspector.run(`(() => {
+      const handlers = electron.ipcMain._invokeHandlers, real = handlers.get(${JSON.stringify(channel)});
+      const fs = process.mainModule.require('node:fs'), steps = ${JSON.stringify(steps)};
+      globalThis.ckPrev = globalThis.ckPrev ?? {}; globalThis.ckPrev[${JSON.stringify(channel)}] = real;
+      let at = 0;
+      handlers.set(${JSON.stringify(channel)}, async (...args) => {
+        const step = steps[at++];
+        if (step) for (const [path, mode] of step) fs.chmodSync(path, mode);
+        return real(...args);
+      });
+      return true;
+    })()`);
+    const restoreChannel = async (inspector, channel) => inspector.run(`(() => {
+      const prev = globalThis.ckPrev?.[${JSON.stringify(channel)}];
+      if (prev) { electron.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, prev); delete globalThis.ckPrev[${JSON.stringify(channel)}]; }
+      return true;
+    })()`);
+    for (const [name, count, missingTool, missingName, expectedFiles, expectedApplied] of [
+      ['alt-three', 3, 'copilot-cli', 'Copilot CLI', [true, false, true], ['claude-cli', 'codex-cli']],
+      ['alt-four', 4, 'claude-cli', 'Claude Code', [false, true, true], ['codex-cli', 'copilot-cli']],
+    ]) {
+      await r3Dismiss();
+      const inspector = await r3.main();
+      try {
+        await stepChannel(inspector, 'skills:apply', Array.from({ length: count }, (_, i) => [[R3.claude, i % 2 ? 0o755 : 0o555], [R3.copilot, i % 2 ? 0o555 : 0o755]]));
+        for (let i = 0; i < count; i++) { await r3.clickInRun(`#${rowPart('switch', 'skills', name)}`); await done(r3); }
+        await restoreChannel(inspector, 'skills:apply');
+        await stepChannel(inspector, 'history:restore', Array.from({ length: count }, (_, i) => [[R3.claude, i % 2 ? 0o555 : 0o755], [R3.copilot, i % 2 ? 0o755 : 0o555]]));
+        await r3.click('#outcome-undo');
+        await done(r3);
+        const head = await r3Head(), rec = r3Record()[name];
+        same(`${count}-click alternating Undo warns and names only ${missingName} (${missingTool} missing)`,
+          [head.text, head.warn, head.problems.length, head.problems.every(line => line.startsWith(`${name} (${missingName}): `)),
+            r3Files(name).map(Boolean), rec?.on, Object.keys(rec?.applied ?? {}).sort()],
+          [`Not all of ${name} could be put back.`, true, 1, true, expectedFiles, true, expectedApplied]);
+      } finally {
+        await restoreChannel(inspector, 'skills:apply');
+        await restoreChannel(inspector, 'history:restore');
+        inspector.close();
+        chmodSync(R3.claude, 0o755); chmodSync(R3.copilot, 0o755);
+      }
+      await r3.click('#header-refresh');
+    }
+  }
+  // Row choice road: queued Add on plug-row whose copies diverge leaves Codex's plugin skill off; choosing Copilot CLI's copy turns it on.
+  await r3Dismiss();
+  if (r3.main) {
+    const inspector = await r3.main(), held = await holdQueue(inspector, r3);
+    try {
+      await r3.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'plug-row'))}).click()`);
+      writeFileSync(join(R3.copilot, 'plug-row/SKILL.md'), plugRowNew);
+    } finally { await held.release(); inspector.close(); }
+  } else {
+    writeFileSync(join(R3.copilot, 'plug-row/SKILL.md'), plugRowNew);
+    await r3.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'plug-row'))}).click()`);
+  }
+  await done(r3);
+  same('queued Add whose copies differ leaves Codex’s plugin skill off until a copy is chosen',
+    [(await r3Head()).text, /name = "team-pack:plug-row"[^[]*enabled = false/.test(readNow(codexToml3)), await cellState(r3, 'skills', 'plug-row', 'codex-cli')],
+    ['plug-row has differing copies. Choose which copy every tool uses.', true, 'plugin-off']);
+  await r3.click(`#${rowPart('add', 'skills', 'plug-row')}`);
+  await r3.click(`#${rowPart('use', 'skills', 'plug-row', 'claude-cli')}`);
+  await done(r3);
+  same('choosing Claude Code’s copy on the row takes plug-row in and turns Codex’s plugin skill on',
+    [readNow(join(R3.claude, 'plug-row/SKILL.md')), readNow(join(R3.copilot, 'plug-row/SKILL.md')),
+      existsSync(join(codex3, 'plug-row')), /name = "team-pack:plug-row"[^[]*enabled = false/.test(readNow(codexToml3)), await cellState(r3, 'skills', 'plug-row', 'codex-cli')],
+    [plugRowEqual, plugRowEqual, false, false, 'plugin']);
+  same('no page errors, three-tool Undo and row-choice plugin checks', r3.pageErrors, []);
+  await r3.quit();
 }
 
 /**
@@ -11997,17 +12292,116 @@ async function profilePluginsFlow() {
   await b.quit();
 }
 
+/**
+ * A plugin with a skill and an MCP server of one name: docs's skill issues and server issues, installed in Codex and Copilot
+ * CLI, each of which has a switch for one skill and one server of a plugin (their records written here; Codex's CLI answers
+ * --version alone, Copilot CLI's turns a skill in its settings as its `copilot skill` does). On the Library's All both are rows,
+ * with the one key docs@ck-test-market/issues (pluginrows.ts PluginRow): each row's switch turns its own item and nothing of the
+ * other's, its row named in the result, with one Undo (matrix.ts pluginRowSwitch finds its row again by kind and key); two quick
+ * clicks, one on each, turn each its own; and a profile that ticks one and not the other leaves each tool's file as it says.
+ */
+async function sameNamePluginFlow() {
+  const home = join(scratch, 'home-same-name'), data = join(scratch, 'same-name-data'), market = join(scratch, 'market-same-name'), tools = join(scratch, 'tools-same-name');
+  writeMarket(market, 'ck-test-market');
+  const parts = { 'skills/issues/SKILL.md': text('issues'), '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', 'issues-mcp'] } } }),
+    '.codex-plugin/plugin.json': JSON.stringify({ name: 'docs', version: '1.0.0', skills: './skills', mcpServers: './.mcp.json' }) };
+  const copilotCopy = join(home, '.copilot/installed-plugins/ck-test-market/docs');
+  for (const copy of [join(home, '.codex/plugins/cache/ck-test-market/docs/1.0.0'), copilotCopy]) for (const [path, body] of Object.entries(parts)) { mkdirSync(dirname(join(copy, path)), { recursive: true }); writeFileSync(join(copy, path), body); }
+  const codexConfig = join(home, '.codex/config.toml'), copilotSettings = join(home, '.copilot/settings.json');
+  writeFileSync(codexConfig, `[marketplaces.ck-test-market]\nsource = "${market}"\n\n[plugins."docs@ck-test-market"]\nenabled = true\n`);
+  writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'docs', marketplace: 'ck-test-market', version: '1.0.0', cache_path: copilotCopy, enabled: true }] }));
+  writeFileSync(copilotSettings, `${JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: market } } } }, null, 2)}\n`);
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.142.3" && exit 0\nexit 9\n', { mode: 0o755 });
+  // Copilot CLI's skill switch takes a second while $HOME/slow is there: a click made meanwhile waits its turn.
+  writeFileSync(join(tools, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\n[ "$1" = "skill" ] && [ -f "$HOME/slow" ] && sleep 1\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="skill"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`, { mode: 0o755 });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  // Each tool's file, and which of the two items each has off, Codex's then Copilot CLI's.
+  const files = () => ({ codex: readNow(codexConfig), copilot: readNow(copilotSettings) });
+  const offIn = () => {
+    const codex = readNow(codexConfig), copilot = jsonOrNothing(copilotSettings) ?? {};
+    return { skill: [codex.includes('name = "docs:issues"\nenabled = false'), (copilot.disabledSkills ?? []).includes('docs:issues')],
+      server: [codex.includes('[plugins."docs@ck-test-market".mcp_servers.issues]\nenabled = false'), (copilot.disabledMcpServers ?? []).includes('issues')] };
+  };
+  const bothOn = { skill: [false, false], server: [false, false] }, serverOff = { skill: [false, false], server: [true, true] }, skillOff = { skill: [true, true], server: [false, false] };
+  const key = 'docs@ck-test-market/issues', [skillSwitch, serverSwitch] = ['skills', 'mcp'].map(kind => byId(rowPart('switch', kind, key)));
+  const a = await launch(data, [], tools);
+  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const said = () => a.text('#header [data-outcome] .band-text');
+  // The rows the result of a click's Undo flashes: the rows its click named (app.ts sayDone).
+  const watchFlashes = () => a.run(`window.flashedRows = []; window.flashWatch?.disconnect(); window.flashWatch = new MutationObserver(() => { for (const row of document.querySelectorAll('.ov-row.row-flash')) if (!flashedRows.includes(row.dataset.key)) flashedRows.push(row.dataset.key); }); flashWatch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })`);
+  const flashed = async () => { for (let tries = 0; tries < 30 && !(await a.run('window.flashedRows')).length; tries++) await wait(100); return a.run('window.flashedRows'); };
+  await openKind(a, 'all');
+  for (let tries = 0; tries < 60 && !(await a.exists(serverSwitch)); tries++) await wait(100);
+  const before = files();
+  same('on the Library’s All, docs’s skill and server named issues are two rows, both on, and neither is off in any tool', [await switchOn(a, 'skills', key), await switchOn(a, 'mcp', key), offIn()], [true, true, bothOn]);
+
+  // The server's switch: the server off in Codex and Copilot CLI, the skill on in both; the result is the server's row's; Undo.
+  await a.click(serverSwitch); await done();
+  same('a click on the server’s switch turns the server off in Codex and Copilot CLI, and leaves the skill on in both', [offIn(), await switchOn(a, 'mcp', key), await switchOn(a, 'skills', key)], [serverOff, false, true]);
+  same('its result names the server by its kind, as a skill on All has its name', await said(), 'issues (MCP server) is off in Copilot CLI and Codex.');
+  const afterServer = files();
+  await watchFlashes();
+  await a.click('#outcome-undo-plugin'); await done();
+  same('its Undo leaves each tool’s file as before the click, and flashes the row the click named: the server’s, not the skill’s', [files(), await flashed()], [before, [rowPart('', 'mcp', key)]]);
+  // The skill's switch: the skill, not the server.
+  await a.click(skillSwitch); await done();
+  same('a click on the skill’s switch turns the skill off in Codex and Copilot CLI, and leaves the server on in both; its result names the skill by its kind', [offIn(), await switchOn(a, 'skills', key), await switchOn(a, 'mcp', key), await said()], [skillOff, false, true, 'issues (skill) is off in Copilot CLI and Codex.']);
+  await a.click('#outcome-undo-plugin'); await done();
+  same('its Undo leaves each tool’s file as before the click', files(), before);
+  // The Library's MCP servers lists the server alone: its switch turns the server, as on All.
+  await openKind(a, 'mcp');
+  await a.click(serverSwitch); await done();
+  const onMcpPage = offIn();
+  await a.click('#outcome-undo-plugin'); await done();
+  same('on the Library’s MCP servers, the server’s switch turns the server off and leaves the skill on, and its Undo puts each file back', [onMcpPage, files()], [serverOff, before]);
+
+  // Two quick clicks on All, the skill's then the server's while the first still runs (Copilot CLI's skill switch takes a second):
+  // each turns its own; the run's one Undo puts each file back.
+  await openKind(a, 'all');
+  writeFileSync(join(home, 'slow'), '');
+  await a.run(`document.querySelector(${JSON.stringify(skillSwitch)}).click()`); await wait(150);
+  await a.run(`document.querySelector(${JSON.stringify(serverSwitch)}).click()`);
+  await done();
+  rmSync(join(home, 'slow'));
+  same('two quick clicks, the skill’s then the server’s: each turns its own off in both tools, and the run names both by kind', [offIn(), await said()],
+    [{ skill: [true, true], server: [true, true] }, '2 items are off: issues (skill) and issues (MCP server).']);
+  await a.click('#outcome-undo'); await done();
+  same('the run’s one Undo leaves each tool’s file as before the two clicks', files(), before);
+
+  // Profiles: one that ticks the skill and not the server, then one the other way; each tool's file as the profile says.
+  await a.click('#nav-profiles');
+  await newProfile(a, 'Skill only');
+  await a.click(byId(`pf-plugin:skill:${key}`)); await done();
+  await a.click('#profile-switch'); await done();
+  same('switching to Skill only turns the plugin’s server issues off in Codex and Copilot CLI, and leaves its skill issues on', offIn(), serverOff);
+  const skillOnly = files();
+  await newProfile(a, 'Server only');
+  await a.click(byId(`pf-plugin:mcp:${key}`)); await done();
+  await a.click('#profile-switch'); await done();
+  same('switching to Server only turns the plugin’s skill issues off in Codex and Copilot CLI, and its server issues back on', offIn(), skillOff);
+  await a.click('#outcome-undo'); await done();
+  same('Undo switch puts each tool’s file back as Skill only left it', files(), skillOnly);
+  same('no page errors', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
   [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
 const listed = groups.flat().map(flow => flow.name);
 const written = [...readFileSync(import.meta.filename, 'utf8').matchAll(/^async function (\w+Flow)\(/gm)].map(([, name]) => name);
+const badGroup = groupAt >= 0 && (!groupMatch || group < 1 || group > groups.length || Number(groupMatch[2]) !== groups.length);
 const refused = [...written.filter(name => listed.filter(each => each === name).length !== 1).map(name => `${name} is in no group or in two`),
+  ...(flag('--flows') && groupAt >= 0 ? ['--group and --flows cannot be used together'] : []),
+  ...(groupAt >= 0 && args.lastIndexOf('--group') !== groupAt ? ['--group may be given only once'] : []),
+  ...(badGroup ? [`--group takes 1 to ${groups.length} of ${groups.length} (<n>/${groups.length}), and was given ${groupArg || 'none'}`] : []),
   ...(named ?? []).filter(name => !listed.includes(name)).map(name => `--flows names ${name}, which is no flow`),
   ...(Number.isInteger(crashRounds) && crashRounds >= 0 ? [] : [`--crash-rounds takes a whole number, and was given ${option('--crash-rounds') ?? 'none'}`])];
 if (refused.length) { rmSync(scratch, { recursive: true, force: true }); throw new Error(`Refused to start: ${refused.join('; ')}.`); }
@@ -12035,7 +12429,8 @@ function readCopy(names, number, output, code, signal) {
 }
 
 /**
- * The run with no --flows: this script once per group with that group's --flows and the run's other options,
+ * The run with neither --flows nor --group (every group), or with --group <n>/<total> (that one group): this script once per
+ * selected group with that group's --flows and the run's other options,
  * CK_E2E_GROUPS_AT_ONCE copies at a time (default 1). Each copy's stdout and stderr, in the order they came, print as one
  * block when it ends; then the run's total, the flows not finished and not run, and every FAIL line again. The run's failures
  * are its copies' FAIL lines, one more for each copy that died or whose total counts more failures than its FAIL lines
@@ -12044,14 +12439,16 @@ function readCopy(names, number, output, code, signal) {
  */
 async function runGroups() {
   const atOnce = Math.max(1, Number(process.env.CK_E2E_GROUPS_AT_ONCE) || 1);
-  const waiting = groups.map(group => group.filter(runs).map(flow => flow.name)).filter(names => names.length);
-  const count = waiting.length;
+  const selected = group ? [[group, groups[group - 1]]] : groups.map((each, index) => [index + 1, each]);
+  const waiting = selected.map(([number, each]) => [number, each.filter(runs).map(flow => flow.name)]).filter(([, names]) => names.length);
+  const count = group ? groups.length : waiting.length;
+  const childArgs = groupAt >= 0 ? args.filter((_, index) => index !== groupAt && index !== groupAt + 1) : args;
   const running = new Set(), unfinished = [], notRun = [], failLines = [], uncounted = [];
-  let passed = 0, begun = 0, stoppedBy;
+  let passed = 0, stoppedBy;
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stoppedBy = signal; for (const copy of running) copy.kill(signal); });
-  const runOne = names => new Promise(done => {
-    const from = Date.now(), number = ++begun;
-    const copy = spawn(process.execPath, [...process.execArgv, import.meta.filename, ...args, '--flows', names.join(',')], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const runOne = ([number, names]) => new Promise(done => {
+    const from = Date.now();
+    const copy = spawn(process.execPath, [...process.execArgv, import.meta.filename, ...childArgs, '--flows', names.join(',')], { stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     for (const stream of [copy.stdout, copy.stderr]) stream.on('data', chunk => { output += chunk; });
     running.add(copy);
@@ -12066,9 +12463,9 @@ async function runGroups() {
       done();
     });
   });
-  console.log(`${waiting.length} groups of flows, ${atOnce} at a time; each group's output follows when it ends.`);
+  console.log(group ? `group ${group} of ${count}; its output follows when it ends.` : `${waiting.length} groups of flows, ${atOnce} at a time; each group's output follows when it ends.`);
   await Promise.all(Array.from({ length: atOnce }, async () => { while (waiting.length && !stoppedBy) await runOne(waiting.shift()); }));
-  notRun.push(...waiting.flat());
+  notRun.push(...waiting.flatMap(([, names]) => names));
   const notCounted = uncounted.length ? ` (the passes of group ${uncounted.join(' and group ')} are not counted: no total line)` : '';
   console.log(`\ne2e: ${passed} passed, ${failLines.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}${notCounted}`);
   if (unfinished.length) console.error(`not finished: ${unfinished.join(', ')}`);
