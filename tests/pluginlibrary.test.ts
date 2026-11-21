@@ -20,7 +20,7 @@ import { readHistory } from '../src/history.ts';
 import * as engine from '../src/plugins.ts';
 import { applyServers, restoreServer, serverKind, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
-import { applySkills, restoreSkill, skillKind, skillsView } from '../src/skills.ts';
+import { applySkills, restoreSkill, skillKind, skillsView, takeOver } from '../src/skills.ts';
 import type { HarnessId, HomeView, PluginTurn } from '../src/types.ts';
 import { execFileSync } from 'node:child_process';
 import { connectRepo, pushRepo } from '../src/gitrepo.ts';
@@ -608,6 +608,62 @@ test('His own skill of that name already in Central Knot: the plugin’s isn’t
     assert.deepEqual(await box.piSays(await box.turn('on')), { report: [`held: ${LEAD} ${KEEPS_NOTES}`], box: `off: ${KEEPS_NOTES}` });
     assert.deepEqual(await box.lines(), { 'skill:notes': 'not-brought' });
   } finally { await box.cleanup(); }
+});
+
+test('Pi has a found copy of one of the plugin’s skills (not in Central Knot) while another item goes on: Pi’s copy stays untouched, heldOut gives OUT.own, and no-item-on never duplicates it', async () => {
+  const box = await kitHome();
+  try {
+    await put(box.pi('skills/notes/SKILL.md'), skill('notes', 'mine in pi'));
+    await box.turn('on');
+    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), skill('notes', 'mine in pi'));
+    assert.equal(await exists(box.pi('skills/review/SKILL.md')), true);
+    const items = (await box.view()).items!.kit!;
+    assert.deepEqual([items.on['pi-cli'], items.notIn?.['pi-cli'], items.heldOut?.['pi-cli'], items.yours?.['pi-cli']],
+      [4, undefined, [OWN], undefined]);
+    // Also when copies differ across tools ("Copies differ" before the click): still held out cleanly with OUT.own.
+    await put(join(box.home, '.claude/skills/notes/SKILL.md'), skill('notes', 'mine in claude'));
+    assert.deepEqual((await box.view()).items!.kit!.heldOut?.['pi-cli'], [OWN]);
+    // With his own Library item (On, and Off): stays in yours, never duplicated in heldOut.
+    await put(box.pi('skills/review/SKILL.md'), skill('review', 'mine edited'));
+    await applySkills(box.share, box.tools, []);
+    await applySkills(box.share, box.tools, [{ key: 'review', on: false, except: [] }]);
+    const afterLib = (await box.view()).items!.kit!;
+    assert.deepEqual(afterLib.heldOut?.['pi-cli'], [OWN]);
+    assert.deepEqual(afterLib.yours?.['pi-cli'], [{ kind: 'skill', key: 'review', name: 'review' }]);
+  } finally { await box.cleanup(); }
+  // With no item on in Pi: notIn carries OUT.own, heldOut does not duplicate it.
+  const solo = await notesOnly();
+  try {
+    await put(solo.pi('skills/notes/SKILL.md'), skill('notes', 'mine'));
+    await solo.turn('on');
+    const items = (await solo.view()).items!.kit!;
+    assert.deepEqual([items.notIn?.['pi-cli']?.reasons, items.heldOut?.['pi-cli']], [[OWN], undefined]);
+  } finally { await solo.cleanup(); }
+});
+
+test('Pi reads his own found copy only from the shared skills folder: heldOut and notIn/report say OUT.shared, and Take over clears it', async () => {
+  const SHARED = 'notes: Pi reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.';
+  const box = await kitHome();
+  try {
+    await put(join(box.home, '.agents/skills/notes/SKILL.md'), skill('notes', 'mine in shared'));
+    await box.turn('on');
+    assert.equal(await exists(box.pi('skills/notes')), false);
+    assert.equal(await readFile(join(box.home, '.agents/skills/notes/SKILL.md'), 'utf8'), skill('notes', 'mine in shared'));
+    const items = (await box.view()).items!.kit!;
+    assert.deepEqual([items.on['pi-cli'], items.notIn?.['pi-cli'], items.heldOut?.['pi-cli']], [4, undefined, [SHARED]]);
+    // Take over on its Library row puts the plugin's copy in Pi and clears heldOut.
+    await takeOver(box.share, box.tools, 'notes', 'pi-cli');
+    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), skill('notes', 'notes'));
+    assert.equal((await box.view()).items!.kit!.heldOut?.['pi-cli'], undefined);
+  } finally { await box.cleanup(); }
+  // Alone (0 on in Pi): notIn and the run's report both give OUT.shared, never duplicated in heldOut.
+  const solo = await notesOnly();
+  try {
+    await put(join(solo.home, '.agents/skills/notes/SKILL.md'), skill('notes', 'mine in shared'));
+    assert.deepEqual(await solo.piSays(await solo.turn('on')), { report: [`held: ${LEAD} ${SHARED}`], box: `off: ${SHARED}` });
+    const items = (await solo.view()).items!.kit!;
+    assert.deepEqual([items.notIn?.['pi-cli']?.reasons, items.heldOut?.['pi-cli']], [[SHARED], undefined]);
+  } finally { await solo.cleanup(); }
 });
 
 test('On while the shared skills folder can’t be read: the skills wait in Pi, which reads that folder, so its report counts the items there now and says why', async () => {

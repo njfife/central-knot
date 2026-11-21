@@ -1872,15 +1872,16 @@ api().onProfileSwitched(result => void applyMenuSwitch(result));
 
 /**
  * Saves a profile: only the fields given change. A new or restored profile opens (a new one with its name field ready to type); an
- * edit leaves the page where it is.
+ * edit leaves the page where it is. Quiet by default; `band` shows `said` visibly on the page it was started on.
  */
-export const saveProfileDef = (profile: ProfileEdit, said?: string) => busy('Saving profile…', async () => {
+export const saveProfileDef = (profile: ProfileEdit, said?: string, band = false) => busy('Saving profile…', async page => {
   const result = await api().saveProfile(profile, state.home!.home);
   if (result.profiles) state.home = { ...state.home!, profiles: result.profiles };
   if (result.problem) { announce(result.problem); return; }
   if (result.id && (!profile.id || profile.restore)) profileState.open = result.id;
   if (result.id && !profile.id) profileState.renaming = result.id;
-  announce(said ?? 'Profile saved.', true);
+  if (band && said) tell({ page, band: true, text: said });
+  else announce(said ?? 'Profile saved.', true);
 });
 
 /** Deletes a profile's definition; one click on Undo saves it again. */

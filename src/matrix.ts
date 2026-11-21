@@ -28,7 +28,7 @@ import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, gro
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
-import { homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
+import { copilotSharesYours, homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
@@ -47,7 +47,7 @@ import { pluginOf } from './sourcelink.ts';
 import { heldKinds } from './presence.ts';
 import { market } from './pluginstate.ts';
 import type { PluginDraft } from './pluginplan.ts';
-import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
+import { alongWords, cantSwitch, click as clickPluginItem, clickWords, copilotByName, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { pageOfPart, partOfPage } from './pluginstatus.ts';
 import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, rowCount, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
@@ -1930,7 +1930,10 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
     const rowNow = () => plugged(t).rows.find(each => idOf(each) === idOf(row));
     queueClick({ kind, key: row.key, on: next }, row.name, () => {
       const now = rowNow(), turned = now && turnEvery(rowItems(now), next);
-      return now && turned?.ops.length ? mainClick(t, now, next, [], turned, () => `${named} is ${next ? 'on' : 'off'} in ${toolsPhrase(turned.turned.map(item => item.tool), tools())}.`, turned.left) : undefined;
+      const copilot = turned?.turned.find(item => item.tool === 'copilot-cli');
+      const shared = copilot && state.home && turned!.ops.some(op => op.tool === 'copilot-cli' && op.part?.kind === 'mcp' && op.part.name === now!.name) && copilotSharesYours(state.home, copilot)
+        ? ` ${copilotByName(now!.name, next, true)}` : '';
+      return now && turned?.ops.length ? mainClick(t, now, next, [], turned, () => `${named} is ${next ? 'on' : 'off'} in ${toolsPhrase(turned.turned.map(item => item.tool), tools())}.${shared}`, turned.left) : undefined;
     }, () => { const now = rowNow(); return now && rowItems(now).some(itemOn); });
   } });
 }

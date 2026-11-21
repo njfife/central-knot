@@ -132,6 +132,23 @@ export type PluginHome = Pick<HomeView, 'pluginItems' | 'profiles' | 'skills' | 
 
 /** Why a copy can't be switched while its whole plugin is off in its tool (installed whole), or on Plugins (placed). */
 const pluginOff = (plugin: string, tool: HarnessId) => `The whole plugin ${plugin} is off in ${toolNames[tool]}.`;
+/** Other Copilot CLI servers sharing the exact bare name of a plugin's MCP server there (PluginCopy `sharesWith`). */
+function copilotShares(home: PluginHome, at: PluginItemAt): PluginCopy['sharesWith'] {
+  if (at.tool !== 'copilot-cli' || at.kind !== 'mcp') return undefined;
+  const rows = new Map(home.mcp.items.map(row => [row.key, row]));
+  const managed = ownHomeItems(home).filter(item => item.kind === 'mcp' && !item.except.includes(at.tool));
+  const managedKeys = new Set(managed.map(item => item.key));
+  const own = managed.filter(item => copilotServerName(rows.get(item.key), item.name) === at.name).map(item => item.id);
+  const plugins = (home.pluginItems ?? []).flatMap(install => install !== at.install && install.tool === at.tool && !install.off
+    ? install.items.filter(part => part.kind === 'mcp' && part.name === at.name).map(part => ({ id: pluginItemId('mcp', pluginItemKey(install, part)), plugin: install.plugin })) : []);
+  const found = home.mcp.items.some(row => isFoundCopilot(row, at.name, home.mcp.library[row.key], managedKeys.has(row.key)));
+  return own.length || plugins.length || found ? { own, plugins, ...(found ? { found: true as const } : {}) } : undefined;
+}
+/** Whether a plugin's MCP server in Copilot CLI shares its exact bare name with a live server of his own or a found one there. */
+export const copilotSharesYours = (home: PluginHome, at: PluginItemAt): boolean => {
+  const shared = copilotShares(home, at);
+  return !!shared && (!!shared.found || ownHomeItems(home).some(item => item.on && shared.own.includes(item.id)));
+};
 /**
  * How a switch meets a copy installed whole: the whole plugin off in that tool first (the copy is off, whatever its own
  * switch); then a tool with no switch for one item of its kind; then a switch that can't be written (pluginswitch.ts
@@ -142,15 +159,8 @@ function installedWay(home: PluginHome, at: PluginItemAt): Pick<PluginCopy, 'way
   if (!ownSwitch(at)) return { way: 'stays' };
   const why = cantSwitch(at);
   if (why) return { way: 'held', why };
-  if (at.tool !== 'copilot-cli' || at.kind !== 'mcp') return { way: 'switch' };
-  const rows = new Map(home.mcp.items.map(row => [row.key, row]));
-  const managed = ownHomeItems(home).filter(item => item.kind === 'mcp' && !item.except.includes(at.tool));
-  const managedKeys = new Set(managed.map(item => item.key));
-  const own = managed.filter(item => copilotServerName(rows.get(item.key), item.name) === at.name).map(item => item.id);
-  const plugins = (home.pluginItems ?? []).flatMap(install => install !== at.install && install.tool === at.tool && !install.off
-    ? install.items.filter(part => part.kind === 'mcp' && part.name === at.name).map(part => ({ id: pluginItemId('mcp', pluginItemKey(install, part)), plugin: install.plugin })) : []);
-  const found = home.mcp.items.some(row => isFoundCopilot(row, at.name, home.mcp.library[row.key], managedKeys.has(row.key)));
-  return { way: 'switch', ...(own.length || plugins.length || found ? { sharesWith: { own, plugins, ...(found ? { found: true as const } : {}) } } : {}) };
+  const sharesWith = copilotShares(home, at);
+  return { way: 'switch', ...(sharesWith ? { sharesWith } : {}) };
 }
 
 /**

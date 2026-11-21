@@ -101,12 +101,12 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       // Under the box: what it has, or what the box says more (why it is off, that he unticked it); in Pi and OpenCode, where none
       // of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its run's report says; then each name of his
       // (yourLines), whatever else is so, which say why on their own where the box is held by those alone.
-      const why = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons ?? [], yours = entry.items?.[plugin.name]?.yours?.[tool] ?? [];
+      const why = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons ?? [], heldOut = entry.items?.[plugin.name]?.heldOut?.[tool] ?? [], yours = entry.items?.[plugin.name]?.yours?.[tool] ?? [];
       const state = why.length ? why.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason))
         : box.held && yours.length ? null : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark));
       return h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]),
-          state, yourLines(view, entry, plugin, tool, yours, marketIndex),
+          state, heldOut.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason)), yourLines(view, entry, plugin, tool, yours, marketIndex),
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
           view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null));
     })), view.tools.length),
