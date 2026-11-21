@@ -28,17 +28,17 @@ esac`);
   chmodSync(join(box, 'hdiutil'), 0o755);
   process.env.PATH = `${box}:${PATH}`;
   const image = join(box, 'writable.dmg'), mount = join(box, 'volume');
-  assert.equal(whileAttached(image, mount, ['-readonly'], () => 'done'), 'done', 'what is done on the image is done, and returned');
+  assert.equal(whileAttached(image, mount, ['-readonly'], () => 'done', 0), 'done', 'what is done on the image is done, and returned');
   return readFileSync(join(box, 'calls'), 'utf8').trimEnd().split('\n').map(call => call.replaceAll(box, '<box>'));
 }
 
 test('A disk refused its eject (“Resource busy”) is detached by its device, tried again forced: no longer there is detached', t => {
   assert.deepEqual(detachWith(t, [busy, gone]), [
     'attach <box>/writable.dmg -nobrowse -noautoopen -mountpoint <box>/volume -readonly', 'detach /dev/disk5', 'detach /dev/disk5 -force']);
-  assert.deepEqual(detachWith(t, [busy, busy]).slice(1), ['detach /dev/disk5', 'detach /dev/disk5 -force', 'detach /dev/disk5 -force']);
+  assert.deepEqual(detachWith(t, Array(5).fill(busy)).slice(1), ['detach /dev/disk5', ...Array(5).fill('detach /dev/disk5 -force')]);
 });
 
-test('A disk still busy after five tries fails in hdiutil’s words, and any other refusal fails at once', t => {
-  assert.throws(() => detachWith(t, Array(9).fill(busy)), /Resource busy/);
+test('A disk still busy after twelve tries fails in hdiutil’s words, and any other refusal fails at once', t => {
+  assert.throws(() => detachWith(t, Array(15).fill(busy)), /Resource busy/);
   assert.throws(() => detachWith(t, ['hdiutil: detach failed - Operation not permitted']), /Operation not permitted/);
 });

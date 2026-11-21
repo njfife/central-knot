@@ -12,36 +12,37 @@ const customIconFlag = '00000000000000000400000000000000000000000000000000000000
 
 const run = (command, args, options) => execFileSync(command, args, { stdio: ['ignore', 'ignore', 'inherit'], ...options });
 // hdiutil is taken from PATH (/usr/bin on every Mac), so a test can stand one in (tests/macdmg.test.ts). macOS can still be
-// holding a disk it was just handed, or one that Spotlight or a scan has just looked at ("Resource busy"); a moment later it
-// is free. So a call that meets one is tried again a second later, five tries in all (`again`: the arguments of each later
-// try), and says so in the log; any other failure is thrown at once.
-const hdiutil = (args, { again = args, stdout = 'ignore' } = {}) => {
+// holding a disk it was just handed, or one that Spotlight or a scan has just looked at ("Resource busy"); a few seconds later
+// it is free (hosted macOS 15 under load held a writable image past 4 s). So a call that meets one is tried again after `waitMs`
+// (default 2 s), twelve tries in all (`again`: the arguments of each later try), and says so in the log; any other failure throws.
+const HDIUTIL_TRIES = 12, pause = new Int32Array(new SharedArrayBuffer(4));
+const hdiutil = (args, { again = args, stdout = 'ignore', waitMs = 2000 } = {}) => {
   for (let tries = 1; ; tries++) {
     try { return run('hdiutil', tries === 1 ? args : again, { stdio: ['ignore', stdout, 'pipe'], encoding: 'utf8' }); }
     catch (error) {
-      if (tries === 5 || !/Resource busy/.test(error.stderr)) throw error;
+      if (tries === HDIUTIL_TRIES || !/Resource busy/.test(String(error.stderr ?? ''))) throw error;
       process.stderr.write(error.stderr);
-      run('/bin/sleep', ['1']);
+      if (waitMs > 0) Atomics.wait(pause, 0, 0, waitMs);
     }
   }
 };
 // Returns the device the image is attached as: the whole disk, which hdiutil names first ("/dev/disk5  GUID_partition_scheme").
-const attach = (image, mount, flags) => {
-  const said = hdiutil(['attach', image, '-nobrowse', '-noautoopen', '-mountpoint', mount, ...flags], { stdout: 'pipe' });
+const attach = (image, mount, flags, waitMs) => {
+  const said = hdiutil(['attach', image, '-nobrowse', '-noautoopen', '-mountpoint', mount, ...flags], { stdout: 'pipe', waitMs });
   const device = /^\/dev\/disk\d+(?=\s)/m.exec(said)?.[0];
   if (!device) throw new Error(`hdiutil attached ${image} and named no disk:\n${said}`);
   return device;
 };
 // Detached by its device, not its mount: a first try can unmount the volume and still be refused the eject, and by the next
 // try the mount's path is gone. A later try is forced; a disk no longer there ("No such file or directory") is detached.
-const detach = device => {
-  try { hdiutil(['detach', device], { again: ['detach', device, '-force'] }); }
-  catch (error) { if (!/No such file or directory/.test(error.stderr)) throw error; }
+const detach = (device, waitMs) => {
+  try { hdiutil(['detach', device], { again: ['detach', device, '-force'], waitMs }); }
+  catch (error) { if (!/No such file or directory/.test(String(error.stderr ?? ''))) throw error; }
 };
 /** Attaches `image` at `mount` for `use`, and detaches it after, however `use` ends. Returns what `use` returns. */
-export function whileAttached(image, mount, flags, use) {
-  const device = attach(image, mount, flags);
-  try { return use(); } finally { detach(device); }
+export function whileAttached(image, mount, flags, use, waitMs = 2000) {
+  const device = attach(image, mount, flags, waitMs);
+  try { return use(); } finally { detach(device, waitMs); }
 }
 
 // Each app's window is its own folder, assets/dmg/<its download name>/ (Central-Knot, Central-Knot-Alpha): the picture,
