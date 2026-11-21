@@ -1783,9 +1783,11 @@ span.ins-confirm { margin-top: 0; }
 .profile-confirm-actions { display: inline-flex; gap: 8px; flex-wrap: nowrap; }
 .profile-name-input { width: min(100%, 360px); height: 28px; padding: 0 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); color: var(--ink); font: 600 14px/20px var(--sans); user-select: text; cursor: text; }
 .profile-name-input:focus { outline: 2px solid var(--focus); outline-offset: -2px; }
-/* The setup step in an empty profile is a full small button, not the band's inline link size */
-.band #profile-from-now { height: 28px; padding: 0 8px; flex: none; }
-.profiles-page .band:has(#profile-from-now) { flex-wrap: wrap; row-gap: 6px; }
+/* The setup step in an empty profile and the older-profile opt-in are full small buttons, not the band's inline link size */
+.band #profile-from-now, .band #profile-choose-plugins { height: 28px; padding: 0 8px; flex: none; }
+.profiles-page .band:has(#profile-from-now, #profile-choose-plugins) { flex-wrap: wrap; align-items: flex-start; row-gap: 6px; }
+.profiles-page .band:has(#profile-from-now, #profile-choose-plugins) > svg { margin-top: 1px; }
+.profiles-page .band:has(#profile-from-now, #profile-choose-plugins) > .band-text { max-width: calc(100% - 20px); }
 /* The result of a switch spans the pane, like the table under it */
 .page.profiles-page > .bands > .band { padding-right: 16px; }
 
@@ -1845,15 +1847,16 @@ span.ins-confirm { margin-top: 0; }
 .status-profile:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .status-profile .icon { color: var(--accent-ink); flex: none; }
 .status-profile .status-profile-chevron { color: var(--ink-soft); }
-.pf-menu { position: absolute; bottom: calc(100% + 6px); left: -10px; z-index: 20; min-width: 200px; max-width: 320px; max-height: 60vh; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--overlay); }
-.pf-menu-item { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 6px; font-size: 13px; line-height: 20px; color: var(--ink); white-space: nowrap; }
+.pf-menu { position: absolute; bottom: calc(100% + 6px); left: -10px; z-index: 20; width: max-content; min-width: 240px; max-width: 400px; max-height: 60vh; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--overlay); }
+.pf-menu-item { all: unset; box-sizing: border-box; display: flex; align-items: flex-start; gap: 8px; min-height: 32px; padding: 6px 8px; border-radius: 6px; font-size: 13px; line-height: 20px; color: var(--ink); }
 .pf-menu-item:hover:not(:disabled) { background: var(--hover); }
 .pf-menu-item:focus-visible { background: var(--hover); outline: 2px solid var(--focus); outline-offset: -2px; }
-.pf-menu-item:disabled { opacity: 0.5; }
-.pf-menu-tick { width: 14px; flex: none; display: grid; place-items: center; color: var(--accent-ink); }
-.pf-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pf-menu-item:disabled:not([aria-checked="true"]) { opacity: 0.5; }
+.pf-menu-tick { width: 14px; height: 20px; flex: none; display: grid; place-items: center; color: var(--accent-ink); }
+.pf-menu-body { min-width: 0; display: flex; flex-direction: column; }
+.pf-menu-name { min-width: 0; overflow-wrap: anywhere; }
+.pf-menu-preview { font-size: 11.5px; line-height: 15px; color: var(--ink-soft); white-space: normal; overflow-wrap: anywhere; }
 .pf-menu-sep { height: 1px; margin: 2px 4px; background: var(--line); }
-.pf-menu-size { margin-left: auto; padding-left: 12px; font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 
 /* ---------- Harnesses ---------- */
 .harness-scroll { container-type: inline-size; padding: 12px var(--pad-end) 16px 16px; display: flex; flex-direction: column; gap: 12px; }

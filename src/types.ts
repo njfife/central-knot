@@ -1383,12 +1383,13 @@ export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the
 // ---------- Profiles ----------
 
 /**
- * A named set of items to have on (profileplan.ts): library items as `skill:<key>`, `agent:<key>` and `mcp:<key>`, and plugins'
- * items as `plugin:<kind>:<key>` (profileplan.ts pluginItemId). Switching to it turns those library items On and every other Off,
- * and each plugin's item on or off in each tool that can switch that one item; nothing else is kept about it, and which profile
- * is in use is worked out.
+ * A named set of items to have on (profileplan.ts): library items as `skill:<key>`, `agent:<key>` and `mcp:<key>`, and, when
+ * `switchesPluginItems` is true, plugins' items as `plugin:<kind>:<key>` (profileplan.ts pluginItemId). Switching to it turns
+ * those library items On and every other Off; when `switchesPluginItems` is true it also turns each plugin's item on or off in
+ * each tool that can switch that one item, and when false it leaves every plugin copy as it stands. Which profile is in use is
+ * worked out.
  */
-export interface Profile { id: string; name: string; items: string[] }
+export interface Profile { id: string; name: string; items: string[]; switchesPluginItems: boolean }
 
 export interface ProfilesView {
   profiles: Profile[];
@@ -1402,10 +1403,11 @@ export interface ProfilesView {
 }
 
 /**
- * A profile to add (no `id`) or change: only the fields given change, so a rename and a tick never undo each other. `restore` makes
- * a deleted profile again with its own `id` (Undo of Delete).
+ * A profile to add (no `id`) or change: only the fields given change, so a rename and a tick never undo each other. `restore`
+ * makes a deleted profile again with its own `id` (Undo of Delete). `switchesPluginItems` defaults to true on a new profile,
+ * stays as stored on edits, and once true stays true.
  */
-export interface ProfileEdit { id?: string; name?: string; items?: string[]; restore?: boolean }
+export interface ProfileEdit { id?: string; name?: string; items?: string[]; switchesPluginItems?: boolean; restore?: boolean }
 
 /** A library item a profile switch named, as History keeps it: its id (profileplan.ts itemId) and its name then. */
 export interface SwitchedItem { id: string; name: string }
