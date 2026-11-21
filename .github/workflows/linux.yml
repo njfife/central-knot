@@ -1,9 +1,10 @@
 name: Linux package
-# The Linux checks, for the Linux plan's steps (AGENTS.md, "Checking a change"): never a required check for a Mac change, and
-# nothing here is released or uploaded but the light tour's pictures.
+# The Linux checks, split into jobs side by side: two unit-test shards (type check once), one package job (AppImage, smoke
+# test, light tour), four end-to-end jobs (one group of scripts/e2e.mjs each), and one final job (`linux`) green only if all
+# passed. Never a required check for a Mac change yet (AGENTS.md, "Checking a change").
 on:
   push:
-    branches: [next]
+    branches: [next, 'ci/**']
   workflow_dispatch:
 permissions:
   contents: read
@@ -12,11 +13,31 @@ concurrency:
   group: linux-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  linux:
+  unit:
     runs-on: ubuntu-latest
-    # A green run of 2026-11-19 took about 19 minutes: the end-to-end checks 14½ (their four groups one after another), the unit
-    # tests 3½, the rest a minute, though apt alone has taken 1½. The limit leaves room for a slow one, as mac.yml's does.
-    timeout-minutes: 30
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      # librarywalk.test.ts alone takes roughly as long as all other unit tests combined; shard 1 also runs tsc once.
+      - if: matrix.shard == 1
+        run: npx tsc --noEmit && node --test tests/librarywalk.test.ts
+      - if: matrix.shard == 2
+        run: |
+          shopt -s extglob
+          node --test tests/!(librarywalk).test.ts
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -24,9 +45,8 @@ jobs:
           node-version: '24'
           cache: npm
       # A display for the app (Xvfb), FUSE for the AppImage to mount itself, and mksquashfs to make it.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb fuse3 squashfs-tools
+      - run: dpkg -s xvfb fuse3 squashfs-tools >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb fuse3 squashfs-tools)
       - run: npm ci
-      - run: npm test
       - run: npm run package:linux
       # Every launch passes --no-sandbox: Ubuntu 24.04 and later keep Chromium's sandbox from the user namespaces it needs.
       - run: xvfb-run -a release/Central-Knot-*-linux-x86_64.AppImage --smoke-test --no-sandbox
@@ -39,4 +59,45 @@ jobs:
           path: light-tour
           if-no-files-found: ignore
           retention-days: 7
-      - run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/e2e.mjs --no-sandbox
+      # The AppImage is already zstd-compressed squashfs; compression-level 0 avoids spending time recompressing it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: appimage
+          path: release/Central-Knot-*-linux-x86_64.AppImage
+          compression-level: 0
+          retention-days: 1
+
+  e2e:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      - run: dpkg -s xvfb fuse3 >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb fuse3)
+      - run: npm ci
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: appimage
+          path: release
+      - run: chmod +x release/Central-Knot-*-linux-x86_64.AppImage
+      - run: xvfb-run -a -s "-screen 0 1920x1200x24" node scripts/e2e.mjs --group ${{ matrix.group }} --no-sandbox
+
+  linux:
+    needs: [unit, package, e2e]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ needs.unit.result }} ${{ needs.package.result }} ${{ needs.e2e.result }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do [ "$result" = success ] || exit 1; done

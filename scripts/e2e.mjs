@@ -1,8 +1,8 @@
 // Drives the real app end to end over its debug port, in a throwaway HOME, so "This Mac's home" is disposable too.
-// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,…]
-// `--flows` runs only the named flows, here, on one HOME, for working on one. Without it the run is every flow that can run here
-// (crashFlow needs a home the app writes and --crash-rounds above 0: `runs`): this script once per group (`groups`, at the end)
-// with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time (runGroups).
+// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,… | --group n]
+// `--flows` runs only the named flows, here, on one HOME, for working on one; `--group n` runs group n of `groups` the same way.
+// Without either the run is every flow that can run here (crashFlow needs a home the app writes and --crash-rounds above 0:
+// `runs`): this script once per group (`groups`, at the end) with that group's `--flows`, CK_E2E_GROUPS_AT_ONCE copies at a time (runGroups).
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, closeSync, constants as fsConstants, cpSync, existsSync, openSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -28,6 +28,8 @@ const flag = name => args.includes(name);
 const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
 const shots = option('--shots');
 const named = option('--flows')?.split(',');
+const hasGroup = flag('--group');
+const group = hasGroup ? Number(option('--group')) : undefined;
 const crashRounds = Number(option('--crash-rounds', 6));
 const canWriteRealHome = writesRealHome(process.platform);
 // The packaged app on Linux is the AppImage, which starts at sign-in from its first open (signin.ts): appImageSignIn.
@@ -159,7 +161,7 @@ let app;
 const launched = new Set();
 process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
 // A grouped run's parent passes these on to its copies and waits for them instead (runGroups).
-if (named) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
+if (named || hasGroup) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
   // OpenCode's CLI is looked for only inside the throwaway home, and on a Mac every app in the stand-in for /Applications
@@ -11726,7 +11728,10 @@ const groups = [
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
 const listed = groups.flat().map(flow => flow.name);
 const written = [...readFileSync(import.meta.filename, 'utf8').matchAll(/^async function (\w+Flow)\(/gm)].map(([, name]) => name);
+const badGroup = hasGroup && (!Number.isInteger(group) || group < 1 || group > groups.length);
 const refused = [...written.filter(name => listed.filter(each => each === name).length !== 1).map(name => `${name} is in no group or in two`),
+  ...(flag('--flows') && hasGroup ? ['--group and --flows cannot be used together'] : []),
+  ...(badGroup ? [`--group takes 1 to ${groups.length}, and was given ${option('--group') || 'none'}`] : []),
   ...(named ?? []).filter(name => !listed.includes(name)).map(name => `--flows names ${name}, which is no flow`),
   ...(Number.isInteger(crashRounds) && crashRounds >= 0 ? [] : [`--crash-rounds takes a whole number, and was given ${option('--crash-rounds') ?? 'none'}`])];
 if (refused.length) { rmSync(scratch, { recursive: true, force: true }); throw new Error(`Refused to start: ${refused.join('; ')}.`); }
@@ -11796,8 +11801,9 @@ async function runGroups() {
   return stoppedBy ? 130 : failLines.length ? 1 : 0;
 }
 
+const chosen = hasGroup ? groups[group - 1].map(flow => flow.name) : named;
 const started = Date.now();
-if (!named) {
+if (!chosen) {
   // The scratch folder and its stand-ins were made as this script loaded, as every flow's paths are built from them; the parent
   // runs no flow, so it deletes them.
   rmSync(scratch, { recursive: true, force: true });
@@ -11806,7 +11812,7 @@ if (!named) {
   try {
     seedHome();
     // Each flow's time is printed, so a run that grows slow says where (and a grouped run, which flows ran).
-    for (const flow of groups.flat().filter(each => named.includes(each.name) && runs(each))) {
+    for (const flow of groups.flat().filter(each => chosen.includes(each.name) && runs(each))) {
       flowRunning = flow.name;
       const from = Date.now();
       await flow();
