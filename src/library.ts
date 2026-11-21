@@ -84,10 +84,18 @@
 // managed, when its folder is made again or it is managed again (librarypass.ts guardFolders, cameBack), and by Take over of that
 // folder (skills.ts runTakeOver). With it, no copy there now is the table's deletion by hand, settled as any (librarypass.ts
 // copyIn); the kind says how (`sharedWay`: `copy`, its folder there gone, said "in the shared folder"; `link`, its link gone).
-// While the shared folder can't be vouched for, nothing is concluded from it and nothing is written because of it: it is missing
-// where it held skills, can't be listed, or lists none of the folders the record names (skills.ts sharedListing). Then a harness
-// that may have had the item through it (it reads that folder, holds a link that leads nowhere, or had it so) is unseen: nothing
-// turns Off, and nothing is written there, a new item's first copy included, until the folder is back. The problems say it once.
+// While the shared folder can't be vouched for, nothing is concluded from it, nothing is written because of it, and nothing is
+// taken from it: it can't be listed, or, of the folders it is known to hold (the record's, and those a link in a harness's own
+// folder leads to, there or not), it is missing or lists none (skills.ts sharedListing); known to hold none, nothing can say it
+// held any, and it is as it lists. Then nothing in it is a way or a copy found (skills.ts readAlsoRead), and a harness that may
+// have had the item through it (it reads that folder, holds a link that leads nowhere, or had it so) is unseen: nothing turns
+// Off, and nothing is written there, a new item's first copy included, until the folder is back. The problems say it once, with
+// the way out for a person who did remove those skills: turn them off, and remove the links to them.
+// A harness that reads that folder is unseen for an item even with a copy of its own (skills.ts readDisk), since that copy may be
+// beside one away: not written over, taken in, recorded or removed; a found key with such a copy waits (FOUND, below: held back),
+// and so does an Undo that would give such a copy back (librarypass.ts click). A click's result names each harness that waits.
+// The price: a skill only ever in such a harness's own folder (Codex's, say) waits too until the folder is back; one in a harness
+// that doesn't read it, with no link into it (Claude Code's own folder), is taken in as on any day.
 //
 // Other marks a harness's line can carry are a kind's own, worked out at each look from what it read and never stored, and
 // they change nothing a pass does: for skills, a tool's own switch that turns the skill off there (skills.ts toolFacts, `loads`).
@@ -305,6 +313,8 @@
 // ("on": the next row decides).
 //
 //   what the key has                                 a click on Add                       Synchronize everything
+//   a copy held back (a reader's own while the       refused, saying why                  left found: its row says why
+//     shared folder is away: THE SHARED FOLDER)
 //   no copy that can be read                         refused: no copy to take in          left found, quietly
 //   the record holds it deleted                      on: its tombstone is lifted          left found, for good
 //   every copy switched off by its tool's own switch on                                   left found: its row keeps Add
@@ -812,11 +822,13 @@ export interface FoundKey {
   copies: FoundCopy[];
   /** The record holds it deleted (a tombstone). */
   deleted: boolean;
+  /** Why a copy a managed harness has is held back (librarypass.ts Disk.holdsBack): the key waits (the table's first row). */
+  heldBack?: string;
 }
 /** Who asks to take a found key in: a click on its Add, or Synchronize everything. */
 export type TakenBy = 'click' | 'rule';
 /** Why a found key is left found (the header's FOUND table, one per row). */
-export type LeftFound = 'no-copy' | 'deleted' | 'switched-off' | 'settling' | 'choice-changed';
+export type LeftFound = 'held-back' | 'no-copy' | 'deleted' | 'switched-off' | 'settling' | 'choice-changed';
 /**
  * The table's answer: take it in from this copy (`chosen`: the person chose it among copies that differ), wait for a choice of
  * copy (`latest`: the content changed last, which the question preselects: latestCopy), or leave it found.
@@ -829,6 +841,7 @@ export type TakeInAnswer = { take: FoundCopy; chosen: boolean } | { wait: 'choic
  */
 export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: HarnessId; hash?: string }, settle?: { clock: number; ms: number }): TakeInAnswer {
   const rule = by === 'rule', { copies } = found;
+  if (found.heldBack) return { leave: 'held-back' };
   if (!copies.length) return { leave: 'no-copy' };
   if (rule && found.deleted) return { leave: 'deleted' };
   if (rule && copies.every(copy => copy.switchedOff)) return { leave: 'switched-off' };
