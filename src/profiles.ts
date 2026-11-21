@@ -9,8 +9,11 @@
 // tool is kept here but those entries, and which profile is in use is never stored. A file from before profiles were sets of items (format 1) is read here for the page and moved once by
 // profilemigrate.ts.
 //
-//   profiles.json   { formatVersion: 2, profiles: [{ id, name, items: ['skill:notes', 'mcp:docs', 'agent:writer'] }] }
+//   profiles.json   { formatVersion: 3, profiles: [{ id, name, items: ['skill:notes', 'mcp:docs', 'agent:writer'], switchesPluginItems: true }] }
 //                   a plugin's item as profileplan.ts pluginItemId names it: 'plugin:skill:document-tools@team-tools/pdf'
+//                   format 2 files are read as-is with switchesPluginItems false and never rewritten until a profile is saved.
+//                   saveProfiles is the one writer: format 3 on a save, format 2 from profilemigrate.ts's format 1 move (a pass
+//                   that runs without a click must not write a file the released build refuses).
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -32,21 +35,23 @@ import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, P
 
 // ---------- The profiles file ----------
 
-const FORMAT_VERSION = 2;
-export const profilesPath = (home: string) => join(storeDirectory(home), 'profiles.json');
+const FORMAT_VERSION = 3;
+const profilesPath = (home: string) => join(storeDirectory(home), 'profiles.json');
 
 /** A profile's id for an item as format 1 named it: a skill by its key, as now; an MCP server by its name as written. */
 const fromFormat1 = (id: string) => (id.startsWith('mcp:') ? `mcp:${itemKey(id.slice(4))}` : id);
 
-/** The profiles in a profiles file: each with a string id and name; items kept only as strings. */
+/** The profiles in a profiles file: each with a string id and name, string items, and whether it switches plugin items (false for format 1 and 2, or a format 3 profile missing the field). */
 const profilesOf = (raw: unknown, format: number): Profile[] => (Array.isArray(raw) ? raw : [])
   .filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string')
-  .map(profile => ({ id: profile.id, name: profile.name, items: (strings(profile.items) ?? []).map(id => (format === 1 ? fromFormat1(id) : id)) }));
+  .map(profile => ({ id: profile.id, name: profile.name, items: (strings(profile.items) ?? []).map(id => (format === 1 ? fromFormat1(id) : id)),
+    switchesPluginItems: format >= 3 && profile.switchesPluginItems === true }));
 
 /**
- * The home's profiles as the file has them, with its format: 1 is a file from before profiles were sets of items, read with
- * its items' ids as they are now, which profilemigrate.ts moves to 2. A file that can't be read, or that a newer Central Knot
- * wrote, is reported and never overwritten: the person's profiles may still be in it.
+ * The home's profiles as the file has them, with its format: 1 is a file from before profiles were sets of items, read with its
+ * items' ids as they are now, which profilemigrate.ts moves to 2; 2 is read as-is with `switchesPluginItems` false and never
+ * rewritten until a profile is saved. A file that can't be read, or that a newer Central Knot wrote, is reported and never
+ * overwritten: the person's profiles may still be in it.
  */
 export async function readProfileFile(home: string): Promise<{ view: ProfilesView; format?: number; raw?: Record<string, unknown>; text?: string }> {
   const path = profilesPath(home);
@@ -68,9 +73,12 @@ export async function readProfileFile(home: string): Promise<{ view: ProfilesVie
 export const readProfiles = async (home: string): Promise<ProfilesView> =>
   ({ ...(await readProfileFile(home)).view, plugins: (await recordedIds(home)).plugins.map(({ id, plugin, marketName, on }) => ({ id, plugin, marketName, on })) });
 
-/** Writes the profiles as format 2. */
-export const saveProfiles = (home: string, profiles: Profile[]) =>
-  writeDurably(profilesPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, profiles }, null, 2)}\n`);
+/**
+ * Writes `profiles.json` in `format` (format 3 on a save; format 2 from profilemigrate.ts's format 1 move, since a pass that runs
+ * without a click must not write a file the released build refuses). Format 2 omits `switchesPluginItems`.
+ */
+export const saveProfiles = (home: string, profiles: Profile[], format: 2 | 3 = FORMAT_VERSION) => writeDurably(profilesPath(home),
+  `${JSON.stringify({ formatVersion: format, profiles: format === 2 ? profiles.map(({ id, name, items }) => ({ id, name, items })) : profiles }, null, 2)}\n`);
 
 /**
  * The home's profiles, ready to change, or why they can't be changed here: a preview-only home, a record that stops every write
@@ -88,9 +96,11 @@ async function openProfiles(context: ShareContext): Promise<{ profiles: Profile[
 }
 
 /**
- * Adds a profile, or changes an existing one's name or items: a field left out keeps what the profile has now, so a rename and a
- * tick sent close together never undo each other. Names are unique, ignoring case. With `restore`, `id` is a deleted profile's,
- * made again with that id (Undo of Delete).
+ * Adds a profile, or changes an existing one's name, items or `switchesPluginItems`: a field left out keeps what the profile has
+ * now, so a rename and a tick sent close together never undo each other. A new profile defaults to `switchesPluginItems: true`;
+ * an existing one keeps `false` until opted in with `true` (which drops any `plugin:` ids while keeping all of his own, dormant
+ * ones too), and once `true` stays `true`. Names are unique, ignoring case. With `restore`, `id` is a deleted profile's, made
+ * again with that id (Undo of Delete) and its saved `switchesPluginItems`.
  */
 export async function saveProfile(context: ShareContext, input: ProfileEdit): Promise<{ problem?: string; id?: string }> {
   const opened = await openProfiles(context);
@@ -101,9 +111,12 @@ export async function saveProfile(context: ShareContext, input: ProfileEdit): Pr
   if (!name) return { problem: 'A profile needs a name.' };
   if (name.length > 40) return { problem: 'Keep the name to 40 characters or fewer.' };
   if (opened.profiles.some(profile => profile.id !== input.id && profile.name.toLowerCase() === name.toLowerCase())) return { problem: `There is already a profile called “${name}”.` };
-  const items = [...new Set((input.items ?? existing?.items ?? []).filter(item => /^(plugin:)?(skill|agent|mcp):./.test(item)))];
+  const optingIn = !!existing && !existing.switchesPluginItems && input.switchesPluginItems === true;
+  const items = [...new Set((input.items ?? existing?.items ?? []).filter(item => /^(plugin:)?(skill|agent|mcp):./.test(item) && (!optingIn || !item.startsWith('plugin:'))))];
+  const switchesPluginItems = existing ? existing.switchesPluginItems || input.switchesPluginItems === true : (input.switchesPluginItems ?? true);
   const id = existing?.id ?? (input.restore ? input.id : undefined) ?? randomUUID();
-  const profiles = existing ? opened.profiles.map(profile => (profile.id === id ? { id, name, items } : profile)) : [...opened.profiles, { id, name, items }];
+  const saved: Profile = { id, name, items, switchesPluginItems };
+  const profiles = existing ? opened.profiles.map(profile => (profile.id === id ? saved : profile)) : [...opened.profiles, saved];
   await saveProfiles(context.home, profiles);
   return { id };
 }
