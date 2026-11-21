@@ -225,3 +225,20 @@ test('A switch-on, a switch-off and an Undo say what they did; the Undo’s entr
   assert.deepEqual(restorePlan(undo, [deleted, undo, entry({ id: 'line', kind: 'deleted', cause: 'in-line', losers: [] })], about(item({ deleted: { at } }))).back.map(event => event.id), ['gone']);
   assert.equal(everythingSentence(rule('undo', false, { everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: [], left: [], keptIn: [] } } })).text, 'Undone: switched off; nothing it took in was taken back.');
 });
+
+test('Use the plugin’s (library.ts TAKE): its entry says what happened; its Undo makes his version current, his own, On and kept out as before, while it carries the link; then Go back before this; its Undo’s entry offers nothing', () => {
+  const took = entry({ cause: 'plugin-taken', previous: 'a', version: 'b', link: 'plugin:geo@team', took: { on: false, except: ['codex-cli'] }, losers: [{ tool: 'claude-cli', hash: 'a' }] });
+  assert.equal(librarySentence(took, libraryWords.agents, tools)?.text,
+    'Use the plugin’s: the plugin geo’s version became current, in Claude Code; yours is kept as a version, and each other tool with your copy keeps it as its own.');
+  const back = { key: 'reviewer', on: false, except: ['codex-cli'], version: 'a', untake: true };
+  assert.deepEqual(offered(took, item({ source: 'geo-id' })), ['Undo', back]);
+  assert.deepEqual(offered(took, item({ source: 'geo-id', hash: 'x' })), ['Go back before this', back], 'the plugin updated meanwhile');
+  assert.deepEqual(offered(took, item())?.[0], 'Go back before this', 'let go by an edit: his first version is not current');
+  assert.equal(offered(took, item({ hash: 'a' })), undefined, 'his own again at his version: nothing to go back to');
+  const same = { ...took, previous: 'b' };
+  assert.equal(librarySentence(same, libraryWords.agents, tools)?.text, 'The plugin geo’s is the same as yours, so it follows the plugin now; each other tool with your copy keeps it as its own.');
+  assert.deepEqual(offered(same, item({ source: 'geo-id' })), ['Undo', { ...back, version: 'b' }], 'the same content: no version changes, the link and his placement go back');
+  const undone = entry({ kind: 'current', cause: 'plugin-taken', previous: 'b', version: 'a', losers: [{ tool: 'claude-cli', hash: 'b' }] });
+  assert.equal(librarySentence(undone, libraryWords.agents, tools, item(), true)?.text, 'Undone: yours is current again, in Claude Code, and your own, no longer the plugin’s.');
+  assert.equal(offered(undone, item({ hash: 'a' })), undefined);
+});

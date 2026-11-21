@@ -2912,7 +2912,7 @@ async function practiceFlow() {
   if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 50 && !(await a.exists('.plugin-items-section')); tries++) await wait(100);
   const migrated = await a.text('.plugin-items-section') ?? '';
-  check('the migrated plugin’s page lists Its items: pdf-reader his own, spreadsheet kept out of Pi', /skill pdf-reader\s*Not brought in: you have your own/.test(migrated) && /skill spreadsheet/.test(migrated), migrated);
+  check('the migrated plugin’s page lists Its items: pdf-reader his own, spreadsheet kept out of Pi', /skill pdf-reader\s*Not brought in: you keep your own/.test(migrated) && /skill spreadsheet/.test(migrated), migrated);
   await fitsAtMinimum(a, 'a migrated plugin’s page, with Its items');
   await a.shot('practice-plugin-migrated');
   // Pi joined just above: its folder goes once the pass bringing it up to date has ended, or that pass makes it again and the
@@ -6573,11 +6573,34 @@ esac
   if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-issue-tracker');
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && !(await a.exists('#pupdate-0-issue-tracker')); tries++) await wait(100);
-  check('its page says an update is ready for issues, and that triage is his own', /MCP server issues\s*An update is ready/.test(await a.text('.plugin-items-section') ?? '') && /skill triage\s*Not brought in: you have your own/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-items-section'));
+  check('its page says an update is ready for issues, and that triage is his own', /MCP server issues\s*An update is ready/.test(await a.text('.plugin-items-section') ?? '') && /skill triage\s*Not brought in: you keep your own/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-items-section'));
   await pictures('plugin-items-page');
   await a.click('#pupdate-0-issue-tracker');
   await done();
   same('Update brings issues up to date in Pi, and leaves triage as he has it', [(readNow(join(home, '.pi/agent/mcp.json')) ?? '').includes('--v2'), readFileSync(join(home, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.')], [true, true]);
+  // His triage meets the plugin's under Pi's box, its reason a state with Use the plugin's beside it (library.ts TAKE). The tool
+  // files it can touch, read before the click, after it and after the header's Undo.
+  const toolFiles = () => Object.fromEntries(['.pi/agent/skills/triage/SKILL.md', '.pi/agent/settings.json', '.pi/agent/mcp.json', '.claude.json', '.claude/settings.json', '.claude/plugins/installed_plugins.json'].map(path => [path, readNow(join(home, path))]));
+  const take = '#ptake-0-issue-tracker-pi-cli-skill-triage', piLine = () => a.text('.plugin-tool[data-tool="pi-cli"] .plugin-tool-text');
+  for (let tries = 0; tries < 50 && !(await a.exists(take)); tries++) await wait(100);
+  check('under Pi’s box: triage is his, said as a state, with Use the plugin’s', /triage: you keep your own skill by that name, not the plugin’s\.\s*Use the plugin’s/.test(await piLine() ?? ''), await piLine());
+  if (shots) for (const theme of ['light', 'dark']) {
+    await a.run(`window.centralKnot.setAppearance('${theme}')`);
+    for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await a.shot(`name-conflict-${theme}-${width}`); }
+    await fullSize(a);
+  }
+  await a.run(`window.centralKnot.setAppearance('system')`);
+  const clashBefore = toolFiles();
+  await a.click(take);
+  await done();
+  const clashAfter = toolFiles(), changedFiles = Object.keys(clashAfter).filter(path => clashAfter[path] !== clashBefore[path]);
+  same('Use the plugin’s writes the plugin’s triage over his in Pi, and nothing else: Pi’s list and Claude Code as they were', [changedFiles, clashAfter['.pi/agent/skills/triage/SKILL.md'] === readFileSync(triage, 'utf8')], [['.pi/agent/skills/triage/SKILL.md'], true]);
+  check('one result, with Undo', /^Its items put in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
+  await a.click('#plugins-undo');
+  await done();
+  same('the header’s Undo leaves every tool file as before the click, his triage back in Pi', toolFiles(), clashBefore);
+  for (let tries = 0; tries < 50 && !(await a.exists(take)); tries++) await wait(100);
+  check('his own again: the clash and its action are back under Pi’s box', await a.exists(take), await piLine());
   await a.click('#plugin-back');
   // A tool's box, on its page: Pi unticked, Pi alone, at once; the switch is then partial, and the automatic updates leave it out.
   await a.click('#popen-0-issue-tracker');

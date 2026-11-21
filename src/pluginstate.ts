@@ -1,8 +1,8 @@
 // Plugins: the page's state and actions. Marketplaces, what the last run did, and where the person is browsing all live
 // here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 // Clicks go by one of two routes, split by whether the plugin's record changes: the switch and each tool's box go through
-// turnPlugin (main records first, marketplaces.ts turn); Update, Update all, a skill's switch and their Undo go through
-// applyPluginOps. Both set market.lastRun, which the window's header says with one Undo (pluginspage.ts pluginsResult); a newer
+// turnPlugin (main records first, marketplaces.ts turn); Update, Update all, a skill's switch, Use the plugin's (usePlugins, whose
+// Undo is a turn's) and their Undo go through applyPluginOps or under busy as it does. Both set market.lastRun, which the window's header says with one Undo (pluginspage.ts pluginsResult); a newer
 // result said there in its place lets it go (overRun).
 // Which clicks wait their turn and which lock, in one place:
 // - A switch or a tool's box joins the page's one list of clicks (clicklist.ts, which the item lists' switches join too) as a
@@ -23,7 +23,7 @@ import { plural } from './model.ts';
 import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, undoLimits } from './pluginstatus.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
-import type { HarnessId, MarketplaceView, PluginDetail, PluginTurn, PluginTurnResult, PluginsView } from './types.ts';
+import type { Clash, HarnessId, MarketplaceView, PluginDetail, PluginTurn, PluginTurnResult, PluginsView } from './types.ts';
 import { andList, toolNames } from './words.ts';
 
 const api = () => window.centralKnot;
@@ -365,6 +365,20 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
   }
   // A result that offers Undo is said in the header, with its Undo; one that only tells (an Undo done) in the status bar.
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), !market.problem && undoOps().length > 0);
+});
+
+/**
+ * Use the plugin's beside a name of his under a tool's box (pluginpage.ts clashLine): main takes the plugin's over his there
+ * (marketplaces.ts take; library.ts TAKE). Its one Undo is a turn's (undoTurn), which main runs as that take's own Undo in
+ * History (pluginlibrary.ts itemsBack), so his comes back his own, never Off and still linked.
+ */
+export const usePlugins = (entry: MarketplaceView, plugin: string, tool: HarnessId, item: Pick<Clash, 'kind' | 'key'>) => act('applying', async () => {
+  const home = app.home!.home, result = await api().takePluginItem(entry.source, plugin, { kind: item.kind, key: item.key }, tool, home)
+    .catch((): PluginTurnResult => ({ stopped: 'That could not finish. Click Refresh to see where things stand.', done: [] }));
+  market.lastRun = { done: result.done, undo: false, home, ...(result.back ? { turn: { source: entry.source, plugin, before: result.before ?? null, back: result.back, limits: [] } } : {}) };
+  market.problem = result.stopped;
+  await readAgain();
+  announce(market.problem ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${plugin}.`), !market.problem && undoOps().length > 0);
 });
 
 /** What each tool now has changed: the page and the item lists read again, once for the action (app.ts readHomeOnce). */

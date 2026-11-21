@@ -13,7 +13,7 @@
 //   pull, source   what Pull brings, and what a source holds (library.ts A SOURCE, through fromSourceStep), recorded on
 //                  the items before any click
 //   click          what the person asked (On, Off, a harness kept out, a version made current, Delete, Restore, a found item
-//                  taken in by Add), recorded on the item
+//                  taken in by Add, a plugin's take undone: untake), recorded on the item
 //   takeInByRule   in main.ts's pass of the whole home only (PassOptions background), with the home's Synchronize everything
 //                  on: each found item the take-in table lets it take (library.ts takeInAnswer, through foundKey), taken in as
 //                  Add takes it (takeIn); History's entry is an Add's, and the pass's one notice says what it took in
@@ -548,7 +548,7 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * What was asked of a pass for one item (a click, what Pull brings, or what a source holds), as the History entry it becomes:
  * begun when it is recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
  * part's text (Claude Code's file, for an agent); or its removal.
@@ -560,7 +560,8 @@ export type Pulled<Content> = { name: string; content: Content; own?: { harness:
  * form (`own`: an agent's file, a server's other fields), and that kind's Merge (`mergeWith`: Kind.merge, which mergeIn runs). `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
  * click on Add on the source's row brings back; `replace`: keys whose waiting version a click on Replace there makes current;
  * `merge`: keys whose waiting version a click on Merge there merges into the current one; `keep`: keys whose waiting version a
- * click on Keep mine there keeps as a version, the current one staying.
+ * click on Keep mine there keeps as a version, the current one staying. `take`: a plugin's keys whose version Use the plugin's takes
+ * over his item of that name (library.ts TAKE).
  */
 export interface SourceRead<Content> extends SourceSeen {
   kind: ItemKind;
@@ -571,6 +572,7 @@ export interface SourceRead<Content> extends SourceSeen {
   replace?: ReadonlySet<string>;
   merge?: ReadonlySet<string>;
   keep?: ReadonlySet<string>;
+  take?: ReadonlySet<string>;
 }
 interface Pass extends AnyLook {
   shelf: Shelf<unknown>;
@@ -1035,7 +1037,8 @@ async function click(pass: Pass, asked: Change) {
   } else if (asked.deleted) {
     item.deleted = { at: now() };
     pass.asked.set(item.key, { kind: 'deleted', fill: 'removed' });
-  } else if (asked.version) await makeCurrent(pass, item, asked.version, refuse, asked.seen);
+  } else if (asked.untake) await untake(pass, item, asked, refuse);
+  else if (asked.version) await makeCurrent(pass, item, asked.version, refuse, asked.seen);
   // A copy is chosen only when a found item is taken in: one in the library is at its current version in every harness.
   else if (asked.use) refuse(`${name} is in Central Knot already, so there is no copy to choose. Make one of its versions current instead.`);
   else turn(pass, item, asked);
@@ -1161,6 +1164,20 @@ async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refus
 }
 
 /**
+ * The Undo of a take (library.ts TAKE; Change untake): his version made current again where it isn't (makeCurrent), then the item
+ * his own, unlinked, On or Off and kept out as before the take; the plan gives each tool its copy as before. Its entry is a
+ * 'current' with the take's cause.
+ */
+async function untake(pass: Pass, item: LibraryItem, asked: Change, refuse: Refuse) {
+  const previous = item.hash;
+  if (asked.version && asked.version !== item.hash) await makeCurrent(pass, item, asked.version, refuse);
+  if (asked.version && asked.version !== item.hash) return;
+  delete item.source; delete item.seen;
+  Object.assign(item, { on: asked.on, except: [...asked.except] } satisfies Partial<LibraryItem>);
+  pass.asked.set(item.key, { kind: 'current', cause: 'plugin-taken', previous, version: item.hash, fill: 'written' });
+}
+
+/**
  * The let-go row (library.ts A PLUGIN) for every item of this kind linked to a recorded plugin, in every pass: each such plugin's
  * table, carried out by fromSourceStep, with a read that holds nothing, so only an item changed here is answered (`let-go`) and
  * the rest wait for the plugin's own reads. Nothing joins the pass's scope: letting go writes no tool.
@@ -1169,7 +1186,7 @@ async function letGo(pass: Pass, { ids, plugins }: Recorded) {
   for (const entry of plugins) {
     if (!Object.values(pass.library.items).some(item => item.source === entry.id && !item.deleted)) continue;
     await fromSourceStep(pass, { id: entry.id, link: pluginLink(entry.plugin, entry.marketName), commitAt: '', whole: false, names: new Map(),
-      plugin: { on: entry.on, outOf: [] }, kind: pass.kind.kind, mergeWith: pass.kind.merge, recorded: ids });
+      plugin: { on: entry.on, outOf: [], into: [] }, kind: pass.kind.kind, mergeWith: pass.kind.merge, recorded: ids });
   }
 }
 
@@ -1178,7 +1195,8 @@ async function letGo(pass: Pass, { ids, plugins }: Recorded) {
  * and every item linked to it, told what the managed tools hold of each item now: copiesOf), carried out: made Off (`make`),
  * linked (`link`, its content recorded as a version from the source where it has none; `same` only moves `seen` on), its
  * content made current (`update`, Replace's dated by its click), merged into the current version (`merge`: mergeIn), S kept
- * beside the current version (`keep`: keepMine), or turned Off with its link let go (`drop`); `wait` changes nothing. Where it is
+ * beside the current version (`keep`: keepMine), a plugin's taken over his of that name (`take`), or turned Off with its link let
+ * go (`drop`); `wait` changes nothing. Where it is
  * made, linked or made current, a tool's own part the source's read holds is kept for each tool the item keeps none for
  * (library.ts A SOURCE, each tool's own fields). Each change a person sees is History's entry with the source's `link`: an `off`
  * (cause `source`) for one made, an `edit` for one made current (a Replace's with `seen` as it was; a Merge's with cause
@@ -1188,7 +1206,7 @@ async function letGo(pass: Pass, { ids, plugins }: Recorded) {
  * keys it answered for: the pass's scope.
  */
 async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Set<string>> {
-  const clicked = { bringBack: read.bringBack, replace: read.replace, merge: read.merge, keep: read.keep };
+  const clicked = { bringBack: read.bringBack, replace: read.replace, merge: read.merge, keep: read.keep, take: read.take };
   // A name a plugin makes arrives with its On, kept out of each tool it is not in now and each with a copy of that name (A PLUGIN).
   const outOf = (key: string) => read.plugin && [...new Set([...read.plugin.outOf, ...pass.managed.filter(tool => pass.disk.byKey.get(key)?.[tool] || unseenIn(pass.disk, tool, key))])].sort(byToolOrder);
   const answers = sourceAnswers(pass.library.items, read, read.recorded, { ...clicked, copies: item => copiesOf(pass, item) });
@@ -1235,10 +1253,30 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
       await keepSourceOwn(pass, item!, entry);
     } else if (answer === 'merge') pass.sourced.get(key)!.merge = await mergeIn(pass, item!, entry, read);
     else if (answer === 'keep') await keepMine(pass, item!, entry, read);
+    else if (answer === 'take') await take(pass, item!, entry, read);
   }
   for (const [key, said] of pass.sourced) if (pass.library.items[key]?.on) said.on = true;
   await saveIfChanged(pass);
   return new Set(answers.keys());
+}
+
+/**
+ * Take (library.ts TAKE), for an item of his the table answered `take`: the plugin's version current, his kept among the versions,
+ * the item linked with the plugin's On; let into the tools the read brings the plugin into, and kept out of every other managed
+ * tool with a copy, what was applied there let go so that copy stays the tool's own. Its entry (an `edit`, cause `plugin-taken`)
+ * records his On and `except` before it (`took`), which its Undo puts back (untake).
+ */
+async function take(pass: Pass, item: LibraryItem, there: { hash: string; content: unknown; own?: Partial<Record<HarnessId, string>> }, read: SourceRead<unknown>) {
+  const into = read.plugin?.into ?? [], took = { on: item.on, except: item.except }, previous = item.hash;
+  const copies = copiesOf(pass, item), his = pass.managed.filter(tool => { const copy = copies[tool];
+    return !into.includes(tool) && (copy?.is === 'present' || copy?.is === 'unseen' || (copy?.is === 'held' && !!copy.throughShared)); });
+  for (const tool of his) delete item.applied[tool];
+  const except = [...new Set([...item.except, ...(read.plugin?.outOf ?? []), ...his])].filter(tool => !into.includes(tool)).sort(byToolOrder);
+  Object.assign(item, { on: !!read.plugin?.on, except, source: read.id, seen: there.hash } satisfies Partial<LibraryItem>);
+  if (there.hash === previous) pass.sourced.get(item.key)!.same = true;
+  else await setCurrent(pass.shelf, item, { hash: there.hash, at: read.commitAt, from: { how: 'source', link: read.link } }, there.content);
+  pass.asked.set(item.key, { kind: 'edit', cause: 'plugin-taken', previous, version: there.hash, link: read.link, fill: 'written', took });
+  await keepSourceOwn(pass, item, there);
 }
 
 /**

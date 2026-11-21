@@ -12,10 +12,10 @@ import { addsText, componentsFrom, outcomes, sessionHooksAbout } from './plugino
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
+import { boxOf, cantSwitchSkill, clashSaid, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
-import { applyPluginOps, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
-import type { Components, DeclaredHook, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView } from './types.ts';
+import { applyPluginOps, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
+import type { Clash, Components, DeclaredHook, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView } from './types.ts';
 import { hookLine } from './sessionhooks.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, toolNames as names } from './words.ts';
@@ -99,16 +99,30 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo), box = boxOf(view, entry, plugin.name, tool, { mark, words });
       // Under the box: what it has, or what the box says more (why it is off, that he unticked it); in Pi and OpenCode, where none
-      // of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its run's report says.
-      const reasons = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons;
+      // of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its run's report says; then each name of his,
+      // with its action (clashLine), whatever else is so, which says why on its own where the box is held by those alone.
+      const why = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons ?? [], clashes = entry.items?.[plugin.name]?.clashes?.[tool] ?? [];
+      const state = why.length ? why.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason))
+        : box.held && clashes.length ? null : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark));
       return h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]),
-          reasons ? reasons.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason)) : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark)),
+          state, clashes.map(clash => clashLine(view, entry, plugin, tool, clash, marketIndex)),
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
           view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null));
     })), view.tools.length),
     // Cowork has no box: with Claude desktop here, one line says which plugins it uses instead.
     hasCowork(app.home?.snapshots ?? []) ? h('p.plugin-panel-note', { id: 'plugin-cowork-note' }, coworkWords.plugin) : null);
+}
+
+/**
+ * A name of his under a tool's box (pluginstatus.ts clashSaid), with Use the plugin's beside it (pluginstate.ts usePlugins), but
+ * where he has it there through the shared skills folder.
+ */
+function clashLine(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, clash: Clash, marketIndex: number) {
+  const title = `Put the plugin’s ${clash.name} in ${names[tool]} in place of yours. Yours is kept as a version, each other tool with your copy keeps it as its own, and Undo gives yours back.`;
+  const id = `ptake-${marketIndex}-${plugin.name}-${tool}-${clash.kind}-${clash.key}`;
+  return h('span.plugin-tool-state.plugin-tool-why.plugin-tool-clash', {}, clashSaid(clash, tool), clash.shared ? null : button({ variant: 'link', size: 'micro',
+    label: 'Use the plugin’s', id, disabled: acting() || !view.canWrite, attrs: { title }, onclick: () => void usePlugins(entry, plugin.name, tool, clash) }));
 }
 
 /**

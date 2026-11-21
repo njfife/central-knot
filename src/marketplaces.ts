@@ -15,7 +15,7 @@ import { itemTools, itemsBack, itemsView, lookAtKinds, readPlugin, runItems, wit
 import { recordedIds } from './sourcestore.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ItemKind } from './library.ts';
-import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, BundledView, Catalog, Clash, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice } from './types.ts';
 import { harnessIds } from './harnesses.ts';
 import { errorCode, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
@@ -379,8 +379,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   /**
    * Each listed plugin with items (pluginlibrary.ts withItemsOf), read from its marketplace's copy as the table reads it
    * (itemsView): its page's "Its items", and what Pi and OpenCode have of it (pluginstatus.ts toolNow). A plugin that is On with
-   * nothing linked is read too, and listed only where none of it can be on in a tool it is wanted in (itemsView `notIn`), so its
-   * page says why. A plugin whose parts wait to be moved (pluginstatus.ts waitsToMove) is not read: it has no Its items, so
+   * nothing linked is read too, and listed only where none of it can be on in a tool it is wanted in (itemsView `notIn`) or a
+   * name it has is his (`clashes`), so its page says why. A plugin whose parts wait to be moved (pluginstatus.ts waitsToMove) is not read: it has no Its items, so
    * Update and Update all bring it nothing. The home is looked at once for them all (pluginlibrary.ts lookAtKinds), when the first is read.
    */
   async function withItems(ctx: engine.PluginContext, share: ShareContext, tools: HarnessId[], marketplaces: MarketplaceView[], entries: PluginEntry[]) {
@@ -394,7 +394,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const reads = at.files && await readPlugin(at.files, entry, at.commitAt, recorded, []);
       looks ??= await lookAtKinds(share, tools);
       const shown = itemsView(tools, looks, entry, reads || undefined, at.problem);
-      if (read.includes(entry) || shown.notIn) (market.items ??= {})[plugin.name] = shown;
+      if (read.includes(entry) || shown.notIn || shown.clashes) (market.items ??= {})[plugin.name] = shown;
     }
   }
 
@@ -815,6 +815,22 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { ...ran, done: [...done, ...ran.done] };
   }
 
+  /**
+   * Use the plugin's (library.ts TAKE): one name he has, the plugin's taken over his in one tool with no installer, by a read of
+   * the plugin (pluginlibrary.ts runItems, ItemsAsk `take`); its record doesn't change. Answers as a turn does, so its Undo is
+   * a turn's (undoTurn: pluginlibrary.ts itemsBack, by the take's own Undo).
+   */
+  async function take(source: string, plugin: string, item: Pick<Clash, 'kind' | 'key'>, tool: HarnessId, home: unknown): Promise<PluginTurnResult> {
+    const stopped = await guard(home, [tool]);
+    if (stopped) return { stopped, done: [] };
+    const share = host.share?.(), entry = entryOf((await readPluginRecord(String(home))).record, source, plugin);
+    if (!share || !entry) return { stopped: 'It has no entry in the plugins record here, so nothing was changed.', done: [] };
+    const op = { source, marketName: entry.marketName, plugin, action: 'install-items' as const };
+    const ran = await runItems(share, (await host.read()).tools, entry, { into: [tool], take: item }, await itemFiles(await context(), source, plugin), op);
+    for (const told of ran.notices) host.notices?.(told.kind, told.notices);
+    return { done: ran.done, before: entry, ...(ran.back ? { back: [{ ...op, tool, action: 'items-back' as const, items: ran.back }] } : {}), ...(ran.stopped ? { stopped: ran.stopped } : {}) };
+  }
+
   /** One tool's own uninstall of one plugin. `marketName` is the catalog's name for it; `source` is checked against what the tool has. */
   async function uninstall(source: string, marketName: string, plugin: string, tool: PluginTool, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home, [tool]);
@@ -921,7 +937,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { report, view: await view() };
   }
 
-  return { view, listings, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, items, pendingUpdates, noteJoined, toolManaged, turn, undoTurn, addCarried, addCarriedTo, beforeParts };
+  return { view, listings, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, items, pendingUpdates, noteJoined, toolManaged, turn, undoTurn, take, addCarried, addCarriedTo, beforeParts };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
@@ -932,7 +948,7 @@ const isSource = (value: unknown): value is string => value === '' || isText(val
 const isItemState = (value: unknown): value is ItemState => {
   const state = record(value);
   return !!state && ['skill', 'agent', 'mcp'].includes(state.kind as string) && isText(state.key, 300) && typeof state.on === 'boolean'
-    && Array.isArray(state.except) && state.except.every(tool => harnessIds.includes(tool as HarnessId));
+    && Array.isArray(state.except) && state.except.every(tool => harnessIds.includes(tool as HarnessId)) && (state.took === undefined || isText(state.took, 100));
 };
 /** A marketplace or plugin name as the tools accept it; anything else never reaches a command line. */
 const isName = (value: unknown): value is string => typeof value === 'string' && engine.SAFE_NAME.test(value);
@@ -994,6 +1010,11 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   };
   handle('plugins:undo-turn', async (source, plugin, before, back, home) => (open() && isText(source) && isName(plugin) && (before === null || isEntry(source, plugin)(before)) && Array.isArray(back) && back.length <= 50 && back.every(isBack(source, plugin))
     ? markets.undoTurn(source, plugin, before as PluginEntry | null, back as PluginOp[], home) : { stopped: 'That request was malformed, so nothing ran.', done: [] }));
+  handle('plugins:take', async (source, plugin, item, tool, home) => {
+    const { kind, key } = record(item) ?? {}, ids = itemTools(onlyAllowed([tool], harnessIds));
+    return open() && isText(source) && isName(plugin) && ['skill', 'agent', 'mcp'].includes(kind as string) && isText(key, 300) && ids.length
+      ? markets.take(source, plugin, { kind: kind as ItemKind, key: key as string }, ids[0]!, home) : { stopped: 'That request was malformed, so nothing ran.', done: [] };
+  });
   handle('plugins:whole', async (source, marketplace, plugin, tool, on, home) => {
     const ids = toolIds([tool]);
     return open() && isSource(source) && isName(marketplace) && isName(plugin) && typeof on === 'boolean' && ids.length ? markets.setWhole(source, marketplace, plugin, ids[0]!, on, home) : refused(tool);
