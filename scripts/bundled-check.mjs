@@ -6,13 +6,13 @@
 // - By default (a Mac) it packages the build with `scripts/package-mac.mjs` and opens the packaged app.
 // - `--electron` stages the same build and opens it as a development run, on any system (under xvfb-run on Linux).
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { connect, debugPorts, openKind, rowPart } from './cdp.mjs';
 import { stage } from './custom-build.mjs';
+import { launched, scratchFolder, tempPlaces } from './scratch.ts';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
@@ -36,19 +36,13 @@ function check(name, ok, detail) {
   console.error(`FAIL ${name}${detail === undefined ? '' : `: ${JSON.stringify(detail)?.slice(0, 600)}`}`);
 }
 
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'ck-bundled-')));
+const scratch = scratchFolder('ck-bundled-');
 const HOME = join(scratch, 'home');
 // Where the build keeps its settings: beside the standard app's, under its own identity, inside the throwaway home (on a Mac,
 // CFFIXED_USER_HOME puts Application Support there), so the standard app's folder it would read is never the account's own.
 const appData = process.platform === 'darwin' ? join(HOME, 'Library/Application Support') : join(HOME, '.config');
 const dataDir = join(appData, `com.centralknot.custom.${ID}`);
 rmSync(dataDir, { recursive: true, force: true });
-const launched = new Set();
-process.on('exit', () => {
-  for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
-  rmSync(dataDir, { recursive: true, force: true });
-  rmSync(scratch, { recursive: true, force: true });
-});
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 // ---------- The build ----------
@@ -126,7 +120,7 @@ for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', '
 const addedBy = name => { try { return readFileSync(join(HOME, `added-by-${name}.txt`), 'utf8').trim().split('\n'); } catch { return []; } };
 async function launch() {
   // CK_TEST_APPS: what stands in for /Applications, the running apps and the Trash (platform.ts macPlaces): none of them runs here.
-  const env = { HOME, CFFIXED_USER_HOME: HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp'), CK_TEST_APPS: standInMac(join(scratch, 'mac')).root };
+  const env = { HOME, CFFIXED_USER_HOME: HOME, PATH: '/usr/bin:/bin', ...tempPlaces(join(scratch, 'tmp')), CK_TEST_APPS: standInMac(join(scratch, 'mac')).root };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // No data folder is named: the build must choose its own.
