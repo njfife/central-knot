@@ -16,6 +16,8 @@ import { pruneDeleted } from '../src/skillstore.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { forgetMissing } from '../src/librarypass.ts';
+import { clickResults } from '../src/clickplan.ts';
+import { saveProfile, switchProfile } from '../src/profiles.ts';
 import type { HarnessId, PassResult } from '../src/types.ts';
 import { bytes, choose, everywhere, folderOf, historyActions, historyOf, inTool, itemOf, makeCurrent, pass, put, remove, restore, roots, sandbox, seen, send, skillText, tools, turnOff, turnOn, type Box, type Tool } from './skillclicks.ts';
 
@@ -633,8 +635,9 @@ test('Only Claude Code’s link to the shared copy deleted by hand: a deletion i
   try {
     await rm(folderOf(box, 'claude-cli'));
     const before = await toolFolders(), done = await pass(box);
-    assert.deepEqual([await toolFolders(), noticesOf(done).map(words => words.text)],
-      [before, ['notes was deleted in Claude Code, so it is off. Copilot CLI, Codex and Pi still read it another way. Central Knot keeps it.']]);
+    assert.deepEqual([await toolFolders(), noticesOf(done).map(words => [words.text, words.help])],
+      [before, [['notes was deleted in Claude Code, so it is off. Copilot CLI, Codex and Pi still read it another way. Central Knot keeps it.',
+        'Put notes in Claude Code as Central Knot’s own folder; the tools that read the shared copy still have it']]]);
     const { row, item, fact } = await seen(box), line = statusLine({ ...row, loads: fact!.loads }, item, box.tools);
     assert.equal(item!.on, false);
     for (const tool of ['Copilot CLI', 'Codex', 'Pi']) assert.match(line, new RegExp(`${tool} also reads a copy at`), tool);
@@ -660,10 +663,28 @@ test('A shared folder that can’t be vouched for: renamed away, unreadable, hol
         const done = await pass(box), view = await skillsView(box.context, box.tools);
         assert.deepEqual([done.writes, done.notices ?? [], (await itemOf(box))!.on, await toolFolders(), view.problems.length], [0, [], true, before, 1], how);
         assert.match(view.problems[0], /^The shared skills folder \(.*\) .*, so Central Knot changes nothing for the skills tools read there \(notes and other\) until/, how);
+        if (how === 'renamed away') assert.match(view.problems[0], /until it is back; a skill turned on meanwhile waits for it too \(if you removed it, turn them off\)\.$/);
       } finally { await show(); }
     }
     assert.deepEqual([await toolFolders(), (await itemOf(box))!.throughShared, (await pass(box)).writes, await deletedHere(box)], [before, item!.throughShared, 0, []]);
   } finally { await chmod(root, 0o755).catch(() => undefined); await box.cleanup(); }
+});
+
+test('A click while the shared folder can’t be vouched for writes no copy for the tools that wait, and its result says each waits; a profile switch’s too', async () => {
+  const { box, root, toolFolders } = await sharedHome();
+  const waits = (results: PassResult['results']) => results.filter(result => result.outcome === 'held' && result.item === 'notes').map(result => result.harness);
+  const wanting = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
+  try {
+    await rename(root, join(box.base, 'aside'));
+    await turnOff(box);
+    const before = await toolFolders(), on = await turnOn(box) as PassResult;
+    assert.deepEqual([await toolFolders(), clickResults(on.results, ['notes']).notIn, waits(on.results)], [before, wanting, wanting]);
+    assert.equal(on.results.find(result => result.harness === 'codex-cli')?.message, 'Codex waits for the shared skills folder (…/.agents/skills) to be back: nothing is written there until then.');
+    await turnOff(box);
+    const id = (await saveProfile(box.context, { name: 'Notes', items: ['skill:notes', 'skill:other'] })).id!;
+    const switched = await switchProfile(box.context, box.tools, id);
+    assert.deepEqual([await toolFolders(), switched.on, waits(switched.results)], [before, ['notes'], wanting]);
+  } finally { await box.cleanup(); }
 });
 
 test('A home as an earlier build left it, with nothing kept of how each tool has a skill: the first pass writes nothing and keeps it, even with the shared folder away (the links into it are how it is known); then a deletion there is one', async () => {
@@ -710,6 +731,15 @@ test('How a tool had a skill is let go when its folder is made again, or it is l
     await pass(reset.box);
     assert.deepEqual([(await itemOf(reset.box))!.on, await deletedHere(reset.box)], [true, []]);
   } finally { await reset.box.cleanup(); }
+  // Claude Code's skills folder away past the settle window: written afresh, as for Central Knot's own copies there; nothing turns off.
+  const away = await sharedHome();
+  try {
+    await rename(join(away.box.home, roots['claude-cli']), join(away.box.base, 'claude-away'));
+    await pass(away.box);
+    const { row, item } = await seen(away.box);
+    assert.deepEqual([item!.on, await deletedHere(away.box), harnessIs(row, item, 'claude-cli'), (await bytes(folderOf(away.box, 'claude-cli')))?.['SKILL.md'] !== undefined],
+      [true, [], 'current', true]);
+  } finally { await away.box.cleanup(); }
   // Left out, its link deleted while away, managed again before a full pass: Central Knot's version wins there, as for any tool.
   const { box } = await sharedHome();
   try {

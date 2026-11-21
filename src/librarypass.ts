@@ -363,12 +363,13 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
     }
     if ('away' in here) {
       if (!backWithoutFolder) look.foldersNow[tool] = here;
-      const applied = items.filter(item => item.applied[tool] !== undefined);
-      if (!applied.length) continue;
+      // What was applied there, or what it had there only by a link into the shared folder (library.ts THE SHARED FOLDER).
+      const had = items.filter(item => item.applied[tool] !== undefined || item.throughShared?.[tool]);
+      if (!had.length) continue;
       if (stillSettling(look, path)) { look.disk.unseen.set(`${tool}:*`, `${where} isn’t there just now. If it stays away, Central Knot writes it afresh.`); continue; }
-      forget(applied.filter(item => wantedIn(item, tool)));
+      forget(had.filter(item => wantedIn(item, tool)));
       const owed = `${where} isn’t there. Its copy is removed once it is back.`;
-      for (const item of applied.filter(item => !wantedIn(item, tool))) look.disk.unseen.set(`${tool}:${item.key}`, owed);
+      for (const item of had.filter(item => !wantedIn(item, tool) && item.applied[tool] !== undefined)) look.disk.unseen.set(`${tool}:${item.key}`, owed);
       continue;
     }
     look.foldersNow[tool] = here;
@@ -716,7 +717,7 @@ async function syncItem(pass: Pass, item: LibraryItem) {
   // Central Knot's before any file changes, so the next pass removes it (telling History) and an Undo meanwhile gives it back.
   for (const { tool, hash } of pass.asked.get(item.key)?.tookFrom ?? []) item.applied[tool] = hash;
   let told: Told = { events: [], named: new Map() };
-  const hadThroughShared = Object.keys(item.throughShared ?? {}) as HarnessId[];
+  const hadThroughShared = Object.keys(item.throughShared ?? {}) as HarnessId[], clicked = pass.asked.has(item.key);
   const held = await carryOut(item, made, {
     ...pass.shelf,
     copy: harness => { const here = slot[harness]!; return { hash: here.hash, at: here.at, content: kind.contentOf(here) }; },
@@ -733,6 +734,12 @@ async function syncItem(pass: Pass, item: LibraryItem) {
     remove: harness => (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
   });
   if (held.length) await untell(pass, told, held);
+  // A click's item that waits in a tool for the shared folder (library.ts THE SHARED FOLDER) is held there, so its result doesn't
+  // count it as on there, and says why.
+  if (clicked) for (const harness of pass.managed) {
+    const waits = copies[harness]?.is === 'unseen' && wantedIn(item, harness) ? pass.disk.lostShared?.(item, harness) : undefined;
+    if (typeof waits === 'object') pass.results.push({ item: item.name, harness, outcome: 'held', message: waits.unseen });
+  }
   // A copy found gone (deleted by hand: plan `forget`), or the shared folder's that a harness had it only through and has it no
   // more (library.ts THE SHARED FOLDER): its settings follow it out too.
   const outThere = hadThroughShared.filter(harness => !made.throughShared?.[harness] && copies[harness]?.is === 'absent');

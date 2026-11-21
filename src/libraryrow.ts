@@ -607,7 +607,8 @@ export function sentences(words: RowWords) {
       const changed = notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : '';
       const text = `${name} was deleted in ${place}, so it is off${others ? ` and was taken out of ${others}` : ''}.${still} Central Knot keeps it.${changed}`;
       // What it had through the shared folder isn't put back: each tool gets Central Knot's own copy (library.ts THE SHARED FOLDER).
-      const help = notice.sharedWay ? `Put ${name} in every tool as Central Knot’s own ${copy}, in place of a link that leads nowhere`
+      const help = notice.sharedWay === 'link' ? `Put ${name} in ${who} as Central Knot’s own ${copy}; the tools that read the shared copy still have it`
+        : notice.sharedWay ? `Put ${name} in every tool as Central Knot’s own ${copy}, in place of a link that leads nowhere`
         : `Put ${name} back in every tool, each ${copy} as it was`;
       return { text, action: 'turn-on', help };
     }

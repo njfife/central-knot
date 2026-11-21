@@ -253,7 +253,8 @@ async function sharedListing(context: ShareContext, recorded: LibraryItem[], lin
   try { listed = new Set((await readdir(sharedFolder(context))).map(itemKey)); }
   catch (error) {
     if (errorCode(error) !== 'ENOENT') return why('can’t be read', 'it can be');
-    return had.length || linkedThere ? why('isn’t there', 'it is back') : new Set();
+    const missing = why('isn’t there', 'it is back; a skill turned on meanwhile waits for it too (if you removed it, turn them off)');
+    return had.length || linkedThere ? missing : new Set();
   }
   const folders = had.flatMap(item => Object.values(item.throughShared!)).map(itemKey);
   const noneOfThem = folders.length && !folders.some(folder => listed.has(folder));
@@ -270,7 +271,9 @@ async function sharedListing(context: ShareContext, recorded: LibraryItem[], lin
 function lostShared(context: ShareContext, disk: SkillDisk, item: Wanted, tool: HarnessId): 'copy' | 'link' | { unseen: string } | undefined {
   const folder = item.throughShared?.[tool], dangling = disk.dangling.has(`${tool}:${item.key}`);
   const reads = alsoReads(context, tool).some(root => root.path === sharedFolder(context));
-  if (typeof disk.sharedNow === 'string') return folder || dangling || reads ? { unseen: disk.sharedNow } : undefined;
+  const at = pathWords(context, sharedFolder(context));
+  const waits = `${nameOf(tool)} waits for the shared skills folder (${at}) to be back: nothing is written there until then.`;
+  if (typeof disk.sharedNow === 'string') return folder || dangling || reads ? { unseen: waits } : undefined;
   if (!folder) return undefined;
   if (!disk.sharedNow.has(itemKey(folder))) return 'copy';
   if (!reads && !dangling) return 'link';
