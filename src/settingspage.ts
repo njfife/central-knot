@@ -5,6 +5,7 @@
 // last lines, read by main.ts readLog, never stored); the log is written by main.ts log. A settings file that couldn't be read at
 // launch is said in a note at the top (keptNote) until it is closed, and first on the Overview (overview.ts needsYou).
 import { acting, announce, machine, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { outcomeBand } from './matrix.ts';
 import { oneUndoCovers } from './historyactions.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -523,7 +524,8 @@ export function settingsPage(): HTMLElement {
   // Why it can't be changed here replaces the hint; why the system has it off (it can be changed) shows beneath, with the way to fix it.
   const cannot = signIn?.available ? undefined : signIn?.reason?.text;
   const systemSays: RowMessage | undefined = signIn?.reason && signIn.place ? { text: signIn.reason.text, tone: 'system', action: openSignInPlace(signIn.place) } : undefined;
-  return h('div.page', {}, h('div.scroll.settings-scroll', { id: 'settings-scroll' },
+  const done = state.outcome?.page === 'settings' ? outcomeBand() : null;
+  return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.settings-scroll', { id: 'settings-scroll' },
     state.home?.settingsUnread ? keptNote(state.home.settingsUnread) : null,
     settingsSection('general', 'General',
       settingRow('sign-in', 'Start at sign-in', cannot ?? signInHint,

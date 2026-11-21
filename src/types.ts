@@ -8,6 +8,7 @@ import type { ItemKind, LibraryItem, Plan, SourceAnswer, TakeInAnswer, VersionCh
 import type { NeutralServer } from './mcp.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry, PluginSwitch } from './pluginrecord.ts';
+import type { ReloadWrite } from './reload.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli';
@@ -128,13 +129,13 @@ export interface DesktopApi {
   /** The home last opened, else this computer's home (dev builds: the practice copy). */
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
-  syncNow(home: string): Promise<{ view: HomeView; text: string; reasons: Reason[]; warn: boolean; history: boolean } | null>;
+  syncNow(home: string): Promise<{ view: HomeView; text: string; reasons: Reason[]; warn: boolean; history: boolean; reloads?: ReloadWrite[] } | null>;
   onSyncRequest(callback: () => void): void;
   /**
    * Turns the open home's standing rule, Synchronize everything, on or off (everything.ts setSyncEverything), then reads and syncs
    * the home. `answering`: first setup's question answers it, which is refused once the home has an answer (another window's).
    */
-  setSyncEverything(on: boolean, home: string, answering?: boolean): Promise<{ stopped?: string; view: HomeView | null }>;
+  setSyncEverything(on: boolean, home: string, answering?: boolean): Promise<{ stopped?: string; view: HomeView | null; reloads?: ReloadWrite[] }>;
   /**
    * A tool's Manage switch (toolchoice.ts chooseTools): Central Knot's care of it turned on or off, then the home read and synced.
    * `resume`: the page showed a home that waits for Resume, which the switch resumes as a click does. `did`: what that pass did in
@@ -428,7 +429,7 @@ export interface Change {
   untake?: Partial<Record<HarnessId, string>>;
 }
 
-export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'settingsChanged'> & { since?: string[] }; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'settingsChanged'> & { since?: string[] }; /** Confirmed additions/enables for reload advice (reload.ts). */ reloads?: ReloadWrite[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
  * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
@@ -723,7 +724,8 @@ export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninsta
   /** An update: the version the tool records now. */ version?: string;
   /** An update of a copy that differed at the same version: done by the tool's own update, or by uninstalling and installing again. */ byContent?: 'update' | 'reinstall';
   /** A failed update with nobody watching: the tool's own update kept its copy, and only a reinstall (never made unasked) would change that. */ kept?: true;
-  /** Said beside what a step did, to be read (an update that turned a server on and couldn't turn it off again: plugins.ts; what a run on a plugin's items changed in a tool's own settings: pluginlibrary.ts reportIn). */ notes?: string[] }
+  /** Said beside what a step did, to be read (an update that turned a server on and couldn't turn it off again: plugins.ts; what a run on a plugin's items changed in a tool's own settings: pluginlibrary.ts reportIn). */ notes?: string[];
+  /** Confirmed item writes for reload advice (pluginlibrary.ts runItems, itemsBack). */ reloads?: ReloadWrite[] }
 
 // ---------- A plugin's parts: the skills, MCP servers and agents it holds, installed with it ----------
 export type PartKind = 'skill' | 'mcp' | 'agent';
@@ -1432,4 +1434,4 @@ export interface PluginSwitched { id: string; name: string; tool: HarnessId; on:
  * was turned in; and what could not be done in a tool (`results`: a plugin item's copy held or failed there too). `event`: its
  * History entry; none when nothing changed.
  */
-export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[] }
+export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[]; /** Confirmed additions/enables for reload advice (reload.ts). */ reloads?: ReloadWrite[] }

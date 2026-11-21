@@ -13,9 +13,10 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, shortOf, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
-import { listResult, problemLines, wholeToggle } from './matrix.ts';
+import { copyLine, listResult, problemLines, wholeToggle } from './matrix.ts';
+import type { ReloadAdvice } from './reload.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
@@ -372,15 +373,18 @@ export function pluginsResult(): HTMLElement[] {
   // A result of the app's said in the run's place (pluginstate.ts overRun; a new run clears it: turnPlugin), as a list page's
   // result is, with its own reasons (matrix.ts listResult).
   if (overRun(app.outcome)) return listResult();
-  const lines = lastLines(), run = runLine(lines), problems = problemBand(lines, !run);
+  const lines = lastLines(), last = market.lastRun;
+  const elsewhere = !!last && (last.reread || (!!market.nav.plugin && !lines.some(line => line.plugin === market.nav.plugin)));
+  const advice = elsewhere ? { text: '', actions: [] } : runReloads();
+  const run = runLine(lines, advice, elsewhere), problems = problemBand(lines, !run);
   // With no problem line, Show all follows the sentence, for one the header's two lines cut (as matrix.ts listResult).
   if (run && !problems) run.querySelector('.toolbar-result-text')!.after(wholeToggle(market.lastRun ?? app.outcome, 0));
-  return [run, problems].filter((part): part is HTMLElement => !!part);
+  return [run, run && advice.actions.length ? copyLine(advice.actions) : null, problems].filter((part): part is HTMLElement => !!part);
 }
 
 /** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */
-function runLine(lines: ResultLine[]): HTMLElement | null {
-  // A result is said here only while it offers something to do (Undo, or its own button); one that only tells is in the
+function runLine(lines: ResultLine[], advice: ReloadAdvice, elsewhere: boolean): HTMLElement | null {
+  // A result is said here only while it offers something to do (Undo, Copy, or its own button); one that only tells is in the
   // status bar (app.ts saidInStatusBar).
   const last = market.lastRun;
   const back = undoButton();
@@ -388,13 +392,12 @@ function runLine(lines: ResultLine[]): HTMLElement | null {
   const parts = last ? resultParts(lines, last.undo, { short: true, here: open && market.nav.plugin ? { plugin: market.nav.plugin, source: open.source } : undefined }) : [];
   // A run that left something undone counts it first, Undo or not (its reasons are the problem lines under it), so the cut never hides it.
   const short = last ? shortOf(lines, last.unreached) : { names: [], of: 0 }, failed = short.names;
-  if (last && (parts.length || failed.length) && (back || failed.length)) {
+  if (last && (parts.length || failed.length) && (back || failed.length || !!advice.text)) {
     const link = (part: { plugin: string; source: string }, at: number) =>
       h('button.result-link', { type: 'button', id: `result-plugin-${at}`, title: `Open ${part.plugin}`, onclick: () => browse({ source: part.source, plugin: part.plugin, tab: 'plugins' }) }, part.plugin);
     // On another plugin's page the result is only named, so it never reads as being about the plugin on screen; an
     // Undo still says it was undone.
     // Once the tools were read again (Refresh) the run is only named, so its sentence never contradicts what the page now shows.
-    const elsewhere = last.reread || (market.nav.plugin && !lines.some(line => line.plugin === market.nav.plugin));
     // Each plugin the run changed, once, whether or not the sentence names it (it leaves out the plugin on screen).
     const changed = [...new Map(lines.filter(line => line.ok).map(line => [pluginKey(line.source, line.plugin), { plugin: line.plugin, source: line.source }])).values()];
     const sentence = elsewhere
@@ -402,9 +405,10 @@ function runLine(lines: ResultLine[]): HTMLElement | null {
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));
     // What a switch's Undo can't put back is said with the result, so the promise beside Undo is the whole of it.
     const limits = !last.undo && last.turn?.limits.length ? ` ${last.turn.limits.join(' ')}` : '';
+    const reload = advice.text ? ` ${advice.text}` : '';
     const lead = failed.length ? `${notAllThrough(failed, short.of)} ` : '';
     return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, failed.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
-      h('span.toolbar-result-text', { title: `${lead}${resultSentence(lines, last.undo)}${limits}` }, lead, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null), back, dismiss(closeRun, 'report-dismiss'));
+      h('span.toolbar-result-text', { title: `${lead}${resultSentence(lines, last.undo)}${limits}${reload}` }, lead, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null, reload || null), back, dismiss(closeRun, 'report-dismiss'));
   }
   // An Undo that undid nothing still offers its way back here, whether or not its failures are still shown.
   if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(closeRun, 'report-dismiss'));

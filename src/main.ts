@@ -45,7 +45,7 @@ import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
-import { homePass, passTells, syncOnceReport, type HomePass } from './homepass.ts';
+import { homePass, passTells, syncOnceReport, takenInReloads, type HomePass } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
 import { homeItems, inUse, inUseName, pluginLive, switchable, switchPreview, type LiveItem, type PluginLive } from './profileplan.ts';
 import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
@@ -1652,7 +1652,9 @@ app.whenReady().then(async () => {
     if (home !== current?.home) return { stopped: elsewhere, view: null };
     const set = await setSyncEverything(context(), on === true, answering === true);
     if (!set.stopped) log(`sync: Synchronize everything ${on === true ? 'on' : 'off'} in ${home}`);
-    return { ...set, view: await syncThenView() };
+    const { view, passes } = await syncAndView();
+    const reloads = on === true && !set.stopped ? takenInReloads(passes.flatMap(pass => pass.synced ?? [])) : [];
+    return { ...set, view, ...(reloads.length ? { reloads } : {}) };
   });
   handleNow('sync:now', syncOnce);
   // One install at a time: the build the held screen names (by its id, and for Replace its bundle) replaced, or quit where it only

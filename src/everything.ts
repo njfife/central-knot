@@ -81,7 +81,7 @@ async function ownActions(context: ShareContext, tools: HarnessId[], entries: Hi
     const ids = entries.filter(about => libraryEntry(about)?.kind === page).map(about => about.id);
     if (!ids.length) continue;
     const done = await restoreAll(kind as Kind<unknown, Seen>, context, tools, ids);
-    results.push(...done.results);
+    results.push(...done.results.map(entry => ({ ...entry, of: page })));
     writes += done.writes;
     for (const [id, by] of done.undid) undid.set(id, by);
   }

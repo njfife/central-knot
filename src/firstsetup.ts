@@ -9,7 +9,8 @@
 // the take-in answer); each step shows that item's row (matrix.ts showRow). Settings' Synchronize everything row
 // counts as the question does and leads in too (settingspage.ts). What Yes does in the engine, and its one Undo in History, are
 // everything.ts's.
-import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, setHome, showPage, state, syncNow, tell, whyReadOnly, type PageKind } from './app.ts';
+import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, setHome, showPage, state, syncNow, tell, whyReadOnly, withReloads, type PageKind } from './app.ts';
+import { toItemKind, writtenReloads } from './reload.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { rowClicks } from './libraryrow.ts';
 import { plural, tookInCount } from './model.ts';
@@ -81,7 +82,7 @@ const answer = (on: boolean) => busy(on ? 'Turning on Synchronize everything…'
   }
   const taken = KINDS.flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' ? told.items : [])));
   const waiting = waitingForChoice(home).length;
-  tell({ page: 'overview', band: true, carry: true, history: true, text: `Synchronize everything is on: it ${tookInCount(taken.length)}${waiting ? `, and ${plural(waiting, 'item')} with copies that differ ${waiting === 1 ? 'waits' : 'wait'} for your choice` : ''}. ${oneUndoCovers}` });
+  tell(withReloads({ page: 'overview', band: true, carry: true, history: true, text: `Synchronize everything is on: it ${tookInCount(taken.length)}${waiting ? `, and ${plural(waiting, 'item')} with copies that differ ${waiting === 1 ? 'waits' : 'wait'} for your choice` : ''}. ${oneUndoCovers}` }, set.reloads));
   walkIfWaiting();
 });
 const walkIfWaiting = () => { if (state.home && waitingForChoice(state.home).length) openWalkthrough(); };
@@ -132,7 +133,7 @@ const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', asy
   setHome(await window.centralKnot.refresh());
   walk.passed.push(...undated.map(walkId));
   passChosen(dated);
-  tell({ page, band: true, history: true, ...latestDone(dated, undated, sent, waitingForChoice(state.home!)) });
+  tell(withReloads({ page, band: true, history: true, ...latestDone(dated, undated, sent, waitingForChoice(state.home!)) }, sent.flatMap(({ kind, result }) => writtenReloads(result.results, toItemKind(kind)))));
 });
 
 /**
