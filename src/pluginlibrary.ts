@@ -19,6 +19,7 @@
 import { basename } from 'node:path';
 import { pluginItems, wasRead } from './atlink.ts';
 import type { PluginFiles } from './catalogdetail.ts';
+import { keptBack } from './clickplan.ts';
 import { fromLinkSinceTakeIn, itemKey, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
 import { copiesOf, lookFor, restoreAll, takeHeld, type KindLibrary, type SourceRead } from './librarypass.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
@@ -204,13 +205,15 @@ function clickOn(ask: ItemsAsk, item: LibraryItem, own: (tool: HarnessId) => boo
 function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], why: string, unread: boolean, on: number, of: number): PluginDone['report'] {
   const has = on > 0, name = toolNames[tool];
   const changed = onIn(after, tool) > 0 !== onIn(before, tool) > 0 || wroteIn(results, tool);
-  const said = `${on} of its ${of} items ${on === 1 ? 'is' : 'are'} on in ${name}.`;
+  // Why an item its pass held in the tool isn't there yet (it waits for the shared skills folder, say), each reason once.
+  const held = new Set(results.flatMap(({ result }) => result.results.filter(each => each.harness === tool && keptBack(each) && after.some(({ item }) => item.name === each.item)).map(each => each.message)));
+  const said = [`${on} of its ${of} items ${on === 1 ? 'is' : 'are'} on in ${name}.`, ...held].join(' ');
   // Its notes: what the run also changed in the tool's own settings with its items' copies (Pi's list: librarypass.ts Kind.follow).
   const notes = results.flatMap(({ result }) => result.results.flatMap(each => (each.harness === tool && each.settingsChanged ? [each.settingsChanged] : [])));
   const reloads = reloadsIn(results, tool);
   const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message, runs: [], changed, ...(notes.length ? { notes } : {}), ...(reloads.length ? { reloads } : {}) });
   if ('outOf' in ask) return report(has ? 'failed' : 'uninstalled');
-  if (!has && 'into' in ask) return report('held', why);
+  if (!has && 'into' in ask) return report('held', held.size ? said : why);
   if (unread && 'read' in ask) return report('failed', why);
   return report('read' in ask && !ask.bring ? 'updated' : 'installed', unread ? `${said} ${why}` : said);
 }

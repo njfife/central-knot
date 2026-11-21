@@ -5504,6 +5504,16 @@ async function sharedDeletionChecks(a, home) {
   await twoPasses();
   const said = (await a.text('.bands') ?? '').split('The shared skills folder').length - 1;
   same('the shared folder renamed away: nothing written, nothing off, said once', [listed(), await switchOn(a, 'skills', 'gone-one'), await switchOn(a, 'skills', 'link-one'), said, await noticeOf('-one')], [before, true, true, 1, []]);
+  // Delete meanwhile: the tools that had it through the shared folder (Claude Code by its link) still have it when it is back,
+  // and the result names them rather than saying it is out of every tool; its Undo puts it back, writing nothing.
+  if (await a.run(`document.querySelector('#${rowPart('open', 'skills', 'link-one')}')?.getAttribute('aria-expanded')`) !== 'true') await a.click(`#${rowPart('open', 'skills', 'link-one')}`);
+  await a.click(`#${rowPart('delete', 'skills', 'link-one')}`);
+  await a.click(`#${rowPart('delete-confirm', 'skills', 'link-one')}`);
+  for (let tries = 0; tries < 40 && !(await a.text('#header') ?? '').includes('link-one is deleted'); tries++) await wait(100);
+  check('deleted while the shared folder is away, the result names the tools that keep it', (await a.text('#header') ?? '').includes('link-one is deleted from Central Knot, but still in Claude Code, Copilot CLI, Codex and Pi. History can restore it.'), await a.text('#header'));
+  await a.click('#outcome-undo');
+  for (let tries = 0; tries < 40 && !(await switchOn(a, 'skills', 'link-one')); tries++) await wait(100);
+  same('and its Undo puts it back, writing nothing', [listed(), await switchOn(a, 'skills', 'link-one')], [before, true]);
   renameSync(`${agents}-away`, agents);
   await twoPasses();
   same('and back, all as before', [listed(), await switchOn(a, 'skills', 'gone-one'), (await a.text('.bands') ?? '').includes('The shared skills folder')], [before, true, false]);
