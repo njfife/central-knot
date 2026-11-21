@@ -135,12 +135,11 @@ export function saidByKind(pairs: readonly [HomeKind, string][], several: boolea
   return [...kindsOf].map(([reason, kinds]) => (several ? `${sentence(andList(kinds.map(kind => kindNouns[kind].many)))}: ${reason}` : reason));
 }
 type Named = Pick<NamedRow, 'kind' | 'name'>;
-/**
- * A result's rows by name, a name with its kind after it where a row of another kind `among` the result's has that name too
- * ("review (skill)").
- */
+/** A name with its kind after it, as a result says a name two kinds share: "review (skill)", "issues (MCP server)". */
+export const withKind = ({ kind, name }: Named) => `${name} (${kindNouns[kind].one})`;
+/** A result's rows by name, each with its kind after it (withKind) where a row of another kind `among` the result's has that name too. */
 export const rowNames = (rows: readonly Named[], among: readonly Named[] = rows) =>
-  rows.map(row => (among.some(other => other.kind !== row.kind && other.name === row.name) ? `${row.name} (${kindNouns[row.kind].one})` : row.name));
+  rows.map(row => (among.some(other => other.kind !== row.kind && other.name === row.name) ? withKind(row) : row.name));
 
 /** Why a tool gets no copy of an item it already has through a plugin: said in its box, its row and wherever a copy is refused. */
 export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?: string; off?: true }, item = 'skill') =>

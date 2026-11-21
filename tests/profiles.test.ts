@@ -741,6 +741,39 @@ test('A placed copy counts as turned only in the tools whose own removal went th
   } finally { await box.cleanup(); }
 });
 
+test('A plugin’s skill and server of one name placed in Pi, one held there: the other’s change is the switch’s, by its kind, and its Undo puts it back', async () => {
+  for (const held of ['skill', 'mcp'] as const) {
+    // docs's skill issues and server issues in Pi, each taken in from Pi and linked to the plugin, as its own run leaves them; his anchor beside them.
+    const box = await sandbox(['pi-cli']), mcp = join(box.home, '.pi/agent/mcp.json');
+    try {
+      for (const key of ['issues', 'anchor']) await put(box, 'pi-cli', { 'SKILL.md': skillText(key, key) }, [], key);
+      await writeFile(mcp, JSON.stringify({ mcpServers: { issues: { command: 'fixture-server' } } }));
+      await applySkills(box.context, box.tools, ['issues', 'anchor'].map(key => ({ key, on: true, except: [] })));
+      await applyServers(box.context, box.tools, [{ key: 'issues', on: true, except: [] }]);
+      for (const store of ['skills.json', 'mcp.json']) {
+        const record = join(box.home, '.central-knot', store), stored = JSON.parse(await readFile(record, 'utf8'));
+        Object.assign(stored.items.issues, { source: DOCS_ID, seen: stored.items.issues.hash });
+        await writeFile(record, JSON.stringify(stored));
+      }
+      await savePluginRecord(box.home, { tools: box.tools, plugins: [{ id: DOCS_ID, source: '/m', marketName: 'team', plugin: 'docs', on: true, except: [] }] });
+      const side: PluginSide = { live: async () => pluginLive({ pluginItems: [], profiles: await readProfiles(box.home), skills: await skillsView(box.context, box.tools),
+        mcp: await serversView(box.context, box.tools), agents: await agentsView(box.context, box.tools) } as unknown as HomeView), run: async () => { throw new Error('Pi has placed copies only.'); } };
+      const files = async () => ({ skill: await bytes(folderOf(box, 'pi-cli', 'issues')), server: JSON.parse(await readFile(mcp, 'utf8')).mcpServers.issues?.command });
+      const before = await files(), folder = join(box.home, held === 'skill' ? '.pi/agent/skills' : '.pi/agent');
+      const anchorOnly = (await saveProfile(box.context, { name: 'Anchor only', items: ['skill:anchor'] })).id!;
+      await chmod(folder, 0o555);
+      let switched;
+      try { switched = await switchProfile(box.context, box.tools, anchorOnly, side); } finally { await chmod(folder, 0o755); }
+      const went = held === 'skill' ? 'mcp' : 'skill', after = await files();
+      assert.deepEqual([after, (await history(box)).find(entry => entry.id === switched.event)!.profile?.plugins?.map(copy => [copy.id, copy.tool, copy.on])],
+        [held === 'skill' ? { skill: before.skill, server: undefined } : { skill: undefined, server: 'fixture-server' }, [[`plugin:${went}:docs@team/issues`, 'pi-cli', false]]],
+        `Pi’s ${held} held: it stays, and the entry has the ${went}’s copy, which went`);
+      await undoSwitch(box.context, box.tools, switched.event!, side);
+      assert.deepEqual(await files(), before, `Pi’s ${held} held: the Undo puts the ${went} back`);
+    } finally { await box.cleanup(); }
+  }
+});
+
 test('An Undo is one History entry, the switch marked undone by it, whether it turned back installed copies alone or a placed copy too', async () => {
   const { box, made } = await pluginHome();
   try {

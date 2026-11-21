@@ -119,7 +119,7 @@ export function turnEvery(items: PluginItemAt[], on: boolean): { draft: PluginDr
   const left: string[] = [];
   for (const item of items.filter(entry => standing(draft, entry).now !== on)) {
     const held = cantSwitch(item);
-    if (held) left.push(`Still ${on ? 'off' : 'on'} in ${names[item.tool]}: ${held}`); else { click(draft, item); turned.push(item); }
+    if (held) left.push(`Still ${on ? 'off' : 'on'} in ${names[item.tool]}: ${held}`); else { if (standing(draft, item).on !== on) click(draft, item); turned.push(item); }
   }
   const leftIn = items.filter(item => !turned.includes(item) && onNow(item) !== on).map(item => item.tool);
   return { draft, ops: [...draft.values()], turned, left: left.length ? left : undefined, leftIn };

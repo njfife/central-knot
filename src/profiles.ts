@@ -208,7 +208,7 @@ function placedClicks(kind: ItemKind, copies: CopyTurn[], libraries: Libraries):
  * asked already (`asAsked`), which are neither turned nor failed.
  */
 async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Turns, told: boolean, copies: CopyTurn[], libraries: Libraries, plugins: PluginSide) {
-  const results: DestinationResult[] = [], made: string[] = [], placedResults: DestinationResult[] = [];
+  const results: DestinationResult[] = [], made: string[] = [], placedResults: { kind: ItemKind; result: DestinationResult }[] = [];
   for (const { kind, pass } of KINDS) {
     const asked = [...turns.on.filter(item => item.kind === kind).map(item => [item, true] as const), ...turns.off.filter(item => item.kind === kind).map(item => [item, false] as const)];
     const clicks = asked.map(([item, on]): Change => ({ key: item.key, on, except: [...item.except], seenOn: !on }));
@@ -217,7 +217,7 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
       const done = await pass(context, tools, list, { only: new Set(list.map(each => each.key)), told: toldHere });
       const names = list.map(click => libraries[kind][click.key]?.name ?? click.key).join(', ');
       results.push(...done.results, ...(done.stopped ? [{ item: names, outcome: 'failed' as const, message: done.stopped }] : []));
-      if (mine) placedResults.push(...done.results); else made.push(...(done.made ?? []));
+      if (mine) placedResults.push(...done.results.map(result => ({ kind, result }))); else made.push(...(done.made ?? []));
     }
   }
   const confirmed: CopyTurn[] = [], asAsked: CopyTurn[] = [], copilotDone = new Set<string>();
@@ -235,7 +235,9 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
   const letGo = copies.filter(turn => placedKey(turn) && recordOf(turn)?.source !== libraries[turn.item.kind][(turn.copy.target as { libraryKey: string }).libraryKey]?.source);
   const placedDone = (turn: CopyTurn) => {
     const record = recordOf(turn), wanted = !!record?.on && !record.except.includes(turn.copy.tool);
-    return wanted === turn.on && !letGo.includes(turn) && !placedResults.some(result => result.item === record?.name && result.harness === turn.copy.tool && (result.outcome === 'failed' || result.outcome === 'held'));
+    // Its own result is in its kind's pass: a plugin's skill and server may share a name in one tool.
+    return wanted === turn.on && !letGo.includes(turn) && !placedResults.some(({ kind, result }) => kind === turn.item.kind && result.item === record?.name
+      && result.harness === turn.copy.tool && (result.outcome === 'failed' || result.outcome === 'held'));
   };
   return { results, made, done: { on: turns.on.filter(item => now(item) === true), off: turns.off.filter(item => now(item) === false) },
     copies: copies.filter(turn => (placedKey(turn) ? placedDone(turn) : confirmed.includes(turn))), letGo, asAsked };

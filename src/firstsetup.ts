@@ -9,14 +9,15 @@
 // the take-in answer); each step shows that item's row (matrix.ts showRow). Settings' Synchronize everything row
 // counts as the question does and leads in too (settingspage.ts). What Yes does in the engine, and its one Undo in History, are
 // everything.ts's.
-import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, setHome, showPage, state, syncNow, tell, whyReadOnly, type PageKind } from './app.ts';
+import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, runSwitches, setHome, showPage, state, switchReasons, syncNow, tell, whyReadOnly, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { rowClicks } from './libraryrow.ts';
 import { plural, tookInCount } from './model.ts';
 import { oneUndoCovers } from './historyactions.ts';
 import { asksNow, KINDS, setupKinds, latestDone, waitingForChoice, walkId, walkPlace, wayBackIn, whatYesDoes, type Waiting } from './setupcounts.ts';
+import { turnEvery } from './pluginswitch.ts';
 import type { Change, HomeView, PassResult } from './types.ts';
-import { showRow } from './matrix.ts';
+import { showRow, throughItemsFor } from './matrix.ts';
 import { andList, kindNouns, rowNames, toolName } from './words.ts';
 
 
@@ -130,9 +131,15 @@ const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', asy
     if (changes.length) sent.push({ kind, result: await send[kind](changes, clickResumes(home), home.home) });
   }
   setHome(await window.centralKnot.refresh());
+  const still = waitingForChoice(state.home!), chosen = dated.filter(item => !still.some(other => walkId(other) === walkId(item)) && state.home?.[item.kind].library[item.key]?.on);
+  // Carry the same plugin switches a row's own choice runs (matrix.ts turnOn) for every item taken in.
+  const plugins = turnEvery(chosen.flatMap(item => throughItemsFor(item.kind, item.key)), true);
+  const plugged = plugins.ops.length ? await runSwitches(plugins.ops) : undefined;
+  if (plugged) setHome(await window.centralKnot.refresh());
   walk.passed.push(...undated.map(walkId));
   passChosen(dated);
-  tell({ page, band: true, history: true, ...latestDone(dated, undated, sent, waitingForChoice(state.home!)) });
+  const done = latestDone(dated, undated, sent, still), reasons = switchReasons(plugged, plugins.left);
+  tell({ page, band: true, history: true, ...done, warn: done.warn || reasons.length > 0, ...(reasons.length ? { reasons } : {}) });
 });
 
 /**
