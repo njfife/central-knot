@@ -4,12 +4,12 @@
 // on the same code, a background notice taken during a click or a home read, and when the rows a click pins are let go (app.ts pinnedRows, drawPage).
 import { mock, test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Change, HarnessId, HomeView, ItemNotice, PassResult, PluginTurn, PluginTurnResult, PluginsView } from '../src/types.ts';
+import type { Change, HarnessId, HomeView, ItemNotice, PassResult, PluginTurn, PluginTurnResult, PluginsView, ProfileSwitchResult } from '../src/types.ts';
 import type { PageKind } from '../src/app.ts';
 
 /** Main, as the page sees it: each switch click waits until the test answers it; every other call is counted. */
 const main = {
-  sent: [] as string[], reads: { plugins: 0, home: 0 },
+  sent: [] as string[], reads: { plugins: 0, home: 0 }, followUps: { repo: 0, sources: 0 },
   /** The History entries an Undo asked main to put back, in the order asked. */
   restored: [] as string[],
   answers: [] as ((result: PluginTurnResult) => void)[],
@@ -17,6 +17,9 @@ const main = {
   passes: [] as ((result: PassResult) => void)[],
   pass(result: PassResult) { this.passes.shift()!(result); return settled(); },
   syncChanged: () => {},
+  profileSwitched: (_result: ProfileSwitchResult) => {},
+  windowShown: () => {},
+  visibilityChange: () => {},
   /** Run as the home is read: a click made meanwhile, say. */
   duringHomeRead: undefined as (() => void) | undefined,
   answer(result: PluginTurnResult = { done: [] }) { this.answers.shift()!(result); return settled(); },
@@ -31,34 +34,46 @@ const api = {
   restore: async (id: string) => { main.restored.push(id); return { results: [], reloads: [] }; },
   plugins: async () => { main.reads.plugins++; return view; },
   refresh: async (): Promise<HomeView | null> => { main.reads.home++; main.duringHomeRead?.(); return null; },
+  repo: async () => { main.followUps.repo++; return null; },
+  sources: async () => { main.followUps.sources++; return null; },
   setPluginSkill: async () => ({ reports: [report('skill-off', 'Turned off.')] }),
   selectHome: async (): Promise<HomeView | null> => null,
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
   onSyncChanged: (listener: () => void) => { main.syncChanged = listener; },
+  onProfileSwitched: (listener: (result: ProfileSwitchResult) => void) => { main.profileSwitched = listener; },
+  onWindowShown: (listener: () => void) => { main.windowShown = listener; },
   syncNow: async (_home: string): Promise<unknown> => null,
   // A home's usage, read as it opens (app.ts collectUsage): none here; one that failed would be said in the status bar.
   readUsage: async () => ({ at: '2026-11-20T00:00:00.000Z', tools: [] }),
 };
 // The page's modules, loaded under node with no window: the little of the DOM they touch as they load and redraw. An element keeps
 // what is appended to it, so a test can read the words a part draws (textOf).
-const element = (): any => ({ dataset: {}, style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, children: [], content: {}, setAttribute() {}, addEventListener() {}, replaceChildren() {},
+const element = (): any => ({ attrs: {} as Record<string, string>, dataset: {}, style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, children: [], content: {}, setAttribute(k: string, v: string) { this.attrs[k] = v; }, addEventListener() {}, replaceChildren() {},
   append(...kids: unknown[]) { this.children.push(...kids); }, appendChild() {}, focus() {}, querySelector: () => element(), after() {} });
+const findById = (node: any, id: string): any => {
+  if (!node || typeof node === 'string') return undefined;
+  if (node.id === id || node.attrs?.id === id) return node;
+  for (const child of node.children ?? []) { const hit = findById(child, id); if (hit) return hit; }
+  return undefined;
+};
 const textOf = (node: any): string => (typeof node === 'string' ? node : (node?.children ?? []).map(textOf).join(''));
 const announcement = element();
 Object.assign(globalThis, {
   window: { centralKnot: new Proxy(api, { get: (known, name) => (known as Record<string | symbol, unknown>)[name] ?? (() => Promise.resolve(null)) }), addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }) },
-  document: { body: element(), documentElement: element(), activeElement: null, hasFocus: () => true, getElementById: (id: string) => id === 'announcement' ? announcement : element(), querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, createElement: element, createTextNode: element },
+  document: { body: element(), documentElement: element(), activeElement: null, hidden: false, hasFocus: () => true, getElementById: (id: string) => id === 'announcement' ? announcement : element(), querySelector: () => null, querySelectorAll: () => [], addEventListener(name: string, fn: () => void) { if (name === 'visibilitychange') main.visibilityChange = fn; }, createElement: element, createTextNode: element },
   ResizeObserver: class { observe() {} disconnect() {} },
+  requestAnimationFrame: () => 0,
 });
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
 const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, whyKindReadOnly, whyReadOnly,
-  loadHome, problemKey, queueClick, readAgain, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
+  loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, runReloads, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
-const { backgroundProblems, headerNotices, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { backgroundProblems, copyQuestion, headerNotices, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { openWalkthrough, walkthroughBand } = await import('../src/firstsetup.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
 const { newItem } = await import('../src/library.ts');
 const { keptBack } = await import('../src/clickplan.ts');
@@ -85,7 +100,8 @@ function start() {
   drop(() => true);
   endRun();
   resetMarket();
-  Object.assign(main, { sent: [], restored: [], reads: { plugins: 0, home: 0 }, answers: [], duringHomeRead: undefined });
+  Object.assign(main, { sent: [], restored: [], reads: { plugins: 0, home: 0 }, followUps: { repo: 0, sources: 0 }, answers: [], duringHomeRead: undefined });
+  (document as unknown as { hidden: boolean }).hidden = false;
   const none = { tools: [], items: [], notices: [], library: {} };
   app.home = { home: '/home', sync: { managed: [], gate: { state: 'open' } }, skills: none, mcp: none, agents: none } as unknown as typeof app.home;
   Object.assign(app, { page: 'plugins', outcome: undefined, libraryKind: 'all' });
@@ -1239,4 +1255,528 @@ test('Resume with empty click.changes preserves confirmed writes from its pass f
   await settled();
   await main.pass({ results: [{ item: 'notes', harness: 'pi-cli', outcome: 'written', message: 'Added.' }], writes: 1, reloads: [{ tool: 'pi-cli', kind: 'skill', key: 'notes', on: true }] });
   assert.deepEqual(app.outcome?.reloads, [{ tool: 'pi-cli', kind: 'skill', key: 'notes', on: true }]);
+});
+
+test('A refused profile Undo says that nothing was undone, naming the profile, without doubling it on a gate refusal', async t => {
+  start();
+  const events = homeWith(t, []);
+  (events as unknown[]).splice(0, events.length, { id: 'sw-1', kind: 'profile', item: 'PluginOnly', at: '2026-11-21T00:00:00.000Z',
+    profile: { toName: 'PluginOnly', on: [], off: [], copilotCleared: [{ id: 'mcp:issues', name: 'issues', server: 'issues' }] } });
+  app.page = 'profiles';
+  let reply: { results: never[]; stopped?: string; harnessWrites: number; reloads: never[] } = {
+    stopped: 'Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.',
+    results: [], harnessWrites: 0, reloads: [],
+  };
+  t.mock.method(api, 'restore', async () => reply);
+  await restoreEvent('sw-1');
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.refused, app.outcome?.history],
+    ['Undo switch to PluginOnly: nothing was undone. Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.', true, true, true]);
+  reply = { stopped: 'Automatic sync is paused. Nothing was undone.', results: [], harnessWrites: 0, reloads: [] };
+  await restoreEvent('sw-1');
+  assert.equal(app.outcome?.text, 'Undo switch to PluginOnly: nothing was undone. Automatic sync is paused.');
+});
+
+test('A menu-bar profile switch waits while the page is busy, then lands its view, result and follow-ups once the action ends', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  const afterView = { ...app.home!, label: 'AfterMenu', profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+  const switchResult: ProfileSwitchResult = { name: 'Focus', on: ['notes'], off: [], left: [], results: [], event: 'sw-menu',
+    profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] }, view: afterView, reloads: [] };
+  flip('notes', false);
+  await settled();
+  try {
+    assert.ok(acting());
+    main.profileSwitched(switchResult);
+    await settled();
+    assert.notEqual(app.home?.label, 'AfterMenu');
+    assert.equal(app.outcome?.text, undefined);
+    app.page = 'sources';
+    await main.pass(did('notes'));
+    await settled();
+    assert.deepEqual([app.home?.label, app.outcome?.text, main.followUps.sources], ['AfterMenu', 'Switched to Focus: 1 item turned on.', 1]);
+  } finally { while (main.passes.length) await main.pass(did('notes')); }
+});
+
+test('A menu-bar profile switch whose view brings a fresh sync notice announces “Sync changed” while keeping the switch’s result', async t => {
+  const home = backgroundWhileReading(t);
+  const notice: ItemNotice = { kind: 'deleted-by-hand', key: 'notes', item: 'notes', history: 'menu-deletion',
+    winner: 'copilot-cli', losers: [], orderProved: true };
+  const withNotice = { ...home, skills: { ...home.skills, notices: [notice] }, mcp: { ...home.mcp, library: {} }, agents: { ...home.agents, library: {} },
+    profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+  main.profileSwitched({ name: 'Focus', on: ['notes'], off: [], left: [], results: [], event: 'sw-notice',
+    profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] }, view: withNotice, reloads: [] });
+  await settled();
+  assert.deepEqual([app.said.text, app.said.notices, app.outcome?.text],
+    ['Sync changed notes.', ['menu-deletion'], 'Switched to Focus: 1 item turned on.']);
+});
+
+test('A result that lands while the window is hidden does not fade until the window shows again', async t => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    onLibrary();
+    homeWith(t, [{ kind: 'skills', key: 'notes' }]);
+    const afterView = { ...app.home!, profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+    (document as unknown as { hidden: boolean }).hidden = true;
+    main.visibilityChange();
+    main.profileSwitched({ name: 'Focus', on: ['notes'], off: [], left: [], results: [], event: 'sw-hidden',
+      profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] }, view: afterView, reloads: [] });
+    await settled();
+    mock.timers.tick(60_000);
+    assert.equal(app.outcome?.text, 'Switched to Focus: 1 item turned on.');
+    (document as unknown as { hidden: boolean }).hidden = false;
+    main.visibilityChange();
+    mock.timers.tick(7999);
+    assert.equal(app.outcome?.text, 'Switched to Focus: 1 item turned on.');
+    mock.timers.tick(1);
+    assert.equal(app.outcome?.text, undefined);
+  } finally {
+    (document as unknown as { hidden: boolean }).hidden = false;
+    mock.timers.reset();
+  }
+});
+
+test('A clean profile Undo confirmation fades on Profiles as other Undo confirmations do; a warning, refusal or switch result stays', async t => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    start();
+    const events = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+    const outcome = () => app.outcome;
+    (events as unknown[]).splice(0, events.length, { id: 'sw-2', kind: 'profile', item: 'Focus', at: '2026-11-21T00:00:00.000Z',
+      profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] } });
+    app.page = 'profiles';
+    let reply: { results: never[]; harnessWrites: number; stopped?: string; switched?: { on: string[]; off: string[]; left: string[] }; reloads: never[] } = { results: [], harnessWrites: 1, switched: { on: [], off: ['notes'], left: [] }, reloads: [] };
+    t.mock.method(api, 'restore', async () => reply);
+    await restoreEvent('sw-2');
+    assert.deepEqual([outcome()?.text, outcome()?.fade], ['Undone: 1 item turned off.', true]);
+    mock.timers.tick(7999);
+    assert.equal(outcome()?.text, 'Undone: 1 item turned off.');
+    mock.timers.tick(1);
+    assert.equal(outcome(), undefined);
+    reply = { results: [], harnessWrites: 0, switched: { on: [], off: ['notes'], left: ['standup'] }, reloads: [] };
+    await restoreEvent('sw-2');
+    mock.timers.tick(60_000);
+    assert.equal(outcome()?.warn, true);
+    assert.match(outcome()?.text ?? '', /^Undone:/);
+    reply = { stopped: 'Automatic sync is paused. Nothing was undone.', results: [], harnessWrites: 0, reloads: [] };
+    await restoreEvent('sw-2');
+    mock.timers.tick(60_000);
+    assert.equal(outcome()?.refused, true);
+    const afterView = { ...app.home!, profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+    main.profileSwitched({ name: 'Focus', on: ['notes'], off: [], left: [], results: [], event: 'sw-2',
+      profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] }, view: afterView, reloads: [] });
+    await settled();
+    mock.timers.tick(60_000);
+    assert.deepEqual([outcome()?.text, outcome()?.act?.label], ['Switched to Focus: 1 item turned on.', 'Undo switch']);
+  } finally { mock.timers.reset(); }
+});
+
+// ---------- Results that say what happened: queued Add waiting for a choice, and superseded Undo problems ----------
+
+test('A queued Add whose copies differ on disk says the copy question alone and runs no plugin switches', async t => {
+  onLibrary();
+  linkedHome(['a'], []);
+  const pluginCalls = t.mock.method(api, 'setPluginSkill', async () => ({ reports: [report('skill-off', 'Turned off.')] }));
+  queueClick({ kind: 'skills', key: 'draft', on: true }, 'draft', () => ({
+    kind: 'skills', items: ['draft'], rows: [{ kind: 'skills', key: 'draft' }],
+    changes: [{ key: 'draft', on: true, except: [], seenOn: false }],
+    said: () => 'draft is in Central Knot now, and on in all 3 tools.',
+    also: ['A plugin note that should not appear before a choice.'],
+    plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', skill: 'draft', action: 'skill-on' }], said: 'Turned on alpha.' },
+  }), () => false);
+  await settled();
+  await main.pass(waitsForChoice);
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons, app.outcome?.act, pluginCalls.mock.callCount()],
+    ['draft has differing copies. Choose which copy every tool uses.', false, undefined, undefined, 0]);
+});
+
+test('A run of three clicks (an On, a queued Add whose copies differ, an Off): the On and Off are counted, the Add’s wait is said once, and its plugin switches do not run', async t => {
+  onLibrary();
+  linkedHome(['a', 'b'], []);
+  onNow.set(rowId('skills', 'a'), false);
+  onNow.set(rowId('skills', 'b'), true);
+  const pluginCalls = t.mock.method(api, 'setPluginSkill', async () => ({ reports: [report('skill-off', 'Turned off.')] }));
+  flip('a', true);
+  queueClick({ kind: 'skills', key: 'draft', on: true }, 'draft', () => ({
+    kind: 'skills', items: ['draft'], rows: [{ kind: 'skills', key: 'draft' }],
+    changes: [{ key: 'draft', on: true, except: [], seenOn: false }],
+    said: () => 'draft is in Central Knot now, and on in all 3 tools.',
+    plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', skill: 'draft', action: 'skill-on' }], said: 'Turned on alpha.' },
+  }), () => false);
+  flip('b', false);
+  await settled();
+  await main.pass(did('a', true));
+  await main.pass(waitsForChoice);
+  await main.pass(did('b', false));
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons, pluginCalls.mock.callCount()],
+    ['1 skill is off: b; 1 skill is on: a. draft has differing copies. Choose which copy every tool uses.', false, [], 0]);
+});
+
+test('An Undo after two clicks on one item drops an earlier tool failure once a later restore of that item puts it right', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  history.push({ id: 'on-skills-notes', key: 'notes', kind: 'on', at: '2026-11-18T09:00:02.000Z' });
+  const claudeFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'Could not remove Claude Code’s copy yet. Central Knot will try again.' };
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    if (id === 'on-skills-notes') {
+      app.home!.skills.library.notes!.on = false;
+      return { results: [{ item: 'notes', harness: 'codex-cli' as const, outcome: 'removed' as const, message: '' }, claudeFail], reloads: [] };
+    }
+    // Turning notes back On finds Claude Code already holding the current version, so restore emits no result for Claude Code.
+    app.home!.skills.library.notes!.on = true;
+    return { results: [{ item: 'notes', harness: 'codex-cli' as const, outcome: 'written' as const, message: '' }], reloads: [] };
+  });
+  flip('notes', false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ results: [{ item: 'notes', harness: 'codex-cli', outcome: 'removed', message: '' }, claudeFail], writes: 1, made: ['off-skills-notes'], reloads: [] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes'] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([main.restored, app.outcome?.text, app.outcome?.warn, app.outcome?.reasons, app.skillsResult?.results.filter(keptBack)],
+    [['on-skills-notes', 'off-skills-notes'], 'Undone: notes is as before.', false, [], []]);
+});
+
+test('An Undo keeps an earlier tool failure when the refreshed view still shows that tool unsettled', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  history.push({ id: 'on-skills-notes', key: 'notes', kind: 'on', at: '2026-11-18T09:00:02.000Z' });
+  const claudeFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'Could not remove Claude Code’s copy yet. Central Knot will try again.' };
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    if (id === 'on-skills-notes') return { results: [claudeFail], reloads: [] };
+    // The refreshed view still owes a removal in Claude Code, so the earlier failure was not put right.
+    (app.home!.skills.items[0] as unknown as { plan: { write: string[]; remove: string[] } }).plan = { write: [], remove: ['claude-cli'] };
+    return { results: [], reloads: [] };
+  });
+  flip('notes', false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ results: [claudeFail], writes: 1, made: ['off-skills-notes'], reloads: [] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes'] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack).map(entry => [entry.item, entry.harness])],
+    ['Not all of notes could be put back.', true, [['notes', 'claude-cli']]]);
+});
+
+test('A real failure at Undo stays warned and names the tool and copy', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  const claudeFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'Could not remove Claude Code’s copy yet. Central Knot will try again.' };
+  t.mock.method(api, 'restore', async (id: string) => { main.restored.push(id); return { results: [claudeFail], reloads: [] }; });
+  flip('notes', false);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass(offMade('skills', 'notes'));
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack)],
+    ['Not all of notes could be put back.', true, [claudeFail]]);
+});
+
+test('An Undo over two different items warns only about the one that truly could not be undone', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'spare' }], { on: true });
+  history.push({ id: 'on-skills-notes', key: 'notes', kind: 'on', at: '2026-11-18T09:00:05.000Z' });
+  const failFor = (item: string) => ({ item, harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'Could not remove Claude Code’s copy yet. Central Knot will try again.' });
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    if (id === 'on-skills-notes') return { results: [failFor('notes')], reloads: [] };
+    if (id === 'off-skills-notes') return { results: [{ item: 'notes', harness: 'codex-cli' as const, outcome: 'written' as const, message: '' }], reloads: [] };
+    return { results: [failFor('spare')], reloads: [] };
+  });
+  flip('spare', false);
+  flip('notes', false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.spare!.on = false;
+  await main.pass(offMade('skills', 'spare'));
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ results: [failFor('notes')], writes: 1, made: ['off-skills-notes'], reloads: [] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes'] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack).map(entry => [entry.item, entry.harness])],
+    ['Not all of spare could be put back.', true, [['spare', 'claude-cli']]]);
+});
+
+test('An Undo whose two restores of one item both fail in the same tool keeps only the latest failure', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  history.push({ id: 'on-skills-notes', key: 'notes', kind: 'on', at: '2026-11-18T09:00:02.000Z' });
+  const firstFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'First failure.' };
+  const secondFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'held' as const, message: 'Second failure.' };
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    return { results: [id === 'on-skills-notes' ? firstFail : secondFail], reloads: [] };
+  });
+  flip('notes', false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ ...did('notes', false), made: ['off-skills-notes'] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes'] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack)],
+    ['Not all of notes could be put back.', true, [secondFail]]);
+});
+
+test('An Undo after a single Off warns and names a tool whose locked folder left its copy missing even when restore emitted no result', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  app.home!.sync.managed = ['claude-cli', 'copilot-cli', 'codex-cli'];
+  app.home!.skills.tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
+  const copilotLocked = 'Copilot CLI’s skills folder can’t be written, so Central Knot can’t change the skill there.';
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    app.home!.skills.library.notes!.on = true;
+    app.home!.skills.items[0]!.cannot = { 'copilot-cli': copilotLocked };
+    // Locked folder holding no file is `held` in librarypass.ts, so restore emits no DestinationResult for Copilot CLI.
+    return { results: [{ item: 'notes', harness: 'claude-cli' as const, outcome: 'written' as const, message: '' }, { item: 'notes', harness: 'codex-cli' as const, outcome: 'written' as const, message: '' }], reloads: [] };
+  });
+  flip('notes', false);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass(offMade('skills', 'notes'));
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack).map(entry => [entry.item, entry.harness, entry.message])],
+    ['Not all of notes could be put back.', true, [['notes', 'copilot-cli', copilotLocked]]]);
+});
+
+test('An Undo after three alternating clicks drops Claude Code’s settled failure and warns about Copilot CLI’s missing copy', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  app.home!.sync.managed = ['claude-cli', 'copilot-cli', 'codex-cli'];
+  app.home!.skills.tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
+  history.push(
+    { id: 'on-skills-notes-2', key: 'notes', kind: 'on', at: '2026-11-18T09:00:02.000Z' },
+    { id: 'off-skills-notes-3', key: 'notes', kind: 'off', at: '2026-11-18T09:00:03.000Z' },
+  );
+  const claudeFail = { item: 'notes', harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, message: 'Could not remove Claude Code’s copy yet.' };
+  const copilotLocked = 'Copilot CLI’s skills folder can’t be written, so Central Knot can’t change the skill there.';
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    if (id === 'off-skills-notes-3') { app.home!.skills.library.notes!.on = true; return { results: [{ item: 'notes', harness: 'codex-cli' as const, outcome: 'written' as const, message: '' }], reloads: [] }; }
+    if (id === 'on-skills-notes-2') { app.home!.skills.library.notes!.on = false; return { results: [{ item: 'notes', harness: 'codex-cli' as const, outcome: 'removed' as const, message: '' }, claudeFail], reloads: [] }; }
+    app.home!.skills.library.notes!.on = true;
+    app.home!.skills.items[0]!.cannot = { 'copilot-cli': copilotLocked };
+    return { results: [{ item: 'notes', harness: 'codex-cli' as const, outcome: 'written' as const, message: '' }], reloads: [] };
+  });
+  flip('notes', false);
+  flip('notes', true);
+  flip('notes', false);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ results: [claudeFail], writes: 1, made: ['off-skills-notes'], reloads: [] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes-2'] });
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ results: [claudeFail], writes: 1, made: ['off-skills-notes-3'], reloads: [] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([main.restored, app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack).map(entry => [entry.item, entry.harness, entry.message])],
+    [['off-skills-notes-3', 'on-skills-notes-2', 'off-skills-notes'], 'Not all of notes could be put back.', true, [['notes', 'copilot-cli', copilotLocked]]]);
+});
+
+test('An Undo after four alternating clicks drops Copilot CLI’s settled failure and warns about Claude Code’s missing copy', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  app.home!.sync.managed = ['claude-cli', 'copilot-cli', 'codex-cli'];
+  app.home!.skills.tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
+  history.push(
+    { id: 'on-skills-notes-2', key: 'notes', kind: 'on', at: '2026-11-18T09:00:02.000Z' },
+    { id: 'off-skills-notes-3', key: 'notes', kind: 'off', at: '2026-11-18T09:00:03.000Z' },
+    { id: 'on-skills-notes-4', key: 'notes', kind: 'on', at: '2026-11-18T09:00:04.000Z' },
+  );
+  const copilotFail = { item: 'notes', harness: 'copilot-cli' as const, outcome: 'failed' as const, removal: true, message: 'Could not remove Copilot CLI’s copy yet.' };
+  const claudeLocked = 'Claude Code’s skills folder can’t be written, so Central Knot can’t change the skill there.';
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    if (id === 'on-skills-notes-4') { app.home!.skills.library.notes!.on = false; return { results: [{ item: 'notes', harness: 'claude-cli' as const, outcome: 'removed' as const, message: '' }], reloads: [] }; }
+    if (id === 'off-skills-notes-3') { app.home!.skills.library.notes!.on = true; return { results: [{ item: 'notes', harness: 'copilot-cli' as const, outcome: 'written' as const, message: '' }], reloads: [] }; }
+    if (id === 'on-skills-notes-2') { app.home!.skills.library.notes!.on = false; return { results: [copilotFail], reloads: [] }; }
+    app.home!.skills.library.notes!.on = true;
+    app.home!.skills.items[0]!.cannot = { 'claude-cli': claudeLocked };
+    return { results: [{ item: 'notes', harness: 'codex-cli' as const, outcome: 'written' as const, message: '' }], reloads: [] };
+  });
+  flip('notes', false);
+  flip('notes', true);
+  flip('notes', false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ ...did('notes', false), made: ['off-skills-notes'] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes-2'] });
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ ...did('notes', false), made: ['off-skills-notes-3'] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes-4'] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([main.restored, app.outcome?.text, app.outcome?.warn, app.skillsResult?.results.filter(keptBack).map(entry => [entry.item, entry.harness, entry.message])],
+    [['on-skills-notes-4', 'off-skills-notes-3', 'on-skills-notes-2', 'off-skills-notes'], 'Not all of notes could be put back.', true, [['notes', 'claude-cli', claudeLocked]]]);
+});
+
+test('An Undo does not warn about a tool that holds an MCP server through a plugin', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'mcp', key: 'issues' }], { on: true });
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    app.home!.mcp.library.issues!.on = true;
+    app.home!.mcp.items[0]!.plugin = { 'codex-cli': { plugin: 'kit', marketplace: 'team' } };
+    app.home!.mcp.items[0]!.cannot = { 'codex-cli': 'Codex has this MCP server through plugin kit.' };
+    return { results: [{ item: 'issues', harness: 'claude-cli' as const, outcome: 'written' as const, message: '' }], reloads: [] };
+  });
+  flip('issues', false, undefined, 'mcp');
+  await settled();
+  app.home!.mcp.library.issues!.on = false;
+  await main.pass(offMade('mcp', 'issues'));
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.mcpResult?.results.filter(keptBack)],
+    ['Undone: issues is as before.', false, []]);
+});
+
+test('An Undo restores History entries written in the same millisecond newest-first', async t => {
+  onLibrary();
+  const history = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  const sameMs = '2026-11-18T09:00:01.000Z';
+  history[0]!.at = sameMs;
+  history.push({ id: 'on-skills-notes', key: 'notes', kind: 'on', at: sameMs });
+  flip('notes', false);
+  flip('notes', true);
+  await settled();
+  app.home!.skills.library.notes!.on = false;
+  await main.pass({ ...did('notes', false), made: ['off-skills-notes'] });
+  app.home!.skills.library.notes!.on = true;
+  await main.pass({ ...did('notes', true), made: ['on-skills-notes'] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual(main.restored, ['on-skills-notes', 'off-skills-notes']);
+});
+
+/** A differing found skill `draft` in Claude Code and Copilot CLI, with Codex holding `draft` switched off through plugin `kit`. */
+function differingPluginHome(t: TestContext) {
+  const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+  const empty = { tools, items: [], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: {} };
+  const draftFact = {
+    key: 'draft', name: 'draft', description: 'Draft skill.', on: false, except: [], cannot: {}, edited: [],
+    copies: {
+      'claude-cli': { hash: 'h1', directory: '/home/.claude/skills/draft', rootLabel: 'Claude Code', lines: 3, modified: '2026-11-18T08:00:00.000Z', summary: 'Older.', writable: true, folder: 'draft' },
+      'copilot-cli': { hash: 'h2', directory: '/home/.copilot/skills/draft', rootLabel: 'Copilot CLI', lines: 3, modified: '2026-11-18T09:00:00.000Z', summary: 'Newer.', writable: true, folder: 'draft' },
+    },
+    plugin: { 'codex-cli': { plugin: 'kit', marketplace: 'team', off: true } },
+    anotherWay: { 'codex-cli': 'Codex has it through plugin kit.' },
+    takeInAnswers: { click: { wait: 'copies-differ', latest: 'h2' }, rule: { wait: 'copies-differ', latest: 'h2' } },
+  };
+  const pluginInstall = { tool: 'codex-cli' as const, plugin: 'kit', source: '/market', marketName: 'team', off: false, skillsOff: ['draft'], items: [{ kind: 'skill' as const, name: 'draft' }] };
+  app.home = {
+    home: '/home', label: 'Practice', sync: { managed: tools, caughtUp: [], access: { allowed: true }, gate: { state: 'ready' }, syncEverything: true },
+    skills: { ...empty, items: [draftFact], library: {} }, mcp: empty, agents: empty, pluginItems: [pluginInstall],
+  } as unknown as HomeView;
+  t.mock.method(api, 'refresh', async () => app.home);
+  const switched: unknown[][] = [];
+  t.mock.method(api, 'setPluginSkill', async (...args: unknown[]) => {
+    switched.push(args);
+    pluginInstall.skillsOff = [];
+    return { reports: [report('skill-off', 'Turned on.')] };
+  });
+  return {
+    switched,
+    takeIn: () => {
+      app.home!.skills.library.draft = { ...newItem('draft', 'draft'), on: true };
+      const chosen = { ...draftFact, on: true, copies: { ...draftFact.copies, 'claude-cli': { ...draftFact.copies['claude-cli'], hash: 'h2' } } };
+      delete (chosen as Record<string, unknown>).takeInAnswers;
+      app.home!.skills.items = [chosen as unknown as typeof app.home.skills.items[0]];
+    },
+  };
+}
+
+test('Choosing a copy on a row runs the plugin switch for another tool holding that skill off through a plugin', async t => {
+  onLibrary();
+  const { switched, takeIn } = differingPluginHome(t);
+  const question = copyQuestion({ kinds: ['skills'], view: { filter: 'all', order: 'name', from: 'anywhere', find: '' } } as any, 'skills', 'draft', () => {});
+  const button = findById(question, 'walk-use-skills-draft-copilot-cli');
+  assert.ok(button, 'row copy choice button exists');
+  button.onclick();
+  await settled();
+  takeIn();
+  await main.pass({ results: [{ item: 'draft', harness: 'claude-cli', outcome: 'written', message: '' }], writes: 1, made: ['chosen-draft'], reloads: [] });
+  assert.equal(switched.length, 1);
+  assert.deepEqual(switched[0]?.slice(0, 6), ['/market', 'team', 'kit', 'draft', 'codex-cli', true]);
+});
+
+test('Use the latest for the rest runs the plugin switch for chosen items held off through a plugin', async t => {
+  onLibrary();
+  const { switched, takeIn } = differingPluginHome(t);
+  openWalkthrough();
+  const band = walkthroughBand(['skills'], () => null);
+  const button = findById(band, 'walk-use-latest');
+  assert.ok(button, 'Use the latest for the rest button exists');
+  button.onclick();
+  await settled();
+  takeIn();
+  await main.pass({ results: [{ item: 'draft', harness: 'claude-cli', outcome: 'written', message: '' }], writes: 1, made: ['chosen-draft'], reloads: [] });
+  assert.equal(switched.length, 1);
+  assert.deepEqual(switched[0]?.slice(0, 6), ['/market', 'team', 'kit', 'draft', 'codex-cli', true]);
+});
+
+test('Use the latest for the rest carries reloads from both its chosen library writes and its plugin switches through tellWritten', async t => {
+  onLibrary();
+  const { takeIn } = differingPluginHome(t);
+  const pluginReload = { tool: 'codex-cli' as const, kind: 'skill' as const, key: 'draft', on: true, plugin: 'kit@team' };
+  const chosenReload = { tool: 'pi-cli' as const, kind: 'skill' as const, key: 'draft', on: true };
+  const bystanderReload = { tool: 'opencode-cli' as const, kind: 'skill' as const, key: 'unrelated', on: true };
+  t.mock.method(api, 'setPluginSkill', async () => ({ reports: [{ ...report('skill-off', 'Turned on.'), tool: 'codex-cli' as const, reloads: [pluginReload] }] }));
+  openWalkthrough();
+  const band = walkthroughBand(['skills'], () => null);
+  findById(band, 'walk-use-latest').onclick();
+  await settled();
+  takeIn();
+  await main.pass({ results: [{ item: 'draft', harness: 'pi-cli', outcome: 'written', message: '' }], writes: 1, made: ['chosen-draft'], reloads: [chosenReload, bystanderReload] });
+  assert.deepEqual(app.outcome?.reloads, [chosenReload, pluginReload]);
+});
+
+test('Profile Undo and menu-bar profile switches carry reloads through turnedOutcome and tellWritten (and coalesced menu switches settle)', async t => {
+  onLibrary();
+  const events = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  (events as unknown[]).splice(0, events.length, { id: 'sw-rel', kind: 'profile', item: 'Focus', at: '2026-11-21T00:00:00.000Z',
+    profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] } });
+  const piOn = { tool: 'pi-cli' as const, kind: 'skill' as const, key: 'notes', on: true };
+  const piOff = { tool: 'pi-cli' as const, kind: 'skill' as const, key: 'notes', on: false };
+  const claudeMcp = { tool: 'claude-cli' as const, kind: 'mcp' as const, key: 'docs', on: true };
+  t.mock.method(api, 'restore', async () => ({ results: [], harnessWrites: 1, switched: { on: ['notes'], off: [], left: [] }, reloads: [piOn] }));
+  app.page = 'profiles';
+  await restoreEvent('sw-rel');
+  assert.deepEqual(app.outcome?.reloads, [piOn]);
+  // Menu-bar switch while idle carries its reloads through switchOutcome -> turnedOutcome -> tellWritten.
+  const afterView = { ...app.home!, profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+  main.profileSwitched({ name: 'Focus', on: ['notes'], off: [], left: [], results: [], event: 'sw-rel',
+    profile: { toName: 'Focus', on: [{ id: 'skill:notes', name: 'notes' }], off: [] }, view: afterView, reloads: [piOn] });
+  await settled();
+  assert.deepEqual(app.outcome?.reloads, [piOn]);
+  // Two menu-bar switches arriving while busy coalesce and settle chronologically (piOn then piOff drops Pi, keeps Copilot skill and Claude MCP).
+  const copilotOn = { tool: 'copilot-cli' as const, kind: 'skill' as const, key: 'standup', on: true };
+  onLibrary();
+  flip('notes', false);
+  await settled();
+  try {
+    main.profileSwitched({ name: 'First', on: ['notes', 'standup'], off: [], left: [], results: [], event: 'sw-1',
+      profile: { toName: 'First', on: [{ id: 'skill:notes', name: 'notes' }, { id: 'skill:standup', name: 'standup' }], off: [] }, view: afterView, reloads: [piOn, copilotOn] });
+    main.profileSwitched({ name: 'Second', on: ['docs'], off: ['notes'], left: [], results: [], event: 'sw-2',
+      profile: { toName: 'Second', on: [{ id: 'mcp:docs', name: 'docs' }], off: [{ id: 'skill:notes', name: 'notes' }] }, view: afterView, reloads: [piOff, claudeMcp] });
+    await main.pass(did('notes'));
+    await settled();
+    assert.deepEqual(app.outcome?.reloads, [copilotOn, claudeMcp]);
+  } finally { while (main.passes.length) await main.pass(did('notes')); }
 });

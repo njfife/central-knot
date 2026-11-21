@@ -5,16 +5,16 @@
 // needs a home the app writes and --crash-rounds above 0: `runs`), or group n alone with `--group n/total` (refused if total != groups.length).
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { chmodSync, closeSync, constants as fsConstants, cpSync, existsSync, openSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants as fsConstants, cpSync, existsSync, openSync, renameSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer as tcpServer } from 'node:net';
-import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { packagedApp } from './package-app.mjs';
 import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, mountsGone, openKind, openKindNow, refocus, byId, rowPart, standIn } from './cdp.mjs';
+import { launched, scratchFolder, tempPlaces } from './scratch.ts';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
@@ -62,7 +62,7 @@ const entriesSorted = text => {
 };
 
 // ---------- Disposable home ----------
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'ck-e2e-')));
+const scratch = scratchFolder('ck-e2e-');
 const HOME = join(scratch, 'home');
 // What stands in for /Applications, the running apps and the Trash in every launch on a Mac (platform.ts macPlaces): no flow
 // looks at or removes the real ones. Off a Mac, where there are none, only the flows about another build name stand-ins of
@@ -158,10 +158,6 @@ if (process.platform === 'linux') {
 `, { mode: 0o755 });
 }
 let app;
-// Every app this run started, and a flow's stand-in running app (standInApp), is closed when the run ends, however it ends: a
-// failed or interrupted run must not leave an app holding a debug port that a later run could attach to, or a stand-in for ever.
-const launched = new Set();
-process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
 // A --flows child exits on signals; a parent running one or all groups passes them on to its copies and waits instead (runGroups).
 if (named) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
@@ -169,7 +165,7 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   // OpenCode's CLI is looked for only inside the throwaway home, and on a Mac every app in the stand-in for /Applications
   // (CK_TEST_APPS, empty here): a machine that has them installed (the Mac these run on does) would otherwise bring them into
   // every flow that opens "This Mac's home".
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, ...tempPlaces(join(scratch, 'tmp')), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -5990,6 +5986,35 @@ async function firstSetupFlow() {
       await page.quit();
     }
   }
+
+  // Settings -> Choose copies -> "Use the latest for the rest" runs the plugin switch for chosen items held off through a plugin.
+  const bulk = homeFor('setup-bulk-plugin'), bulkCopilot = join(bulk.home, '.copilot/skills'), bulkCodexToml = join(bulk.home, '.codex/config.toml');
+  writeFileSync(join(bulk.home, '.local/bin/copilot'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\nexit 9\n');
+  chmodSync(join(bulk.home, '.local/bin/copilot'), 0o755);
+  saved(skill(bulk.claude, 'plug-bulk', text('plug-bulk', 'Newer Claude copy.')), 2);
+  saved(skill(bulkCopilot, 'plug-bulk', text('plug-bulk', 'Older Copilot copy.')), 48);
+  const bulkPluginDir = join(bulk.home, '.codex/plugins/cache/ck-test-market/team-pack/1.0.0/skills/plug-bulk');
+  mkdirSync(bulkPluginDir, { recursive: true });
+  writeFileSync(join(bulkPluginDir, 'SKILL.md'), text('plug-bulk', 'Newer Claude copy.'));
+  writeFileSync(bulkCodexToml, '[plugins."team-pack@ck-test-market"]\nenabled = true\n\n[[skills.config]]\nname = "team-pack:plug-bulk"\nenabled = false\n');
+  const bulkData = join(scratch, 'setup-data-bulk-plugin');
+  opened(bulk.home, bulkData);
+  const p = await launch(bulkData, [], real);
+  try {
+    await p.click('#nav-settings');
+    for (let tries = 0; tries < 40 && !(await p.exists('#setting-sync-everything-notice button')); tries++) await wait(100);
+    await p.click('#setting-sync-everything-notice button');
+    for (let tries = 0; tries < 40 && !(await p.exists('#walk-use-latest')); tries++) await wait(100);
+    same('before Use the latest for the rest, Codex’s plugin skill is off',
+      [/name = "team-pack:plug-bulk"[^[]*enabled = false/.test(readNow(bulkCodexToml)), await cellState(p, 'skills', 'plug-bulk', 'codex-cli')], [true, 'plugin-off']);
+    await p.click('#walk-use-latest');
+    for (let tries = 0; tries < 40 && readNow(join(bulkCopilot, 'plug-bulk/SKILL.md')) !== text('plug-bulk', 'Newer Claude copy.'); tries++) await wait(100);
+    same('Use the latest for the rest takes plug-bulk in with Claude Code’s copy and turns Codex’s plugin skill on',
+      [readNow(join(bulk.claude, 'plug-bulk/SKILL.md')), readNow(join(bulkCopilot, 'plug-bulk/SKILL.md')),
+        existsSync(join(bulk.codex, 'plug-bulk')), /name = "team-pack:plug-bulk"[^[]*enabled = false/.test(readNow(bulkCodexToml)), await cellState(p, 'skills', 'plug-bulk', 'codex-cli')],
+      [text('plug-bulk', 'Newer Claude copy.'), text('plug-bulk', 'Newer Claude copy.'), false, false, 'plugin']);
+    same('no page errors, bulk Choose copies with plugin switch', p.pageErrors, []);
+  } finally { await p.quit(); }
 }
 
 /**
@@ -8893,7 +8918,8 @@ async function usageFlow() {
   await wait(2000);
   same('started with no window, it collects nothing until the window shows', [reading(), await a.text('#usage-when')], [false, 'Collecting…']);
   const again = spawn(command, [...(flag('--electron') ? [root] : []), `--user-data-dir=${data}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])],
-    { env: { ...process.env, HOME: real, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') }, stdio: 'ignore' });
+    { env: { ...process.env, HOME: real, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, ...tempPlaces(join(scratch, 'tmp')) }, stdio: 'ignore' });
+  launched.add(again);
   await new Promise(done => again.once('exit', done));
   for (let tries = 0; tries < 100 && !reading(); tries++) await wait(50);
   await letGo();
@@ -10239,6 +10265,7 @@ async function libraryFlow() {
   same('no page errors, the empty states and Resume', [...d.pageErrors, ...e.pageErrors, ...g.pageErrors], []);
   await g.quit();
 
+  {
   // ---------- Reload words: per-tool chips on Row 2, Show all lines, Copy state and opened row ----------
   const R = { home: join(scratch, 'reload-home'), data: join(scratch, 'reload-data'), tools: join(scratch, 'reload-tools') };
   mkdirSync(join(R.tools, '.local/bin'), { recursive: true });
@@ -10465,6 +10492,268 @@ async function libraryFlow() {
   await fullSize(r);
   same('no page errors, reload words', r.pageErrors, []);
   await r.quit();
+  }
+
+  // ---------- Queued Add whose copies differ on disk, and Undo after refused / double clicks ----------
+  const R = homeWith('library-result-true');
+  const equalAdd = text('race-add', 'Equal at draw.'), changedAdd = text('race-add', 'Changed before turn.');
+  const equalMid = text('race-mid', 'Equal mid.'), changedMid = text('race-mid', 'Changed mid.');
+  for (const dir of [R.claude, R.copilot]) {
+    skill(dir, 'race-add', equalAdd);
+    skill(dir, 'race-mid', equalMid);
+  }
+  for (const name of ['off-one', 'on-one', 'double-ok', 'real-fail', 'item-stuck']) skill(R.claude, name, text(name, `Skill ${name}.`));
+  const r = await launch(R.data, [], R.real);
+  await r.click('#nav-overview');
+  await r.click('#setup-no');
+  await openKind(r, 'skills');
+  for (const name of ['off-one', 'on-one', 'double-ok', 'real-fail', 'item-stuck']) { await r.click(`#${rowPart('add', 'skills', name)}`); await done(r); }
+  for (const name of ['off-one', 'real-fail', 'item-stuck']) { await r.click(`#${rowPart('switch', 'skills', name)}`); await done(r); }
+  await r.click('#header-refresh');
+  const readSkillsRecord = () => JSON.parse(readNow(join(R.home, '.central-knot/skills.json')) || '{"items":{}}').items;
+  const readHistory = () => JSON.parse(readNow(join(R.home, '.central-knot/history.json')) || '{"events":[]}').events;
+  const pairFiles = name => [readNow(join(R.claude, `${name}/SKILL.md`)), readNow(join(R.copilot, `${name}/SKILL.md`))];
+  const headerState = async () => {
+    if (await r.exists('#problems-show-all') && /^Show all \d+/.test(await r.text('#problems-show-all') ?? '')) await r.click('#problems-show-all');
+    return {
+      text: await r.text('#header [data-outcome] .band-text'),
+      warn: await r.exists('#header [data-outcome] .tone-warning'),
+      undo: await r.exists('#outcome-undo'),
+      problems: await r.all('#header .problem-text'),
+    };
+  };
+  const dismissOutcome = async () => { if (await r.exists('#outcome-dismiss')) await r.click('#outcome-dismiss'); };
+  // 1. Measured Add: found in two tools with equal copies when drawn, one changed on disk before the click's turn.
+  same('race-add starts found with no Copies differ tag', [await r.exists(`#${rowPart('add', 'skills', 'race-add')}`), await r.exists(`#${rowPart('decide', 'skills', 'race-add')}`)], [true, false]);
+  await dismissOutcome();
+  if (r.main) {
+    const inspector = await r.main(), held = await holdQueue(inspector, r);
+    try {
+      await r.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'race-add'))}).click()`);
+      writeFileSync(join(R.copilot, 'race-add/SKILL.md'), changedAdd);
+    } finally { await held.release(); inspector.close(); }
+  } else {
+    writeFileSync(join(R.copilot, 'race-add/SKILL.md'), changedAdd);
+    await r.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'race-add'))}).click()`);
+  }
+  await done(r);
+  same('queued Add whose copies differ says the copy question alone, with no warning, no Undo and no record',
+    [await headerState(), await r.exists(`#${rowPart('add', 'skills', 'race-add')}`), await r.exists(`#${rowPart('decide', 'skills', 'race-add')}`),
+      await r.all(`${row('skills', 'race-add')} .row-tag`), !!readSkillsRecord()['race-add'], readHistory().some(entry => entry.key === 'race-add'), pairFiles('race-add')],
+    [{ text: 'race-add has differing copies. Choose which copy every tool uses.', warn: false, undo: false, problems: [] },
+      true, true, ['Copies differ', 'not in Central Knot'], false, false, [equalAdd, changedAdd]]);
+  // Choosing a copy then adds it, writes both tools, records History, and says so.
+  await r.click(`#${rowPart('add', 'skills', 'race-add')}`);
+  check('Add on the differing row opens its copy question', await r.exists(`#${rowPart('use', 'skills', 'race-add', 'copilot-cli')}`), await r.text('#page'));
+  await r.click(`#${rowPart('use', 'skills', 'race-add', 'copilot-cli')}`);
+  await done(r);
+  same('choosing Copilot CLI’s copy adds race-add everywhere and says so',
+    [(await headerState()).text, await switchOn(r, 'skills', 'race-add'), !!readSkillsRecord()['race-add']?.on,
+      readHistory().some(entry => entry.key === 'race-add' && entry.kind === 'chosen'), pairFiles('race-add')],
+    ['race-add is in Central Knot now, with Copilot CLI’s copy, and on in Claude Code and Copilot CLI. The other copies are kept as its versions.',
+      true, true, true, [changedAdd, changedAdd]]);
+  // 2. The same inside a run of three clicks (On, Add, Off): On and Off are counted, Add's wait is said once.
+  await dismissOutcome();
+  if (r.main) {
+    const inspector = await r.main(), held = await holdQueue(inspector, r);
+    try {
+      await r.run(`for (const id of ${JSON.stringify([rowPart('switch', 'skills', 'off-one'), rowPart('add', 'skills', 'race-mid'), rowPart('switch', 'skills', 'on-one')])}) document.getElementById(id).click()`);
+      writeFileSync(join(R.copilot, 'race-mid/SKILL.md'), changedMid);
+    } finally { await held.release(); inspector.close(); }
+  } else {
+    writeFileSync(join(R.copilot, 'race-mid/SKILL.md'), changedMid);
+    await r.run(`for (const id of ${JSON.stringify([rowPart('switch', 'skills', 'off-one'), rowPart('add', 'skills', 'race-mid'), rowPart('switch', 'skills', 'on-one')])}) document.getElementById(id).click()`);
+  }
+  await done(r);
+  same('three-click run with a differing queued Add counts On and Off, says the wait once, and leaves race-mid found',
+    [await headerState(), await switchOn(r, 'skills', 'off-one'), await switchOn(r, 'skills', 'on-one'),
+      await r.exists(`#${rowPart('add', 'skills', 'race-mid')}`), !!readSkillsRecord()['race-mid'], readHistory().some(entry => entry.key === 'race-mid'), pairFiles('race-mid')],
+    [{ text: '1 skill is off: on-one; 1 skill is on: off-one. race-mid has differing copies. Choose which copy every tool uses.', warn: false, undo: true, problems: [] },
+      true, false, true, false, false, [equalMid, changedMid]]);
+  // 3. Measured Undo: two clicks on double-ok while Claude Code's folder refuses the first; Undo puts every file back with no warning.
+  await dismissOutcome();
+  const doubleBefore = pairFiles('double-ok'), historyBeforeDouble = readHistory().length;
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    const clickEntries = readHistory().slice(historyBeforeDouble).filter(entry => entry.key === 'double-ok');
+    await r.click('#outcome-undo');
+    await done(r);
+    const afterHistory = readHistory(), undoneEntries = clickEntries.map(entry => afterHistory.find(now => now.id === entry.id));
+    const doubleRec = readSkillsRecord()['double-ok'];
+    same('Undo after two clicks on double-ok with Claude Code locked: plain confirmation, no warning, files byte-for-byte back, record On and both entries marked undone',
+      [await headerState(), pairFiles('double-ok'), doubleRec?.on, Object.keys(doubleRec?.applied ?? {}).sort(),
+        undoneEntries.length, undoneEntries.every(entry => !!entry?.undoneBy), clickEntries[0]?.losers.map(loser => loser.tool)],
+      [{ text: 'Undone: double-ok is as before.', warn: false, undo: false, problems: [] }, doubleBefore, true, ['claude-cli', 'copilot-cli'], 2, true, ['copilot-cli']]);
+  } finally { chmodSync(R.claude, 0o755); }
+  // 4. Real failure at Undo stays said: real-fail turned On unlocked, then Claude Code locked before Undo.
+  await dismissOutcome();
+  await r.click(`#${rowPart('switch', 'skills', 'real-fail')}`);
+  await done(r);
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.click('#outcome-undo');
+    await done(r);
+    const failHead = await headerState();
+    same('real Undo failure warns and names Claude Code and real-fail',
+      [failHead.text, failHead.warn, failHead.problems, pairFiles('real-fail').map(Boolean), readSkillsRecord()['real-fail']?.on, !!readSkillsRecord()['real-fail']?.applied?.['claude-cli']],
+      ['Not all of real-fail could be put back.', true, ['real-fail (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], [true, false], false, true]);
+  } finally { chmodSync(R.claude, 0o755); }
+  await r.click('#header-refresh');
+  // 5. Two different items, one truly cannot be undone: warning names only item-stuck (both after double-ok's superseded failure and after a single click on double-ok).
+  await dismissOutcome();
+  const doubleBefore5 = pairFiles('double-ok');
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'item-stuck')}`);
+  await done(r);
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.click('#outcome-undo');
+    await done(r);
+    const fiveHead = await headerState();
+    same('Undo over two different items drops double-ok’s superseded failure and names only item-stuck',
+      [fiveHead.text, fiveHead.warn, fiveHead.problems, pairFiles('double-ok'), readSkillsRecord()['double-ok']?.on, !!readSkillsRecord()['item-stuck']?.applied?.['claude-cli']],
+      ['Not all of item-stuck could be put back.', true, ['item-stuck (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], doubleBefore5, true, true]);
+  } finally { chmodSync(R.claude, 0o755); }
+  await r.click('#header-refresh');
+  // Two single clicks on two different items (item-stuck On unlocked, lock Claude Code, double-ok Off): Undo puts double-ok back cleanly and names only item-stuck.
+  await dismissOutcome();
+  await r.clickInRun(`#${rowPart('switch', 'skills', 'item-stuck')}`);
+  await done(r);
+  chmodSync(R.claude, 0o555);
+  try {
+    await r.clickInRun(`#${rowPart('switch', 'skills', 'double-ok')}`);
+    await done(r);
+    await r.click('#outcome-undo');
+    await done(r);
+    const twoHead = await headerState();
+    same('Undo over two clicks on two different items warns only about item-stuck',
+      [twoHead.text, twoHead.warn, twoHead.problems, pairFiles('double-ok'), readSkillsRecord()['double-ok']?.on, !!readSkillsRecord()['item-stuck']?.applied?.['claude-cli']],
+      ['Not all of item-stuck could be put back.', true, ['item-stuck (Claude Code): Could not remove Claude Code’s copy yet. Central Knot will try again.'], doubleBefore5, true, true]);
+  } finally { chmodSync(R.claude, 0o755); }
+  await r.click('#header-refresh');
+  same('no page errors, queued Add and Undo checks', r.pageErrors, []);
+  await r.quit();
+
+  // Three-tool home (Claude Code, Copilot CLI, Codex): Undo with a locked destination folder holding no file (single Off,
+  // 3-click alternating, 4-click alternating), and row copy choice running the plugin switch after a queued differing Add.
+  const R3 = homeWith('library-result-true-three');
+  const codex3 = join(R3.home, '.codex/skills'), codexToml3 = join(R3.home, '.codex/config.toml');
+  mkdirSync(codex3, { recursive: true });
+  writeFileSync(join(R3.home, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.142.3" && exit 0\nexit 9\n');
+  chmodSync(join(R3.home, '.local/bin/codex'), 0o755);
+  for (const name of ['single-lock', 'alt-three', 'alt-four']) skill(R3.claude, name, text(name, `Skill ${name}.`));
+  const plugRowEqual = text('plug-row', 'Equal at draw.'), plugRowNew = text('plug-row', 'Newer in Copilot.');
+  for (const dir of [R3.claude, R3.copilot]) skill(dir, 'plug-row', plugRowEqual);
+  const plugRowCache = join(R3.home, '.codex/plugins/cache/ck-test-market/team-pack/1.0.0/skills/plug-row');
+  mkdirSync(plugRowCache, { recursive: true });
+  writeFileSync(join(plugRowCache, 'SKILL.md'), plugRowEqual);
+  writeFileSync(codexToml3, '[plugins."team-pack@ck-test-market"]\nenabled = true\n\n[[skills.config]]\nname = "team-pack:plug-row"\nenabled = false\n');
+  const r3 = await launch(R3.data, [], R3.real);
+  await r3.click('#nav-overview');
+  await r3.click('#setup-no');
+  await openKind(r3, 'skills');
+  for (const name of ['single-lock', 'alt-three', 'alt-four']) { await r3.click(`#${rowPart('add', 'skills', name)}`); await done(r3); }
+  await r3.click('#header-refresh');
+  const r3Record = () => JSON.parse(readNow(join(R3.home, '.central-knot/skills.json')) || '{"items":{}}').items;
+  const r3Files = name => [readNow(join(R3.claude, `${name}/SKILL.md`)), readNow(join(R3.copilot, `${name}/SKILL.md`)), readNow(join(codex3, `${name}/SKILL.md`))];
+  const r3Head = async () => {
+    if (await r3.exists('#problems-show-all') && /^Show all \d+/.test(await r3.text('#problems-show-all') ?? '')) await r3.click('#problems-show-all');
+    return { text: await r3.text('#header [data-outcome] .band-text'), warn: await r3.exists('#header [data-outcome] .tone-warning'), problems: await r3.all('#header .problem-text') };
+  };
+  const r3Dismiss = async () => { if (await r3.exists('#outcome-dismiss')) await r3.click('#outcome-dismiss'); };
+  // Single Off, then Copilot CLI locked before Undo: Copilot CLI has no file and restore emits no result for it, yet Undo warns and names Copilot CLI.
+  await r3Dismiss();
+  await r3.click(`#${rowPart('switch', 'skills', 'single-lock')}`);
+  await done(r3);
+  chmodSync(R3.copilot, 0o555);
+  try {
+    await r3.click('#outcome-undo');
+    await done(r3);
+    const head = await r3Head(), rec = r3Record()['single-lock'];
+    same('single Off then locked Copilot CLI before Undo: warns and names Copilot CLI, with Copilot CLI missing and record applied only to Claude Code and Codex',
+      [head.text, head.warn, head.problems.length, head.problems.some(line => line.startsWith('single-lock (Copilot CLI): ')),
+        r3Files('single-lock').map(Boolean), rec?.on, Object.keys(rec?.applied ?? {}).sort()],
+      ['Not all of single-lock could be put back.', true, 1, true, [true, false, true], true, ['claude-cli', 'codex-cli']]);
+  } finally { chmodSync(R3.copilot, 0o755); }
+  await r3.click('#header-refresh');
+  // 3-click and 4-click alternating locks across clicks and restores: drops the settled tool's earlier failure and names the tool missing its file.
+  if (r3.main) {
+    const stepChannel = async (inspector, channel, steps) => inspector.run(`(() => {
+      const handlers = electron.ipcMain._invokeHandlers, real = handlers.get(${JSON.stringify(channel)});
+      const fs = process.mainModule.require('node:fs'), steps = ${JSON.stringify(steps)};
+      globalThis.ckPrev = globalThis.ckPrev ?? {}; globalThis.ckPrev[${JSON.stringify(channel)}] = real;
+      let at = 0;
+      handlers.set(${JSON.stringify(channel)}, async (...args) => {
+        const step = steps[at++];
+        if (step) for (const [path, mode] of step) fs.chmodSync(path, mode);
+        return real(...args);
+      });
+      return true;
+    })()`);
+    const restoreChannel = async (inspector, channel) => inspector.run(`(() => {
+      const prev = globalThis.ckPrev?.[${JSON.stringify(channel)}];
+      if (prev) { electron.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, prev); delete globalThis.ckPrev[${JSON.stringify(channel)}]; }
+      return true;
+    })()`);
+    for (const [name, count, missingTool, missingName, expectedFiles, expectedApplied] of [
+      ['alt-three', 3, 'copilot-cli', 'Copilot CLI', [true, false, true], ['claude-cli', 'codex-cli']],
+      ['alt-four', 4, 'claude-cli', 'Claude Code', [false, true, true], ['codex-cli', 'copilot-cli']],
+    ]) {
+      await r3Dismiss();
+      const inspector = await r3.main();
+      try {
+        await stepChannel(inspector, 'skills:apply', Array.from({ length: count }, (_, i) => [[R3.claude, i % 2 ? 0o755 : 0o555], [R3.copilot, i % 2 ? 0o555 : 0o755]]));
+        for (let i = 0; i < count; i++) { await r3.clickInRun(`#${rowPart('switch', 'skills', name)}`); await done(r3); }
+        await restoreChannel(inspector, 'skills:apply');
+        await stepChannel(inspector, 'history:restore', Array.from({ length: count }, (_, i) => [[R3.claude, i % 2 ? 0o555 : 0o755], [R3.copilot, i % 2 ? 0o755 : 0o555]]));
+        await r3.click('#outcome-undo');
+        await done(r3);
+        const head = await r3Head(), rec = r3Record()[name];
+        same(`${count}-click alternating Undo warns and names only ${missingName} (${missingTool} missing)`,
+          [head.text, head.warn, head.problems.length, head.problems.every(line => line.startsWith(`${name} (${missingName}): `)),
+            r3Files(name).map(Boolean), rec?.on, Object.keys(rec?.applied ?? {}).sort()],
+          [`Not all of ${name} could be put back.`, true, 1, true, expectedFiles, true, expectedApplied]);
+      } finally {
+        await restoreChannel(inspector, 'skills:apply');
+        await restoreChannel(inspector, 'history:restore');
+        inspector.close();
+        chmodSync(R3.claude, 0o755); chmodSync(R3.copilot, 0o755);
+      }
+      await r3.click('#header-refresh');
+    }
+  }
+  // Row choice road: queued Add on plug-row whose copies diverge leaves Codex's plugin skill off; choosing Copilot CLI's copy turns it on.
+  await r3Dismiss();
+  if (r3.main) {
+    const inspector = await r3.main(), held = await holdQueue(inspector, r3);
+    try {
+      await r3.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'plug-row'))}).click()`);
+      writeFileSync(join(R3.copilot, 'plug-row/SKILL.md'), plugRowNew);
+    } finally { await held.release(); inspector.close(); }
+  } else {
+    writeFileSync(join(R3.copilot, 'plug-row/SKILL.md'), plugRowNew);
+    await r3.run(`document.getElementById(${JSON.stringify(rowPart('add', 'skills', 'plug-row'))}).click()`);
+  }
+  await done(r3);
+  same('queued Add whose copies differ leaves Codex’s plugin skill off until a copy is chosen',
+    [(await r3Head()).text, /name = "team-pack:plug-row"[^[]*enabled = false/.test(readNow(codexToml3)), await cellState(r3, 'skills', 'plug-row', 'codex-cli')],
+    ['plug-row has differing copies. Choose which copy every tool uses.', true, 'plugin-off']);
+  await r3.click(`#${rowPart('add', 'skills', 'plug-row')}`);
+  await r3.click(`#${rowPart('use', 'skills', 'plug-row', 'claude-cli')}`);
+  await done(r3);
+  same('choosing Claude Code’s copy on the row takes plug-row in and turns Codex’s plugin skill on',
+    [readNow(join(R3.claude, 'plug-row/SKILL.md')), readNow(join(R3.copilot, 'plug-row/SKILL.md')),
+      existsSync(join(codex3, 'plug-row')), /name = "team-pack:plug-row"[^[]*enabled = false/.test(readNow(codexToml3)), await cellState(r3, 'skills', 'plug-row', 'codex-cli')],
+    [plugRowEqual, plugRowEqual, false, false, 'plugin']);
+  same('no page errors, three-tool Undo and row-choice plugin checks', r3.pageErrors, []);
+  await r3.quit();
 }
 
 /**
@@ -12195,8 +12484,112 @@ async function profilePluginsFlow() {
     } finally { menu.close(); }
     for (let tries = 0; tries < 80 && JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers; tries++) await wait(100);
     await bDone();
+    for (let tries = 0; tries < 50 && !(await b.exists('.band-done')); tries++) await wait(100);
     same('native menu switch to Old work clears the orphan disabledMcpServers rule', JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, undefined);
+    // Worked example 1 (menu bar): header result keeps the off-switch sentence with no Undo switch; History offers none either.
+    same('worked example 1 (menu bar): header result says the off-switch was cleared and offers no Undo switch',
+      [await b.text('.band-done .band-text'), await b.exists('#outcome-undo')],
+      ['Switched to Old work: 1 item turned on. Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.', false]);
+    await b.click('#nav-history');
+    same('worked example 1 (menu bar): History shows the same entry with no Undo',
+      [await b.run(`document.querySelector('.history-row[data-kind="profile"] .history-about')?.textContent`),
+        await b.run(`!!document.querySelector('.history-row[data-kind="profile"]')?.querySelector('.history-actions button')`)],
+      ['Switched to Old work: 1 item turned on. Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.', false]);
+    await b.click('#nav-profiles');
   }
+
+  // Worked examples 1 (page) and 5 (row tooltip with off-switch standing): standing disabledMcpServers while his issues is On.
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ ...JSON.parse(readNow(oldCopilotSettings)), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+  await b.click('#header-refresh');
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('Old work')).click()`); await b.settle();
+  same('worked example 5: with an off-switch standing in Copilot CLI, the row tooltip does not say issues is on now',
+    [await b.text('.profile-header p'), await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-state')?.dataset.state`),
+      await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-tick')?.title`)],
+    ['Switching turns 1 item on. Plugin items stay as they are.', 'Turns on',
+      'In Old work: switching to it turns issues on. Click to leave it out. issues is off in Copilot CLI now.']);
+  await b.click('#profile-switch'); await bDone();
+  same('worked example 1 (page): switch clears the off-switch, header keeps the sentence with no Undo switch, and Now and tooltip both say On',
+    [JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, JSON.parse(readNow(oldCopilotMcp)).mcpServers.issues?.command,
+      await b.text('.band-done .band-text'), await b.exists('#outcome-undo'),
+      await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-state')?.dataset.state`),
+      await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-tick')?.title`)],
+    [undefined, 'mine', 'Switched to Old work: 1 item turned on. Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.', false,
+      'On', 'In Old work: switching to it turns issues on. Click to leave it out. issues is on now.']);
+  await b.click('#nav-history');
+  same('worked example 1 (page): History’s newest profile entry has no Undo',
+    [await b.run(`document.querySelector('.history-row[data-kind="profile"] .history-about')?.textContent`),
+      await b.run(`!!document.querySelector('.history-row[data-kind="profile"]')?.querySelector('.history-actions button')`)],
+    ['Switched to Old work: 1 item turned on. Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.', false]);
+
+  // Worked example 2: a switch turning two items on and clearing an orphan Copilot CLI off-switch offers Undo; clicking Undo
+  // turns the two items back off and says in the header's result that the off-switch was left off and why.
+  mkdirSync(join(oldHome, '.claude/skills/standup'), { recursive: true });
+  writeFileSync(join(oldHome, '.claude/skills/standup/SKILL.md'), md('standup', 'Writes standup notes.'));
+  await b.click('#nav-profiles');
+  await b.click('#header-refresh');
+  same('second skill standup taken in, then notes and standup turned off', [
+    await b.run(`window.centralKnot.applySkills([{ key: 'standup', on: true, except: [] }], false, ${JSON.stringify(oldHome)}).then(r => r.stopped ?? 'ok')`),
+    await b.run(`window.centralKnot.applySkills([{ key: 'notes', on: false, except: [], seenOn: true }, { key: 'standup', on: false, except: [], seenOn: true }], false, ${JSON.stringify(oldHome)}).then(r => r.stopped ?? 'ok')`),
+  ], ['ok', 'ok']);
+  await b.run(`window.centralKnot.saveProfile({ name: 'WithTwo', items: ['skill:notes', 'skill:standup', 'mcp:issues'], switchesPluginItems: false }, ${JSON.stringify(oldHome)})`);
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ ...JSON.parse(readNow(oldCopilotSettings)), disabledMcpServers: ['issues'] }, null, 2)}\n`);
+  await b.click('#header-refresh');
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('WithTwo')).click()`); await b.settle();
+  await b.click('#profile-switch'); await bDone();
+  same('worked example 2: switch turning two items on and clearing the off-switch offers Undo switch',
+    [await b.text('.band-done .band-text'), await b.exists('#outcome-undo'),
+      existsSync(join(oldHome, '.claude/skills/notes/SKILL.md')), existsSync(join(oldHome, '.claude/skills/standup/SKILL.md')),
+      JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers],
+    ['Switched to WithTwo: 3 items turned on. Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.', true, true, true, undefined]);
+  await b.click('#outcome-undo'); await bDone();
+  same('worked example 2: Undo turns the two items back off and says in the header’s result that the off-switch was left off and why',
+    [existsSync(join(oldHome, '.claude/skills/notes/SKILL.md')), existsSync(join(oldHome, '.claude/skills/standup/SKILL.md')),
+      JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, JSON.parse(readNow(oldCopilotMcp)).mcpServers.issues?.command,
+      await b.text('.band-done .band-text')],
+    [false, false, undefined, 'mine', 'Undone: 2 items turned off. Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.']);
+
+  // Worked example 4: Undo offered, then a server of his added by hand under that name in the copy, then the click -> refusal
+  // shown whole in the header's result, wrapped not cut, at 860x528 and 1316x819 (light and dark).
+  writeFileSync(join(oldHome, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'issue-tracker', marketplace: 'ck-test-market', version: '2.0.0', cache_path: oldCopilot, enabled: true }] }));
+  writeFileSync(oldCodexCfg, oldCodexInit);
+  writeFileSync(join(oldHome, '.claude/settings.json'), `${JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: market } } }, enabledPlugins: { 'issue-tracker@ck-test-market': true } }, null, 2)}\n`);
+  await b.run(`window.centralKnot.applyServers([{ key: 'issues', on: false, except: ['claude-cli', 'codex-cli'], seenOn: true }], false, ${JSON.stringify(oldHome)})`);
+  writeFileSync(oldCopilotSettings, `${JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: market } } }, disabledMcpServers: ['issues'] }, null, 2)}\n`);
+  await b.run(`window.centralKnot.saveProfile({ name: 'PluginOnly', items: [${JSON.stringify(triageId)}, ${JSON.stringify(issuesId)}], switchesPluginItems: true }, ${JSON.stringify(oldHome)})`);
+  await b.click('#header-refresh');
+  await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('PluginOnly')).click()`); await b.settle();
+  await b.click('#profile-switch'); await bDone();
+  same('worked example 4: switch clearing plugin’s Copilot CLI off-switch with no personal server offers Undo switch',
+    [await b.text('.band-done .band-text'), await b.exists('#outcome-undo'), JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers],
+    ['Switched to PluginOnly: 1 item turned on.', true, undefined]);
+  // Add a server of his own under that exact name by hand in Copilot CLI before clicking Undo switch.
+  writeFileSync(oldCopilotMcp, `${JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'hand', tools: ['*'] } } }, null, 2)}\n`);
+  await b.click('#outcome-undo'); await bDone();
+  const refusalReason = 'Undo switch to PluginOnly: nothing was undone. Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.';
+  same('worked example 4: refused Undo says its reason in the header’s result with History, leaving the off-switch off',
+    [await b.text('.band-done .band-text'), await b.exists('.band-done svg.tone-warning'), await b.text('.band-done #outcome-history'),
+      JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers, JSON.parse(readNow(oldCopilotMcp)).mcpServers.issues?.command],
+    [refusalReason, true, 'History', undefined, 'hand']);
+  for (const theme of ['light', 'dark']) {
+    await b.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+    for (const [width, height] of [[860, 528], [1316, 819]]) {
+      await sizeTo(b, width, height);
+      if (width === 1316 && await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+      await b.settle();
+      const metrics = await b.run(`(() => {
+        const band = document.querySelector('.band-done'), text = band?.querySelector('.band-text');
+        if (!band || !text) return null;
+        const b = band.getBoundingClientRect(), t = text.getBoundingClientRect();
+        return { text: text.textContent, clippedX: text.scrollWidth > text.clientWidth + 1, clippedY: text.scrollHeight > text.clientHeight + 1,
+          fitsWidth: b.right <= window.innerWidth + 1, height: Math.round(t.height) };
+      })()`);
+      same(`worked example 4: refusal wraps whole without clipping at ${width}×${height} (${theme})`,
+        metrics && [metrics.text, metrics.clippedX, metrics.clippedY, metrics.fitsWidth], [refusalReason, false, false, true]);
+      if (shots) await b.shot(`undo-refused-${theme}-${width}`);
+    }
+  }
+  await b.run(`window.centralKnot.setAppearance('system')`);
+  await fullSize(b);
 
   same('no page errors after reopen', b.pageErrors, []);
   await b.quit();
@@ -12314,7 +12707,7 @@ const refused = [...written.filter(name => listed.filter(each => each === name).
   ...(badGroup ? [`--group takes 1 to ${groups.length} of ${groups.length} (<n>/${groups.length}), and was given ${groupArg || 'none'}`] : []),
   ...(named ?? []).filter(name => !listed.includes(name)).map(name => `--flows names ${name}, which is no flow`),
   ...(Number.isInteger(crashRounds) && crashRounds >= 0 ? [] : [`--crash-rounds takes a whole number, and was given ${option('--crash-rounds') ?? 'none'}`])];
-if (refused.length) { rmSync(scratch, { recursive: true, force: true }); throw new Error(`Refused to start: ${refused.join('; ')}.`); }
+if (refused.length) throw new Error(`Refused to start: ${refused.join('; ')}.`);
 
 /**
  * What a copy's output and its end say: its passes (undefined without a total line), its FAIL lines, among them one more when
@@ -12345,7 +12738,8 @@ function readCopy(names, number, output, code, signal) {
  * block when it ends; then the run's total, the flows not finished and not run, and every FAIL line again. The run's failures
  * are its copies' FAIL lines, one more for each copy that died or whose total counts more failures than its FAIL lines
  * (readCopy); the passes of a copy without a total line are not known, and the total says so. A signal is passed on to every
- * copy, and each one's block printed as it ends. Returns the exit code.
+ * copy, and each one's block printed as it ends; if the parent ends any other way while copies run (an error of its own), each
+ * is sent SIGTERM and cleans up as it ends. A parent killed by SIGKILL leaves them to the Mac run's last step. Returns the exit code.
  */
 async function runGroups() {
   const atOnce = Math.max(1, Number(process.env.CK_E2E_GROUPS_AT_ONCE) || 1);
@@ -12356,6 +12750,7 @@ async function runGroups() {
   const running = new Set(), unfinished = [], notRun = [], failLines = [], uncounted = [];
   let passed = 0, stoppedBy;
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stoppedBy = signal; for (const copy of running) copy.kill(signal); });
+  process.on('exit', () => { for (const copy of running) copy.kill('SIGTERM'); });
   const runOne = ([number, names]) => new Promise(done => {
     const from = Date.now();
     const copy = spawn(process.execPath, [...process.execArgv, import.meta.filename, ...childArgs, '--flows', names.join(',')], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -12386,9 +12781,6 @@ async function runGroups() {
 
 const started = Date.now();
 if (!named) {
-  // The scratch folder and its stand-ins were made as this script loaded, as every flow's paths are built from them; the parent
-  // runs no flow, so it deletes them.
-  rmSync(scratch, { recursive: true, force: true });
   process.exitCode = await runGroups();
 } else {
   try {
@@ -12400,15 +12792,13 @@ if (!named) {
       await flow();
       console.log(`${flow.name}: ${Math.round((Date.now() - from) / 1000)}s`);
     }
-    execChmod();
   } catch (error) {
     check(`aborted: ${error.message}`, false);
     console.error(error);
   } finally {
+    // An AppImage's mount goes a moment after its app; the folder goes as the script ends (scratch.ts).
     app?.child.kill('SIGKILL');
-    execChmod();
     await mountsGone(scratch);
-    rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
   }
   console.log(`e2e: ${passes} passed, ${failures.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}`);
   if (failures.length) { console.error(failures.join('\n')); process.exit(1); }

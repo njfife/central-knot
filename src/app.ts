@@ -18,7 +18,7 @@ import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { Reason, ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice, UsageReading } from './types.ts';
 import { anyOn, kindSource, noPins, pinsOn, rowId, sameRow, type NamedRow, type Pinned, type RowKey } from './itemrow.ts';
-import { itemKey } from './library.ts';
+import { itemKey, wantedIn } from './library.ts';
 import { caughtUpNames, groupBy, noticeNames, plural, withSetAside } from './model.ts';
 import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -34,7 +34,7 @@ import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, t
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { turnsWords } from './profileplan.ts';
+import { turnsWords, undoOffered } from './profileplan.ts';
 import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
@@ -238,15 +238,16 @@ export const notDoneFirst = (outcome: Outcome): Outcome => (outcome.warn ? { ...
  */
 export const FADE_MS = 8000;
 let fading: ReturnType<typeof setTimeout> | undefined;
-/** The result's time starts again from now; none runs while the page acts, whose end starts it (afterActing). */
+const windowVisible = () => windowShown && !document.hidden;
+/** The result's time starts again from now; none runs while the page acts (afterActing) or while the window is hidden. */
 function fadeLater(): void {
   clearTimeout(fading);
-  if (!acting()) fading = setTimeout(fadeNow, FADE_MS);
+  if (!acting() && windowVisible()) fading = setTimeout(fadeNow, FADE_MS);
 }
 /** The pointer or the focus is in the header's result, or it is open as a card: it stays while so, and its time starts again after. */
 const heldInHeader = () => !!document.querySelector('.header-result:hover, .header-result:focus-within, .result-whole');
 function fadeNow(): void {
-  if (acting()) return;
+  if (acting() || !windowVisible()) return;
   if (heldInHeader()) { fading = setTimeout(() => (heldInHeader() ? fadeNow() : fadeLater()), 250); return; }
   const outcome = state.outcome;
   if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length)) state.outcome = undefined;
@@ -285,8 +286,8 @@ export function paintStatusMessage() {
  * page follows: a page whose kind is no longer here gives way to the Overview, saying why, and a page with its own data
  * reads it again (unless `reload` is false: the caller reads it itself).
  */
-export function setHome(view: HomeView | null | undefined, { reload = true, say, background = false }: {
-  reload?: boolean; say?: (view: HomeView) => void; background?: boolean;
+export function setHome(view: HomeView | null | undefined, { reload = true, say, background = false, sayNews = true }: {
+  reload?: boolean; say?: (view: HomeView) => void; background?: boolean; sayNews?: boolean;
 } = {}): void {
   if (!view) return;
   const held = setAside?.home === view.home ? setAside : undefined;
@@ -299,7 +300,7 @@ export function setHome(view: HomeView | null | undefined, { reload = true, say,
   // Each notice's place in the order of arrival is given as its view is taken: the newest is the last to arrive, of any kind.
   for (const [, notices] of noticesByKind(view)) for (const notice of notices) noticeArrived(notice.history);
   state.home = keepUnshown(state.home, view);
-  if (news && !acting()) sayBackgroundNews();
+  if (news && !acting() && sayNews) sayBackgroundNews();
   // A closed background problem stays closed while reads report it, and is forgotten once one doesn't (matrix.ts listResult).
   for (const key of state.dismissed) if (key.startsWith('problem:') && !view.sync.caughtUp.some(entry => problemKey(entry) === key)) state.dismissed.delete(key);
   // A record taken over at this view's look (types.ts HomeView tookOver), after whatever the read itself said.
@@ -415,7 +416,8 @@ function accept(view: HomeView): HomeView {
 
 /** Whether the window has shown: false only after a start at sign-in with no window (main.ts startedHidden, the page's `start`), until it first shows. */
 let windowShown = new URLSearchParams(globalThis.location?.search).get('start') !== 'hidden';
-api().onWindowShown(() => { if (windowShown) return; windowShown = true; void collectUsage(); });
+api().onWindowShown(() => { const first = !windowShown; windowShown = true; if (first) void collectUsage(); fadeLater(); });
+document.addEventListener('visibilitychange', () => { if (windowVisible()) fadeLater(); else clearTimeout(fading); });
 
 /**
  * Collects usage: main's usage:read reads the tools' own session history on this computer, and nothing leaves it. By itself
@@ -559,6 +561,9 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const kept = { kind: click.kind, results: ours.filter(entry => entry !== refusal), notices: result.notices };
   if (result.stopped) return { kept, did: false, reloads: [], refused: result.stopped, changed: [], outcome: { page, items: click.items, rows: click.rows, warn: true, band: true, text: result.stopped } };
   const made = result.made ?? [];
+  // An Add held because its copies differ on disk: nothing was added, so say the question alone and leave its plugins' part unrun.
+  if (differs && !did && !made.length) return { kept, did: false, reloads: [], changed: [], focus: click.focus?.(),
+    outcome: { page, items: click.items, rows: click.rows, warn: failed, band: true, text: copiesDiffer(click.items) } };
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
   if (plugged) setHome(await api().refresh());
@@ -752,8 +757,9 @@ interface Undoable { kind: PageKind; made: string[]; back: PluginOp[] }
  * Undo of one click, or of several as one (a run, Turn these off): their plugin items' switches first, then every History entry
  * they made, newest first, each by its own action (historyactions.ts). An entry History no longer holds, or one whose Undo is
  * stopped (its kind's record, say), is said once as a problem line (words.ts saidByKind: led by its kind where the Undo spans several), and
- * the later entries of a stopped kind are left; the other kinds' still go back, and the result names them. Each kind's last result
- * becomes what its own entries' Undo did.
+ * the later entries of a stopped kind are left; the other kinds' still go back, and the result names them. A tool problem from an
+ * earlier restore that a later restore of the same item put right, confirmed against the refreshed view, is dropped. Each kind's
+ * last result becomes what its own entries' Undo did.
  */
 const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async page => {
   const home = state.home!, several = new Set(parts.map(part => part.kind)).size > 1;
@@ -761,20 +767,58 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const switchedBack = parts.flatMap(part => part.back);
   const unswitched = switchedBack.length ? await runSwitches(switchedBack, true) : undefined;
   const kindOfEntry = new Map(parts.flatMap(part => part.made.map(id => [id, part.kind] as const)));
-  const events = (await api().history()).events.filter(event => kindOfEntry.has(event.id)).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
+  // History is stored newest-last (history.ts); reversing first keeps entries written in the same millisecond newest-first.
+  const events = (await api().history()).events.filter(event => kindOfEntry.has(event.id)).reverse()
+    .sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
-  const results = new Map(parts.map(part => [part.kind, [] as DestinationResult[]])), stops = new Map<PageKind, string>();
+  type UndoEntry = { key?: string; entry: DestinationResult; answeredLater?: boolean };
+  const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Set<string>()])), stops = new Map<PageKind, string>();
   const reloads: ReloadChange[] = unswitched ? pluginReloads(unswitched.done) : [];
   for (const event of events) {
     const kind = kindOfEntry.get(event.id)!;
     if (stops.has(kind)) continue;
     const result = await api().restore(event.id, home.home);
-    if (result.stopped) stops.set(kind, result.stopped); else { results.get(kind)!.push(...result.results); reloads.push(...result.reloads); }
+    if (result.stopped) { stops.set(kind, result.stopped); continue; }
+    reloads.push(...result.reloads);
+    const key = libraryEntry(event)?.key, list = raw.get(kind)!;
+    // A later restore of the same item in this Undo answers an earlier tool problem: replaced if that tool failed again,
+    // or dropped below once settled. restore runs with `only`, so every result in result.results belongs to this item.
+    if (key) {
+      restored.get(kind)!.add(key);
+      const failedNow = new Set(result.results.filter(entry => entry.harness && keptBack(entry)).map(entry => entry.harness!));
+      for (let at = list.length - 1; at >= 0; at--) {
+        const earlier = list[at]!;
+        if (earlier.key !== key || !earlier.entry.harness || !keptBack(earlier.entry)) continue;
+        if (failedNow.has(earlier.entry.harness)) list.splice(at, 1); else earlier.answeredLater = true;
+      }
+    }
+    list.push(...result.results.map(entry => ({ key, entry })));
   }
   setHome(await api().refresh());
+  // Settled: managed, readable, and matching what the library now wants (not held or owed a write/removal; nothing applied if deleted).
+  const settledIn = (kind: PageKind, key: string, tool: HarnessId) => {
+    const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
+    const live = item && !item.deleted;
+    return !!view?.tools.includes(tool) && !row?.unseen?.[tool]
+      && (live ? !(row?.cannot?.[tool] && !row?.plugin?.[tool]) && !row?.plan?.write.includes(tool) && !row?.plan?.remove.includes(tool) : item?.applied[tool] === undefined);
+  };
+  // One look at the refreshed view, both ways: drop answered problems now settled, and add any wanted or owed tool still unsettled.
+  const kept = new Map([...raw].map(([kind, list]) => {
+    const entries = list.filter(each => !(each.answeredLater && each.key && each.entry.harness && settledIn(kind, each.key, each.entry.harness)));
+    if (!stops.has(kind)) for (const key of restored.get(kind)!) {
+      const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
+      if (view && item) for (const tool of view.tools) {
+        if (!((!item.deleted && wantedIn(item, tool)) || item.applied[tool] !== undefined) || settledIn(kind, key, tool)) continue;
+        if (entries.some(each => each.key === key && each.entry.harness === tool && keptBack(each.entry))) continue;
+        entries.push({ key, entry: { item: item.name, harness: tool, outcome: 'held', message: row?.cannot?.[tool] ?? row?.unseen?.[tool] ?? `Could not put ${toolName(tool)}’s copy back yet.` } });
+      }
+    }
+    return [kind, entries] as const;
+  }));
+  const results = new Map([...kept].map(([kind, list]) => [kind, list.map(each => each.entry)]));
   focusAfterBusy = about.focus?.();
   await putHistory();
-  keepOwn([...results].map(([kind, kept]) => ({ kind, results: kept, notices: [] })));
+  keepOwn([...results].map(([kind, list]) => ({ kind, results: list, notices: [] })));
   const missing = [...groupBy(gone, ([, kind]) => kind)].map(([kind, of]): [PageKind, string] =>
     [kind, `${plural(of.length, 'History entry', 'History entries')} it was to put back ${of.length === 1 ? 'is' : 'are'} no longer in History.`]);
   const reasons = [...saidByKind([...stops, ...missing], several), ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
@@ -783,9 +827,10 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const short = new Set([...stops.keys(), ...gone.map(([, kind]) => kind)]), names = (rows: NamedRow[]) => [...new Set(rowNames(rows, about.rows))];
   const switchesShort = new Set(unswitched && switchProblems(unswitched).length ? parts.filter(part => part.back.length).map(part => part.kind) : []);
   const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
+  const failed = names(about.rows.filter(row => switchesShort.has(row.kind) || kept.get(row.kind)?.some(each => keptBack(each.entry) && (each.key ? each.key === row.key : each.entry.item.toLowerCase() === row.name.toLowerCase()))));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
   tellWritten({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
-    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(all)} could be put back.` }, reloads);
+    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads);
   for (const row of about.rows) flashRow(row);
   if (about.regroups) unpin();
 });
@@ -793,7 +838,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
 /** What a run of plugin switches couldn't do, each in its own words ("issue-tracker: couldn’t turn it on in Codex."). */
 const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [...(ran.stopped ? [ran.stopped] : []), ...ran.failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)];
 /** A click's reasons (Outcome) from its plugin switches' run, one for each failure: what it couldn't do, then `also`, what the click left as it is. */
-const switchReasons = (ran: Awaited<ReturnType<typeof runSwitches>> | undefined, also: string[] = []) => [...(ran ? switchProblems(ran) : []), ...also];
+export const switchReasons = (ran: Awaited<ReturnType<typeof runSwitches>> | undefined, also: string[] = []) => [...(ran ? switchProblems(ran) : []), ...also];
 /** The key under which a background pass's problem the person closed is remembered (state.dismissed). */
 export const problemKey = (entry: DestinationResult) => `problem:${entry.of ?? ''}:${entry.item}:${entry.harness ?? ''}:${entry.message}`;
 
@@ -802,7 +847,7 @@ export const problemKey = (entry: DestinationResult) => `problem:${entry.of ?? '
  * switched off for it: those written before it are put back. Returns what ran, in lines, the tools where something didn't,
  * and the choices that turn it all back.
  */
-async function runSwitches(ops: PluginOp[], undo = false) {
+export async function runSwitches(ops: PluginOp[], undo = false) {
   // A plugin changes here as it does on its own page: the Plugins list's rows from before are no longer true (pluginstate.ts).
   endListNews();
   const home = state.home!.home;
@@ -1087,7 +1132,8 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if ((past?.kind !== 'profile' && past?.kind !== 'everything') || result.stopped) keepOwn([{ kind: (past && libraryEntry(past)?.kind) || 'agents', results: result.results, notices: result.notices }]);
   if (past?.kind === 'profile') {
     // Each item it turned back has its own History entry, with its own action: the band offers no Undo of the Undo.
-    if (result.stopped || !result.switched) tell(undefined, result.stopped); else turnedOutcome(page, 'Undone', result.switched, result.results, undefined, result.reloads);
+    if (result.stopped) tell({ page, text: `Undo switch to ${past.profile?.toName ?? past.item}: nothing was undone. ${result.stopped.replace(/ Nothing was undone\.$/, '')}`, warn: true, band: true, history: page !== 'history', refused: true });
+    else if (result.switched) turnedOutcome(page, 'Undone', result.switched, result.results, result.reloads, { fade: true });
     return;
   }
   const everywhere = touchedToolsPhrase(where);
@@ -1657,6 +1703,8 @@ let refreshing = false;
 let refreshOwed = false;
 /** A background reply that landed while the page acted. The next view of its home takes it in (setHome). */
 let setAside: HomeView | undefined;
+/** A menu-bar profile switch that arrived while the page acted or refreshed, applied once that ends (drainOwedRefresh). */
+let pendingSwitch: ProfileSwitchResult | undefined;
 /** Whether the home waits to be read once the page's run of clicks is done: a background refresh asked for meanwhile, or a plugin's click (oweHomeRead). */
 export const homeReadOwed = () => refreshOwed;
 /** A plugin's click changed what the item lists show: the home is read once at the run's end (clicklist.ts), not after each click. */
@@ -1682,7 +1730,8 @@ api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings
 
 // A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
 // The Sources page reads its view again too: a read by itself (the daily check) changes what each name there is to the library.
-api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); if (state.page === 'sources') void loadSources(); });
+function syncFollowUps() { loadRepoSoon(); if (state.page === 'sources') void loadSources(); }
+api().onSyncChanged(() => { syncFollowUps(); void backgroundRefresh(); });
 api().onSaid(text => announce(text));
 
 /** Each kind's sync notices in a view: what changed on its own, with its History event. */
@@ -1750,9 +1799,11 @@ function sayBackgroundNews() {
   announce(`Sync changed ${andList(items)}.`, true, undefined, news.map(({ notice }) => notice.history));
 }
 
-/** A background refresh asked for while the page acted or while another ran: run it now, once, if nothing is running. */
+/** A background refresh or menu-bar switch asked for while the page acted or while another ran: run it now, once, if nothing is running. */
 function drainOwedRefresh() {
-  if (!refreshOwed || acting() || refreshing) return;
+  if (acting() || refreshing) return;
+  if (pendingSwitch) { const next = pendingSwitch; pendingSwitch = undefined; void applyMenuSwitch(next); return; }
+  if (!refreshOwed) return;
   refreshOwed = false;
   void backgroundRefresh();
 }
@@ -1772,19 +1823,21 @@ export const profileState = {
 };
 
 /** What a switch or its Undo did, as its band says it: what it turned On and Off, and what could not change. */
-function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], act: Outcome['act'], reloads: readonly ReloadChange[]) {
+function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], reloads: readonly ReloadChange[], { act, fade }: { act?: Outcome['act']; fade?: boolean } = {}) {
   const leftSaid = `${turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : ''}${(turned.settingsChanged ?? []).map(said => ` ${said}`).join('')}`;
   // An Undo's plugin copies changed since the switch (profiles.ts undoSwitch), left as they are.
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}: ${turned.since.join('; ')}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
-  tellWritten({ page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0 || !!turned.since?.length, act }, reloads);
+  const warn = results.length > 0 || turned.left.length > 0 || !!turned.since?.length;
+  tellWritten({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${leftSaid}${sinceSaid}${notDone}`, warn, act }, reloads);
 }
 
-/** What a switch did, with Undo switch (from the page or, next time the window shows, the menu bar). */
-const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, result, result.results,
-  result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined, result.reloads);
+/** What a switch did, with Undo switch only where History would offer it (profileplan.ts undoOffered, over the view already in state.home). */
+const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, result, result.results, result.reloads,
+  { act: result.event && state.home && undoOffered(result, state.home)
+    ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined });
 
-/** Switches to a profile. The band says what changed, with Undo; the menu bar follows. */
+/** Switches to a profile. The band says what changed, with Undo where History offers it; the menu bar follows. */
 export const switchToProfile = (id: string) => busy('Switching profile…', async page => {
   const result = await api().switchProfile(id, state.home!.home);
   if (result.view) setHome(result.view);
@@ -1792,13 +1845,22 @@ export const switchToProfile = (id: string) => busy('Switching profile…', asyn
   switchOutcome(result, page);
   if (state.page === 'history') await putHistory();
 });
-// A switch from the menu bar: its result and Undo are on the page the next time the window shows.
-api().onProfileSwitched(async result => {
-  switchOutcome(result, state.page);
-  // History lists the new switch at once when it is the page open (it reads History only when opened).
-  if (state.page === 'history') await putHistory();
-  rerender();
-});
+// A switch from the menu bar: its fresh view and result land together so switchOutcome asks undoOffered against the post-switch home, waiting while busy like backgroundRefresh.
+async function applyMenuSwitch(result: ProfileSwitchResult) {
+  if (!state.home || (result.view && result.view.home !== state.home.home)) return;
+  if (acting() || refreshing) { pendingSwitch = pendingSwitch ? { ...result, ...(pendingSwitch.view && result.view ? { view: withSetAside(pendingSwitch.view, result.view) } : {}), reloads: [...pendingSwitch.reloads, ...result.reloads] } : result; return; }
+  refreshing = true;
+  try {
+    if (result.view) setHome(result.view, { background: true, sayNews: false });
+    switchOutcome(result, state.page);
+    sayBackgroundNews();
+    // History lists the new switch at once when it is the page open (it reads History only when opened).
+    if (state.page === 'history') await putHistory();
+    syncFollowUps();
+    rerender();
+  } finally { refreshing = false; drainOwedRefresh(); }
+}
+api().onProfileSwitched(result => void applyMenuSwitch(result));
 
 /**
  * Saves a profile: only the fields given change. A new or restored profile opens (a new one with its name field ready to type); an
