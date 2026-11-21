@@ -500,11 +500,12 @@ async function walk(seed: number): Promise<Finding[]> {
         // Another skills folder in its place, with a skill of its own, for two passes with Synchronize everything on: nothing in it
         // is found or taken in, so no folder of any tool changes (library.ts THE SHARED FOLDER).
         add(1, { name: 'the shared folder replaced by one with a skill of its own, two passes, Synchronize everything on', app: true, byHand: true, run: async () => {
-          const { record } = await readRecord(box.home), before = await folders();
+          const { record } = await readRecord(box.home);
           await rename(root, aside);
           await mkdir(join(root, 'stranger'), { recursive: true });
           await writeFile(join(root, 'stranger/SKILL.md'), skillText('Another folder’s.', 'stranger'));
           await saveRecord(box.home, { ...record!, syncEverything: true });
+          const before = await folders();
           try {
             for (const _ of [1, 2]) await applySkills(context(), tools, [], { background: true });
             if (!same(await folders(), before) || (await seen(box, context(), 'stranger')).item) fail('a folder of other skills in the shared folder’s place had something taken in or a tool’s folder changed');
