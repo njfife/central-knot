@@ -8766,7 +8766,9 @@ async function mcpSigninFlow() {
   same('no page errors, mcp sign-in', a.pageErrors, []);
   const quitter = await a.main();
   const gone = new Promise(done => (a.child.exitCode !== null ? done() : a.child.once('exit', done)));
-  await quitter.run('(setTimeout(() => { electron.app.quit(); electron.app.quit(); }, 50), true)').catch(() => undefined);
+  // The two Quits come once this connection to the main process is closed, which would otherwise keep the app open.
+  await quitter.run('(setTimeout(() => { electron.app.quit(); electron.app.quit(); }, 300), true)').catch(() => undefined);
+  quitter.close();
   await Promise.race([gone, wait(20000)]);
   const alive = pid => { try { process.kill(Number(pid), 0); return true; } catch { return false; } };
   same('a second Quit waits for the check it stopped: the app gone, its tool stopped, its folder removed', [a.child.exitCode !== null || a.child.signalCode !== null, alive(quitPid), existsSync(quitCwd)], [true, false, false]);
