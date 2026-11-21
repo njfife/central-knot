@@ -8582,7 +8582,10 @@ async function mcpSigninFlow() {
     if (outputs[binary]) writeFileSync(join(said, binary), outputs[binary]);
     // Every call but --version is recorded as it starts and as it ends: the tool, the folder it ran in, how many entries that held, its arguments, its process.
     writeFileSync(join(home, '.local/bin', binary), [`#!/bin/sh`, `[ "$1" = "--version" ] && echo "${version}" && exit 0`,
-      `echo "start|${binary}|$(pwd)|$(ls -A | wc -l | tr -d ' ')|$*|$$" >> ${calls}`, `[ -f ${said}/${binary}.wait ] && sleep "$(cat ${said}/${binary}.wait)"`,
+      `echo "start|${binary}|$(pwd)|$(ls -A | wc -l | tr -d ' ')|$*|$$" >> ${calls}`,
+      // <binary>.linger: a helper in a session of its own holds the tool's output open that many seconds after the tool is stopped.
+      `[ -f ${said}/${binary}.linger ] && "${process.execPath}" -e ${JSON.stringify(`require('node:child_process').spawn('sleep', [process.argv[1]], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }).unref()`)} "$(cat ${said}/${binary}.linger)"`,
+      `[ -f ${said}/${binary}.wait ] && sleep "$(cat ${said}/${binary}.wait)"`,
       `cat ${said}/${binary} 2>/dev/null`, `echo "end|${binary}" >> ${calls}`, binary === 'pi' ? 'exit 1' : 'exit 0', ''].join('\n'));
     chmodSync(join(home, '.local/bin', binary), 0o755);
   }
@@ -8656,16 +8659,19 @@ async function mcpSigninFlow() {
     ['No sign-in needed', 'Needs sign-in', 'Codex can’t tell if it needs a sign-in', 'Codex can’t tell if it needs a sign-in', 'Off in Codex', 'Signed in']);
   same('the other columns are still not checked', (await column('claude-cli')).plain, 'Not checked');
 
-  // Copy on a cell that needs a sign-in: the tool's own command, with its name for the server, under a button that says Copy.
-  const main = await a.main();
+  // Copy on a cell that needs a sign-in: the tool's own command, with its name for the server, under a button that says Copy. The
+  // clipboard is read through the main process, which only a development run opens to the checks (as practiceFlow's menus are).
+  const main = a.inspect ? await a.main() : undefined;
+  if (!main) console.log('(mcpSigninFlow: the packaged app opens no main process to the checks and offers no Practice copy: the clipboard after Copy and a refused check are not checked here, the other home opened during a check is this one again, and Quit comes once)');
   const copyOn = async (tool, name) => {
-    const index = (await page()).rows.findIndex(row => rowName(row) === name);
+    const index = (await page()).rows.findIndex(row => rowName(row) === name), command = await a.text(`#signin-cell-${tool}-${index} .signin-command`);
     const label = await a.text(`#signin-copy-${tool}-${index}`);
     await a.click(`#signin-copy-${tool}-${index}`);
     await wait(200);
-    return [label, await a.text(`#signin-cell-${tool}-${index} .signin-command`), await main.run('electron.clipboard.readText()'), await a.run(`document.querySelector('#announcement').dataset.text`)];
+    // Its label, the command the cell shows, what the status bar says, and (a development run) what the clipboard holds.
+    return [label, command, await a.run(`document.querySelector('#announcement').dataset.text`), ...(main ? [await main.run('electron.clipboard.readText()')] : [])];
   };
-  same('Copy gives Codex’s own sign-in command, the one the cell shows', await copyOn('codex-cli', 'oauth'), ['Copy', 'codex mcp login oauth', 'codex mcp login oauth', 'Copied. Run it in a terminal; then Check again.']);
+  same('Copy gives Codex’s own sign-in command, the one the cell shows', await copyOn('codex-cli', 'oauth'), ['Copy', 'codex mcp login oauth', 'Copied. Run it in a terminal; then Check again.', ...(main ? ['codex mcp login oauth'] : [])]);
 
   // A slow check: the column says Checking…, every Check waits, the page stays usable, and Check all meanwhile does nothing.
   writeFileSync(join(said, 'pi.wait'), '2');
@@ -8696,8 +8702,8 @@ async function mcpSigninFlow() {
     ['Connected', 'Needs sign-in', 'Couldn’t reach: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: MCP server "silent" connection timed out after 30000ms', 'Connected', 'Needs sign-in', 'Not reported by Claude Code']);
   same('OpenCode’s answers, line by line', ['plain', 'oauth', 'down', 'silent', 'search', longName].map(name => openCodeWords[name]),
     ['Connected', 'Needs sign-in', 'Couldn’t reach: SSE error: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: Operation timed out after 30000ms', 'Connected', 'Needs sign-in']);
-  same('Copy on the plugin’s server gives Claude Code’s name for it', (await copyOn('claude-cli', 'issues (tracker)')).slice(1, 3), ['claude mcp login plugin:tracker:issues', 'claude mcp login plugin:tracker:issues']);
-  await main.close();
+  same('Copy on the plugin’s server gives Claude Code’s name for it', (await copyOn('claude-cli', 'issues (tracker)')).filter((_, at) => at === 1 || at === 3), ['claude mcp login plugin:tracker:issues', ...(main ? ['claude mcp login plugin:tracker:issues'] : [])]);
+  main?.close();
   await fits('checked');
   // Scrolled to the end, in the smallest window and in the owner's: the tools' names stay at the top as the rows go under them.
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
@@ -8759,24 +8765,27 @@ async function mcpSigninFlow() {
   check('a tool that didn’t answer in time says so', true);
   rmSync(join(said, 'codex.wait'));
   await owners('no-answer');
-  // A check that couldn't be run says why in its column's head.
-  const helpers = await mainHelpers(a.inspect);
-  await helpers.failRequest('mcp-signin:check');
-  await a.click('#signin-check-pi-cli');
-  await until(async () => (await head('pi-cli'))?.includes('Couldn’t run the check'), 'Pi’s refused check');
-  check('a check that couldn’t run says so at its head', /Couldn’t run the check: .*Refused for the test/.test(await head('pi-cli')), await head('pi-cli'));
-  await helpers.restore('mcp-signin:check');
-  await helpers.close();
+  // A check that couldn't be run says why in its column's head (a development run: main refuses the request through its debugger).
+  if (a.inspect) {
+    const helpers = await mainHelpers(a.inspect);
+    await helpers.failRequest('mcp-signin:check');
+    await a.click('#signin-check-pi-cli');
+    await until(async () => (await head('pi-cli'))?.includes('Couldn’t run the check'), 'Pi’s refused check');
+    check('a check that couldn’t run says so at its head', /Couldn’t run the check: .*Refused for the test/.test(await head('pi-cli')), await head('pi-cli'));
+    await helpers.restore('mcp-signin:check');
+    await helpers.close();
+  }
 
-  // A check still running when another home opens: its answer is not shown there, nor on this home opened again.
+  // A check still running when another home opens: its answer is not shown there, nor on this home opened again. The other home is
+  // the Practice copy in a development run; the packaged app offers none, and this home opened again is a new home's checks too.
   writeFileSync(join(said, 'claude.wait'), '2');
   await a.click('#signin-check-claude-cli');
-  await a.click('#home-fixture');
+  await a.click(a.inspect ? '#home-fixture' : '#home-actual');
   await a.click('#nav-mcpsignin');
   await until(async () => called().filter(([what, tool]) => what === 'end' && tool === 'claude').length === 3, 'the slow Claude Code check to end');
   await wait(300);
-  const practice = await page();
-  check('the Practice copy shows nothing of the other home’s check', practice.rows.length > 0 && practice.rows.every(([, , ...cells]) => cells.every(cell => ['', 'Not checked', 'Check inside a session'].includes(cell) || cell.startsWith('Off in'))) && !(await a.all('.signin-when')).some(when => when.startsWith('Checked')), practice);
+  const other = await page();
+  check('the home opened meanwhile shows nothing of the check', other.rows.length > 0 && other.rows.every(([, , ...cells]) => cells.every(cell => ['', 'Not checked', 'Check inside a session'].includes(cell) || cell.startsWith('Off in'))) && !(await a.all('.signin-when')).some(when => when.startsWith('Checked')), other);
   rmSync(join(said, 'claude.wait'));
   await a.click('#home-actual');
   await a.click('#nav-mcpsignin');
@@ -8788,23 +8797,29 @@ async function mcpSigninFlow() {
   await a.click('#header-refresh');
   same('with no server in any tool the page says so', await a.text('.empty-title'), 'No MCP servers in your tools');
   await owners('no-servers');
-  // Quit twice while a check runs: the app goes only once the check's tool is stopped and its folder removed.
+  // Quit while a check runs: the app goes only once the check's tool is stopped and its folder removed. The tool's output is held
+  // open 3 s after it is stopped (linger), so a Quit that didn't wait would leave before the folder went. A development run sends two
+  // Quits at once through main's debugger, the second waiting too; the packaged app gets one, as the system sends it (SIGTERM: a
+  // second signal would not be a second Quit, as Electron takes the first itself).
   write('.claude.json', JSON.stringify({ mcpServers: remote(claudeServers) }));
   await a.click('#header-refresh');
   writeFileSync(join(said, 'claude.wait'), '30');
+  writeFileSync(join(said, 'claude.linger'), '3');
   const quitFrom = called().length;
   await a.click('#signin-check-claude-cli');
   await until(async () => called().slice(quitFrom).some(([what]) => what === 'start'), 'the check Quit stops to start');
   const [[, , quitCwd, , , quitPid]] = called().slice(quitFrom);
   same('no page errors, mcp sign-in', a.pageErrors, []);
-  const quitter = await a.main();
   const gone = new Promise(done => (a.child.exitCode !== null ? done() : a.child.once('exit', done)));
-  // The two Quits come once this connection to the main process is closed, which would otherwise keep the app open.
-  await quitter.run('(setTimeout(() => { electron.app.quit(); electron.app.quit(); }, 300), true)').catch(() => undefined);
-  quitter.close();
+  if (a.inspect) {
+    // The two Quits come once this connection to the main process is closed, which would otherwise keep the app open.
+    const quitter = await a.main();
+    await quitter.run('(setTimeout(() => { electron.app.quit(); electron.app.quit(); }, 300), true)').catch(() => undefined);
+    quitter.close();
+  } else a.child.kill('SIGTERM');
   await Promise.race([gone, wait(20000)]);
   const alive = pid => { try { process.kill(Number(pid), 0); return true; } catch { return false; } };
-  same('a second Quit waits for the check it stopped: the app gone, its tool stopped, its folder removed', [a.child.exitCode !== null || a.child.signalCode !== null, alive(quitPid), existsSync(quitCwd)], [true, false, false]);
+  same(`${a.inspect ? 'two Quits wait' : 'Quit waits'} for the check stopped: the app gone, its tool stopped, its folder removed`, [a.child.exitCode !== null || a.child.signalCode !== null, alive(quitPid), existsSync(quitCwd)], [true, false, false]);
 }
 
 /**
