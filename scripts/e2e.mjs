@@ -13169,9 +13169,12 @@ async function stillLoadsFlow() {
   // The profile: issues alone ticked, so Switch is offered (profileplan.ts switchable); the ten skills turn off.
   await a.click('#nav-profiles');
   await newProfile(a, 'Writing');
-  // Yes's background pass writes the skills before its sync:changed refresh reaches the page (app.ts backgroundRefresh);
-  // wait for the ten skill rows on Profiles before ticking and reading the header and menu preview.
-  await until(async () => (await a.all('.pf-row[data-item^="skill:"]', 'e.dataset.item')).length === ours.length);
+  // Yes's own pass leaves the ten just-written skills settling (library.ts takeInAnswer); a later pass takes them in,
+  // and its sync:changed refresh reaches the page outside busy() (app.ts backgroundRefresh).
+  let seenSkills = 0;
+  check('the ten taken-in skills reach Profiles',
+    await until(async () => (seenSkills = (await a.all('.pf-row[data-item^="skill:"]', 'e.dataset.item')).length) === ours.length),
+    { skillRows: seenSkills, expected: ours.length });
   await a.click(byId('pf-mcp:issues'));
   await done();
   const header = 'Switching turns 10 items off; 4 still load from the shared skills folder, in Copilot CLI, Codex, Pi or OpenCode';
