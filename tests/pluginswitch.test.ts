@@ -279,7 +279,7 @@ test('skill one Off, skill two Off, one On: the plugin is on again in Claude Cod
   installs = mainSwitch(two.after, 'one', true).after;
   const pluginOn = installs.map(install => item(install, 'skill', 'two')).filter(onNow).map(entry => entry.tool);
   assert.deepEqual(pluginOn, ['claude-cli']);
-  // Its library row is Off, and says where it is still on (matrix.ts pluginOnIn); its switch turns it on everywhere else, and
+  // Its library row is Off, and says where it is still on (pluginrows.ts pluginOnIn); its switch turns it on everywhere else, and
   // says nothing of a whole plugin, which is on already.
   assert.equal(offRowSays('two', pluginOn), 'Off · on in Claude Code only, through its plugin. Turn it on to put it in every tool.');
   assert.equal(wholeWords(installs.map(install => item(install, 'skill', 'two')), true), '');

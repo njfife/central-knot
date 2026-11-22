@@ -42,14 +42,14 @@ import { versionList, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
 import { keptBack } from './clickplan.ts';
 import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, PluginTextView, SearchHit, SyncGate, SyncNotice } from './types.ts';
-import type { HarnessId, TakenInNotice, ThroughPlugin, UsageReading } from './types.ts';
+import type { HarnessId, TakenInNotice, UsageReading } from './types.ts';
 import { pluginOf } from './sourcelink.ts';
 import { heldKinds } from './presence.ts';
 import { market } from './pluginstate.ts';
 import { succeeded, type PluginDone, type PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, copilotByName, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { pageOfPart, partOfPage } from './pluginstatus.ts';
-import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, rowCount, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
+import { cellWords, handledWhere, inTool, insideTitle, itemThrough, offIn, pageRows, pluginOnIn, rowCount, pluginTools, throughPluginHere, toolWords, type PluginRow } from './pluginrows.ts';
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -78,13 +78,6 @@ const plugged = (t: Table) => {
   const each = state.home ? t.kinds.map(kind => pageRows(state.home!, kind)) : [], named = (row: PluginRow) => ({ key: row.name.toLowerCase(), kind: kindOf(row) });
   return { rows: each.flatMap(rows => rows.rows).sort((first, second) => byName(named(first), named(second))), unread: [...new Set(each.flatMap(rows => rows.unread))] };
 };
-
-/** The item a tool has through a plugin on a row of the person's own, with that plugin as the tool has it installed. */
-function itemThrough(skill: ItemRow, tool: Tool): PluginItemAt | undefined {
-  const given = throughPluginHere(skill, tool);
-  const install = given && state.home?.pluginItems?.find(entry => entry.tool === tool && entry.plugin === given.plugin && entry.marketName === given.marketplace);
-  return install ? { kind: partOfPage[skill.kind], name: given.name ?? skill.name ?? skill.key, tool: tool as HarnessId, install } : undefined;
-}
 
 
 /** Turns a plugin's item on or off in its tool at once, with its own switch or the whole plugin's (pluginswitch.ts). */
@@ -276,7 +269,7 @@ function rowsOf(kind: PageKind): ItemRow[] {
   if (!state.home) return [];
   const { facts } = kindSource(state.home, kind);
   // Where a plugin has it on is read from the plugins the tools have, beside the facts (an Off item's words say it).
-  if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fact => fromFacts(kind, fact)).map(row => ({ ...row, pluginOn: pluginOnIn(row) })) };
+  if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fact => fromFacts(kind, fact)).map(row => ({ ...row, pluginOn: pluginOnIn(state.home, kind, row) })) };
   return factsCache[kind]!.list;
 }
 /** A kind's row by its key, as the home on screen has it now: what a run's result reads of each row it changed (app.ts runOutcome). */
@@ -322,8 +315,6 @@ const columns = (t: Table): Tool[] => {
 };
 /** Whether the table's tool has the item (pluginrows.ts inTool); on the Library, every item counts. */
 const inTableTool = (t: Table, skill: ItemRow) => !t.tool || inTool(skill, t.tool as HarnessId);
-/** A row's `pluginOn`: the tools of its kind with no copy of their own that have it on through an installed plugin (libraryrow.ts LibraryRow). */
-const pluginOnIn = (skill: ItemRow): Tool[] => (state.home ? kindSource(state.home, skill.kind).tools : []).filter(tool => { const given = throughPluginHere(skill, tool); if (!given) return false; const item = itemThrough(skill, tool); return item ? itemOn(item) : !given.off; });
 /** An item as Central Knot's library holds it (library.ts), deleted or not; none for an item only found in a harness. */
 const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, skill.kind).library[skill.key] : undefined);
 /** Where a row stands: 0 on, 1 found (in a tool, not in Central Knot), 2 off: its item's place (libraryrow.ts). */
@@ -445,9 +436,6 @@ const segmentKinds = (): PageKind[] => { const shown = segment(); return shown !
 let tablesVisit = -1;
 
 // ---------- Visual vocabulary ----------
-
-const throughPluginHere = (skill: ItemRow, tool: Tool): ThroughPlugin | undefined => (skill.copies[tool] === undefined ? skill.plugin?.[tool] : undefined);
-
 
 const smallAction = (label: string, id: string, onclick: () => void, extra = '', disabled = false) =>
   h(`button.text-action${extra}`, { type: 'button', id, disabled, onclick: (event: Event) => { event.stopPropagation(); onclick(); } }, label);
@@ -1878,7 +1866,7 @@ function turnOn(t: Table, skill: ItemRow, use?: Tool, seen?: boolean): Click {
 // ---------- Items tools have through a plugin ----------
 
 /** The items a person's own row has through a plugin: in each tool with no copy of its own that has it through an installed plugin. */
-const rowThroughItems = (skill: ItemRow, tools: readonly Tool[]): PluginItemAt[] => tools.flatMap(tool => { const item = itemThrough(skill, tool); return item ? [item] : []; });
+const rowThroughItems = (skill: ItemRow, tools: readonly Tool[]): PluginItemAt[] => tools.flatMap(tool => { const item = itemThrough(state.home, skill.kind, skill, tool); return item ? [item] : []; });
 const throughItems = (t: Table, skill: ItemRow): PluginItemAt[] => rowThroughItems(skill, toolsFor(t, skill.kind));
 /** The same for one row looked up by kind and key (firstsetup.ts "Use the latest for the rest"). */
 export const throughItemsFor = (kind: PageKind, key: string): PluginItemAt[] => { const skill = rowByKey(kind, key); return skill && state.home ? rowThroughItems(skill, kindSource(state.home, kind).tools) : []; };
@@ -2023,7 +2011,7 @@ const keyWords = {
 function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; glyph?: IconName; state: string; key: keyof typeof keyWords } {
   const given = throughPluginHere(skill, tool);
   if (given) {
-    const on = pluginOnIn(skill).includes(tool);
+    const on = pluginOnIn(state.home, skill.kind, skill).includes(tool);
     return { look: on ? 'on' : 'off', state: on ? 'plugin' : 'plugin-off', key: on ? 'on' : 'plugin-off', words: `${skill.anotherWay?.[tool] ?? skill.cannot?.[tool] ?? `${names[tool]} has it through the plugin ${given.plugin}.`}${on ? '' : ' It is turned off there.'}` };
   }
   return libraryMark(libraryPages[skill.kind], skill, tool);
@@ -2406,7 +2394,7 @@ const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skil
 
 /** What one tool has, for its row in the item's details: what its copy is, then whether its own switch has it off, and any reload step from the active click result. */
 function harnessLine(skill: ItemRow, tool: Tool): string {
-  const through = itemThrough(skill, tool);
+  const through = itemThrough(state.home, skill.kind, skill, tool);
   const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
     ? rowReload(state.outcome.reloads, toItemKind(skill.kind), through ? itemKey(through.name) : skill.key, tool as HarnessId, through ? `${through.install.plugin}@${through.install.marketName}` : undefined) : '';
   // Through a plugin: where it comes from, then why its switch can't be used here, or that it is the whole plugin's.
@@ -2500,7 +2488,7 @@ function libraryVersions(t: Table, lib: LibraryPage, skill: ItemRow) {
 function harnessControls(skill: ItemRow, tool: Tool) {
   const given = throughPluginHere(skill, tool);
   // Through a plugin: the item's switch in that tool (its own, or the whole plugin's), with the way to the plugin's page.
-  const through = itemThrough(skill, tool);
+  const through = itemThrough(state.home, skill.kind, skill, tool);
   if (through) return pluginItemControls(through, skill, () => openPlugin(given!));
   if (given) return h('span.details-tool-actions', {}, smallAction('Plugin’s page', elId('plugin', skill, tool), () => openPlugin(given)));
   return libraryHarnessSwitch(libraryPages[skill.kind], skill, tool);

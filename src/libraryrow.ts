@@ -103,7 +103,7 @@ export interface LibraryRow {
   loads?: LibraryFacts['loads']; alsoLoads?: LibraryFacts['alsoLoads']; takeOver?: LibraryFacts['takeOver'];
   /** Harnesses whose own switch turns it off there (types.ts LibraryFacts switchedOff), said as offInOwnSettings says it. */
   switchedOff?: readonly string[];
-  /** `pluginOn`: the tools with no copy of their own that have it on through an installed plugin (matrix.ts pluginOnIn): an Off item is still on there. */
+  /** `pluginOn`: the tools with no copy of their own that have it on through an installed plugin (pluginrows.ts pluginOnIn): an Off item is still on there. */
   pluginOn?: readonly string[];
 }
 
@@ -180,7 +180,7 @@ export function harnessIs(row: LibraryRow, item: LibraryItem | undefined, tool: 
  * Whether one tool loads a library item now, and from which copy, from what the read observed: `central-knot`, a copy Central
  * Knot wrote (item `applied`), in the tool's own folder or in another tool's it reads (LibraryFacts loads `in`, alsoLoads);
  * `elsewhere`, a copy Central Knot doesn't write (in the shared skills folder, a link, a folder of his), which an Off leaves as it
- * is; `plugin`, a plugin's (`pluginOn`, which only the page reads); `unknown`, its copy can't be seen for sure; undefined, none (no
+ * is; `plugin`, a plugin's (`pluginOn`: pluginrows.ts pluginOnIn); `unknown`, its copy can't be seen for sure; undefined, none (no
  * copy, or its own switch has it off). Asked by the row's count and switches (loadingIn) and, for what an Off leaves, by keptByOff.
  * A plugin's own item answers from its copies' own fields instead (profileplan.ts keptOn, PluginCopy `way`).
  */
@@ -193,15 +193,17 @@ export function loadsFrom(row: LibraryRow, item: LibraryItem | undefined, tool: 
   return wrote(item, has ? tool : loads!.in) ? 'central-knot' : 'elsewhere';
 }
 const wrote = (item: LibraryItem | undefined, tool: string | undefined) => !!tool && inLibrary(item)?.applied[tool as HarnessId] !== undefined;
-/** How a tool loads a copy Central Knot doesn't write, where the read knows: the shared skills folder, a link, a copy of his own there, another tool's folder. */
-export type LoadWay = 'shared' | 'link' | 'yours' | 'tool';
+/** How a tool loads a copy Central Knot doesn't write, where the read knows: the shared skills folder, a link, a copy of his own there, another tool's folder, a plugin's. */
+export type LoadWay = 'shared' | 'link' | 'yours' | 'tool' | 'plugin';
 /**
  * Whether a tool still loads an item once an Off removes what Central Knot wrote, and how (`way`, where the read knows it): a copy
- * Central Knot doesn't write (loadsFrom `elsewhere`), or, beside Central Knot's in its own folder, one in another tool's folder it
- * reads (alsoLoads). A copy Central Knot wrote beside one it has another way is not counted: which it would then load isn't read.
+ * Central Knot doesn't write (loadsFrom `elsewhere`), a plugin's copy of the same item (loadsFrom `plugin`, from the row's
+ * `pluginOn`), or, beside Central Knot's in its own folder, one in another tool's folder it reads (alsoLoads). A copy Central Knot
+ * wrote beside one it has another way is not counted: which it would then load isn't read.
  */
 export function keptByOff(row: LibraryRow, item: LibraryItem | undefined, tool: string): { way?: LoadWay } | undefined {
   const from = loadsFrom(row, item, tool), also = row.alsoLoads?.[tool as HarnessId], loads = row.loads?.[tool as HarnessId];
+  if (from === 'plugin') return { way: 'plugin' };
   if (from === 'central-knot') return row.hashes?.[tool] !== undefined && also && !wrote(item, also.in) ? { way: 'tool' } : undefined;
   if (from !== 'elsewhere') return undefined;
   return { way: row.hashes?.[tool] !== undefined ? 'yours' : !loads || (loads.in && loads.in !== tool) ? 'tool' : row.takeOver?.[tool as HarnessId]?.kind };
