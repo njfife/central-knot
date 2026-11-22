@@ -13,6 +13,10 @@ import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, rowClicks, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, readDisk, skillChange, skillsView, takeOver } from '../src/skills.ts';
+import { serversView } from '../src/servers.ts';
+import { agentsView } from '../src/agents.ts';
+import { homePass } from '../src/homepass.ts';
+import { setSyncEverything } from '../src/everything.ts';
 import { pruneDeleted } from '../src/skillstore.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -20,7 +24,7 @@ import { forgetMissing } from '../src/librarypass.ts';
 import { readRecord, saveRecord } from '../src/share.ts';
 import { clickResults } from '../src/clickplan.ts';
 import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
-import type { HarnessId, PassResult } from '../src/types.ts';
+import type { Change, HarnessId, PassResult } from '../src/types.ts';
 import { bytes, choose, everywhere, folderOf, historyActions, historyOf, inTool, itemOf, makeCurrent, pass, put, remove, restore, roots, sandbox, seen, send, skillText, tools, turnOff, turnOn, type Box, type Tool } from './skillclicks.ts';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 10, 12, 9, minutes));
@@ -1225,6 +1229,21 @@ test('A partial skill (kept out of a tool by its switch in the opened row) says 
   } finally { await box.cleanup(); }
 });
 
+/**
+ * How many times each file is opened while `run` runs, by its real path: only hashing a file (share.ts hashFile's read stream)
+ * opens one through callback `fs.open` (fs/promises does not), so a file's count is how many times it was hashed.
+ */
+async function countOpens<T>(run: () => Promise<T>): Promise<{ result: T; opens: Map<string, number> }> {
+  const opens = new Map<string, number>(), original = fs.open;
+  fs.open = ((path: fs.PathLike, ...rest: unknown[]) => {
+    const key = typeof path === 'string' ? (() => { try { return realpathSync(path); } catch { return path; } })() : String(path);
+    opens.set(key, (opens.get(key) ?? 0) + 1);
+    return (original as (...args: unknown[]) => unknown).call(fs, path, ...rest);
+  }) as typeof fs.open;
+  try { return { result: await run(), opens }; }
+  finally { fs.open = original; }
+}
+
 test('One read of the home hashes a shared skill’s files once across all tools and links that read it, never hashes stored versions for shapes, and reads afresh next time', async () => {
   const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']);
   try {
@@ -1236,16 +1255,6 @@ test('One read of the home hashes a shared skill’s files once across all tools
     await symlink('../../.agents/skills/notes', folderOf(box, 'claude-cli', 'alias'));
     await turnOn(box);
     const stored = join(box.home, '.central-knot/items/skills/notes/versions', (await itemOf(box))!.hash);
-    const countOpens = async <T>(run: () => Promise<T>): Promise<{ result: T; opens: Map<string, number> }> => {
-      const opens = new Map<string, number>(), original = fs.open;
-      fs.open = ((path: fs.PathLike, ...rest: unknown[]) => {
-        const key = typeof path === 'string' ? (() => { try { return realpathSync(path); } catch { return path; } })() : String(path);
-        opens.set(key, (opens.get(key) ?? 0) + 1);
-        return (original as (...args: unknown[]) => unknown).call(fs, path, ...rest);
-      }) as typeof fs.open;
-      try { return { result: await run(), opens }; }
-      finally { fs.open = original; }
-    };
     const first = await countOpens(() => readDisk(box.context, box.tools));
     const sharedSkill = realpathSync(join(shared, 'SKILL.md')), sharedExtra = realpathSync(join(shared, 'extra.txt'));
     const storedSkill = realpathSync(join(stored, 'SKILL.md')), storedExtra = realpathSync(join(stored, 'extra.txt'));
@@ -1263,5 +1272,60 @@ test('One read of the home hashes a shared skill’s files once across all tools
     const after = await countOpens(() => readDisk(box.context, box.tools));
     assert.equal(after.opens.get(sharedExtra), 1, 'next read hashes afresh');
     assert.notEqual(after.result.outside.get('notes')?.['codex-cli']?.hash, before.result.outside.get('notes')?.['codex-cli']?.hash);
+  } finally { await box.cleanup(); }
+});
+
+/**
+ * A skill in the shared folder that four tools read and Claude Code links to, On; and one found in Claude Code, to Add. Every
+ * kind's record is settled by a pass of the whole home first, as the app's first view leaves it.
+ */
+async function addHome() {
+  const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']);
+  const shared = join(box.home, '.agents/skills/notes');
+  await mkdir(shared, { recursive: true });
+  await writeFile(join(shared, 'SKILL.md'), skillText('In the shared folder.'));
+  await writeFile(join(shared, 'extra.txt'), 'first\n');
+  await symlink('../../.agents/skills/notes', folderOf(box, 'claude-cli'));
+  await turnOn(box);
+  await put(box, 'claude-cli', { 'SKILL.md': skillText('Draft it first.', 'draft') }, [], 'draft');
+  await homePass({ ...box.context, reads: new Map() }, box.tools, true);
+  return { box, untouchedFiles: [realpathSync(join(shared, 'SKILL.md')), realpathSync(join(shared, 'extra.txt'))] };
+}
+/**
+ * A click, then what main.ts syncAndView does after it: the pass of the whole home, then the page's view, given that pass's reads
+ * where every kind's pass left the home as it read it (homepass.ts HomePass untouched), as main.ts gives them.
+ */
+async function clickThenView(box: Box, change: Change) {
+  await send(box, change);
+  const kept = new Map(), passed = await homePass({ ...box.context, reads: new Map(), kept }, box.tools, true);
+  const view = { ...box.context, reads: new Map(), kept: passed.untouched ? kept : undefined };
+  return { passed, skills: await skillsView(view, box.tools), mcp: await serversView(view, box.tools), agents: await agentsView(view, box.tools) };
+}
+
+test('One Add, then the pass of the whole home and the view after it (main.ts syncAndView), hash a skill the click didn’t touch twice, not three times: the pass changes nothing, so the view is made from its read', async () => {
+  const { box, untouchedFiles } = await addHome();
+  try {
+    const { row, item } = await seen(box, box.context, 'draft');
+    const counted = await countOpens(() => clickThenView(box, rowClicks.on(row, item)));
+    assert.deepEqual(untouchedFiles.map(file => counted.opens.get(file)), [2, 2], 'the click’s read and the pass’s');
+    const { passed, skills, mcp, agents } = counted.result;
+    assert.equal(passed.untouched, true);
+    assert.equal(skills.items.find(fact => fact.key === 'draft')?.on, true, 'the view shows the Add');
+    // What the page is given is the home as it is: the same as views read afresh now.
+    assert.deepEqual([skills, mcp, agents], [await skillsView(box.context, box.tools), await serversView(box.context, box.tools), await agentsView(box.context, box.tools)]);
+  } finally { await box.cleanup(); }
+});
+
+test('An Add while Synchronize everything takes in a skill found elsewhere: the pass of the whole home writes, so the view reads the home again and shows it taken in everywhere', async () => {
+  const { box, untouchedFiles } = await addHome();
+  try {
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('A spare.', 'spare') }, [], 'spare');
+    assert.deepEqual(await setSyncEverything(box.context, true), {});
+    const { row, item } = await seen(box, box.context, 'draft');
+    const counted = await countOpens(() => clickThenView(box, rowClicks.on(row, item)));
+    const { passed, skills } = counted.result;
+    assert.deepEqual([passed.untouched, untouchedFiles.map(file => counted.opens.get(file))], [undefined, [3, 3]], 'the click’s read, the pass’s, and the view’s own');
+    assert.equal(skills.items.find(fact => fact.key === 'spare')?.on, true, 'taken in by the pass');
+    assert.deepEqual(skills, await skillsView(box.context, box.tools), 'the page is given the home as the pass’s writes left it');
   } finally { await box.cleanup(); }
 });

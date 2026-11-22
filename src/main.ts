@@ -622,9 +622,11 @@ interface ServersAndAgentsResult { serverNotices: SyncNotice[]; agentNotices: Sy
  * `synced`: the original results by kind for Sync once. `seen`: what a person would see of the home as the pass read it
  * (homepass.ts pageSees), compared with what the page was last given (seenChanged).
  * `told`: what the page is told of the pass, every kind alike (homepass.ts passTells); `done`: every result of the pass, all
- * three kinds, for a caller that says what it did (a tool's Manage switch).
+ * three kinds, for a caller that says what it did (a tool's Manage switch). `kept`: each kind's read, where the pass left the
+ * home as it read it (homepass.ts HomePass untouched), for the view made from them (syncAndView).
  */
-interface BackgroundPass { synced?: HomePass['synced']; seen?: string; skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; told?: ReturnType<typeof passTells>; done?: DestinationResult[] }
+interface BackgroundPass { synced?: HomePass['synced']; seen?: string; skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; told?: ReturnType<typeof passTells>;
+  done?: DestinationResult[]; kept?: ShareContext['kept'] }
 
 /** Each reason the move of plugin parts waited that the log has had this launch (pass). */
 const partsWaitsLogged = new Set<string>();
@@ -640,11 +642,11 @@ let partsWaiting: string | undefined;
  * comes before it.
  */
 async function pass(snapshots: Snapshot[], explicit = false): Promise<BackgroundPass> {
-  const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map() };
+  const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map(), kept: new Map() };
   // While plugin parts from before the library wait to be moved there, the plugins record's first read comes first (its install
   // alpha 1 waited for read from pluginUpdates, made before any pass), and the move may read a plugin (homepass.ts step 2).
   const pluginNow = await carriedMarket?.beforeParts().catch((error: unknown) => { logFailure('plugins record', error); return undefined; });
-  const { synced, seen, seenFailed, profilesFailed, partsFailed, partsWait } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
+  const { synced, seen, seenFailed, profilesFailed, partsFailed, partsWait, untouched } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
   partsWaiting = partsWait;
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
   if (partsFailed !== undefined) logFailure('moving plugin parts', partsFailed);
@@ -656,7 +658,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   const { skills, servers, agents } = synced;
   return { synced, seen, skills: skills ?? { results: [], writes: 0, reloads: [] }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
-    changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) } };
+    changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) }, ...(untouched ? { kept: shared.kept } : {}) };
 }
 
 /**
@@ -680,10 +682,10 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   // First, so the held screen is shown before any pass could write: held, the pass below meets writeAccess's refusal. A record
   // taken over on the way is said with the view (a click on the held screen says it itself: carryOn).
   const tookOver = await lookForOthers();
-  const shared: ShareContext = { ...context(), reads: new Map() };
+  readBegins();
   const before = await read();
   const passes = explicit ? await explicitPass(before) : [await pass(before)];
-  const passed = passes[passes.length - 1], { skills } = passed;
+  const passed = passes[passes.length - 1], { skills, kept } = passed;
   passes.forEach(keepPass);
   lookAgainSoon(passed);
   // The page is given this view, and what it sees is this view's own pass's value, silently: the next pass tells it nothing it
@@ -692,8 +694,10 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   const caughtUp = pendingResults.splice(0), notices = pendingNotices.splice(0);
   const profiles = await readProfiles(current!.home);
   // The home is read again after a pass that may have written (Sync on, or Sync once): a pass that stopped part-way reports
-  // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing.
-  const snapshots = skills && (syncOn || explicit) ? await read() : before;
+  // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing; and one whose every kind
+  // left the home as it read it (`kept`) gives the view its reads, each kind's taken by its view's look (librarypass.ts lookFor).
+  const snapshots = skills && (syncOn || explicit) && !kept ? await read() : before;
+  const shared: ShareContext = { ...context(), reads: new Map(), kept };
   const writable = (await writeAccess(shared)).allowed;
   const managed = await managedNow(shared, snapshots), present = presentTools(snapshots);
   const syncEverything = (await readRecord(current!.home)).record?.syncEverything;
@@ -1058,12 +1062,24 @@ function toolsChangedHere(snapshots: Snapshot[]): boolean {
   return changed;
 }
 
-function queueBackgroundPass() { if (current && !smoke) void queued(backgroundPass).catch(() => undefined); }
+/**
+ * A read of the open home begins (a view's, syncAndView, or a background pass's): every watcher event delivered before it is in
+ * what it reads, so the pass their debounce would start is dropped, and what they marked is the caller's to answer. An event
+ * delivered after still starts a pass of its own, DEBOUNCE_MS later; the poll and lookAgainSoon's look are left as they are.
+ */
+function readBegins() {
+  const marked = { fromEvent: touched, fromSettings: settingsTouched };
+  clearTimeout(soon); touched = settingsTouched = false;
+  return marked;
+}
+/** A background pass waits in the queue and hasn't begun: it reads after every nudge made meanwhile, so they queue no other. */
+let passWaits = false;
+function queueBackgroundPass() { if (current && !smoke && !passWaits) { passWaits = true; void queued(backgroundPass).catch(() => undefined); } }
 
 async function backgroundPass() {
+  passWaits = false;
   if (!current) return;
-  const fromEvent = touched, fromSettings = settingsTouched;
-  touched = settingsTouched = false;
+  const { fromEvent, fromSettings } = readBegins();
   // The home is read once per pass, whatever Sync or write access say (reading writes nothing), and the pass uses that read.
   // Whatever the pass finds, the page is told once, at the end (it keeps the news until it can read).
   const snapshots = await read();

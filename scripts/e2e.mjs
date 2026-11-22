@@ -13555,10 +13555,127 @@ async function sameNamePluginFlow() {
   await a.quit();
 }
 
+/**
+ * A click reads the home twice (main.ts readBegins, queueBackgroundPass, and syncAndView's view made from its pass's reads): once
+ * in its own pass, once in the pass of the whole home that the page's view after it is made from. The watcher's events for what
+ * it wrote start no read of their own, and background passes asked for while one waits are one. Counted in a development run's
+ * main process, where each whole read of the skills hashes the shared skill's SKILL.md once (skills.ts readDisk), each such hash
+ * held up 2 s there so that a read outlasts the watcher's debounce, as it does in a home of forty skills; an installed app has no
+ * inspector, and the flow says so and stops. Each count starts just after a poll's pass (main.ts POLL_MS), so none falls in it.
+ * Hand edits: one made just before the view's read is on the page after it; one made while that read runs, after it read that
+ * folder, gets a pass of its own, which the page follows. A click whose write Claude Code's lock refuses says so, and what Claude
+ * Code then writes while the read after the click runs is on the page at that read or the next pass, its own change kept.
+ */
+async function clickReadsFlow() {
+  const home = join(scratch, 'home-reads'), data = join(scratch, 'reads-data');
+  const [claude, copilot, codex, agents] = ['.claude/skills', '.copilot/skills', '.codex/skills', '.agents/skills'].map(path => join(home, path));
+  for (const folder of [claude, copilot, codex]) mkdirSync(folder, { recursive: true });
+  skill(agents, 'shared');
+  for (const name of ['first', 'second', 'third', 'fourth', 'spare']) skill(claude, name);
+  const claudeServers = join(home, '.claude.json'), claudeLock = `${claudeServers}.lock`;
+  writeFileSync(claudeServers, `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`);
+  writeFileSync(join(home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: { atlas: { type: 'local', command: 'npx', args: ['-y', 'quarry'], tools: ['*'] } } }, null, 2)}\n`);
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const a = await launch(data);
+  const main = a.inspect && await a.main();
+  if (!main) { console.log('No main-process inspector: skipping the count of whole reads per click.'); await a.quit(); return; }
+  await a.click('#nav-overview');
+  await a.click('#setup-no');
+  await openKind(a, 'all');
+  same('Automatic sync is on', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
+  const row = (name, kind = 'skills') => `.ov-row[data-key="${rowPart('', kind, name)}"]`;
+  const counted = realpathSync(join(agents, 'shared/SKILL.md'));
+  // `ckAt`: something done once in main as one read hashes the shared skill, inside that read (its own folders read already).
+  await main.run(`(() => { const fs = process.mainModule.require('node:fs'), real = fs.open; globalThis.ckOpen = real; globalThis.ckReads = 0;
+    fs.open = function (path, ...rest) {
+      let it = false; try { it = fs.realpathSync(String(path)) === ${JSON.stringify(counted)}; } catch { /* not there */ }
+      if (!it) return real.call(fs, path, ...rest);
+      globalThis.ckReads++;
+      if (globalThis.ckAt?.read === globalThis.ckReads) { const run = globalThis.ckAt.run; globalThis.ckAt = undefined; run(fs); }
+      setTimeout(() => real.call(fs, path, ...rest), 2000);
+    };
+    return true; })()`);
+  const reads = () => main.run('globalThis.ckReads');
+  /** Waits for a poll's pass to begin (the next is 20 s away), and to end unless `begun`; the count of whole reads then. */
+  const afterPoll = async (begun = false) => { const was = await reads(); for (let tries = 0; tries < 250 && await reads() === was; tries++) await wait(100); if (!begun) await wait(2600); return reads(); };
+  /** The whole reads since `from`, once the page has settled and no read has begun for `quietMs` (the watcher's debounce is 1.5 s). */
+  const readsSince = async (from, quietMs = 4000) => {
+    await a.settle();
+    let last = await reads();
+    for (let quiet = 0; quiet < quietMs / 100; quiet++) { await wait(100); const now = await reads(); if (now !== last) { last = now; quiet = 0; } }
+    return last - from;
+  };
+  /** Runs `body` in main once, inside the `nth` whole read from now (the click's own pass's is the first, the read after it the second). */
+  const insideRead = (nth, body) => main.run(`(globalThis.ckAt = { read: globalThis.ckReads + ${nth}, run: fs => { ${body} } }, true)`);
+  /** Runs `body` in main once, as the next refresh the page asks for (the click's) comes in, before its turn; `real` is the request. */
+  const onNextRefresh = body => main.run(`(() => { const { ipcMain } = electron, fs = process.mainModule.require('node:fs'), handlers = ipcMain._invokeHandlers, real = handlers.get('discovery:refresh');
+    handlers.set('discovery:refresh', async (...args) => { handlers.set('discovery:refresh', real); ${body} });
+    return true; })()`);
+  const description = (name, said) => `---\nname: ${name}\ndescription: ${said}\n---\n\nBody.\n`;
+
+  // One Add: its own pass's read, and the read of the pass its view is made from; its writes' events start nothing after.
+  let from = await afterPoll();
+  await a.click(`${row('first')} .add-item`);
+  same('one Add reads the home twice: its pass, and the pass its view is made from; its own writes start no pass', await readsSince(from), 2);
+  check('and it is on', await switchOn(a, 'skills', 'first'));
+
+  // A hand edit just before the view's read (made as the click's refresh comes in, before its turn): the view shows it, and its
+  // event starts no pass of its own, the view's read having begun after it.
+  const spare = join(claude, 'spare/SKILL.md');
+  await onNextRefresh(`fs.writeFileSync(${JSON.stringify(spare)}, ${JSON.stringify(description('spare', 'Edited just before the view.'))}); await new Promise(done => setTimeout(done, 400)); return real(...args);`);
+  from = await afterPoll();
+  await a.click(`${row('second')} .add-item`);
+  same('a hand edit made just before the view’s read starts no pass of its own after the click’s two reads', await readsSince(from), 2);
+  check('and the view shows it', (await a.text(row('spare')) ?? '').includes('Edited just before the view.'), await a.text(row('spare')));
+
+  // A hand edit made inside the view's read, after that read had read Claude Code's folder: its event gets a pass of its own,
+  // and the page follows that pass without a Refresh.
+  await insideRead(2, `fs.writeFileSync(${JSON.stringify(spare)}, ${JSON.stringify(description('spare', 'Edited while the view was read.'))});`);
+  from = await afterPoll();
+  await a.click(`${row('third')} .add-item`);
+  let shown = await a.text(row('spare')) ?? '';
+  for (let tries = 0; tries < 100 && !shown.includes('Edited while the view was read.'); tries++) { await wait(100); shown = await a.text(row('spare')) ?? ''; }
+  check('a hand edit made while the view’s read ran, after its folder was read, reaches the page without a Refresh', shown.includes('Edited while the view was read.'), shown);
+  same('that pass, and the view the page asks for after it: two reads after the click’s two', await readsSince(from), 4);
+
+  // The click's write refused (Claude Code's lock is held), and Claude Code writes its file and lets the lock go while the read
+  // after the click runs: the page shows that file as it is at that read or the next pass, the server written there without a
+  // Refresh and Claude Code's own change kept; the click's result says the refusal.
+  mkdirSync(claudeLock);
+  await insideRead(2, `fs.writeFileSync(${JSON.stringify(claudeServers)}, ${JSON.stringify(`${JSON.stringify({ numStartups: 2, mcpServers: {} }, null, 2)}\n`)}); fs.rmdirSync(${JSON.stringify(claudeLock)});`);
+  await a.click(`${row('atlas', 'mcp')} .add-item`);
+  const said = await a.text('#header') ?? '';
+  let mark;
+  for (let tries = 0; tries < 100 && (mark = await cellState(a, 'mcp', 'atlas', 'claude-cli')) !== 'current'; tries++) await wait(100);
+  console.log(`clickReadsFlow: the refused click said ${JSON.stringify(said)}; Claude Code’s mark then ${mark}`);
+  check('the click’s result says Claude Code’s file refused its write', said.includes('locked'), said);
+  same('what Claude Code wrote while the read after the click ran is on the page: the server there, its own change kept',
+    [mark, jsonOrNothing(claudeServers)?.numStartups, Object.keys(jsonOrNothing(claudeServers)?.mcpServers ?? {})], ['current', 2, ['atlas']]);
+
+  // Three nudges while a click waits behind a long pass (the queue held), each the shared skill written again as it was, far
+  // enough apart for the debounce to let each through: one background pass after the click, then the pass its view is made
+  // from; that background pass tells the page what the click changed, so the page reads once more after its click. Begun as a
+  // poll's pass begins, and counted until 2 s pass with no read, so the next poll falls outside.
+  from = await afterPoll(true);
+  const held = await holdQueue(main, a), sharedFile = join(agents, 'shared/SKILL.md'), sharedText = readFileSync(sharedFile, 'utf8');
+  await a.run(`document.querySelector(${JSON.stringify(`${row('fourth')} .add-item`)}).click()`);
+  for (let nudge = 0; nudge < 3; nudge++) { await wait(200); writeFileSync(sharedFile, sharedText); await wait(1500); }
+  await wait(300);
+  await held.release();
+  same('three nudges while a click waits: one background pass after it, the pass its view is made from, and the page’s read after that pass’s news', await readsSince(from, 2000), 4);
+  check('and the click went through', await switchOn(a, 'skills', 'fourth'));
+
+  await main.run(`(process.mainModule.require('node:fs').open = globalThis.ckOpen, true)`);
+  main.close();
+  same('no page errors', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow],
+  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
