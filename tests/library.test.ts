@@ -536,7 +536,9 @@ test('A plugin: a version it gave earlier, made current again (History’s Undo,
   const pi = { copies: { 'pi-cli': holds('a') } };
   assert.equal(fromSource(back, 'unreadable', 'this', { ...plugin, ...pi }), 'nothing', 'a pass that doesn’t read the plugin: still the plugin’s');
   assert.equal(fromSource(back, there('b'), 'this', { ...plugin, ...pi }), 'nothing', 'it still gives b, the version he took back: the background leaves a');
-  assert.equal(fromSource(back, there('b'), 'this', { ...plugin, ...pi, bringBack: true }), 'update', 'a click on Update brings b back');
+  assert.equal(fromSource(back, there('b'), 'this', { ...plugin, ...pi, update: true }), 'update', 'a click on Update brings b back');
+  assert.equal(fromSource(back, there('b'), 'this', { ...plugin, ...pi, bringBack: true }), 'nothing', 'its On, Add or a box ticked: a stays, as only Update brings b');
+  assert.equal(fromSource(back, there('b'), 'this', { ...plugin, update: true, copies: { 'pi-cli': unseen } }), 'nothing', 'Update while Pi’s copy settling: b waits for a read where it can be seen');
   assert.equal(fromSource(back, there('c'), 'this', { ...plugin, ...pi }), 'update', 'it gives c: an update as any');
   assert.equal(fromSource(back, there('a'), 'this', { ...plugin, ...pi }), 'same', 'it gives a again: only `seen` moves on');
   assert.equal(fromSource(back, 'gone', 'this', { ...plugin, ...pi }), 'drop', 'it drops the name: turned Off as any of its items');

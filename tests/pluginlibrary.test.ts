@@ -1335,7 +1335,7 @@ test('Versions’ Make current on the plugin’s earlier version keeps it the pl
   } finally { await box.cleanup(); }
 });
 
-test('While an item is taken back to the plugin’s earlier version: OpenCode managed again gets that version, and a profile switch away and back keeps it; the plugin’s Off and On, a click that brings it in, brings the plugin’s latest', async () => {
+test('While an item is taken back to the plugin’s earlier version: OpenCode managed again gets that version, and a profile switch away and back keeps it, and so do the plugin’s Off and On', async () => {
   const box = await rootHome(['pi-cli', 'opencode-cli']);
   try {
     const both = async () => Promise.all([box.pi('skills/root-fixture'), join(box.home, '.config/opencode/skills/root-fixture')].map(folder => readFile(join(folder, 'SKILL.md'), 'utf8').catch(() => 'none')));
@@ -1366,7 +1366,46 @@ test('While an item is taken back to the plugin’s earlier version: OpenCode ma
     assert.deepEqual([await both(), back.on, back.source, back.hash, back.seen], [[rootText('a'), rootText('a')], true, a.source, a.hash, b.hash], 'switched back: a, still the plugin’s');
     await box.turnOf('root-fixture', 'off');
     await box.turnOf('root-fixture', 'on');
-    assert.deepEqual([await both(), (await box.skills())['root-fixture']!.hash], [[rootText('b'), rootText('b')], b.hash], 'its On is a click that brings it in: the plugin’s b');
+    assert.deepEqual([await both(), (await box.skills())['root-fixture']!.hash], [[rootText('a'), rootText('a')], a.hash], 'its On brings its items back, at a: only Update brings b');
+  } finally { await box.cleanup(); }
+});
+
+test('Installed whole in Claude Code and placed in Pi, all updated, then taken back in Pi alone: the Library row keeps Claude Code’s mark through the plugin, by the link it folds by, though the two texts differ', async () => {
+  const box = await kitHome();
+  try {
+    await box.turn('on');
+    const a = (await box.library()).skill.notes!;
+    await put(join(box.kit, 'skills/notes/SKILL.md'), skill('notes', 'v2'));
+    // Claude Code's own update moves its installed copy on too.
+    await put(join(box.home, '.claude/plugins/cache/team/kit/1.0.0/skills/notes/SKILL.md'), skill('notes', 'v2'));
+    await box.update();
+    const b = (await box.library()).skill.notes!;
+    await restoreSkill(box.share, box.tools, (await readHistory(box.share)).find(event => event.key === 'notes' && event.previous === a.hash && event.version === b.hash)!.id);
+    const row = (await skillsView(box.share, box.tools)).items.find(each => each.key === 'notes')!;
+    assert.deepEqual([await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), row.fromSource?.link, row.plugin?.['claude-cli']?.plugin], [skill('notes'), 'plugin:kit@team', 'kit']);
+  } finally { await box.cleanup(); }
+});
+
+test('Taken back in Pi, then OpenCode’s box ticked: OpenCode gets the version taken back and the hold stays; the tick’s Undo leaves both as before it; Update then brings the plugin’s latest', async () => {
+  const box = await rootHome(['pi-cli', 'opencode-cli']);
+  try {
+    const both = async () => Promise.all([box.pi('skills/root-fixture'), join(box.home, '.config/opencode/skills/root-fixture')].map(folder => readFile(join(folder, 'SKILL.md'), 'utf8').catch(() => 'none')));
+    await rootAt(box, 'a');
+    await box.turnOf('root-fixture', 'on');
+    const a = (await box.skills())['root-fixture']!;
+    await rootAt(box, 'b');
+    await box.updateOf('root-fixture');
+    const b = (await box.skills())['root-fixture']!;
+    await box.turnOf('root-fixture', 'keep-out', 'opencode-cli');
+    await restoreSkill(box.share, box.tools, (await entryOf(box, 'root-fixture', a.hash, b.hash)).id);
+    assert.deepEqual(await both(), [rootText('a'), 'none']);
+    const ticked = await box.turnOf('root-fixture', 'let-in', 'opencode-cli');
+    const held = (await box.skills())['root-fixture']!;
+    assert.deepEqual([await both(), held.hash, held.seen, held.source], [[rootText('a'), rootText('a')], a.hash, b.hash, a.source], 'OpenCode gets a; Pi keeps it');
+    await box.markets.undoTurn(box.root, 'root-fixture', ticked.before!, ticked.back!, box.home);
+    assert.deepEqual([await both(), (await box.skills())['root-fixture']!.hash], [[rootText('a'), 'none'], a.hash], 'the tick’s Undo: as before it');
+    await box.updateOf('root-fixture');
+    assert.deepEqual([await both(), (await box.skills())['root-fixture']!.hash], [[rootText('b'), 'none'], b.hash], 'Update brings b, where the plugin is');
   } finally { await box.cleanup(); }
 });
 
@@ -1382,6 +1421,7 @@ for (const tools of [['pi-cli'], ['pi-cli', 'opencode-cli']] as HarnessId[][]) {
       const b = (await box.skills())['root-fixture']!;
       await restoreSkill(box.share, box.tools, (await entryOf(box, 'root-fixture', a.hash, b.hash)).id);
       await syncOnce(box);
+      assert.equal((await box.skills())['root-fixture']!.source, a.source, 'still the plugin’s before the edit');
       await put(box.pi('skills/root-fixture/SKILL.md'), skill('root-fixture', 'Edited by hand.'));
       await syncOnce(box);
       const own = (await box.skills())['root-fixture']!;

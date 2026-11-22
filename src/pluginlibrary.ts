@@ -142,9 +142,11 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   const alike = await alikeIn(context, plain), outOf = pluginOutOf(entry, tools, [...before, ...alike], brought);
   // THE MOVE (library.ts A PLUGIN): the root skill is made where the earlier build's copy was.
   const folder = files.files && basename(files.files.folder), moved = 'take' in ask ? undefined : movedFrom(before, plain, entry, folder);
-  const read = plain.map(each => ({ ...each, plugin: { ...each.plugin!, ...(moved && each.kind === 'skill' ? { on: moved.on, outOf: moved.except } : { outOf }) } }));
-  // A click that turns its items On (its On, Add, a box ticked), or its Update, brings back a name of its own he deleted and the
-  // version he took an item back from; the background never does (library.ts A PLUGIN, TAKEN BACK).
+  // Its Update's click alone brings back the version he took an item back from (library.ts TAKEN BACK).
+  const update = 'read' in ask && ask.click ? { update: true as const } : {};
+  const read = plain.map(each => ({ ...each, plugin: { ...each.plugin!, ...update, ...(moved && each.kind === 'skill' ? { on: moved.on, outOf: moved.except } : { outOf }) } }));
+  // A click that turns its items On (its On, Add, a box ticked), or its Update, brings back a name of its own he deleted; the
+  // background never does (library.ts A PLUGIN).
   // Use the plugin's reads its one name, as not read whole, so nothing else of the plugin changes.
   const taken = 'take' in ask && ask.take, bringsBack = ('into' in ask && ask.on) || ('read' in ask && ask.click);
   const one = (each: SourceRead<unknown>, key: string) => ({ ...each, whole: false, names: new Map([...each.names].filter(([name]) => name === key)), take: new Set([key]) });
@@ -318,8 +320,8 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
   for (const { kind, look } of looks) {
     const items = look.library.items, read = reads?.find(each => each.kind === kind.kind.kind), copies = (item: LibraryItem) => copiesOf(look, item);
     const answers = read ? sourceAnswers(items, read, read.recorded, { copies }) : new Map();
-    // Update's click asks as runItems does (`bringBack`), which also brings back the version he took an item back from (library.ts TAKEN BACK).
-    const clicked = read ? sourceAnswers(items, read, read.recorded, { copies, bringBack: new Set(read.names.keys()) }) : new Map();
+    // Update's click, as runItems reads it (`update`), also brings back the version he took an item back from (library.ts TAKEN BACK).
+    const clicked = read ? sourceAnswers(items, { ...read, plugin: { ...read.plugin!, update: true } }, read.recorded, { copies }) : new Map();
     for (const [key, background] of answers) {
       const item = items[key], there = read!.names.get(key), name = there && 'name' in there ? there.name : item?.name ?? key;
       const answer = background === 'nothing' && clicked.get(key) === 'update' ? 'update' : background;

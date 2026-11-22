@@ -201,7 +201,7 @@
 // an edit no pass has taken in yet, or can't be seen for sure where Central Knot applied it (a save may still be settling).
 // Only content counts. The item follows its source after Off and On, a tool kept out or let in, a tool managed for the first
 // time, Make current of `seen`, or an edit by hand back to exactly `seen`; it waits after Make current of any other version (an
-// older one from the source too; a plugin's: A PLUGIN, TAKEN BACK). While S waits nothing is stored: `seen` stays (the source's
+// older one from the source too; a plugin's earlier version is no change: A PLUGIN, TAKEN BACK). While S waits nothing is stored: `seen` stays (the source's
 // version the edit started from, one of its versions), and S is the source's last read, which every view reads again. No time decides between the source and
 // an edit here: a tool's edit no pass has taken in is taken in by the plan after the step, and S waits. Replace (a key handed
 // to the step, read from the last read) makes S current dated by its click, so an edit a tool saved before the click gives way
@@ -274,19 +274,20 @@
 //                                                                   Before every other row, so the plugin's drop never turns it Off
 //   S changed                           linked, a tool's copy       nothing, until a read where it can be seen: no version of a
 //                                       can't be seen for sure      plugin ever waits, and no Merge, Replace or Keep mine is asked
-//   S = seen                            linked, taken back to a     nothing (the background never puts S back), but at a click
-//                                       version it gave earlier     that brings it in (`bringBack`): S becomes current (`update`)
+//   S = seen                            linked, taken back to a     nothing (nothing else puts S back), but at a click on its
+//                                       version it gave earlier     Update (`update`), with every copy seen: S becomes current
 //                                       (TAKEN BACK)
 //
 // TAKEN BACK (`takenBack`, the one place it is decided): a version this same plugin gave earlier, made current again (History's
 // Undo or Go back before this, Versions' Make current), is no change here. It is what the item is compared with in place of
-// `seen`, which stays at what the plugin last gave, and nothing else is stored. So the item stays the plugin's; while
-// the plugin still gives `seen` (the version he took back from), the background (a pass, the automatic check, a sibling item's
-// update) leaves it, as it leaves a name he deleted, and a click that brings the plugin in (Update, its On, Add, a box ticked)
-// makes `seen` current again; any other content the plugin gives is S changed, by a click or the automatic check alike. Its page
-// offers Update for it, and the automatic check counts nothing for it (pluginlibrary.ts itemsView, `ready` and `due`). An edit
-// no pass has taken in still comes first and lets it go, and so does a version made current that the plugin never gave (his,
-// one TAKE kept) or another link gave.
+// `seen`, which stays at what the plugin last gave, and nothing else is stored. So the item stays the plugin's; while the
+// plugin still gives `seen` (the version he took back from), only a click on the plugin's Update makes it current again, once
+// every copy can be seen: a pass, the automatic check, a sibling item's update, the plugin's On, Add, a box ticked, a tool
+// managed again and a profile switch leave it, each tool it is wanted in given the version taken back (a name he deleted is
+// still brought back by the clicks that bring the plugin in). Any other content the plugin gives is S changed, by a click or
+// the automatic check alike. Its page offers Update for it, and the automatic check counts nothing for it (pluginlibrary.ts
+// itemsView, `ready` and `due`). An edit no pass has taken in still comes first and lets it go, and so does a version made
+// current that the plugin never gave (his, one TAKE kept) or another link gave.
 //
 // THE MOVE: a build before this one named that root skill for the folder it read the plugin from, the marketplace's folder for
 // it or its own copy's (earlierRootName). The plugin's next read moves it once, where the read's one skill is the root skill and
@@ -693,11 +694,11 @@ export type SourceAnswer = 'make' | 'link' | 'same' | 'update' | 'wait' | 'merge
 /**
  * What the table is told of one name besides the item and S: what each managed tool holds of the item now (librarypass.ts
  * copiesOf; none, for what the record alone says), and a click on the source's row for it, Add on a deleted one (`bringBack`;
- * for a plugin, a click that brings it in, which brings back a name of its own he deleted and the version he took back from:
- * A PLUGIN), or Replace, Merge or Keep mine on one whose version waits (`replace`, `merge`, `keep`); for a plugin, Use the
- * plugin's (`take`).
+ * for a plugin, a click that brings it in, which brings back a name of its own he deleted: A PLUGIN), or Replace, Merge or Keep
+ * mine on one whose version waits (`replace`, `merge`, `keep`); for a plugin, Use the plugin's (`take`), and its Update (`update`,
+ * which brings back the version an item was taken back from: TAKEN BACK).
  */
-export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean; merge?: boolean; keep?: boolean; plugin?: boolean; take?: boolean; link?: string }
+export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean; merge?: boolean; keep?: boolean; plugin?: boolean; take?: boolean; link?: string; update?: boolean }
 
 /**
  * The header's A SOURCE table for one name: `item` is the library's for its key (deleted or not), `here` what the source holds.
@@ -706,7 +707,7 @@ export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: b
 export function fromSource(item: LibraryItem | undefined, here: AtSource, linked: LinkedTo, asked: SourceAsked = {}): SourceAnswer {
   const copies = asked.copies ?? {}, plugin = !!asked.plugin;
   // What a plugin's item is compared with: `seen`, or the version he took it back to (TAKEN BACK).
-  const base = plugin && item && takenBack(item, asked.link) ? item.hash : item?.seen;
+  const back = plugin && !!item && takenBack(item, asked.link), base = back ? item.hash : item?.seen;
   if (plugin && item && !item.deleted && linked === 'this' && editedHere(item, base, copies)) return 'let-go';
   if (here === 'unreadable') return 'nothing';
   if (here === 'gone') return item && !item.deleted && linked === 'this' ? 'drop' : 'nothing';
@@ -717,8 +718,8 @@ export function fromSource(item: LibraryItem | undefined, here: AtSource, linked
   if (linked === 'none') return here.hash === item.hash ? 'alike' : asked.take ? 'take' : 'differs';
   // Its current version is the one this same link gave, so only an edit a tool holds can have changed it since: then it differs.
   if (linked === 'once') return here.hash === item.hash ? 'link' : changedHere(item, item.hash, copies) ? 'differs' : 'update';
-  // The plugin still gives the version he took back from: the background leaves it, a click brings it (TAKEN BACK).
-  if (here.hash === item.seen) return base !== item.seen && asked.bringBack ? 'update' : 'nothing';
+  // The plugin still gives the version he took back from: only Update brings it, once every copy can be seen (TAKEN BACK).
+  if (here.hash === item.seen) return back && asked.update && !changedHere(item, base, copies) ? 'update' : 'nothing';
   if (here.hash === item.hash) return 'same';
   // Keep mine keeps the current version, so nothing a tool holds stops it (KEEP MINE): it writes nothing.
   if (asked.keep) return 'keep';
@@ -763,10 +764,11 @@ const takenBack = (item: LibraryItem, link: string | undefined) => item.versions
 export interface SourceSeen {
   id: string; link: string; commitAt: string; whole: boolean; names: Map<string, { hash: string } | { unreadable: string }>;
   /**
-   * The read is a plugin's (A PLUGIN): its On, which a name it makes arrives with, the tools that name is kept out of, and the
-   * tools its click brings its items into, which a name it takes is let into (TAKE).
+   * The read is a plugin's (A PLUGIN): its On, which a name it makes arrives with, the tools that name is kept out of, the
+   * tools its click brings its items into, which a name it takes is let into (TAKE), and whether a click on its Update read it
+   * (`update`: TAKEN BACK).
    */
-  plugin?: { on: boolean; outOf: HarnessId[]; into: HarnessId[] };
+  plugin?: { on: boolean; outOf: HarnessId[]; into: HarnessId[]; update?: true };
 }
 
 /**
@@ -784,7 +786,7 @@ export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSe
     const entry = read.names.get(key), item = items[key];
     const here: AtSource = !entry ? (read.whole ? 'gone' : 'unreadable') : 'hash' in entry ? { hash: entry.hash } : 'unreadable';
     const about: SourceAsked = { copies: item && asked.copies?.(item), bringBack: asked.bringBack?.has(key), replace: asked.replace?.has(key),
-      merge: asked.merge?.has(key), keep: asked.keep?.has(key), plugin: !!read.plugin, take: asked.take?.has(key), link: read.link };
+      merge: asked.merge?.has(key), keep: asked.keep?.has(key), plugin: !!read.plugin, take: asked.take?.has(key), link: read.link, update: read.plugin?.update };
     return [key, fromSource(item, here, linkedTo(item, read, recorded), about)];
   }));
 }
