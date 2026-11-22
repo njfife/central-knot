@@ -1310,6 +1310,37 @@ test('Three pins: at c, History’s Go back before this on the update to b puts 
   } finally { await box.cleanup(); }
 });
 
+test('Versions’ Make current holds only a version that is not what the plugin last gave: back to b, its latest, nothing waits and Update changes nothing; a again is held; at c, b is held and c is not', async () => {
+  const box = await rootHome(['pi-cli']);
+  try {
+    const hashOf = async () => (await box.skills())['root-fixture']!.hash;
+    const makeCurrent = async (hash: string) => { await applySkills(box.share, box.tools, [{ key: 'root-fixture', on: true, except: [], version: hash }]); await syncOnce(box); };
+    const waits = async () => (({ update, due }) => ({ update, due }))(await pageOf(box, 'root-fixture', 'root-fixture'));
+    await rootAt(box, 'a');
+    await box.turnOf('root-fixture', 'on');
+    const a = await hashOf();
+    await rootAt(box, 'b');
+    await box.updateOf('root-fixture');
+    const b = await hashOf();
+    await restoreSkill(box.share, box.tools, (await entryOf(box, 'root-fixture', a, b)).id);
+    assert.deepEqual(await waits(), { update: true, due: false }, 'a taken back: Update offered');
+    await makeCurrent(b);
+    assert.deepEqual([await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), await waits()], [rootText('b'), { update: false, due: false }], 'b, what the plugin last gave: nothing waits');
+    const entries = (await readHistory(box.share)).length, versions = (await box.skills())['root-fixture']!.versions.length;
+    const clicked = await box.updateOf('root-fixture');
+    assert.deepEqual([clicked.reports.map(report => report.changed), (await readHistory(box.share)).length, (await box.skills())['root-fixture']!.versions.length], [[false], entries, versions], 'Update changes nothing, and says so');
+    await makeCurrent(a);
+    assert.deepEqual(await waits(), { update: true, due: false }, 'a made current again: held');
+    await rootAt(box, 'c');
+    await box.updateOf('root-fixture');
+    const c = await hashOf();
+    await makeCurrent(b);
+    assert.deepEqual([await waits(), (await box.skills())['root-fixture']!.source !== undefined], [{ update: true, due: false }, true], 'at c, b made current: held');
+    await makeCurrent(c);
+    assert.deepEqual([await hashOf(), await waits()], [c, { update: false, due: false }], 'c, what the plugin last gave: not held');
+  } finally { await box.cleanup(); }
+});
+
 test('Versions’ Make current on the plugin’s earlier version keeps it the plugin’s; on a version of his that Use the plugin’s kept, it is his own again', async () => {
   const box = await rootHome(['pi-cli']);
   try {

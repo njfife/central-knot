@@ -278,8 +278,9 @@
 //                                       version it gave earlier     Update (`update`), with every copy seen: S becomes current
 //                                       (TAKEN BACK)
 //
-// TAKEN BACK (`takenBack`, the one place it is decided): a version this same plugin gave earlier, made current again (History's
-// Undo or Go back before this, Versions' Make current), is no change here. It is what the item is compared with in place of
+// TAKEN BACK (`takenBack`, the one place it is decided): a version this same plugin gave earlier, other than the one it last gave
+// (`seen`), made current again (History's Undo or Go back before this, Versions' Make current), is no change here. It is what
+// the item is compared with in place of
 // `seen`, which stays at what the plugin last gave, and nothing else is stored. So the item stays the plugin's; while the
 // plugin still gives `seen` (the version he took back from), only a click on the plugin's Update makes it current again, once
 // every copy can be seen: a pass, the automatic check, a sibling item's update, the plugin's On, Add, a box ticked, a tool
@@ -750,10 +751,12 @@ function toolHoldsChange(item: LibraryItem, copies: Copies): boolean {
  */
 const editedHere = (item: LibraryItem, base: string | undefined, copies: Copies) => item.hash !== base || pendingEdits(plan(item, copies)).length > 0;
 /**
- * Whether a plugin's item was taken back to a version its plugin gave earlier (A PLUGIN, TAKEN BACK): its current version was
- * made current again (Origin `made-current`), and an earlier entry of that content came from `link`. The one place it is decided.
+ * Whether a plugin's item was taken back to a version its plugin gave earlier (A PLUGIN, TAKEN BACK): its current version is not
+ * what the plugin last gave (`seen`), was made current again (Origin `made-current`), and an earlier entry of that content came
+ * from `link`. The one place it is decided.
  */
-const takenBack = (item: LibraryItem, link: string | undefined) => item.versions[currentIndex(item)]?.from.how === 'made-current'
+const takenBack = (item: LibraryItem, link: string | undefined) => item.hash !== item.seen
+  && item.versions[currentIndex(item)]?.from.how === 'made-current'
   && item.versions.some(version => version.hash === item.hash && version.from.how === 'source' && version.from.link === link);
 
 /**

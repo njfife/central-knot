@@ -540,6 +540,8 @@ test('A plugin: a version it gave earlier, made current again (History’s Undo,
   assert.equal(fromSource(back, there('b'), 'this', { ...plugin, ...pi, bringBack: true }), 'nothing', 'its On, Add or a box ticked: a stays, as only Update brings b');
   assert.equal(fromSource(back, there('b'), 'this', { ...plugin, update: true, copies: { 'pi-cli': unseen } }), 'nothing', 'Update while Pi’s copy settling: b waits for a read where it can be seen');
   assert.equal(fromSource(back, there('c'), 'this', { ...plugin, ...pi }), 'update', 'it gives c: an update as any');
+  const latest = { ...back, hash: 'b', applied: { 'pi-cli': 'b' }, versions: [{ hash: 'b', at: '2026-11-05T10:00:00.000Z', from: { how: 'made-current' as const } }, ...back.versions] };
+  assert.equal(fromSource(latest, there('b'), 'this', { ...plugin, update: true, copies: { 'pi-cli': holds('b') } }), 'nothing', 'b made current again is what it last gave: nothing taken back');
   assert.equal(fromSource(back, there('a'), 'this', { ...plugin, ...pi }), 'same', 'it gives a again: only `seen` moves on');
   assert.equal(fromSource(back, 'gone', 'this', { ...plugin, ...pi }), 'drop', 'it drops the name: turned Off as any of its items');
   assert.equal(fromSource(back, there('c'), 'this', { ...plugin, copies: { 'pi-cli': unseen } }), 'nothing', 'Pi’s copy settling: c waits for a read where it can be seen');
