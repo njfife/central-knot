@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { CHECK_EVERY_MS, FIRST_CHECK_MS, FRESH_MS, RESTART_MS, STALLED_MS, updateFlow, type PendingUpdate } from '../src/updateflow.ts';
 import { prepareUnfinished } from '../src/updates.ts';
 import type { UpdateRelease, UpdateView } from '../src/types.ts';
-import { within } from './within.ts';
+import { realBeat, within } from './within.ts';
 
 const RELEASES = 'https://fixture.test/releases';
 const zipOf = (tag: string) => `https://fixture.test/download/${tag}/Central-Knot-0.5.0-mac-arm64.zip`;
@@ -21,12 +21,18 @@ const bytes = (sent: number, open = false) => new Response(new ReadableStream<Ui
 
 /** install() returns at the click. Its final action, after deciding whether to restart, removes the zip's folder. */
 async function folderRemoved(temp: string) {
+  if (!readdirSync(temp).length) return;
   const watcher = watch(temp);
+  let stop = () => {};
   try {
-    await within('the download’s folder removed', (async () => {
-      while (readdirSync(temp).length) await once(watcher, 'change');
-    })());
-  } finally { watcher.close(); }
+    await within('the download’s folder removed', new Promise<void>((done, fail) => {
+      const check = () => { try { if (!readdirSync(temp).length) { stop(); done(); } } catch (error) { stop(); fail(error); } };
+      // Re-read on a real-time beat too: on macOS fs.watch can miss a removal made just as the watcher starts.
+      watcher.on('change', check).on('error', fail);
+      stop = realBeat(check, 25);
+      check();
+    }));
+  } finally { stop(); watcher.close(); }
 }
 
 /**
