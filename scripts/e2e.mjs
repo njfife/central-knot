@@ -13136,6 +13136,8 @@ async function stillLoadsFlow() {
   // his row counts the five tools that load it, and each of the four running his says so beside its switch.
   const home = join(scratch, 'home-still-loads'), data = join(scratch, 'still-loads-data'), market = join(scratch, 'market-still-loads'), tools = join(scratch, 'tools-still-loads');
   writeMarket(market, 'ck-test-market');
+  const t0 = Date.now(), trace = [];
+  const mark = (step, extra) => trace.push([step, Date.now() - t0, ...(extra ? [extra] : [])]);
   const own = ['one', 'two', 'three', 'four', 'five', 'triage'], shared = ['s-one', 's-two', 's-three', 's-four'], mine = { command: 'npx', args: ['-y', 'my-issues'] };
   for (const name of own) skill(join(home, '.claude/skills'), name);
   for (const name of shared) skill(join(home, '.agents/skills'), name);
@@ -13149,6 +13151,22 @@ async function stillLoadsFlow() {
   const listing = () => Object.fromEntries(roots.map(root => [root, existsSync(join(home, root)) ? tree(join(home, root)) : {}]));
   const ours = [...own, ...shared], outOfTools = files => Object.fromEntries(Object.entries(files).filter(([path]) => !ours.includes(path.split('/')[0])));
   const a = await launch(data, [], tools);
+  mark('launched');
+  await a.run(`(() => {
+    const t0 = ${t0};
+    window.ckTrace = [];
+    window.centralKnot.onSyncChanged(() => window.ckTrace.push(['sync:changed', Date.now() - t0]));
+    let last = '';
+    const snap = () => {
+      const s = [document.body.dataset.busy, document.querySelectorAll('.pf-row[data-item^="skill:"]').length, document.querySelectorAll('.pf-row[data-item^="mcp:"]').length, document.querySelector('.profile-header p')?.textContent ?? null, !!document.querySelector('#profile-left-out')];
+      const k = JSON.stringify(s);
+      if (k !== last) { last = k; window.ckTrace.push(['dom', Date.now() - t0, ...s]); }
+    };
+    snap();
+    window.ckObs = new MutationObserver(snap);
+    window.ckObs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-busy'] });
+    return true;
+  })()`);
   const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
   // Light and dark, at the smallest window and the owner's own.
@@ -13162,26 +13180,45 @@ async function stillLoadsFlow() {
     await fullSize(a);
   };
   await a.click('#nav-overview');
+  mark('nav-overview');
   await a.click('#setup-yes');
   await done();
+  mark('after-setup-yes', {
+    skillsJson: Object.keys(jsonOrNothing(join(home, '.central-knot/skills.json'))?.items ?? {}).length,
+    mcpJson: Object.keys(jsonOrNothing(join(home, '.central-knot/mcp.json'))?.items ?? {}).length,
+    codexOne: existsSync(join(home, '.codex/skills/one/SKILL.md')),
+    piMcp: existsSync(join(home, '.pi/agent/mcp.json')),
+  });
   check('Synchronize everything takes his in: each own skill and issues in every tool', await until(() => ['.codex/skills/one/SKILL.md', '.pi/agent/skills/triage/SKILL.md', '.pi/agent/mcp.json'].every(path => existsSync(join(home, path)))), listing());
+  mark('after-until-disk', {
+    skillsJson: Object.keys(jsonOrNothing(join(home, '.central-knot/skills.json'))?.items ?? {}).length,
+    piTwo: existsSync(join(home, '.pi/agent/skills/two/SKILL.md')),
+  });
 
   // The profile: issues alone ticked, so Switch is offered (profileplan.ts switchable); the ten skills turn off.
   await a.click('#nav-profiles');
+  mark('after-nav-profiles');
   await newProfile(a, 'Writing');
+  mark('after-newProfile');
   await a.click(byId('pf-mcp:issues'));
   await done();
+  mark('after-tick-issues');
   const header = 'Switching turns 10 items off; 4 still load from the shared skills folder, in Copilot CLI, Codex, Pi or OpenCode';
   const notes = async () => Object.fromEntries((await a.all('.pf-row[data-item^="skill:"]', `[e.dataset.item, e.querySelector('.pf-note')?.textContent ?? '']`)).sort());
   const sharedNote = 'Copilot CLI, Codex, Pi and OpenCode still load it from the shared skills folder.';
   same('the header counts the ten it turns off and, apart, the four that still load from the shared folder; each of those four rows names the tools, the six others nothing',
     [await a.text('.profile-header p'), await notes()], [header, Object.fromEntries(ours.map(name => [`skill:${name}`, shared.includes(name) ? sharedNote : '']).sort())]);
+  mark('after-header-check');
   await a.click('#status-profile');
   const barPreview = await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Writing'))?.querySelector('.pf-menu-preview')?.textContent`);
   await a.click('#status-profile');
   same('the status bar’s menu says what the header says', barPreview, header);
+  mark('after-status-menu', { barPreview });
   await pictures('still-loads-profile');
   await fitsAtMinimum(a, 'a profile whose rows name the tools that still load them');
+  mark('after-fitsAtMinimum');
+  console.log('[MEASURE stillLoadsFlow node]', JSON.stringify(trace));
+  console.log('[MEASURE stillLoadsFlow dom]', JSON.stringify(await a.run(`(window.ckObs?.disconnect(), window.ckTrace)`)));
 
   // The page's Switch: Central Knot's copies leave every tool; the shared folder is as it was; the result is read again.
   const before = listing();
