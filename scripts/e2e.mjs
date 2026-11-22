@@ -13169,6 +13169,12 @@ async function stillLoadsFlow() {
   // The profile: issues alone ticked, so Switch is offered (profileplan.ts switchable); the ten skills turn off.
   await a.click('#nav-profiles');
   await newProfile(a, 'Writing');
+  // Yes's own pass leaves the ten just-written skills settling (library.ts takeInAnswer); a later pass takes them in,
+  // and its sync:changed refresh reaches the page outside busy() (app.ts backgroundRefresh).
+  let seenSkills = 0;
+  check('the ten taken-in skills reach Profiles',
+    await until(async () => (seenSkills = (await a.all('.pf-row[data-item^="skill:"]', 'e.dataset.item')).length) === ours.length),
+    { skillRows: seenSkills, expected: ours.length });
   await a.click(byId('pf-mcp:issues'));
   await done();
   const header = 'Switching turns 10 items off; 4 still load from the shared skills folder, in Copilot CLI, Codex, Pi or OpenCode';
@@ -13191,7 +13197,8 @@ async function stillLoadsFlow() {
   const said = 'Switched to Writing: 10 items turned off; 4 still load from the shared skills folder, in Copilot CLI, Codex, Pi or OpenCode.';
   check('its result says what it turned off and, read again, how many still load and where', (await a.text('.band-done') ?? '').startsWith(said), await a.text('.bands'));
   await pictures('still-loads-result');
-  await a.click('#nav-history');
+  // History loads outside busy() (app.ts loadHistory); wait for the profile switch row before reading it.
+  await openHistory(a, '#nav-history', () => a.exists('li.history-row[data-kind="profile"]'));
   same('History’s entry counts what it turned in the Library, as before', await a.text('li.history-row[data-kind="profile"] .history-about'), 'Switched to Writing: 10 items turned off.');
   await a.click('li.history-row[data-kind="profile"] .history-actions button');
   await done();
@@ -13246,8 +13253,10 @@ async function stillLoadsFlow() {
   await done();
   same('its Undo gives the row back as the take left it', await rowNow(), taken);
   // The take's Undo, from History: the row exactly as before the take.
-  await a.click('#nav-history');
-  const undoTake = await a.run(`[...document.querySelectorAll('li.history-row')].find(row => /^Use the plugin’s/.test(row.querySelector('.history-about')?.textContent ?? ''))?.querySelector('.history-actions button')?.id`);
+  // Second visit to History keeps the earlier rows while loadHistory() runs outside busy(); wait for the take's row.
+  const findUndoTake = () => a.run(`[...document.querySelectorAll('li.history-row')].find(row => /^Use the plugin’s/.test(row.querySelector('.history-about')?.textContent ?? ''))?.querySelector('.history-actions button')?.id`);
+  await openHistory(a, '#nav-history', async () => !!(await findUndoTake()));
+  const undoTake = await findUndoTake();
   check('History has the take, with Undo', !!undoTake);
   await a.click(byId(undoTake));
   await done();
