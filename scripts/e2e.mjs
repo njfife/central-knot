@@ -7612,11 +7612,14 @@ fs.writeFileSync(record, JSON.stringify(now));
   await done();
   rmSync(join(home, 'fail-plug-11'));
   same('a run where nothing went through, with no Undo: its sentence counts it first, and its reason follows', [await a.text('#plugins-result .toolbar-result-text'), (await plugReasons()).length], ['1 of 1 didn’t go through in every tool: plug-11. ', 1]);
-  await press('#header .band-dismiss');
   // A plugin's page and back, then Refresh: the list in its order again, installed first.
+  // On another plugin's page while plug-11's refused result is still up, the header omits any empty "Last change: .".
   const inOrder = on => [...plugins.filter(name => on.includes(name)), ...plugins.filter(name => !on.includes(name))];
   const installedNow = [...installedFirst.filter(name => name !== 'plug-06'), 'plug-01', 'plug-10', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
-  await a.click('#popen-0-plug-20'); await a.click('#plugin-back');
+  await a.click('#popen-0-plug-20');
+  same('on another plugin’s page after a switch that changed nothing, the header has no empty “Last change: .”', await a.text('#plugins-result .toolbar-result-text'), '1 of 1 didn’t go through in every tool: plug-11. ');
+  await a.click('#plugin-back');
+  await press('#header .band-dismiss');
   same('back from a plugin’s page, every plugin is in its place in the order', await order(), inOrder(installedNow));
   await putAt(list, '[data-plugin="plug-02"]', 300);
   await clickAt(await middleOf('#pswitch-0-plug-02')); await done();
