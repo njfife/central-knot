@@ -254,8 +254,8 @@ function fadeNow(): void {
   if (heldInHeader()) { fading = setTimeout(() => (heldInHeader() ? fadeNow() : fadeLater()), 250); return; }
   const outcome = state.outcome;
   if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length)) state.outcome = undefined;
-  fadeRun();
-  rerender();
+  // Drawn only when a result went: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
+  if (fadeRun() || state.outcome !== outcome) rerender();
 }
 
 /** Paints the status bar's message from state.said, keeping its whole text as its tooltip. */

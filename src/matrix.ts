@@ -1228,13 +1228,21 @@ function toldNotices(kind: PageKind, cardOpen: boolean): Told[] {
 
 /**
  * Seen, the one rule: a notice is seen once its sentence is drawn in the header's lines, cut or not, or in the opened card, while the
- * window has the focus, so he can see it (markSeen; renderer.ts draws again when it gets the focus), and one dismissed, undone or
- * folded into History by a newer one is no longer unseen. Asked by the sidebar's dot and the kind switch's (unseenNotices), the
- * Notices control's mark, app.ts keepUnshown and the "Sync changed" message (app.ts paintStatusMessage).
+ * window has the focus, so he can see it (markSeen; renderer.ts draws again when it gets the focus while one drawn without it is
+ * unseen: unseenFromAway), and one dismissed, undone or folded into History by a newer one is no longer unseen. Asked by the
+ * sidebar's dot and the kind switch's (unseenNotices), the Notices control's mark, app.ts keepUnshown and the "Sync changed" message
+ * (app.ts paintStatusMessage).
  */
 export const noticeUnseen = (id: string) => !state.dismissed.has(id) && !state.seenNotices.has(id) && ![...foldedNotices.values()].some(folded => folded.has(id));
+/** The notices drawn while the window had no focus, so not seen then (markSeen). */
+const drawnAway = new Set<string>();
 /** A notice drawn: seen now, and when (the arrival's clock: noticeLine), if the window has the focus; a hidden window has none. */
-const markSeen = (id: string) => { if (document.hasFocus() && !state.seenNotices.has(id)) state.seenNotices.set(id, Date.now()); };
+const markSeen = (id: string) => {
+  if (!document.hasFocus()) drawnAway.add(id);
+  else if (!state.seenNotices.has(id)) state.seenNotices.set(id, Date.now());
+};
+/** Whether a notice drawn while the window had no focus is still unseen: what renderer.ts draws again for when the focus comes back. */
+export const unseenFromAway = () => [...drawnAway].some(noticeUnseen);
 /** A kind's automatic changes not yet seen (noticeUnseen). */
 export const unseenNotices = (kind: PageKind) => (state.home?.[kind].notices ?? []).filter(notice => noticeUnseen(notice.history));
 /** Whether the header keeps a notice for the open home, not dismissed or undone (app.ts readFound: no "Nothing changed" beside it). */
