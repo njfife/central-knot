@@ -938,6 +938,54 @@ test('Turn these off where every row it turned off is kept back by a tool: the l
   assert.equal(app.outcome?.text, '2 of 2 didn’t go through in every tool: notes and spare. Both are off.');
 });
 
+test('Turn these off where one refreshed skill still loads in Codex from another copy: the result says Codex still reads that one another way, and leaves out the one with no other copy', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'spare' }, { kind: 'skills', key: 'standup' }], { on: true });
+  const codexShared = {
+    anotherWay: { 'codex-cli': 'Codex reads a copy in ~/.agents/skills, which is not Central Knot’s.' },
+    loads: { 'codex-cli': { folder: 'spare', name: 'spare', skillFile: '/home/.agents/skills/spare/SKILL.md', switchedOff: false } },
+  };
+  t.mock.method(api, 'refresh', async () => ({
+    ...app.home!,
+    skills: {
+      ...app.home!.skills,
+      items: [{ key: 'spare', name: 'spare', copies: {}, ...codexShared }, { key: 'standup', name: 'standup', copies: {} }] as unknown as HomeView['skills']['items'],
+      library: { spare: { ...newItem('spare', 'spare'), on: false }, standup: { ...newItem('standup', 'standup'), on: false } },
+    },
+  }));
+  turnTheseOff([itemRow('skills', 'spare'), itemRow('skills', 'standup')]);
+  await settled();
+  await main.pass({ results: [...did('spare').results, ...did('standup').results], writes: 2, reloads: [], made: ['off-skills-spare', 'off-skills-standup'] });
+  assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons, app.outcome?.act?.label],
+    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Codex still reads spare another way. Central Knot keeps them, and turning one on puts it back as it was.', false, [], 'Undo']);
+});
+
+test('Turn these off where a kind with a shared skill is refused and an MCP server goes through: only rows Off afterwards get the still-read sentence', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'spare' }, { kind: 'mcp', key: 'github' }], { stopped: 'skills', on: true });
+  app.home!.skills.items = [{
+    key: 'spare', name: 'spare', copies: {},
+    anotherWay: { 'codex-cli': 'Codex reads a copy in ~/.agents/skills, which is not Central Knot’s.' },
+    loads: { 'codex-cli': { folder: 'spare', name: 'spare', skillFile: '/home/.agents/skills/spare/SKILL.md', switchedOff: false } },
+  }] as unknown as HomeView['skills']['items'];
+  turnTheseOff([itemRow('skills', 'spare'), itemRow('mcp', 'github')]);
+  await settled();
+  await main.pass({ stopped: 'The skills record is damaged. Nothing was written or deleted.', results: [], writes: 0, reloads: [] });
+  app.home!.mcp.library.github!.on = false;
+  await main.pass(offMade('mcp', 'github'));
+  assert.deepEqual([app.outcome?.text, app.outcome?.reasons, app.outcome?.warn, app.outcome?.act?.label],
+    ['1 of 2 didn’t go through in every tool: spare. Turned off 1 MCP server with no use seen in the last 30 days: github. Central Knot keeps it, and turning it on puts it back as it was.',
+      ['Skills: The skills record is damaged. Nothing was written or deleted.'], true, 'Undo']);
+  // Even if a kind went through, a row that is On again in the refreshed view does not get the still-read sentence.
+  app.home!.skills.gate = { state: 'ready' };
+  turnTheseOff([itemRow('skills', 'spare'), itemRow('mcp', 'github')]);
+  await settled();
+  await main.pass(offMade('skills', 'spare'));
+  app.home!.mcp.library.github!.on = false;
+  await main.pass(offMade('mcp', 'github'));
+  assert.equal(app.outcome?.text, 'Turned off 2 items with no use seen in the last 30 days: spare and github. Central Knot keeps them, and turning one on puts it back as it was.');
+});
+
 test('An Undo across kinds whose agent’s entry is stopped: the agents’ entries before it are left, the skill’s and the server’s still go back, and it says so, the stop led by its kind', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'review' }, { kind: 'agents', key: 'review' }, { kind: 'agents', key: 'notes' }, { kind: 'mcp', key: 'github' }]);
