@@ -10,10 +10,12 @@ import { readHistory } from '../src/history.ts';
 import { newItem, type ItemKind } from '../src/library.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
+import { hashesOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
 import { allTurns, copilotKeptOnBy, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, withCopilotOff, type Libraries, type PluginHome } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
+import { pluginOnIn } from '../src/pluginrows.ts';
 import { runPlan, type PlanApi } from '../src/pluginplan.ts';
 import { savePluginRecord } from '../src/pluginrecord.ts';
 import { setPart, setSkill } from '../src/plugins.ts';
@@ -1049,6 +1051,91 @@ test('The plugin in Claude Code and Codex, his triage in Codex, a profile that l
     const both = '2 items off; 1 still loads from a copy of yours there, in Codex; 1 stays on in Claude Code, through its plugin';
     assert.equal(await preview('Quiet'), `Switching turns ${both}`);
     assert.equal(await result(quiet), `2 items turned off; ${both.split('; ').slice(1).join('; ')}`);
+  } finally { await box.cleanup(); }
+});
+
+/**
+ * His triage's row in the Library, as the page makes it from the home now (matrix.ts rowsOf: the view's facts, with where a
+ * plugin has it on): its tag, and what Codex's cell reads (whether Codex loads a copy, and how its line says Codex has it).
+ */
+async function triageRow(box: Box) {
+  const { view } = await sideNow(box), facts = view.skills.items.find(each => each.key === 'triage')!;
+  const row = { ...facts, hashes: hashesOf(facts.copies), pluginOn: pluginOnIn(view, 'skills', facts) };
+  return { tag: sentences(libraryWords.skills).placeTag(row, view.skills.library.triage, view.skills.tools), codex: { loads: !!facts.loads?.['codex-cli'], way: facts.anotherWay?.['codex-cli'] } };
+}
+
+test('The plugin in Claude Code and Codex, his triage in Codex, both turned off by a switch: his row says it is in Central Knot, Claude Code and Codex, and its tooltip says why of each', async () => {
+  const { box, made, result } = await kitHome({ codex: true });
+  try {
+    await result(await made('Quiet', ['skill:keep']));
+    assert.deepEqual((await triageRow(box)).tag, { text: 'in Central Knot, Claude Code and Codex', title: 'Central Knot keeps this skill and its versions. '
+      + 'Claude Code has it on through its plugin: its switch there, in the opened row, turns that off. Codex has a copy Central Knot didn’t put there, left alone while the skill is off.' });
+  } finally { await box.cleanup(); }
+});
+
+test('The same, then his copy in Codex switched off by path in Codex’s own settings: Codex loads nothing, so his row says it is on in Claude Code only, through its plugin, as its tooltip does', async () => {
+  const { box, made, result } = await kitHome({ codex: true });
+  try {
+    await result(await made('Quiet', ['skill:keep']));
+    await setDisabled(box.context, 'codex-cli', { folder: 'triage', name: 'triage', skillFile: join(folderOf(box, 'codex-cli', 'triage'), 'SKILL.md') }, true);
+    assert.deepEqual((await triageRow(box)).tag, { text: 'on in Claude Code only, through its plugin',
+      title: 'Central Knot keeps this skill and its versions. Claude Code has it on through its plugin: its switch there, in the opened row, turns that off.' });
+  } finally { await box.cleanup(); }
+});
+
+test('His triage only in the shared folder, which Codex reads, and the same skill through a plugin in Codex, both turned off by a switch: Codex then loads the shared folder’s, and the result, his row and Codex’s cell say so; the preview, read while the plugin’s part is on, can’t', async () => {
+  const { box, made, preview, result } = await kitHome({ claude: false, codex: true, shared: ['triage'] });
+  try {
+    const quiet = await made('Quiet', ['skill:keep']);
+    assert.equal(await preview('Quiet'), 'Switching turns 2 items off');
+    assert.equal(await result(quiet), '2 items turned off; 1 still loads from the shared skills folder, in Codex');
+    const { tag, codex } = await triageRow(box);
+    assert.deepEqual([tag?.text, codex], ['in Central Knot and Codex', { loads: true, way: 'Codex also reads a copy at …/.agents/skills, which is not Central Knot’s.' }]);
+  } finally { await box.cleanup(); }
+});
+
+test('The same, with the shared folder’s triage switched off by path in Codex’s own settings: nothing still loads, and neither the preview nor the result says one does', async () => {
+  const { box, made, preview, result } = await kitHome({ claude: false, codex: true, shared: ['triage'] });
+  try {
+    await setDisabled(box.context, 'codex-cli', { folder: 'triage', name: 'triage', skillFile: join(box.home, '.agents/skills/triage/SKILL.md') }, true);
+    const quiet = await made('Quiet', ['skill:keep']);
+    assert.deepEqual([await preview('Quiet'), await result(quiet)], ['Switching turns 2 items off', '2 items turned off']);
+  } finally { await box.cleanup(); }
+});
+
+test('A profiles file from before, where Codex’s plugin part is off and Codex loads his triage from the shared folder: the move releases the rule it listed for that copy, turns triage Off as held everywhere, and History says so', async () => {
+  const { box } = await kitHome({ claude: false, codex: true, shared: ['triage'] });
+  try {
+    const config = join(box.home, '.codex/config.toml'), partOff = '\n[[skills.config]]\nname = "kit:triage"\nenabled = false\n';
+    await writeFile(config, `${await readFile(config, 'utf8')}${partOff}`);
+    // What the earlier profile switch set: Claude Code's override for its folder, Codex's rule for the copy it loads.
+    await setDisabled(box.context, 'claude-cli', { folder: 'triage', name: 'triage', skillFile: join(folderOf(box, 'claude-cli', 'triage'), 'SKILL.md') }, true);
+    await setDisabled(box.context, 'codex-cli', { folder: 'triage', name: 'triage', skillFile: join(box.home, '.agents/skills/triage/SKILL.md') }, true);
+    const old = { formatVersion: 1, profiles: [{ id: 'dev', name: 'Dev', items: ['skill:keep'] }], offByProfile: { 'skill:triage': ['claude-cli', 'codex-cli'] } };
+    await writeFile(join(box.home, '.central-knot/profiles.json'), JSON.stringify(old));
+    await migrateProfiles(box.context, box.tools);
+    const [told] = (await history(box)).filter(entry => entry.kind === 'profile');
+    assert.deepEqual([await text(box, '.codex/config.toml'), await text(box, '.claude/settings.json'), Object.fromEntries((await live(box)).map(item => [item.id, item.on])), names(told.profile?.off ?? [])],
+      ['[marketplaces.team]\nsource = "/m"\n\n[plugins."kit@team"]\nenabled = true\n' + partOff, '{}\n', { 'skill:triage': false, 'skill:keep': true }, ['triage']]);
+  } finally { await box.cleanup(); }
+});
+
+test('His triage only in the shared folder turned off, the same skill through a plugin kept on in Codex: the plugin’s is what Codex loads, and what is said', async () => {
+  const { box, made, preview, result } = await kitHome({ claude: false, codex: true, shared: ['triage'] });
+  try {
+    const quiet = await made('Quiet', ['skill:keep', kitId('skill', 'triage')]), still = '1 still loads through a plugin, in Codex';
+    assert.equal(await preview('Quiet'), `Switching turns 1 item off; ${still}`);
+    assert.equal(await result(quiet), `1 item turned off; ${still}`);
+    const { tag, codex } = await triageRow(box);
+    assert.deepEqual([tag?.text, codex.loads], ['on in Codex only, through its plugin', false]);
+  } finally { await box.cleanup(); }
+});
+
+test('His triage in Codex turned off, the same skill through a plugin in Claude Code alone: his row says it is on in Claude Code only, through its plugin', async () => {
+  const { box, made, result } = await kitHome();
+  try {
+    await result(await made('Quiet', ['skill:keep']));
+    assert.equal((await triageRow(box)).tag?.text, 'on in Claude Code only, through its plugin');
   } finally { await box.cleanup(); }
 });
 

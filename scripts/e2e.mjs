@@ -13400,7 +13400,7 @@ async function stillLoadsFlow() {
   // His triage, which a plugin still loads (profileplan.ts keptOn, a plugin's copy), in a small home of its own with Claude Code
   // and Codex alone: triage and keep in Codex's folder, taken in and On; issue-tracker, installed and enabled in Claude Code,
   // brings the same triage, so Central Knot writes none there. Quiet, with keep alone: the header, triage's row, the result read
-  // again, Codex's folder gone and the plugin as it was; the result's Undo puts Codex's folder back.
+  // again, Codex's folder gone and the plugin as it was; the result's Undo puts Codex's folder back; switched again, his Library row.
   const kit = join(scratch, 'home-plugin-still-loads'), kitData = join(scratch, 'plugin-still-loads-data'), kitTools = join(scratch, 'tools-plugin-still-loads');
   const triage = readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8');
   writeClaudeInstall(kit, 'ck-test-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': triage });
@@ -13439,6 +13439,12 @@ async function stillLoadsFlow() {
   await b.click('#outcome-undo');
   await bDone();
   same('its Undo puts Codex’s folder back, and the header says what it said before the switch', [codexTriage(), await b.text('.profile-header p')], [true, kitHeader]);
+  // Switched again, his row in the Library says where it still is (libraryrow.ts offWhere): on through the plugin, in Claude Code alone.
+  await b.click('#profile-switch');
+  await bDone();
+  await openKind(b, 'skills');
+  same('switched again, his triage’s row in the Library says it is on in Claude Code only, through its plugin',
+    await b.all(`.ov-row[data-key="${rowPart('', 'skills', 'triage')}"] .row-tag`), ['on in Claude Code only, through its plugin']);
   await b.quit();
 }
 
