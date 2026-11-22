@@ -17,6 +17,7 @@ import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from
 import { readPlugin } from '../src/pluginlibrary.ts';
 import { notInWhy } from '../src/pluginstatus.ts';
 import { readHistory } from '../src/history.ts';
+import { homePass } from '../src/homepass.ts';
 import * as engine from '../src/plugins.ts';
 import { applyServers, restoreServer, serverKind, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
@@ -525,20 +526,25 @@ test('Every item of a plugin let go: its page still lists them, Pi says why none
 });
 
 test('An item that is Off when it is let go keeps its except as it was: turned On, it goes where it is wanted', async () => {
-  const box = await kitHome();
+  const box = await kitHome({ tools: ['pi-cli'] });
   try {
+    // His own notes first, then the plugin's taken over it by Use the plugin's: his stays a version, the plugin never gave it.
+    await put(box.pi('skills/notes/SKILL.md'), skill('notes', 'his'));
+    await applySkills(box.share, box.tools, [{ key: 'notes', on: true, except: [] }]);
+    const his = (await box.library()).skill.notes!.hash;
     await box.turn('on');
-    const first = (await box.library()).skill.notes!.hash;
+    await box.markets.take(box.root, 'kit', { kind: 'skill', key: 'notes' }, 'pi-cli', box.home);
     await put(join(box.kit, 'skills/notes/SKILL.md'), skill('notes', 'v2'));
     await box.update();
-    await applySkills(box.share, box.tools, [{ key: 'notes', on: false, except: [] }]);
-    await applySkills(box.share, box.tools, [{ key: 'notes', on: false, except: [], version: first }]);
+    const except = (await box.library()).skill.notes!.except;
+    await applySkills(box.share, box.tools, [{ key: 'notes', on: false, except }]);
+    // His version made current, Off: a change here (a version the plugin gave earlier would not be: library.ts TAKEN BACK).
+    await applySkills(box.share, box.tools, [{ key: 'notes', on: false, except, version: his }]);
     await applySkills(box.share, box.tools, []);
     const notes = (await box.library()).skill.notes!;
-    assert.deepEqual([notes.source, notes.except], [undefined, []]);
-    // Claude Code has the same SKILL.md through the installed plugin, so it gets no copy of its own beside it (skills.ts anotherWay).
+    assert.deepEqual([notes.source, notes.except], [undefined, except]);
     await applySkills(box.share, box.tools, [{ key: 'notes', on: true, except: [] }]);
-    assert.equal(await exists(box.pi('skills/notes/SKILL.md')), true);
+    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), skill('notes', 'his'));
   } finally { await box.cleanup(); }
 });
 
@@ -1199,6 +1205,265 @@ test('After two updates of a root skill, History’s Go back before this on the 
     assert.deepEqual(Object.keys(await box.skills()), ['root-fixture']);
   } finally { await box.cleanup(); }
 });
+
+// ---------- A version the plugin gave earlier, made current again: still the plugin's (library.ts A PLUGIN) ----------
+
+type RootBox = Awaited<ReturnType<typeof rootHome>>;
+const rootText = (letter: string) => skill('root-fixture', `Text ${letter}.`);
+/** root-fixture's marketplace moved to the pin of `letter`, whose one skill says so. */
+const rootAt = async (box: RootBox, letter: string) => { await box.list({ 'root-fixture': pinOf(letter) }); await box.copy('root-fixture', pinOf(letter), { 'SKILL.md': rootText(letter) }); };
+/** Sync once, and the background pass Automatic sync runs after a click: main.ts's pass of the whole home. */
+const syncOnce = (box: RootBox) => homePass({ ...box.share, reads: new Map() }, box.tools, true);
+/** History's entry of a change from one content of an item to another. */
+const entryOf = async (box: RootBox, key: string, from: string, to: string) => (await readHistory(box.share)).find(event => event.key === key && event.previous === from && event.version === to)!;
+/**
+ * A plugin's page for one of its items: its line under Its items, whether Update is offered, whether the automatic check would run
+ * it (`due`, which marketplaces.ts pendingUpdates reads: asked of the check itself on kit, below, since its fetch lets a pinned
+ * plugin's copy go and nothing is fetched here), and whether Use the plugin's is offered.
+ */
+const pageOf = async (box: RootBox, plugin: string, key: string) => {
+  const items = (await box.view()).items?.[plugin];
+  return { line: items?.lines.find(line => line.key === key)?.state, update: !!items?.ready, due: !!items?.due, useThePlugins: !!items?.yours };
+};
+/** The automatic updates' run of a plugin's items (no click), as the check runs it. */
+const checkRuns = (box: RootBox, plugin: string) => box.markets.items(box.root, 'team', plugin, box.tools.filter(tool => tool !== 'claude-cli'), box.home);
+
+for (const [when, refresh] of [['Automatic sync off, then Sync once', false], ['Automatic sync on: the restore’s own refresh runs the pass', true]] as const) {
+  test(`Pi alone, ${when}: a root skill updated, then History’s Undo: its earlier text stays current and the plugin’s (same key and link, the profile’s tick live, nothing says “your own now”), and the plugin’s page offers Update; the automatic check and a second Sync leave it; Update brings the plugin’s back, said as an update, with its Undo`, async () => {
+    const box = await rootHome(['pi-cli']);
+    try {
+      await rootAt(box, 'a');
+      await box.turnOf('root-fixture', 'on');
+      await saveProfile(box.share, { name: 'Roots', items: [rootId('root-fixture')] });
+      const a = (await box.skills())['root-fixture']!;
+      await rootAt(box, 'b');
+      await box.updateOf('root-fixture');
+      const b = (await box.skills())['root-fixture']!, update = await entryOf(box, 'root-fixture', a.hash, b.hash);
+      assert.equal(libraryAction(update, b, { managed: box.tools, pending: [], linked: true })?.label, 'Undo');
+      await restoreSkill(box.share, box.tools, update.id);
+      if (refresh) await syncOnce(box);
+      await syncOnce(box);
+      const held = (await box.skills())['root-fixture']!;
+      assert.equal(await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), rootText('a'));
+      assert.deepEqual([held.key, held.source, held.hash, held.seen], ['root-fixture', a.source, a.hash, b.hash], 'its key and link; b is what the plugin last gave');
+      assert.deepEqual([(await box.live()).map(item => item.id), await box.inUseNow()], [[rootId('root-fixture')], ['Roots']], 'the profile’s tick names a live item');
+      assert.deepEqual([(await readHistory(box.share)).filter(event => event.cause === 'own-now'), box.notices.filter(notice => notice.includes('let-go'))], [[], []], 'nothing says it is his own now');
+      assert.deepEqual(await pageOf(box, 'root-fixture', 'root-fixture'), { line: 'update', update: true, due: false, useThePlugins: false }, 'Update offered there, Use the plugin’s not; the automatic check has nothing to run');
+      // The automatic check, and another Sync: the version he took back stays.
+      await checkRuns(box, 'root-fixture');
+      await syncOnce(box);
+      assert.deepEqual([await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), (await box.skills())['root-fixture']!.hash], [rootText('a'), a.hash]);
+      const entries = (await readHistory(box.share)).length;
+      // A click on Update: b again, as an update, with History's entry and its Undo.
+      const clicked = await box.updateOf('root-fixture');
+      const again = (await box.skills())['root-fixture']!, history = await readHistory(box.share);
+      const said = history.find(event => event.key === 'root-fixture' && event.previous === a.hash && event.version === b.hash && event.id !== update.id);
+      assert.deepEqual([await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), again.hash, again.seen, again.source], [rootText('b'), b.hash, b.hash, a.source]);
+      assert.deepEqual([clicked.reports.map(report => report.outcome), history.length, said?.cause, said && libraryAction(said, again, { managed: box.tools, pending: [], linked: true })?.label], [['updated'], entries + 1, 'source', 'Undo'], 'a new entry, from the plugin, with its Undo');
+    } finally { await box.cleanup(); }
+  });
+}
+
+test('kit, its notes put back to its earlier version: the automatic check has nothing to run; once review changes, the check runs and brings review’s update, leaving notes; a click on Update brings the plugin’s notes', async () => {
+  const box = await kitHome({ tools: ['pi-cli'] });
+  try {
+    const inPi = async () => [await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), await readFile(box.pi('skills/review/SKILL.md'), 'utf8')];
+    const due = async () => (await box.markets.pendingUpdates(box.home)).ops.map(op => `${op.plugin} ${op.action}`);
+    await box.turn('on');
+    const a = (await box.library()).skill.notes!;
+    await put(join(box.kit, 'skills/notes/SKILL.md'), skill('notes', 'notes v2'));
+    await box.update();
+    const updated = (await box.library()).skill.notes!;
+    await restoreSkill(box.share, box.tools, (await readHistory(box.share)).find(event => event.key === 'notes' && event.previous === a.hash && event.version === updated.hash)!.id);
+    assert.deepEqual(await due(), [], 'the version he took back from is no update to run');
+    await put(join(box.kit, 'skills/review/SKILL.md'), skill('review', 'review v2'));
+    assert.deepEqual(await due(), ['kit update-items'], 'review’s update is');
+    await box.update();
+    await applySkills(box.share, box.tools, [], { background: true });
+    assert.deepEqual(await inPi(), [skill('notes', 'notes'), skill('review', 'review v2')], 'the check brought review’s update; notes stays as he put it back');
+    const notes = (await box.library()).skill.notes!;
+    const lines = await box.lines();
+    assert.deepEqual([notes.source, notes.hash, notes.seen, lines['skill:notes'], lines['skill:review']], [a.source, a.hash, updated.hash, 'update', 'linked'], 'still the plugin’s; its line offers Update');
+    assert.deepEqual(await due(), [], 'and still nothing to run');
+    await box.markets.items(box.root, 'team', 'kit', ['pi-cli'], box.home, false, true);
+    assert.deepEqual(await inPi(), [skill('notes', 'notes v2'), skill('review', 'review v2')], 'the click brings the plugin’s notes');
+  } finally { await box.cleanup(); }
+});
+
+test('Three pins: at c, History’s Go back before this on the update to b puts a back; the plugin still giving c leaves it; once it gives d, the automatic check brings d', async () => {
+  const box = await rootHome(['pi-cli']);
+  try {
+    await rootAt(box, 'a');
+    await box.turnOf('root-fixture', 'on');
+    const hashes = [(await box.skills())['root-fixture']!.hash];
+    for (const letter of ['b', 'c']) { await rootAt(box, letter); await box.updateOf('root-fixture'); hashes.push((await box.skills())['root-fixture']!.hash); }
+    const toB = await entryOf(box, 'root-fixture', hashes[0]!, hashes[1]!), now = (await box.skills())['root-fixture']!;
+    assert.equal(libraryAction(toB, now, { managed: box.tools, pending: [], linked: true })?.label, 'Go back before this');
+    await restoreSkill(box.share, box.tools, toB.id);
+    await checkRuns(box, 'root-fixture');
+    await syncOnce(box);
+    assert.deepEqual([await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), (await box.skills())['root-fixture']!.source, (await pageOf(box, 'root-fixture', 'root-fixture')).due], [rootText('a'), now.source, false]);
+    await rootAt(box, 'd');
+    assert.equal((await pageOf(box, 'root-fixture', 'root-fixture')).due, true, 'd is an update as any');
+    await checkRuns(box, 'root-fixture');
+    assert.deepEqual([await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), (await box.skills())['root-fixture']!.source], [rootText('d'), now.source]);
+  } finally { await box.cleanup(); }
+});
+
+test('Versions’ Make current holds only a version that is not what the plugin last gave: back to b, its latest, nothing waits and Update changes nothing; a again is held; at c, b is held and c is not', async () => {
+  const box = await rootHome(['pi-cli']);
+  try {
+    const hashOf = async () => (await box.skills())['root-fixture']!.hash;
+    const makeCurrent = async (hash: string) => { await applySkills(box.share, box.tools, [{ key: 'root-fixture', on: true, except: [], version: hash }]); await syncOnce(box); };
+    const waits = async () => (({ update, due }) => ({ update, due }))(await pageOf(box, 'root-fixture', 'root-fixture'));
+    await rootAt(box, 'a');
+    await box.turnOf('root-fixture', 'on');
+    const a = await hashOf();
+    await rootAt(box, 'b');
+    await box.updateOf('root-fixture');
+    const b = await hashOf();
+    await restoreSkill(box.share, box.tools, (await entryOf(box, 'root-fixture', a, b)).id);
+    assert.deepEqual(await waits(), { update: true, due: false }, 'a taken back: Update offered');
+    await makeCurrent(b);
+    assert.deepEqual([await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), await waits()], [rootText('b'), { update: false, due: false }], 'b, what the plugin last gave: nothing waits');
+    const entries = (await readHistory(box.share)).length, versions = (await box.skills())['root-fixture']!.versions.length;
+    const clicked = await box.updateOf('root-fixture');
+    assert.deepEqual([clicked.reports.map(report => report.changed), (await readHistory(box.share)).length, (await box.skills())['root-fixture']!.versions.length], [[false], entries, versions], 'Update changes nothing, and says so');
+    await makeCurrent(a);
+    assert.deepEqual(await waits(), { update: true, due: false }, 'a made current again: held');
+    await rootAt(box, 'c');
+    await box.updateOf('root-fixture');
+    const c = await hashOf();
+    await makeCurrent(b);
+    assert.deepEqual([await waits(), (await box.skills())['root-fixture']!.source !== undefined], [{ update: true, due: false }, true], 'at c, b made current: held');
+    await makeCurrent(c);
+    assert.deepEqual([await hashOf(), await waits()], [c, { update: false, due: false }], 'c, what the plugin last gave: not held');
+  } finally { await box.cleanup(); }
+});
+
+test('Versions’ Make current on the plugin’s earlier version keeps it the plugin’s; on a version of his that Use the plugin’s kept, it is his own again', async () => {
+  const box = await rootHome(['pi-cli']);
+  try {
+    // His own root-fixture first, in the library; the plugin's is taken over it by Use the plugin's.
+    await put(box.pi('skills/root-fixture/SKILL.md'), skill('root-fixture', 'His text.'));
+    await applySkills(box.share, box.tools, [{ key: 'root-fixture', on: true, except: [] }]);
+    const his = (await box.skills())['root-fixture']!.hash;
+    await rootAt(box, 'a');
+    await box.turnOf('root-fixture', 'on');
+    await box.markets.take(box.root, 'root-fixture', { kind: 'skill', key: 'root-fixture' }, 'pi-cli', box.home);
+    const a = (await box.skills())['root-fixture']!;
+    await rootAt(box, 'b');
+    await box.updateOf('root-fixture');
+    const linkedAs = (await box.skills())['root-fixture']!.source;
+    assert.deepEqual([a.source, linkedAs !== undefined], [linkedAs, true]);
+    await applySkills(box.share, box.tools, [{ key: 'root-fixture', on: true, except: [], version: a.hash }]);
+    await syncOnce(box);
+    assert.deepEqual([await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), (await box.skills())['root-fixture']!.source], [rootText('a'), linkedAs], 'the plugin’s a: still the plugin’s');
+    await applySkills(box.share, box.tools, [{ key: 'root-fixture', on: true, except: [], version: his }]);
+    await syncOnce(box);
+    const own = (await box.skills())['root-fixture']!;
+    assert.deepEqual([await readFile(box.pi('skills/root-fixture/SKILL.md'), 'utf8'), own.source, own.hash], [skill('root-fixture', 'His text.'), undefined, his], 'his: let go');
+  } finally { await box.cleanup(); }
+});
+
+test('While an item is taken back to the plugin’s earlier version: OpenCode managed again gets that version, and a profile switch away and back keeps it, and so do the plugin’s Off and On', async () => {
+  const box = await rootHome(['pi-cli', 'opencode-cli']);
+  try {
+    const both = async () => Promise.all([box.pi('skills/root-fixture'), join(box.home, '.config/opencode/skills/root-fixture')].map(folder => readFile(join(folder, 'SKILL.md'), 'utf8').catch(() => 'none')));
+    await rootAt(box, 'a');
+    await box.turnOf('root-fixture', 'on');
+    const a = (await box.skills())['root-fixture']!;
+    await rootAt(box, 'b');
+    await box.updateOf('root-fixture');
+    const b = (await box.skills())['root-fixture']!;
+    // OpenCode's Manage switch off, the Undo, then OpenCode managed again (its install the automatic updates owe it, and a pass).
+    box.tools.splice(box.tools.indexOf('opencode-cli'), 1);
+    await restoreSkill(box.share, box.tools, (await entryOf(box, 'root-fixture', a.hash, b.hash)).id);
+    box.tools.push('opencode-cli');
+    await box.markets.toolManaged('opencode-cli', box.home);
+    const owed = (await box.markets.pendingUpdates(box.home)).ops;
+    // The check fetched the marketplace again, which lets the pin's copy go; nothing is fetched here, so it is put back as a fetch would.
+    await rootAt(box, 'b');
+    for (const op of owed) await box.markets.items(box.root, op.marketName, op.plugin, [op.tool], box.home, op.action === 'install-items');
+    await syncOnce(box);
+    const held = (await box.skills())['root-fixture']!;
+    assert.deepEqual([await both(), held.source, held.seen], [[rootText('a'), rootText('a')], a.source, b.hash], 'OpenCode gets a; still the plugin’s');
+    const roots = (await saveProfile(box.share, { name: 'Roots', items: [rootId('root-fixture')] })).id!, none = (await saveProfile(box.share, { name: 'None', items: [] })).id!;
+    await switchProfile(box.share, box.tools, none, { live: box.live, run: async () => [] });
+    assert.deepEqual([await both(), (await box.skills())['root-fixture']!.source], [['none', 'none'], a.source], 'switched away: Off, still the plugin’s');
+    await switchProfile(box.share, box.tools, roots, { live: box.live, run: async () => [] });
+    await syncOnce(box);
+    const back = (await box.skills())['root-fixture']!;
+    assert.deepEqual([await both(), back.on, back.source, back.hash, back.seen], [[rootText('a'), rootText('a')], true, a.source, a.hash, b.hash], 'switched back: a, still the plugin’s');
+    await box.turnOf('root-fixture', 'off');
+    await box.turnOf('root-fixture', 'on');
+    assert.deepEqual([await both(), (await box.skills())['root-fixture']!.hash], [[rootText('a'), rootText('a')], a.hash], 'its On brings its items back, at a: only Update brings b');
+  } finally { await box.cleanup(); }
+});
+
+test('Installed whole in Claude Code and placed in Pi, all updated, then taken back in Pi alone: the Library row keeps Claude Code’s mark through the plugin, by the link it folds by, though the two texts differ', async () => {
+  const box = await kitHome();
+  try {
+    await box.turn('on');
+    const a = (await box.library()).skill.notes!;
+    await put(join(box.kit, 'skills/notes/SKILL.md'), skill('notes', 'v2'));
+    // Claude Code's own update moves its installed copy on too.
+    await put(join(box.home, '.claude/plugins/cache/team/kit/1.0.0/skills/notes/SKILL.md'), skill('notes', 'v2'));
+    await box.update();
+    const b = (await box.library()).skill.notes!;
+    await restoreSkill(box.share, box.tools, (await readHistory(box.share)).find(event => event.key === 'notes' && event.previous === a.hash && event.version === b.hash)!.id);
+    const row = (await skillsView(box.share, box.tools)).items.find(each => each.key === 'notes')!;
+    assert.deepEqual([await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), row.fromSource?.link, row.plugin?.['claude-cli']?.plugin], [skill('notes'), 'plugin:kit@team', 'kit']);
+  } finally { await box.cleanup(); }
+});
+
+test('Taken back in Pi, then OpenCode’s box ticked: OpenCode gets the version taken back and the hold stays; the tick’s Undo leaves both as before it; Update then brings the plugin’s latest', async () => {
+  const box = await rootHome(['pi-cli', 'opencode-cli']);
+  try {
+    const both = async () => Promise.all([box.pi('skills/root-fixture'), join(box.home, '.config/opencode/skills/root-fixture')].map(folder => readFile(join(folder, 'SKILL.md'), 'utf8').catch(() => 'none')));
+    await rootAt(box, 'a');
+    await box.turnOf('root-fixture', 'on');
+    const a = (await box.skills())['root-fixture']!;
+    await rootAt(box, 'b');
+    await box.updateOf('root-fixture');
+    const b = (await box.skills())['root-fixture']!;
+    await box.turnOf('root-fixture', 'keep-out', 'opencode-cli');
+    await restoreSkill(box.share, box.tools, (await entryOf(box, 'root-fixture', a.hash, b.hash)).id);
+    assert.deepEqual(await both(), [rootText('a'), 'none']);
+    const ticked = await box.turnOf('root-fixture', 'let-in', 'opencode-cli');
+    const held = (await box.skills())['root-fixture']!;
+    assert.deepEqual([await both(), held.hash, held.seen, held.source], [[rootText('a'), rootText('a')], a.hash, b.hash, a.source], 'OpenCode gets a; Pi keeps it');
+    await box.markets.undoTurn(box.root, 'root-fixture', ticked.before!, ticked.back!, box.home);
+    assert.deepEqual([await both(), (await box.skills())['root-fixture']!.hash], [[rootText('a'), 'none'], a.hash], 'the tick’s Undo: as before it');
+    await box.updateOf('root-fixture');
+    assert.deepEqual([await both(), (await box.skills())['root-fixture']!.hash], [[rootText('b'), 'none'], b.hash], 'Update brings b, where the plugin is');
+  } finally { await box.cleanup(); }
+});
+
+for (const tools of [['pi-cli'], ['pi-cli', 'opencode-cli']] as HarnessId[][]) {
+  test(`Put back to the plugin’s earlier version in ${tools.length === 1 ? 'Pi' : 'Pi and OpenCode'}, then edited by hand in Pi: his own now, as any edit, the plugin’s versions kept`, async () => {
+    const box = await rootHome(tools);
+    try {
+      await rootAt(box, 'a');
+      await box.turnOf('root-fixture', 'on');
+      const a = (await box.skills())['root-fixture']!;
+      await rootAt(box, 'b');
+      await box.updateOf('root-fixture');
+      const b = (await box.skills())['root-fixture']!;
+      await restoreSkill(box.share, box.tools, (await entryOf(box, 'root-fixture', a.hash, b.hash)).id);
+      await syncOnce(box);
+      assert.equal((await box.skills())['root-fixture']!.source, a.source, 'still the plugin’s before the edit');
+      await put(box.pi('skills/root-fixture/SKILL.md'), skill('root-fixture', 'Edited by hand.'));
+      await syncOnce(box);
+      const own = (await box.skills())['root-fixture']!;
+      assert.deepEqual([own.source, own.seen, [a.hash, b.hash].every(hash => own.versions.some(version => version.hash === hash))], [undefined, undefined, true]);
+      assert.equal((await readHistory(box.share)).filter(event => event.cause === 'own-now').length, 1);
+      for (const folder of tools.map(tool => (tool === 'pi-cli' ? box.pi('skills/root-fixture') : join(box.home, '.config/opencode/skills/root-fixture')))) {
+        assert.equal(await readFile(join(folder, 'SKILL.md'), 'utf8'), skill('root-fixture', 'Edited by hand.'));
+      }
+    } finally { await box.cleanup(); }
+  });
+}
 
 test('Pi unticked and ticked again, the plugin Off and On: its root skill leaves and comes back under the plugin’s name each time, one item throughout', async () => {
   const box = await rootHome();

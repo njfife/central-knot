@@ -1,8 +1,10 @@
 // Plugin updates that arrive by themselves (PLG-09). Every few hours, with or without a window, Central Knot reads the
 // marketplaces again and runs what Update all would choose on the Plugins page, through each tool's own command: the same
 // route as the button, so a plugin turned off stays off, one a tool no longer has is not put back, and one its marketplace
-// dropped is left as it is. It also makes the installs a plugin's table owes a tool new here (pluginrecord.ts `background`),
-// once: after that check the tool is on the plugins record's `tools`. It never uninstalls. What it did is kept for the page's
+// dropped is left as it is; but a plugin's version an item was taken back from waits for a click (library.ts TAKEN BACK:
+// marketplaces.ts pendingUpdates reads pluginlibrary.ts itemsView `due`). It also makes the installs a plugin's table owes a
+// tool new here (pluginrecord.ts `background`), once: after that check the tool is on the plugins record's `tools`. It never
+// uninstalls. What it did is kept for the page's
 // note and the Settings row; a failed update is tried again, less often each time. The steps are here, without Electron;
 // main.ts gives them the app's parts (AutoUpdateHost).
 import { resultLines, runPlan, succeeded, type PlanApi, type PluginDone, type PluginOp } from './pluginplan.ts';

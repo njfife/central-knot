@@ -6939,6 +6939,32 @@ async function rootSkillPage() {
   await a.click('#pupdate-0-root-fixture');
   await busy();
   same('its Update to another pin writes the new text into the same folder', await seen(), [['root-fixture'], ['skill:root-fixture'], 'Second root text.']);
+  // The update's Undo in History (Automatic sync on: a pass follows the click), then Refresh: the first text is back and still
+  // the plugin's (library.ts A PLUGIN, TAKEN BACK); its page offers Update, which brings the second back.
+  const piText = () => readFileSync(join(home, '.pi/agent/skills/root-fixture/SKILL.md'), 'utf8').trim().split('\n').at(-1);
+  await a.click('#nav-history');
+  const undo = `[...document.querySelectorAll('.history-row[data-kind="edit"]')].find(row => row.textContent.includes('root-fixture'))?.querySelector('.history-actions button[id^="history-"]')`;
+  for (let tries = 0; tries < 50 && !(await a.run(`!!${undo}`)); tries++) await wait(100);
+  same('History offers the update’s Undo', await a.run(`${undo}?.textContent`), 'Undo');
+  await a.run(`${undo}.click()`);
+  await busy();
+  for (let tries = 0; tries < 50 && piText() !== 'First root text.'; tries++) await wait(100);
+  await a.click('#header-refresh');
+  await busy();
+  await openKind(a, 'skills');
+  const row = `.ov-row[data-key="${rowPart('', 'skills', 'root-fixture')}"]`;
+  for (let tries = 0; tries < 50 && !(await a.exists(row)); tries++) await wait(100);
+  const notices = await openNotices(a);
+  await closeNotices(a);
+  same('undone, Pi has the first text, its row still says the plugin’s, and no notice says it is his own now', [piText(), /from the plugin/.test(await a.text(row) ?? ''), /your own now/.test(notices)], ['First root text.', true, false]);
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-root-fixture');
+  for (let tries = 0; tries < 100 && !(await a.exists('#pupdate-0-root-fixture')); tries++) await wait(100);
+  same('its page offers Update for it, and no Use the plugin’s', [await a.text('.plugin-items-list [data-key="skill:root-fixture"] .plugin-outcome-what'), await a.exists('#pupdate-0-root-fixture'), await a.exists('.plugin-tool-yours')],
+    ['An update is ready: Update brings it in', true, false]);
+  await a.click('#pupdate-0-root-fixture');
+  await busy();
+  same('Update brings the plugin’s second text back', await seen(), [['root-fixture'], ['skill:root-fixture'], 'Second root text.']);
   same('no page errors, a root skill’s pin', a.pageErrors, []);
   await a.quit();
 }
@@ -13116,6 +13142,73 @@ async function profilePluginsFlow() {
 
   same('no page errors after reopen', b.pageErrors, []);
   await b.quit();
+  await heldWholeInstallsPage();
+}
+
+/**
+ * The owner's arrangement: issue-tracker installed whole in Claude Code and Codex (their records written here, their CLIs
+ * answering --version alone) and placed in Pi. The marketplace and both installs move to a second text of triage (as their own
+ * updates would), Update brings it into Pi, and History's Undo puts the first back in Pi alone (library.ts TAKEN BACK). The opened
+ * triage row keeps Claude Code's and Codex's marks and switches through the plugin (matrix.ts harnessControls), pictured at 1316×819.
+ */
+async function heldWholeInstallsPage() {
+  const home = join(scratch, 'home-held-whole'), data = join(scratch, 'held-whole-data'), market = join(scratch, 'market-held-whole'), tools = join(scratch, 'tools-held-whole');
+  writeMarket(market, 'ck-test-market');
+  const triageFile = join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), first = readFileSync(triageFile, 'utf8');
+  const servers = readFileSync(join(market, 'plugins/issue-tracker/.mcp.json'), 'utf8'), codexCopy = join(home, '.codex/plugins/cache/ck-test-market/issue-tracker/2.0.0');
+  const installs = triage => {
+    writeClaudeInstall(home, 'ck-test-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': triage, '.mcp.json': servers });
+    for (const [path, text] of [['skills/triage/SKILL.md', triage], ['.mcp.json', servers], ['.codex-plugin/plugin.json', JSON.stringify({ name: 'issue-tracker', version: '2.0.0', skills: './skills', mcpServers: './.mcp.json' })]]) {
+      mkdirSync(dirname(join(codexCopy, path)), { recursive: true });
+      writeFileSync(join(codexCopy, path), text);
+    }
+  };
+  installs(first);
+  writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'git', url: market } } }));
+  writeFileSync(join(home, '.codex/config.toml'), `[marketplaces.ck-test-market]\nsource = "${market}"\n\n[plugins."issue-tracker@ck-test-market"]\nenabled = true\n`);
+  mkdirSync(join(home, '.pi/agent'), { recursive: true });
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  for (const [name, output] of [['claude', '2.1.322 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) writeFileSync(join(tools, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true, appearance: 'light' }));
+  const a = await launch(data, [], tools);
+  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const piText = () => readNow(join(home, '.pi/agent/skills/triage/SKILL.md')).trim().split('\n').at(-1);
+  same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists('#popen-0-issue-tracker')); tries++) await wait(100);
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-issue-tracker-pi-cli')); tries++) await wait(100);
+  await a.click('#pbox-0-issue-tracker-pi-cli');
+  await done();
+  const second = `${first.trimEnd()}\n\nSecond text.\n`;
+  writeFileSync(triageFile, second);
+  installs(second);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await a.exists('#pupdate-0-issue-tracker')); tries++) await wait(100);
+  await a.click('#pupdate-0-issue-tracker');
+  await done();
+  same('Update brings the second text into Pi', piText(), 'Second text.');
+  await a.click('#nav-history');
+  const undo = `[...document.querySelectorAll('.history-row[data-kind="edit"]')].find(row => row.textContent.includes('triage'))?.querySelector('.history-actions button[id^="history-"]')`;
+  for (let tries = 0; tries < 50 && !(await a.run(`!!${undo}`)); tries++) await wait(100);
+  await a.run(`${undo}.click()`);
+  await done();
+  await a.click('#header-refresh');
+  await done();
+  await openKind(a, 'skills');
+  for (let tries = 0; tries < 50 && !(await a.exists(byId(rowPart('open', 'skills', 'triage')))); tries++) await wait(100);
+  await a.click(byId(rowPart('open', 'skills', 'triage')));
+  await sizeTo(a, 1316, 819);
+  await a.settle();
+  if (shots) await a.shot('held-whole-installs-row-1316');
+  same('Pi holds the first text again; Claude Code and Codex keep the second through the plugin, with their marks and switches on the opened row',
+    [piText(), await cellState(a, 'skills', 'triage', 'claude-cli'), await cellState(a, 'skills', 'triage', 'codex-cli'),
+      await a.exists(byId(rowPart('enable', 'skills', 'triage', 'claude-cli'))), await a.exists(byId(rowPart('enable', 'skills', 'triage', 'codex-cli')))],
+    [first.trim().split('\n').at(-1), 'plugin', 'plugin', true, true]);
+  await fullSize(a);
+  same('no page errors, the whole installs beside a version taken back', a.pageErrors, []);
+  await a.quit();
 }
 
 /**

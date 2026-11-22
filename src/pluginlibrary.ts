@@ -142,8 +142,11 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   const alike = await alikeIn(context, plain), outOf = pluginOutOf(entry, tools, [...before, ...alike], brought);
   // THE MOVE (library.ts A PLUGIN): the root skill is made where the earlier build's copy was.
   const folder = files.files && basename(files.files.folder), moved = 'take' in ask ? undefined : movedFrom(before, plain, entry, folder);
-  const read = plain.map(each => ({ ...each, plugin: { ...each.plugin!, ...(moved && each.kind === 'skill' ? { on: moved.on, outOf: moved.except } : { outOf }) } }));
-  // A click that turns its items On (its On, Add, a box ticked) brings back a name of its own he deleted; the background never does (library.ts A PLUGIN).
+  // Its Update's click alone brings back the version he took an item back from (library.ts TAKEN BACK).
+  const update = 'read' in ask && ask.click ? { update: true as const } : {};
+  const read = plain.map(each => ({ ...each, plugin: { ...each.plugin!, ...update, ...(moved && each.kind === 'skill' ? { on: moved.on, outOf: moved.except } : { outOf }) } }));
+  // A click that turns its items On (its On, Add, a box ticked), or its Update, brings back a name of its own he deleted; the
+  // background never does (library.ts A PLUGIN).
   // Use the plugin's reads its one name, as not read whole, so nothing else of the plugin changes.
   const taken = 'take' in ask && ask.take, bringsBack = ('into' in ask && ask.on) || ('read' in ask && ask.click);
   const one = (each: SourceRead<unknown>, key: string) => ({ ...each, whole: false, names: new Map([...each.names].filter(([name]) => name === key)), take: new Set([key]) });
@@ -304,7 +307,8 @@ export type KindLooks = Awaited<ReturnType<typeof lookAtKinds>>;
  * What the Plugins page shows of a plugin's items (types.ts PluginItemsView), from the same table the pass carries out: each
  * item linked to it, with its state where it isn't plain (Off; an update ready; removed by the plugin's update); each name it
  * has that is not brought in, with why, and each of his under each tool's box (`yours`); how many are there in each tool, as
- * its look reads them; and whether Update has something to do (`ready`). `reads`: none where the plugin can't
+ * its look reads them; whether Update has something to do (`ready`), and whether the automatic check has (`due`: Update's but
+ * the version he took an item back from, which only a click brings: library.ts TAKEN BACK). `reads`: none where the plugin can't
  * be read now (`problem` says why); then only its linked items are listed. `looks`: the home as lookAtKinds read it.
  */
 export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, entry: PluginEntry, reads: SourceRead<unknown>[] | undefined, problem?: string): Promise<PluginItemsView> {
@@ -312,13 +316,17 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
   // Of those, the ones a tool's own settings keep out (librarypass.ts Disk.switchedOff: Pi's list, say), which it doesn't load.
   const switchedOff = (kind: ItemKind, key: string) => looks.find(each => each.kind.kind.kind === kind)!.look.disk.switchedOff?.get(key) ?? [];
   const keptOut = Object.fromEntries(itemTools(tools).map(tool => [tool, linked.filter(({ kind, item }) => wantedIn(item, tool) && switchedOff(kind, item.key).includes(tool)).length]).filter(([, out]) => out));
-  let ready = false;
+  let ready = false, due = false;
   for (const { kind, look } of looks) {
-    const items = look.library.items, read = reads?.find(each => each.kind === kind.kind.kind);
-    const answers = read ? sourceAnswers(items, read, read.recorded, { copies: item => copiesOf(look, item) }) : new Map();
-    for (const [key, answer] of answers) {
+    const items = look.library.items, read = reads?.find(each => each.kind === kind.kind.kind), copies = (item: LibraryItem) => copiesOf(look, item);
+    const answers = read ? sourceAnswers(items, read, read.recorded, { copies }) : new Map();
+    // Update's click, as runItems reads it (`update`), also brings back the version he took an item back from (library.ts TAKEN BACK).
+    const clicked = read ? sourceAnswers(items, { ...read, plugin: { ...read.plugin!, update: true } }, read.recorded, { copies }) : new Map();
+    for (const [key, background] of answers) {
       const item = items[key], there = read!.names.get(key), name = there && 'name' in there ? there.name : item?.name ?? key;
+      const answer = background === 'nothing' && clicked.get(key) === 'update' ? 'update' : background;
       if (['update', 'make', 'drop'].includes(answer)) ready = true;
+      if (['update', 'make', 'drop'].includes(background)) due = true;
       lines.push(lineOf(kind, key, name, item, answer, there && 'unreadable' in there ? there.unreadable : undefined));
     }
     for (const item of Object.values(items)) {
@@ -355,7 +363,7 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
     const plugins = reads?.find(each => each.kind === kind)?.names.get(key), held = plugins && 'content' in plugins ? await takeHeld(look(kind), item, tool, plugins.content) : undefined;
     return { kind, key, name, ...(state === 'alike' ? { same: true as const } : held ? { held: { why: held.why, ...(held.throughShared ? { shared: true as const } : {}) } } : {}) };
   }));
-  return { lines, on, of: linked.length + his.length, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(problem ? { problem } : {}),
+  return { lines, on, of: linked.length + his.length, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(due ? { due: true as const } : {}), ...(problem ? { problem } : {}),
     ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(Object.keys(heldOut).length ? { heldOut } : {}), ...(Object.keys(yours).length ? { yours } : {}) };
 }
 
