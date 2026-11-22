@@ -4,7 +4,7 @@
 import { announce, machine, rerender } from './app.ts';
 import { lineDiff, folded } from './diff.ts';
 import { afterLayout, button, h, icon, offsetIn, pressWasDrag } from './dom.ts';
-import { plural } from './model.ts';
+import { DAY_MS, plural, timeAgo } from './model.ts';
 import { linesOf } from './words.ts';
 import type { InstructionFile } from './types.ts';
 
@@ -19,9 +19,9 @@ function words(line: { kind: string; text: string }, diff: { kind: string; text:
   const keep = line.kind === 'removed' ? 'removed' : 'added';
   return parts.filter(part => part.kind === 'same' || part.kind === keep).map(part => part.kind === 'same' ? part.text : h('span.ins-word', {}, part.text));
 }
-const ago = (at: string) => {
-  const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60_000);
-  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
+const ago = (at: string, now = Date.now()) => {
+  const elapsed = now - Date.parse(at);
+  return elapsed < DAY_MS ? timeAgo(at, now) : `${Math.floor(elapsed / DAY_MS)} d ago`;
 };
 
 /** A card's stage (at rest, editing, reviewing): its one actions row, which goes in the card's head, and what goes under the head. */

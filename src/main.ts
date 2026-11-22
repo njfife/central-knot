@@ -637,9 +637,10 @@ let partsWaiting: string | undefined;
 /**
  * One pass on the open home: writes only with Sync on (or when asked explicitly); with Sync off nothing is done in the
  * background, and an edit or a deletion waits for Sync or a click on its item. `snapshots`: the caller's read of the home,
- * which the pass uses instead of reading it again. What a pass does, in order, is homepass.ts homePass: a profiles file from
- * before profiles were sets of items is moved before anything else, either way (it does nothing once moved), so no click
- * comes before it.
+ * which the pass uses instead of reading it again. `forView`: collect each kind's read (librarypass.ts KeptReads) and return
+ * it with the plugins read in `kept` when every kind left the home as it read it, so syncAndView can build the view from them.
+ * What a pass does, in order, is homepass.ts homePass: a profiles file from before profiles were sets of items is moved before
+ * anything else, either way (it does nothing once moved), so no click comes before it.
  */
 async function pass(snapshots: Snapshot[], explicit = false, forView = false): Promise<BackgroundPass> {
   const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map(), ...(forView ? { kept: new Map() } : {}) };

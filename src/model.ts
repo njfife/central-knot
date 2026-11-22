@@ -1,4 +1,4 @@
-// Small helpers both the main process and the page use (but atMostEvery and oneTurn, main's alone): times in words (dayAndTime, timesApart), History's days (the choices
+// Small helpers both the main process and the page use (but atMostEvery and oneTurn, main's alone): times in words (dayAndTime, timeAgo, timesApart), History's days (the choices
 // and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, one install at a time (what
 // holds this build: holdingBuild, holdsUntil, QUIT_WAIT_MS), a notice's names, what the Caught up band names (caughtUpNames),
 // the notices a view set aside brought, carried into the next view (withSetAside), grouping, a call paced to at most once
@@ -73,6 +73,11 @@ export function dayWords(iso: string): string {
 }
 /** "today at 9:20 AM", "yesterday at 9:20 AM", else "Nov 8 at 9:20 AM" (with the year when it isn't this one). */
 export const dayAndTime = (iso: string) => `${dayWords(iso)} at ${clockTime(iso)}`;
+/** How long ago `iso` was, floored ("just now", "3 min ago", "2 h ago"). */
+export function timeAgo(iso: string, now = Date.now()): string {
+  const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
+  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
+}
 /**
  * When each row of one list happened, every row in the same form so they read alike (History, an agent's versions): how
  * long ago ("just now", "3 min ago", "2 h ago") when every row is today and no two would read the same; else the clock
@@ -80,10 +85,7 @@ export const dayAndTime = (iso: string) => `${dayWords(iso)} at ${clockTime(iso)
  * `withDay`: a row before today says its day too ("yesterday at 9:20 AM"); History, under day headings, says the time alone.
  */
 export function timesApart(isos: readonly string[], now = Date.now(), withDay = false, seconds = true): string[] {
-  const ago = isos.map(iso => {
-    const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
-    return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
-  });
+  const ago = isos.map(iso => timeAgo(iso, now));
   const today = new Date(now).toDateString();
   return isos.every(iso => new Date(iso).toDateString() === today) && apart(ago) ? ago : clockTimesApart(isos, now, withDay, seconds);
 }
