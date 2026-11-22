@@ -6305,28 +6305,27 @@ async function draftFlow() {
   // Undo as the Edit menu sends it: the editing command, with no key that types.
   const undo = async () => { for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, commands: type === 'keyUp' ? [] : ['undo'] }); await a.settle(); };
   const sameEditor = () => a.run(`${editorNow}?.ckSame === true && document.activeElement === ${editorNow}`);
-  /** A word typed in the focused editor, `meanwhile` run, then Undo: whether the editor stayed the same box, and its text after the Undo. */
+  /** A word typed in the focused editor, `meanwhile` run, then Undo: whether the editor stayed the same box, and whether the Undo took the word away. */
   const typedThenUndone = async (meanwhile = async () => {}) => {
-    await a.run(`(area => { area.ckSame = true; area.focus(); return true; })(${editorNow})`);
+    const before = await a.run(`(area => { area.ckSame = true; area.focus(); return area.value; })(${editorNow})`);
     await a.send('Input.insertText', { text: 'typed ' });
     await meanwhile();
     const kept = await sameEditor();
     await undo();
-    return [kept, await a.run(`${editorNow}?.value`)];
+    return [kept, await a.run(`${editorNow}?.value`) === before];
   };
   // What the window hears when he comes back to it from another app.
   const focusBack = async () => { await a.run(`(dispatchEvent(new Event('focus')), true)`); await a.settle(); };
   await editorSteady();
-  const unedited = await a.run(`${editorNow}.value`);
-  same('in a tool’s editor with no redraw, Undo takes away the word typed', await typedThenUndone(), [true, unedited]);
+  same('in a tool’s editor with no redraw, Undo takes away the word typed', await typedThenUndone(), [true, true]);
   same('the window getting the focus back, with no notice drawn while it was away, draws nothing: the editor is the same box, and Undo takes away the word typed',
-    await typedThenUndone(focusBack), [true, unedited]);
-  const caret = await a.run(`${editorNow}.selectionStart`);
+    await typedThenUndone(focusBack), [true, true]);
+  const [composedIn, caret] = await a.run(`[${editorNow}.value, ${editorNow}.selectionStart]`);
   await a.send('Input.imeSetComposition', { text: 'ni', selectionStart: 2, selectionEnd: 2 });
   await focusBack();
   await a.send('Input.insertText', { text: '你' });
   same('a word an input method is composing, the window getting the focus back meanwhile: once committed, the editor holds the word, not its letters before it',
-    await a.run(`${editorNow}.value`), unedited.slice(0, caret) + '你' + unedited.slice(caret));
+    await a.run(`${editorNow}.value`), composedIn.slice(0, caret) + '你' + composedIn.slice(caret));
   await undo();
   // Refresh ends by starting the result's 8 s to go (app.ts FADE_MS) and a read of the Git repo 1.5 s later (app.ts afterActing).
   // With no result to clear and the repo as it was, neither draws: a word typed just after Refresh is still undone after both.
@@ -6344,8 +6343,10 @@ async function draftFlow() {
   if (typedAt < 1400) same('the Git repo read 1.5 s after Refresh, the repo as it was, draws nothing: the editor is the same box', through.repoRead, true);
   else console.log(`draft: the Git repo read after Refresh not checked: the word was typed ${typedAt} ms after Refresh ended, too near the read`);
   same('the result’s time to go 8 s after Refresh, with nothing to clear, draws nothing: the editor is the same box', through.fade, true);
-  same('and Undo, after both, takes away the word typed just after Refresh', afterRefresh[1], unedited);
+  same('and Undo, after both, takes away the word typed just after Refresh', afterRefresh[1], true);
+  // Closed; where a check above failed and left words in it, through its discard question, so the checks below start as they would.
   await a.press('Escape');
+  if (await a.exists('#ins-discard-codex-cli')) await a.click('#ins-discard-codex-cli');
   for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
 
   await a.shot('draft-entry');
