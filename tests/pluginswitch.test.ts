@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { batches, resultLines, strayHolds, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
-import { LIVE_PLUGIN, alongWords, cantSwitch, click, clickWords, itemSaid, onNow, standing, switchWords, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
+import { LIVE_PLUGIN, alongWords, cantSwitch, click, clickWords, copilotByName, itemSaid, onNow, standing, switchWords, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
 import { statusLine } from '../src/libraryrow.ts';
 import { newItem } from '../src/library.ts';
 import { owedTo } from '../src/pluginrecord.ts';
@@ -39,6 +39,10 @@ test('an item that is off with its own switch comes back on with it', () => {
   assert.equal(clickWords(item(copilot, 'mcp', 'wiki')), 'Click to turn it on in Copilot CLI. Copilot CLI goes by the name, so any other server named “wiki” there goes on too.');
   assert.equal(clickWords(item(copilot, 'skill', 'one')), 'Click to turn it on in Copilot CLI.');
   assert.equal(clickWords(item(copilot, 'mcp', 'issues')), 'Click to turn it off in Copilot CLI. Copilot CLI goes by the name, so any other server named “issues” there goes off too.');
+  // The same sentence builder serves the row's result when a server of his own shares the name in Copilot CLI.
+  assert.equal(copilotByName('issues', false), 'Copilot CLI goes by the name, so any other server named “issues” there goes off too.');
+  assert.equal(copilotByName('issues', false, true), 'Copilot CLI goes by the name, so your own “issues” there goes off too.');
+  assert.equal(copilotByName('issues', true, true), 'Copilot CLI goes by the name, so your own “issues” there goes on too (while both are on, Copilot CLI runs the plugin’s).');
   click(draft, item(copilot, 'skill', 'one'));
   click(draft, item(copilot, 'mcp', 'wiki'));
   assert.deepEqual(chosen(draft), ['copilot-cli skill-on one', 'copilot-cli part-on mcp wiki']);

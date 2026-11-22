@@ -6980,6 +6980,113 @@ async function nameClashPage() {
     await a.click('#plugin-back');
   }
   await a.quit();
+  await foundOwnCopyPage();
+}
+
+/**
+ * A plugin's skill held out of Pi by a copy of his own not in the Library (found in Pi's folder, or only in the shared skills
+ * folder): Pi's box gives the reason line with another item on (no action button), never duplicates it with no item on, and
+ * keeps his own Library item (Off) as before.
+ */
+async function foundOwnCopyPage() {
+  const home = join(scratch, 'home-found-own'), data = join(scratch, 'found-own-data'), market = join(scratch, 'market-found-own');
+  const put = (path, content) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); };
+  const md = (name, body) => `---\nname: ${name}\ndescription: ${name}.\n---\n\n${body}\n`;
+  put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({
+    name: 'ck-own-market',
+    plugins: [
+      { name: 'kit-own', source: './plugins/kit-own', version: '1.0.0' },
+      { name: 'kit-only', source: './plugins/kit-only', version: '1.0.0' },
+      { name: 'kit-shared', source: './plugins/kit-shared', version: '1.0.0' },
+      { name: 'kit-lib-on', source: './plugins/kit-lib-on', version: '1.0.0' },
+      { name: 'kit-lib-off', source: './plugins/kit-lib-off', version: '1.0.0' },
+    ],
+  }, null, 2));
+  put(join(market, 'plugins/kit-own/skills/a/SKILL.md'), md('a', 'Plugin a.'));
+  put(join(market, 'plugins/kit-own/skills/tdd/SKILL.md'), md('tdd', 'Plugin tdd.'));
+  put(join(market, 'plugins/kit-only/skills/solo/SKILL.md'), md('solo', 'Plugin solo.'));
+  put(join(market, 'plugins/kit-shared/skills/b/SKILL.md'), md('b', 'Plugin b.'));
+  put(join(market, 'plugins/kit-shared/skills/shared-tdd/SKILL.md'), md('shared-tdd', 'Plugin shared-tdd.'));
+  put(join(market, 'plugins/kit-lib-on/skills/d/SKILL.md'), md('d', 'Plugin d.'));
+  put(join(market, 'plugins/kit-lib-on/skills/lib-on/SKILL.md'), md('lib-on', 'Plugin lib-on.'));
+  put(join(market, 'plugins/kit-lib-off/skills/c/SKILL.md'), md('c', 'Plugin c.'));
+  put(join(market, 'plugins/kit-lib-off/skills/lib-tdd/SKILL.md'), md('lib-tdd', 'Plugin lib-tdd.'));
+  const piTddPath = join(home, '.pi/agent/skills/tdd/SKILL.md'), piTddMine = md('tdd', 'My own tdd in Pi.');
+  const piSoloPath = join(home, '.pi/agent/skills/solo/SKILL.md'), piSoloMine = md('solo', 'My own solo in Pi.');
+  const sharedPath = join(home, '.agents/skills/shared-tdd/SKILL.md'), sharedMine = md('shared-tdd', 'My own shared-tdd.');
+  put(piTddPath, piTddMine);
+  put(piSoloPath, piSoloMine);
+  put(sharedPath, sharedMine);
+  put(join(home, '.pi/agent/skills/lib-on/SKILL.md'), md('lib-on', 'My own library on.'));
+  put(join(home, '.pi/agent/skills/lib-tdd/SKILL.md'), md('lib-tdd', 'My own library tdd.'));
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  // Claude Code is here too (Pi alone has no Plugins page): a stand-in that only says its version, so any other call fails.
+  const tools = join(scratch, 'tools-found-own');
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/claude'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0\nexit 9\n', { mode: 0o755 });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  const a = await launch(data, [], tools);
+  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  await a.run(`(async () => { const { home } = await window.centralKnot.refresh();
+    await window.centralKnot.applySkills([{ key: 'lib-on', on: true, except: [] }, { key: 'lib-tdd', on: true, except: [] }], false, home);
+    await window.centralKnot.applySkills([{ key: 'lib-tdd', on: false, except: [], seenOn: true }], false, home);
+    await window.centralKnot.addMarketplace(${JSON.stringify(market)}); })()`);
+  await a.click('#nav-plugins');
+  const tickPi = async plugin => {
+    for (let tries = 0; tries < 50 && !(await a.exists(`#popen-0-${plugin}`)); tries++) await wait(100);
+    await a.click(`#popen-0-${plugin}`);
+    for (let tries = 0; tries < 50 && !(await a.exists(`#pbox-0-${plugin}-pi-cli`)); tries++) await wait(100);
+    await a.click(`#pbox-0-${plugin}-pi-cli`);
+    await done();
+  };
+  const piReasons = () => a.all('.plugin-tool[data-tool="pi-cli"] .plugin-tool-why', 'e.textContent');
+  // Worked example 1 (with a on): Pi's own tdd is kept untouched, and Pi's box shows OUT.own's sentence with no action button.
+  await tickPi('kit-own');
+  const ownSentence = 'tdd: Pi has a skill of its own by that name, never written over; turn it on in Pi on its row to put the plugin’s there, keeping Pi’s as a version.';
+  same('Pi’s own found tdd is untouched and Pi’s box shows its reason beside 1 of 2 on, with no action button',
+    [readNow(piTddPath), existsSync(join(home, '.pi/agent/skills/a/SKILL.md')), await a.text('.plugin-tool[data-tool="pi-cli"] .plugin-tool-state:not(.plugin-tool-why)'), await piReasons(), await a.exists('.plugin-tool[data-tool="pi-cli"] button.btn')],
+    [piTddMine, true, '1 of its 2 items is on in Pi.', [ownSentence], false]);
+  if (shots) {
+    for (const theme of ['light', 'dark']) {
+      await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      for (const [width, height] of [SMALLEST, [1316, 819]]) {
+        await sizeTo(a, width, height);
+        if (width === 1316 && await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+        await a.shot(`three-said-1-${theme}-${width}`);
+        const clipped = await a.run(`(() => { const p = document.querySelector('.plugin-tool[data-tool="pi-cli"]'); const r = p.getBoundingClientRect(); return r.right > window.innerWidth + 1 || p.scrollWidth > p.clientWidth + 1; })()`);
+        check(`Pi box reason fits without clipping at ${width}×${height} (${theme})`, !clipped);
+      }
+    }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await fullSize(a);
+  }
+  await a.click('#plugin-back');
+  // Worked example 1 (with no item on): the box reads exactly as today, never saying the reason twice.
+  await tickPi('kit-only');
+  same('with no item on, Pi’s box shows solo’s own-copy reason exactly once',
+    [readNow(piSoloPath), await piReasons()],
+    [piSoloMine, ['solo: Pi has a skill of its own by that name, never written over; turn it on in Pi on its row to put the plugin’s there, keeping Pi’s as a version.']]);
+  await a.click('#plugin-back');
+  // Worked example 3: found only in the shared skills folder, which Pi reads.
+  await tickPi('kit-shared');
+  same('shared-folder-only found skill: Pi’s own folder has no copy, shared copy is untouched, and Pi’s box says Pi reads yours from the shared skills folder',
+    [existsSync(join(home, '.pi/agent/skills/b/SKILL.md')), existsSync(join(home, '.pi/agent/skills/shared-tdd')), readNow(sharedPath),
+      await a.text('.plugin-tool[data-tool="pi-cli"] .plugin-tool-state:not(.plugin-tool-why)'), await piReasons(), await a.exists('.plugin-tool[data-tool="pi-cli"] button.btn')],
+    [true, false, sharedMine, '1 of its 2 items is on in Pi.', ['shared-tdd: Pi reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.'], false]);
+  await a.click('#plugin-back');
+  // Worked example 2 (Library item On, and Off): unchanged, Use the plugin's offered, no duplicate line.
+  await tickPi('kit-lib-on');
+  same('his own Library skill (On) still shows its yours line with Use the plugin’s and no duplicate line',
+    [await piReasons(), await a.exists('#ptake-0-kit-lib-on-pi-cli-skill-lib-on')],
+    [['lib-on: you keep your own skill by that name, not the plugin’s.Use the plugin’s lib-on', 'Using the plugin’s keeps yours as a version, and your other tools keep their copies.'], true]);
+  await a.click('#plugin-back');
+  await tickPi('kit-lib-off');
+  same('his own Library skill (Off) still shows its yours line with Use the plugin’s and no duplicate line',
+    [await piReasons(), await a.exists('#ptake-0-kit-lib-off-pi-cli-skill-lib-tdd')],
+    [['lib-tdd: you keep your own skill by that name, not the plugin’s.Use the plugin’s lib-tdd', 'Using the plugin’s keeps yours as a version, and your other tools keep their copies.'], true]);
+  same('no page errors, found-own plugin box', a.pageErrors, []);
+  await a.quit();
 }
 
 /**
@@ -12676,20 +12783,35 @@ async function profilePluginsFlow() {
     [false, oldBefore, format2Text, 'Empty old']);
 
   // Worked example 2: Choose plugin items -> tick triage -> switch (on in Codex & Copilot CLI) -> untick -> switch (off in both) -> reopen.
+  const historyBeforeChoose = readNow(join(oldHome, '.central-knot/history.json'));
   await b.click('#profile-choose-plugins');
   await bDone();
   same('Choose plugin items writes format 3 with switchesPluginItems true, touches no tool file, and reveals unticked plugin rows',
     [oldPluginFiles(), JSON.parse(readNow(oldProfilesFile)), await b.exists('#profile-choose-plugins'), (await b.all('.pf-row[data-item]', 'e.dataset.item')).sort(),
       await b.run(`[...document.querySelectorAll('.pf-row[data-item^="plugin:"] input[type="checkbox"]')].some(c => c.checked)`)],
     [oldBefore, { formatVersion: 3, profiles: [{ id: 'legacy', name: 'Legacy', items: ['skill:notes'], switchesPluginItems: true }, { id: 'empty-old', name: 'Empty old', items: [], switchesPluginItems: false }] }, false, [issuesId, triageId, 'skill:notes'], false]);
+  same('Choose plugin items shows a visible band saying it stays, with no Undo button and no History entry',
+    [await b.text('.band-done .band-text'), await b.exists('.band-done .btn'), readNow(join(oldHome, '.central-knot/history.json'))],
+    ['Legacy now switches plugin items for good. Tick the ones you want on before switching.', false, historyBeforeChoose]);
   check('after Choose, the header no longer says Plugin items stay as they are', !(await b.text('.profile-header p'))?.includes('Plugin items stay as they are'), await b.text('.profile-header p'));
   if (shots) {
-    await sizeTo(b, 1316, 819);
-    if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
-    await b.shot('old-profile-after-choose-1316');
+    for (const theme of ['light', 'dark']) {
+      await b.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      for (const [width, height] of [SMALLEST, [1316, 819]]) {
+        await sizeTo(b, width, height);
+        if (width === 1316 && await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+        await b.shot(`three-said-4-${theme}-${width}`);
+        const clipped = await b.run(`(() => { const el = document.querySelector('.band-done'); const r = el.getBoundingClientRect(); return r.right > window.innerWidth + 1 || el.scrollWidth > el.clientWidth + 1; })()`);
+        check(`Choose band fits without clipping at ${width}×${height} (${theme})`, !clipped);
+      }
+    }
+    await b.run(`window.centralKnot.setAppearance('system')`);
     await fullSize(b);
   }
   await b.click(byId(`pf-${triageId}`)); await bDone();
+  same('ticking a row on the same page stays quiet: no result band and status announcement visually hidden',
+    [await b.exists('.band-done'), await b.run(`document.querySelector('#announcement').classList.contains('visually-hidden')`)],
+    [false, true]);
   await b.click('#profile-switch'); await bDone();
   same('after ticking triage and switching, triage is on in both Codex and Copilot CLI while unticked issues turned off',
     [!(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"'), !(JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
@@ -13143,7 +13265,7 @@ async function sameNamePluginFlow() {
   mkdirSync(join(tools, '.local/bin'), { recursive: true });
   writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.142.3" && exit 0\nexit 9\n', { mode: 0o755 });
   // Copilot CLI's skill switch takes a second while $HOME/slow is there: a click made meanwhile waits its turn.
-  writeFileSync(join(tools, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\n[ "$1" = "skill" ] && [ -f "$HOME/slow" ] && sleep 1\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="skill"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`, { mode: 0o755 });
+  writeFileSync(join(tools, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\n[ "$1" = "skill" ] && [ -f "$HOME/slow" ] && sleep 1\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="skill"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}if(a==="plugin"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/config.json"),j=JSON.parse(fs.readFileSync(f,"utf8"));for(const e of j.installedPlugins)if(e.name+"@"+e.marketplace===c)e.enabled=b==="enable";fs.writeFileSync(f,JSON.stringify(j));process.exit(0);}process.exit(9);' "$@"\n`, { mode: 0o755 });
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
   // Each tool's file, and which of the two items each has off, Codex's then Copilot CLI's.
@@ -13212,6 +13334,97 @@ async function sameNamePluginFlow() {
   same('switching to Server only turns the plugin’s skill issues off in Codex and Copilot CLI, and its server issues back on', offIn(), skillOff);
   await a.click('#outcome-undo'); await done();
   same('Undo switch puts each tool’s file back as Skill only left it', files(), skillOnly);
+
+  // Worked examples 5 & 6: Copilot CLI and Codex; plugin's server `issues` beside his own `issues` (both Library On and found)
+  // on All view: Off and On say his own goes off/on too in Copilot CLI (with the same files written as on next, Undo restoring
+  // byte for byte); without his own `issues`, On says only the existing sentence.
+  writeFileSync(codexConfig, before.codex);
+  writeFileSync(copilotSettings, before.copilot);
+  const copilotMcp = join(home, '.copilot/mcp-config.json');
+  const copilotMcpText = `${JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'mine', tools: ['*'] } } }, null, 2)}\n`;
+  writeFileSync(copilotMcp, copilotMcpText);
+  await openKind(a, 'all');
+  await a.click('#header-refresh'); await done();
+  same('his own issues taken in for Copilot CLI alone', await a.run(`window.centralKnot.applyServers([{ key: 'issues', on: true, except: ['codex-cli'] }], false, ${JSON.stringify(home)}).then(r => r.stopped ?? 'ok')`), 'ok');
+  await a.click('#header-refresh'); await done();
+  for (let tries = 0; tries < 60 && !(await a.exists(serverSwitch)); tries++) await wait(100);
+  const allThree = () => ({ codex: readNow(codexConfig), copilotSettings: readNow(copilotSettings), copilotMcp: readNow(copilotMcp) });
+  const sharedBefore = allThree();
+  await a.click(serverSwitch); await done();
+  same('All view Off on plugin server sharing a name with his own in Copilot CLI says his goes off too there, and writes exact files',
+    [await said(), offIn(), allThree()],
+    ['issues (MCP server) is off in Copilot CLI and Codex. Copilot CLI goes by the name, so your own “issues” there goes off too.', serverOff, { codex: afterServer.codex, copilotSettings: afterServer.copilot, copilotMcp: copilotMcpText }]);
+  if (shots) {
+    for (const theme of ['light', 'dark']) {
+      await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      for (const [width, height] of [SMALLEST, [1316, 819]]) {
+        await sizeTo(a, width, height);
+        if (width === 1316 && await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+        await a.shot(`three-said-5-${theme}-${width}`);
+        const headerBox = await a.run(`(() => { const h = document.querySelector('#header'); const r = h.getBoundingClientRect(); return { h: Math.round(r.height), overflow: h.scrollWidth > h.clientWidth + 1 }; })()`);
+        check(`shared-name header result fits inside 48px at ${width}×${height} (${theme})`, headerBox.h === 48 && !headerBox.overflow, headerBox);
+      }
+    }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await fullSize(a);
+  }
+  await a.click('#outcome-undo-plugin'); await done();
+  same('Undo of plugin server Off restores both Copilot CLI files and Codex config byte for byte', allThree(), sharedBefore);
+  // Off again, then On: On says the matching truth for Copilot CLI and restores all three files byte for byte.
+  await a.click(serverSwitch); await done();
+  await a.click('#outcome-dismiss');
+  await a.click(serverSwitch); await done();
+  same('All view On on plugin server sharing a name with his own in Copilot CLI says the matching truth and restores files byte for byte',
+    [await said(), allThree()],
+    ['issues (MCP server) is on in Copilot CLI and Codex. Copilot CLI goes by the name, so your own “issues” there goes on too (while both are on, Copilot CLI runs the plugin’s).', sharedBefore]);
+  // Partial failure: Copilot CLI succeeds while Codex fails — the Copilot CLI shared-name sentence is kept (not dropped).
+  await a.click('#outcome-dismiss');
+  chmodSync(join(home, '.codex'), 0o555);
+  try {
+    await a.click(serverSwitch); await done();
+    same('when Copilot CLI succeeds and Codex fails, the result still says his own server in Copilot CLI went off too',
+      [await said(), JSON.parse(readNow(copilotSettings)).disabledMcpServers],
+      ['Didn’t go through in every tool: docs: MCP server issues turned off in Copilot CLI. Copilot CLI goes by the name, so your own “issues” there goes off too.', ['issues']]);
+  } finally { chmodSync(join(home, '.codex'), 0o755); }
+  await a.click('#outcome-undo-plugin'); await done();
+  same('Undo after partial failure puts Copilot CLI back byte for byte', allThree(), sharedBefore);
+  // Reverse partial failure: Copilot CLI fails while Codex succeeds — no false Copilot CLI sentence.
+  chmodSync(join(home, '.copilot'), 0o555);
+  try {
+    await a.click(serverSwitch); await done();
+    same('when Copilot CLI fails and Codex succeeds, no Copilot CLI shared-name sentence is shown',
+      [await said(), JSON.parse(readNow(copilotSettings)).disabledMcpServers],
+      ['Didn’t go through in every tool: docs: MCP server issues turned off in Codex.', undefined]);
+  } finally { chmodSync(join(home, '.copilot'), 0o755); }
+  await a.click('#outcome-undo-plugin'); await done();
+  same('Undo after Copilot CLI failure puts Codex back byte for byte', allThree(), sharedBefore);
+  // Whole-plugin Off in Copilot CLI (agent has no single-item switch): leaves his own MCP server on, so no Copilot CLI sentence.
+  mkdirSync(join(copilotCopy, 'agents'), { recursive: true });
+  writeFileSync(join(copilotCopy, 'agents/issues.md'), '---\nname: issues\ndescription: The issues agent.\n---\nPrompt.\n');
+  await a.click('#header-refresh'); await done();
+  const agentSwitch = byId(rowPart('switch', 'agents', key));
+  for (let tries = 0; tries < 60 && !(await a.exists(agentSwitch)); tries++) await wait(100);
+  await a.click(agentSwitch); await done();
+  same('whole-plugin Off in Copilot CLI leaves disabledMcpServers untouched and adds no Copilot CLI shared-name sentence',
+    [await said(), JSON.parse(readNow(copilotSettings)).disabledMcpServers],
+    ['issues (agent) is off in Copilot CLI. Its whole plugin docs was turned off in Copilot CLI, with its 1 skill and 1 MCP server.', undefined]);
+  await a.click('#outcome-undo-plugin'); await done();
+  rmSync(join(copilotCopy, 'agents'), { recursive: true, force: true });
+  // Delete his own Library server, then check a found-only server in Copilot CLI too; then remove it so no server of his shares the name.
+  await a.run(`window.centralKnot.applyServers([{ key: 'issues', on: false, except: [], deleted: true }], false, ${JSON.stringify(home)})`);
+  writeFileSync(copilotMcp, copilotMcpText);
+  await a.click('#header-refresh'); await done();
+  await a.click(serverSwitch); await done();
+  same('with a found server of his in Copilot CLI, Off also says his own goes off there too', await said(),
+    'issues (MCP server) is off in Copilot CLI and Codex. Copilot CLI goes by the name, so your own “issues” there goes off too.');
+  await a.click('#outcome-undo-plugin'); await done();
+  rmSync(copilotMcp, { force: true });
+  await a.click('#header-refresh'); await done();
+  await a.click(serverSwitch); await done();
+  same('with no server of his by that name, Off reads as today', await said(), 'issues (MCP server) is off in Copilot CLI and Codex.');
+  await a.click('#outcome-dismiss');
+  await a.click(serverSwitch); await done();
+  same('with no server of his by that name, On reads as today', await said(), 'issues (MCP server) is on in Copilot CLI and Codex.');
   same('no page errors', a.pageErrors, []);
   await a.quit();
 }

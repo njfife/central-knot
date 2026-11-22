@@ -11,7 +11,7 @@ import { newItem, type ItemKind } from '../src/library.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, copilotKeptOnBy, copilotServerName, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, withCopilotOff, type Libraries } from '../src/profileplan.ts';
+import { allTurns, copilotKeptOnBy, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, withCopilotOff, type Libraries, type PluginHome } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { runPlan, type PlanApi } from '../src/pluginplan.ts';
@@ -2011,4 +2011,27 @@ test('A library item’s row tooltip words (itemRowState): an off-switch standin
   assert.equal(itemRowState({ on: false }), 'off');
   assert.equal(itemRowState({ on: false, copilotOff: 'github' }), 'off');
   assert.equal(itemRowState({ on: true, copilotOff: 'github' }), 'off in Copilot CLI');
+});
+
+test('copilotSharesYours: true only when his own On server or a found server in Copilot CLI shares the exact bare name', () => {
+  const copilotInstall: InstalledPlugin = { tool: 'copilot-cli', plugin: 'docs', marketName: 'team', version: '1.0.0', listed: true, source: '/m', items: [{ kind: 'mcp', name: 'issues', description: '' }] };
+  const otherInstall: InstalledPlugin = { tool: 'copilot-cli', plugin: 'other', marketName: 'team', version: '1.0.0', listed: true, source: '/m', items: [{ kind: 'mcp', name: 'issues', description: '' }] };
+  const at = { kind: 'mcp' as const, name: 'issues', tool: 'copilot-cli' as const, install: copilotInstall };
+  const fact = (key: string, folder?: string): LibraryFacts => ({ key, name: key, description: '', on: false, except: [], cannot: {}, edited: [], copies: folder ? { 'copilot-cli': { hash: 'h', directory: '', rootLabel: '', lines: 1, modified: '', summary: '', writable: true, folder } } : {} });
+  const home = (library: Record<string, ReturnType<typeof newItem>>, items: LibraryFacts[], pluginItems: InstalledPlugin[] = [copilotInstall]): PluginHome =>
+    ({ pluginItems, profiles: { profiles: [], plugins: [] }, skills: { items: [], library: {} }, agents: { items: [], library: {} }, mcp: { items, library } } as unknown as PluginHome);
+  // No server of his: false (even if another plugin shares the name, or for a skill/non-Copilot copy).
+  assert.equal(copilotSharesYours(home({}, [], [copilotInstall, otherInstall]), at), false);
+  assert.equal(copilotSharesYours(home({ issues: { ...newItem('issues', 'issues'), on: true } }, [fact('issues', 'issues')]), { ...at, tool: 'codex-cli' }), false);
+  // His own Library server On in Copilot CLI: true.
+  assert.equal(copilotSharesYours(home({ issues: { ...newItem('issues', 'issues'), on: true } }, [fact('issues', 'issues')]), at), true);
+  // His own Library server Off with no unmanaged copy: false; with an unmanaged copy in Copilot CLI: true.
+  assert.equal(copilotSharesYours(home({ issues: { ...newItem('issues', 'issues'), on: false } }, [fact('issues')]), at), false);
+  assert.equal(copilotSharesYours(home({ issues: { ...newItem('issues', 'issues'), on: false } }, [fact('issues', 'issues')]), at), true);
+  // Kept out of Copilot CLI with no copy: false; with an unmanaged copy in Copilot CLI: true.
+  assert.equal(copilotSharesYours(home({ issues: { ...newItem('issues', 'issues'), on: true, except: ['copilot-cli'] } }, [fact('issues')]), at), false);
+  assert.equal(copilotSharesYours(home({ issues: { ...newItem('issues', 'issues'), on: true, except: ['copilot-cli'] } }, [fact('issues', 'issues')]), at), true);
+  // Found-only server of his in Copilot CLI: true; different case: false (Copilot CLI matches exact bare name).
+  assert.equal(copilotSharesYours(home({}, [fact('issues', 'issues')]), at), true);
+  assert.equal(copilotSharesYours(home({}, [fact('issues', 'Issues')]), at), false);
 });

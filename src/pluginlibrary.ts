@@ -175,10 +175,11 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   // his own or another source's by the pass's answer), and an item made now and kept out had a copy of its kind and name there.
   const lines: PluginItemLine[] = [...read.flatMap(each => [...each.names].flatMap(([key, name]) => ('unreadable' in name ? [{ kind: each.kind, key, name: key, state: 'not-brought' as const, why: name.unreadable }] : []))),
     ...sourced.flatMap(({ kind, said }) => (['differs', 'another', 'alike'].includes(said.answer) ? [{ kind, key: said.name, name: said.name, state: 'not-brought' as const, why: { another: ANOTHER, alike: SAME }[said.answer as string] ?? YOURS }] : []))];
+  const looks = await lookAtKinds(context, tools);
   const madeOut = (tool: HarnessId) => (item: LibraryItem, kind: ItemKind) => item.except.includes(tool) && made.has(`${kind}:${item.name}`);
-  const why = (tool: HarnessId) => files.problem ?? `Nothing of ${entry.plugin} is on in ${toolNames[tool]}. ${notInWhy(tool, entry.plugin, outsIn(tool, lines, after, madeOut(tool))).join(' ')}`;
+  const why = (tool: HarnessId) => files.problem ?? `Nothing of ${entry.plugin} is on in ${toolNames[tool]}. ${notInWhy(tool, entry.plugin, outsIn(tool, lines, after, madeOut(tool), heldByShared(looks, tool))).join(' ')}`;
   // A take that can't land says why, and nothing changed. What is on in each tool is counted as the box counts it (onThere).
-  const refused = sourced.find(({ said }) => said.held)?.said, looks = await lookAtKinds(context, tools), his = sourced.filter(({ said }) => said.answer === 'differs').length;
+  const refused = sourced.find(({ said }) => said.held)?.said, his = sourced.filter(({ said }) => said.answer === 'differs').length;
   const on = (tool: HarnessId) => onThere(looks, [...after, ...(!('outOf' in ask) && entry.on && !entry.except.includes(tool) ? alike : [])], tool);
   const ticks = await movedTicks(context, entry, before, after, moved, folder);
   const done = named.map((tool): PluginDone => ({ ...op, tool, report: refused ? { tool, outcome: 'held', message: `${refused.name}: ${refused.held}`, runs: [], changed: false }
@@ -254,15 +255,18 @@ function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linke
 
 /**
  * Why each of a plugin's items is not on in a tool with no installer, the one place the run's report and the page ask (both say
- * it by pluginstatus.ts notInWhy): a name of its `lines` not brought in (his own, another source's, unreadable) or deleted, and
- * each item `linked` to it not wanted there: off on its own row, or kept out of it (`own`: the tool has a copy of its own of that
- * kind and name, never written over).
+ * it by pluginstatus.ts notInWhy): a name of its `lines` not brought in (his own, another source's, unreadable) or deleted,
+ * each item `linked` to it not wanted there (off on its own row, or kept out: `own` when the tool has its own copy, never
+ * written over), and each `linked` item wanted there held out by his copy in the shared skills folder (`shared`).
  */
 type Out = { name: string; kind: ItemKind; out: ItemOut };
-function outsIn(tool: HarnessId, lines: PluginItemLine[], linked: Linked[], own: (item: LibraryItem, kind: ItemKind) => boolean): Out[] {
+/** Whether a linked item wanted in `tool` is held out there by his copy in the shared skills folder (librarypass.ts copiesOf). */
+const heldByShared = (looks: KindLooks, tool: HarnessId) => (item: LibraryItem, kind: ItemKind) => { const copy = copiesOf(looks.find(each => each.kind.kind.kind === kind)!.look, item)[tool]; return copy?.is === 'held' && !!copy.throughShared; };
+function outsIn(tool: HarnessId, lines: PluginItemLine[], linked: Linked[], own: (item: LibraryItem, kind: ItemKind) => boolean, shared: (item: LibraryItem, kind: ItemKind) => boolean): Out[] {
   return [...lines.flatMap(({ name, kind, state, why }): Out[] => (state === 'deleted' ? [{ name, kind, out: 'deleted' }]
     : state === 'not-brought' ? [{ name, kind, out: why === YOURS ? 'yours' : why === ANOTHER ? 'another' : { cannot: why! } }] : [])),
-  ...linked.filter(({ item }) => !wantedIn(item, tool)).map(({ kind, item }): Out => ({ name: item.name, kind, out: !item.on ? 'off' : own(item, kind) ? 'own' : 'kept' }))];
+  ...linked.filter(({ item }) => !wantedIn(item, tool)).map(({ kind, item }): Out => ({ name: item.name, kind, out: !item.on ? 'off' : own(item, kind) ? 'own' : 'kept' })),
+  ...linked.filter(({ item, kind }) => wantedIn(item, tool) && shared(item, kind)).map(({ kind, item }): Out => ({ name: item.name, kind, out: 'shared' }))];
 }
 const wroteIn = (results: Passed[], tool: HarnessId) => results.some(({ result }) => result.results.some(each => each.harness === tool && (each.outcome === 'written' || each.outcome === 'removed')));
 const reloadsIn = (results: Passed[], tool: HarnessId) => results.flatMap(({ result }) => result.reloads.filter(each => each.tool === tool));
@@ -332,13 +336,18 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
   const his = lines.filter(line => line.state === 'alike' || line.why === YOURS).map(line => ({ line, item: look(line.kind).library.items[line.key]! }));
   const alike = his.filter(({ line }) => line.state === 'alike').map(({ line, item }) => ({ kind: line.kind, item })), wanted = itemTools(tools).filter(tool => entry.on && !entry.except.includes(tool));
   const on = Object.fromEntries(itemTools(tools).map(tool => [tool, onThere(looks, [...linked, ...(wanted.includes(tool) ? alike : [])], tool)]));
+  const ownIn = (tool: HarnessId) => (item: LibraryItem, kind: ItemKind) => !!look(kind).disk.byKey.get(item.key)?.[tool] && item.applied[tool] === undefined;
   // A name of his is said apart, under each tool's box (`yours`, below), so not among these.
   const away = reads && !lines.some(line => line.state === 'new') ? wanted.filter(tool => !on[tool]).flatMap(tool => {
-    const own = (item: LibraryItem, kind: ItemKind) => !!look(kind).disk.byKey.get(item.key)?.[tool] && item.applied[tool] === undefined;
-    const why = outsIn(tool, lines, linked, own).filter(({ out }) => out !== 'yours');
+    const why = outsIn(tool, lines, linked, ownIn(tool), heldByShared(looks, tool)).filter(({ out }) => out !== 'yours');
     const tickHelps = why.some(({ out }) => out === 'kept' || out === 'off' || out === 'deleted');
     return !why.length && lines.length ? [] : [[tool, { reasons: notInWhy(tool, entry.plugin, why), tickHelps }] as const];
   }) : [];
+  // Linked items kept out by his own copy there (not a Library item, or only in the shared folder), where `notIn` didn't already say it.
+  const heldOut = Object.fromEntries(wanted.filter(tool => away.every(([each]) => each !== tool)).flatMap(tool => {
+    const held = outsIn(tool, [], linked, ownIn(tool), heldByShared(looks, tool)).filter(({ out }) => out === 'own' || out === 'shared');
+    return held.length ? [[tool, notInWhy(tool, entry.plugin, held)] as const] : [];
+  }));
   // Each name of his under each tool's box the plugin is wanted in, whatever else is so: the same as his, or Use the plugin's but
   // where its take can't land there (librarypass.ts takeHeld: his through the shared folder, say).
   const yours: Partial<Record<HarnessId, YourName[]>> = {};
@@ -347,7 +356,7 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
     return { kind, key, name, ...(state === 'alike' ? { same: true as const } : held ? { held: { why: held.why, ...(held.throughShared ? { shared: true as const } : {}) } } : {}) };
   }));
   return { lines, on, of: linked.length + his.length, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(problem ? { problem } : {}),
-    ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(Object.keys(yours).length ? { yours } : {}) };
+    ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(Object.keys(heldOut).length ? { heldOut } : {}), ...(Object.keys(yours).length ? { yours } : {}) };
 }
 
 /** A name not brought in, as its line says why: his own item of that name, another source's, or his of the same content (a run's report). */

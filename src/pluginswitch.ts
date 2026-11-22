@@ -164,6 +164,10 @@ const counted = (items: Part[], beside?: PartKind) => andList((['skill', 'mcp', 
   return n ? [`${n} ${kind === beside ? 'other ' : ''}${partWords[kind][n === 1 ? 0 : 1]}`] : [];
 }));
 
+/** Copilot CLI's server switch goes by its bare name: the one sentence for its control (`yours`: false) and result (`yours`: true, when his own or a found server shares the name there). */
+export const copilotByName = (name: string, on: boolean, yours = false) =>
+  `Copilot CLI goes by the name, so ${yours ? `your own “${name}”` : `any other server named “${name}”`} there goes ${on ? 'on' : 'off'} too${on && yours ? ' (while both are on, Copilot CLI runs the plugin’s)' : ''}.`;
+
 /** What a click on the item's switch does, as the sentence after its state ("Click to turn it off in Codex."). */
 export function clickWords(item: PluginItemAt): string {
   const tool = names[item.tool];
@@ -171,11 +175,10 @@ export function clickWords(item: PluginItemAt): string {
   const on = onNow(item);
   // What else of the plugin is on there now: what its own switch already keeps off neither goes with it nor comes back with it.
   const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
-  // Copilot CLI's switch for a server goes by its bare name, whoever's server it is.
-  const byName = (way: string) => (item.kind === 'mcp' && item.tool === 'copilot-cli' ? ` Copilot CLI goes by the name, so any other server named “${item.name}” there goes ${way} too.` : '');
-  if (on && ownSwitch(item)) return `Click to turn it off in ${tool}.${byName('off')}`;
+  const byName = (turnsOn: boolean) => (item.kind === 'mcp' && item.tool === 'copilot-cli' ? ` ${copilotByName(item.name, turnsOn)}` : '');
+  if (on && ownSwitch(item)) return `Click to turn it off in ${tool}.${byName(false)}`;
   if (on) return `${tool} has no switch for one ${partWords[item.kind][0]} of a plugin. Click to turn the whole plugin ${plugin} off in ${tool}${rest.length ? `, with its ${counted(rest)}` : ''}.`;
-  if (!item.install.off) return `Click to turn it on in ${tool}.${byName('on')}`;
+  if (!item.install.off) return `Click to turn it on in ${tool}.${byName(true)}`;
   if (ownSwitch(item)) {
     // What comes on beside this item: whatever the plugin brings that can't be held off there (no switch of its own, or
     // one that can't be written), and isn't off by its own switch already.
