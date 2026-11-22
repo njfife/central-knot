@@ -13551,22 +13551,71 @@ async function sameNamePluginFlow() {
   await a.click('#outcome-dismiss');
   await a.click(serverSwitch); await done();
   same('with no server of his by that name, On reads as today', await said(), 'issues (MCP server) is on in Copilot CLI and Codex.');
+  // Two plugin items' switches one right after the other, with a hand edit of a skill of his and a History read between them
+  // (worked example 9 of the click-reads step): what is written and said is as before that step.
+  const notes = join(home, '.codex/skills/notes/SKILL.md');
+  skill(join(home, '.codex/skills'), 'notes', text('notes', 'First words.'));
+  await a.click('#header-refresh'); await done();
+  await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'notes')}"] .add-item`); await done();
+  const entries = (await a.run('window.centralKnot.history()')).events.length;
+  await a.run(`(document.querySelector('#outcome-dismiss, #report-dismiss')?.click(), document.querySelector(${JSON.stringify(skillSwitch)}).click(), true)`);
+  await wait(150);
+  writeFileSync(notes, text('notes', 'Edited between two switches.'));
+  await a.run('window.centralKnot.history().then(list => list.events.length)');
+  await a.run(`(document.querySelector(${JSON.stringify(serverSwitch)}).click(), true)`);
+  await done(); await wait(4000); await done();
+  const written = (await a.run('window.centralKnot.history()')).events.slice(entries).map(event => `${event.kind} ${event.item}`);
+  same('two plugin items’ switches with a hand edit and a History read between them: both off, the edit taken in once and spread, one result',
+    [offIn(), written, await said(), readNow(join(home, '.copilot/skills/notes/SKILL.md')).includes('Edited between two switches.')],
+    [{ skill: [true, true], server: [true, true] }, ['edit notes'], '2 items are off: issues (skill) and issues (MCP server).', true]);
   same('no page errors', a.pageErrors, []);
   await a.quit();
 }
 
 /**
- * A click reads the home twice (main.ts readBegins, queueBackgroundPass, and syncAndView's view made from its pass's reads): once
- * in its own pass, once in the pass of the whole home that the page's view after it is made from. The watcher's events for what
- * it wrote start no read of their own, and background passes asked for while one waits are one. Counted in a development run's
- * main process, where each whole read of the skills hashes the shared skill's SKILL.md once (skills.ts readDisk), each such hash
- * held up 2 s there so that a read outlasts the watcher's debounce, as it does in a home of forty skills; an installed app has no
- * inspector, and the flow says so and stops. Each count starts just after a poll's pass (main.ts POLL_MS), so none falls in it.
+ * A click reads the home three times, not four: in its own pass, in the pass of the whole home that the page's view after it is
+ * made from (main.ts syncAndView, while nothing changed since that pass's read began), and in the one pass its own writes start;
+ * background passes asked for while one waits are one (main.ts queueBackgroundPass). Counted in a development run's main process,
+ * where each whole read of the skills hashes the shared skill's SKILL.md once (skills.ts readDisk), each such hash held up 2 s
+ * there so that a read outlasts the watcher's debounce, as it does in a home of forty skills; an installed app has no inspector,
+ * and the flow says so and stops there. Each count starts just after a poll's pass and leaves out a read on the poll's beat
+ * (main.ts POLL_MS).
  * Hand edits: one made just before the view's read is on the page after it; one made while that read runs, after it read that
- * folder, gets a pass of its own, which the page follows. A click whose write Claude Code's lock refuses says so, and what Claude
- * Code then writes while the read after the click runs is on the page at that read or the next pass, its own change kept.
+ * folder, is on the page without a Refresh. A click whose write Claude Code's lock refuses says so, and what Claude Code then
+ * writes while the read after the click runs is on the page at that read or the next pass, its own change kept. First, in a home
+ * of its own and packaged too: a skill saved twice around a click keeps both versions.
  */
 async function clickReadsFlow() {
+  // With Synchronize everything on, a new skill saved, an unrelated click 850 ms later, and the skill saved again 2.85 s after
+  // its first save: each save is a version of it, the second an edit, as the pass the watcher owes the first save takes it in
+  // once it has settled. In its own home, as the rule takes in every found skill; packaged too (it needs no inspector).
+  {
+    const saves = join(scratch, 'home-saves'), savesData = join(scratch, 'saves-data'), saved = join(saves, '.claude/skills/saved/SKILL.md');
+    for (const folder of ['.claude/skills', '.copilot/skills', '.codex/skills']) mkdirSync(join(saves, folder), { recursive: true });
+    skill(join(saves, '.claude/skills'), 'first');
+    mkdirSync(savesData, { recursive: true });
+    writeFileSync(join(savesData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: saves } }));
+    const b = await launch(savesData);
+    await b.click('#nav-overview');
+    await b.click('#setup-yes');
+    await openKind(b, 'skills');
+    for (let tries = 0; tries < 100 && !(await switchOn(b, 'skills', 'first')); tries++) await wait(100);
+    await wait(2000);
+    const first = Date.now();
+    mkdirSync(dirname(saved), { recursive: true });
+    writeFileSync(saved, text('saved', 'First save.'));
+    await wait(850);
+    await b.run(`(document.querySelector('#outcome-dismiss, #report-dismiss')?.click(), document.querySelector('#${rowPart('switch', 'skills', 'first')}').click(), true)`);
+    await wait(Math.max(0, first + 2850 - Date.now()));
+    writeFileSync(saved, text('saved', 'Second save.'));
+    for (let tries = 0; tries < 150 && !readNow(join(saves, '.codex/skills/saved/SKILL.md')).includes('Second save.'); tries++) await wait(100);
+    await wait(3000);
+    await b.settle();
+    const versions = jsonOrNothing(join(saves, '.central-knot/skills.json'))?.items?.saved?.versions?.length;
+    const kinds = (await b.run('window.centralKnot.history()')).events.filter(event => event.key === 'saved').map(event => event.kind);
+    same('a skill saved twice around a click, with Synchronize everything on: both saves are versions of it, the second an edit', [versions, kinds.includes('edit')], [2, true]);
+    await b.quit();
+  }
   const home = join(scratch, 'home-reads'), data = join(scratch, 'reads-data');
   const [claude, copilot, codex, agents] = ['.claude/skills', '.copilot/skills', '.codex/skills', '.agents/skills'].map(path => join(home, path));
   for (const folder of [claude, copilot, codex]) mkdirSync(folder, { recursive: true });
@@ -13591,20 +13640,27 @@ async function clickReadsFlow() {
     fs.open = function (path, ...rest) {
       let it = false; try { it = fs.realpathSync(String(path)) === ${JSON.stringify(counted)}; } catch { /* not there */ }
       if (!it) return real.call(fs, path, ...rest);
-      globalThis.ckReads++;
+      globalThis.ckReads++; (globalThis.ckReadTimes ??= []).push(Date.now());
       if (globalThis.ckAt?.read === globalThis.ckReads) { const run = globalThis.ckAt.run; globalThis.ckAt = undefined; run(fs); }
       setTimeout(() => real.call(fs, path, ...rest), 2000);
     };
     return true; })()`);
   const reads = () => main.run('globalThis.ckReads');
   /** Waits for a poll's pass to begin (the next is 20 s away), and to end unless `begun`; the count of whole reads then. */
-  const afterPoll = async (begun = false) => { const was = await reads(); for (let tries = 0; tries < 250 && await reads() === was; tries++) await wait(100); if (!begun) await wait(2600); return reads(); };
-  /** The whole reads since `from`, once the page has settled and no read has begun for `quietMs` (the watcher's debounce is 1.5 s). */
+  let beat = 0;
+  const afterPoll = async (begun = false) => {
+    const was = await reads();
+    for (let tries = 0; tries < 250 && await reads() === was; tries++) await wait(100);
+    beat = await main.run('globalThis.ckReadTimes.at(-1)');
+    if (!begun) await wait(2600);
+    return reads();
+  };
+  /** The whole reads since `from` but those on the poll's beat, once the page has settled and none has begun for `quietMs`. */
   const readsSince = async (from, quietMs = 4000) => {
     await a.settle();
     let last = await reads();
     for (let quiet = 0; quiet < quietMs / 100; quiet++) { await wait(100); const now = await reads(); if (now !== last) { last = now; quiet = 0; } }
-    return last - from;
+    return (await main.run('globalThis.ckReadTimes')).slice(from).filter(at => { const off = (at - beat) % 20000; return off > 400 && off < 19600; }).length;
   };
   /** Runs `body` in main once, inside the `nth` whole read from now (the click's own pass's is the first, the read after it the second). */
   const insideRead = (nth, body) => main.run(`(globalThis.ckAt = { read: globalThis.ckReads + ${nth}, run: fs => { ${body} } }, true)`);
@@ -13614,30 +13670,34 @@ async function clickReadsFlow() {
     return true; })()`);
   const description = (name, said) => `---\nname: ${name}\ndescription: ${said}\n---\n\nBody.\n`;
 
-  // One Add: its own pass's read, and the read of the pass its view is made from; its writes' events start nothing after.
+  // One Add: its own pass's read, the read of the pass its view is made from (no view's read of its own), and the one pass its
+  // writes' events start after it.
   let from = await afterPoll();
   await a.click(`${row('first')} .add-item`);
-  same('one Add reads the home twice: its pass, and the pass its view is made from; its own writes start no pass', await readsSince(from), 2);
+  same('one Add reads the home three times: its pass, the pass its view is made from, and the pass its own writes start', await readsSince(from), 3);
   check('and it is on', await switchOn(a, 'skills', 'first'));
 
   // A hand edit just before the view's read (made as the click's refresh comes in, before its turn): the view shows it, and its
-  // event starts no pass of its own, the view's read having begun after it.
+  // event and the click's own make one pass after it.
   const spare = join(claude, 'spare/SKILL.md');
   await onNextRefresh(`fs.writeFileSync(${JSON.stringify(spare)}, ${JSON.stringify(description('spare', 'Edited just before the view.'))}); await new Promise(done => setTimeout(done, 400)); return real(...args);`);
   from = await afterPoll();
   await a.click(`${row('second')} .add-item`);
-  same('a hand edit made just before the view’s read starts no pass of its own after the click’s two reads', await readsSince(from), 2);
+  same('a hand edit made just before the view’s read: three reads, as for a click alone', await readsSince(from), 3);
   check('and the view shows it', (await a.text(row('spare')) ?? '').includes('Edited just before the view.'), await a.text(row('spare')));
 
-  // A hand edit made inside the view's read, after that read had read Claude Code's folder: its event gets a pass of its own,
-  // and the page follows that pass without a Refresh.
+  // A hand edit made inside the pass's read, after that read had read Claude Code's folder: the watcher saw a change since the
+  // read began, so the view reads the home afresh, and the edit is on the page by the time the click's result is said, as
+  // before this step (not only after a background pass's news, seconds later).
+  await afterPoll();
   await insideRead(2, `fs.writeFileSync(${JSON.stringify(spare)}, ${JSON.stringify(description('spare', 'Edited while the view was read.'))});`);
-  from = await afterPoll();
+  await a.run(`(() => { window.ckShown = {}; const note = () => {
+    if ((document.querySelector(${JSON.stringify(row('spare'))})?.textContent ?? '').includes('Edited while the view was read.')) window.ckShown.edit ??= performance.now();
+    if ((document.querySelector('#header')?.textContent ?? '').includes('third is in Central Knot')) window.ckShown.result ??= performance.now(); };
+    new MutationObserver(note).observe(document.body, { subtree: true, childList: true, characterData: true }); return true; })()`);
   await a.click(`${row('third')} .add-item`);
-  let shown = await a.text(row('spare')) ?? '';
-  for (let tries = 0; tries < 100 && !shown.includes('Edited while the view was read.'); tries++) { await wait(100); shown = await a.text(row('spare')) ?? ''; }
-  check('a hand edit made while the view’s read ran, after its folder was read, reaches the page without a Refresh', shown.includes('Edited while the view was read.'), shown);
-  same('that pass, and the view the page asks for after it: two reads after the click’s two', await readsSince(from), 4);
+  const shown = await a.run('window.ckShown');
+  check('a hand edit made while the read after a click ran, after its folder was read, is on the page by the time the click’s result is said', shown.edit !== undefined && shown.edit <= shown.result, shown);
 
   // The click's write refused (Claude Code's lock is held), and Claude Code writes its file and lets the lock go while the read
   // after the click runs: the page shows that file as it is at that read or the next pass, the server written there without a
@@ -13654,16 +13714,16 @@ async function clickReadsFlow() {
     [mark, jsonOrNothing(claudeServers)?.numStartups, Object.keys(jsonOrNothing(claudeServers)?.mcpServers ?? {})], ['current', 2, ['atlas']]);
 
   // Three nudges while a click waits behind a long pass (the queue held), each the shared skill written again as it was, far
-  // enough apart for the debounce to let each through: one background pass after the click, then the pass its view is made
-  // from; that background pass tells the page what the click changed, so the page reads once more after its click. Begun as a
-  // poll's pass begins, and counted until 2 s pass with no read, so the next poll falls outside.
+  // enough apart for the debounce to let each through: one background pass after the click for all three, then the pass its view
+  // is made from, then the pass the click's own writes start; that background pass tells the page what the click changed, so
+  // the page reads once more after its click.
   from = await afterPoll(true);
   const held = await holdQueue(main, a), sharedFile = join(agents, 'shared/SKILL.md'), sharedText = readFileSync(sharedFile, 'utf8');
   await a.run(`document.querySelector(${JSON.stringify(`${row('fourth')} .add-item`)}).click()`);
   for (let nudge = 0; nudge < 3; nudge++) { await wait(200); writeFileSync(sharedFile, sharedText); await wait(1500); }
   await wait(300);
   await held.release();
-  same('three nudges while a click waits: one background pass after it, the pass its view is made from, and the page’s read after that pass’s news', await readsSince(from, 2000), 4);
+  same('three nudges while a click waits: one background pass for them, the view’s pass, the click’s own writes’ pass, and the page’s read after the news', await readsSince(from, 2000), 5);
   check('and the click went through', await switchOn(a, 'skills', 'fourth'));
 
   await main.run(`(process.mainModule.require('node:fs').open = globalThis.ckOpen, true)`);

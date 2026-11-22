@@ -280,7 +280,8 @@ type AnyLook = Look<unknown, Seen, Disk<Seen>>;
 
 /**
  * Reads the managed harnesses once, with every copy of a plugin's part from before the library unseen while it waits to be moved
- * there (partsmigrate.ts hideParts). The guards come after (guardFolders), once a pass's clicks are on its items.
+ * there (partsmigrate.ts hideParts), or takes a pass's read left standing (`kept`, which has those already). The guards come
+ * after (guardFolders), once a pass's clicks are on its items.
  */
 async function lookAt<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, managed: HarnessId[], library: KindLibrary, settle?: Look<C, E, D>['settle'], kept?: Disk<Seen>,
@@ -657,7 +658,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const saved = JSON.stringify(library);
   const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? SETTLE_MS, settling: false };
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
-  const asRead = new Map(look.disk.unseen); // before this pass's guards note more on it (guardFolders)
+  const asRead = context.kept && new Map(look.disk.unseen); // before this pass's guards note more on it (guardFolders)
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
   const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [], followed: new Map() };
   await deletionsTold(pass);
@@ -688,11 +689,12 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   }
   keepFolders(library, pass.foldersNow, managed, !options.only && !sourceScope);
   await saveIfChanged(pass);
-  // Nothing written, removed or tried in a harness, no setting followed, the record as opened: the read still stands (KeptReads).
+  // Nothing written, removed or tried in a harness after the read, no setting followed, the record as opened: the read still
+  // stands (KeptReads), unless its kind writes after this pass (servers.ts releaseKeptDenies takes it back).
   const untouched = !pass.results.length && !pass.followed.size && pass.saved === saved;
   const done: PassResult = { results: pass.results, writes: pass.writes, reloads: destinationReloads(pass.results, kind.kind), notices: pass.notices, settling: settle.settling, made: pass.made,
     ...(options.background ? { found: foundNow(pass), unread } : {}), ...(options.source ? { sourced: [...pass.sourced.values()] } : {}), ...(untouched ? { untouched: true as const } : {}) };
-  if (untouched) context.kept?.set(kind.kind, { managed, disk: Object.assign(look.disk, { unseen: asRead }) });
+  if (untouched && asRead) context.kept?.set(kind.kind, { managed, disk: Object.assign(look.disk, { unseen: asRead }) });
   return done;
 }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
-import { atMostEvery, caughtUpNames, holdingBuild, plural, timesApart } from '../src/model.ts';
+import { atMostEvery, caughtUpNames, holdingBuild, oneTurn, plural, timesApart } from '../src/model.ts';
 
 test('plural words read naturally', () => {
   assert.equal(plural(1, 'copy', 'copies'), '1 copy');
@@ -73,4 +73,20 @@ test('At most once every few seconds: the first call runs at once, a burst after
     at(40_000);
     assert.deepEqual(runs, [0, 5_000, 10_000, 30_000], 'nothing owed, nothing run');
   } finally { mock.timers.reset(); }
+});
+
+test('One turn waiting in the queue stands for every ask made meanwhile; an ask once it has begun queues one more (main.ts: the background pass)', async () => {
+  // A queue like main.ts's, held at first as a long pass holds it.
+  let release!: () => void, queue: Promise<unknown> = new Promise<void>(done => { release = done; });
+  const queued = (work: () => Promise<void>) => { const next = queue.then(work); queue = next.catch(() => undefined); return next; };
+  const drained = async () => { for (let last = queue; ; last = queue) { await last; if (last === queue) return; } };
+  let runs = 0, askWhileRunning = false;
+  const ask = oneTurn(queued, async () => { runs++; if (askWhileRunning) { askWhileRunning = false; ask(); } });
+  ask(); ask(); ask();
+  release(); await drained();
+  assert.equal(runs, 1, 'three asks while one turn waits: one run');
+  askWhileRunning = true; ask(); await drained();
+  assert.equal(runs, 3, 'an ask while its work runs: one more run after it');
+  ask(); await drained();
+  assert.equal(runs, 4, 'and once nothing waits, an ask runs again');
 });

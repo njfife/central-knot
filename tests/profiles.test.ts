@@ -1044,6 +1044,19 @@ test('A list of Claude Code denies an earlier build’s migration kept is draine
   } finally { await box.cleanup(); }
 });
 
+test('A deny kept by an earlier build, cleared after a pass that found nothing to do: that pass leaves its read to no view, as Claude Code’s settings changed after it (librarypass.ts KeptReads)', async () => {
+  const { box } = await oldHome();
+  try {
+    await applyServers(box.context, box.tools, [{ key: 'sentry', on: true, except: [], seenOn: false }]);
+    // What such a build left: sentry On, with its deny still in Claude Code's settings and listed as kept.
+    const settings = join(box.home, SETTINGS['claude-cli']);
+    await writeFile(settings, withMcpSwitch('claude-cli', (await text(box, SETTINGS['claude-cli'])) ?? '', 'sentry', true));
+    await keepDenies(box.home, ['sentry']);
+    const kept = new Map(), done = await applyServers({ ...box.context, kept }, box.tools, [], { background: true });
+    assert.deepEqual([done.untouched, kept.has('mcp'), JSON.parse((await text(box, SETTINGS['claude-cli']))!).deniedMcpServers ?? []], [undefined, false, []]);
+  } finally { await box.cleanup(); }
+});
+
 test('Migration: the first switch after it turns no agent Off, and an old file with no profile in use moves the same way', async () => {
   const { box } = await oldHome();
   try {

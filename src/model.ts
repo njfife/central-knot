@@ -1,8 +1,8 @@
-// Small helpers both the main process and the page use (but atMostEvery, main's alone): times in words (dayAndTime, timesApart), History's days (the choices
+// Small helpers both the main process and the page use (but atMostEvery and oneTurn, main's alone): times in words (dayAndTime, timesApart), History's days (the choices
 // and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, one install at a time (what
 // holds this build: holdingBuild, holdsUntil, QUIT_WAIT_MS), a notice's names, what the Caught up band names (caughtUpNames),
-// the notices a view set aside brought, carried into the next view (withSetAside), grouping, and a call paced to at most once
-// every so often (atMostEvery).
+// the notices a view set aside brought, carried into the next view (withSetAside), grouping, a call paced to at most once
+// every so often (atMostEvery), and one turn waiting in a queue for every ask made meanwhile (oneTurn).
 // Pure: no DOM, no files. Tools' and kinds' names and lists in words are words.ts's.
 import type { HarnessId, HistoryDays, HomeView, OtherBuild, Snapshot, SyncNotice } from './types.ts';
 import { rowNames } from './words.ts';
@@ -126,4 +126,17 @@ export function atMostEvery(ms: number, run: () => void): () => void {
     waiting = setTimeout(() => { waiting = undefined; if (owed) { owed = false; call(); } }, ms);
   };
   return call;
+}
+
+/**
+ * Asks for `work`'s turn on `queue`: none is queued while one waits there unbegun, since it will run after every ask made
+ * meanwhile; once it begins, the next ask queues another (main.ts asks so for the background pass: poll, watcher and retry).
+ */
+export function oneTurn(queue: (work: () => Promise<void>) => Promise<unknown>, work: () => Promise<void>): () => void {
+  let waiting = false;
+  return () => {
+    if (waiting) return;
+    waiting = true;
+    void queue(async () => { waiting = false; await work(); }).catch(() => undefined);
+  };
 }

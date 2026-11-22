@@ -1072,7 +1072,7 @@ export interface PassResult {
   stopped?: string; results: DestinationResult[]; writes: number; reloads: ReloadChange[]; made?: string[]; notices?: SyncNotice[];
   /** A deletion is inside its settle window: look again shortly. */
   settling?: boolean;
-  /** It changed nothing in the home it read (no result, no setting followed, its record as opened): its read still stands (librarypass.ts runPass). */
+  /** It left the home as it read it (no result, no setting followed, its record as opened; History may gain an earlier Delete's entry): librarypass.ts runPass. */
   untouched?: true;
   /**
    * A pass of the whole home (librarypass.ts PassOptions background): each found key it left found, with the hash of each
