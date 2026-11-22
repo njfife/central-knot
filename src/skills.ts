@@ -31,10 +31,8 @@ import { comparableText } from './pluginstatus.ts';
 import { pluginHolds, throughPlugins, type GivenByPlugin, type PluginHold } from './plugins.ts';
 import { destinationReloads } from './reload.ts';
 import { errorCode, itemKey, landingOf, libraryGate, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
-import {
-  alsoReads, lockedRoot, placeFolder, readCopy, readShape, readSkillsFolder, recoverFolders, removeFolder, rootOf, rootProblem,
-  sharedFolder, swapFolder, type FolderReads, type SkillCopy,
-} from './skillfiles.ts';
+import { alsoReads, lockedRoot, placeFolder, readCopy, readShape, readSkillsFolder, recoverFolders, removeFolder,
+  rootOf, rootProblem, sharedFolder, swapFolder, type FolderReads, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
 import { mergeSkill } from './merge.ts';
 import { sourceFacts } from './sources.ts';
@@ -93,9 +91,10 @@ type SkillLook = Look<SkillContent, SkillCopy, SkillDisk>;
 /** The label the page gives a tool's own skills folder ("Claude Code skills"). */
 const ownLabel = (tool: HarnessId) => harnesses[tool].skillRoots('', '')[0].label;
 
-/** Reads each managed tool's skills: its own folder, the folders it also reads, its plugins and its switches. */
+/** Reads each managed tool's skills (one FolderReads map hashes each real folder once for this read): its own folder, the folders it also reads, its plugins and its switches. */
 export async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<SkillDisk> {
-  const recorded = Object.values(await recordedSkills(context.home)), sharedAt = await landingOf(sharedFolder(context)), reads: FolderReads = new Map();
+  const recorded = Object.values(await recordedSkills(context.home)), sharedAt = await landingOf(sharedFolder(context));
+  const reads: FolderReads = new Map(); // local to this readDisk: never kept past its return
   const disk: SkillDisk = {
     byKey: new Map(), unseen: new Map(), uncopied: new Set(), locked: new Map(), problems: [], outside: new Map(), ways: new Map(), readsFrom: {},
     through: await throughPlugins(context, managed, 'skill'), shapes: new Map(), switches: new Map(), switchedOff: new Map(),
@@ -127,7 +126,8 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
     disk.unseen.set(at, why); disk.holdsBack!.set(at, why);
   }
   await readAlsoRead(context, disk, managed, sound, sharedAt, reads);
-  // A skill's shape: its current version's SKILL.md where the library has it, else a copy's.
+  // A skill's shape: its current version's SKILL.md where the library has it, else a copy's (readShape reads SKILL.md alone,
+  // so a stored version whose SKILL.md reads still gives its shape if a companion file under .central-knot is unreadable or a link).
   for (const item of recorded) {
     const version = item.deleted ? undefined : await readVersion(context, item.key, item.hash);
     const shape = version && await readShape(version.directory);
