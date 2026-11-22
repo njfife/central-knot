@@ -11,8 +11,8 @@ import { pluginFiles } from '../src/catalogdetail.ts';
 import { libraryAction } from '../src/historyactions.ts';
 import type { ItemKind } from '../src/library.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
-import { liveNow, readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
-import { inUse, pluginLive } from '../src/profileplan.ts';
+import { readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
+import { homeItems, inUse, pluginLive } from '../src/profileplan.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
 import { notInWhy } from '../src/pluginstatus.ts';
@@ -1144,10 +1144,12 @@ async function rootHome(tools: HarnessId[] = ['pi-cli', 'opencode-cli']) {
   /** The page's Update of one plugin. */
   const updateOf = (plugin: string) => box.markets.items(box.root, 'team', plugin, itemsIn, box.home, false, true);
   const folders = async () => ({ pi: (await readdir(box.pi('skills')).catch(() => [])).sort(), opencode: (await readdir(join(box.home, '.config/opencode/skills')).catch(() => [])).sort() });
-  const live = async () => pluginLive({ pluginItems: await readPluginItems(context, tools), profiles: await readProfiles(box.home), skills: await skillsView(box.share, tools),
-    mcp: await serversView(box.share, tools), agents: await agentsView(box.share, tools) } as unknown as HomeView);
-  /** The profiles in use, as the status bar names them. */
-  const inUseNow = async () => { const plugins = await live(); return inUse((await readProfiles(box.home)).profiles, await liveNow(box.share, tools, plugins), plugins).map(profile => profile.name); };
+  /** The home as the page reads it. */
+  const view = async () => ({ pluginItems: await readPluginItems(context, tools), profiles: await readProfiles(box.home), skills: await skillsView(box.share, tools),
+    mcp: await serversView(box.share, tools), agents: await agentsView(box.share, tools) }) as unknown as HomeView;
+  const live = async () => pluginLive(await view());
+  /** The profiles in use, as the status bar names them, from that read (profileplan.ts homeItems). */
+  const inUseNow = async () => { const home = await view(), plugins = pluginLive(home); return inUse((await readProfiles(box.home)).profiles, homeItems(home, plugins), plugins).map(profile => profile.name); };
   const skills = async () => (await box.library()).skill;
   return { ...box, list, copy, copyName, turnOf, updateOf, folders, live, inUseNow, skills };
 }

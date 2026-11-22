@@ -47,8 +47,8 @@ import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { homePass, passTells, syncOnceReport, takenInReloads, type HomePass } from './homepass.ts';
-import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
-import { homeItems, inUse, inUseName, pluginLive, switchable, switchPreview, type LiveItem, type PluginLive } from './profileplan.ts';
+import { deleteProfile, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
+import { homeItems, inUse, inUseName, pluginLive, switchable, switchPreview, type LiveItem, type PluginHome, type PluginLive } from './profileplan.ts';
 import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
 import { keepEntries, linuxPlaces, placeAutostart, readAutostart, signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
@@ -982,16 +982,19 @@ function followProfiles(profiles: ProfilesView, items = lastItems, plugins = las
   refreshTray();
 }
 
+/** The home in `tools` as profiles read it (profileplan.ts PluginHome), read now as a view reads it. */
+async function profileHome(tools: HarnessId[]): Promise<PluginHome> {
+  const shared: ShareContext = { ...context(), reads: new Map() };
+  return { pluginItems: await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), tools), profiles: await readProfiles(current!.home),
+    skills: await skillsView(shared, tools), mcp: await serversView(shared, tools), agents: await agentsView(shared, tools) };
+}
+
 /**
- * What a profile switch and its Undo are given of the plugins' items (profiles.ts PluginSide): each as it is now in `tools`, read
- * as a view reads it (so a switch queued behind another plans from what that one left), and a run of one item's own switch in its
+ * What a profile switch and its Undo are given of the plugins' items (profiles.ts PluginSide): each as it is now in `tools`
+ * (profileHome, so a switch queued behind another plans from what that one left), and a run of one item's own switch in its
  * tool, through the Plugins page's own steps (marketplaces.ts setSkill, setPart); a profile installs and uninstalls nothing.
  */
-const pluginSide = (tools: HarnessId[]): PluginSide => ({ live: async () => {
-  const shared: ShareContext = { ...context(), reads: new Map() };
-  return pluginLive({ pluginItems: await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), tools), profiles: await readProfiles(current!.home),
-    skills: await skillsView(shared, tools), mcp: await serversView(shared, tools), agents: await agentsView(shared, tools) });
-}, run: async ops => {
+const pluginSide = (tools: HarnessId[]): PluginSide => ({ live: async () => pluginLive(await profileHome(tools)), run: async ops => {
   const markets = carriedMarket, home = current?.home;
   if (!markets || !home) return [];
   // No setWhole is given, so a whole plugin's step fails for its tool (pluginplan.ts runPlan); no install or uninstall runs either.
@@ -999,10 +1002,10 @@ const pluginSide = (tools: HarnessId[]): PluginSide => ({ live: async () => {
   return (await runPlan(ops, { install: (...args) => never(args[3]), uninstall: (...args) => never([args[3]]), setSkill: markets.setSkill, setPart: markets.setPart }, home)).done;
 } });
 
-/** Refreshes the menus' live library items and plugin copies for `tools`, from the same read the page and switch use. */
+/** Refreshes the menus' live library items and plugin copies for `tools`, from the same read the page and switch use (profileHome). */
 async function refreshMenus(tools: HarnessId[]) {
-  const plugins = await pluginSide(tools).live();
-  followProfiles(lastProfiles, await liveNow(context(), tools, plugins), plugins);
+  const home = await profileHome(tools), plugins = pluginLive(home);
+  followProfiles(lastProfiles, homeItems(home, plugins), plugins);
 }
 
 /** After a profile is made, changed or deleted (Central Knot's own file only, no tool changes): the profiles for the page, and the menus. */

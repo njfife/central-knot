@@ -511,7 +511,7 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   const loser = { tool, hash: copy.hash, path: way.path, ...(way.linkTo ? { linkTo: way.linkTo } : {}) };
   // Each tool that read the copy, and whether its own switch had it off (whoever set it).
   const readers = look.managed.filter(each => look.disk.ways.get(key)?.[each]?.path === way.path);
-  const heldOff = readers.flatMap(each => { const target = loadTarget(look, key, item.name, each); return target && isDisabled(context, look.disk.switches.get(each)!, target) ? [{ tool: each, target }] : []; });
+  const heldOff = readers.flatMap(each => { const target = loadTarget(loadedCopy(look, key, each)); return target && isDisabled(context, look.disk.switches.get(each)!, target) ? [{ tool: each, target }] : []; });
   const result = await runTakeOver(context, look.managed, item, keep, way);
   if (result) return stop(result);
   // Told once it happened: a take-over has no Undo, so an entry must never claim one that didn't.
@@ -589,17 +589,22 @@ export async function skillsForRepo(context: ShareContext, tools: HarnessId[]): 
 
 // ---------- View ----------
 
-/** The folder a tool loads a skill from, own copy first, then the one it has another way, and how its switch names it there. */
-function loadTarget(look: SkillLook, key: string, name: string, tool: HarnessId): SwitchTarget | undefined {
+/** The copy a tool loads a skill from, and how its own switch names it: its own folder's first, then the one it has another way, then the one in the folder it reads. */
+function loadedCopy(look: SkillLook, key: string, tool: HarnessId): SkillCopy | undefined {
   const disk = look.disk, source = disk.readsFrom[tool];
-  const copy = disk.byKey.get(key)?.[tool] ?? disk.outside.get(key)?.[tool] ?? (source ? disk.byKey.get(key)?.[source] : undefined);
-  return copy && switchTarget(copy);
+  return disk.byKey.get(key)?.[tool] ?? disk.outside.get(key)?.[tool] ?? (source ? disk.byKey.get(key)?.[source] : undefined);
 }
+const loadTarget = (copy: SkillCopy | undefined) => copy && switchTarget(copy);
+/** The copy in the skills folder of the managed tool `tool` reads (OpenCode reads Claude Code's): that tool's own, or its link's. */
+const copyInRead = (disk: SkillDisk, key: string, tool: HarnessId) => {
+  const source = disk.readsFrom[tool];
+  return !source ? undefined : disk.byKey.get(key)?.[source] ?? (disk.ways.get(key)?.[source]?.take === 'link' ? disk.outside.get(key)?.[source] : undefined);
+};
 /** The skill a tool's switch is cleared for (clearSwitch): its name, in Central Knot or found in a tool, and the copy the tool loads. */
 async function skillLoads(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId) {
   const { look, live, problem } = await lookFor(skillKind, context, tools);
   const name = live.find(entry => entry.key === key)?.name ?? foundCopies(look, key, [])[0]?.name ?? key;
-  return { name, target: loadTarget(look, key, name, tool), problem };
+  return { name, target: loadTarget(loadedCopy(look, key, tool)), problem };
 }
 /** How a tool's own switch names one copy of a skill. */
 const switchTarget = (copy: SkillCopy): SwitchTarget => ({ folder: copy.name, name: copy.skill.name, skillFile: join(copy.directory, 'SKILL.md') });
@@ -680,7 +685,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   const copies: Partial<Record<HarnessId, ToolCopy>> = {};
   for (const copy of entries) copies[copy.tool] = toolCopy(copy);
   const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
-  const facts: ToolFacts = { cannot: {}, unseen: {}, plugin: {}, anotherWay: {}, takeOver: {}, loads: {} };
+  const facts: ToolFacts = { cannot: {}, unseen: {}, plugin: {}, anotherWay: {}, takeOver: {}, loads: {}, alsoLoads: {} };
   for (const tool of look.managed) toolFacts(look, { key, name, item, copiesNow, made }, tool, facts);
   const switchProblem = Object.fromEntries(Object.keys(facts.loads).flatMap(tool => { const problem = disk.switches.get(tool as HarnessId)?.problem; return problem ? [[tool, problem]] : []; }));
   // Its description is the current version's, else a copy's (readDisk's shapes).
@@ -692,7 +697,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key), choiceBlocks: choiceBlocksOf(entries) }),
     ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('takeOver', facts.takeOver),
-    ...some('loads', facts.loads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.switchedOff)), ...some('switchProblem', switchProblem),
+    ...some('loads', facts.loads), ...some('alsoLoads', facts.alsoLoads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.switchedOff)), ...some('switchProblem', switchProblem),
     ...(fromSource ? { fromSource } : {}),
   };
 }
@@ -701,6 +706,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
 interface ToolFacts {
   cannot: LibraryFacts['cannot']; unseen: NonNullable<LibraryFacts['unseen']>; plugin: NonNullable<LibraryFacts['plugin']>;
   anotherWay: NonNullable<LibraryFacts['anotherWay']>; takeOver: NonNullable<LibraryFacts['takeOver']>; loads: NonNullable<LibraryFacts['loads']>;
+  alsoLoads: NonNullable<LibraryFacts['alsoLoads']>;
 }
 type RowOf = { key: string; name: string; item: LibraryItem | undefined; copiesNow?: ReturnType<typeof copiesOf>; made?: ReturnType<typeof plan> };
 
@@ -726,8 +732,11 @@ function toolFacts(look: SkillLook, row: RowOf, tool: HarnessId, facts: ToolFact
   // Take over is for a skill in Central Knot: a found one is taken in first.
   const outsideWay = disk.ways.get(key)?.[tool];
   if (item && !item.deleted && outsideWay?.take && outsideCopy) facts.takeOver[tool] = { kind: outsideWay.take, path: outsideWay.path };
-  const target = given && !here ? undefined : loadTarget(look, key, name, tool);
-  if (target) facts.loads[tool] = { ...target, switchedOff: offIn(look.context, disk, key, tool) };
+  const loaded = given && !here ? undefined : loadedCopy(look, key, tool), also = given ? undefined : copyInRead(disk, key, tool);
+  // The managed tool whose own folder holds a copy, by where it really is: a link's copy is the folder it leads to.
+  const holder = (copy: SkillCopy) => { const at = look.managed.find(each => disk.byKey.get(key)?.[each]?.skill.realDirectory === copy.skill.realDirectory); return at ? { in: at } : {}; };
+  if (loaded) facts.loads[tool] = { ...switchTarget(loaded), switchedOff: offIn(look.context, disk, key, tool), ...holder(loaded) };
+  if (also && also !== loaded) facts.alsoLoads[tool] = holder(also);
 }
 
 /** A copy outside a tool's own folder that has moved on since the skill was taken in: neither its current version nor another of its versions. */

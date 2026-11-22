@@ -164,12 +164,6 @@ export async function readLibraries(context: ShareContext): Promise<{ libraries:
   return { libraries, plugins: new Set((await recordedIds(context.home)).plugins.map(entry => entry.id)) };
 }
 
-/** The live library items now (with uncovered Copilot CLI off-switches when `tools` has Copilot CLI), for the menus (main.ts); none when a record can't be read. */
-export async function liveNow(context: ShareContext, tools: HarnessId[] = [], plugins: readonly PluginLive[] = []): Promise<LiveItem[]> {
-  const read = await readLibraries(context);
-  return 'stop' in read ? [] : (await withCopilot(context, tools, liveItems(read.libraries, read.plugins), plugins)).items;
-}
-
 /**
  * What a switch and its Undo need from the main process for a plugin's items: each item every tool has, read now (profileplan.ts
  * pluginLive), and a run of plugin steps through each tool's own switch (pluginplan.ts runPlan, with marketplaces.ts setSkill and

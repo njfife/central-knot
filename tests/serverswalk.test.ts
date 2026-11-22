@@ -36,8 +36,8 @@ import { entriesNow, everythingAction, everythingPlan, libraryAction, versionCho
 import { wantedIn, type LibraryItem } from '../src/library.ts';
 import { asksWhichCopy, harnessIs, placeOf, rowClicks, type LibraryRow } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
-import { changes, switchPlan, undoPlan } from '../src/profileplan.ts';
-import { NO_PLUGINS, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
+import { changes, liveItems, switchPlan, undoPlan } from '../src/profileplan.ts';
+import { NO_PLUGINS, readLibraries, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
 import { applyServers, restoreServer, serversView } from '../src/servers.ts';
 import { everythingEntryAction, setSyncEverything } from '../src/everything.ts';
 import { readRecord, type ShareContext } from '../src/share.ts';
@@ -116,9 +116,11 @@ async function walk(seed: number): Promise<Finding[]> {
   };
   const historyCount = async () => (await readHistory(context())).filter(event => event.key === 'mcp:docs').length;
   // Profiles: each switch the page offers (one that would change something), and each switch entry whose Undo History offers.
-  const onNow = async () => JSON.stringify([await liveNow(context()), ...await Promise.all(['skills', 'mcp', 'agents', 'sync'].map(name => readFile(join(box.home, `.central-knot/${name}.json`), 'utf8').catch(() => '')))]);
-  const switches = async () => { const items = await liveNow(context()); return (await readProfiles(box.home)).profiles.filter(profile => changes(switchPlan(profile, items))); };
-  const switchUndos = async () => { const items = await liveNow(context()); return (await readHistory(context())).filter(event => event.kind === 'profile' && !event.undoneBy && changes(undoPlan(event, items))); };
+  /** The live library items now, from the records (profiles.ts readLibraries). */
+  const liveNow = async () => { const read = await readLibraries(context()); return 'stop' in read ? [] : liveItems(read.libraries, read.plugins); };
+  const onNow = async () => JSON.stringify([await liveNow(), ...await Promise.all(['skills', 'mcp', 'agents', 'sync'].map(name => readFile(join(box.home, `.central-knot/${name}.json`), 'utf8').catch(() => '')))]);
+  const switches = async () => { const items = await liveNow(); return (await readProfiles(box.home)).profiles.filter(profile => changes(switchPlan(profile, items))); };
+  const switchUndos = async () => { const items = await liveNow(); return (await readHistory(context())).filter(event => event.kind === 'profile' && !event.undoneBy && changes(undoPlan(event, items))); };
   const switchCount = async () => (await readHistory(context())).filter(event => event.kind === 'profile').length;
   const others = async () => ({ skill: await Promise.all(three.map(tool => bytes(folderOf(box, tool)))), agent: await Promise.all(three.map(tool => readFile(join(box.home, agentFiles[tool]), 'utf8').catch(() => undefined))) });
   let othersAsWritten: Awaited<ReturnType<typeof others>>;
