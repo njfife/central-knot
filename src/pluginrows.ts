@@ -3,11 +3,13 @@
 // linked to it in Pi and OpenCode) stays on that row, whose box says "Through a plugin" (types.ts LibraryFacts plugin); one
 // that only shares a name is a row of its own here. These rows are never managed: no sync, no repo; a box turns the item on or
 // off in that tool (pluginswitch.ts), a profile ticks the item by its own rows (profileplan.ts pluginLive), and the plugin's page
-// is where the plugin itself is handled.
+// is where the plugin itself is handled. Which tools have such a row of his on through a plugin is decided here too (pluginOnIn),
+// for the Library's rows and for what a profile switch leaves loaded.
 import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts';
+import { onNow, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, pageNames, toolNames as names } from './words.ts';
-import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, PartKind, PluginItem } from './types.ts';
+import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, PartKind, PluginItem, ThroughPlugin } from './types.ts';
 import { kindSource } from './itemrow.ts';
 import { pluginLink } from './sourcelink.ts';
 
@@ -58,6 +60,24 @@ export const inTool = (fact: Pick<LibraryFacts, 'copies' | 'plugin' | 'loads'>, 
 export const onOwnRow = (fact: LibraryFacts, row: Pick<PluginRow, 'kind' | 'name' | 'plugin' | 'marketName'>) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
   && (Object.values(fact.plugin ?? {}).some(given => given.plugin === row.plugin && given.marketplace === row.marketName)
     || fact.fromSource?.link === pluginLink(row.plugin, row.marketName));
+
+/** A row of the person's own as its tools have it through plugins: the kind's view's (types.ts LibraryFacts) or the page's (itemrow.ts ItemRow). */
+type OwnRow = { key: string; name?: string; copies: Partial<Record<string, unknown>>; plugin?: Partial<Record<string, ThroughPlugin>> };
+/** The plugin a tool has a row's item through, where the tool has no copy of its own (types.ts LibraryFacts plugin). */
+export const throughPluginHere = (row: Pick<OwnRow, 'copies' | 'plugin'>, tool: string): ThroughPlugin | undefined => (row.copies[tool] === undefined ? row.plugin?.[tool] : undefined);
+/** The item a tool has through a plugin on a row of the person's own (throughPluginHere), with that plugin as the tool has it installed in `home`. */
+export function itemThrough(home: Pick<HomeView, 'pluginItems'> | undefined, page: Page, row: OwnRow, tool: string): PluginItemAt | undefined {
+  const given = throughPluginHere(row, tool);
+  const install = given && home?.pluginItems?.find(entry => entry.tool === tool && entry.plugin === given.plugin && entry.marketName === given.marketplace);
+  return install ? { kind: partOfPage[page], name: given.name ?? row.name ?? row.key, tool: tool as HarnessId, install } : undefined;
+}
+/**
+ * A row's `pluginOn` (libraryrow.ts LibraryRow): the tools of its kind with no copy of their own that have its item on through an
+ * installed plugin (pluginswitch.ts onNow; with no install read, the plugin's own `off`). The Library's rows ask it (matrix.ts
+ * rowsOf), and so does what a profile switch leaves loaded (profileplan.ts withLoads).
+ */
+export const pluginOnIn = (home: Pick<HomeView, 'pluginItems' | Page> | undefined, page: Page, row: OwnRow): string[] => (home ? kindSource(home, page).tools : [])
+  .filter(tool => { const given = throughPluginHere(row, tool), item = itemThrough(home, page, row, tool); return item ? onNow(item) : !!given && !given.off; });
 
 const memo = new WeakMap<HomeView, Partial<Record<Page, PageRows>>>();
 
