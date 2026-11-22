@@ -6301,9 +6301,14 @@ async function draftFlow() {
   await a.click('#ins-edit-codex-cli');
   const editorNow = `document.querySelector('#ins-text-codex-cli')`;
   /** Waits until the editor has stayed the same box for 300 ms: the read a click starts draws the page again when it lands. */
-  const editorSteady = async () => { for (let tries = 0; tries < 30; tries++) { await a.run(`(${editorNow}.ckSteady = true)`); await wait(300); if (await a.run(`${editorNow}?.ckSteady === true`)) return; } };
+  const editorSteady = async () => {
+    for (let tries = 0; tries < 30; tries++) { await a.run(`(${editorNow}.ckSteady = true)`); await wait(300); if (await a.run(`${editorNow}?.ckSteady === true`)) return; }
+  };
   // Undo as the Edit menu sends it: the editing command, with no key that types.
-  const undo = async () => { for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, commands: type === 'keyUp' ? [] : ['undo'] }); await a.settle(); };
+  const undo = async () => {
+    for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, commands: type === 'keyUp' ? [] : ['undo'] });
+    await a.settle();
+  };
   const sameEditor = () => a.run(`${editorNow}?.ckSame === true && document.activeElement === ${editorNow}`);
   /** A word typed in the focused editor, `meanwhile` run, then Undo: whether the editor stayed the same box, and whether the Undo took the word away. */
   const typedThenUndone = async (meanwhile = async () => {}) => {
@@ -6329,7 +6334,8 @@ async function draftFlow() {
   await undo();
   // Refresh ends by starting the result's 8 s to go (app.ts FADE_MS) and a read of the Git repo 1.5 s later (app.ts afterActing).
   // With no result to clear and the repo as it was, neither draws: a word typed just after Refresh is still undone after both.
-  const idleAt = await a.run(`new Promise(done => { const watch = new MutationObserver(() => { if (document.body.dataset.busy === 'false') { watch.disconnect(); done(Date.now()); } });
+  const idleAt = await a.run(`new Promise(done => {
+    const watch = new MutationObserver(() => { if (document.body.dataset.busy === 'false') { watch.disconnect(); done(Date.now()); } });
     watch.observe(document.body, { attributeFilter: ['data-busy'] }); document.querySelector('#header-refresh').click(); })`);
   await editorSteady();
   const typedAt = Date.now() - idleAt, through = {};
