@@ -8973,7 +8973,7 @@ async function mcpSigninFlow() {
     ['Connected', 'Needs sign-in', 'Couldn’t reach: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: MCP server "silent" connection timed out after 30000ms', 'Connected', 'Needs sign-in', 'Not reported by Claude Code']);
   same('OpenCode’s answers, line by line', ['plain', 'oauth', 'down', 'silent', 'search', longName].map(name => openCodeWords[name]),
     ['Connected', 'Needs sign-in', 'Couldn’t reach: SSE error: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: Operation timed out after 30000ms', 'Connected', 'Needs sign-in']);
-  same('Copy on the plugin’s server gives Claude Code’s name for it', (await copyOn('claude-cli', 'issues (tracker)')).filter((_, at) => at === 1 || at === 3), ['claude mcp login plugin:tracker:issues', ...(main ? ['claude mcp login plugin:tracker:issues'] : [])]);
+  same('Copy on the plugin’s server gives Claude Code’s name for it', (await copyOn('claude-cli', 'issues (tracker)')).slice(1), ['claude mcp login plugin:tracker:issues', 'Copied. Run it in a terminal; then Check again.', ...(main ? ['claude mcp login plugin:tracker:issues'] : [])]);
   main?.close();
   await fits('checked');
   // Scrolled to the end, in the smallest window and in the owner's: the tools' names stay at the top as the rows go under them.
