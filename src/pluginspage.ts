@@ -404,7 +404,7 @@ function runLine(lines: ResultLine[], advice: ReloadAdvice, elsewhere: boolean):
     // Each plugin the run changed, once, whether or not the sentence names it (it leaves out the plugin on screen).
     const changed = [...new Map(lines.filter(line => line.ok).map(line => [pluginKey(line.source, line.plugin), { plugin: line.plugin, source: line.source }])).values()];
     const sentence = elsewhere
-      ? [last.undo ? 'Undone: ' : 'Last change: ', ...changed.flatMap((part, at) => [at ? ', ' : '', link(part, at)]), '.']
+      ? changed.length ? [last.undo ? 'Undone: ' : 'Last change: ', ...changed.flatMap((part, at) => [at ? ', ' : '', link(part, at)]), '.'] : []
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));
     // What a switch's Undo can't put back is said with the result, so the promise beside Undo is the whole of it.
     const limits = !last.undo && last.turn?.limits.length ? ` ${last.turn.limits.join(' ')}` : '';

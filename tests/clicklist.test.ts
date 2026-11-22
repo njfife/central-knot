@@ -75,6 +75,8 @@ const { pin, rowId } = await import('../src/itemrow.ts');
 const { backgroundProblems, copyQuestion, headerNotices, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { openWalkthrough, walkthroughBand } = await import('../src/firstsetup.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
+const { versionsList } = await import('../src/editparts.ts');
+const { timesApart } = await import('../src/model.ts');
 const { newItem } = await import('../src/library.ts');
 const { keptBack } = await import('../src/clickplan.ts');
 const { clickWords } = await import('../src/pluginparts.ts');
@@ -1827,4 +1829,55 @@ test('Profile Undo and menu-bar profile switches carry reloads through turnedOut
     await settled();
     assert.deepEqual(app.outcome?.reloads, [copilotOn, claudeMcp]);
   } finally { while (main.passes.length) await main.pass(did('notes')); }
+});
+
+test('An editor’s earlier-versions list floors how long ago each version was, matching model.ts timesApart (and floors days too)', () => {
+  const now = new Date(2026, 10, 22, 12, 0, 0, 0).getTime();
+  mock.timers.enable({ apis: ['Date'], now });
+  try {
+    const agoSeconds = (seconds: number) => new Date(now - seconds * 1000).toISOString();
+    const cases: [number, string][] = [
+      [30, 'just now'], [59, 'just now'], [60, '1 min ago'], [90, '1 min ago'],
+      [59 * 60, '59 min ago'], [60 * 60, '1 h ago'], [119 * 60, '1 h ago'],
+      [1439 * 60, '23 h ago'], [1440 * 60, '1 d ago'], [36 * 3600, '1 d ago'],
+    ];
+    const versions = cases.map(([seconds], index) => ({ id: `v${index}`, at: agoSeconds(seconds), firstLine: '', lines: 1, differs: 1 }));
+    const list = versionsList(versions, { id: id => `r-${id}`, disabled: false, run: () => {} }) as unknown as { children: { children: unknown[] }[] };
+    const shown = list.children[1]!.children.map(row => textOf(row).match(/\(([^)]+)\)/)?.[1]);
+    assert.deepEqual(shown, cases.map(([, expected]) => expected));
+    // Every sub-day case matches timesApart's own words for that same moment.
+    for (const [seconds, expected] of cases.slice(0, 7)) assert.deepEqual(timesApart([agoSeconds(seconds)], now), [expected]);
+  } finally { mock.timers.reset(); }
+});
+
+test('On another plugin’s page (or after Refresh), the header omits "Last change" / "Undone" when nothing succeeded, and names what changed or was undone when it did', () => {
+  const resultText = () => {
+    const run = pluginsResult()[0] as unknown as { children?: { className?: string }[] } | undefined;
+    return textOf(run?.children?.find(child => child?.className === 'toolbar-result-text'));
+  };
+  // Nothing changed (every tool refused), viewed on another plugin's page and after Refresh: no empty "Last change: .".
+  start();
+  market.lastRun = { done: refused('alpha').done, undo: false, home: '/home' };
+  market.nav = { source: '/market', tab: 'plugins', find: '', plugin: 'beta' };
+  assert.equal(resultText(), '1 of 1 didn’t go through in every tool: alpha. ');
+  market.nav.plugin = undefined;
+  market.lastRun.reread = true;
+  assert.equal(resultText(), '1 of 1 didn’t go through in every tool: alpha. ');
+  // One thing changed, viewed on another plugin's page: "Last change: alpha.".
+  start();
+  market.lastRun = { done: installed('alpha').done, undo: false, home: '/home' };
+  market.nav = { source: '/market', tab: 'plugins', find: '', plugin: 'beta' };
+  assert.equal(resultText(), 'Last change: alpha.');
+  // An Undo that undid one plugin (with another step still left to undo), viewed on another plugin's page: "Undone: alpha.".
+  start();
+  const undoneAlpha: PluginTurnResult['done'][number] = { source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'remove',
+    report: { tool: 'claude-cli', outcome: 'uninstalled', changed: true, message: 'Uninstalled.', runs: [] } };
+  market.lastRun = { done: [undoneAlpha], undo: true, home: '/home', rest: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'remove' }] };
+  market.nav = { source: '/market', tab: 'plugins', find: '', plugin: 'beta' };
+  assert.equal(resultText(), 'Undone: alpha.');
+  // An Undo where every tool refused, viewed on another plugin's page: no empty "Undone: .".
+  start();
+  market.lastRun = { done: refused('alpha').done, undo: true, home: '/home', rest: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'remove' }] };
+  market.nav = { source: '/market', tab: 'plugins', find: '', plugin: 'beta' };
+  assert.equal(resultText(), '1 of 1 didn’t go through in every tool: alpha. ');
 });

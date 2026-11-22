@@ -7666,11 +7666,14 @@ fs.writeFileSync(record, JSON.stringify(now));
   await done();
   rmSync(join(home, 'fail-plug-11'));
   same('a run where nothing went through, with no Undo: its sentence counts it first, and its reason follows', [await a.text('#plugins-result .toolbar-result-text'), (await plugReasons()).length], ['1 of 1 didn’t go through in every tool: plug-11. ', 1]);
-  await press('#header .band-dismiss');
   // A plugin's page and back, then Refresh: the list in its order again, installed first.
+  // On another plugin's page while plug-11's refused result is still up, the header omits any empty "Last change: .".
   const inOrder = on => [...plugins.filter(name => on.includes(name)), ...plugins.filter(name => !on.includes(name))];
   const installedNow = [...installedFirst.filter(name => name !== 'plug-06'), 'plug-01', 'plug-10', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
-  await a.click('#popen-0-plug-20'); await a.click('#plugin-back');
+  await a.click('#popen-0-plug-20');
+  same('on another plugin’s page after a switch that changed nothing, the header has no empty “Last change: .”', await a.text('#plugins-result .toolbar-result-text'), '1 of 1 didn’t go through in every tool: plug-11. ');
+  await a.click('#plugin-back');
+  await press('#header .band-dismiss');
   same('back from a plugin’s page, every plugin is in its place in the order', await order(), inOrder(installedNow));
   await putAt(list, '[data-plugin="plug-02"]', 300);
   await clickAt(await middleOf('#pswitch-0-plug-02')); await done();
@@ -9024,7 +9027,7 @@ async function mcpSigninFlow() {
     ['Connected', 'Needs sign-in', 'Couldn’t reach: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: MCP server "silent" connection timed out after 30000ms', 'Connected', 'Needs sign-in', 'Not reported by Claude Code']);
   same('OpenCode’s answers, line by line', ['plain', 'oauth', 'down', 'silent', 'search', longName].map(name => openCodeWords[name]),
     ['Connected', 'Needs sign-in', 'Couldn’t reach: SSE error: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: Operation timed out after 30000ms', 'Connected', 'Needs sign-in']);
-  same('Copy on the plugin’s server gives Claude Code’s name for it', (await copyOn('claude-cli', 'issues (tracker)')).filter((_, at) => at === 1 || at === 3), ['claude mcp login plugin:tracker:issues', ...(main ? ['claude mcp login plugin:tracker:issues'] : [])]);
+  same('Copy on the plugin’s server gives Claude Code’s name for it', (await copyOn('claude-cli', 'issues (tracker)')).slice(1), ['claude mcp login plugin:tracker:issues', 'Copied. Run it in a terminal; then Check again.', ...(main ? ['claude mcp login plugin:tracker:issues'] : [])]);
   main?.close();
   await fits('checked');
   // Scrolled to the end, in the smallest window and in the owner's: the tools' names stay at the top as the rows go under them.
