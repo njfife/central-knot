@@ -2009,9 +2009,9 @@ const keyWords = {
  * entry in the key.
  */
 function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; glyph?: IconName; state: string; key: keyof typeof keyWords } {
-  const given = throughPluginHere(skill, tool);
-  if (given) {
-    const on = pluginOnIn(state.home, skill.kind, skill).includes(tool);
+  const given = throughPluginHere(skill, tool), on = !!given && pluginOnIn(state.home, skill.kind, skill).includes(tool);
+  // A plugin's part turned off there loads nothing: where the tool loads a copy it has another way, its mark is that copy's.
+  if (given && (on || !skill.loads?.[tool as HarnessId])) {
     return { look: on ? 'on' : 'off', state: on ? 'plugin' : 'plugin-off', key: on ? 'on' : 'plugin-off', words: `${skill.anotherWay?.[tool] ?? skill.cannot?.[tool] ?? `${names[tool]} has it through the plugin ${given.plugin}.`}${on ? '' : ' It is turned off there.'}` };
   }
   return libraryMark(libraryPages[skill.kind], skill, tool);

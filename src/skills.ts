@@ -732,15 +732,17 @@ function toolFacts(look: SkillLook, row: RowOf, tool: HarnessId, facts: ToolFact
   if (given && !here) facts.plugin[tool] = given;
   const hidden = copy?.is === 'unseen' ? copy.why : !copiesNow ? unseenIn(disk, tool, key) : undefined;
   if (hidden) facts.unseen[tool] = hidden;
-  const way = disk.anotherWay(asIf, tool);
+  // A plugin's part on there is what the tool loads. Turned off there, it loads none: a copy the tool has another way is what it
+  // loads, and its line says that way (the pass's `held` still answers with the plugin: anotherWay).
+  const pluginLoads = !!given && !given.off, outsideWay = disk.ways.get(key)?.[tool];
+  const way = (given?.off && !here && outsideWay?.why) || disk.anotherWay(asIf, tool);
   const why = copy?.is === 'held' ? copy.why : (here ? undefined : disk.cannotTake(asIf, tool)) ?? disk.locked.get(tool)?.why;
   const touched = made?.write.includes(tool) || made?.remove.includes(tool);
   if (way) facts.anotherWay[tool] = `${way}${outsideCopy && movedOn(item, outsideCopy.hash) ? ` ${MOVED_ON}` : ''}`;
   else if (why && (copy?.is === 'held' || touched || (!copiesNow && !here))) facts.cannot[tool] = why;
   // Take over is for a skill in Central Knot: a found one is taken in first.
-  const outsideWay = disk.ways.get(key)?.[tool];
   if (item && !item.deleted && outsideWay?.take && outsideCopy) facts.takeOver[tool] = { kind: outsideWay.take, path: outsideWay.path };
-  const loaded = given && !here ? undefined : loadedCopy(look, key, tool), also = given ? undefined : copyInRead(disk, key, tool);
+  const loaded = pluginLoads && !here ? undefined : loadedCopy(look, key, tool), also = pluginLoads ? undefined : copyInRead(disk, key, tool);
   // The managed tool whose own folder holds a copy, by where it really is: a link's copy is the folder it leads to.
   const holder = (copy: SkillCopy) => { const at = look.managed.find(each => disk.byKey.get(key)?.[each]?.skill.realDirectory === copy.skill.realDirectory); return at ? { in: at } : {}; };
   if (loaded) facts.loads[tool] = { ...switchTarget(loaded), switchedOff: offIn(look.context, disk, key, tool), ...holder(loaded) };

@@ -332,15 +332,16 @@ export const copiesDiffer = (names: readonly string[]) =>
   `${andList([...names])} ${names.length === 1 ? 'has' : 'have'} differing copies. Choose which copy every tool uses${names.length === 1 ? '' : ' for each'}.`;
 
 /**
- * Where an item that is Off is: in Central Knot only; on in the tools that have it through a plugin still on there (`pluginOn`);
- * in Central Knot and the tools with a copy of their own, left alone while it is off (ownCopies), or that still read it another
- * way (otherReaders); in Central Knot, and switched off in the tools that have it another way but don't load it; or, while some
- * installed tool is left out (`leftOut`: its Manage switch off; it keeps whatever it had), in no tool Central Knot manages.
+ * Where an item that is Off is: in Central Knot only; on in the tools that have it through a plugin still on there (`pluginOn`),
+ * where no other tool loads it; in Central Knot and the tools with a copy of their own, left alone while it is off (ownCopies), or
+ * that still read it another way (otherReaders), with those that have it on through a plugin; in Central Knot, and switched off in
+ * the tools that have it another way but don't load it; or, while some installed tool is left out (`leftOut`: its Manage switch
+ * off; it keeps whatever it had), in no tool Central Knot manages.
  */
 function offWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[]) {
   const own = ownCopies(row, item, tools), through = onThrough(row, tools);
   const readers = otherReaders(row, tools), held = outsideCopyIn(row, tools, true);
-  if (readers.length) return `in ${andList(['Central Knot', ...tools.filter(tool => readers.includes(tool) || own.includes(tool) || through.includes(tool)).map(toolName)])}`;
+  if (readers.length || (through.length && own.length)) return `in ${andList(['Central Knot', ...tools.filter(tool => readers.includes(tool) || own.includes(tool) || through.includes(tool)).map(toolName)])}`;
   return through.length ? `on in ${andList(through.map(toolName))} only, through its plugin`
     : own.length ? `in ${andList(['Central Knot', ...own.map(toolName)])}` : held.length ? `in Central Knot · switched off in ${andList(held.map(toolName))}`
     : leftOut.length ? 'in no tool Central Knot manages' : 'in Central Knot only';
@@ -571,10 +572,10 @@ export function sentences(words: RowWords) {
     const place = placeOf(item);
     const unseen = stillIn(row, item, [], tools);
     const own = ownCopies(row, item, tools), through = onThrough(row, tools);
-    const none = through.length ? `${andList(through.map(toolName))} ${through.length === 1 ? 'has' : 'have'} it on through its plugin: its switch there, in the opened row, turns that off.`
-      : own.length ? `${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there, left alone while the ${noun} is off.`
-      : switchedOffWords(row, tools)[0] ?? (leftOut.length ? `No tool it manages has it until you turn it on; ${andList(leftOut.map(toolName))}, left out, ${leftOut.length === 1 ? 'keeps whatever it has' : 'keep whatever they have'}.`
-      : 'No tool has it until you turn it on.');
+    const none = [through.length ? `${andList(through.map(toolName))} ${through.length === 1 ? 'has' : 'have'} it on through its plugin: its switch there, in the opened row, turns that off.` : '',
+      own.length ? `${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there, left alone while the ${noun} is off.` : ''].filter(Boolean).join(' ')
+      || (switchedOffWords(row, tools)[0] ?? (leftOut.length ? `No tool it manages has it until you turn it on; ${andList(leftOut.map(toolName))}, left out, ${leftOut.length === 1 ? 'keeps whatever it has' : 'keep whatever they have'}.`
+      : 'No tool has it until you turn it on.'));
     const owed = andList(removalOwed(row, tools).map(toolName));
     // Its tooltip says why it is where its text says (offPlace): a copy that can't be seen, a removal still owed, or where else it is.
     if (place === 'off') return { text: offPlace(row, item, tools, leftOut), title: unseen.length ? unseen.map(tool => row.unseen![tool]).join(' ')
