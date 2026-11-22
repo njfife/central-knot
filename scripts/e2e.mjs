@@ -12898,8 +12898,11 @@ async function profilePluginsFlow() {
   same('standing rule on Mine shows Turns on note beside per-tool Switching column',
     [await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await b.run(`document.querySelector('${row(issuesId)} .pf-state')?.dataset.state`)],
     [['Turns on in Copilot CLI, which runs the plugin’s “issues” instead of yours (same name).'], 'Turns on in Copilot CLI; turns off in Claude Code and Codex']);
+  check('the header says the plugin’s issues is on in Copilot CLI, as the row says it turns on there: not that it stays on', /; 1 is on in Copilot CLI, through its plugin/.test(await b.text('.profile-header p') ?? ''), await b.text('.profile-header p'));
   if (shots) {
     await b.run(`window.centralKnot.setAppearance('light')`);
+    await sizeTo(b, ...SMALLEST);
+    await b.shot('copilot-shared-turns-on-light-860');
     await sizeTo(b, 1316, 819);
     if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
     await b.run(`document.querySelector('${row(issuesId)}')?.scrollIntoView({ block: 'center' })`);
@@ -13261,6 +13264,14 @@ async function stillLoadsFlow() {
     [skillTaken.tags.filter(tag => !tag.startsWith('from')), skillTaken.tools], [['in 5 of 5 tools · 3 run their own copies · OpenCode has it another way'],
       [['claude-cli', 'false', 'Its own copy'], ['copilot-cli', 'false', 'Its own copy'], ['codex-cli', 'false', 'Its own copy'], ['pi-cli', 'true', 'On'], ['opencode-cli', 'false', 'Another way']]]);
   await pictures('still-loads-taken-skill');
+  // His skill one kept out of OpenCode, which reads Claude Code's folder, where Central Knot's copy stays: OpenCode still loads it.
+  same('one is kept out of OpenCode', await a.run(`window.centralKnot.applySkills([{ key: 'one', on: true, except: ['opencode-cli'] }], false, ${JSON.stringify(home)}).then(result => result.stopped ?? 'ok')`), 'ok');
+  await a.click('#header-refresh');
+  await done();
+  const keptOut = await rowNow('skills', 'one');
+  same('its row counts OpenCode, which reads Claude Code’s copy, and OpenCode’s switch, unticked, says it has it another way',
+    [keptOut.tags, keptOut.tools.find(([tool]) => tool === 'opencode-cli')], [['in 5 of 5 tools · OpenCode has it another way'], ['opencode-cli', 'false', 'Another way']]);
+  await pictures('still-loads-kept-out-reader');
   await a.quit();
 }
 

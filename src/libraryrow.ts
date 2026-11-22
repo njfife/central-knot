@@ -466,13 +466,14 @@ export function whereAdded(row: LibraryRow, item: LibraryItem | undefined, tools
 const cannotHave = (row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) =>
   tools.filter(tool => harnessIs(row, item, tool) === 'cannot' && row.hashes?.[tool] === undefined);
 /**
- * The home's harnesses that load an item (loadsFrom), as its tag and its switch count them: one it is kept out of only where it
- * loads a copy Central Knot doesn't write there (a take, library.ts TAKE, leaves his so), not where Central Knot's leaves when sync
- * runs. Of those kept out, `own` run a copy of their own; `another` have it another way (another tool's folder, a link, a plugin).
+ * The home's harnesses that load an item (loadsFrom), as its tag and its switch count them: one it is kept out of only where its
+ * copy stays so, one Central Knot doesn't write there (a take, library.ts TAKE, leaves his so) or Central Knot's in another tool's
+ * folder it reads, not Central Knot's in its own, which leaves when sync runs. Of those kept out, `own` run a copy of their own;
+ * `another` have it another way (another tool's folder, a link, a plugin).
  */
 export function loadingIn(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
   const out = (tool: string) => !!item?.except.includes(tool as HarnessId), from = (tool: string) => loadsFrom(row, item, tool);
-  const loading = tools.filter(tool => (from(tool) === 'central-knot' && !out(tool)) || from(tool) === 'elsewhere' || from(tool) === 'plugin');
+  const loading = tools.filter(tool => (from(tool) === 'central-knot' && (!out(tool) || row.hashes?.[tool] === undefined)) || from(tool) === 'elsewhere' || from(tool) === 'plugin');
   const own = loading.filter(tool => out(tool) && harnessIs(row, item, tool) === 'own-copy');
   return { loading, own, another: loading.filter(tool => out(tool) && !own.includes(tool)) };
 }

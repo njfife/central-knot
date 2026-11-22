@@ -53,8 +53,11 @@ export const pluginItemId = (kind: ItemKind, key: string) => `plugin:${itemId(ki
  * (libraryrow.ts keptByOff, from the view: homeItems).
  */
 export interface LiveItem { id: string; kind: ItemKind; key: string; name: string; on: boolean; except: LibraryItem['except']; copilotOff?: string; loadsElsewhere?: KeptOn }
-/** The tools that keep an item on once a switch turns it off, and how (keptOn): one way all of them share (libraryrow.ts LoadWay), or a plugin's copy. */
-export interface KeptOn { tools: HarnessId[]; how?: LoadWay | 'plugin' }
+/**
+ * The tools that keep an item on once a switch turns it off, and how (keptOn): one way all of them share (libraryrow.ts LoadWay),
+ * or a plugin's copy, `turnsOn` where the switch itself turns one of them on (Copilot CLI's, by its shared name).
+ */
+export interface KeptOn { tools: HarnessId[]; how?: LoadWay | 'plugin'; turnsOn?: true }
 
 /** Each kind's items as the library holds them, deleted ones too (types.ts LibraryView `library`, or a kind's record). */
 export type Libraries = Record<ItemKind, Record<string, LibraryItem>>;
@@ -406,11 +409,14 @@ export const changes = (turns: { on: unknown[]; off: unknown[] }) => turns.on.le
 
 /**
  * The tools that keep an item on once a switch turns it off, from a copy Central Knot doesn't write: a library item's
- * (`loadsElsewhere`); a plugin's (from its copies' own fields), each copy on now or that `turn` (its pluginPlan) turns on, and
- * not one it turns off. Asked before a switch it projects; asked of the view after one (no `turn`), it reads back.
+ * (`loadsElsewhere`); a plugin's (from its copies' own fields), each copy on now or that `turn` (its pluginPlan; after a switch,
+ * the copies its entry turned on) turns on, and not one it turns off. Asked before a switch it projects; after one, it reads back.
  */
-export const keptOn = (item: LiveItem | PluginLive, turn?: PluginTurn): KeptOn => ('copies' in item ? { tools: item.copies
-  .filter(copy => (copy.on || !!turn?.on.includes(copy.tool)) && copy.way !== 'unread' && !turn?.off.includes(copy.tool)).map(copy => copy.tool), how: 'plugin' } : item.loadsElsewhere ?? { tools: [] });
+export function keptOn(item: LiveItem | PluginLive, turn?: Pick<PluginTurn, 'on' | 'off'>): KeptOn {
+  if (!('copies' in item)) return item.loadsElsewhere ?? { tools: [] };
+  const tools = item.copies.filter(copy => (copy.on || !!turn?.on.includes(copy.tool)) && copy.way !== 'unread' && !turn?.off.includes(copy.tool)).map(copy => copy.tool);
+  return { tools, how: 'plugin', ...(tools.some(tool => turn?.on.includes(tool)) ? { turnsOn: true as const } : {}) };
+}
 
 /** How items still load (keptOn), said once: the way they all share, else "another way". */
 export const loadWords = (kept: KeptOn[]) => (new Set(kept.map(each => each.how)).size === 1 && kept[0]?.how && kept[0].how !== 'plugin'
@@ -419,15 +425,18 @@ export const loadWords = (kept: KeptOn[]) => (new Set(kept.map(each => each.how)
 export function stillLoadWords(kept: KeptOn[]): string {
   const where = (list: KeptOn[]) => orList([...new Set(list.flatMap(each => each.tools))].sort(byToolOrder).map(tool => toolNames[tool]));
   const own = kept.filter(each => each.tools.length && each.how !== 'plugin'), plugin = kept.filter(each => each.tools.length && each.how === 'plugin');
+  // One the switch turns on was off there: it is on, it doesn't stay on.
+  const [one, many] = plugin.some(each => each.turnsOn) ? ['is', 'are'] : ['stays', 'stay'];
   return [own.length ? `${own.length} still ${own.length === 1 ? 'loads' : 'load'} ${loadWords(own)}, in ${where(own)}` : '',
-    plugin.length ? `${plugin.length} ${plugin.length === 1 ? 'stays' : 'stay'} on in ${where(plugin)}, through ${plugin.length === 1 ? 'its plugin' : 'their plugins'}` : '']
+    plugin.length ? `${plugin.length} ${plugin.length === 1 ? one : many} on in ${where(plugin)}, through ${plugin.length === 1 ? 'its plugin' : 'their plugins'}` : '']
     .filter(Boolean).map(part => `; ${part}`).join('');
 }
 
 /** What a switch's result adds of the items its entry turned off that still load, asked of the view after it (`home`). */
 export function stillLoadAfter(entry: NonNullable<HistoryEvent['profile']>, home: PluginHome): string {
   const off = new Set(entryTurns(entry).off.map(each => each.id)), plugins = pluginLive(home);
-  return stillLoadWords([...homeItems(home, plugins).filter(item => !item.on), ...plugins].filter(item => off.has(item.id)).map(item => keptOn(item)));
+  const turnedOn = (id: string) => ({ on: (entry.plugins ?? []).filter(copy => copy.id === id && copy.on).map(copy => copy.tool), off: [] });
+  return stillLoadWords([...homeItems(home, plugins).filter(item => !item.on), ...plugins].filter(item => off.has(item.id)).map(item => keptOn(item, turnedOn(item.id))));
 }
 
 /**

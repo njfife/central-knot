@@ -283,6 +283,16 @@ test('After a take, a tool kept out that reads another tool’s copy of his is a
     'triage: on in 5 of 5 tools; 3 run their own copies; OpenCode has it another way. Click to take it out of every tool; Central Knot keeps it.']);
 });
 
+test('Kept out of OpenCode, which reads Claude Code’s folder where Central Knot’s copy stays: OpenCode still loads it, counted and said as having it another way', () => {
+  const three = ['claude-cli', 'codex-cli', 'opencode-cli'], skills = sentences(libraryWords.skills);
+  const notes = { ...newItem('notes', 'notes'), on: true, hash: 'a', except: ['opencode-cli'] as HarnessId[], applied: { 'claude-cli': 'a', 'codex-cli': 'a' } };
+  const hashes = { 'claude-cli': 'a', 'codex-cli': 'a' }, copies = Object.fromEntries(Object.entries(hashes).map(([tool, hash]) => [tool, { is: 'present', hash, at: 0 }])) as Copies;
+  const row: LibraryRow = { key: 'notes', name: 'notes', hashes, plan: plan(notes, copies), anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.' },
+    loads: { 'opencode-cli': { folder: 'notes', name: 'notes', skillFile: '~/.claude/skills/notes/SKILL.md', switchedOff: false, in: 'claude-cli' } } };
+  assert.deepEqual([skills.placeTag(row, notes, three)?.text, switchLabel(row, notes, three)],
+    ['in 3 of 3 tools · OpenCode has it another way', 'notes: on in 3 of 3 tools; OpenCode has it another way. Click to take it out of every tool; Central Knot keeps it.']);
+});
+
 test('What a result says of Off skills tools still read another way, one click and a run alike: one sentence for the skills the same tools read, none for a tool whose own switch has it off', () => {
   const five = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
   // Read by `readers` through a link into the shared folder, with no copy of Central Knot's; `off`: those whose own switch has it off.

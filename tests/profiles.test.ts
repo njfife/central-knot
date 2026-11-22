@@ -1619,10 +1619,11 @@ test('Copilot shared name sequences: (a) box-written rule flips on in Copilot CL
       const mine = await made('Mine', ['mcp:issues', pdfId2, sheetId2]);
       const planNow = await sideNow(box);
       const mineProfile = (await readProfiles(box.home)).profiles.find(each => each.id === mine)!;
-      // The plugin's issues turns off in Claude Code and Codex and on in Copilot CLI, where it then runs: the header says so, as the result does.
-      assert.equal(switchPreview(mineProfile, planNow.live, planNow.plugins), 'Switching turns 1 item on and 1 off; 1 stays on in Copilot CLI, through its plugin');
+      // The plugin's issues turns off in Claude Code and Codex and on in Copilot CLI, where it then runs: the header says so, as the
+      // result does, in words true before the click and after it ("is on", not "stays on": it was off there).
+      assert.equal(switchPreview(mineProfile, planNow.live, planNow.plugins), 'Switching turns 1 item on and 1 off; 1 is on in Copilot CLI, through its plugin');
       const switched = await switchProfile(box.context, box.tools, mine, planNow.side);
-      assert.equal(stillLoadAfter(switched.profile!, (await sideNow(box)).view), '; 1 stays on in Copilot CLI, through its plugin');
+      assert.equal(stillLoadAfter(switched.profile!, (await sideNow(box)).view), '; 1 is on in Copilot CLI, through its plugin');
       assert.deepEqual([switched.on, switched.off, switched.results, switched.settingsChanged], [['issues'], ['issues'], [],
         ['Copilot CLI’s off-switch for “issues” was cleared; there the plugin’s “issues” runs, not yours (same name).']]);
       assert.equal(turnsWords(entryTurns((await history(box)).at(-1)!.profile!), 'did'), '1 item turned on and 1 turned off');
