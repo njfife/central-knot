@@ -49,7 +49,7 @@ import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { homePass, passTells, syncOnceReport, takenInReloads, type HomePass } from './homepass.ts';
 import { deleteProfile, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
 import { homeItems, inUse, inUseName, pluginLive, switchable, switchPreview, type LiveItem, type PluginHome, type PluginLive } from './profileplan.ts';
-import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil } from './model.ts';
+import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil, oneTurn } from './model.ts';
 import { keepEntries, linuxPlaces, placeAutostart, readAutostart, signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
 import { machineNames, writesRealHome } from './machine.ts';
@@ -622,9 +622,11 @@ interface ServersAndAgentsResult { serverNotices: SyncNotice[]; agentNotices: Sy
  * `synced`: the original results by kind for Sync once. `seen`: what a person would see of the home as the pass read it
  * (homepass.ts pageSees), compared with what the page was last given (seenChanged).
  * `told`: what the page is told of the pass, every kind alike (homepass.ts passTells); `done`: every result of the pass, all
- * three kinds, for a caller that says what it did (a tool's Manage switch).
+ * three kinds, for a caller that says what it did (a tool's Manage switch). `kept`: a pass for a view whose every kind left the
+ * home as it read it (homepass.ts HomePass untouched): each kind's read and the plugins it read, for that view (syncAndView).
  */
-interface BackgroundPass { synced?: HomePass['synced']; seen?: string; skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; told?: ReturnType<typeof passTells>; done?: DestinationResult[] }
+interface BackgroundPass { synced?: HomePass['synced']; seen?: string; skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; told?: ReturnType<typeof passTells>;
+  done?: DestinationResult[]; kept?: Pick<ShareContext, 'kept' | 'reads'> }
 
 /** Each reason the move of plugin parts waited that the log has had this launch (pass). */
 const partsWaitsLogged = new Set<string>();
@@ -639,12 +641,12 @@ let partsWaiting: string | undefined;
  * before profiles were sets of items is moved before anything else, either way (it does nothing once moved), so no click
  * comes before it.
  */
-async function pass(snapshots: Snapshot[], explicit = false): Promise<BackgroundPass> {
-  const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map() };
+async function pass(snapshots: Snapshot[], explicit = false, forView = false): Promise<BackgroundPass> {
+  const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map(), ...(forView ? { kept: new Map() } : {}) };
   // While plugin parts from before the library wait to be moved there, the plugins record's first read comes first (its install
   // alpha 1 waited for read from pluginUpdates, made before any pass), and the move may read a plugin (homepass.ts step 2).
   const pluginNow = await carriedMarket?.beforeParts().catch((error: unknown) => { logFailure('plugins record', error); return undefined; });
-  const { synced, seen, seenFailed, profilesFailed, partsFailed, partsWait } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
+  const { synced, seen, seenFailed, profilesFailed, partsFailed, partsWait, untouched } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
   partsWaiting = partsWait;
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
   if (partsFailed !== undefined) logFailure('moving plugin parts', partsFailed);
@@ -656,7 +658,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   const { skills, servers, agents } = synced;
   return { synced, seen, skills: skills ?? { results: [], writes: 0, reloads: [] }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
-    changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) } };
+    changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) }, ...(untouched && forView ? { kept: { kept: shared.kept, reads: shared.reads } } : {}) };
 }
 
 /**
@@ -680,9 +682,8 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   // First, so the held screen is shown before any pass could write: held, the pass below meets writeAccess's refusal. A record
   // taken over on the way is said with the view (a click on the held screen says it itself: carryOn).
   const tookOver = await lookForOthers();
-  const shared: ShareContext = { ...context(), reads: new Map() };
-  const before = await read();
-  const passes = explicit ? await explicitPass(before) : [await pass(before)];
+  const nudgedBefore = nudges, before = await read();
+  const passes = explicit ? await explicitPass(before) : [await pass(before, false, true)];
   const passed = passes[passes.length - 1], { skills } = passed;
   passes.forEach(keepPass);
   lookAgainSoon(passed);
@@ -692,8 +693,11 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   const caughtUp = pendingResults.splice(0), notices = pendingNotices.splice(0);
   const profiles = await readProfiles(current!.home);
   // The home is read again after a pass that may have written (Sync on, or Sync once): a pass that stopped part-way reports
-  // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing.
+  // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing. A pass whose every kind
+  // left the home as it read it gives the view its reads (each kind's taken by its view's look: librarypass.ts lookFor), unless
+  // the watcher has seen any change since that read began: then the view reads afresh.
   const snapshots = skills && (syncOn || explicit) ? await read() : before;
+  const shared: ShareContext = { ...context(), reads: new Map(), ...(nudges === nudgedBefore ? passed.kept : {}) };
   const writable = (await writeAccess(shared)).allowed;
   const managed = await managedNow(shared, snapshots), present = presentTools(snapshots);
   const syncEverything = (await readRecord(current!.home)).record?.syncEverything;
@@ -709,7 +713,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
     agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
   };
   // What plugins installed whole bring, read with the home so the Library shows it without Plugins.
-  // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
+  // With the view's reads (its pass's, where it gives them), so each tool's installed plugins are read once for these rows and the boxes.
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
   // Whose own record of its plugins can't be read, as the Plugins page finds it (marketplaces.ts look): what it has isn't known.
   const records = pluginItemsContext(shared.overrides, shared.reads);
@@ -957,11 +961,11 @@ const settling = ({ skills, serversAndAgents }: BackgroundPass) => skills?.settl
 
 /** Only when a kind reports settling, Sync once waits out the window and reads afresh once. */
 async function explicitPass(snapshots: Snapshot[]): Promise<BackgroundPass[]> {
-  const first = await pass(snapshots, true);
+  const first = await pass(snapshots, true, true);
   if (!settling(first)) return [first];
   send('said', 'Waiting briefly in case a tool is still saving its files…');
   await new Promise(done => setTimeout(done, AFTER_SETTLE_MS));
-  return [first, await pass(await read(), true)];
+  return [first, await pass(await read(), true, true)];
 }
 
 /**
@@ -1021,6 +1025,8 @@ async function profilesSaved(): Promise<ProfilesView> {
  * have turned, which changes no content and so no write: the page reads again for it whether or not the pass wrote.
  */
 let touched = false, settingsTouched = false;
+/** How many watcher events have come since launch: a view compares it across its pass (syncAndView). */
+let nudges = 0;
 
 /** The tools Central Knot manages in the open home, read now: the one way the requests below learn them. */
 const toolsNow = async (): Promise<HarnessId[]> => managedNow(context(), await read());
@@ -1058,7 +1064,9 @@ function toolsChangedHere(snapshots: Snapshot[]): boolean {
   return changed;
 }
 
-function queueBackgroundPass() { if (current && !smoke) void queued(backgroundPass).catch(() => undefined); }
+/** The background pass's turn in the queue: one waiting there stands for every ask made meanwhile (model.ts oneTurn). */
+const askForPass = oneTurn(queued, () => backgroundPass());
+function queueBackgroundPass() { if (current && !smoke) askForPass(); }
 
 async function backgroundPass() {
   if (!current) return;
@@ -1088,7 +1096,7 @@ async function backgroundPass() {
   if (changed || wrote) send('sync:changed');
 }
 
-const nudge = (settings = false) => { touched = true; settingsTouched ||= settings; clearTimeout(soon); soon = setTimeout(queueBackgroundPass, DEBOUNCE_MS); };
+const nudge = (settings = false) => { nudges++; touched = true; settingsTouched ||= settings; clearTimeout(soon); soon = setTimeout(queueBackgroundPass, DEBOUNCE_MS); };
 
 /** Stops watching the folders and the poll; passes already due (an edit's debounce, a deletion's settle) still run. */
 function closeWatchers() {

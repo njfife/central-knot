@@ -131,3 +131,39 @@ test('A pass under way while another build re-records the home as its own runs t
     assert.equal((await readRecord(context.home)).record?.owner, 'other');
   } finally { await cleanup(); }
 });
+
+test('A pass that changes nothing leaves its read for the look made right after it (main.ts syncAndView), taken once and as it was read; a pass that writes leaves none', async () => {
+  const { context, cleanup } = await sandbox();
+  try {
+    // Each tool gets a copy of its own here (OpenCode doesn't read Claude Code's folder), and each read of the home is counted.
+    const toy = noteKind();
+    let reads = 0;
+    const kind: Kind<string, Note> = { ...toy, read: async (at, managed, library) => { reads++; return { ...await toy.read(at, managed, library), held: () => undefined }; } };
+    await writeFile(join(folderOf(context, 'claude-cli'), 'plan.txt'), 'Plan.\n');
+    await runPass(kind, context, tools, [click(true, [])]);
+    const kept = new Map(), passing = { ...context, kept }, looking = () => lookFor(kind, { ...context, kept }, tools);
+    reads = 0;
+    assert.equal((await runPass(kind, passing, tools, [])).untouched, true, 'a pass with nothing to do');
+    const { look, live } = await looking();
+    assert.equal(reads, 1, 'the look right after it is made from its read');
+    assert.deepEqual(copiesOf(look, live[0])['opencode-cli'], { is: 'present', hash: hashOf('Plan.\n'), at: 0 });
+    await looking();
+    assert.equal(reads, 2, 'taken once: the next look reads the home');
+    // An edit by hand, which the pass writes into OpenCode: the home is no longer as it read it, so the look reads it again.
+    await writeFile(join(folderOf(context, 'claude-cli'), 'plan.txt'), 'Plan, edited.\n');
+    const wrote = await runPass(kind, passing, tools, []);
+    assert.deepEqual([wrote.writes, wrote.untouched], [1, undefined]);
+    reads = 0;
+    const after = await looking();
+    assert.deepEqual([reads, copiesOf(after.look, after.live[0])['opencode-cli']], [1, { is: 'present', hash: hashOf('Plan, edited.\n'), at: 0 }]);
+    // OpenCode's folder gone inside the settle window: the pass's guard holds that tool unseen and writes nothing. The look made
+    // from that read says what a look of its own says (the window read as passed: written afresh), not what the guard noted.
+    await rm(folderOf(context, 'opencode-cli'), { recursive: true });
+    const waiting = { ...context, settleMs: 60_000 };
+    await runPass(kind, waiting, tools, []);
+    assert.equal((await runPass(kind, { ...waiting, kept }, tools, [])).untouched, true, 'inside the window: nothing to do');
+    const own = await lookFor(kind, context, tools), taken = await looking();
+    assert.deepEqual(copiesOf(taken.look, taken.live[0]), copiesOf(own.look, own.live[0]));
+    assert.equal(copiesOf(taken.look, taken.live[0])['opencode-cli']?.is, 'absent');
+  } finally { await cleanup(); }
+});

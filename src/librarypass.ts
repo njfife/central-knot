@@ -25,8 +25,8 @@
 //                  its copy (Kind.follow: Pi's skills list) are kept in step, and what that changed is added to what was told
 //   keepFolders    the folder identities the next pass compares with
 //
-// Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved), so a mark says what a pass
-// will do, and a found row's answers from the take-in table (takeInAnswers); History entries' actions (restoreAll; restore for one),
+// Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved; or the read a pass just before
+// left standing, KeptReads), so a mark says what a pass will do, and a found row's answers from the take-in table (takeInAnswers); History entries' actions (restoreAll; restore for one),
 // decided on the copies as this look reads them now (itemsNow), each always one of the clicks above; and for the tool choice (toolchoice.ts), folders let go (forgetFolders) and what managing
 // a tool would do there, counted from the same look with it added (joinCounts). What the Library shows, and how the Git
 // repo reads it, stay with the kind (agents.ts agentsView and agentsForRepo, skills.ts skillsView and skillsForRepo, servers.ts
@@ -280,15 +280,19 @@ type AnyLook = Look<unknown, Seen, Disk<Seen>>;
 
 /**
  * Reads the managed harnesses once, with every copy of a plugin's part from before the library unseen while it waits to be moved
- * there (partsmigrate.ts hideParts). The guards come after (guardFolders), once a pass's clicks are on its items.
+ * there (partsmigrate.ts hideParts), or takes a pass's read left standing (`kept`, which has those already). The guards come
+ * after (guardFolders), once a pass's clicks are on its items.
  */
 async function lookAt<C, E extends Seen, D extends Disk<E>>(
-  kind: Kind<C, E, D>, context: ShareContext, managed: HarnessId[], library: KindLibrary, settle?: Look<C, E, D>['settle'],
+  kind: Kind<C, E, D>, context: ShareContext, managed: HarnessId[], library: KindLibrary, settle?: Look<C, E, D>['settle'], kept?: Disk<Seen>,
 ): Promise<Look<C, E, D>> {
-  const disk = await kind.read(context, managed, library);
-  await hideParts(context.home, kind.kind, managed, disk.unseen);
+  const disk = kept ? kept as D : await kind.read(context, managed, library);
+  if (!kept) await hideParts(context.home, kind.kind, managed, disk.unseen);
   return { kind, context, managed, library, disk, foldersNow: {}, givingWay: new Map(), settle };
 }
+
+/** Each kind's read that its pass left standing (runPass `untouched`), as read: what hideParts noted on it, not its guards (ShareContext kept). */
+export type KeptReads = Map<ItemKind, { managed: readonly HarnessId[]; disk: Disk<Seen> }>;
 
 /**
  * The page's look, and Push's (agents.ts agentsForRepo): the same reading a pass makes, with the guards applied to the items
@@ -297,7 +301,10 @@ async function lookAt<C, E extends Seen, D extends Disk<E>>(
 export async function lookFor<C, E extends Seen, D extends Disk<E>>(kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[]) {
   const { library, problem } = await kind.open(context);
   const live = Object.values(library.items).filter(item => !item.deleted);
-  const look = await lookAt(kind, context, kind.harnesses(tools), library);
+  // A pass's read left for this look (KeptReads), taken once: no two looks share one Disk.
+  const managed = kind.harnesses(tools), kept = context.kept?.get(kind.kind);
+  context.kept?.delete(kind.kind);
+  const look = await lookAt(kind, context, managed, library, undefined, kept?.managed.join() === managed.join() ? kept.disk : undefined);
   await guardFolders(look, live);
   return { look, live, problem };
 }
@@ -651,6 +658,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const saved = JSON.stringify(library);
   const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? SETTLE_MS, settling: false };
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
+  const asRead = context.kept && new Map(look.disk.unseen); // before this pass's guards note more on it (guardFolders)
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
   const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [], followed: new Map() };
   await deletionsTold(pass);
@@ -681,8 +689,13 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   }
   keepFolders(library, pass.foldersNow, managed, !options.only && !sourceScope);
   await saveIfChanged(pass);
-  return { results: pass.results, writes: pass.writes, reloads: destinationReloads(pass.results, kind.kind), notices: pass.notices, settling: settle.settling, made: pass.made,
-    ...(options.background ? { found: foundNow(pass), unread } : {}), ...(options.source ? { sourced: [...pass.sourced.values()] } : {}) };
+  // Nothing written, removed or tried in a harness after the read, no setting followed, the record as opened: the read still
+  // stands (KeptReads), unless its kind writes after this pass (servers.ts releaseKeptDenies takes it back).
+  const untouched = !pass.results.length && !pass.followed.size && pass.saved === saved;
+  const done: PassResult = { results: pass.results, writes: pass.writes, reloads: destinationReloads(pass.results, kind.kind), notices: pass.notices, settling: settle.settling, made: pass.made,
+    ...(options.background ? { found: foundNow(pass), unread } : {}), ...(options.source ? { sourced: [...pass.sourced.values()] } : {}), ...(untouched ? { untouched: true as const } : {}) };
+  if (untouched && asRead) context.kept?.set(kind.kind, { managed, disk: Object.assign(look.disk, { unseen: asRead }) });
+  return done;
 }
 
 /**

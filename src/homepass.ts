@@ -34,10 +34,12 @@ import type { DestinationResult, HarnessId, PassResult, Reason } from './types.t
  * is absent when it crashed, and the crash is in `crashes`. `profilesFailed`, `partsFailed`: why step 1 or 2 failed, for the log;
  * `partsWait`: why step 2 waits, for the log and the Plugins page (main.ts keeps it: MarketplaceHost partsWait). `seen`: what
  * a person would see of the home as step 3 read it (pageSees); absent where that isn't known. `seenFailed`: why pageSees threw,
- * for the log.
+ * for the log. `untouched`: every kind's pass of step 3 left the home as it read it (types.ts PassResult untouched), so a view
+ * made right after may be made from those reads (main.ts syncAndView); absent where one wrote, stopped, crashed or didn't run.
  */
 export interface HomePass {
   synced?: { skills?: PassResult; servers?: PassResult; agents?: PassResult; crashes: DestinationResult[] };
+  untouched?: true;
   seen?: string;
   seenFailed?: unknown;
   profilesFailed?: unknown;
@@ -73,7 +75,8 @@ export async function homePass(context: ShareContext, managed: HarnessId[], writ
   let seenFailed: unknown;
   const synced = { skills, servers, agents, crashes };
   const seen = await pageSees(context, managed, synced).catch((error: unknown) => { seenFailed = error ?? 'failed'; return undefined; });
-  return { ...failure, synced, ...(seen ? { seen } : {}), ...(seenFailed === undefined ? {} : { seenFailed }) };
+  const untouched = [skills, servers, agents].every(done => done?.untouched);
+  return { ...failure, synced, ...(seen ? { seen } : {}), ...(seenFailed === undefined ? {} : { seenFailed }), ...(untouched ? { untouched: true as const } : {}) };
 }
 
 /**

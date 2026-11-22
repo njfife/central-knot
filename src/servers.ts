@@ -205,6 +205,8 @@ async function releaseKeptDenies(context: ShareContext, tools: HarnessId[], done
   const { library } = await openLibrary(context);
   const wanted = kept.filter(name => { const item = library.items[itemKey(name)]; return !!item && wantedIn(item, 'claude-cli'); });
   if (!wanted.length) return done;
+  // Claude Code's settings are written after the pass: its read no longer stands (librarypass.ts KeptReads).
+  context.kept?.delete('mcp'); delete done.untouched;
   const file = mcpSwitchPath(context, 'claude-cli');
   try {
     const text = await readFile(file, 'utf8').catch(error => { if (errorCode(error) === 'ENOENT') return ''; throw error; });
