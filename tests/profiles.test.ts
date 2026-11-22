@@ -1015,6 +1015,17 @@ test('A plugin’s triage with other content is another item: nothing is said of
   } finally { await box.cleanup(); }
 });
 
+test('His triage kept out of Claude Code, where a plugin’s triage with other content is on: a switch that turns his off says nothing of Claude Code, before it or after it', async () => {
+  const { box, made, preview, result } = await kitHome({ triage: 'Another triage.' });
+  try {
+    // Kept out: Central Knot's copy leaves Claude Code, so no copy of his is there to hide the plugin's another skill of that name.
+    await applySkills(box.context, box.tools, [{ key: 'triage', on: true, except: ['claude-cli'] }]);
+    const quiet = await made('Quiet', ['skill:keep']);
+    assert.deepEqual([await bytes(folderOf(box, 'claude-cli', 'triage')), await preview('Quiet')], [undefined, 'Switching turns 1 item off']);
+    assert.equal(await result(quiet), '1 item turned off');
+  } finally { await box.cleanup(); }
+});
+
 test('His triage only in the shared folder, which Codex reads, and through the plugin in Claude Code: one item, still loading another way, in either', async () => {
   const { box, made, preview } = await kitHome({ shared: ['triage'] });
   try {
