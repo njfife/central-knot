@@ -6939,6 +6939,30 @@ async function rootSkillPage() {
   await a.click('#pupdate-0-root-fixture');
   await busy();
   same('its Update to another pin writes the new text into the same folder', await seen(), [['root-fixture'], ['skill:root-fixture'], 'Second root text.']);
+  // The update's Undo in History (Automatic sync on: a pass follows the click), then Refresh: the first text is back and still
+  // the plugin's (library.ts A PLUGIN, TAKEN BACK); its page offers Update, which brings the second back.
+  const piText = () => readFileSync(join(home, '.pi/agent/skills/root-fixture/SKILL.md'), 'utf8').trim().split('\n').at(-1);
+  await a.click('#nav-history');
+  const undo = `[...document.querySelectorAll('.history-row[data-kind="edit"]')].find(row => row.textContent.includes('root-fixture'))?.querySelector('.history-actions button[id^="history-"]')`;
+  for (let tries = 0; tries < 50 && !(await a.run(`!!${undo}`)); tries++) await wait(100);
+  same('History offers the update’s Undo', await a.run(`${undo}?.textContent`), 'Undo');
+  await a.run(`${undo}.click()`);
+  await busy();
+  for (let tries = 0; tries < 50 && piText() !== 'First root text.'; tries++) await wait(100);
+  await a.click('#header-refresh');
+  await busy();
+  await openKind(a, 'skills');
+  const row = `.ov-row[data-key="${rowPart('', 'skills', 'root-fixture')}"]`;
+  for (let tries = 0; tries < 50 && !(await a.exists(row)); tries++) await wait(100);
+  same('undone, Pi has the first text, its row still says the plugin’s, and nothing says it is his own now', [piText(), /from the plugin/.test(await a.text(row) ?? ''), /your own now/.test(await a.run(`document.querySelector('#notices')?.title ?? ''`) ?? '')], ['First root text.', true, false]);
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-root-fixture');
+  for (let tries = 0; tries < 100 && !(await a.exists('#pupdate-0-root-fixture')); tries++) await wait(100);
+  same('its page offers Update for it, and no Use the plugin’s', [await a.text('.plugin-items-list [data-key="skill:root-fixture"] .plugin-outcome-what'), await a.exists('#pupdate-0-root-fixture'), await a.exists('.plugin-tool-yours')],
+    ['An update is ready: Update brings it in', true, false]);
+  await a.click('#pupdate-0-root-fixture');
+  await busy();
+  same('Update brings the plugin’s second text back', await seen(), [['root-fixture'], ['skill:root-fixture'], 'Second root text.']);
   same('no page errors, a root skill’s pin', a.pageErrors, []);
   await a.quit();
 }
