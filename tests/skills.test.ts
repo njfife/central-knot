@@ -19,8 +19,10 @@ import { chooseTools } from '../src/toolchoice.ts';
 import { forgetMissing } from '../src/librarypass.ts';
 import { readRecord, saveRecord } from '../src/share.ts';
 import { clickResults } from '../src/clickplan.ts';
+import { setSyncEverything } from '../src/everything.ts';
 import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import type { HarnessId, PassResult } from '../src/types.ts';
+import { toolsPhrase } from '../src/words.ts';
 import { bytes, choose, everywhere, folderOf, historyActions, historyOf, inTool, itemOf, makeCurrent, pass, put, remove, restore, roots, sandbox, seen, send, skillText, tools, turnOff, turnOn, type Box, type Tool } from './skillclicks.ts';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 10, 12, 9, minutes));
@@ -1145,6 +1147,153 @@ test('A folder that can’t be written holds the write there, and the tool catch
     await pass(box);
     assert.ok(await bytes(folderOf(box, 'codex-cli')));
   } finally { await chmod(join(box.home, roots['codex-cli']), 0o755).catch(() => undefined); await box.cleanup(); }
+});
+
+test('Clicking Add, On, or a tool’s switch with a locked skills folder names that tool and says why, while background passes and History stay unchanged', { skip: process.getuid?.() === 0 }, async t => {
+  const lockedWhy = 'Codex’s skills folder can’t be written, so Central Knot can’t change the skill there. Once the folder’s permissions let it, Codex catches up when sync runs.';
+  const withLockedCodex = async (run: (box: Box, codexRoot: string) => Promise<void>) => {
+    const box = await sandbox(), codexRoot = join(box.home, roots['codex-cli']);
+    try { await run(box, codexRoot); } finally { await chmod(codexRoot, 0o755).catch(() => undefined); await box.cleanup(); }
+  };
+  await t.test('Add of a found skill read before Codex is locked names Claude Code and Copilot CLI, not Codex', () => withLockedCodex(async (box, codexRoot) => {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Fifth skill.', 'fifth') }, [], 'fifth');
+    const before = await seen(box, box.context, 'fifth');
+    await chmod(codexRoot, 0o555);
+    const added = await send(box, rowClicks.on(before.row, before.item));
+    const addRes = clickResults(added.results, ['fifth']);
+    assert.deepEqual([addRes.notIn, addRes.failed], [['codex-cli'], true]);
+    assert.deepEqual(addRes.ours.filter(entry => entry.harness === 'codex-cli'), [{ item: 'fifth', harness: 'codex-cli', outcome: 'held', message: lockedWhy }]);
+    assert.equal(say.said.takenIn('fifth', tools.filter(tool => !addRes.notIn.includes(tool)), tools), 'fifth is in Central Knot now, and on in Claude Code and Copilot CLI.');
+    assert.deepEqual([(await historyOf(box, box.context, 'fifth')).at(-1)!.losers.map(loser => loser.tool), await bytes(folderOf(box, 'codex-cli', 'fifth'))], [['copilot-cli'], undefined]);
+    assert.deepEqual((await pass(box)).results, [], 'a background pass says nothing new');
+  }));
+  await t.test('On for an Off skill names Claude Code and Copilot CLI and says not in Codex', () => withLockedCodex(async (box, codexRoot) => {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Fifth skill.', 'fifth') }, [], 'fifth');
+    await turnOn(box, box.context, 'fifth');
+    await turnOff(box, box.context, 'fifth');
+    await chmod(codexRoot, 0o555);
+    assert.equal((await seen(box, box.context, 'fifth')).fact!.cannot['codex-cli'], undefined);
+    const turnedOn = await turnOn(box, box.context, 'fifth');
+    assert.ok(turnedOn !== 'choose');
+    const onRes = clickResults(turnedOn.results, ['fifth']);
+    assert.deepEqual([onRes.notIn, onRes.failed], [['codex-cli'], true]);
+    assert.equal(`fifth is on in ${toolsPhrase(tools.filter(tool => !onRes.notIn.includes(tool)), tools)}; not in ${toolsPhrase(onRes.notIn, tools)}.`, 'fifth is on in Claude Code and Copilot CLI; not in Codex.');
+    assert.deepEqual((await historyOf(box, box.context, 'fifth')).at(-1)!.losers.map(loser => loser.tool), ['claude-cli', 'copilot-cli']);
+    assert.deepEqual((await pass(box)).results, []);
+  }));
+  await t.test('Codex’s switch from kept out to on says couldn’t be put in Codex, and catches up once writable', () => withLockedCodex(async (box, codexRoot) => {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Fifth skill.', 'fifth') }, [], 'fifth');
+    await turnOn(box, box.context, 'fifth');
+    const { row: onRow, item: onItem } = await seen(box, box.context, 'fifth');
+    const out = await send(box, rowClicks.inHarness(onRow, onItem, 'codex-cli', true));
+    assert.deepEqual(clickResults(out.results, ['fifth']).notIn, []);
+    await chmod(codexRoot, 0o555);
+    const { row: outRow, item: outItem } = await seen(box, box.context, 'fifth');
+    const back = await send(box, rowClicks.inHarness(outRow, outItem, 'codex-cli', false));
+    const backRes = clickResults(back.results, ['fifth']);
+    assert.deepEqual([backRes.notIn, backRes.failed], [['codex-cli'], true]);
+    assert.equal(say.said.inHarness('fifth', 'codex-cli', false, backRes.notIn.includes('codex-cli')), 'fifth couldn’t be put in Codex.');
+    assert.deepEqual((await pass(box)).results, []);
+    await chmod(codexRoot, 0o755);
+    const caught = await pass(box);
+    assert.deepEqual([caught.writes, caught.results.filter(entry => entry.outcome === 'held'), !!(await bytes(folderOf(box, 'codex-cli', 'fifth')))], [1, [], true]);
+    assert.deepEqual([(await pass(box)).writes, (await pass(box)).results], [0, []]);
+  }));
+  await t.test('Synchronize everything reports a locked folder once on take-in, not on later passes', () => withLockedCodex(async (box, codexRoot) => {
+    await setSyncEverything(box.context, true);
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Sixth skill.', 'sixth') }, [], 'sixth');
+    await chmod(codexRoot, 0o555);
+    const firstRule = await pass(box);
+    assert.deepEqual(firstRule.results.filter(entry => entry.outcome === 'held'), [{ item: 'sixth', harness: 'codex-cli', outcome: 'held', message: lockedWhy }]);
+    assert.deepEqual((await pass(box)).results, [], 'not repeated on the next pass');
+  }));
+});
+
+test('A click names a tool whose skills folder is a dangling link, and says why', async () => {
+  const box = await sandbox();
+  const codexRoot = join(box.home, roots['codex-cli']);
+  try {
+    await rm(codexRoot, { recursive: true, force: true });
+    await symlink(join(box.base, 'nowhere'), codexRoot);
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Fifth skill.', 'fifth') }, [], 'fifth');
+    const added = await turnOn(box, box.context, 'fifth');
+    assert.ok(added !== 'choose');
+    const addRes = clickResults(added.results, ['fifth']);
+    assert.deepEqual([addRes.notIn, addRes.failed], [['codex-cli'], true]);
+    assert.match(addRes.ours.find(entry => entry.harness === 'codex-cli')?.message ?? '', /^Codex’s skills folder is a link to /);
+    await turnOff(box, box.context, 'fifth');
+    const turnedOn = await turnOn(box, box.context, 'fifth');
+    assert.ok(turnedOn !== 'choose');
+    assert.deepEqual(clickResults(turnedOn.results, ['fifth']).notIn, ['codex-cli']);
+    assert.deepEqual((await pass(box)).results, []);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool whose skills folder is linked to another tool’s locks both folders: Off to On writes only to the third tool and names both; a skill already in the shared folder is not named', async () => {
+  const box = await sandbox();
+  const copilotRoot = join(box.home, roots['copilot-cli']);
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Fifth skill.', 'fifth') }, [], 'fifth');
+    await turnOn(box, box.context, 'fifth');
+    await turnOff(box, box.context, 'fifth');
+    await rm(copilotRoot, { recursive: true, force: true });
+    await symlink('../.claude/skills', copilotRoot);
+    // Neither Claude Code nor Copilot CLI is written (rootProblem locks both when their folders land on one directory).
+    const turnedOn = await turnOn(box, box.context, 'fifth');
+    assert.ok(turnedOn !== 'choose');
+    const onRes = clickResults(turnedOn.results, ['fifth']);
+    assert.deepEqual([onRes.notIn, onRes.failed], [['claude-cli', 'copilot-cli'], true]);
+    assert.deepEqual([await bytes(folderOf(box, 'claude-cli', 'fifth')), await bytes(join(copilotRoot, 'fifth')), !!(await bytes(folderOf(box, 'codex-cli', 'fifth')))], [undefined, undefined, true]);
+    // A skill already present in that shared folder is read by both tools another way, so Add writes Codex and names neither.
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Shared skill.', 'sixth') }, [], 'sixth');
+    const added = await turnOn(box, box.context, 'sixth');
+    assert.ok(added !== 'choose');
+    const addRes = clickResults(added.results, ['sixth']);
+    assert.deepEqual([addRes.notIn, addRes.failed, !!(await bytes(folderOf(box, 'codex-cli', 'sixth')))], [[], false, true]);
+  } finally { await box.cleanup(); }
+});
+
+test('Only a tool held by its locked skills folder is named on a click, not one kept out, with a plugin, or reading another copy', { skip: process.getuid?.() === 0 }, async () => {
+  const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli']);
+  const claudeRoot = join(box.home, roots['claude-cli']), codexRoot = join(box.home, roots['codex-cli']), opencodeRoot = join(box.home, roots['opencode-cli']);
+  try {
+    const skill = skillText('Fifth skill.', 'fifth');
+    // Claude Code has `fifth` through an installed plugin; Copilot CLI will be kept out; Codex's folder is locked.
+    const pluginDir = join(box.home, '.claude/plugins/cache/team/kit/1.0.0');
+    await mkdir(join(pluginDir, '.claude-plugin'), { recursive: true });
+    await mkdir(join(pluginDir, 'skills/fifth'), { recursive: true });
+    await writeFile(join(pluginDir, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'kit', version: '1.0.0' }));
+    await writeFile(join(pluginDir, 'skills/fifth/SKILL.md'), skill);
+    await mkdir(join(box.home, '.claude/plugins'), { recursive: true });
+    await writeFile(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'kit@team': [{ scope: 'user', installPath: pluginDir, version: '1.0.0' }] } }));
+    await put(box, 'copilot-cli', { 'SKILL.md': skill }, [], 'fifth');
+    await turnOn(box, box.context, 'fifth');
+    const { row: keptRow, item: keptItem } = await seen(box, box.context, 'fifth');
+    await send(box, rowClicks.inHarness(keptRow, keptItem, 'copilot-cli', true));
+    await turnOff(box, box.context, 'fifth');
+    await chmod(codexRoot, 0o555);
+    const turnedOn = await turnOn(box, box.context, 'fifth');
+    assert.ok(turnedOn !== 'choose');
+    assert.deepEqual(clickResults(turnedOn.results, ['fifth']).notIn, ['codex-cli'], 'kept out and plugin tools are not named');
+    // Even if Claude Code's own folder is also locked, Claude Code is held by the plugin (Disk.held), not by the lock.
+    await turnOff(box, box.context, 'fifth');
+    await chmod(claudeRoot, 0o555);
+    const bothLocked = await turnOn(box, box.context, 'fifth');
+    assert.ok(bothLocked !== 'choose');
+    assert.deepEqual(clickResults(bothLocked.results, ['fifth']).notIn, ['codex-cli']);
+    await chmod(claudeRoot, 0o755);
+    await chmod(codexRoot, 0o755);
+    // OpenCode reads Claude Code's folder: keeping another skill out of Claude Code while OpenCode's folder is locked names OpenCode.
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Shared reader.', 'reader') }, [], 'reader');
+    await turnOn(box, box.context, 'reader');
+    await chmod(opencodeRoot, 0o555);
+    const { row: readerRow, item: readerItem } = await seen(box, box.context, 'reader');
+    const outOfClaude = await send(box, rowClicks.inHarness(readerRow, readerItem, 'claude-cli', true));
+    assert.deepEqual(clickResults(outOfClaude.results, ['reader']).notIn, ['opencode-cli']);
+  } finally {
+    for (const dir of [claudeRoot, codexRoot, opencodeRoot]) await chmod(dir, 0o755).catch(() => undefined);
+    await box.cleanup();
+  }
 });
 
 test('A tool that won’t load a skill of that shape can’t be given it, and its line says why', async () => {

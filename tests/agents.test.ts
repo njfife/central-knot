@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { agentText, readAgents } from '../src/agentfiles.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { rowClicks, harnessIs, placeOf, libraryWords, sentences } from '../src/libraryrow.ts';
+import { clickResults } from '../src/clickplan.ts';
 import { librarySentence } from '../src/historyactions.ts';
 import { listed, originWords } from '../src/library.ts';
 import { readHistory } from '../src/history.ts';
@@ -26,7 +27,7 @@ import { chooseTools } from '../src/toolchoice.ts';
 import type { HarnessId, PassResult } from '../src/types.ts';
 import { choose, claudeAgent, claudeOwn, codexAgent, deleteIt, fileOf, filesOf, historyActions, historyOf, itemOf, keepOut, makeCurrent, pass, readOf, sandbox, seen, tools, trial, turnOff, turnOn, undo, write, type Box, type Tool } from './agentclicks.ts';
 
-const { harnessLine, noticeWords } = sentences(libraryWords.agents);
+const { harnessLine, noticeWords, said } = sentences(libraryWords.agents);
 const inBox = (name: string, body: (box: Box) => Promise<void>, options: { skip?: boolean } = {}) => test(name, options, async () => { const box = await sandbox(); try { await body(box); } finally { await box.cleanup(); } });
 /** An agent written in Claude Code, taken into Central Knot and applied to every harness. */
 async function on(box: Box, text = claudeAgent()) { await write(box, 'claude-cli', text); assert.notEqual(await turnOn(box), 'choose'); }
@@ -1012,6 +1013,35 @@ inBox('A tool whose agents folder can’t be written says why on its line, pass 
     const tried = await pass(box);
     assert.deepEqual([tried.results.filter(entry => entry.harness === 'copilot-cli'), (await marks(box))['copilot-cli']], [[], 'cannot']);
   } finally { await chmod(folder, 0o755); }
+}, { skip: process.getuid?.() === 0 });
+
+inBox('Clicking Add, On, or a harness’s switch with a locked agents folder names that harness and says why, and says nothing on later passes', async box => {
+  const codexAgents = join(box.home, '.codex/agents');
+  const lockedWhy = 'Codex’s agents folder can’t be written, so Central Knot can’t change the agent there. Once the folder’s permissions let it, Codex catches up when sync runs.';
+  await write(box, 'claude-cli', claudeAgent());
+  await chmod(codexAgents, 0o555);
+  try {
+    const added = await turnOn(box);
+    assert.ok(added !== 'choose');
+    const addRes = clickResults(added.results, ['reviewer']);
+    assert.deepEqual([addRes.notIn, addRes.failed], [['codex-cli'], true]);
+    assert.deepEqual(addRes.ours.filter(entry => entry.harness === 'codex-cli'), [{ item: 'reviewer', harness: 'codex-cli', outcome: 'held', message: lockedWhy }]);
+    assert.equal(said.takenIn('reviewer', tools.filter(tool => !addRes.notIn.includes(tool)), tools), 'reviewer is in Central Knot now, and on in Claude Code and Copilot CLI.');
+    assert.deepEqual((await pass(box)).results, []);
+    await turnOff(box);
+    const onAgain = await turnOn(box);
+    assert.ok(onAgain !== 'choose');
+    assert.deepEqual(clickResults(onAgain.results, ['reviewer']).notIn, ['codex-cli']);
+    await keepOut(box, 'codex-cli', true);
+    const back = await keepOut(box, 'codex-cli', false);
+    const backRes = clickResults(back.results, ['reviewer']);
+    assert.deepEqual([backRes.notIn, backRes.failed], [['codex-cli'], true]);
+    assert.equal(said.inHarness('reviewer', 'codex-cli', false, backRes.notIn.includes('codex-cli')), 'reviewer couldn’t be put in Codex.');
+    assert.deepEqual((await pass(box)).results, []);
+  } finally { await chmod(codexAgents, 0o755); }
+  assert.equal((await pass(box)).writes, 1);
+  assert.ok(await readOf(box, 'codex-cli'));
+  assert.deepEqual((await pass(box)).results, []);
 }, { skip: process.getuid?.() === 0 });
 
 // ---------- Found agents ----------

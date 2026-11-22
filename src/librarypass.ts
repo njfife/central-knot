@@ -723,11 +723,12 @@ async function saveIfChanged(pass: Pass) {
 async function syncItem(pass: Pass, item: LibraryItem) {
   const { kind, context } = pass, slot = pass.disk.byKey.get(item.key) ?? {}, giveBack = pass.giveBack.get(item.key) ?? {};
   const copies = copiesOf(pass, item), made = plan(item, copies);
+  const hadThroughShared = Object.keys(item.throughShared ?? {}) as HarnessId[], clicked = pass.asked.has(item.key);
+  const lockedHeld = clicked ? new Set(pass.managed.filter(harness => !slot[harness] && pass.disk.locked.has(harness) && !pass.disk.held(item, harness))) : undefined;
   // A copy a take-in took over beside a plugin (takeIn): this plan leaves it in place, as the tool's own, and it is on record as
   // Central Knot's before any file changes, so the next pass removes it (telling History) and an Undo meanwhile gives it back.
   for (const { tool, hash } of pass.asked.get(item.key)?.tookFrom ?? []) item.applied[tool] = hash;
   let told: Told = { events: [], named: new Map() };
-  const hadThroughShared = Object.keys(item.throughShared ?? {}) as HarnessId[], clicked = pass.asked.has(item.key);
   const held = await carryOut(item, made, {
     ...pass.shelf,
     copy: harness => { const here = slot[harness]!; return { hash: here.hash, at: here.at, content: kind.contentOf(here) }; },
@@ -750,12 +751,16 @@ async function syncItem(pass: Pass, item: LibraryItem) {
     const copy = copies[harness], untouched = !made.write.includes(harness) && !made.remove.includes(harness);
     if (untouched && (copy?.is === 'held' || copy?.is === 'absent') && await giveBackCopy(pass, item, harness, slot[harness], hash)) delete item.applied[harness];
   }
-  // A click's item that waits in a tool for the shared folder (library.ts THE SHARED FOLDER) is held there, so its result names the
-  // tool and says why: wanted there, it isn't on there yet; else its own copy stays, or what it had through that folder (no other way now).
+  // An item asked of this pass that waits in a tool for the shared folder (library.ts THE SHARED FOLDER: wanted there, it isn't on
+  // there yet; else its own copy stays, or what it had through that folder), or whose wanted copy is held only by Disk.locked, gets
+  // a held result naming the tool and why. `lockedHeld` is taken before tookFrom and carryOut change item.applied (which Disk.held
+  // reads); `wanted` is asked again here because carryOut can turn the item off (made.turnedOffBy).
   if (clicked) for (const harness of pass.managed) {
-    const copy = copies[harness], had = copy?.is === 'absent' && !wantedIn(item, harness) && hadThroughShared.includes(harness) && !pass.disk.held(item, harness);
+    const copy = copies[harness], wanted = wantedIn(item, harness);
+    const had = copy?.is === 'absent' && !wanted && hadThroughShared.includes(harness) && !pass.disk.held(item, harness);
     const waits = copy?.is === 'unseen' || had ? pass.disk.lostShared?.(item, harness) : undefined;
     if (typeof waits === 'object') pass.results.push({ item: item.name, harness, outcome: 'held', message: waits.unseen });
+    else if (wanted && copy?.is === 'held' && lockedHeld?.has(harness)) pass.results.push({ item: item.name, harness, outcome: 'held', message: copy.why });
   }
   // A copy found gone (deleted by hand: plan `forget`), or the shared folder's that a harness had it only through and has it no
   // more (library.ts THE SHARED FOLDER): its settings follow it out too.
