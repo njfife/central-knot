@@ -94,11 +94,12 @@ const kindWords: Record<ItemKind, { one: string; many: string; title: string }> 
 
 /**
  * One item's row: its tick box, name and description, and what a switch does to it; on a row the profile leaves out, under its
- * name, the tools that still load it from a copy Central Knot doesn't write (profileplan.ts keptOn).
+ * name, the tools that still load it from a copy Central Knot doesn't write, given what the switch turns of the plugins' items
+ * (profileplan.ts keptOn).
  */
-function itemRow(profile: Profile, item: LiveItem, turns: Turns, isInUse: boolean) {
-  const included = profile.items.includes(item.id), description = descriptionOf(item), { said, changes: moves } = stateOf(item, turns, isInUse);
-  const kept = included ? { tools: [] } : keptOn(item), many = kept.tools.length > 1;
+function itemRow(profile: Profile, item: LiveItem, plan: Plan) {
+  const included = profile.items.includes(item.id), description = descriptionOf(item), { said, changes: moves } = stateOf(item, plan.turns, plan.isInUse);
+  const kept = included ? { tools: [] } : keptOn(item, plan.plugs), many = kept.tools.length > 1;
   const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on. Click to leave it out.` : `Not in ${profile.name}: switching to it turns ${item.name} off. Click to put it in.`} ${item.name} is ${itemRowState(item)} now.`;
   return h(`div.pf-row${included ? '.pf-included' : ''}`, { role: 'row', 'data-item': item.id },
     h('span.pf-name', { role: 'cell' },
@@ -184,7 +185,7 @@ function tableSection(profile: Profile, kind: ItemKind, list: LiveItem[], plugge
   const tickAll = tick(profile, { id: `pf-all-${kind}`, checked: all, mixed: inside > 0, label: `${title}: all in ${profile.name}`, help: `${all ? 'Leave every one' : 'Put every one'}${find ? ' shown' : ''} ${all ? 'out of' : 'in'} ${profile.name}`,
     itemsAfterClick: all ? profile.items.filter(entry => !ids.has(entry)) : [...new Set([...profile.items, ...ids])] });
   return [h('div.pf-section', { role: 'row' }, h('span.pf-section-label', { role: 'cell' }, tickAll, h('strong', {}, title), h('span.pf-section-count', {}, `${inside} of ${ids.size} ticked`))),
-    kindNote(kind, plugged), ...list.map(item => itemRow(profile, item, plan.turns, plan.isInUse)), ...plugged.map(item => pluginRow(profile, item, plan.plugs.find(turn => turn.id === item.id), plan.isInUse))];
+    kindNote(kind, plugged), ...list.map(item => itemRow(profile, item, plan)), ...plugged.map(item => pluginRow(profile, item, plan.plugs.find(turn => turn.id === item.id), plan.isInUse))];
 }
 
 /** The items under their kinds, each with what a switch does to it. */

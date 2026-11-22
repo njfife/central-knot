@@ -929,6 +929,142 @@ test('An Undo’s History row counts all it put back, his own items and the plug
   } finally { await box.cleanup(); }
 });
 
+// ---------- His item, which a plugin still loads ----------
+// kit@team, installed in Claude Code (`claude` false: not there; `enabled` false: turned off there) and with `codex` in Codex, brings the skill triage, and
+// with `parts` the MCP server tracker and the agent reviewer, each of the same content as his. His own triage and keep are in the
+// folder of `mine` (Codex's by default), taken in and On: Central Knot writes keep into the other tool, and nothing of triage where
+// the plugin brings the same skill (skills.ts pluginFor). A profile names its items; a plugin's by docsId's form for kit.
+
+const kitId = (kind: ItemKind, key: string) => `plugin:${kind}:kit@team/${key}`;
+const KIT_TRACKER = { command: 'npx', args: ['-y', 'tracker'] }, KIT_REVIEWER = { name: 'reviewer', description: 'Reviews a change.', prompt: 'You review changes.' };
+
+async function kitHome({ claude = true, codex = false, enabled = true, triage = 'The triage skill.', mine = 'codex-cli' as Three, shared = [] as string[], parts = false } = {}) {
+  const box = await sandbox(['claude-cli', 'codex-cli']);
+  const copyIn = async (folder: string) => {
+    await putFile(join(folder, 'skills/triage/SKILL.md'), skillText(triage, 'triage'));
+    await putFile(join(folder, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'kit', version: '1.0.0' }));
+    await putFile(join(folder, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'kit', version: '1.0.0', skills: './skills' }));
+    if (!parts) return;
+    await putFile(join(folder, '.mcp.json'), JSON.stringify({ mcpServers: { tracker: KIT_TRACKER } }));
+    await putFile(join(folder, 'agents/reviewer.md'), `---\nname: ${KIT_REVIEWER.name}\ndescription: ${KIT_REVIEWER.description}\n---\n\n${KIT_REVIEWER.prompt}\n`);
+  };
+  if (claude) {
+    const market = { team: { source: { source: 'directory', path: '/m' } } }, cache = join(box.home, '.claude/plugins/cache/team/kit/1.0.0');
+    await copyIn(cache);
+    await putFile(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'kit@team': [{ scope: 'user', installPath: cache, version: '1.0.0' }] } }));
+    await putFile(join(box.home, '.claude/settings.json'), `${JSON.stringify({ extraKnownMarketplaces: market, enabledPlugins: { 'kit@team': enabled } }, null, 2)}\n`);
+  }
+  if (codex) {
+    await copyIn(join(box.home, '.codex/plugins/cache/team/kit/1.0.0'));
+    await putFile(join(box.home, '.codex/config.toml'), '[marketplaces.team]\nsource = "/m"\n\n[plugins."kit@team"]\nenabled = true\n');
+  }
+  for (const name of ['triage', 'keep']) if (!shared.includes(name)) await put(box, mine, { 'SKILL.md': skillText(`The ${name} skill.`, name) }, [], name);
+  for (const name of shared) await putShared(box, name);
+  await applySkills(box.context, box.tools, ['triage', 'keep', ...shared.filter(name => name !== 'triage')].map(key => ({ key, on: true, except: [] })));
+  if (parts) {
+    await putFile(join(box.home, '.codex/config.toml'), `[mcp_servers.tracker]\ncommand = "npx"\nargs = ["-y", "tracker"]\n`);
+    await putFile(join(box.home, '.codex/agents/reviewer.toml'), `name = "reviewer"\ndescription = "${KIT_REVIEWER.description}"\ndeveloper_instructions = "${KIT_REVIEWER.prompt}"\n`);
+    await applyServers(box.context, box.tools, [{ key: 'tracker', on: true, except: [] }]);
+    await applyAgents(box.context, box.tools, [{ key: 'reviewer', on: true, except: [] }]);
+  }
+  const made = async (name: string, items: string[]) => (await saveProfile(box.context, { name, items })).id!;
+  /** What a switch to `name` would do (the page's header and both menus), and what its result says once switched (app.ts): its count, then stillLoadAfter. */
+  const preview = async (name: string) => { const now = await sideNow(box); return switchPreview((await readProfiles(box.home)).profiles.find(each => each.name === name)!, now.live, now.plugins); };
+  const result = async (id: string) => {
+    const switched = await switchProfile(box.context, box.tools, id, (await sideNow(box)).side);
+    return `${turnsWords(entryTurns(switched.profile!), 'did')}${stillLoadAfter(switched.profile!, (await sideNow(box)).view)}`;
+  };
+  return { box, made, preview, result };
+}
+/** The plugin's files in Claude Code: its settings, its record and its copy. */
+const kitFiles = async (box: Box) => ({ settings: await text(box, '.claude/settings.json'), record: await text(box, '.claude/plugins/installed_plugins.json'),
+  triage: await bytes(join(box.home, '.claude/plugins/cache/team/kit/1.0.0/skills/triage')) });
+
+test('His triage in Codex, the same skill a plugin brings in Claude Code: a switch that turns his off says Claude Code still loads it through a plugin, before and after; Codex’s folder goes, the plugin’s files stay', async () => {
+  const { box, made, preview, result } = await kitHome();
+  try {
+    const quiet = await made('Quiet', ['skill:keep']), before = await kitFiles(box);
+    assert.equal(await preview('Quiet'), 'Switching turns 1 item off; 1 still loads through a plugin, in Claude Code');
+    assert.equal(await result(quiet), '1 item turned off; 1 still loads through a plugin, in Claude Code');
+    assert.deepEqual([await bytes(folderOf(box, 'codex-cli', 'triage')), await kitFiles(box)], [undefined, before], 'Codex’s copy gone; the plugin as it was');
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin’s copy keeps nothing of his that the same switch turns off: kit in Codex, his triage in Claude Code’s folder, a profile that leaves both out turns both off and nothing still loads', async () => {
+  const { box, made, preview, result } = await kitHome({ claude: false, codex: true, mine: 'claude-cli' });
+  try {
+    const quiet = await made('Quiet', ['skill:keep']);
+    assert.equal(await preview('Quiet'), 'Switching turns 2 items off');
+    assert.equal(await result(quiet), '2 items turned off');
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin turned off in Claude Code keeps nothing on: his triage’s switch says nothing still loads', async () => {
+  const { box, made, preview } = await kitHome({ enabled: false });
+  try {
+    await made('Quiet', ['skill:keep']);
+    assert.equal(await preview('Quiet'), 'Switching turns 1 item off');
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin’s triage with other content is another item: nothing is said of his', async () => {
+  const { box, made, preview } = await kitHome({ triage: 'Another triage.' });
+  try {
+    await made('Quiet', ['skill:keep']);
+    assert.equal(await preview('Quiet'), 'Switching turns 1 item off');
+  } finally { await box.cleanup(); }
+});
+
+test('His triage only in the shared folder, which Codex reads, and through the plugin in Claude Code: one item, still loading another way, in either', async () => {
+  const { box, made, preview } = await kitHome({ shared: ['triage'] });
+  try {
+    await made('Quiet', ['skill:keep']);
+    assert.equal(await preview('Quiet'), 'Switching turns 1 item off; 1 still loads another way, in Claude Code or Codex');
+  } finally { await box.cleanup(); }
+});
+
+test('Two of his skills, one kept by the plugin in Claude Code and one by the shared folder in Codex: both counted, said as the mixed case', async () => {
+  const { box, made, preview } = await kitHome({ shared: ['notes'] });
+  try {
+    await made('Quiet', ['skill:keep']);
+    assert.equal(await preview('Quiet'), 'Switching turns 2 items off; 2 still load another way, in Claude Code or Codex');
+  } finally { await box.cleanup(); }
+});
+
+test('The plugin in Claude Code and Codex, his triage in Codex, a profile that leaves both out: Claude Code’s copy is said once, as the plugin’s item that stays on; Codex’s folder, his own there (Central Knot never wrote it: Codex has the plugin’s), as before', async () => {
+  const { box, made, preview, result } = await kitHome({ codex: true });
+  try {
+    const quiet = await made('Quiet', ['skill:keep']);
+    const both = '2 items off; 1 still loads from a copy of yours there, in Codex; 1 stays on in Claude Code, through its plugin';
+    assert.equal(await preview('Quiet'), `Switching turns ${both}`);
+    assert.equal(await result(quiet), `2 items turned off; ${both.split('; ').slice(1).join('; ')}`);
+  } finally { await box.cleanup(); }
+});
+
+test('An MCP server and an agent of his that the plugin brings alike in Claude Code still load there through it while the profile keeps the plugin’s; one that turns the plugin’s off too leaves nothing', async () => {
+  const { box, made, preview, result } = await kitHome({ parts: true });
+  try {
+    const plugin = [kitId('mcp', 'tracker'), kitId('agent', 'reviewer')];
+    const servers = await made('No tracker', ['skill:keep', 'skill:triage', 'agent:reviewer', ...plugin]);
+    await made('No reviewer', ['skill:keep', 'skill:triage', 'mcp:tracker', ...plugin]);
+    await made('Bare', ['skill:keep', 'skill:triage']);
+    assert.deepEqual([await preview('No tracker'), await preview('No reviewer'), await preview('Bare')], ['Switching turns 1 item off; 1 still loads through a plugin, in Claude Code',
+      'Switching turns 1 item off; 1 still loads through a plugin, in Claude Code', 'Switching turns 4 items off']);
+    assert.equal(await result(servers), '1 item turned off; 1 still loads through a plugin, in Claude Code');
+  } finally { await box.cleanup(); }
+});
+
+test('A switch that turns the plugin’s server on in Claude Code, where its own switch had it off, counts it as turned on and says nothing more of his: before the switch and after it alike', async () => {
+  const { box, made, preview, result } = await kitHome({ parts: true });
+  try {
+    const settings = join(box.home, '.claude/settings.json');
+    await writeFile(settings, `${JSON.stringify({ ...JSON.parse((await text(box, '.claude/settings.json'))!), deniedMcpServers: [{ serverName: 'plugin:kit:tracker' }] }, null, 2)}\n`);
+    const theirs = await made('Theirs', ['skill:keep', 'skill:triage', 'agent:reviewer', kitId('mcp', 'tracker'), kitId('agent', 'reviewer')]);
+    assert.equal(await preview('Theirs'), 'Switching turns 1 item on and 1 off');
+    assert.equal(await result(theirs), '1 item turned on and 1 turned off');
+  } finally { await box.cleanup(); }
+});
+
 // ---------- A profiles file from before ----------
 
 /**

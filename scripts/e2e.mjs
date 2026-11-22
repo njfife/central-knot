@@ -13381,6 +13381,50 @@ async function stillLoadsFlow() {
     [keptOut.tags, keptOut.tools.find(([tool]) => tool === 'opencode-cli')], [['in 5 of 5 tools · OpenCode has it another way'], ['opencode-cli', 'false', 'Another way']]);
   await pictures('still-loads-kept-out-reader');
   await a.quit();
+
+  // His triage, which a plugin still loads (profileplan.ts keptOn, a plugin's copy), in a small home of its own with Claude Code
+  // and Codex alone: triage and keep in Codex's folder, taken in and On; issue-tracker, installed and enabled in Claude Code,
+  // brings the same triage, so Central Knot writes none there. Quiet, with keep alone: the header, triage's row, the result read
+  // again, Codex's folder gone and the plugin as it was; the result's Undo puts Codex's folder back.
+  const kit = join(scratch, 'home-plugin-still-loads'), kitData = join(scratch, 'plugin-still-loads-data'), kitTools = join(scratch, 'tools-plugin-still-loads');
+  const triage = readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8');
+  writeClaudeInstall(kit, 'ck-test-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': triage });
+  writeFileSync(join(kit, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'git', url: market } } }));
+  writeFileSync(join(kit, '.claude/settings.json'), `${JSON.stringify({ enabledPlugins: { 'issue-tracker@ck-test-market': true } }, null, 2)}\n`);
+  skill(join(kit, '.codex/skills'), 'triage', triage);
+  skill(join(kit, '.codex/skills'), 'keep');
+  mkdirSync(join(kitTools, '.local/bin'), { recursive: true });
+  for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) writeFileSync(join(kitTools, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`, { mode: 0o755 });
+  mkdirSync(kitData, { recursive: true });
+  writeFileSync(join(kitData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: kit }, closeExplained: true }));
+  const plugin = () => ({ settings: readNow(join(kit, '.claude/settings.json')), installed: tree(join(kit, '.claude/plugins')) }), codexTriage = () => existsSync(join(kit, '.codex/skills/triage'));
+  const b = await launch(kitData, [], kitTools);
+  const bDone = async () => { for (let tries = 0; tries < 100 && await b.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await b.settle(); };
+  const kitShot = async name => { if (!shots) return; await sizeTo(b, 1316, 819); await b.shot(name); await fullSize(b); };
+  await b.click('#nav-overview');
+  await b.click('#setup-yes');
+  await bDone();
+  check('Synchronize everything takes his two in: keep written into Claude Code, triage not (the plugin brings it there)', await until(() => existsSync(join(kit, '.claude/skills/keep/SKILL.md'))) && !existsSync(join(kit, '.claude/skills/triage')), tree(kit));
+  await b.click('#nav-profiles');
+  await newProfile(b, 'Quiet');
+  check('triage reaches Profiles', await until(() => b.exists(byId('pf-skill:triage'))));
+  await b.click(byId('pf-skill:keep'));
+  await bDone();
+  const kitHeader = 'Switching turns 1 item off; 1 still loads through a plugin, in Claude Code';
+  same('the header counts triage as still loading through a plugin, in Claude Code, and its row says so under its name',
+    [await b.text('.profile-header p'), await b.text('.pf-row[data-item="skill:triage"] .pf-note')], [kitHeader, 'Claude Code still loads it through a plugin.']);
+  await kitShot('plugin-still-loads-preview');
+  const kitBefore = plugin();
+  await b.click('#profile-switch');
+  await bDone();
+  const kitSaid = 'Switched to Quiet: 1 item turned off; 1 still loads through a plugin, in Claude Code.';
+  check('its result says it, read again after the switch', (await b.text('.band-done') ?? '').startsWith(kitSaid), await b.text('.bands'));
+  same('Codex’s folder of triage is gone; the plugin’s record, copy and settings are as they were', [codexTriage(), plugin()], [false, kitBefore]);
+  await kitShot('plugin-still-loads-result');
+  await b.click('#outcome-undo');
+  await bDone();
+  same('its Undo puts Codex’s folder back, and the header says what it said before the switch', [codexTriage(), await b.text('.profile-header p')], [true, kitHeader]);
+  await b.quit();
 }
 
 async function sameNamePluginFlow() {

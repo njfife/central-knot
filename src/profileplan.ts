@@ -13,7 +13,8 @@
 //   `profiles.ts runCopilotRules` writes it.
 // - `inUse` holds while a switch changes and holds nothing (never stored); `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`)
 //   gives the header and menu line, counting apart the items it turns off that still load from a copy Central Knot doesn't
-//   write, and how (`keptOn`, `stillLoadWords`, `loadWords`; a switch's result asks the view after it: `stillLoadAfter`); `undoPlan`, `pluginUndo` and `copilotUndo` revert items still as left, never re-disabling a
+//   write (a plugin's among them, while the switch turns that plugin's item nowhere), and how (`keptOn`, `stillLoadWords`,
+//   `loadWords`; a switch's result asks the view after it: `stillLoadAfter`); `undoPlan`, `pluginUndo` and `copilotUndo` revert items still as left, never re-disabling a
 //   Copilot CLI name a server of his uses now (`onAfterUndo`, `copilotHasYours`), and `undoOffered` (`undoInHome`) is the one rule
 //   both History and the header ask. `itemRowState` words a library item's live state for its row tooltip (`profilespage.ts`; `switchPlan` puts any `copilotOff` item under Turns on or Turns off, so the Now column only sees on/off). Dormant ids
 //   stay skipped; plugin-linked library items belong to `pluginLive` (`pluginItemKey`), not `liveItems`; found-only rows no
@@ -21,7 +22,8 @@
 import { earlierRootName, itemKey, type ItemKind, type LibraryItem } from './library.ts';
 import { hashesOf, keptByOff, placeOf, type LoadWay } from './libraryrow.ts';
 import { plural } from './model.ts';
-import { loadsKind, pageOfPart } from './pluginstatus.ts';
+import { itemThrough, pluginOnIn } from './pluginrows.ts';
+import { loadsKind, pageOfPart, samePart } from './pluginstatus.ts';
 import { cantSwitch, onNow, ownSwitch, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, kindNouns, orList, toolNames } from './words.ts';
@@ -49,15 +51,17 @@ export const pluginItemId = (kind: ItemKind, key: string) => `plugin:${itemId(ki
 
 /**
  * A live library item (not deleted) as profiles see it. `except`: tools kept out of; `copilotOff`: exact Copilot CLI name currently
- * disabled in settings.json; `loadsElsewhere`: the tools that still load it once an Off removes what Central Knot wrote, and how
+ * disabled in settings.json; `loadsElsewhere`: each tool that still loads it once an Off removes what Central Knot wrote, and how
  * (libraryrow.ts keptByOff, from the view: homeItems).
  */
-export interface LiveItem { id: string; kind: ItemKind; key: string; name: string; on: boolean; except: LibraryItem['except']; copilotOff?: string; loadsElsewhere?: KeptOn }
+export interface LiveItem { id: string; kind: ItemKind; key: string; name: string; on: boolean; except: LibraryItem['except']; copilotOff?: string; loadsElsewhere?: LoadsThere[] }
+/** One tool that still loads an item of his once Off, and how; `through`, for a plugin's copy (way `plugin`), that plugin's item (its pluginItemId), which keptOn asks the switch about. */
+export interface LoadsThere { tool: HarnessId; way?: LoadWay; through?: string }
 /**
- * The tools that keep an item on once a switch turns it off, and how (keptOn): one way all of them share (libraryrow.ts LoadWay),
- * or a plugin's copy, `turnsOn` where the switch itself turns one of them on (Copilot CLI's, by its shared name).
+ * The tools that keep an item on once a switch turns it off (keptOn): for his item, `how`, the one way all of them share
+ * (libraryrow.ts LoadWay); for a plugin's, `turnsOn` where the switch itself turns one of them on (Copilot CLI's, by its shared name).
  */
-export interface KeptOn { tools: HarnessId[]; how?: LoadWay | 'plugin'; turnsOn?: true }
+export interface KeptOn { tools: HarnessId[]; how?: LoadWay; turnsOn?: true }
 
 /** Each kind's items as the library holds them, deleted ones too (types.ts LibraryView `library`, or a kind's record). */
 export type Libraries = Record<ItemKind, Record<string, LibraryItem>>;
@@ -90,12 +94,21 @@ export function withCopilotOff(items: LiveItem[], rows: readonly LibraryFacts[],
 /** A home view's live items that profiles act on, with any uncovered Copilot CLI `disabledMcpServers` block (`withCopilotOff`) and where each loads from a copy Central Knot doesn't write (`withLoads`). */
 export const homeItems = (home: PluginHome, plugins: readonly PluginLive[] = pluginLive(home)): LiveItem[] =>
   withCopilotOff(ownHomeItems(home), home.mcp.items, plugins).map(item => withLoads(home, item));
-/** A live item with the tools that still load it once Off (LiveItem `loadsElsewhere`), from its row in `home`. */
+/** A live item with the tools that still load it once Off (LiveItem `loadsElsewhere`), from its row in `home`: a plugin's copy where a plugin has it on (pluginrows.ts pluginOnIn). */
 function withLoads(home: PluginHome, item: LiveItem): LiveItem {
-  const view = home[pageOfPart[item.kind]], facts = view.items.find(row => row.key === item.key);
-  const kept = facts ? view.tools.flatMap(tool => { const left = keptByOff({ ...facts, hashes: hashesOf(facts.copies) }, view.library[item.key], tool); return left ? [{ tool, ...left }] : []; }) : [];
-  const ways = new Set(kept.map(each => each.way));
-  return kept.length ? { ...item, loadsElsewhere: { tools: kept.map(each => each.tool), ...(ways.size === 1 && kept[0]!.way ? { how: kept[0]!.way } : {}) } } : item;
+  const page = pageOfPart[item.kind], view = home[page], facts = view.items.find(row => row.key === item.key);
+  if (!facts) return item;
+  const row = { ...facts, hashes: hashesOf(facts.copies), pluginOn: pluginOnIn(home, page, facts) };
+  const kept = view.tools.flatMap((tool): LoadsThere[] => {
+    const left = keptByOff(row, view.library[item.key], tool), through = left?.way === 'plugin' ? pluginItemThrough(home, item.kind, facts, tool) : undefined;
+    return left ? [{ tool, ...left, ...(through ? { through } : {}) }] : [];
+  });
+  return kept.length ? { ...item, loadsElsewhere: kept } : item;
+}
+/** The plugin's item (its pluginItemId) whose copy a tool has a row of his through (pluginrows.ts itemThrough), where the tool has that plugin installed. */
+function pluginItemThrough(home: PluginHome, kind: ItemKind, facts: LibraryFacts, tool: HarnessId): string | undefined {
+  const at = itemThrough(home, pageOfPart[kind], facts, tool), part = at?.install.items.find(each => samePart(each, at));
+  return part && pluginItemId(kind, pluginItemKey(at!.install, part));
 }
 /** The ids of the plugins the home records. */
 const recordedPlugins = (home: Pick<HomeView, 'profiles'>) => new Set(home.profiles.plugins?.map(entry => entry.id));
@@ -408,23 +421,31 @@ export const allTurns = (turns: Turns, plugins: PluginTurn[]) =>
 export const changes = (turns: { on: unknown[]; off: unknown[] }) => turns.on.length + turns.off.length;
 
 /**
- * The tools that keep an item on once a switch turns it off, from a copy Central Knot doesn't write: a library item's
- * (`loadsElsewhere`); a plugin's (from its copies' own fields), each copy on now or that `turn` (its pluginPlan; after a switch,
- * the copies its entry turned on) turns on, and not one it turns off. Asked before a switch it projects; after one, it reads back.
+ * The tools that keep an item on once a switch turns it off, from a copy Central Knot doesn't write, given the plugins' items the
+ * switch turns (`plugs`: its pluginPlan; after a switch, those its entry turned: entryPlugs):
+ * - his item's (`loadsElsewhere`), a plugin's copy only while `plugs` turns that plugin's item nowhere: where it turns it, that item
+ *   is in the switch's own count, said once there (turned on, or turned off with where it stays on);
+ * - a plugin's (from its copies' own fields), each copy on now or that its turn turns on, and not one it turns off.
+ * Asked before a switch it projects; after one, it reads back.
  */
-export function keptOn(item: LiveItem | PluginLive, turn?: Pick<PluginTurn, 'on' | 'off'>): KeptOn {
-  if (!('copies' in item)) return item.loadsElsewhere ?? { tools: [] };
+export function keptOn(item: LiveItem | PluginLive, plugs: readonly Pick<PluginTurn, 'id' | 'on' | 'off'>[] = []): KeptOn {
+  if (!('copies' in item)) {
+    const turned = new Set(plugs.filter(turn => turn.on.length || turn.off.length).map(turn => turn.id));
+    const kept = (item.loadsElsewhere ?? []).filter(each => !each.through || !turned.has(each.through)), ways = new Set(kept.map(each => each.way));
+    return { tools: kept.map(each => each.tool), ...(ways.size === 1 && kept[0]!.way ? { how: kept[0]!.way } : {}) };
+  }
+  const turn = plugs.find(each => each.id === item.id);
   const tools = item.copies.filter(copy => (copy.on || !!turn?.on.includes(copy.tool)) && copy.way !== 'unread' && !turn?.off.includes(copy.tool)).map(copy => copy.tool);
-  return { tools, how: 'plugin', ...(tools.some(tool => turn?.on.includes(tool)) ? { turnsOn: true as const } : {}) };
+  return { tools, ...(tools.some(tool => turn?.on.includes(tool)) ? { turnsOn: true as const } : {}) };
 }
 
-/** How items still load (keptOn), said once: the way they all share, else "another way". */
-export const loadWords = (kept: KeptOn[]) => (new Set(kept.map(each => each.how)).size === 1 && kept[0]?.how && kept[0].how !== 'plugin'
-  ? { shared: 'from the shared skills folder', link: 'through a link', yours: 'from a copy of yours there', tool: 'from another tool’s folder' }[kept[0].how] : 'another way');
-/** After the count of items a switch turns off, or turned: how many still load of yours (and how), and of plugins' items stay on, in which tools; '' for none. */
-export function stillLoadWords(kept: KeptOn[]): string {
+/** How items of his still load (keptOn), said once: the way they all share, else "another way". */
+export const loadWords = (kept: KeptOn[]) => (new Set(kept.map(each => each.how)).size === 1 && kept[0]?.how
+  ? { shared: 'from the shared skills folder', link: 'through a link', yours: 'from a copy of yours there', tool: 'from another tool’s folder', plugin: 'through a plugin' }[kept[0].how] : 'another way');
+/** After the count of items a switch turns off, or turned: how many of his (`yours`) still load, and how, and how many plugins' items stay on, in which tools; '' for none. */
+export function stillLoadWords(yours: KeptOn[], plugins: KeptOn[]): string {
   const where = (list: KeptOn[]) => orList([...new Set(list.flatMap(each => each.tools))].sort(byToolOrder).map(tool => toolNames[tool]));
-  const own = kept.filter(each => each.tools.length && each.how !== 'plugin'), plugin = kept.filter(each => each.tools.length && each.how === 'plugin');
+  const own = yours.filter(each => each.tools.length), plugin = plugins.filter(each => each.tools.length);
   // One the switch turns on was off there: it is on, it doesn't stay on.
   const [one, many] = plugin.some(each => each.turnsOn) ? ['is', 'are'] : ['stays', 'stay'];
   return [own.length ? `${own.length} still ${own.length === 1 ? 'loads' : 'load'} ${loadWords(own)}, in ${where(own)}` : '',
@@ -434,10 +455,13 @@ export function stillLoadWords(kept: KeptOn[]): string {
 
 /** What a switch's result adds of the items its entry turned off that still load, asked of the view after it (`home`). */
 export function stillLoadAfter(entry: NonNullable<HistoryEvent['profile']>, home: PluginHome): string {
-  const off = new Set(entryTurns(entry).off.map(each => each.id)), plugins = pluginLive(home);
-  const turnedOn = (id: string) => ({ on: (entry.plugins ?? []).filter(copy => copy.id === id && copy.on).map(copy => copy.tool), off: [] });
-  return stillLoadWords([...homeItems(home, plugins).filter(item => !item.on), ...plugins].filter(item => off.has(item.id)).map(item => keptOn(item, turnedOn(item.id))));
+  const off = new Set(entryTurns(entry).off.map(each => each.id)), plugins = pluginLive(home), plugs = entryPlugs(entry);
+  const kept = (items: (LiveItem | PluginLive)[]) => items.filter(item => off.has(item.id)).map(item => keptOn(item, plugs));
+  return stillLoadWords(kept(homeItems(home, plugins).filter(item => !item.on)), kept(plugins));
 }
+/** The plugins' items a switch's entry turned, each with the tools it turned on and off there (as pluginPlan's turns). */
+const entryPlugs = (entry: NonNullable<HistoryEvent['profile']>) => [...new Set((entry.plugins ?? []).map(copy => copy.id))]
+  .map(id => { const copies = entry.plugins!.filter(copy => copy.id === id); return { id, on: copies.filter(copy => copy.on).map(copy => copy.tool), off: copies.filter(copy => !copy.on).map(copy => copy.tool) }; });
 
 /**
  * What the Undo of a switch's History entry turns back, decided from each item now: each item it turned On that is still On
@@ -507,6 +531,6 @@ export function switchPreview(profile: Profile, live: LiveItem[], plugins: Plugi
     return `In use · ${plural(count, 'item')} on${rest}${keep}`;
   }
   if (!count) return `0 items${keep}`;
-  const kept = [...turns.off.map(item => keptOn(item)), ...plugs.filter(turn => turn.off.length).map(turn => keptOn(plugins.find(item => item.id === turn.id)!, turn))];
-  return changes(counted) ? `Switching ${turnsWords(counted, 'will')}${stillLoadWords(kept)}${keep}` : `Not in use · ${heldWords(plugs, plugins).text}`;
+  const kept = stillLoadWords(turns.off.map(item => keptOn(item, plugs)), plugs.filter(turn => turn.off.length).map(turn => keptOn(plugins.find(item => item.id === turn.id)!, plugs)));
+  return changes(counted) ? `Switching ${turnsWords(counted, 'will')}${kept}${keep}` : `Not in use · ${heldWords(plugs, plugins).text}`;
 }
