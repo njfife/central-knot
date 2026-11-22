@@ -1022,8 +1022,8 @@ export interface LibraryFacts {
   takeInAnswers?: { click: TakeInAnswer; rule: TakeInAnswer };
   /**
    * Skills: how a tool has it another way (a link, a folder Central Knot doesn't own, another tool's folder it reads, a plugin;
-   * where a plugin's part is turned off there, the copy the tool loads instead), as its line says it, On or Off (skills.ts
-   * anotherWay, toolFacts). Nothing of Central Knot's goes there while it does.
+   * where a plugin's part is turned off there and the tool has no copy in its own folder, the copy it loads instead), as its line
+   * says it, On or Off (skills.ts anotherWay, toolFacts). Nothing of Central Knot's goes there while it does.
    */
   anotherWay?: Partial<Record<HarnessId, string>>;
   /**

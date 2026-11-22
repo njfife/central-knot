@@ -333,13 +333,13 @@ export const copiesDiffer = (names: readonly string[]) =>
 
 /**
  * Where an item that is Off is: in Central Knot only; on in the tools that have it through a plugin still on there (`pluginOn`),
- * where no other tool loads it; in Central Knot and the tools with a copy of their own, left alone while it is off (ownCopies), or
+ * where no other tool loads it; in Central Knot and the tools with a copy of their own, left alone while it is off (ownNamed), or
  * that still read it another way (otherReaders), with those that have it on through a plugin; in Central Knot, and switched off in
  * the tools that have it another way but don't load it; or, while some installed tool is left out (`leftOut`: its Manage switch
  * off; it keeps whatever it had), in no tool Central Knot manages.
  */
 function offWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[]) {
-  const own = ownCopies(row, item, tools), through = onThrough(row, tools);
+  const through = onThrough(row, tools), own = ownNamed(row, item, tools, through);
   const readers = otherReaders(row, tools), held = outsideCopyIn(row, tools, true);
   if (readers.length || (through.length && own.length)) return `in ${andList(['Central Knot', ...tools.filter(tool => readers.includes(tool) || own.includes(tool) || through.includes(tool)).map(toolName)])}`;
   return through.length ? `on in ${andList(through.map(toolName))} only, through its plugin`
@@ -356,6 +356,9 @@ function offPlace(row: LibraryRow, item: LibraryItem | undefined, tools: readonl
 }
 /** The tools that have an Off item on through its plugin (`pluginOn`), in the page's order of `tools` (its own tool first on a tool's page). */
 const onThrough = (row: LibraryRow, tools: readonly string[]) => tools.filter(tool => row.pluginOn?.includes(tool));
+/** The tools with a copy of their own (ownCopies) an Off item's tag names: beside a plugin on (`through`), only those whose own switch lets them load it. */
+const ownNamed = (row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], through: readonly string[]) =>
+  ownCopies(row, item, tools).filter(tool => !through.length || !row.switchedOff?.includes(tool));
 /**
  * Whether an item in Central Knot has a change that waits for the next pass, as its status line says it ("when sync runs"): an On
  * item's edit to take in, a copy deleted by hand that turns it off, a copy to write in a tool that can take it, or copies still to
@@ -571,7 +574,7 @@ export function sentences(words: RowWords) {
   function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = []): { text: string; title: string } | undefined {
     const place = placeOf(item);
     const unseen = stillIn(row, item, [], tools);
-    const own = ownCopies(row, item, tools), through = onThrough(row, tools);
+    const through = onThrough(row, tools), own = ownNamed(row, item, tools, through);
     const none = [through.length ? `${andList(through.map(toolName))} ${through.length === 1 ? 'has' : 'have'} it on through its plugin: its switch there, in the opened row, turns that off.` : '',
       own.length ? `${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there, left alone while the ${noun} is off.` : ''].filter(Boolean).join(' ')
       || (switchedOffWords(row, tools)[0] ?? (leftOut.length ? `No tool it manages has it until you turn it on; ${andList(leftOut.map(toolName))}, left out, ${leftOut.length === 1 ? 'keeps whatever it has' : 'keep whatever they have'}.`
