@@ -1627,13 +1627,19 @@ async function practiceFlow() {
   const versionsShown = () => a.all('.version-row', `e.querySelector('.version-from').textContent`);
   same('the opened row lists two versions: the chosen copy, current, then Claude Code’s', [(await versionsShown()).length, /Current$/.test((await versionsShown())[0] ?? ''), /Claude Code/.test((await versionsShown())[1] ?? '')], [2, true, true]);
   const claudeSkills = join(practice, '.claude/skills');
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+  await a.click('#outcome-dismiss');
   chmodSync(claudeSkills, 0o555);
-  await a.click(`#${rowPart('version-current', 'skills', 'review', '1')}`);
-  for (let tries = 0; tries < 30 && readNow(join(practice, '.codex/skills/review/SKILL.md')) !== reviewClaude; tries++) await wait(100);
-  same('Make current writes the earlier version everywhere it can; Claude Code’s write waits, and its mark says it can’t take it yet', [readNow(join(practice, '.codex/skills/review/SKILL.md')), readNow(join(practice, '.claude/skills/review/SKILL.md')), await cellState(a, 'skills', 'review', 'claude-cli')], [reviewClaude, reviewCopilot, 'cannot']);
-  chmodSync(claudeSkills, 0o755);
+  try {
+    await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+    same('On with a locked folder says which tool it is not in, and why', [await a.text('#header [data-outcome] .band-text'), await a.text('#header .problem-text')],
+      ['Didn’t go through in every tool: notes is on in Copilot CLI and Codex; not in Claude Code.', 'notes (Claude Code): Claude Code’s skills folder can’t be written, so Central Knot can’t change the skill there. Once the folder’s permissions let it, Claude Code catches up when sync runs.']);
+    await a.click(`#${rowPart('version-current', 'skills', 'review', '1')}`);
+    for (let tries = 0; tries < 30 && readNow(join(practice, '.codex/skills/review/SKILL.md')) !== reviewClaude; tries++) await wait(100);
+    same('Make current writes the earlier version everywhere it can; Claude Code’s write waits, and its mark says it can’t take it yet', [readNow(join(practice, '.codex/skills/review/SKILL.md')), readNow(join(practice, '.claude/skills/review/SKILL.md')), await cellState(a, 'skills', 'review', 'claude-cli')], [reviewClaude, reviewCopilot, 'cannot']);
+  } finally { chmodSync(claudeSkills, 0o755); }
   await a.click('#header-refresh');
-  same('once the folder can be written, Claude Code catches up', readNow(join(practice, '.claude/skills/review/SKILL.md')), reviewClaude);
+  same('once the folder can be written, Claude Code catches up', [readNow(join(practice, '.claude/skills/review/SKILL.md')), existsSync(join(claudeSkills, 'notes/SKILL.md'))], [reviewClaude, true]);
   await opened('review', false);
 
   // A tool's own switch for a skill is left exactly as it is: the folder stays, the tool doesn't load it, its mark is off and
