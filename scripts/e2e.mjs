@@ -9213,7 +9213,7 @@ async function usageFlow() {
   same('with the chip on, the table holds standup and spare', await sectionsNow(a, 'skills'), [['on', ['standup', 'spare']]]);
   same('its band leads with how many, what Turn these off does and the profile it ends; then, fainter, that a use elsewhere isn’t seen, how far back each tool’s history goes, what Codex doesn’t always record and the new one left out',
     [await a.text('#unused-band .usage-lead'), (await a.text('#unused-band .usage-more'))?.replace(/ /g, ' ').replace(/from \w+ \d+/g, 'from <day>')],
-    ['2 skills with no use seen in the last 30 days. Turn these off: Central Knot takes its copies out of every tool and keeps them; Undo turns them all back on. With these off, Everyday stops being the profile in use.',
+    ['2 skills with no use seen in the last 30 days. Turn these off: Central Knot takes its copies out of every tool it manages and keeps them; Undo turns them all back on. With these off, Everyday stops being the profile in use.',
       'A use on another computer or in a tool not read isn’t seen. Each tool’s history: Claude Code, 30 days or more; Copilot CLI, from <day>; Codex, from <day>. Codex doesn’t always record which skill was used. Left out: 1 skill under 30 days old.']);
   same('Turn these off sits at the band’s end, at 1280 and 2560 alike', await (async () => { const ends = []; for (const [width, height] of [[1280, 800], [2560, 1440]]) { await sizeTo(a, width, height);
     ends.push(await a.run(`Math.round(document.querySelector('#unused-band').getBoundingClientRect().right - document.querySelector('#turn-unused-off').getBoundingClientRect().right)`)); } await fullSize(a); return ends[0] === ends[1]; })(), true);
@@ -9227,7 +9227,7 @@ async function usageFlow() {
   if (shots) { for (const [width, height] of [[1316, 819], SMALLEST]) { await sizeTo(a, width, height); await a.shot(`usage-result-${width}`); } await fullSize(a); }
   same('Turn these off: one click removes Central Knot’s copies, leaves spare’s shared copy and says Codex still reads spare another way, with one Undo; the chip, now at 0, is gone',
     [await a.text('.outcome-text, [data-outcome] .band-text'), Object.entries(filesOf(['standup', 'spare'])).filter(([, body]) => body), (await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'spare')}"] .row-tag`))?.trim(), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
-    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Central Knot keeps them, and turning one on puts it back as it was. Codex still reads spare another way.', [[join(shared, 'spare'), before[join(shared, 'spare')]]], 'in Central Knot and Codex', false]);
+    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Codex still reads spare another way. Central Knot keeps them, and turning one on puts it back as it was.', [[join(shared, 'spare'), before[join(shared, 'spare')]]], 'in Central Knot and Codex', false]);
   await a.click('#outcome-undo');
   for (let tries = 0; tries < 50 && JSON.stringify(filesOf(['standup', 'spare'])) !== JSON.stringify(before); tries++) await wait(100);
   same('its one Undo puts both back On, every file byte for byte, and the chip offers them again',

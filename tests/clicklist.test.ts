@@ -957,7 +957,7 @@ test('Turn these off where one refreshed skill still loads in Codex from another
   await settled();
   await main.pass({ results: [...did('spare').results, ...did('standup').results], writes: 2, reloads: [], made: ['off-skills-spare', 'off-skills-standup'] });
   assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons, app.outcome?.act?.label],
-    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Central Knot keeps them, and turning one on puts it back as it was. Codex still reads spare another way.', false, [], 'Undo']);
+    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Codex still reads spare another way. Central Knot keeps them, and turning one on puts it back as it was.', false, [], 'Undo']);
 });
 
 test('Turn these off where a kind with a shared skill is refused and an MCP server goes through: only rows Off afterwards get the still-read sentence', async t => {

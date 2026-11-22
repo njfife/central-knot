@@ -2225,7 +2225,7 @@ function unusedBand(t: Table, shown: ItemRow[]) {
   const live = homeItems(home), plugins = pluginLive(home), ids = new Set(off.map(skill => itemId(partOfPage[skill.kind], skill.key))), before = inUse(home.profiles.profiles, live, plugins);
   const ending = before.filter(profile => !inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item)), plugins).includes(profile));
   const lead = [`${counted(shown)} with no use seen in the last ${USAGE_DAYS} days.`,
-    off.length ? 'Turn these off: Central Knot takes its copies out of every tool and keeps them; Undo turns them all back on.' : '',
+    off.length ? 'Turn these off: Central Knot takes its copies out of every tool it manages and keeps them; Undo turns them all back on.' : '',
     kept.length ? `${counted(kept)} from a plugin skipped: turn each off on its own row.` : '',
     ending.length ? `With these off, ${andList(ending.map(profile => profile.name))} ${ending.length === 1 ? 'stops' : 'stop'} being the profile in use.` : ''];
   const more = ['A use on another computer or in a tool not read isn’t seen.', reachWords(read), record('seen', ' always'), record(undefined, ''),
@@ -2243,16 +2243,17 @@ export const toTurnOff = (shown: ItemRow[]) => shown.filter(row => !leftToItsRow
 /**
  * Turn these off, over rows of any kinds: each kind's rows one click with each row's own Off (libraryrow.ts rowClicks.off), the
  * kinds in turn (app.ts applyByKind: a kind that refuses is skipped and named), with one Undo that puts them all back. Its words
- * are one sentence over the rows that went through (what didn't is said before it: app.ts applyByKind), a row's kind named where a
- * row of another kind has its name (words.ts rowNames).
+ * name the rows that went through (what didn't is said first: app.ts applyByKind; a row's kind named where another kind shares its
+ * name: words.ts rowNames), then any tools still reading them another way (from applyByKind's stillRead), then that Central Knot keeps them.
  */
 export function turnTheseOff(rows: ItemRow[]) {
   const clicks = KINDS.map(kind => rows.filter(row => row.kind === kind)).filter(list => list.length).map((list): Click => ({
     // Its words are the whole click's, over every kind (applyByKind's `said`, below).
     kind: list[0]!.kind, items: list.map(nameOf), rows: list.map(rowKey), regroups: true, changes: list.map(row => rowClicks.off(row, itemOf(row))), said: '' }));
-  void applyByKind(clicks, off => {
+  void applyByKind(clicks, (off, stayed) => {
     const { one, many } = rowNouns(off.map(row => row.kind));
-    return `Turned off ${plural(off.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(rowNames(off))}. Central Knot keeps ${off.length === 1 ? 'it, and turning it on puts it' : 'them, and turning one on puts it'} back as it was.`;
+    return [`Turned off ${plural(off.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(rowNames(off))}.`,
+      ...stayed, `Central Knot keeps ${off.length === 1 ? 'it, and turning it on puts it' : 'them, and turning one on puts it'} back as it was.`].join(' ');
   });
 }
 

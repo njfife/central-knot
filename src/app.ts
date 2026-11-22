@@ -625,7 +625,10 @@ function sayDone(done: Done, click: Click) {
   for (const row of click.rows) flashRow(row);
 }
 
-/** Tools still reading `rows` left Off in the view another way (libraryrow.ts stillReadWords), kind by kind, named among `among`. */
+/**
+ * Tools still reading `rows` left Off in the view via an outside copy (libraryrow.ts stillReadWords), kind by kind, named among
+ * `among`. Callers: applyByKind passes `through` (only rows that went through), runOutcome every row left Off (partial Offs too).
+ */
 const stillRead = (rows: NamedRow[], among: NamedRow[]) => [...groupBy(rows, row => row.kind)].flatMap(([kind, list]) => {
   const { library, tools } = kindSource(state.home!, kind);
   return stillReadWords(list.flatMap(each => {
@@ -639,10 +642,10 @@ const stillRead = (rows: NamedRow[], among: NamedRow[]) => [...groupBy(rows, row
  * kind in turn under one busy, each through its kind's engine (carryOut). A kind's click refused whole (its own record stops its
  * writes, say) is skipped, and said as a problem line (words.ts saidByKind); the others go on. Its result belongs to the page it was clicked
  * on (busy). `said`: what was done, given the rows that went through in every tool (a row whose own change was refused, a stale
- * one, is no row changed: Done changed), followed by what tools still read another way of them (stillRead). Its result names the rows
+ * one, is no row changed: Done changed) and what tools still read another way of them (stillRead). Its result names the rows
  * that changed, and only they flash; one Undo, only when every click that changed something has one, puts them back (undoClick).
  */
-export const applyByKind = (clicks: Click[], said: (changed: NamedRow[]) => string) => busy('Applying…', async page => {
+export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed: string[]) => string) => busy('Applying…', async page => {
   const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
   for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
@@ -658,9 +661,9 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[]) => stri
     || done.kept?.results.some(entry => keptBack(entry) && entry.item.toLowerCase() === row.name.toLowerCase())).map(({ row }) => row);
   const through = changed.filter(row => !left.some(each => sameRow(each, row))), all = asked.map(({ row }) => row);
   const lead = left.length ? notAllThrough(rowNames(left, all), asked.length) : '';
-  const after = !changed.length ? 'Nothing changed.' : through.length ? said(through) : `${countedAs(changed.length, asked.length, false)}.`;
+  const after = !changed.length ? 'Nothing changed.' : through.length ? said(through, stillRead(through, all)) : `${countedAs(changed.length, asked.length, false)}.`;
   tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
-    text: [lead, after, ...stillRead(through, all)].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? [])],
+    text: [lead, after].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? [])],
     act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads));
   for (const row of changed) flashRow(row);
   if (regroups) unpin();
