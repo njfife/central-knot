@@ -272,7 +272,7 @@ function rowsOf(kind: PageKind): ItemRow[] {
   if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fact => fromFacts(kind, fact)).map(row => ({ ...row, pluginOn: pluginOnIn(state.home, kind, row) })) };
   return factsCache[kind]!.list;
 }
-/** A kind's row by its key, as the home on screen has it now: what a run's result reads of each row it changed (app.ts runOutcome). */
+/** A kind's row by its key, as the home on screen has it now: what a result reads of each row it changed (app.ts runOutcome, stillRead). */
 export const rowByKey = (kind: PageKind, key: string) => rowsOf(kind).find(row => row.key === key);
 /**
  * A table (useLibrary, useTab): the kinds it lists (the Library's segment's; a tab's one) and the harness whose page it is on
@@ -2225,7 +2225,7 @@ function unusedBand(t: Table, shown: ItemRow[]) {
   const live = homeItems(home), plugins = pluginLive(home), ids = new Set(off.map(skill => itemId(partOfPage[skill.kind], skill.key))), before = inUse(home.profiles.profiles, live, plugins);
   const ending = before.filter(profile => !inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item)), plugins).includes(profile));
   const lead = [`${counted(shown)} with no use seen in the last ${USAGE_DAYS} days.`,
-    off.length ? 'Turn these off: off in every tool; Central Knot keeps them, and Undo turns them all back on.' : '',
+    off.length ? 'Turn these off: Central Knot takes its copies out of every tool and keeps them; Undo turns them all back on.' : '',
     kept.length ? `${counted(kept)} from a plugin skipped: turn each off on its own row.` : '',
     ending.length ? `With these off, ${andList(ending.map(profile => profile.name))} ${ending.length === 1 ? 'stops' : 'stop'} being the profile in use.` : ''];
   const more = ['A use on another computer or in a tool not read isn’t seen.', reachWords(read), record('seen', ' always'), record(undefined, ''),

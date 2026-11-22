@@ -25,7 +25,7 @@ import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
 import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
-import { asksWhichCopy, copiesDiffer, libraryWords, stillReadWords } from './libraryrow.ts';
+import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } from './libraryrow.ts';
 import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
@@ -625,13 +625,22 @@ function sayDone(done: Done, click: Click) {
   for (const row of click.rows) flashRow(row);
 }
 
+/** Tools still reading `rows` left Off in the view another way (libraryrow.ts stillReadWords), kind by kind, named among `among`. */
+const stillRead = (rows: NamedRow[], among: NamedRow[]) => [...groupBy(rows, row => row.kind)].flatMap(([kind, list]) => {
+  const { library, tools } = kindSource(state.home!, kind);
+  return stillReadWords(list.flatMap(each => {
+    const row = rowByKey(kind, each.key);
+    return row && placeOf(library[each.key]) === 'off' ? [{ name: rowNames([each], among)[0]!, row }] : [];
+  }), tools);
+});
+
 /**
  * One click over rows of several kinds (Turn these off: matrix.ts turnTheseOff): `clicks`, one per kind, carried out kind by
  * kind in turn under one busy, each through its kind's engine (carryOut). A kind's click refused whole (its own record stops its
  * writes, say) is skipped, and said as a problem line (words.ts saidByKind); the others go on. Its result belongs to the page it was clicked
  * on (busy). `said`: what was done, given the rows that went through in every tool (a row whose own change was refused, a stale
- * one, is no row changed: Done changed). Its result names the rows that changed, and only they flash; one Undo, only when every
- * click that changed something has one, puts them back (undoClick).
+ * one, is no row changed: Done changed), followed by what tools still read another way of them (stillRead). Its result names the rows
+ * that changed, and only they flash; one Undo, only when every click that changed something has one, puts them back (undoClick).
  */
 export const applyByKind = (clicks: Click[], said: (changed: NamedRow[]) => string) => busy('Applying…', async page => {
   const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
@@ -647,11 +656,11 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[]) => stri
   const asked = parts.flatMap(({ click, done }) => click.rows.map((row, at) => ({ row: { ...row, name: click.items[at] ?? row.key }, done })));
   const left = asked.filter(({ row, done }) => done.refused || !done.changed?.some(each => sameRow(each, row))
     || done.kept?.results.some(entry => keptBack(entry) && entry.item.toLowerCase() === row.name.toLowerCase())).map(({ row }) => row);
-  const through = changed.filter(row => !left.some(each => sameRow(each, row)));
-  const lead = left.length ? notAllThrough(rowNames(left, asked.map(({ row }) => row)), asked.length) : '';
+  const through = changed.filter(row => !left.some(each => sameRow(each, row))), all = asked.map(({ row }) => row);
+  const lead = left.length ? notAllThrough(rowNames(left, all), asked.length) : '';
   const after = !changed.length ? 'Nothing changed.' : through.length ? said(through) : `${countedAs(changed.length, asked.length, false)}.`;
   tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
-    text: [lead, after].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? [])],
+    text: [lead, after, ...stillRead(through, all)].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? [])],
     act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads));
   for (const row of changed) flashRow(row);
   if (regroups) unpin();
@@ -733,10 +742,7 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   const through = rows.filter(turn => !left.some(other => sameRow(other.row, turn.row))), byState = (list: ItemTurn[]) => [false, true].map(on => list.filter(turn => (turn.isOn() ?? turn.row.on) === on));
   // What stayed of every row the run left Off (gone through or not; a row waiting for a choice is neither), as the view after it
   // has it: the tools still reading them another way.
-  const stayed = [...groupBy(byState(once(each).filter(turn => !waits(turn)))[0]!, turn => turn.row.kind)].flatMap(([kind, list]) => stillReadWords(list.flatMap(turn => {
-    const row = rowByKey(kind, turn.row.key);
-    return row ? [{ name: rowNames([named(turn)], among)[0]!, row }] : [];
-  }), kindSource(state.home!, kind).tools));
+  const stayed = stillRead(byState(once(each).filter(turn => !waits(turn)))[0]!.map(named), among);
   const namedAs = (group: ItemTurn[], on: boolean) => `${plural(group.length, nouns.one, nouns.many)} ${group.length === 1 ? 'is' : 'are'} ${on ? 'on' : 'off'}: ${fewNames(rowNames(group.map(named), among))}`;
   const said = byState(through.length ? through : rows).map((group, on) => (!group.length ? '' : through.length ? namedAs(group, !!on) : countedAs(group.length, once(each).length, !!on))).filter(Boolean).join('; ');
   const along = did.flatMap(turn => (turn.done!.along ? [`${rowNames([named(turn)], among)[0]}: ${turn.done!.along.replace(/^./, first => first.toLowerCase())}`] : []));
