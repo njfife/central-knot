@@ -8923,12 +8923,21 @@ async function mcpSigninFlow() {
   const main = a.inspect ? await a.main() : undefined;
   if (!main) console.log('(mcpSigninFlow: the packaged app opens no main process to the checks and offers no Practice copy: the clipboard after Copy and a refused check are not checked here, the other home opened during a check is this one again, and Quit comes once)');
   const copyOn = async (tool, name) => {
-    const index = (await page()).rows.findIndex(row => rowName(row) === name), command = await a.text(`#signin-cell-${tool}-${index} .signin-command`);
-    const label = await a.text(`#signin-copy-${tool}-${index}`);
-    await a.click(`#signin-copy-${tool}-${index}`);
-    await wait(200);
-    // Its label, the command the cell shows, what the status bar says, and (a development run) what the clipboard holds.
-    return [label, command, await a.run(`document.querySelector('#announcement').dataset.text`), ...(main ? [await main.run('electron.clipboard.readText()')] : [])];
+    // navigator.clipboard.writeText needs a focused document; a.click uses DOM click() without OS focus, and parallel groups
+    // share one screen. Emulate focus only around this click so other checks still see real focus.
+    await a.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    try {
+      const index = (await page()).rows.findIndex(row => rowName(row) === name), command = await a.text(`#signin-cell-${tool}-${index} .signin-command`);
+      const label = await a.text(`#signin-copy-${tool}-${index}`);
+      await a.run(`document.querySelector('#announcement').dataset.text = ''`);
+      await a.click(`#signin-copy-${tool}-${index}`);
+      let said = '';
+      await until(async () => !!(said = await a.run(`document.querySelector('#announcement').dataset.text`)), `Copy on ${tool}`);
+      // Its label, the command the cell shows, what the status bar says, and (a development run) what the clipboard holds.
+      return [label, command, said, ...(main ? [await main.run('electron.clipboard.readText()')] : [])];
+    } finally {
+      await a.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+    }
   };
   same('Copy gives Codex’s own sign-in command, the one the cell shows', await copyOn('codex-cli', 'oauth'), ['Copy', 'codex mcp login oauth', 'Copied. Run it in a terminal; then Check again.', ...(main ? ['codex mcp login oauth'] : [])]);
 
