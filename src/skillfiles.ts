@@ -143,7 +143,7 @@ async function readFolder(directory: string): Promise<FolderContent> {
 export async function readCopy(tool: HarnessId, directory: string, rootLabel: string, reads: FolderReads = new Map()): Promise<SkillCopy | { unseen: string; isSkill?: true }> {
   const name = directory.split(sep).at(-1)!, where = `${toolName(tool)}’s copy`;
   const real = await realpath(directory).catch(() => undefined);
-  const entry = (real && reads.get(real)) ?? await readFolder(real ?? directory);
+  const entry = (real ? reads.get(real) : undefined) ?? await readFolder(real ?? directory);
   if (real && !reads.has(real)) reads.set(real, entry);
   if ('unseen' in entry) return { unseen: entry.unseen(where), ...(entry.isSkill ? { isSkill: true } : {}) };
   return { tool, name, key: itemKey(name), hash: entry.hash, at: entry.at, directory, skill: asSkill(directory, entry.content, entry.real, rootLabel) };
