@@ -1229,6 +1229,30 @@ test('A click names a tool whose skills folder is a dangling link, and says why'
   } finally { await box.cleanup(); }
 });
 
+test('A tool whose skills folder is linked to another tool’s locks both folders: Off to On writes only to the third tool and names both; a skill already in the shared folder is not named', async () => {
+  const box = await sandbox();
+  const copilotRoot = join(box.home, roots['copilot-cli']);
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Fifth skill.', 'fifth') }, [], 'fifth');
+    await turnOn(box, box.context, 'fifth');
+    await turnOff(box, box.context, 'fifth');
+    await rm(copilotRoot, { recursive: true, force: true });
+    await symlink('../.claude/skills', copilotRoot);
+    // Neither Claude Code nor Copilot CLI is written (rootProblem locks both when their folders land on one directory).
+    const turnedOn = await turnOn(box, box.context, 'fifth');
+    assert.ok(turnedOn !== 'choose');
+    const onRes = clickResults(turnedOn.results, ['fifth']);
+    assert.deepEqual([onRes.notIn, onRes.failed], [['claude-cli', 'copilot-cli'], true]);
+    assert.deepEqual([await bytes(folderOf(box, 'claude-cli', 'fifth')), await bytes(join(copilotRoot, 'fifth')), !!(await bytes(folderOf(box, 'codex-cli', 'fifth')))], [undefined, undefined, true]);
+    // A skill already present in that shared folder is read by both tools another way, so Add writes Codex and names neither.
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Shared skill.', 'sixth') }, [], 'sixth');
+    const added = await turnOn(box, box.context, 'sixth');
+    assert.ok(added !== 'choose');
+    const addRes = clickResults(added.results, ['sixth']);
+    assert.deepEqual([addRes.notIn, addRes.failed, !!(await bytes(folderOf(box, 'codex-cli', 'sixth')))], [[], false, true]);
+  } finally { await box.cleanup(); }
+});
+
 test('Only a tool held by its locked skills folder is named on a click, not one kept out, with a plugin, or reading another copy', { skip: process.getuid?.() === 0 }, async () => {
   const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli']);
   const claudeRoot = join(box.home, roots['claude-cli']), codexRoot = join(box.home, roots['codex-cli']), opencodeRoot = join(box.home, roots['opencode-cli']);
