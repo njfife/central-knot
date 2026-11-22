@@ -633,10 +633,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * What is due now, with each Git marketplace fetched again first (as Refresh does). Nothing here writes to a tool.
-   * - The updates Update all would choose: for each plugin some tool has installed, an update in each tool whose copy is
-   *   behind (pluginstatus.updateTools, as the page asks it), and its items read again where it has something for them
-   *   (pluginlibrary.ts itemsView `ready`). A plugin's files are read first, as its page reads them (from the repository it is kept in, too), so a copy
-   *   that differs at the same version counts. Each op carries the version offered. One turned off in a tool is still updated
+   * - The updates Update all would choose, but what only a click brings: for each plugin some tool has installed, an update in
+   *   each tool whose copy is behind (pluginstatus.updateTools, as the page asks it), and its items read again where it has
+   *   something for them without a click (pluginlibrary.ts itemsView `due`, not Update's `ready`). A plugin's files are read
+   *   first, as its page reads them (from the repository it is kept in, too), so a copy that differs at the same version counts. Each op carries the version offered. One turned off in a tool is still updated
    *   there, and update() keeps it off. A plugin its catalog dropped is left as it is.
    * - The installs the plugins' table owes the automatic updates (pluginrecord.ts `background`: an On plugin a managed tool
    *   new here lacks), each marked `newHere`.
@@ -662,9 +662,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
         for (const [tool, owed] of Object.entries(entry.switches?.[plugin.name]?.tools ?? {}) as [HarnessId, Owed][]) {
           if (owed.background && (owed.act === 'install' || owed.act === 'install-items')) ops.push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: owed.act, newHere: true });
         }
-        // A plugin with items whose read has something for them (pluginlibrary.ts itemsView `ready`): read and carried out once.
+        // A plugin with items whose read has something for them without a click (pluginlibrary.ts itemsView `due`): read and carried out once.
         const itemsTool = itemTools(shown.tools)[0];
-        if (entry.items?.[plugin.name]?.ready && itemsTool) ops.push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool: itemsTool, action: 'update-items' });
+        if (entry.items?.[plugin.name]?.due && itemsTool) ops.push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool: itemsTool, action: 'update-items' });
         const copied = shown.tools.some(tool => { const state = entry.states[plugin.name]?.[tool]; return state?.state === 'installed' && !state.live && !state.directory; });
         if (!copied) continue;
         const files = await detail(entry.source, plugin.name).catch(() => null);

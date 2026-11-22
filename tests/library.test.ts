@@ -497,7 +497,7 @@ test('Changed here: the current version is not what it took from the source, or 
 
 // ---------- A plugin's rows (library.ts's header, A PLUGIN): the same table, but where `plugin` says otherwise ----------
 
-const plugin = { plugin: true };
+const plugin = { plugin: true, link: 'team/notes' };
 
 test('A plugin: a name the library has no item for is made, and so is his own deleted; one of its own he deleted only at a click that brings the plugin in; a name the library has unlinked is taken (`take`) only by Use the plugin’s on it, and never when it is the same', () => {
   assert.equal(fromSource(undefined, there('s'), 'none', plugin), 'make');
@@ -526,6 +526,30 @@ test('A plugin: its item changed here is let go, before every other row, whateve
   assert.equal(fromSource(on, 'gone', 'this', plugin), 'drop');
   assert.equal(fromSource({ ...on, hash: 'mine' }, there('s'), 'this', { ...plugin, copies: { 'pi-cli': holds('l') } }), 'let-go');
   assert.equal(fromSource({ ...on, hash: 'mine', source: undefined }, there('s'), 'none', plugin), 'differs', 'let go once, it stays the person’s while it differs');
+});
+
+test('A plugin: a version it gave earlier, made current again (History’s Undo, Go back, Make current), is no change here: the background holds what it gives still, a click brings that back, and anything else it gives updates', () => {
+  // It gave a, then b (`seen`); a was made current again. Pi holds a, as the pass wrote it.
+  const gave = (hash: string, at: string): Version => ({ hash, at, from: { how: 'source', link: 'team/notes' } });
+  const back = { ...linked('a', 'b'), on: true, applied: { 'pi-cli': 'a' },
+    versions: [{ hash: 'a', at: '2026-11-04T10:00:00.000Z', from: { how: 'made-current' } }, gave('b', '2026-11-03T10:00:00.000Z'), gave('a', '2026-11-02T10:00:00.000Z')] } satisfies LibraryItem;
+  const pi = { copies: { 'pi-cli': holds('a') } };
+  assert.equal(fromSource(back, 'unreadable', 'this', { ...plugin, ...pi }), 'nothing', 'a pass that doesn’t read the plugin: still the plugin’s');
+  assert.equal(fromSource(back, there('b'), 'this', { ...plugin, ...pi }), 'nothing', 'it still gives b, the version he took back: the background leaves a');
+  assert.equal(fromSource(back, there('b'), 'this', { ...plugin, ...pi, update: true }), 'update', 'a click on Update brings b back');
+  assert.equal(fromSource(back, there('b'), 'this', { ...plugin, ...pi, bringBack: true }), 'nothing', 'its On, Add or a box ticked: a stays, as only Update brings b');
+  assert.equal(fromSource(back, there('b'), 'this', { ...plugin, update: true, copies: { 'pi-cli': unseen } }), 'nothing', 'Update while Pi’s copy settling: b waits for a read where it can be seen');
+  assert.equal(fromSource(back, there('c'), 'this', { ...plugin, ...pi }), 'update', 'it gives c: an update as any');
+  const latest = { ...back, hash: 'b', applied: { 'pi-cli': 'b' }, versions: [{ hash: 'b', at: '2026-11-05T10:00:00.000Z', from: { how: 'made-current' as const } }, ...back.versions] };
+  assert.equal(fromSource(latest, there('b'), 'this', { ...plugin, update: true, copies: { 'pi-cli': holds('b') } }), 'nothing', 'b made current again is what it last gave: nothing taken back');
+  assert.equal(fromSource(back, there('a'), 'this', { ...plugin, ...pi }), 'same', 'it gives a again: only `seen` moves on');
+  assert.equal(fromSource(back, 'gone', 'this', { ...plugin, ...pi }), 'drop', 'it drops the name: turned Off as any of its items');
+  assert.equal(fromSource(back, there('c'), 'this', { ...plugin, copies: { 'pi-cli': unseen } }), 'nothing', 'Pi’s copy settling: c waits for a read where it can be seen');
+  assert.equal(fromSource(back, there('b'), 'this', { ...plugin, copies: { 'pi-cli': holds('e') } }), 'let-go', 'an edit in Pi no pass has taken in comes first: his');
+  const his = { ...back, versions: [back.versions[0]!, gave('b', '2026-11-03T10:00:00.000Z'), { hash: 'a', at: '2026-11-02T10:00:00.000Z', from: { how: 'found' as const, harness: 'pi-cli' as const } }] };
+  assert.equal(fromSource(his, there('b'), 'this', { ...plugin, ...pi }), 'let-go', 'a version of his made current (one Use the plugin’s kept): his');
+  assert.equal(fromSource(back, there('b'), 'this', { ...plugin, ...pi, link: 'team/other' }), 'let-go', 'a version another link gave: his');
+  assert.equal(fromSource(back, there('c'), 'this', pi), 'wait', 'a Git source’s item waits, as CHANGED HERE says');
 });
 
 test('A source: a name gone, read whole, drops an item linked to it; one that can’t be read, or isn’t linked, changes nothing', () => {

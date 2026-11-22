@@ -35,6 +35,7 @@ import { alsoReads, lockedRoot, placeFolder, readCopy, readShape, readSkillsFold
   rootOf, rootProblem, sharedFolder, swapFolder, type FolderReads, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
 import { mergeSkill } from './merge.ts';
+import { pluginLink } from './sourcelink.ts';
 import { sourceFacts } from './sources.ts';
 import { followCopy, isDisabled, piListWords, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type PiEdit, type SwitchFile } from './skillswitch.ts';
 import { agentInPi, agentKind, applyAgents } from './agents.ts';
@@ -301,11 +302,15 @@ function lostShared(context: ShareContext, disk: SkillDisk, item: Wanted, tool: 
 
 /**
  * The plugin a tool has this skill through, if it does: a plugin skill of that name is this one when its SKILL.md is the
- * skill's; another one that only shares the name is not. Turned off there or not, as for every kind (plugins.ts partsHolding).
+ * skill's, or when the skill is linked to that plugin (`link`, as pluginrows.ts onOwnRow folds it: a version taken back in Pi,
+ * library.ts TAKEN BACK); another one that only shares the name is not. Turned off there or not, as for every kind (plugins.ts
+ * partsHolding).
  */
-function pluginFor(disk: SkillDisk, key: string, tool: HarnessId): ThroughPlugin | undefined {
+function pluginFor(disk: SkillDisk, key: string, tool: HarnessId, link?: string): ThroughPlugin | undefined {
   const given = disk.through.get(tool)?.get(key), shape = disk.shapes.get(key);
-  if (!given || given.text === undefined || !shape || comparableText(given.text) !== comparableText(shape.content)) return undefined;
+  if (!given) return undefined;
+  const same = given.text !== undefined && !!shape && comparableText(given.text) === comparableText(shape.content);
+  if (!same && link !== pluginLink(given.plugin, given.marketplace)) return undefined;
   const { text: _text, ...plugin } = given;
   return plugin;
 }
@@ -689,7 +694,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   for (const copy of entries) copies[copy.tool] = toolCopy(copy);
   const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
   const facts: ToolFacts = { cannot: {}, unseen: {}, plugin: {}, anotherWay: {}, takeOver: {}, loads: {}, alsoLoads: {} };
-  for (const tool of look.managed) toolFacts(look, { key, name, item, copiesNow, made }, tool, facts);
+  for (const tool of look.managed) toolFacts(look, { key, name, item, copiesNow, made, link: fromSource?.link }, tool, facts);
   const switchProblem = Object.fromEntries(Object.keys(facts.loads).flatMap(tool => { const problem = disk.switches.get(tool as HarnessId)?.problem; return problem ? [[tool, problem]] : []; }));
   // Its description is the current version's, else a copy's (readDisk's shapes).
   const description = disk.shapes.get(key)?.description ?? first?.skill.description ?? '';
@@ -711,7 +716,7 @@ interface ToolFacts {
   anotherWay: NonNullable<LibraryFacts['anotherWay']>; takeOver: NonNullable<LibraryFacts['takeOver']>; loads: NonNullable<LibraryFacts['loads']>;
   alsoLoads: NonNullable<LibraryFacts['alsoLoads']>;
 }
-type RowOf = { key: string; name: string; item: LibraryItem | undefined; copiesNow?: ReturnType<typeof copiesOf>; made?: ReturnType<typeof plan> };
+type RowOf = { key: string; name: string; item: LibraryItem | undefined; copiesNow?: ReturnType<typeof copiesOf>; made?: ReturnType<typeof plan>; link?: string };
 
 /**
  * One tool's facts on a skill's row: through a plugin, a copy that can't be read for sure, how it has the skill another way
@@ -719,11 +724,11 @@ type RowOf = { key: string; name: string; item: LibraryItem | undefined; copiesN
  * what its own switch says.
  */
 function toolFacts(look: SkillLook, row: RowOf, tool: HarnessId, facts: ToolFacts) {
-  const { key, name, item, copiesNow, made } = row, disk = look.disk;
+  const { key, name, item, copiesNow, made, link } = row, disk = look.disk;
   const here = disk.byKey.get(key)?.[tool], outsideCopy = disk.outside.get(key)?.[tool], copy = copiesNow?.[tool];
   // A found skill is asked about as taking it in would leave it: On everywhere, nothing applied yet.
   const asIf: Wanted = item ?? { key, name, on: true, except: [], applied: {} };
-  const given = pluginFor(disk, key, tool);
+  const given = pluginFor(disk, key, tool, link);
   if (given && !here) facts.plugin[tool] = given;
   const hidden = copy?.is === 'unseen' ? copy.why : !copiesNow ? unseenIn(disk, tool, key) : undefined;
   if (hidden) facts.unseen[tool] = hidden;
