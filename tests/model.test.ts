@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
-import { atMostEvery, caughtUpNames, holdingBuild, oneTurn, plural, timesApart } from '../src/model.ts';
+import { atMostEvery, caughtUpNames, holdingBuild, oneTurn, plural, timeAgo, timesApart } from '../src/model.ts';
 
 test('plural words read naturally', () => {
   assert.equal(plural(1, 'copy', 'copies'), '1 copy');
@@ -44,6 +44,15 @@ test('Every row of a list says its time in one form: how long ago while that tel
   assert.ok(/^\d+:\d\d\D/.test(todayRow) && !/\d:\d\d:\d\d/.test(todayRow), todayRow);
   assert.match(dayRow, /^yesterday at \d+:\d\d\D/);
   assert.doesNotMatch(timesApart([plus(0), yesterday], now)[1], /yesterday/);
+});
+
+test('How long ago floors minutes and hours at each boundary', () => {
+  const now = new Date(2026, 10, 22, 12, 0, 0, 0).getTime();
+  const ago = (seconds: number) => new Date(now - seconds * 1000).toISOString();
+  assert.deepEqual(
+    [30, 59, 60, 90, 59 * 60, 60 * 60, 119 * 60].map(seconds => timeAgo(ago(seconds), now)),
+    ['just now', 'just now', '1 min ago', '1 min ago', '59 min ago', '1 h ago', '1 h ago'],
+  );
 });
 
 test('What holds this build, one install at a time: nothing is written before the first look answers, then the first other build found holds it; none found, or whether one is here can’t be told, holds nothing', () => {

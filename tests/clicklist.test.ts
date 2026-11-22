@@ -75,6 +75,8 @@ const { pin, rowId } = await import('../src/itemrow.ts');
 const { backgroundProblems, copyQuestion, headerNotices, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { openWalkthrough, walkthroughBand } = await import('../src/firstsetup.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
+const { versionsList } = await import('../src/editparts.ts');
+const { timesApart } = await import('../src/model.ts');
 const { newItem } = await import('../src/library.ts');
 const { keptBack } = await import('../src/clickplan.ts');
 const { clickWords } = await import('../src/pluginparts.ts');
@@ -1827,4 +1829,23 @@ test('Profile Undo and menu-bar profile switches carry reloads through turnedOut
     await settled();
     assert.deepEqual(app.outcome?.reloads, [copilotOn, claudeMcp]);
   } finally { while (main.passes.length) await main.pass(did('notes')); }
+});
+
+test('An editor’s earlier-versions list floors how long ago each version was, matching model.ts timesApart (and floors days too)', () => {
+  const now = new Date(2026, 10, 22, 12, 0, 0, 0).getTime();
+  mock.timers.enable({ apis: ['Date'], now });
+  try {
+    const agoSeconds = (seconds: number) => new Date(now - seconds * 1000).toISOString();
+    const cases: [number, string][] = [
+      [30, 'just now'], [59, 'just now'], [60, '1 min ago'], [90, '1 min ago'],
+      [59 * 60, '59 min ago'], [60 * 60, '1 h ago'], [119 * 60, '1 h ago'],
+      [1439 * 60, '23 h ago'], [1440 * 60, '1 d ago'], [36 * 3600, '1 d ago'],
+    ];
+    const versions = cases.map(([seconds], index) => ({ id: `v${index}`, at: agoSeconds(seconds), firstLine: '', lines: 1, differs: 1 }));
+    const list = versionsList(versions, { id: id => `r-${id}`, disabled: false, run: () => {} }) as unknown as { children: { children: unknown[] }[] };
+    const shown = list.children[1]!.children.map(row => textOf(row).match(/\(([^)]+)\)/)?.[1]);
+    assert.deepEqual(shown, cases.map(([, expected]) => expected));
+    // Every sub-day case matches timesApart's own words for that same moment.
+    for (const [seconds, expected] of cases.slice(0, 7)) assert.deepEqual(timesApart([agoSeconds(seconds)], now), [expected]);
+  } finally { mock.timers.reset(); }
 });
