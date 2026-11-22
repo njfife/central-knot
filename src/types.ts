@@ -1021,8 +1021,9 @@ export interface LibraryFacts {
    */
   takeInAnswers?: { click: TakeInAnswer; rule: TakeInAnswer };
   /**
-   * Skills: how a tool has it another way (a link, a folder Central Knot doesn't own, another tool's folder it reads, a plugin),
-   * as its line says it, On or Off (skills.ts anotherWay). Nothing of Central Knot's goes there while it does.
+   * Skills: how a tool has it another way (a link, a folder Central Knot doesn't own, another tool's folder it reads, a plugin;
+   * where a plugin's part is turned off there, the copy the tool loads instead), as its line says it, On or Off (skills.ts
+   * anotherWay, toolFacts). Nothing of Central Knot's goes there while it does.
    */
   anotherWay?: Partial<Record<HarnessId, string>>;
   /**
@@ -1033,10 +1034,10 @@ export interface LibraryFacts {
   /** Skills: a copy outside Central Knot's own that Take over can make Central Knot's, by tool: a link in its folder, or a copy in ~/.agents/skills. */
   takeOver?: Partial<Record<HarnessId, { kind: 'link' | 'shared'; path: string }>>;
   /**
-   * Skills: the copy each tool loads (its own, or one it has another way; not a plugin's), as its own switch names it, and
-   * whether that switch turns it off there (`switchedOff`): the copy stays, and the tool doesn't load it. `in`: the managed tool
-   * whose own skills folder holds that copy (its own, or another's it reads or links to); none for the shared folder or a folder
-   * of his elsewhere. Read at each look.
+   * Skills: the copy each tool loads (its own, or one it has another way where no plugin's part on there gives it; never a
+   * plugin's), as its own switch names it, and whether that switch turns it off there (`switchedOff`): the copy stays, and the
+   * tool doesn't load it. `in`: the managed tool whose own skills folder holds that copy (its own, or another's it reads or
+   * links to); none for the shared folder or a folder of his elsewhere. Read at each look.
    */
   loads?: Partial<Record<HarnessId, SwitchTarget & { switchedOff: boolean; in?: HarnessId }>>;
   /**

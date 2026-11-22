@@ -99,14 +99,17 @@ export function withCopilotOff(items: LiveItem[], rows: readonly LibraryFacts[],
 /** A home view's live items that profiles act on, with any uncovered Copilot CLI `disabledMcpServers` block (`withCopilotOff`) and where each loads from a copy Central Knot doesn't write (`withLoads`). */
 export const homeItems = (home: PluginHome, plugins: readonly PluginLive[] = pluginLive(home)): LiveItem[] =>
   withCopilotOff(ownHomeItems(home), home.mcp.items, plugins).map(item => withLoads(home, item));
-/** A live item with the tools that still load it once Off (LiveItem `loadsElsewhere`), from its row in `home`: a plugin's copy where a plugin has it on (pluginrows.ts pluginOnIn). */
+/**
+ * A live item with the tools that still load it once Off (LiveItem `loadsElsewhere`), from its row in `home`: a plugin's copy where
+ * a plugin has it on (pluginrows.ts pluginOnIn), and a copy beneath it, which the tool loads once that plugin's item is off there.
+ */
 function withLoads(home: PluginHome, item: LiveItem): LiveItem {
   const page = pageOfPart[item.kind], view = home[page], facts = view.items.find(row => row.key === item.key);
   if (!facts) return item;
   const row = { ...facts, hashes: hashesOf(facts.copies), pluginOn: pluginOnIn(home, page, facts) };
   const kept = view.tools.flatMap((tool): LoadsThere[] => {
     const left = keptByOff(row, view.library[item.key], tool), through = left?.way === 'plugin' ? pluginItemThrough(home, item.kind, facts, tool) : undefined;
-    // Beneath a plugin's copy on there, the row has no `loads` (skills.ts toolFacts), but a copy it could take over (`takeOver`) is one.
+    // Beneath a plugin's copy on there the row names no `loads` (skills.ts toolFacts): the copy it could take over (`takeOver`) is one.
     const beneath = through && facts.takeOver?.[tool] ? [{ tool, way: facts.takeOver[tool]!.kind, through }] : [];
     return left ? [{ tool, ...left, ...(through ? { through } : {}) }, ...beneath] : [];
   });
