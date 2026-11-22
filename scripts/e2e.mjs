@@ -12541,10 +12541,10 @@ async function profilePluginsFlow() {
   same('with everything on, Work is in use', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p')], ['Work', 'In use · 2 items on']);
   await newProfile(a, 'Quiet');
   await a.click(byId(`pf-${issuesId}`)); await done();
-  const keptOnNote = 'Claude Code has no switch for a single skill of a plugin, so it stays on there.';
+  const keptOnNote = 'Stays on in Claude Code.';
   same('before the click: Quiet turns triage off where it can, and its row says, under its name and not in a tooltip, that Claude Code keeps it on and why; issues has no change; the header counts triage as still loading there',
     [await a.text(`${row(triageId)} .pf-state`), await a.run(`document.querySelector('${row(triageId)} .pf-state').title`), await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text(`${row(issuesId)} .pf-state`), await a.text('.profile-header p')],
-    ['Turns off in Codex and Pi', '', [keptOnNote], 'No change', 'Switching turns 1 item off; 1 still loads another way, in Claude Code']);
+    ['Turns off in Codex and Pi', '', [keptOnNote], 'No change', 'Switching turns 1 item off; 1 stays on in Claude Code, through its plugin']);
   await pictures('profile-plugin-rows');
 
   // The switch: Codex's own rule for triage alone, Pi's copy out, Claude Code untouched; one History entry, with Undo.
@@ -12555,7 +12555,7 @@ async function profilePluginsFlow() {
     { codex: `${codexBefore}\n[[skills.config]]\nname = "issue-tracker:triage"\nenabled = false\n`, claude: before.claude, pi: undefined });
   same('Quiet is in use, said with what it can switch; triage’s row still says Claude Code keeps it on', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p'), await a.text(`${row(triageId)} .pf-state`), await a.all(`${row(triageId)} .pf-note`, 'e.textContent')],
     ['Quiet', 'In use · 1 item on, the other 1 off wherever they can be switched', 'Off', [keptOnNote]]);
-  check('the result says what it turned off and, read again, that Claude Code still loads it, with Undo switch', /^Switched to Quiet: 1 item turned off; 1 still loads another way, in Claude Code\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
+  check('the result says what it turned off and, read again, that Claude Code still loads it, with Undo switch', /^Switched to Quiet: 1 item turned off; 1 stays on in Claude Code, through its plugin\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   if (a.inspect) {
     const menu = await mainHelpers(a.inspect);
     // A click on the profile in use changes nothing (main.ts switchFromMenu), so finding the ticked Quiet is a look, not a switch.
@@ -12652,7 +12652,7 @@ async function profilePluginsFlow() {
   const trackerRow = row('plugin:mcp:issue-tracker@ck-test-market/tracker');
   same('Copilot CLI’s found tracker shows the shared-name note on unticked tracker (not on ticked issues), and document-tools’s unread copy shows not known on pdf',
     [await a.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await a.all(`${trackerRow} .pf-note`, 'e.textContent'), await a.all(`${row('plugin:skill:document-tools@ck-test-market/pdf')} .pf-note`, 'e.textContent')],
-    [[], ['Stays on in Copilot CLI, which runs the plugin’s “tracker” instead of yours (same name).'], ['Claude Code has no switch for a single skill of a plugin, so it stays on there.', 'Not known in Copilot CLI: its copy couldn’t be read.']]);
+    [[], ['Stays on in Copilot CLI, which runs the plugin’s “tracker” instead of yours (same name).'], ['Stays on in Claude Code.', 'Not known in Copilot CLI: its copy couldn’t be read.']]);
   await picture('profile-plugin-held-unread', 1316, 819);
   // His tracker taken in for Copilot CLI alone, then Off: a profile that has it keeps the plugin's tracker on there (without holding), said on its row.
   for (const on of [true, false]) await a.run(`window.centralKnot.applyServers([{ key: 'tracker', on: ${on}, except: ['claude-cli', 'codex-cli', 'pi-cli'], ...(${on} ? {} : { seenOn: true }) }], false, ${JSON.stringify(home)})`);
@@ -12817,7 +12817,7 @@ async function profilePluginsFlow() {
     [!(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"'), !(JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
       (readNow(oldCodexCfg) ?? '').includes('[plugins."issue-tracker@ck-test-market".mcp_servers.issues]\nenabled = false')], [true, true, true]);
   await b.click(byId(`pf-${triageId}`)); await bDone();
-  same('unticking triage (keeping notes ticked) counts 1 item turning off before Switch, which Claude Code still loads', await b.text('.profile-header p'), 'Switching turns 1 item off; 1 still loads another way, in Claude Code');
+  same('unticking triage (keeping notes ticked) counts 1 item turning off before Switch, which Claude Code still loads', await b.text('.profile-header p'), 'Switching turns 1 item off; 1 stays on in Claude Code, through its plugin');
   await b.click('#profile-switch'); await bDone();
   same('switching with triage unticked turns triage off in both Codex and Copilot CLI, and format 3 keeps the flag',
     [(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"\nenabled = false'), (JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
@@ -13133,7 +13133,7 @@ async function stillLoadsFlow() {
   // his row counts the five tools that load it, and each of the four running his says so beside its switch.
   const home = join(scratch, 'home-still-loads'), data = join(scratch, 'still-loads-data'), market = join(scratch, 'market-still-loads'), tools = join(scratch, 'tools-still-loads');
   writeMarket(market, 'ck-test-market');
-  const own = ['one', 'two', 'three', 'four', 'five', 'six'], shared = ['s-one', 's-two', 's-three', 's-four'], mine = { command: 'npx', args: ['-y', 'my-issues'] };
+  const own = ['one', 'two', 'three', 'four', 'five', 'triage'], shared = ['s-one', 's-two', 's-three', 's-four'], mine = { command: 'npx', args: ['-y', 'my-issues'] };
   for (const name of own) skill(join(home, '.claude/skills'), name);
   for (const name of shared) skill(join(home, '.agents/skills'), name);
   for (const folder of ['.copilot', '.codex', '.pi/agent', '.config/opencode']) mkdirSync(join(home, folder), { recursive: true });
@@ -13161,16 +13161,16 @@ async function stillLoadsFlow() {
   await a.click('#nav-overview');
   await a.click('#setup-yes');
   await done();
-  check('Synchronize everything takes his in: each own skill and issues in every tool', await until(() => ['.codex/skills/one/SKILL.md', '.pi/agent/skills/six/SKILL.md', '.pi/agent/mcp.json'].every(path => existsSync(join(home, path)))), listing());
+  check('Synchronize everything takes his in: each own skill and issues in every tool', await until(() => ['.codex/skills/one/SKILL.md', '.pi/agent/skills/triage/SKILL.md', '.pi/agent/mcp.json'].every(path => existsSync(join(home, path)))), listing());
 
   // The profile: issues alone ticked, so Switch is offered (profileplan.ts switchable); the ten skills turn off.
   await a.click('#nav-profiles');
   await newProfile(a, 'Writing');
   await a.click(byId('pf-mcp:issues'));
   await done();
-  const header = 'Switching turns 10 items off; 4 still load another way, in Copilot CLI, Codex, Pi or OpenCode';
+  const header = 'Switching turns 10 items off; 4 still load from the shared skills folder, in Copilot CLI, Codex, Pi or OpenCode';
   const notes = async () => Object.fromEntries((await a.all('.pf-row[data-item^="skill:"]', `[e.dataset.item, e.querySelector('.pf-note')?.textContent ?? '']`)).sort());
-  const sharedNote = 'Copilot CLI, Codex, Pi and OpenCode still load it another way.';
+  const sharedNote = 'Copilot CLI, Codex, Pi and OpenCode still load it from the shared skills folder.';
   same('the header counts the ten it turns off and, apart, the four that still load from the shared folder; each of those four rows names the tools, the six others nothing',
     [await a.text('.profile-header p'), await notes()], [header, Object.fromEntries(ours.map(name => [`skill:${name}`, shared.includes(name) ? sharedNote : '']).sort())]);
   await a.click('#status-profile');
@@ -13185,7 +13185,7 @@ async function stillLoadsFlow() {
   await a.click('#profile-switch');
   await done();
   same('the switch takes the ten out of every tool’s own folder and leaves the shared folder as it was', listing(), Object.fromEntries(Object.entries(before).map(([root, files]) => [root, root === '.agents/skills' ? files : outOfTools(files)])));
-  const said = 'Switched to Writing: 10 items turned off; 4 still load another way, in Copilot CLI, Codex, Pi or OpenCode.';
+  const said = 'Switched to Writing: 10 items turned off; 4 still load from the shared skills folder, in Copilot CLI, Codex, Pi or OpenCode.';
   check('its result says what it turned off and, read again, how many still load and where', (await a.text('.band-done') ?? '').startsWith(said), await a.text('.bands'));
   await pictures('still-loads-result');
   await a.click('#nav-history');
@@ -13208,12 +13208,13 @@ async function stillLoadsFlow() {
 
   // His issues meets the plugin's in Pi: Use the plugin's takes the plugin's there, and his row counts the tools that load it.
   same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
-  const row = `.ov-row[data-key="${rowPart('', 'mcp', 'issues')}"]`, opened = `#${rowPart('open', 'mcp', 'issues')}`;
   /** His row as the Library shows it: its tags, and each tool's switch, ticked or not, with the word beside it. */
-  const rowNow = async () => {
-    await openKind(a, 'mcp');
+  const rowNow = async (kind = 'mcp', key = 'issues') => {
+    const opened = `#${rowPart('open', kind, key)}`;
+    await openKind(a, kind);
     if (await a.run(`document.querySelector('${opened}')?.getAttribute('aria-expanded')`) !== 'true') await a.click(opened);
-    return { tags: await a.all(`${row} .row-tag`), tools: await a.all(`[id^="${rowPart('enable', 'mcp', 'issues')}-"]`, `[e.id.split('-issues-')[1], e.getAttribute('aria-checked'), e.closest('.tool-switch')?.querySelector('.tool-switch-word')?.textContent]`) };
+    return { tags: await a.all(`.ov-row[data-key="${rowPart('', kind, key)}"] .row-tag`),
+      tools: await a.all(`[id^="${rowPart('enable', kind, key)}-"]`, `[e.id.split('-${key}-')[1], e.getAttribute('aria-checked'), e.closest('.tool-switch')?.querySelector('.tool-switch-word')?.textContent]`) };
   };
   const asBefore = await rowNow();
   await a.click('#nav-plugins');
@@ -13248,6 +13249,18 @@ async function stillLoadsFlow() {
   await a.click(byId(undoTake));
   await done();
   same('the take’s Undo gives Pi his issues back, and his row is exactly as before the take', [piIssues(), await rowNow()], [mine.args, asBefore]);
+  // His skill triage meets the plugin's in Pi too: taken there, Claude Code, Copilot CLI and Codex keep his folders, and OpenCode,
+  // which reads Claude Code's skills folder, still loads his from there: a reader too, its switch unticked as before.
+  await a.click('#nav-plugins');
+  if (await a.exists('#popen-0-issue-tracker')) await a.click('#popen-0-issue-tracker');
+  check('Pi’s box offers Use the plugin’s triage', await until(() => a.exists('#ptake-0-issue-tracker-pi-cli-skill-triage')), await a.text('.plugin-tool[data-tool="pi-cli"]'));
+  await a.click('#ptake-0-issue-tracker-pi-cli-skill-triage');
+  await done();
+  const skillTaken = await rowNow('skills', 'triage');
+  same('his skill’s row counts the five tools that load it, OpenCode, reading Claude Code’s folder, among them; beside its switch, unticked, that it has it another way',
+    [skillTaken.tags.filter(tag => !tag.startsWith('from')), skillTaken.tools], [['in 5 of 5 tools · 3 run their own copies · OpenCode has it another way'],
+      [['claude-cli', 'false', 'Its own copy'], ['copilot-cli', 'false', 'Its own copy'], ['codex-cli', 'false', 'Its own copy'], ['pi-cli', 'true', 'On'], ['opencode-cli', 'false', 'Another way']]]);
+  await pictures('still-loads-taken-skill');
   await a.quit();
 }
 

@@ -58,7 +58,7 @@ export interface ItemRow {
   /** A library kind: the names in each harness's own part of its copy (types.ts ToolCopy ownPart). */
   ownPart?: Partial<Record<Tool, string[]>>;
   /** A skill’s copy in each tool, including one switched off there (types.ts LibraryFacts loads). */
-  loads?: LibraryFacts['loads'];
+  loads?: LibraryFacts['loads']; alsoLoads?: LibraryFacts['alsoLoads'];
   /** A library kind: how a tool has it another way, in words, which copies Take over can make Central Knot's, and (skills, MCP servers) the tools whose own switch has it off (types.ts LibraryFacts). */
   anotherWay?: Partial<Record<Tool, string>>;
   takeOver?: Partial<Record<Tool, { kind: 'link' | 'shared'; path: string }>>;

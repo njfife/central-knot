@@ -1,7 +1,8 @@
 // Profiles: named sets of items, switched in one click (here, from the status bar, or from the menu bar or tray icon). The list
 // shows each profile and which are in use; the open profile shows every item it can tick, under its kind (skills, MCP servers,
 // agents): the library's items, and when `switchesPluginItems` is true each plugin's item some tool has, from its plugin, with
-// under its name each tool that doesn't switch it and why (copyNote); an older profile with `switchesPluginItems` false hides
+// under its name each tool that doesn't switch it (copyNote; why, for a tool with no switch for one item, the head of its kind
+// says once: kindNote); an older profile with `switchesPluginItems` false hides
 // plugin rows behind "Choose plugin items for this profile" until chosen. Each row has its box (in the profile or not) and what
 // a switch would do to it (one the profile leaves out names under its name the tools that keep it on: profileplan.ts keptOn),
 // and under Find a line on what the Library lists beside them (items only found: profileplan.ts leftOut). Ticking only edits the
@@ -10,7 +11,7 @@
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
-import { allTurns, changes, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, turnsWords, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { allTurns, changes, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, turnsWords, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
 import { noSingleSwitch } from './pluginstatus.ts';
 import { andList, toolList, toolNames } from './words.ts';
 import type { ItemKind } from './library.ts';
@@ -97,14 +98,14 @@ const kindWords: Record<ItemKind, { one: string; many: string; title: string }> 
  */
 function itemRow(profile: Profile, item: LiveItem, turns: Turns, isInUse: boolean) {
   const included = profile.items.includes(item.id), description = descriptionOf(item), { said, changes: moves } = stateOf(item, turns, isInUse);
-  const kept = included ? [] : keptOn(item);
+  const kept = included ? { tools: [] } : keptOn(item), many = kept.tools.length > 1;
   const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on. Click to leave it out.` : `Not in ${profile.name}: switching to it turns ${item.name} off. Click to put it in.`} ${item.name} is ${itemRowState(item)} now.`;
   return h(`div.pf-row${included ? '.pf-included' : ''}`, { role: 'row', 'data-item': item.id },
     h('span.pf-name', { role: 'cell' },
       tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${kindWords[item.kind].one}) in ${profile.name}`, help,
         itemsAfterClick: included ? profile.items.filter(entry => entry !== item.id) : [...profile.items, item.id] }),
       h('span.pf-name-text', { title: item.name }, item.name), description ? h('span.pf-desc', { title: description }, description) : null,
-      kept.length ? h('span.pf-notes', {}, h('span.pf-note', {}, `${toolList(kept)} still ${kept.length === 1 ? 'loads' : 'load'} it another way.`)) : null),
+      kept.tools.length ? h('span.pf-notes', {}, h('span.pf-note', {}, `${toolList(kept.tools)} still ${many ? 'load' : 'loads'} it ${loadWords([kept])}.`)) : null),
     h(`span.pf-state${moves ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said));
 }
 
@@ -143,7 +144,8 @@ function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy): HTMLEle
       : h('span.pf-note', { 'data-tool': copy.tool, title: 'To use yours there, rename one of the two or turn the plugin off in Copilot CLI.' },
         `${verb} in ${tool}, which runs the plugin’s “${item.name}” instead of yours (same name).`);
   }
-  if (copy.way === 'stays') return profile.items.includes(item.id) ? null : note(`${noSingleSwitch(copy.tool, item.kind)}, so it stays on there.`);
+  // Why, the head of its kind says once (kindNote).
+  if (copy.way === 'stays') return profile.items.includes(item.id) ? null : note(`Stays on in ${tool}.`);
   if (copy.way === 'unread') return h('span.pf-note', { 'data-tool': copy.tool, title: copy.why }, `Not known in ${tool}: its copy couldn’t be read.`);
   if (copy.way === 'held') return note(`Stays ${copy.on ? 'on' : 'off'} in ${tool}: ${copy.why}`);
   const source = 'install' in copy.target ? copy.target.install.source : undefined;

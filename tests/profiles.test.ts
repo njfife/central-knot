@@ -422,14 +422,14 @@ test('His case: six of his skills in a tool’s folder and four only in the shar
     await saveProfile(box.context, { name: 'Shared', items: ['skill:keep', ...shared.map(key => `skill:${key}`)] });
     // Off takes Central Knot's copies out of every tool (Claude Code's of the shared ones too); the shared folder stays as it is,
     // and Copilot CLI, Codex, Pi and OpenCode read it by themselves.
-    assert.equal(await preview(box, 'Writing'), 'Switching turns 10 items off; 4 still load another way, in Copilot CLI, Codex, Pi or OpenCode');
+    assert.equal(await preview(box, 'Writing'), 'Switching turns 10 items off; 4 still load from the shared skills folder, in Copilot CLI, Codex, Pi or OpenCode');
     assert.equal(await preview(box, 'Shared'), 'Switching turns 6 items off', 'none of the six still loads: the words as before');
     // The switch's result asks the home read again after it, not the preview: an item its entry names that is On there now is
     // not one it turned off.
     assert.equal(stillLoadAfter({ toName: 'Writing', on: [], off: [{ id: 'skill:s-one', name: 's-one' }] }, await homeNow(box)), '');
     const writing = (await readProfiles(box.home)).profiles.find(each => each.name === 'Writing')!;
     const switched = await switchProfile(box.context, box.tools, writing.id, NO_PLUGINS);
-    assert.equal(stillLoadAfter(switched.profile!, await homeNow(box)), '; 4 still load another way, in Copilot CLI, Codex, Pi or OpenCode');
+    assert.equal(stillLoadAfter(switched.profile!, await homeNow(box)), '; 4 still load from the shared skills folder, in Copilot CLI, Codex, Pi or OpenCode');
   } finally { await box.cleanup(); }
 });
 
@@ -449,6 +449,23 @@ test('Still loading after a switch is what the read decides of each copy that st
     await put(box, 'codex-cli', { 'SKILL.md': skillText('His own, in Codex.', 'kept') }, [], 'kept');
     await saveProfile(box.context, { name: 'Other', items: ['skill:keep'] });
     assert.equal(await preview(box, 'Other'), 'Switching turns 3 items off; 2 still load another way, in Claude Code, Copilot CLI or Codex');
+  } finally { await box.cleanup(); }
+});
+
+test('A link of his in Claude Code’s folder still loads after a switch in Claude Code and in OpenCode, which reads that folder: before it and after it alike', async () => {
+  const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli']);
+  try {
+    await putFile(join(box.home, 'my-skills/external/SKILL.md'), skillText('External.', 'external'));
+    await mkdir(join(box.home, '.claude/skills'), { recursive: true });
+    await symlink('../../my-skills/external', join(box.home, '.claude/skills/external'));
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('The keep skill.', 'keep') }, [], 'keep');
+    await applySkills(box.context, box.tools, [{ key: 'external', on: true, except: [] }, { key: 'keep', on: true, except: [] }]);
+    await saveProfile(box.context, { name: 'Other', items: ['skill:keep'] });
+    const header = await preview(box, 'Other');
+    const other = (await readProfiles(box.home)).profiles.find(each => each.name === 'Other')!;
+    const switched = await switchProfile(box.context, box.tools, other.id, NO_PLUGINS);
+    assert.deepEqual([header, stillLoadAfter(switched.profile!, await homeNow(box))],
+      ['Switching turns 1 item off; 1 still loads another way, in Claude Code or OpenCode', '; 1 still loads another way, in Claude Code or OpenCode']);
   } finally { await box.cleanup(); }
 });
 
@@ -618,7 +635,7 @@ async function sideNow(box: Box) {
     setSkill: async (source, marketName, plugin, skill, tool, on) => ({ reports: [await setSkill(context, marketName, plugin, skill, tool as PluginTool, on, source)] }),
     setPart: async (source, marketName, plugin, part, tool, on) => ({ reports: [await setPart(context, marketName, plugin, part, tool as PluginTool, on, source)] }) };
   const side: PluginSide = { live: async () => plugins, run: async ops => (await runPlan(ops, api, box.home)).done };
-  return { live: homeItems(view), plugins, side, inUse: async () => inUse((await readProfiles(box.home)).profiles, homeItems(view), plugins).map(each => each.name) };
+  return { view, live: homeItems(view), plugins, side, inUse: async () => inUse((await readProfiles(box.home)).profiles, homeItems(view), plugins).map(each => each.name) };
 }
 /** The files a plugin's items live in: Codex's and Claude Code's settings, and each skill's folder in Pi. */
 const pluginFiles = async (box: Box) => ({ codex: await text(box, '.codex/config.toml'), claude: await text(box, '.claude/settings.json'),
@@ -1397,7 +1414,7 @@ test('switchPreview gives the same line for the page header and both menus: mana
   assert.equal(switchPreview(profile('EmptyOld', [], false), liveList, plugs), '0 items. Plugin items stay as they are.');
   assert.equal(switchPreview(profile('EmptyNew', [], true), liveList, plugs), '0 items');
   // pdf and sheet turn off in Codex; Claude Code, with no switch for one skill of a plugin, still loads both.
-  assert.equal(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs), 'Switching turns 1 item on and 3 off; 2 still load another way, in Claude Code');
+  assert.equal(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs), 'Switching turns 1 item on and 3 off; 2 stay on in Claude Code, through their plugins');
   // notes on, pager off: Legacy is in use (other personal item off, plugin items left alone); Modern is not (plugin items still on).
   const notesOn = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', true], ['skill', 'pager', false]]);
   assert.equal(switchPreview(legacy, homeItems(notesOn), pluginLive(notesOn)), 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.');
@@ -1602,8 +1619,10 @@ test('Copilot shared name sequences: (a) box-written rule flips on in Copilot CL
       const mine = await made('Mine', ['mcp:issues', pdfId2, sheetId2]);
       const planNow = await sideNow(box);
       const mineProfile = (await readProfiles(box.home)).profiles.find(each => each.id === mine)!;
-      assert.equal(switchPreview(mineProfile, planNow.live, planNow.plugins), 'Switching turns 1 item on and 1 off');
+      // The plugin's issues turns off in Claude Code and Codex and on in Copilot CLI, where it then runs: the header says so, as the result does.
+      assert.equal(switchPreview(mineProfile, planNow.live, planNow.plugins), 'Switching turns 1 item on and 1 off; 1 stays on in Copilot CLI, through its plugin');
       const switched = await switchProfile(box.context, box.tools, mine, planNow.side);
+      assert.equal(stillLoadAfter(switched.profile!, (await sideNow(box)).view), '; 1 stays on in Copilot CLI, through its plugin');
       assert.deepEqual([switched.on, switched.off, switched.results, switched.settingsChanged], [['issues'], ['issues'], [],
         ['Copilot CLI’s off-switch for “issues” was cleared; there the plugin’s “issues” runs, not yours (same name).']]);
       assert.equal(turnsWords(entryTurns((await history(box)).at(-1)!.profile!), 'did'), '1 item turned on and 1 turned off');

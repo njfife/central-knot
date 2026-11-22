@@ -1039,6 +1039,11 @@ export interface LibraryFacts {
    * of his elsewhere. Read at each look.
    */
   loads?: Partial<Record<HarnessId, SwitchTarget & { switchedOff: boolean; in?: HarnessId }>>;
+  /**
+   * Skills: for a tool that reads another managed tool's skills folder (OpenCode reads Claude Code's), the copy there it can load
+   * that `loads` doesn't name (a link there, or one beside its own folder's), and which managed tool's folder holds it (`in`).
+   */
+  alsoLoads?: Partial<Record<HarnessId, { in?: HarnessId }>>;
   /** Skills and MCP servers: why a tool's own switch can't be read (its settings file), for the tools that have a copy. */
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
   /** MCP servers: tools whose own switch turns it off there (mcpswitch.ts), read at each look: the entry stays, and the tool doesn't start it. */

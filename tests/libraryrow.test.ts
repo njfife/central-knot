@@ -270,6 +270,19 @@ test('After Use the plugin’s in Pi, his server’s row counts the five tools t
   assert.deepEqual([servers.placeTag(before, back, five), switchLabel(before, back, five)], [undefined, 'tracker: on. Click to take it out of every tool; Central Knot keeps it.']);
 });
 
+test('After a take, a tool kept out that reads another tool’s copy of his is a reader too: OpenCode, reading Claude Code’s folder, counts, and its tag part says it has it another way', () => {
+  // triage, his skill in Claude Code, Copilot CLI and Codex (OpenCode reads Claude Code's folder); the plugin's taken in Pi.
+  const five = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'], skills = sentences(libraryWords.skills);
+  const at = (tool: string, inTool: HarnessId) => ({ folder: 'triage', name: 'triage', skillFile: `~/${tool}/triage/SKILL.md`, switchedOff: false, in: inTool });
+  const hashes = { 'claude-cli': 'his', 'copilot-cli': 'his', 'codex-cli': 'his', 'pi-cli': 'kit' };
+  const taken = { ...newItem('triage', 'triage'), on: true, hash: 'kit', except: five.filter(tool => tool !== 'pi-cli') as HarnessId[], applied: { 'pi-cli': 'kit' } };
+  const copies = Object.fromEntries(Object.entries(hashes).map(([tool, hash]) => [tool, { is: 'present', hash, at: 0 }])) as Copies;
+  const row: LibraryRow = { key: 'triage', name: 'triage', hashes, plan: plan(taken, copies), anotherWay: { 'opencode-cli': 'OpenCode reads a copy in Claude Code’s skills folder, which is not Central Knot’s.' },
+    loads: { 'claude-cli': at('claude', 'claude-cli'), 'copilot-cli': at('copilot', 'copilot-cli'), 'codex-cli': at('codex', 'codex-cli'), 'pi-cli': at('pi', 'pi-cli'), 'opencode-cli': at('claude', 'claude-cli') } };
+  assert.deepEqual([skills.placeTag(row, taken, five)?.text, switchLabel(row, taken, five)], ['in 5 of 5 tools · 3 run their own copies · OpenCode has it another way',
+    'triage: on in 5 of 5 tools; 3 run their own copies; OpenCode has it another way. Click to take it out of every tool; Central Knot keeps it.']);
+});
+
 test('What a result says of Off skills tools still read another way, one click and a run alike: one sentence for the skills the same tools read, none for a tool whose own switch has it off', () => {
   const five = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
   // Read by `readers` through a link into the shared folder, with no copy of Central Knot's; `off`: those whose own switch has it off.
