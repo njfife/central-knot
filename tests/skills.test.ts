@@ -5,13 +5,14 @@
 import { test } from 'node:test';
 import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
+import fs, { realpathSync } from 'node:fs';
 import { chmod, mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, rowClicks, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
-import { applySkills, clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
+import { applySkills, clearSwitch, readDisk, skillChange, skillsView, takeOver } from '../src/skills.ts';
 import { pruneDeleted } from '../src/skillstore.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -1221,5 +1222,46 @@ test('A partial skill (kept out of a tool by its switch in the opened row) says 
     const all = await everywhere(box);
     assert.deepEqual([!!all['claude-cli'], !!all['copilot-cli'], all['codex-cli']], [true, true, undefined]);
     assert.deepEqual((await itemOf(box))!.except, ['codex-cli']);
+  } finally { await box.cleanup(); }
+});
+
+test('One read of the home hashes a shared skill’s files once across all tools and links that read it, never hashes stored versions for shapes, and reads afresh next time', async () => {
+  const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']);
+  try {
+    const shared = join(box.home, '.agents/skills/notes');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), skillText('In the shared folder.'));
+    await writeFile(join(shared, 'extra.txt'), 'first\n');
+    await symlink('../../.agents/skills/notes', folderOf(box, 'claude-cli'));
+    await symlink('../../.agents/skills/notes', folderOf(box, 'claude-cli', 'alias'));
+    await turnOn(box);
+    const stored = join(box.home, '.central-knot/items/skills/notes/versions', (await itemOf(box))!.hash);
+    const countOpens = async <T>(run: () => Promise<T>): Promise<{ result: T; opens: Map<string, number> }> => {
+      const opens = new Map<string, number>(), original = fs.open;
+      fs.open = ((path: fs.PathLike, ...rest: unknown[]) => {
+        const key = typeof path === 'string' ? (() => { try { return realpathSync(path); } catch { return path; } })() : String(path);
+        opens.set(key, (opens.get(key) ?? 0) + 1);
+        return (original as (...args: unknown[]) => unknown).call(fs, path, ...rest);
+      }) as typeof fs.open;
+      try { return { result: await run(), opens }; }
+      finally { fs.open = original; }
+    };
+    const first = await countOpens(() => readDisk(box.context, box.tools));
+    const sharedSkill = realpathSync(join(shared, 'SKILL.md')), sharedExtra = realpathSync(join(shared, 'extra.txt'));
+    const storedSkill = realpathSync(join(stored, 'SKILL.md')), storedExtra = realpathSync(join(stored, 'extra.txt'));
+    assert.deepEqual([first.opens.get(sharedSkill), first.opens.get(sharedExtra)], [1, 1], 'shared skill files hashed once across 4 readers and 2 links');
+    assert.deepEqual([first.opens.get(storedSkill) ?? 0, first.opens.get(storedExtra) ?? 0], [0, 0], 'stored version files not hashed for shapes');
+    assert.equal(first.result.shapes.get('notes')?.description, 'Takes notes.');
+    assert.equal(first.result.outside.get('alias')?.['claude-cli']?.name, 'alias');
+    assert.equal(first.result.outside.get('notes')?.['codex-cli']?.hash, first.result.outside.get('alias')?.['claude-cli']?.hash);
+    // An edit with the same timestamp is still seen on the next read: nothing is kept across reads.
+    const beforeTime = at(15);
+    await touch(shared, beforeTime);
+    const before = await countOpens(() => readDisk(box.context, box.tools));
+    await writeFile(join(shared, 'extra.txt'), 'edited\n');
+    await touch(shared, beforeTime);
+    const after = await countOpens(() => readDisk(box.context, box.tools));
+    assert.equal(after.opens.get(sharedExtra), 1, 'next read hashes afresh');
+    assert.notEqual(after.result.outside.get('notes')?.['codex-cli']?.hash, before.result.outside.get('notes')?.['codex-cli']?.hash);
   } finally { await box.cleanup(); }
 });

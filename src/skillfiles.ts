@@ -8,7 +8,7 @@
 //   parseSkill) and no link or special file inside (share.ts readTree). Its content, and a version's, is the folder as
 //   readTree hashes it: every file's bytes, the executable bit, empty folders; Finder's and editors' leftovers and a nested
 //   .git are no part of it. Its time (folderTime) is the latest change among the folder and what is in it, so a file removed
-//   inside counts.
+//   inside counts. One readDisk shares a local FolderReads map so each real folder is hashed once; nothing is kept past it.
 // - What a copy is not: a folder whose SKILL.md is missing or can't be read, or with a link inside, is `unseen` (its why);
 //   a link in a skills folder is no copy of Central Knot's, read as the copy it leads to (`links`).
 // - Writing and removing, each checked: a copy is written over (swapFolder) or removed (removeFolder) only while it still
@@ -99,32 +99,61 @@ export async function folderTime(directory: string): Promise<number> {
   return latest;
 }
 
-/** Reads one folder as a copy, or why it can't be one for sure. `rootLabel` names the folder it is in, as the page shows it. */
-export async function readCopy(tool: HarnessId, directory: string, rootLabel: string): Promise<SkillCopy | { unseen: string; isSkill?: true }> {
-  const name = directory.split(sep).at(-1)!, where = `${toolName(tool)}’s copy`;
+/**
+ * One real folder's content, shared within one readDisk (skills.ts) and never kept across reads: an edit made by hand,
+ * even one that keeps its time stamp, must be seen at the next read (share.ts ShareContext.read).
+ */
+type FolderContent = { real: string; content: string; hash: string; at: number } | { unseen: (where: string) => string; isSkill?: true };
+export type FolderReads = Map<string, FolderContent>;
+
+/** Builds a Skill from a folder's SKILL.md text as a tool loads it under `directory`'s own folder name. */
+function asSkill(directory: string, content: string, real: string, rootLabel: string): Skill {
+  const name = directory.split(sep).at(-1)!;
+  return { folder: name, ...parseSkill(content, name), path: join(directory, 'SKILL.md'), directory, realDirectory: real, rootLabel, content, status: '', ...loadProblems(content, name) };
+}
+
+/** Reads only a folder's SKILL.md as a Skill shape (no tree hash or folder time), or undefined when it can't be read. */
+export async function readShape(directory: string): Promise<Skill | undefined> {
+  const file = join(directory, 'SKILL.md');
+  if (!(await lstat(file).catch(() => undefined))?.isFile()) return undefined;
+  try { return asSkill(directory, await readFile(file, 'utf8'), await realpath(directory), ''); }
+  catch { return undefined; }
+}
+
+/** Reads one real folder's SKILL.md, tree hash and folderTime, independent of which tool or link name reached it. */
+async function readFolder(directory: string): Promise<FolderContent> {
   try {
     const file = join(directory, 'SKILL.md'), info = await lstat(file).catch(() => undefined);
-    if (!info) return { unseen: `${where} has no SKILL.md, so it is no skill just now. Nothing changes there until it has one.` };
-    if (!info.isFile()) return { unseen: `${where}’s SKILL.md is not a plain file, so Central Knot leaves it as it is.` };
+    if (!info) return { unseen: where => `${where} has no SKILL.md, so it is no skill just now. Nothing changes there until it has one.` };
+    if (!info.isFile()) return { unseen: where => `${where}’s SKILL.md is not a plain file, so Central Knot leaves it as it is.` };
     const content = await readFile(file, 'utf8');
-    let parsed;
-    try { parsed = parseSkill(content, name); }
-    catch (error) { return { unseen: `${where}’s SKILL.md can’t be read as a skill (${error instanceof Error ? error.message : 'its frontmatter'}). Nothing changes there until it can.` }; }
+    // Frontmatter errors depend only on content, never folder name (discovery.ts frontmatter); check before hashing.
+    try { parseSkill(content, ''); } catch (error) {
+      return { unseen: where => `${where}’s SKILL.md can’t be read as a skill (${error instanceof Error ? error.message : 'its frontmatter'}). Nothing changes there until it can.` };
+    }
     const tree = await readTree(directory);
-    if (tree.held) return { unseen: `${where} can’t be copied as it is: ${tree.held.replace(/^It\b/, 'it')}`, isSkill: true };
-    const real = await realpath(directory);
-    const skill: Skill = { folder: name, ...parsed, path: file, directory, realDirectory: real, rootLabel, content, status: '', ...loadProblems(content, name) };
-    return { tool, name, key: itemKey(name), hash: tree.hash, at: await folderTime(directory), directory, skill };
+    if (tree.held) return { unseen: where => `${where} can’t be copied as it is: ${tree.held!.replace(/^It\b/, 'it')}`, isSkill: true };
+    return { real: await realpath(directory), content, hash: tree.hash, at: await folderTime(directory) };
   } catch (error) {
-    return { unseen: `${where} is there but could not be read${errorCode(error) === 'EACCES' ? ' (permission denied)' : ''}. Nothing changes there until it reads again.` };
+    return { unseen: where => `${where} is there but could not be read${errorCode(error) === 'EACCES' ? ' (permission denied)' : ''}. Nothing changes there until it reads again.` };
   }
+}
+
+/** Reads one folder as a copy, or why it can't be one for sure. `reads` (one readDisk's local map) hashes each real folder once. */
+export async function readCopy(tool: HarnessId, directory: string, rootLabel: string, reads: FolderReads = new Map()): Promise<SkillCopy | { unseen: string; isSkill?: true }> {
+  const name = directory.split(sep).at(-1)!, where = `${toolName(tool)}’s copy`;
+  const real = await realpath(directory).catch(() => undefined);
+  const entry = (real ? reads.get(real) : undefined) ?? await readFolder(real ?? directory);
+  if (real && !reads.has(real)) reads.set(real, entry);
+  if ('unseen' in entry) return { unseen: entry.unseen(where), ...(entry.isSkill ? { isSkill: true } : {}) };
+  return { tool, name, key: itemKey(name), hash: entry.hash, at: entry.at, directory, skill: asSkill(directory, entry.content, entry.real, rootLabel) };
 }
 
 /**
  * Reads one skills folder as `tool` reads it: each entry a tool would load (no dot-folder where it skips them, no name it
  * reserves). Two entries whose names differ only by case (a case-sensitive disk) can't be told apart, so both are unseen.
  */
-export async function readSkillsFolder(tool: HarnessId, folder: string, rootLabel: string): Promise<FolderRead> {
+export async function readSkillsFolder(tool: HarnessId, folder: string, rootLabel: string, reads?: FolderReads): Promise<FolderRead> {
   const read: FolderRead = { copies: [], links: [], broken: new Map(), unseen: new Map(), uncopied: new Set() };
   let entries;
   try { entries = await readdir(folder, { withFileTypes: true }); }
@@ -144,11 +173,11 @@ export async function readSkillsFolder(tool: HarnessId, folder: string, rootLabe
       const leads = await stat(path).then(info => info.isDirectory(), () => undefined);
       if (leads === undefined) { read.broken.set(key, linkTo); continue; }
       if (!leads) continue;
-      const copy = await readCopy(tool, path, rootLabel);
+      const copy = await readCopy(tool, path, rootLabel, reads);
       read.links.push({ key, name: entry.name, path, linkTo, ...('unseen' in copy ? {} : { copy }) });
       continue;
     }
-    const copy = await readCopy(tool, path, rootLabel);
+    const copy = await readCopy(tool, path, rootLabel, reads);
     if ('unseen' in copy) { read.unseen.set(key, copy.unseen); if (copy.isSkill) read.uncopied.add(key); } else read.copies.push(copy);
   }
   return read;
