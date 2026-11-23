@@ -1153,9 +1153,10 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
   // Codex on Windows finds its home from the system, not HOME or USERPROFILE (seen with ChatGPT desktop's Codex 0.165), so
   // it is named outright. CODEX_HOME at the default root is what Codex reads anyway. CLAUDE_CONFIG_DIR is never set
   // this way, because it also moves .claude.json.
-  if (override) env[harnesses[tool].configEnv] = override;
+  const variable = harnesses[tool].configEnv;
+  if (override && variable) env[variable] = override;
   else if (tool === 'codex-cli') env.CODEX_HOME = join(context.home, harnesses[tool].defaultConfig);
-  else delete env[harnesses[tool].configEnv];
+  else if (variable) delete env[variable];
   const result = await run(binary, args, { env, cwd: context.home, timeoutMs: context.timeoutMs ?? 180_000 });
   const after = await Promise.all(files.map(readOrNull));
   const changed = files.map((path, index) => ({ path, before: before[index], after: after[index] })).filter(entry => entry.before !== entry.after);

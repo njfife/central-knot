@@ -96,6 +96,8 @@ export async function sessionSettings(tool: HarnessId, root: string): Promise<Pi
       const plugins = (await json(openCodeSettings(root)))?.plugin;
       return { extensions: (Array.isArray(plugins) ? plugins : []).map(text).filter(Boolean) };
     }
+    // Antigravity's own hooks (its hooks.json) are not read yet.
+    case 'antigravity-cli': return {};
   }
 }
 

@@ -22,7 +22,7 @@ const readText = (path: string) => readFile(path, 'utf8').then(text => text, () 
 /** Every file a save can write in a tool's folder (Pi's CLAUDE.md: the file Pi reads when its folder has no AGENTS.md). */
 export const instructionFiles: Record<HarnessId, string[]> = {
   'claude-cli': ['CLAUDE.md'], 'copilot-cli': ['copilot-instructions.md'], 'codex-cli': ['AGENTS.md', 'AGENTS.override.md'], 'pi-cli': ['AGENTS.md', 'AGENTS.override.md', 'CLAUDE.md'],
-  'opencode-cli': ['AGENTS.md'],
+  'opencode-cli': ['AGENTS.md'], 'antigravity-cli': ['AGENTS.md'],
 };
 /** Where earlier versions are kept: one folder per tool, and one for the base instructions. */
 type Shelf = HarnessId | 'base';
@@ -72,6 +72,10 @@ async function bind(tool: HarnessId, root: string, home: string): Promise<{ path
       notes.push('The Copilot app may not read it; that isn’t confirmed yet.');
       return { path: join(root, 'copilot-instructions.md'), readers: 'Copilot CLI reads this in every session.', notes };
     }
+    // Its docs: it reads AGENTS.md and GEMINI.md, both here and in ~/.gemini, all four together; GEMINI.md is the Gemini CLI's too.
+    case 'antigravity-cli':
+      return { path: join(root, 'AGENTS.md'), readers: 'Antigravity reads this in every session, in the CLI, the desktop app and the IDE.',
+        notes: ['Antigravity also reads GEMINI.md here, and AGENTS.md and GEMINI.md in ~/.gemini, with this one; they are not shown or changed here.'] };
   }
 }
 

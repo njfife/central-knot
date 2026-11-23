@@ -69,14 +69,14 @@ test('The first read: a plugin every managed tool has is On everywhere; one some
   ], []);
   assert.deepEqual(record.plugins.map(entry => [entry.plugin, entry.on, entry.except]), [
     ['pdf', true, []],
-    ['notes', true, ['copilot-cli', 'codex-cli', 'opencode-cli']]]);
+    ['notes', true, ['copilot-cli', 'codex-cli', 'opencode-cli', 'antigravity-cli']]]);
   assert.deepEqual(record.tools, ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli']);
   assert.deepEqual(record.plugins.map(entry => [entry.source, entry.marketName, typeof entry.id]), [[team, 'team', 'string'], [team, 'team', 'string']]);
 });
 
 test('The first read keeps a tool out of nothing an install waited for in the version before: that tool stays off `tools`, so the install still happens', () => {
   const record = firstRecord(['claude-cli', 'codex-cli'], [has('claude-cli', 'pdf')], [{ tool: 'codex-cli', source: `${team}/`, plugin: 'pdf' }]);
-  assert.deepEqual(record.plugins.map(entry => [entry.plugin, entry.except]), [['pdf', ['copilot-cli', 'pi-cli', 'opencode-cli']]]);
+  assert.deepEqual(record.plugins.map(entry => [entry.plugin, entry.except]), [['pdf', ['copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli']]]);
   assert.deepEqual(record.tools, ['claude-cli']);
   assert.equal(owedTo(record.plugins[0], 'codex-cli', now('none'), record.tools).background, true);
 });

@@ -76,6 +76,7 @@ export function mcpFile(context: ShareContext, tool: HarnessId): string {
     case 'pi-cli': return join(rootOf(context, tool), 'mcp.json');
     case 'codex-cli': return join(rootOf(context, tool), 'config.toml');
     case 'opencode-cli': return openCodeSettings(rootOf(context, tool));
+    case 'antigravity-cli': return join(rootOf(context, tool), 'mcp_config.json');
   }
 }
 
@@ -147,6 +148,26 @@ function openCodeEntry(server: NeutralServer, extras: Record<string, unknown>): 
   const entry: Record<string, unknown> = server.transport === 'stdio'
     ? { type: 'local', command: [server.command, ...(server.args ?? [])], environment: server.env, cwd: server.cwd, ...extras }
     : { type: 'remote', url: server.url, headers: server.headers, ...extras };
+  return Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined));
+}
+
+// Antigravity keeps its servers in mcp_config.json's `mcpServers` (measured on its CLI 1.5.14): `{ command, args, env, cwd }`, or
+// a remote one at `serverUrl` (what its `mcp add` writes) or `url`, with `headers`, read as Streamable HTTP whatever a `type`
+// says (it has no SSE). Every other field, its switch `disabled` too, is its own.
+
+function fromAntigravity(name: string, file: string, raw: Record<string, unknown>): McpEntry {
+  const url = [raw.serverUrl, raw.url].find(value => typeof value === 'string') as string | undefined;
+  const server: NeutralServer = url !== undefined ? { transport: 'http', url, headers: nonEmpty(strings(raw.headers)) }
+    : { transport: 'stdio', command: typeof raw.command === 'string' ? raw.command : undefined, args: nonEmpty(list(raw.args)), env: nonEmpty(strings(raw.env)), cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined };
+  const extras = Object.fromEntries(Object.entries(raw).filter(([key]) => !['command', 'args', 'env', 'cwd', 'serverUrl', 'url', 'headers'].includes(key)));
+  return { name, tool: 'antigravity-cli', file, server, extras, hash: serverHash(server), hostBound: hostBound(name, server) };
+}
+
+/** A server as Antigravity's file holds it, with its own fields there kept. */
+function antigravityEntry(server: NeutralServer, extras: Record<string, unknown>): Record<string, unknown> {
+  const entry: Record<string, unknown> = server.transport === 'stdio'
+    ? { command: server.command, args: server.args, env: server.env, cwd: server.cwd, ...extras }
+    : { serverUrl: server.url, headers: server.headers, ...extras };
   return Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined));
 }
 
@@ -223,7 +244,8 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
     const servers = parsed && typeof parsed === 'object' && 'mcpServers' in parsed ? parsed.mcpServers : {};
     if (!servers || typeof servers !== 'object' || Array.isArray(servers)) throw new Error('mcpServers is not an object');
     const all = Object.entries(servers as Record<string, unknown>);
-    return { entries: all.filter(([, raw]) => valid(raw)).map(([name, raw]) => fromJson(name, tool, file, raw as Record<string, unknown>)), invalid: all.filter(([, raw]) => !valid(raw)).map(([name]) => name), exists: true, text };
+    const read = (name: string, raw: Record<string, unknown>) => (tool === 'antigravity-cli' ? fromAntigravity(name, file, raw) : fromJson(name, tool, file, raw));
+    return { entries: all.filter(([, raw]) => valid(raw)).map(([name, raw]) => read(name, raw as Record<string, unknown>)), invalid: all.filter(([, raw]) => !valid(raw)).map(([name]) => name), exists: true, text };
   } catch {
     return { entries: [], exists: true, problem: `${file} could not be read as ${tool === 'codex-cli' ? 'TOML' : 'JSON'}, so its servers are not offered and it is never written.` };
   }
@@ -251,7 +273,7 @@ export async function runsFrom(raw: Record<string, unknown>, folder: string): Pr
 
 /** Why a tool cannot hold this server, if it cannot (CD §5, Unsupported). */
 export function cannotHold(tool: HarnessId, server: NeutralServer): string | undefined {
-  if ((tool === 'codex-cli' || tool === 'pi-cli' || tool === 'opencode-cli') && server.transport === 'sse') return `${harnesses[tool].name} has no SSE transport.`;
+  if ((tool === 'codex-cli' || tool === 'pi-cli' || tool === 'opencode-cli' || tool === 'antigravity-cli') && server.transport === 'sse') return `${harnesses[tool].name} has no SSE transport.`;
   if (server.transport === 'stdio' && !server.command) return 'It has no command to run.';
   if (server.transport !== 'stdio' && !server.url) return 'It has no URL.';
   return undefined;
@@ -280,7 +302,7 @@ export function writeEntry(text: string, tool: HarnessId, name: string, server: 
     return setJsonMember(text, openCodeServer(text, name)?.place ?? place ?? ['mcp', name], server && openCodeEntry(server, extras));
   }
   if (!server) return setJsonMember(text, ['mcpServers', name], undefined);
-  return setJsonMember(text, ['mcpServers', name], jsonEntry(tool, server, extras));
+  return setJsonMember(text, ['mcpServers', name], tool === 'antigravity-cli' ? antigravityEntry(server, extras) : jsonEntry(tool, server, extras));
 }
 
 /** A server as a JSON tool writes it (Claude Code, Copilot CLI, Pi), with that tool's own fields kept. */

@@ -11,7 +11,7 @@ import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
 import { andList, coworkWords, fileName, kindNouns, pageNames, toolNames as names } from './words.ts';
-import { agentsKeptIn, hasCowork, takesPlugins } from './presence.ts';
+import { agentsKeptIn, hasCowork, takesPlugins, type AgentTool } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
@@ -349,7 +349,7 @@ function aboutTab(snapshot: Snapshot, home: HomeView) {
         ...(disclosed && roots.size && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : []),
         ...(supports(home, 'mcp', tool) ? fact('MCP servers file', mcpFile ? path(mcpFile) : h('span.tone-faint', {}, '— (no MCP servers found)')) : []),
         // Where it keeps agents (presence.ts agentsKeptIn): its agents folder, or (Pi) its skills folder, shown above.
-        ...(!supports(home, 'agents', tool) ? [] : agentsKeptIn[tool] === 'skills folder' ? fact('Agents', h('span.tone-faint', {}, 'In its skills folder, each as a skill'))
+        ...(!supports(home, 'agents', tool) ? [] : agentsKeptIn[tool as AgentTool] === 'skills folder' ? fact('Agents', h('span.tone-faint', {}, 'In its skills folder, each as a skill'))
           : fact('Agents folder', agentFile ? path(dirname(agentFile)) : h('span.tone-faint', {}, '— (no agents found)'))),
         ...(ins ? fact('Instructions', h('span.harness-path', {}, path(ins.path), ins.exists ? null : h('span.tone-faint', {}, '(no file yet)'))) : [])))))));
 }

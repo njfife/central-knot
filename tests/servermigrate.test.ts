@@ -19,6 +19,7 @@ const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'o
 const managed: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
 const FILES: Record<HarnessId, string> = {
   'claude-cli': '.claude.json', 'copilot-cli': '.copilot/mcp-config.json', 'codex-cli': '.codex/config.toml', 'pi-cli': '.pi/agent/mcp.json', 'opencode-cli': '.config/opencode/opencode.json',
+  'antigravity-cli': '.gemini/config/mcp_config.json',
 };
 const server = (command: string): NeutralServer => ({ transport: 'stdio', command });
 const H = (command: string) => serverHash(server(command));

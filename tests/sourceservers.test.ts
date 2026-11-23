@@ -26,6 +26,7 @@ test.after(() => hosts.cleanup());
 const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 const FILES: Record<HarnessId, string> = {
   'claude-cli': '.claude.json', 'copilot-cli': '.copilot/mcp-config.json', 'codex-cli': '.codex/config.toml', 'pi-cli': '.pi/agent/mcp.json', 'opencode-cli': '.config/opencode/opencode.json',
+  'antigravity-cli': '.gemini/config/mcp_config.json',
 };
 
 /** A home with all five tools (their skills and agents folders too); `tools`: those Central Knot manages here. */

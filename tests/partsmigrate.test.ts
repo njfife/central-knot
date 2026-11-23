@@ -27,7 +27,7 @@ import type { HarnessId } from '../src/types.ts';
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
 const skill = (name: string, body = `Use ${name}.`) => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\n${body}\n`;
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
-const ROOTS: Record<HarnessId, string> = { 'pi-cli': '.pi/agent', 'opencode-cli': '.config/opencode', 'claude-cli': '.claude', 'copilot-cli': '.copilot', 'codex-cli': '.codex' };
+const ROOTS: Record<HarnessId, string> = { 'pi-cli': '.pi/agent', 'opencode-cli': '.config/opencode', 'claude-cli': '.claude', 'copilot-cli': '.copilot', 'codex-cli': '.codex', 'antigravity-cli': '.gemini/config' };
 
 /** A part on the record, as alpha 1 wrote it. */
 type Part = { tool: HarnessId; plugin?: string; version?: string; at?: string; item: PartItem };
@@ -272,7 +272,7 @@ test('A plugin Off makes its items Off; one with no entry (its parts only in a t
     // OpenCode, not managed, is decided as the record knew it: lone's copy there is applied, so managing OpenCode again changes nothing.
     // Codex holds only a part's loose copy: it hasn't the plugin, so the entry keeps it out (no install is owed there beside it).
     assert.deepEqual([items.pdf.on, made.length, made[0].on, made[0].except, items.lone.source, items.lone.except, items.lone.applied],
-      [false, 1, true, ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'], made[0].id, ['pi-cli'], { 'opencode-cli': lone }]);
+      [false, 1, true, ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'antigravity-cli'], made[0].id, ['pi-cli', 'antigravity-cli'], { 'opencode-cli': lone }]);
   } finally { await box.cleanup(); }
 });
 

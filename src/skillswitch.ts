@@ -5,7 +5,7 @@
 // Undo, switchBack), carried to Central Knot's copy by skills.ts takeOver, released once by the profiles migration
 // (profilemigrate.ts), and flipped for a plugin's skill (plugins.ts). Each tool keeps its switch in its own user-wide settings
 // file, which is edited in place: only the switch changes. Every other byte stays, apart from these: the JSON list holding
-// Copilot's or Pi's switches is written back as a list (same entries, JSON layout); a list or map Enable leaves empty goes with
+// Copilot's, Pi's or Antigravity's switches is written back as a list (same entries, JSON layout); a list or map Enable leaves empty goes with
 // its last entry (and a JSON settings file that wasn't there is left as `{}`); a config.toml without a final newline gains one
 // when a rule is added; a person's Codex rule with no `enabled` key keeps the `enabled` line a Disable gave it; a JSON settings
 // file with Windows line ends gets plain ones in the lines added while a skill is disabled (Enable takes them out again).
@@ -20,6 +20,8 @@
 //   OpenCode     opencode.json   "permission": { "skill": { "<name>": "deny" } }   (by name, whichever folder holds it; the last
 //                                rule that matches a name decides, so the rule goes last. Measured 2026-11-10 on 1.19.5 and 2.2.5:
 //                                a denied skill is left out of what a new session is sent.)
+//   Antigravity  skills.json     "exclude": ["<folder>"]   (in its config folder; an entry is the folder's name or a path that ends at
+//                                the folder, whole and in its case, never a pattern: measured on 1.5.14)
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
@@ -39,8 +41,8 @@ import { record, withoutBom } from './values.ts';
 export interface SwitchFile { tool: HarnessId; path: string; text: string; exists: boolean; problem?: SwitchProblem; parsed?: ParsedSwitches }
 
 /** The file that holds a tool's skill switches. */
-export const switchPath = (context: ShareContext, tool: HarnessId) =>
-  (tool === 'opencode-cli' ? openCodeSettings(toolConfigRoot(context, tool)) : join(toolConfigRoot(context, tool), tool === 'codex-cli' ? 'config.toml' : 'settings.json'));
+export const switchPath = (context: ShareContext, tool: HarnessId) => (tool === 'opencode-cli' ? openCodeSettings(toolConfigRoot(context, tool))
+  : join(toolConfigRoot(context, tool), tool === 'codex-cli' ? 'config.toml' : tool === 'antigravity-cli' ? 'skills.json' : 'settings.json'));
 
 /** Reads a tool's switch file. A file that can't be read, or isn't the JSON or TOML expected, is reported and never written. */
 export async function readSwitchFile(context: ShareContext, tool: HarnessId): Promise<SwitchFile> {
@@ -276,6 +278,12 @@ const openCodeRules = (json: Record<string, unknown>): [string, unknown][] => Ob
 /** What OpenCode's rules say about a skill: the last one matching its name decides (measured, also for a `"*"` written after `skill`). */
 const openCodeAction = (rules: [string, unknown][], name: string) => rules.filter(([pattern]) => openCodeMatches(pattern, name)).at(-1)?.[1];
 
+/** Whether an Antigravity `exclude` entry keeps this copy out: the name of its folder, or a path ending at that folder. */
+const antigravityExcludes = (entry: unknown, skillFile: string) => {
+  const folder = forwardSlashes(dirname(skillFile));
+  return typeof entry === 'string' && (folder === entry || folder.endsWith(`/${entry}`));
+};
+
 /** Whether the parsed settings turn this copy off, and (Claude Code) what its override held otherwise. */
 function stateIn(context: ShareContext, tool: HarnessId, parsed: ParsedSwitches, target: SwitchTarget): { disabled: boolean; previous?: string } {
   if ('rules' in parsed) return { disabled: parsed.rules.filter(rule => isPathOf(rule, target.skillFile) || rule.name === target.name).at(-1)?.enabled === false };
@@ -283,6 +291,7 @@ function stateIn(context: ShareContext, tool: HarnessId, parsed: ParsedSwitches,
   if (tool === 'claude-cli') { const value = record(json.skillOverrides)?.[target.folder]; return { disabled: value === 'off', previous: typeof value === 'string' && value !== 'off' ? value : undefined }; }
   if (tool === 'copilot-cli') return { disabled: list(json.disabledSkills).includes(target.name) };
   if (tool === 'opencode-cli') return { disabled: openCodeAction(openCodeRules(json), target.name) === 'deny' };
+  if (tool === 'antigravity-cli') return { disabled: list(json.exclude).some(entry => antigravityExcludes(entry, target.skillFile)) };
   // Pi: an entry that isn't text keeps every skill out (parse).
   const skills = list(json.skills);
   return { disabled: skills.some(entry => typeof entry !== 'string') || piOff(skills as string[], piCopy(context, target), context.home) };
@@ -305,6 +314,10 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
   if (file.tool === 'copilot-cli') {
     const others = list(json.disabledSkills).filter(name => name !== target.name);
     return bom + putList('disabledSkills', disabled ? [...others, target.name] : others);
+  }
+  if (file.tool === 'antigravity-cli') {
+    const others = list(json.exclude).filter(entry => !antigravityExcludes(entry, target.skillFile));
+    return bom + putList('exclude', disabled ? [...others, target.folder] : others);
   }
   // OpenCode. Already as asked: not a byte changes.
   if ((openCodeAction(openCodeRules(json), target.name) === 'deny') === disabled) return file.text;

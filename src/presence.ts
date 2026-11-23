@@ -49,10 +49,10 @@ export function noteTools(last: NotedTools, home: string, snapshots: Snapshot[])
 }
 
 /**
- * The tools that hold each kind besides skills: plugins in Claude Code, Copilot CLI and Codex (Pi and OpenCode take a plugin's
- * parts instead); agents and MCP servers in every tool.
+ * The tools that hold each kind besides skills: plugins in Claude Code, Copilot CLI and Codex (Pi, OpenCode and Antigravity take
+ * a plugin's parts instead); MCP servers in every tool; agents in every tool but Antigravity, not yet written there.
  */
-export type PluginTool = Exclude<HarnessId, 'pi-cli' | 'opencode-cli'>;
+export type PluginTool = Exclude<HarnessId, 'pi-cli' | 'opencode-cli' | 'antigravity-cli'>;
 export const pluginTools: PluginTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 /**
  * Where each tool that holds agents keeps one: in an agents folder of its own, or, in Pi, which has no agents, in its skills
@@ -65,7 +65,7 @@ export const agentsKeptIn = {
 } as const satisfies Partial<Record<HarnessId, 'agents folder' | 'skills folder'>>;
 export type AgentTool = keyof typeof agentsKeptIn;
 export const agentTools = Object.keys(agentsKeptIn) as AgentTool[];
-export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
+export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
 
 /** Whether a tool (or a value from the page) is one that installs plugins. */
 export const takesPlugins = (tool: unknown): tool is PluginTool => pluginTools.some(entry => entry === tool);

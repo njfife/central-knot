@@ -743,7 +743,7 @@ test('His case: his server maps meets the plugin’s maps of other content in Pi
     assert.deepEqual([piMaps(after).args, after.claude, after['opencode/opencode.json']], [['maps-of-kit'], before.claude, before['opencode/opencode.json']],
       'Pi has the plugin’s entry; Claude Code and OpenCode keep his, untouched');
     const maps = await box.maps();
-    assert.deepEqual([!!maps.source, maps.on, maps.except, Object.keys(maps.applied), maps.versions.some(version => version.hash === his)], [true, true, ['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli'], ['pi-cli'], true],
+    assert.deepEqual([!!maps.source, maps.on, maps.except, Object.keys(maps.applied), maps.versions.some(version => version.hash === his)], [true, true, ['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli', 'antigravity-cli'], ['pi-cli'], true],
       'the plugin’s, linked; his version kept; kept out of every tool but Pi, his copies there theirs now');
     assert.deepEqual((await box.taken()).map(event => [event.previous, event.version, event.took, event.losers.map(loser => loser.tool)]),
       [[his, maps.hash, { on: true, except: [], copies: { 'claude-cli': his, 'opencode-cli': his } }, ['pi-cli']]], 'one History entry, with the copy each let-go tool held');
@@ -1624,7 +1624,7 @@ test('Upgrading with the plugin installed whole in Claude Code: a switch to a pr
     assert.deepEqual([await box.folders(), await box.inUseNow()], [{ pi: [old], opencode: [old] }, ['Saved']]);
     await rootAtPinB(box);
     await switchProfile(box.share, box.tools, saved, { live: box.live, run: async () => [] });
-    assert.deepEqual([await box.folders(), (await box.skills())['root-fixture']!.except, await box.inUseNow()], [{ pi: ['root-fixture'], opencode: ['root-fixture'] }, [], ['Saved']]);
+    assert.deepEqual([await box.folders(), (await box.skills())['root-fixture']!.except, await box.inUseNow()], [{ pi: ['root-fixture'], opencode: ['root-fixture'] }, ['antigravity-cli'], ['Saved']]);
   } finally { await box.cleanup(); }
 });
 

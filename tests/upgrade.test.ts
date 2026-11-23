@@ -42,6 +42,7 @@ import { managedNow, readRecord, syncGate, writeAccess } from '../src/share.ts';
 import { asksNow } from '../src/setupcounts.ts';
 import { applySkills, skillKind } from '../src/skills.ts';
 import type { HarnessId, HistoryEvent, HomeView } from '../src/types.ts';
+import type { AgentTool } from '../src/presence.ts';
 import { appContext, filesIn, type AfterPass, type Files } from './upgrade/start.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import * as plugins_ from '../src/plugins.ts';
@@ -104,7 +105,7 @@ async function place(folder: OldHome['folder'] | 'alpha-1-parts'): Promise<Box> 
   for (const name of ['sync.json', 'skills.json', 'agents.json']) {
     const record = JSON.parse(await readFile(join(store, name), 'utf8').catch(() => 'null'));
     if (!record?.roots && !record?.folders) continue;
-    for (const [at, was] of Object.entries<object>(record.roots ?? {})) Object.assign(was, await seen(isAbsolute(at) ? at : agentsFolder(context, at as HarnessId)));
+    for (const [at, was] of Object.entries<object>(record.roots ?? {})) Object.assign(was, await seen(isAbsolute(at) ? at : agentsFolder(context, at as AgentTool)));
     for (const was of Object.values<{ path: string; ino?: number }>(record.folders ?? {})) if (was.ino) Object.assign(was, await seen(was.path));
     await writeFile(join(store, name), `${JSON.stringify(record, null, 2)}\n`);
   }
@@ -363,15 +364,15 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
       // Sync off doesn't run, and kept where they are. writer, edited in OpenCode (whose folder agents.json never knew): OpenCode kept
       // out, his edit that tool's own. Codex, left out, is decided as the record knew it: its part copies are its own, kept out. one,
       // taken in by Add in alpha 1, was his own already (still applied in Codex). scribe, no part anywhere, is kept out of both.
-      const [pdf, lookup] = sync === 'on' ? [['his', true, 'claude-cli copilot-cli codex-cli', 'opencode-cli pi-cli'], ['his', true, 'claude-cli copilot-cli codex-cli', 'opencode-cli pi-cli']]
-        : [['docs', true, 'codex-cli', 'opencode-cli pi-cli'], ['docs', true, 'codex-cli', 'opencode-cli pi-cli']];
+      const [pdf, lookup] = sync === 'on' ? [['his', true, 'claude-cli copilot-cli codex-cli antigravity-cli', 'opencode-cli pi-cli'], ['his', true, 'claude-cli copilot-cli codex-cli antigravity-cli', 'opencode-cli pi-cli']]
+        : [['docs', true, 'codex-cli antigravity-cli', 'opencode-cli pi-cli'], ['docs', true, 'codex-cli antigravity-cli', 'opencode-cli pi-cli']];
       assert.deepEqual(items, {
-        'skill:forms': ['docs', true, 'codex-cli opencode-cli', 'pi-cli'], 'skill:pdf': pdf, 'skill:review': ['docs', true, 'codex-cli pi-cli', 'opencode-cli'],
-        'skill:memo': ['memo', true, 'opencode-cli', 'pi-cli'], 'skill:journal': ['journal', true, 'pi-cli', 'opencode-cli'], 'skill:old': ['old', true, 'opencode-cli', 'pi-cli'],
-        'skill:three': ['picks', true, 'pi-cli opencode-cli', ''], 'skill:two': ['picks', true, 'pi-cli opencode-cli', ''], 'skill:one': ['his', true, '', 'claude-cli codex-cli copilot-cli pi-cli'],
-        'skill:chart': ['sheet', true, 'opencode-cli', 'pi-cli'], 'skill:sheet': ['sheet', true, '', 'opencode-cli pi-cli'],
-        'agent:writer': ['docs', true, 'codex-cli pi-cli opencode-cli', ''], 'agent:scribe': ['memo', true, 'pi-cli opencode-cli', ''],
-        'mcp:lookup': lookup, 'mcp:memo-index': ['memo', true, 'opencode-cli', 'pi-cli'],
+        'skill:forms': ['docs', true, 'codex-cli opencode-cli antigravity-cli', 'pi-cli'], 'skill:pdf': pdf, 'skill:review': ['docs', true, 'codex-cli pi-cli antigravity-cli', 'opencode-cli'],
+        'skill:memo': ['memo', true, 'opencode-cli antigravity-cli', 'pi-cli'], 'skill:journal': ['journal', true, 'pi-cli antigravity-cli', 'opencode-cli'], 'skill:old': ['old', true, 'opencode-cli antigravity-cli', 'pi-cli'],
+        'skill:three': ['picks', true, 'pi-cli opencode-cli antigravity-cli', ''], 'skill:two': ['picks', true, 'pi-cli opencode-cli antigravity-cli', ''], 'skill:one': ['his', true, '', 'claude-cli codex-cli copilot-cli pi-cli'],
+        'skill:chart': ['sheet', true, 'opencode-cli antigravity-cli', 'pi-cli'], 'skill:sheet': ['sheet', true, 'antigravity-cli', 'opencode-cli pi-cli'],
+        'agent:writer': ['docs', true, 'codex-cli pi-cli opencode-cli antigravity-cli', ''], 'agent:scribe': ['memo', true, 'pi-cli opencode-cli antigravity-cli', ''],
+        'mcp:lookup': lookup, 'mcp:memo-index': ['memo', true, 'opencode-cli antigravity-cli', 'pi-cli'],
       });
       for (const kind of ['skill', 'agent', 'mcp'] as const) for (const name of names[kind]) assert.ok(!first[2].pages[pageOf[kind]].items.find(row => row.key === itemKey(name))?.takeInAnswers, `${kind}:${name} is not found`);
     });
@@ -394,9 +395,9 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
     test('records the plugins installed whole as without parts, and each plugin some managed tool has, On, kept out of each tool lacking it', async () => {
       const record = await readJson(join(box.store, 'plugins.json'));
       assert.deepEqual(Object.fromEntries(record.plugins.map((entry: PluginEntry) => [entry.plugin, [entry.marketName, entry.on, entry.except.join(' ')]])), {
-        tasks: ['team', true, 'codex-cli pi-cli opencode-cli'], memo: ['team', true, 'copilot-cli codex-cli opencode-cli'], old: ['gone', true, 'copilot-cli codex-cli opencode-cli'],
-        docs: ['team', true, 'claude-cli copilot-cli codex-cli'], sheet: ['team', true, 'claude-cli copilot-cli codex-cli'], picks: ['team', true, 'claude-cli copilot-cli codex-cli opencode-cli'],
-        journal: ['team', true, 'claude-cli copilot-cli codex-cli pi-cli'] });
+        tasks: ['team', true, 'codex-cli pi-cli opencode-cli antigravity-cli'], memo: ['team', true, 'copilot-cli codex-cli opencode-cli antigravity-cli'], old: ['gone', true, 'copilot-cli codex-cli opencode-cli antigravity-cli'],
+        docs: ['team', true, 'claude-cli copilot-cli codex-cli antigravity-cli'], sheet: ['team', true, 'claude-cli copilot-cli codex-cli antigravity-cli'], picks: ['team', true, 'claude-cli copilot-cli codex-cli opencode-cli antigravity-cli'],
+        journal: ['team', true, 'claude-cli copilot-cli codex-cli pi-cli antigravity-cli'] });
       assert.deepEqual(record.tools, ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli']);
     });
 
