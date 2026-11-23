@@ -4,7 +4,7 @@
 // as main.ts runs them (homepass.ts homePass with the managed tools of the moment). Codex is the tool switched.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
@@ -401,6 +401,45 @@ test('What a pass removes or writes over that no click of it asked for has its H
     const item = (await c.items()).skills.notes;
     assert.ok(item.versions.some(version => version.hash === told[0].losers[0].hash), 'what Codex held is one of its versions');
   } finally { await c.cleanup(); }
+});
+
+test('What a pass puts in a tool with no click of his behind it has its own entry, “Copied to Codex”, whose action takes that copy out again', async () => {
+  const b = await box();
+  try {
+    await b.turnOn();
+    await b.pass();
+    const copiedTo = async () => (await b.history()).filter(event => event.cause === 'in-line' && event.only);
+    assert.deepEqual(await copiedTo(), [], 'a first setup: every copy is its click’s own, in that click’s entry');
+    // todo turned On while Codex is left out: its click puts it in Claude Code and Copilot CLI; turning Codex on puts it there.
+    await chooseTools(b.context, 'codex-cli', false);
+    await mkdir(join(b.home, '.claude/skills/todo'), { recursive: true });
+    await writeFile(join(b.home, '.claude/skills/todo/SKILL.md'), '---\nname: todo\ndescription: Todo.\n---\n\nDo things.\n');
+    await applySkills(b.context, await b.managed(), [{ key: 'todo', on: true, except: [] }]);
+    await turnCodexOn(b);
+    const [entry, ...more] = await copiedTo();
+    const item = (await b.items()).skills.todo, now = { managed: await b.managed(), pending: [] };
+    assert.deepEqual([more, entry.key, entry.kind, entry.only, entry.losers, librarySentence(entry, libraryWords.skills, await b.managed(), item)?.text, libraryAction(entry, item, now)?.label],
+      [[], 'todo', 'on', 'codex-cli', [{ tool: 'codex-cli', hash: '' }], 'Copied to Codex.', 'Turn it off in Codex'], 'one entry, for the one copy put there; the copies Codex kept while left out are not written');
+    assert.ok(await b.read('.codex/skills/todo/SKILL.md'));
+    await restoreSkill(b.context, await b.managed(), entry.id);
+    assert.deepEqual([await b.read('.codex/skills/todo/SKILL.md'), !!(await b.read('.copilot/skills/todo/SKILL.md')), (await b.items()).skills.todo.except], [undefined, true, ['codex-cli']],
+      'its action takes the copy out of Codex alone');
+  } finally { await b.cleanup(); }
+});
+
+test('A copy a pass could not put in a tool has no entry: a skills folder that can’t be written', async () => {
+  const b = await box();
+  try {
+    await b.turnOn();
+    await chooseTools(b.context, 'codex-cli', false);
+    await mkdir(join(b.home, '.claude/skills/todo'), { recursive: true });
+    await writeFile(join(b.home, '.claude/skills/todo/SKILL.md'), '---\nname: todo\ndescription: Todo.\n---\n\nDo things.\n');
+    await applySkills(b.context, await b.managed(), [{ key: 'todo', on: true, except: [] }]);
+    await chmod(join(b.home, '.codex/skills'), 0o555);
+    await turnCodexOn(b);
+    assert.deepEqual([await b.read('.codex/skills/todo/SKILL.md'), (await b.history()).filter(event => event.cause === 'in-line' && event.only)], [undefined, []]);
+    await chmod(join(b.home, '.codex/skills'), 0o755);
+  } finally { await b.cleanup(); }
 });
 
 test('A copy of a deleted item removed from a tool managed again: its entry says it was deleted; the Delete’s entry keeps the Restore', async () => {
