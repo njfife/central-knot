@@ -13,10 +13,12 @@ import { byToolOrder } from './words.ts';
 
 export type ToolWay = 'cli' | 'app' | 'both';
 export type ToolWays = Partial<Record<HarnessId, ToolWay>>;
+export type ReloadKind = ItemKind | 'plugin';
 export interface ReloadChip { readonly chip: string; readonly command?: string; readonly title: string }
-export interface ReloadStep { readonly text: string; readonly command?: string; readonly chip?: string; readonly title?: string; readonly more?: readonly ReloadChip[]; readonly rank: number }
+export interface ReloadStep { readonly text: string; readonly command?: string; readonly chip?: string;
+  readonly title?: string; readonly more?: readonly ReloadChip[]; readonly appOnly?: readonly [string, string]; readonly rank: number }
 /** One confirmed change in order: `on: true` advises, a later `on: false` for the same slot cancels it. */
-export interface ReloadChange { tool: HarnessId; kind: ItemKind; key?: string; on: boolean; plugin?: string }
+export interface ReloadChange { tool: HarnessId; kind: ReloadKind; key?: string; on: boolean; plugin?: string }
 export interface ReloadItem { tool: HarnessId; text: string; command?: string; chip?: string; title?: string; more?: ReloadChip[] }
 export interface ReloadAdvice { text: string; items: ReloadItem[] }
 type WaySteps = Record<ToolWay, ReloadStep>;
@@ -38,11 +40,11 @@ const restartWays = (name: string, command: string, app: string, title = `Quit $
 });
 
 const COPILOT_APP = restartApp('GitHub Copilot app', 'the GitHub Copilot app');
+const COPILOT_SESSION: WaySteps = { cli: newSession('Copilot CLI'), app: COPILOT_APP, both: orRestartApp(newSession('Copilot CLI'), 'GitHub Copilot app', 'the GitHub Copilot app', 5) };
+const CHATGPT_APP = restartApp('ChatGPT desktop', 'the ChatGPT desktop app', 4);
 const CODEX_RESUME: ReloadChip = { chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' };
-const CODEX_MCP_CLI: ReloadStep = {
-  text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).',
-  command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session.', more: [CODEX_RESUME], rank: 4,
-};
+const CODEX_MCP_CLI: ReloadStep = { text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).',
+  command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session.', more: [CODEX_RESUME], rank: 4 };
 const PI_CLI = typeCmd('Pi', '/reload');
 const PI_ALL: WaySteps = { cli: PI_CLI, app: restartApp('pi-gui'), both: orRestartApp(PI_CLI, 'pi-gui') };
 const OPENCODE_RESTART = restartWays('OpenCode', 'opencode --continue', 'OpenCode desktop');
@@ -53,10 +55,8 @@ export const reloadTable: Record<HarnessId, ToolSteps> = {
     // Claude Code plugins load from installed_plugins.json, so plugin skills and agents need /reload-plugins; plugin MCP servers still need a restart (mcp, rank 5).
     plugin: {
       cli: typeCmd('Claude Code', '/reload-plugins'),
-      app: {
-        text: 'In Claude desktop’s Code tab, type /reload-plugins or start a new session.',
-        command: '/reload-plugins', chip: 'Claude desktop: /reload-plugins', title: 'Type this in Claude desktop’s Code tab, or start a new session.', rank: 2,
-      },
+      app: { text: 'In Claude desktop’s Code tab, type /reload-plugins or start a new session.',
+        command: '/reload-plugins', chip: 'Claude desktop: /reload-plugins', title: 'Type this in Claude desktop’s Code tab, or start a new session.', rank: 2 },
       both: typeCmd('Claude Code or Claude desktop’s Code tab', '/reload-plugins', 'Claude Code / desktop', 'Type this in Claude Code or Claude desktop’s Code tab.'),
     },
     mcp: restartWays('Claude Code', 'claude --continue', 'Claude desktop'),
@@ -67,21 +67,21 @@ export const reloadTable: Record<HarnessId, ToolSteps> = {
       app: typeCmd('the GitHub Copilot app', '/skills reload', 'GitHub Copilot app'),
       both: typeCmd('Copilot CLI or the GitHub Copilot app', '/skills reload', 'Copilot CLI / app', 'Type this in Copilot CLI or the GitHub Copilot app.'),
     },
-    mcp: { cli: NONE, app: COPILOT_APP, both: { ...COPILOT_APP, text: 'Restart the GitHub Copilot app if it is open.', rank: 4 } },
-    agent: { cli: newSession('Copilot CLI'), app: COPILOT_APP, both: orRestartApp(newSession('Copilot CLI'), 'GitHub Copilot app', 'the GitHub Copilot app', 5) },
+    mcp: { cli: NONE, app: COPILOT_APP, both: { ...COPILOT_APP, text: 'Restart the GitHub Copilot app if it is open.', appOnly: ['GitHub Copilot app', 'the GitHub Copilot app'], rank: 4 } },
+    agent: COPILOT_SESSION, plugin: COPILOT_SESSION,
   },
   'codex-cli': {
     skill: same({ text: 'Codex picks it up at the next turn; if not, start a new chat.', rank: 1 }),
     mcp: {
-      cli: CODEX_MCP_CLI,
-      app: restartApp('ChatGPT desktop', 'the ChatGPT desktop app', 4),
-      both: {
-        ...CODEX_MCP_CLI,
-        text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat); restart the ChatGPT desktop app if it is open.',
-        more: [CODEX_RESUME, appMore('ChatGPT desktop', 'the ChatGPT desktop app')],
-      },
+      cli: CODEX_MCP_CLI, app: CHATGPT_APP,
+      both: { ...CODEX_MCP_CLI, text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat); restart the ChatGPT desktop app if it is open.',
+        more: [CODEX_RESUME, appMore('ChatGPT desktop', 'the ChatGPT desktop app')] },
     },
     agent: { cli: newSession('Codex'), app: newSession('ChatGPT desktop'), both: newSession('Codex or ChatGPT desktop', 'Codex / ChatGPT desktop') },
+    plugin: {
+      cli: newSession('Codex'), app: CHATGPT_APP,
+      both: { ...newSession('Codex'), text: 'In Codex, start a new session; restart the ChatGPT desktop app if it is open.', more: [appMore('ChatGPT desktop', 'the ChatGPT desktop app')] },
+    },
   },
   // Pi has no native agents: Central Knot keeps one in its skills folder (agents.ts), so it takes Pi's skill line.
   'pi-cli': { skill: PI_ALL, mcp: PI_ALL, agent: PI_ALL },
@@ -97,10 +97,8 @@ export const toolWay = (snapshot: Pick<Snapshot, 'detection' | 'app'> | undefine
   (snapshot?.detection === 'App only' ? 'app' : snapshot?.app ? 'both' : 'cli');
 export const waysFrom = (snapshots: readonly Pick<Snapshot, 'harness' | 'detection' | 'app'>[] | undefined): ToolWays =>
   Object.fromEntries((snapshots ?? []).map(snapshot => [snapshot.harness, toolWay(snapshot)]));
-export const reloadStep = (tool: HarnessId, kind: ItemKind, way: ToolWay = 'cli', plugin = false): ReloadStep =>
-  (plugin && kind !== 'mcp' && reloadTable[tool].plugin ? reloadTable[tool].plugin![way] : reloadTable[tool][kind][way]);
-export const reloadLine = (tool: HarnessId, kind: ItemKind, way: ToolWay = 'cli', plugin = false): string =>
-  reloadStep(tool, kind, way, plugin).text;
+export const reloadStep = (tool: HarnessId, kind: ReloadKind, way: ToolWay = 'cli', plugin = false): ReloadStep =>
+  (kind === 'plugin' || (plugin && tool === 'claude-cli' && kind !== 'mcp') ? reloadTable[tool].plugin?.[way] ?? NONE : reloadTable[tool][kind][way]);
 
 /** Confirmed changes in a pass's results: additions/enables (`on: true`, never switched off) and removals/disables (`on: false`). */
 export const destinationReloads = (results: readonly DestinationResult[], kind?: ItemKind): ReloadChange[] => results.flatMap(entry => {
@@ -130,11 +128,14 @@ export const pluginReloads = (done: readonly PluginDone[]): ReloadChange[] => do
 
 /** One entry per tool needing an action (strongest rank per tool, in tool order) with its sentence, chips and Copy commands. */
 export function reloadAdvice(writes: readonly ReloadChange[], ways: ToolWays = {}): ReloadAdvice {
-  const best = new Map<HarnessId, ReloadStep>();
+  const best = new Map<HarnessId, ReloadStep>(), cliBest = new Map<HarnessId, ReloadStep>();
   for (const { tool, kind, plugin } of writes) {
-    const step = reloadStep(tool, kind, ways[tool], !!plugin);
+    const way = ways[tool], step = reloadStep(tool, kind, way, !!plugin);
     if (step.rank > (best.get(tool)?.rank ?? 0)) best.set(tool, step);
+    const cli = way === 'both' ? reloadStep(tool, kind, 'cli', !!plugin) : NONE;
+    if (cli.rank > (cliBest.get(tool)?.rank ?? 0)) cliBest.set(tool, cli);
   }
+  for (const [tool, step] of best) if (step.appOnly && cliBest.has(tool)) best.set(tool, orRestartApp(cliBest.get(tool)!, ...step.appOnly, step.rank));
   const items = [...best.entries()].sort(([first], [second]) => byToolOrder(first, second)).map(([tool, step]): ReloadItem => ({
     tool, text: step.text, ...(step.command ? { command: step.command } : {}),
     ...(step.chip ? { chip: step.chip, title: step.title ?? step.text } : {}),

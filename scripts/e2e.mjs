@@ -11236,6 +11236,65 @@ async function libraryFlow() {
     await fullSize(a);
     same('no page errors, reload app/both', a.pageErrors, []);
     await a.quit();
+
+    // Copilot found both ways (CLI + GitHub Copilot app), a skill and an MCP server turned on in one run -> keeps both /skills reload and desktop app restart in 48px at 860 wide.
+    const RC = { home: join(scratch, 'reload-copilot-both-home'), data: join(scratch, 'reload-copilot-both-data') };
+    mkdirSync(join(RC.home, 'Applications/GitHub Copilot.app/Contents'), { recursive: true });
+    writeFileSync(join(RC.home, 'Applications/GitHub Copilot.app/Contents/Info.plist'), '<?xml version="1.0"?>\n<plist><dict><key>CFBundleShortVersionString</key><string>1.2.0</string></dict></plist>\n');
+    mkdirSync(join(RC.home, '.local/bin'), { recursive: true });
+    writeFileSync(join(RC.home, '.local/bin/copilot'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.114" && exit 0\nexit 9\n', { mode: 0o755 });
+    skill(join(RC.home, '.copilot/skills'), 'cop-skill');
+    writeFileSync(join(RC.home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: { 'cop-docs': { command: 'npx', args: ['docs'] } } }, null, 2)}\n`);
+    mkdirSync(RC.data, { recursive: true });
+    writeFileSync(join(RC.data, 'app-settings.json'), JSON.stringify({ closeExplained: true }));
+    const c = await launch(RC.data, flag('--electron') ? ['--as-released'] : [], RC.home, onlyHere);
+    const cShots = async (name, size, railMode) => {
+      if (!shots) return;
+      await sizeTo(c, ...size);
+      if (railMode !== undefined && await c.run(`document.body.classList.contains('rail')`) !== railMode) await c.click('#sidebar-toggle');
+      for (const look of ['light', 'dark']) { await theme(c, look); await c.shot(`${name}-${look}`); }
+      await theme(c, 'light');
+    };
+    const cChips = () => c.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
+    const cMore = () => c.run(`(m => m && !m.hidden ? m.textContent?.trim() : null)(document.querySelector('#outcome-reload-more'))`);
+    const cWhole = () => c.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text')?.textContent?.trim(), buttons: [...row.querySelectorAll('button[data-copy]')].map(b => [b.textContent?.trim(), b.dataset.copy]) }))`);
+    const cHeight = () => c.run(`document.querySelector('#header').offsetHeight`);
+    await c.click('#nav-overview');
+    await c.click('#setup-no');
+    await openKind(c, 'all');
+    await c.click(`#${rowPart('add', 'skills', 'cop-skill')}`);
+    await done(c);
+    await c.click(`#${rowPart('add', 'mcp', 'cop-docs')}`);
+    await done(c);
+    await c.click(`#${rowPart('switch', 'skills', 'cop-skill')}`);
+    await done(c);
+    await c.click(`#${rowPart('switch', 'mcp', 'cop-docs')}`);
+    await done(c);
+    await c.click('#outcome-dismiss');
+    await c.clickInRun(`#${rowPart('switch', 'skills', 'cop-skill')}`);
+    await c.clickInRun(`#${rowPart('switch', 'mcp', 'cop-docs')}`);
+    await done(c);
+    same('Copilot found both ways with skill + MCP in one run keeps /skills reload and GitHub Copilot app restart chips at 48px', [
+      await cHeight(), await cChips(),
+    ], [48, [
+      { text: 'Copilot CLI: /skills reload', title: 'Type this in your Copilot CLI session.', copy: '/skills reload' },
+      { text: 'GitHub Copilot app: restart', title: 'Restart the GitHub Copilot app.', copy: null },
+    ]]);
+    for (const [label, size, railMode] of [['reload-copilot-both-860', SMALLEST, undefined], ['reload-copilot-both-1316-open', [1316, 819], false], ['reload-copilot-both-1316-rail', [1316, 819], true]]) {
+      await sizeTo(c, ...size);
+      if (railMode !== undefined && await c.run(`document.body.classList.contains('rail')`) !== railMode) await c.click('#sidebar-toggle');
+      same(`Copilot both skill+MCP fits header’s two lines at ${label} with both chips visible`, [await c.run(CUT_OFF), await cHeight(), await cMore()], [[], 48, null]);
+      await cShots(label, size, railMode);
+      await c.click('#problems-show-all');
+      same(`Copilot both skill+MCP Show all at ${label} shows one Copilot line with both steps and /skills reload button`, [await c.run(CUT_OFF), await cWhole()], [[], [
+        { text: 'In Copilot CLI, type /skills reload, or restart the GitHub Copilot app.', buttons: [['Copilot CLI: /skills reload', '/skills reload']] },
+      ]]);
+      await cShots(`${label}-whole`, size, railMode);
+      await c.click('#problems-show-all');
+    }
+    await fullSize(c);
+    same('no page errors, Copilot both reload', c.pageErrors, []);
+    await c.quit();
   } else console.log('Real-home writes disabled: skipping Claude desktop app-only/both reload checks.');
   }
 

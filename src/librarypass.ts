@@ -77,7 +77,7 @@ import { errorCode, libraryGate } from './share.ts';
 import { hideParts } from './partsmigrate.ts';
 import type { ThroughWhichPlugin } from './plugins.ts';
 import { pluginLink } from './sourcelink.ts';
-import { destinationReloads, reloadLine } from './reload.ts';
+import { destinationReloads, reloadStep } from './reload.ts';
 import { recordedIds, type Recorded } from './sourcestore.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, JoinCounts, MergeDone, PassResult, SyncNotice, TakenInNotice } from './types.ts';
@@ -807,7 +807,7 @@ async function writeCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: S
   const done = here ? {} : await follow(pass, item, tool, true);
   const switchedOff = !!done.off || !!pass.disk.switchedOff?.get(item.key)?.includes(tool);
   const off = done.off ? ` ${toolName(tool)}’s own settings keep it out, so it doesn’t load it.` : '';
-  const next = switchedOff ? '' : reloadLine(tool, pass.kind.kind, pass.context.ways?.[tool]);
+  const next = switchedOff ? '' : reloadStep(tool, pass.kind.kind, pass.context.ways?.[tool]).text;
   const message = `${here ? 'Now has the current version' : 'Added'}${wrote ? `, ${wrote.said}` : ''}.${done.changed ? ` ${done.changed}` : ''}${off}${next ? ` ${next}` : ''}`;
   pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message, ...(switchedOff ? { switchedOff: true as const } : {}), ...(done.changed ? { settingsChanged: done.changed } : {}) });
   return true;

@@ -1074,13 +1074,17 @@ async function switchWhole(context: PluginContext, tool: PluginTool, id: string,
   return { tool, command, ok: true, output: '', changed };
 }
 
-/** Enabled items of an installed plugin copy, for reload advice when the whole plugin is installed, updated, switched or removed. */
-const wholeReloads = ({ plugin, marketplace, state, contents, serversOff, agentsOff }: InstalledCopyOf, tool: PluginTool, on: boolean): ReloadChange[] =>
-  (state.state !== 'installed' || !contents ? [] : [
-    ...contents.skills.filter(skill => !state.skillsOff?.some(off => off.skill === skill.name)).map(skill => ({ tool, kind: 'skill' as const, key: itemKey(skill.name), on, plugin: `${plugin}@${marketplace}` })),
-    ...contents.mcpServers.filter(server => !serversOff?.includes(server.name)).map(server => ({ tool, kind: 'mcp' as const, key: itemKey(server.name), on, plugin: `${plugin}@${marketplace}` })),
-    ...(loadsKind(tool, 'agent') ? contents.agents.filter(agent => !agentsOff?.includes(agent.name)).map(agent => ({ tool, kind: 'agent' as const, key: itemKey(agent.name), on, plugin: `${plugin}@${marketplace}` })) : []),
-  ]);
+/** Enabled items (plus a plugin-level entry when anything enabled or commands/hooks are present), for whole-plugin reload advice. */
+const wholeReloads = ({ plugin, marketplace, state, contents, serversOff, agentsOff }: InstalledCopyOf, tool: PluginTool, on: boolean): ReloadChange[] => {
+  if (state.state !== 'installed' || !contents) return [];
+  const id = `${plugin}@${marketplace}`, items: ReloadChange[] = [
+    ...contents.skills.filter(skill => !state.skillsOff?.some(off => off.skill === skill.name)).map(skill => ({ tool, kind: 'skill' as const, key: itemKey(skill.name), on, plugin: id })),
+    ...contents.mcpServers.filter(server => !serversOff?.includes(server.name)).map(server => ({ tool, kind: 'mcp' as const, key: itemKey(server.name), on, plugin: id })),
+    ...(loadsKind(tool, 'agent') ? contents.agents.filter(agent => !agentsOff?.includes(agent.name)).map(agent => ({ tool, kind: 'agent' as const, key: itemKey(agent.name), on, plugin: id })) : []),
+  ];
+  const other = contents.commands.length || (contents.hooksByTool[tool]?.length ?? contents.hooks.length) || contents.hooksUnread?.length || contents.lspServers.length || contents.bin;
+  return items.length || other ? [...items, { tool, kind: 'plugin', on, plugin: id }] : [];
+};
 const installedReloads = async (context: PluginContext, tool: PluginTool, marketplace: string, plugin: string, on: boolean): Promise<ReloadChange[]> => {
   const copy = (await installedCopies({ ...context, reads: new Map() }, tool)).find(each => each.plugin === plugin && each.marketplace === marketplace);
   return copy ? wholeReloads(copy, tool, on) : [];
@@ -1356,10 +1360,9 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
 /** The end of a tool's own message, shown as it is. */
 const lastLines = (output: string) => output.split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 400);
 
-/** Reload sentence from the one reload table (reload.ts), keeping "still off" when an updated plugin stays off. */
+/** Reload sentence from the one reload table (reload.ts), keeping "still off" (and no reload chips) when an updated plugin stays off. */
 const withNext = (context: PluginContext, tool: PluginTool, reloads: ReloadChange[], message: string, stillOff?: boolean) => {
-  const ways = context.ways ?? (context.apps?.[tool] ? { [tool]: context.binaries?.[tool] ? 'both' : 'app' } : {});
-  const tail = stillOff ? `It is still off in ${toolNames[tool]}.` : reloadAdvice(settleReloads(reloads), ways).text;
-  return { message: `${message} ${tail}`.trim(), reloads };
+  const tail = stillOff ? `It is still off in ${toolNames[tool]}.` : reloadAdvice(settleReloads(reloads), context.ways).text;
+  return { message: `${message} ${tail}`.trim(), reloads: stillOff ? [] : reloads };
 };
 
