@@ -443,6 +443,31 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
   });
 }
 
+// A home `next` made knew five tools: its records name only those in an `except`. When Antigravity turns up, what they keep out
+// of some tool they knew is kept out of it too (pluginrecord.ts bringForward), as the same selections saved now would be.
+test('Records that knew five tools: when Antigravity turns up, a plugin kept out of some, and its items, stay out of it', async () => {
+  const box = await placeParts(true);
+  try {
+    start(box, 'on', 1);
+    const records = ['plugins.json', 'skills.json', 'mcp.json', 'agents.json'];
+    // Each plugin's `except`, and each item's linked to one (pdf and lookup, let go as his own, follow the library's rule for a tool joining).
+    const plugins = (await readJson(join(box.store, 'plugins.json'))).plugins.map((entry: PluginEntry) => entry.id);
+    const excepts = async () => Promise.all(records.map(async name => { const json = await readJson(join(box.store, name));
+      return name === 'plugins.json' ? json.plugins.map((entry: PluginEntry) => [entry.plugin, entry.except])
+        : Object.entries<LibraryItem>(json.items).filter(([, item]) => plugins.includes(item.source)).map(([key, item]) => [key, item.except]); }));
+    const saved = await excepts(), linked = saved.slice(1).flat().map(([key]: [string]) => key);
+    // As `next` wrote them: no sixth tool in any list, and no `knows`.
+    const five = (value: unknown): unknown => (Array.isArray(value) ? value.filter(each => each !== 'antigravity-cli').map(five)
+      : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'knows').map(([key, each]) => [key, five(each)])) : value);
+    for (const name of records) await writeFile(join(box.store, name), `${JSON.stringify(five(await readJson(join(box.store, name))), null, 2)}\n`);
+    await mkdir(join(box.home, '.gemini/config'), { recursive: true });
+    const was = await filesIn(box.home), after = start(box, 'on', 1)[0];
+    const there = changedInTools(was, after.files).filter(path => path.startsWith('.gemini/config/skills/')).map(path => path.split('/')[3]);
+    const servers = Object.keys((await readJson(join(box.home, '.gemini/config/mcp_config.json')))?.mcpServers ?? {});
+    assert.deepEqual([[...there, ...servers].filter(key => linked.includes(key)), await excepts()], [[], saved]);
+  } finally { await rm(box.base, { recursive: true, force: true }); }
+});
+
 // Pi left out at the upgrade and managed again later: the move decides it as the record knew it, so nothing he removed there
 // comes back and nothing he edited there is written over; memo's agent, which Pi never had, doesn't go there; and a skill journal's
 // plugin gains meanwhile doesn't either, since the plugins record keeps journal out of Pi (pluginlibrary.ts pluginOutOf).

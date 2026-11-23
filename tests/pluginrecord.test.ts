@@ -86,6 +86,18 @@ test('The first read records only what a managed tool has, one entry per plugin 
   assert.deepEqual(record.plugins.map(entry => entry.plugin), ['pdf'], 'Codex is left out here: its plugin is not read');
 });
 
+test('plugins.json written knowing five tools: a plugin kept out of some of them is kept out of a tool it never knew; one in all five is not', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'ck-pluginrecord-'));
+  try {
+    const entry = (plugin: string, except: HarnessId[]) => ({ id: plugin, source: '/m', marketName: 'm', plugin, on: true, except });
+    await mkdir(join(home, '.central-knot'));
+    await writeFile(join(home, '.central-knot/plugins.json'), JSON.stringify({ formatVersion: 1, tools: ['pi-cli'], plugins: [entry('kept', ['claude-cli', 'copilot-cli', 'codex-cli']), entry('everywhere', [])] }));
+    const { record } = await readPluginRecord(home);
+    assert.deepEqual(record?.plugins.map(each => [each.plugin, each.except]), [['kept', ['claude-cli', 'copilot-cli', 'codex-cli', 'antigravity-cli']], ['everywhere', []]]);
+    assert.deepEqual(record?.knows, ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'], 'what it knew, until bringForward records more');
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test('plugins.json: none is no record; one damaged or newer stops writes; one saved reads back', async () => {
   const home = await mkdtemp(join(tmpdir(), 'ck-pluginrecord-'));
   try {

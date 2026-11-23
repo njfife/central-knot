@@ -17,6 +17,7 @@ import { serverHash } from '../src/mcp.ts';
 import { hideParts, migrateParts, type PartItem } from '../src/partsmigrate.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
 import { readPluginRecord, savePluginRecord, type PluginEntry } from '../src/pluginrecord.ts';
+import { harnessIds } from '../src/harnesses.ts';
 import { NO_PLUGINS, readLibraries, saveProfile, switchProfile } from '../src/profiles.ts';
 import { inUse, liveItems } from '../src/profileplan.ts';
 import { applyServers, serverKind } from '../src/servers.ts';
@@ -66,7 +67,7 @@ async function partsHome(options: { tools?: HarnessId[]; identity?: boolean } = 
         else installs.push({ source: join(base, 'market'), marketName: 'team', plugin, version, tool, at: when, digest: 'd', items: [item] });
       }
       await put(join(home, '.central-knot/plugin-parts.json'), `${JSON.stringify({ installs }, null, 2)}\n`);
-      await savePluginRecord(home, { tools: managed, plugins: entries });
+      await savePluginRecord(home, { tools: managed, knows: [...harnessIds], plugins: entries });
     },
     /** The migration as homepass.ts runs it; with `plugin`, the plugin kit's folder read as its marketplace's copy. */
     migrate: (plugin?: string) => migrateParts(context, managed, [skillKind, agentKind, serverKind],
@@ -323,7 +324,7 @@ test('It waits whole while a copy on record can’t be read, the record can’t,
     await rm(join(box.home, '.central-knot/plugins.json'));
     assert.ok((await box.migrate()).waits, 'no plugins.json');
     assert.deepEqual(Object.keys(await box.library()), [], 'nothing made while it waited');
-    await savePluginRecord(box.home, { tools: box.managed, plugins: box.entries });
+    await savePluginRecord(box.home, { tools: box.managed, knows: [...harnessIds], plugins: box.entries });
     assert.deepEqual(await box.migrate(), {});
     assert.equal((await box.library()).pdf.source, 'kit-id');
   } finally { await box.cleanup(); }

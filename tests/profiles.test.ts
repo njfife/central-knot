@@ -18,6 +18,7 @@ import { readPluginItems } from '../src/pluginitems.ts';
 import { pluginOnIn } from '../src/pluginrows.ts';
 import { runPlan, type PlanApi } from '../src/pluginplan.ts';
 import { savePluginRecord } from '../src/pluginrecord.ts';
+import { harnessIds } from '../src/harnesses.ts';
 import { setPart, setSkill } from '../src/plugins.ts';
 import type { PluginTool } from '../src/presence.ts';
 import { applyServers, serversView } from '../src/servers.ts';
@@ -610,7 +611,7 @@ async function pluginHome({ copilot = false, opencode = false } = {}) {
   const record = join(box.home, '.central-knot/skills.json'), stored = JSON.parse(await readFile(record, 'utf8'));
   for (const key of ['pdf-reader', 'spreadsheet']) Object.assign(stored.items[key], { source: DOCS_ID, seen: stored.items[key].hash });
   await writeFile(record, JSON.stringify(stored));
-  await savePluginRecord(box.home, { tools: box.tools, plugins: [{ id: DOCS_ID, source: '/m', marketName: 'team', plugin: 'docs', on: true, except: [] }] });
+  await savePluginRecord(box.home, { tools: box.tools, knows: [...harnessIds], plugins: [{ id: DOCS_ID, source: '/m', marketName: 'team', plugin: 'docs', on: true, except: [] }] });
   // OpenCode's copies, as a pass places an item that is On in each tool it isn't kept out of.
   if (opencode) await applySkills(box.context, box.tools, []);
   const made = async (name: string, items: string[]) => (await saveProfile(box.context, { name, items })).id!;
@@ -827,7 +828,7 @@ test('A plugin’s skill and server of one name placed in Pi, one held there: th
         Object.assign(stored.items.issues, { source: DOCS_ID, seen: stored.items.issues.hash });
         await writeFile(record, JSON.stringify(stored));
       }
-      await savePluginRecord(box.home, { tools: box.tools, plugins: [{ id: DOCS_ID, source: '/m', marketName: 'team', plugin: 'docs', on: true, except: [] }] });
+      await savePluginRecord(box.home, { tools: box.tools, knows: [...harnessIds], plugins: [{ id: DOCS_ID, source: '/m', marketName: 'team', plugin: 'docs', on: true, except: [] }] });
       const side: PluginSide = { live: async () => pluginLive({ pluginItems: [], profiles: await readProfiles(box.home), skills: await skillsView(box.context, box.tools),
         mcp: await serversView(box.context, box.tools), agents: await agentsView(box.context, box.tools) } as unknown as HomeView), run: async () => { throw new Error('Pi has placed copies only.'); } };
       const files = async () => ({ skill: await bytes(folderOf(box, 'pi-cli', 'issues')), server: JSON.parse(await readFile(mcp, 'utf8')).mcpServers.issues?.command });

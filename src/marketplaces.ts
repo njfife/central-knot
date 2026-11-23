@@ -389,7 +389,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const asked = [...read, ...entries.filter(entry => entry.on && !read.includes(entry) && itemTools(tools).some(tool => !entry.except.includes(tool)))];
     let looks: KindLooks | undefined;
     for (const market of marketplaces) for (const plugin of market.plugins) {
-      const entry = entryOf({ tools: [], plugins: asked }, market.source, plugin.name);
+      const entry = entryOf({ plugins: asked }, market.source, plugin.name);
       if (!entry || waitsToMove(market, plugin.name)) continue;
       const at: Awaited<ReturnType<typeof itemFiles>> = plugin.gone ? { commitAt: '', problem: MARKET_UNREAD } : await itemFiles(ctx, market.source, plugin.name);
       const reads = at.files && await readPlugin(at.files, entry, at.commitAt, recorded, []);
