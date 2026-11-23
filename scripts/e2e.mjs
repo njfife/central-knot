@@ -4606,7 +4606,8 @@ async function antigravityFlow() {
   await fitsAtMinimum(a, 'a plugin’s page with six tools');
   await pictures('antigravity-plugin-page');
   await a.click('#nav-harnesses'); await a.click('#harness-antigravity-cli'); await a.click('#harness-tab-plugins');
-  check('its Plugins tab says a plugin’s page puts its skills and MCP servers there, no agents', (await a.text('#harness-body') ?? '').includes('puts its skills and MCP servers in Antigravity as items'), await a.text('#harness-body'));
+  const tab = await a.text('#harness-body') ?? '';
+  check('its Plugins tab says a plugin’s page puts its skills and MCP servers there, no agents, and its own plugins stay', ['puts its skills and MCP servers in Antigravity as items', 'Antigravity’s own plugins stay as they are'].every(said => tab.includes(said)), tab);
   same('no page errors, Antigravity', a.pageErrors, []);
   await a.quit();
 }
@@ -6951,7 +6952,7 @@ esac
   await a.click(box('claude-cli'));
   await done();
   same('one tick on an Off plugin turns it On in that tool alone', [installed(), entry()?.on, entry()?.except, inPi(), await boxIs('pi-cli'), await switchIs('#pswitch-page-0-issue-tracker')],
-    [true, true, ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'], [true, false], ['false', false, 'absent'], 'true partial']);
+    [true, true, ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], [true, false], ['false', false, 'absent'], 'true partial']);
   // A plugin installed in Claude Code with its own command and no record here: its row offers Add.
   const helper = join(home, '.claude/plugins/cache/ck-test-market/release-helper/0.4.1');
   mkdirSync(join(helper, 'commands'), { recursive: true });
