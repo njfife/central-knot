@@ -61,6 +61,12 @@ const CODEX_MCP_CLI: ReloadStep = {
 const PI_CLI = typeCmd('Pi', '/reload');
 const PI_ALL: WaySteps = { cli: PI_CLI, app: restartApp('pi-gui'), both: orRestartApp(PI_CLI, 'pi-gui') };
 const OPENCODE_RESTART = restartWays('OpenCode', 'opencode --continue', 'OpenCode desktop');
+// Antigravity (its docs, 2026-11-23): a skill is read at the next turn, but the CLI's slash menu lists it only after /skills
+// reload; an MCP server is reloaded from the CLI's /mcp manager, or by Restart on its menu in the app (Customizations › Installed).
+const AGY_SKILL: ReloadStep = { ...typeCmd('Antigravity', '/skills reload', 'Antigravity', 'Type this in your Antigravity CLI session: its slash menu then lists the skill.'),
+  text: 'Antigravity reads it at the next turn; for the CLI’s slash menu, type /skills reload.', rank: 1 };
+const AGY_MCP_CLI = typeCmd('Antigravity', '/mcp', 'Antigravity', 'Type this in your Antigravity session, then reload the servers there.');
+const AGY_MCP_APP: ReloadStep = { text: 'In the Antigravity app, choose Restart on the server’s menu.', chip: 'Antigravity app: restart the server', rank: 2 };
 
 export const reloadTable: Record<HarnessId, ToolSteps> = {
   'claude-cli': {
@@ -119,6 +125,16 @@ export const reloadTable: Record<HarnessId, ToolSteps> = {
   'opencode-cli': {
     skill: OPENCODE_RESTART, mcp: OPENCODE_RESTART,
     agent: { cli: newSession('OpenCode'), app: restartApp('OpenCode desktop'), both: orRestartApp(newSession('OpenCode'), 'OpenCode desktop') },
+  },
+  'antigravity-cli': {
+    skill: { cli: AGY_SKILL, app: NONE, both: AGY_SKILL },
+    mcp: {
+      cli: AGY_MCP_CLI, app: AGY_MCP_APP,
+      both: { ...AGY_MCP_CLI, text: 'In Antigravity, type /mcp and reload, or choose Restart on the server’s menu in the Antigravity app.',
+        more: [{ chip: AGY_MCP_APP.chip!, title: AGY_MCP_APP.text }] },
+    },
+    // No agent is written to Antigravity yet (presence.ts agentsKeptIn), so this line is never asked.
+    agent: same(NONE),
   },
 };
 

@@ -3,6 +3,8 @@
 //   1. a profiles file from before profiles were sets of library items is moved, with Sync on or off (profilemigrate.ts);
 //   2. plugin parts from before the library become items linked to their plugin, with Sync on or off (partsmigrate.ts: it
 //      waits for the plugins record, which main.ts asks for first while there are parts, marketplaces.ts beforeParts);
+//   2b. a plugins record written knowing fewer tools than this build keeps its plugins' items out of the others where it
+//      keeps them out of some (pluginrecord.ts bringForward), before anything is written in a tool;
 //   3. where this build syncs the home and the pass may write (Sync on, or Sync once), skills, MCP servers and agents are
 //      brought into line, in that order, each on its own: one that crashes is told as a failure and the next still runs.
 //      This is the pass of the whole home, the one in which Synchronize everything takes found items in
@@ -24,6 +26,7 @@ import { sha256, syncsHere, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
 import { installedCopies, type InstalledCopyOf } from './plugins.ts';
 import { loadsKind } from './pluginstatus.ts';
+import { bringForward } from './pluginrecord.ts';
 import { takesPlugins } from './presence.ts';
 import { itemKey } from './library.ts';
 import { reloadsFor, type ReloadChange } from './reload.ts';
@@ -59,6 +62,7 @@ export async function homePass(context: ShareContext, managed: HarnessId[], writ
   await migrateProfiles(context, managed).catch((error: unknown) => { profilesFailed = error ?? 'failed'; });
   const moved = migrateParts(context, managed, [skillKind, agentKind, serverKind], pluginNow);
   const { waits: partsWait } = await moved.catch((error: unknown): { waits?: string } => { partsFailed = error ?? 'failed'; return {}; });
+  await bringForward(context, [skillKind, agentKind, serverKind]).catch((error: unknown) => { partsFailed ??= error ?? 'failed'; });
   const failure = { ...(profilesFailed === undefined ? {} : { profilesFailed }), ...(partsFailed === undefined ? {} : { partsFailed }), ...(partsWait ? { partsWait } : {}) };
   if (!(await syncsHere(context)) || !writes) return failure;
   const crashes: DestinationResult[] = [];

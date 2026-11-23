@@ -45,6 +45,8 @@ export const spelledIn: Record<HarnessId, (names: ItemNames, kind: ItemKind) => 
   'copilot-cli': ({ own, plugin }) => [...own, ...(plugin ? [plugin.name] : [])],
   'pi-cli': ({ own }, kind) => (kind === 'mcp' ? [...own, ...own.map(piServer)] : own),
   'opencode-cli': ({ own }) => own,
+  // Never asked yet: Antigravity's history is not read (usage.ts readers).
+  'antigravity-cli': ({ own }) => own,
 };
 
 /** The names a tool's own copy goes by: its folder and name, each also without a file's `.md` (Pi keeps an agent as `<name>.md`). */

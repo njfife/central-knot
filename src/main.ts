@@ -771,7 +771,7 @@ async function joiningCounts(shared: ShareContext, managed: HarnessId[], present
  * costs a folder and nothing else.)
  */
 async function carriedInstalled(marketplace: string): Promise<string[]> {
-  const context = { home: homedir(), dataDir: join(app.getPath('userData'), 'plugins'), binaries: {}, overrides: Object.fromEntries(harnessIds.map(id => [id, process.env[harnesses[id].configEnv]])) };
+  const context = { home: homedir(), dataDir: join(app.getPath('userData'), 'plugins'), binaries: {}, overrides: Object.fromEntries(harnessIds.map(id => [id, envOverride(harnesses[id], process.env)])) };
   const found = await Promise.all(pluginTools.map(tool => installedPlugins(context, tool).catch(() => [])));
   return [...new Set(found.flat().filter(plugin => plugin.marketplace === marketplace && plugin.state.state !== 'not-installed').map(plugin => plugin.plugin))];
 }

@@ -15,17 +15,17 @@ import { libraryWords, sentences } from '../src/libraryrow.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
-const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
+const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
 const text = (name: string, body = 'Body.') => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\n${body}\n`;
 
 async function sandbox(tools: HarnessId[]) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-switch-')));
   const home = join(base, 'home');
-  for (const dir of ['.claude', '.copilot', '.codex', '.pi/agent', '.config/opencode']) await mkdir(join(home, dir), { recursive: true });
+  for (const dir of ['.claude', '.copilot', '.codex', '.pi/agent', '.config/opencode', '.gemini/config']) await mkdir(join(home, dir), { recursive: true });
   const context: ShareContext = { home, mode: 'custom', read: () => Promise.all(tools.map(harness => discover({ home, mode: 'custom', harness }))), build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real'), settleMs: 0 };
   return { home, context, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
-const skillsDir = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills', 'pi-cli': '.pi/agent/skills', 'opencode-cli': '.config/opencode/skills' } as const;
+const skillsDir = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills', 'pi-cli': '.pi/agent/skills', 'opencode-cli': '.config/opencode/skills', 'antigravity-cli': '.gemini/config/skills' } as const;
 async function skill(home: string, tool: HarnessId, folder: string, content = text(folder)) {
   await mkdir(join(home, skillsDir[tool], folder), { recursive: true });
   await writeFile(join(home, skillsDir[tool], folder, 'SKILL.md'), content);
@@ -41,6 +41,7 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
       'codex-cli': '# my settings\nmodel = "gpt"\n\n[mcp_servers.docs]\ncommand = "docs"\n',
       'pi-cli': '{\n  "skills": ["-skills/other/SKILL.md"]\n}\n',
       'opencode-cli': '{\n  // mine\n  "model": "a/b",\n  "permission": { "skill": { "other": "deny" } },\n}\n',
+      'antigravity-cli': '{\n  "exclude": ["other"],\n  "entries": [{ "path": "~/mine" }]\n}\n',
     };
     const expected: Record<HarnessId, RegExp> = {
       'claude-cli': /"alpha": "off"/,
@@ -48,6 +49,7 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
       'codex-cli': /\[\[skills\.config\]\]\npath = ".*\/\.codex\/skills\/alpha\/SKILL\.md"\nenabled = false\n$/,
       'pi-cli': /"-skills\/alpha\/SKILL\.md"/,
       'opencode-cli': /"other": "deny",\s*"Alpha Skill": "deny"/,
+      'antigravity-cli': /"other",\s*"alpha"/,
     };
     for (const tool of all) {
       await writeFile(switchPath(box.context, tool), before[tool]);
@@ -60,7 +62,7 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
       await setDisabled(box.context, tool, target, false);
       // A list the switch lives in is written back as a JSON list (same values, new layout); otherwise every byte is as it was.
       const now = await readFile(switchPath(box.context, tool), 'utf8');
-      if (tool === 'copilot-cli' || tool === 'pi-cli') assert.deepEqual(JSON.parse(now), JSON.parse(before[tool]), tool);
+      if (tool === 'copilot-cli' || tool === 'pi-cli' || tool === 'antigravity-cli') assert.deepEqual(JSON.parse(now), JSON.parse(before[tool]), tool);
       else assert.equal(now, before[tool], tool);
     }
     // Claude Code: an override the skill already had ("name-only") comes back on Enable, not plain "on".

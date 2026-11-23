@@ -12,7 +12,7 @@ import { addsText, componentsFrom, outcomes, sessionHooksAbout } from './plugino
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
+import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, takenItems, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
 import type { Components, DeclaredHook, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
@@ -33,7 +33,7 @@ const glyph: Record<Outcome['result'], Parameters<typeof icon>[0]> = { works: 'c
  * every part works everywhere (only names differ), it is a few plain lines; a limit anywhere makes it a table.
  */
 function outcomesBlock(view: PluginsView, entry: MarketplaceView, plugin: PluginView, components: Components) {
-  // Pi and OpenCode, which take its items instead, are described by Its items.
+  // Pi, OpenCode and Antigravity, which take its items instead, are described by Its items.
   const tools = nativeTools(view, entry, plugin.name);
   const byTool = Object.fromEntries(tools.map(tool => [tool, outcomes(tool, components)])) as Record<HarnessId, Outcome[]>;
   const groups = groupBy(tools, tool => JSON.stringify(byTool[tool]));
@@ -98,7 +98,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       h('button.inline-link', { type: 'button', id: 'plugin-only-instructions-open', onclick: () => showPage('instructions') }, 'instructions'), '.') : null,
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo), box = boxOf(view, entry, plugin.name, tool, { mark, words });
-      // Under the box: what it has, or what the box says more (why it is off, that he unticked it); in Pi and OpenCode, where none
+      // Under the box: what it has, or what the box says more (why it is off, that he unticked it); in Pi, OpenCode and Antigravity, where none
       // of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its run's report says; then each name of his
       // (yourLines), whatever else is so, which say why on their own where the box is held by those alone.
       const why = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons ?? [], heldOut = entry.items?.[plugin.name]?.heldOut?.[tool] ?? [], yours = entry.items?.[plugin.name]?.yours?.[tool] ?? [];
@@ -127,7 +127,7 @@ function yourLines(view: PluginsView, entry: MarketplaceView, plugin: PluginView
 }
 
 /**
- * Its items: in Pi and OpenCode, which take no plugins, the plugin's skills, agents and MCP servers are items of Central Knot's
+ * Its items: in Pi, OpenCode and Antigravity, which take no plugins, the plugin's skills, agents and MCP servers are items of Central Knot's
  * linked to it (pluginlibrary.ts itemsView, from the table the pass carries out). One line each, by kind, its name opening its
  * row, with its state where it isn't plain (On in each of those tools), or why a name of the plugin's is not brought in.
  */
@@ -146,7 +146,7 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const lines = (['skill', 'agent', 'mcp'] as const).flatMap(kind => items.lines.filter(line => line.kind === kind));
   return h('section.plugin-section.plugin-items-section', { 'aria-label': 'Its items' },
     h('div.plugin-section-head', {}, h('h3', {}, 'Its items')),
-    h('p.plugin-parts-about', {}, `In ${andList(tools.map(tool => names[tool]))}, its skills, agents and MCP servers are items of Central Knot’s that follow the plugin: its switch turns them on or off there, and one you change here becomes your own.`),
+    h('p.plugin-parts-about', {}, `In ${andList(tools.map(tool => names[tool]))}, ${takenItems(tools)} are items of Central Knot’s that follow the plugin: its switch turns them on or off there, and one you change here becomes your own.`),
     items.problem ? h('p.plugin-muted', {}, `${items.problem} Its items stay as they are.`) : null,
     h('ul.plugin-outcome-list.plugin-items-list', {}, lines.map(line => h('li.plugin-outcome-row', { 'data-key': `${line.kind}:${line.key}` },
       h('span.plugin-items-name', {}, `${partWords[line.kind][0]} `, linked(line)

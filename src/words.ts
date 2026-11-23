@@ -7,7 +7,7 @@ import type { HomeKind } from './presence.ts';
 import type { NamedRow } from './itemrow.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
 
-export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi', 'opencode-cli': 'OpenCode' };
+export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi', 'opencode-cli': 'OpenCode', 'antigravity-cli': 'Antigravity' };
 
 /** What is said about Cowork where Claude desktop is here (presence.ts, hasCowork): on Claude Code's card, and on a plugin's page. */
 export const coworkWords = {
@@ -87,7 +87,6 @@ export const leftOutSentence = (tool: string) => `${toolName(tool)} is left out 
 
 /** What an Undo says of a tool it would have written that isn't managed now (left out, or uninstalled): it changed nothing there. */
 export const notManagedHere = (tool: string) => `${toolName(tool)} isn’t managed here now, so this changed nothing there.`;
-
 
 /** A switch problem in words: the file (shown through `show`, say as ~/…) and what is wrong with it. */
 export const problemText = (problem: SwitchProblem, show = (path: string) => path) => `${show(problem.file)} ${problem.reason}`;

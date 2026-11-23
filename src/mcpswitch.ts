@@ -11,6 +11,8 @@
 //   OpenCode     opencode.json  "mcp": { "<name>": { "enabled": false } }, or for an entry under "mcp": { "servers": … },
 //                               "disabled": true   (2026-11-10, 1.19.5 and 2.2.5: `opencode mcp list` shows each disabled on both;
 //                               `enabled: false` under "servers" is not honoured by 2.2.5, so it is not written there)
+//   Antigravity  mcp_config.json  "mcpServers": { "<name>": { "disabled": true } }  (what `mcp disable` writes on 1.5.14; `mcp list`
+//                               shows a hand-written one disabled too; `mcp enable` takes the key out)
 // Claude Code's ~/.claude.json is never touched: its switch lives in settings.json, which Claude Code does not rewrite while it runs.
 import { readFile } from 'node:fs/promises';
 import { mcpFile, openCodeServer, type OwnPart } from './mcp.ts';
@@ -18,14 +20,16 @@ import { errorCode, type ShareContext } from './share.ts';
 import { switchPath, type SwitchFile } from './skillswitch.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
 import { record, withoutBom } from './values.ts';
+import { toolName } from './words.ts';
 import type { HarnessId } from './types.ts';
 
 /**
  * The file that holds a tool's MCP switches: Claude Code's and Copilot's settings.json (beside their skill switches), Codex's
- * config.toml (beside its skill switches, and its servers), and Pi's mcp.json and OpenCode's settings file (each server's own entry).
+ * config.toml (beside its skill switches, and its servers), and Pi's mcp.json, OpenCode's settings file and Antigravity's
+ * mcp_config.json (each server's own entry).
  */
 export function mcpSwitchPath(context: ShareContext, tool: HarnessId): string {
-  return tool === 'pi-cli' || tool === 'opencode-cli' ? mcpFile(context, tool) : switchPath(context, tool);
+  return tool === 'pi-cli' || tool === 'opencode-cli' || tool === 'antigravity-cli' ? mcpFile(context, tool) : switchPath(context, tool);
 }
 
 /** A settings file's JSON object ({} for an empty file). Throws when it is not one. */
@@ -56,11 +60,12 @@ export async function readMcpSwitches(context: ShareContext, tools: HarnessId[])
 
 const deniesByName = (entry: unknown, name: string) => record(entry)?.serverName === name;
 
-/** Pi: the server's own entry in mcp.json's `mcpServers`, if it is there as an object. */
-const piEntry = (text: string, name: string) => record(record(jsonOf(text).mcpServers)?.[name]);
+/** Pi and Antigravity: the server's own entry in their file's `mcpServers`, if it is there as an object. */
+const serversEntry = (text: string, name: string) => record(record(jsonOf(text).mcpServers)?.[name]);
 
-/** The key that turns an OpenCode entry off, with its value: `enabled: false` under `mcp`, `disabled: true` under `mcp.servers`. */
-const openCodeOff = (place: string[]): [string, boolean] => (place.length === 3 ? ['disabled', true] : ['enabled', false]);
+/** The key inside a server's entry that turns it off, with its value: `disabled: true` in Antigravity and under OpenCode's `mcp.servers`, else `enabled: false`. */
+const entryOff = (tool: HarnessId, place: string[] = []): [string, boolean] =>
+  (tool === 'antigravity-cli' || (tool === 'opencode-cli' && place.length === 3) ? ['disabled', true] : ['enabled', false]);
 
 /** Codex: the server's own `[mcp_servers.<name>]` table, if it has one. */
 const codexTable = (text: string, name: string) => readTomlTables(text).find(table => !table.array && table.path.length === 2 && table.path[0] === 'mcp_servers' && table.path[1] === name);
@@ -71,10 +76,13 @@ export function mcpDisabled(tool: HarnessId, text: string, name: string): boolea
     case 'claude-cli': return list(jsonOf(text).deniedMcpServers).some(entry => deniesByName(entry, name));
     case 'copilot-cli': return list(jsonOf(text).disabledMcpServers).includes(name);
     case 'codex-cli': return codexTable(text, name)?.entries.find(entry => entry.key === 'enabled')?.value === false;
-    case 'pi-cli': return piEntry(text, name)?.enabled === false;
+    case 'pi-cli': case 'antigravity-cli': {
+      const [key, off] = entryOff(tool);
+      return serversEntry(text, name)?.[key] === off;
+    }
     case 'opencode-cli': {
       const found = openCodeServer(text, name);
-      const [key, off] = openCodeOff(found?.place ?? []);
+      const [key, off] = entryOff(tool, found?.place);
       return record(found?.raw)?.[key] === off;
     }
   }
@@ -105,15 +113,16 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
       const before = text.slice(0, at);
       return `${before}${before.endsWith('\n') ? '' : '\n'}enabled = false\n${text.slice(at)}`;
     }
-    case 'pi-cli': {
+    case 'pi-cli': case 'antigravity-cli': {
       // Only an entry that is there is switched: one removed meanwhile is never made again as a bare switch.
-      if (!piEntry(text, name)) throw new Error(`Pi has no "${name}" server to switch.`);
-      return setJsonMember(text, ['mcpServers', name, 'enabled'], disabled ? false : undefined);
+      if (!serversEntry(text, name)) throw new Error(`${toolName(tool)} has no "${name}" server to switch.`);
+      const [key, off] = entryOff(tool);
+      return setJsonMember(text, ['mcpServers', name, key], disabled ? off : undefined);
     }
     case 'opencode-cli': {
       const found = openCodeServer(text, name);
       if (!found || !record(found.raw)) throw new Error(`OpenCode has no "${name}" server to switch.`);
-      const [key, off] = openCodeOff(found.place);
+      const [key, off] = entryOff(tool, found.place);
       return setJsonMember(text, [...found.place, key], disabled ? off : undefined);
     }
   }
@@ -122,12 +131,12 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
 /**
  * A server's own part in a tool (mcp.ts OwnPart, as Central Knot keeps it while the entry is out of the tool) with the tool's
  * switch inside the entry cleared, as withMcpSwitch clears it in the file: Codex's `enabled = false` line, Pi's and OpenCode's
- * `enabled: false`, OpenCode's `disabled: true` under `mcp.servers`. Undefined when the part has no such switch on (or the tool
- * keeps its switch outside the entry: Claude Code, Copilot CLI). Every other own field stays.
+ * `enabled: false`, OpenCode's `disabled: true` under `mcp.servers`, Antigravity's `disabled: true`. Undefined when the part has
+ * no such switch on (or the tool keeps its switch outside the entry: Claude Code, Copilot CLI). Every other own field stays.
  */
 export function ownWithoutSwitch(tool: HarnessId, own: OwnPart): OwnPart | undefined {
-  if (tool !== 'codex-cli' && tool !== 'pi-cli' && tool !== 'opencode-cli') return undefined;
-  const [key, off] = tool === 'opencode-cli' ? openCodeOff(own.place ?? []) : ['enabled', false];
+  if (tool === 'claude-cli' || tool === 'copilot-cli') return undefined;
+  const [key, off] = entryOff(tool, own.place);
   const value = own.extras[key];
   // Codex's own lines are kept as written: the switch is its `enabled = false` line.
   if (tool === 'codex-cli' ? !(typeof value === 'string' && /^\s*enabled\s*=\s*false\b/.test(value)) : value !== off) return undefined;

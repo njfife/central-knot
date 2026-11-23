@@ -37,7 +37,7 @@ import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, ty
 import { mergeSkill } from './merge.ts';
 import { pluginLink } from './sourcelink.ts';
 import { sourceFacts } from './sources.ts';
-import { followCopy, isDisabled, piListWords, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type PiEdit, type SwitchFile } from './skillswitch.ts';
+import { followCopy, isDisabled, piListWords, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type ListEdit, type SwitchFile } from './skillswitch.ts';
 import { agentInPi, agentKind, applyAgents } from './agents.ts';
 import { harnesses } from './harnesses.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
@@ -469,7 +469,7 @@ export async function clearSwitch(context: ShareContext, tools: HarnessId[], key
   if (problem) return stop(problem);
   const gate = await libraryGate(context, { start: true, resume });
   if ('refused' in gate) return stop(gate.refused);
-  let listEdit: PiEdit | undefined;
+  let listEdit: ListEdit | undefined;
   try { listEdit = (await setDisabled(context, tool, target, false, await overrideBefore(context, key, tool, target))).edit; }
   catch (error) { return stop(`Could not clear ${toolName(tool)}’s switch: ${switchFailure(error)}`); }
   const switched = { tool, disabled: false, target, ...(listEdit ? { listEdit } : {}) };

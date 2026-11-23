@@ -226,6 +226,9 @@ export function targetFor(harness: HarnessId, directory: string, source: Skill):
       if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'OpenCode 1.x will not load a skill with no YAML frontmatter.' };
       if (source.opencodeProblem) return { harness, directory, limits: [], skipped: `OpenCode 1.x will not load it: ${source.opencodeProblem}.` };
       return { harness, directory, limits: [] };
+    // What Antigravity refuses in a skill was not measured: it is offered every one.
+    case 'antigravity-cli':
+      return { harness, directory, limits: [] };
     case 'claude-cli':
       return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
   }

@@ -233,7 +233,7 @@ function sessionsCell(history: ToolHistory | undefined) {
   return h('td.tools-sessions', {}, h('strong.tools-count', {}, String(history.recent)), since);
 }
 
-/** A count cell: the figure, "—" where the tool can't hold it, "?" where what it holds isn't all known. */
+/** A count cell: the figure, "—" where that kind isn't handled for the tool, "?" where what it holds isn't all known. */
 const countCell = (shown: string) => h(`td.num${shown === '—' ? '.tone-faint' : ''}`, {}, shown);
 const pluginsShown = (plugins: PluginsInstalled) => (plugins.state === 'unsupported' ? '—' : plugins.state === 'unknown' ? '?' : String(plugins.count));
 
@@ -250,7 +250,7 @@ function toolsTable(home: HomeView) {
   const rows = tools.map(tool => ({ tool, kinds: kinds.map(kind => kindShown(kind, tool)),
     plugins: plugins ? pluginsShown(pluginsInstalled(home, tool)) : undefined, sessions: sessionsCell(histories.find(each => each.tool === tool)) }));
   const shown = rows.flatMap(row => [...row.kinds, row.plugins, row.sessions.textContent]), kindDash = rows.some(row => row.kinds.includes('—'));
-  const dashes = [kindDash ? 'that tool can’t hold that kind' : '', rows.some(row => row.plugins === '—') ? takesItemsOnly('that tool') : ''].filter(Boolean);
+  const dashes = [kindDash ? 'that kind isn’t handled for that tool' : '', rows.some(row => row.plugins === '—') ? takesItemsOnly('that tool') : ''].filter(Boolean);
   const unknown = shown.some(value => value?.endsWith('?'));
   const key = [dashes.length ? `—: ${dashes.join(', or ')}.` : '',
     unknown ? '?: not known, as what that tool keeps there couldn’t all be read. A number before the mark is what was counted, and there may be more.' : ''].filter(Boolean).join(' ');

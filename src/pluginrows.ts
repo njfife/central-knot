@@ -1,11 +1,11 @@
 // What plugins installed whole bring, as rows of the Library (no DOM): one row per item of a
 // plugin across every tool that has the plugin. An item the person also has as their own (the same skill, or the plugin's item
-// linked to it in Pi and OpenCode) stays on that row, whose box says "Through a plugin" (types.ts LibraryFacts plugin); one
+// linked to it in Pi, OpenCode and Antigravity) stays on that row, whose box says "Through a plugin" (types.ts LibraryFacts plugin); one
 // that only shares a name is a row of its own here. These rows are never managed: no sync, no repo; a box turns the item on or
 // off in that tool (pluginswitch.ts), a profile ticks the item by its own rows (profileplan.ts pluginLive), and the plugin's page
 // is where the plugin itself is handled. Which tools have such a row of his on through a plugin is decided here too (pluginOnIn),
 // for the Library's rows and for what a profile switch leaves loaded.
-import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts';
+import { DIRECTORY, partOfPage, samePart, takenItems, versionWord } from './pluginstatus.ts';
 import { onNow, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, pageNames, toolNames as names } from './words.ts';
@@ -141,7 +141,7 @@ function missingWhy(row: PluginRow, tool: HarnessId): string {
   if (install?.problem) return `${name} has ${row.plugin} installed, but its files couldn’t be read.`;
   if (install && tool === 'codex-cli' && row.kind === 'agent') return `${name} has ${row.plugin} installed, but Codex doesn’t load a plugin’s agents.`;
   if (install) return `${name} has ${row.plugin} installed, but its copy doesn’t have this ${row.kind === 'mcp' ? 'MCP server' : row.kind}.`;
-  if (!takesPlugins(tool)) return `${name} takes no plugins.${handledWhere(row).listed ? ` Tick ${name} on ${row.plugin}’s page to put its skills, agents and MCP servers there, as items that follow it.` : ''}`;
+  if (!takesPlugins(tool)) return `${name} takes no plugins.${handledWhere(row).listed ? ` Tick ${name} on ${row.plugin}’s page to put ${takenItems([tool])} there, as items that follow it.` : ''}`;
   return `Not installed in ${name}.${handledWhere(row).listed ? ` The plugin’s page on ${pageNames.plugins} installs it there.` : ''}`;
 }
 

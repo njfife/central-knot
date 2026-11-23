@@ -279,7 +279,8 @@ const facts = (key: string, copies: Partial<Record<HarnessId, ToolCopy>>, more: 
   ({ key, name: key, description: '', copies, on: true, except: [], cannot: {}, edited: [], ...more });
 /** A reading of every tool, made by hand: `used` per tool, as `kind:name` with the session numbers that used it, and when each history starts. */
 function readingOf(used: Partial<Record<HarnessId, Record<string, number[]>>>, from: Partial<Record<HarnessId, string>> = {}): UsageReading {
-  return { at: daysAgo(0), tools: (Object.keys(readers) as HarnessId[]).map(tool => ({ tool, tells: readers[tool].tells, sessions: 10, recent: 4, from: from[tool] ?? daysAgo(90),
+  const read = (Object.keys(readers) as HarnessId[]).flatMap(tool => { const reader = readers[tool]; return reader ? [{ tool, tells: reader.tells }] : []; });
+  return { at: daysAgo(0), tools: read.map(({ tool, tells }) => ({ tool, tells, sessions: 10, recent: 4, from: from[tool] ?? daysAgo(90),
     used: Object.entries(used[tool] ?? {}).map(([id, sessions]) => ({ kind: id.split(':')[0] as 'skill', name: id.slice(id.indexOf(':') + 1), sessions, last: daysAgo(sessions.length ? 2 : 45) })) })) };
 }
 const sessionsIn = (reading: UsageReading, kind: 'skill' | 'agent' | 'mcp', row: LibraryFacts, tool: HarnessId) => toolSays(reading, kind, row, tool)!.sessions;

@@ -65,7 +65,7 @@ function serverParts(server: NeutralServer): { name: string; text: string; block
  * agent off everywhere (library.ts THE RULE), before it happens.
  */
 function asSkillNote(agent: ItemRow) {
-  const asSkills = (state.home?.sync.managed ?? []).filter(tool => agentsKeptIn[tool] === 'skills folder');
+  const asSkills = (state.home?.sync.managed ?? []).filter(tool => (agentsKeptIn as Partial<Record<HarnessId, string>>)[tool] === 'skills folder');
   if (!asSkills.length) return null;
   const there = andList(asSkills.map(toolName)), takes = andList(asSkills.filter(tool => !agent.cannot?.[tool]).map(toolName));
   const lacks = `${there} holds no agents of its own, so there an agent is a skill, a file in its skills folder: it has no `

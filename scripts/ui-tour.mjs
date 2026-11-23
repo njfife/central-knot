@@ -3112,7 +3112,7 @@ if (wanted('overview')) {
   const fixture = await serveReleases(releases);
   // Tools are looked for only in this run's HOME, as e2e.mjs does: on a machine with real CLIs installed (a Mac with
   // Homebrew's), "no tool in it" would otherwise find them.
-  await fresh({ CK_UPDATE_STUB: 'v0.7.0-alpha.1', CK_UPDATE_RELEASES: fixture.releasesUrl, CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  await fresh({ CK_UPDATE_STUB: 'v0.7.0-alpha.1', CK_UPDATE_RELEASES: fixture.releasesUrl, CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   begin('overview');
   const top = () => a.run(`document.getElementById('overview-scroll')?.scrollTo(0, 0)`);
   /** Waits for a state the next pictures show; the run stops if it never comes, so no picture shows the wrong one. */

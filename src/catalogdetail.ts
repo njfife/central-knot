@@ -440,7 +440,7 @@ async function copilotManifest(folder: string) {
   return undefined;
 }
 
-/** The files behind a plugin's skills, agents and MCP servers, read as its items in Pi and OpenCode (pluginlibrary.ts readPlugin). */
+/** The files behind a plugin's skills, agents and MCP servers, read as its items in Pi, OpenCode and Antigravity (pluginlibrary.ts readPlugin). */
 export interface PluginFiles {
   /** The plugin's folder: a server's relative paths are checked against it. */
   folder: string;

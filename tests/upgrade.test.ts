@@ -21,11 +21,13 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { agentsFolder } from '../src/agentfiles.ts';
+import { observe, seenBefore } from '../src/arrivals.ts';
+import { readHistory } from '../src/history.ts';
 import { agentKind, applyAgents } from '../src/agents.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { libraryEntry } from '../src/historyactions.ts';
@@ -42,6 +44,7 @@ import { managedNow, readRecord, syncGate, writeAccess } from '../src/share.ts';
 import { asksNow } from '../src/setupcounts.ts';
 import { applySkills, skillKind } from '../src/skills.ts';
 import type { HarnessId, HistoryEvent, HomeView } from '../src/types.ts';
+import type { AgentTool } from '../src/presence.ts';
 import { appContext, filesIn, type AfterPass, type Files } from './upgrade/start.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import * as plugins_ from '../src/plugins.ts';
@@ -104,7 +107,7 @@ async function place(folder: OldHome['folder'] | 'alpha-1-parts'): Promise<Box> 
   for (const name of ['sync.json', 'skills.json', 'agents.json']) {
     const record = JSON.parse(await readFile(join(store, name), 'utf8').catch(() => 'null'));
     if (!record?.roots && !record?.folders) continue;
-    for (const [at, was] of Object.entries<object>(record.roots ?? {})) Object.assign(was, await seen(isAbsolute(at) ? at : agentsFolder(context, at as HarnessId)));
+    for (const [at, was] of Object.entries<object>(record.roots ?? {})) Object.assign(was, await seen(isAbsolute(at) ? at : agentsFolder(context, at as AgentTool)));
     for (const was of Object.values<{ path: string; ino?: number }>(record.folders ?? {})) if (was.ino) Object.assign(was, await seen(was.path));
     await writeFile(join(store, name), `${JSON.stringify(record, null, 2)}\n`);
   }
@@ -363,15 +366,15 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
       // Sync off doesn't run, and kept where they are. writer, edited in OpenCode (whose folder agents.json never knew): OpenCode kept
       // out, his edit that tool's own. Codex, left out, is decided as the record knew it: its part copies are its own, kept out. one,
       // taken in by Add in alpha 1, was his own already (still applied in Codex). scribe, no part anywhere, is kept out of both.
-      const [pdf, lookup] = sync === 'on' ? [['his', true, 'claude-cli copilot-cli codex-cli', 'opencode-cli pi-cli'], ['his', true, 'claude-cli copilot-cli codex-cli', 'opencode-cli pi-cli']]
-        : [['docs', true, 'codex-cli', 'opencode-cli pi-cli'], ['docs', true, 'codex-cli', 'opencode-cli pi-cli']];
+      const [pdf, lookup] = sync === 'on' ? [['his', true, 'claude-cli copilot-cli codex-cli antigravity-cli', 'opencode-cli pi-cli'], ['his', true, 'claude-cli copilot-cli codex-cli antigravity-cli', 'opencode-cli pi-cli']]
+        : [['docs', true, 'codex-cli antigravity-cli', 'opencode-cli pi-cli'], ['docs', true, 'codex-cli antigravity-cli', 'opencode-cli pi-cli']];
       assert.deepEqual(items, {
-        'skill:forms': ['docs', true, 'codex-cli opencode-cli', 'pi-cli'], 'skill:pdf': pdf, 'skill:review': ['docs', true, 'codex-cli pi-cli', 'opencode-cli'],
-        'skill:memo': ['memo', true, 'opencode-cli', 'pi-cli'], 'skill:journal': ['journal', true, 'pi-cli', 'opencode-cli'], 'skill:old': ['old', true, 'opencode-cli', 'pi-cli'],
-        'skill:three': ['picks', true, 'pi-cli opencode-cli', ''], 'skill:two': ['picks', true, 'pi-cli opencode-cli', ''], 'skill:one': ['his', true, '', 'claude-cli codex-cli copilot-cli pi-cli'],
-        'skill:chart': ['sheet', true, 'opencode-cli', 'pi-cli'], 'skill:sheet': ['sheet', true, '', 'opencode-cli pi-cli'],
-        'agent:writer': ['docs', true, 'codex-cli pi-cli opencode-cli', ''], 'agent:scribe': ['memo', true, 'pi-cli opencode-cli', ''],
-        'mcp:lookup': lookup, 'mcp:memo-index': ['memo', true, 'opencode-cli', 'pi-cli'],
+        'skill:forms': ['docs', true, 'codex-cli opencode-cli antigravity-cli', 'pi-cli'], 'skill:pdf': pdf, 'skill:review': ['docs', true, 'codex-cli pi-cli antigravity-cli', 'opencode-cli'],
+        'skill:memo': ['memo', true, 'opencode-cli antigravity-cli', 'pi-cli'], 'skill:journal': ['journal', true, 'pi-cli antigravity-cli', 'opencode-cli'], 'skill:old': ['old', true, 'opencode-cli antigravity-cli', 'pi-cli'],
+        'skill:three': ['picks', true, 'pi-cli opencode-cli antigravity-cli', ''], 'skill:two': ['picks', true, 'pi-cli opencode-cli antigravity-cli', ''], 'skill:one': ['his', true, '', 'claude-cli codex-cli copilot-cli pi-cli'],
+        'skill:chart': ['sheet', true, 'opencode-cli antigravity-cli', 'pi-cli'], 'skill:sheet': ['sheet', true, 'antigravity-cli', 'opencode-cli pi-cli'],
+        'agent:writer': ['docs', true, 'codex-cli pi-cli opencode-cli antigravity-cli', ''], 'agent:scribe': ['memo', true, 'pi-cli opencode-cli antigravity-cli', ''],
+        'mcp:lookup': lookup, 'mcp:memo-index': ['memo', true, 'opencode-cli antigravity-cli', 'pi-cli'],
       });
       for (const kind of ['skill', 'agent', 'mcp'] as const) for (const name of names[kind]) assert.ok(!first[2].pages[pageOf[kind]].items.find(row => row.key === itemKey(name))?.takeInAnswers, `${kind}:${name} is not found`);
     });
@@ -394,9 +397,9 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
     test('records the plugins installed whole as without parts, and each plugin some managed tool has, On, kept out of each tool lacking it', async () => {
       const record = await readJson(join(box.store, 'plugins.json'));
       assert.deepEqual(Object.fromEntries(record.plugins.map((entry: PluginEntry) => [entry.plugin, [entry.marketName, entry.on, entry.except.join(' ')]])), {
-        tasks: ['team', true, 'codex-cli pi-cli opencode-cli'], memo: ['team', true, 'copilot-cli codex-cli opencode-cli'], old: ['gone', true, 'copilot-cli codex-cli opencode-cli'],
-        docs: ['team', true, 'claude-cli copilot-cli codex-cli'], sheet: ['team', true, 'claude-cli copilot-cli codex-cli'], picks: ['team', true, 'claude-cli copilot-cli codex-cli opencode-cli'],
-        journal: ['team', true, 'claude-cli copilot-cli codex-cli pi-cli'] });
+        tasks: ['team', true, 'codex-cli pi-cli opencode-cli antigravity-cli'], memo: ['team', true, 'copilot-cli codex-cli opencode-cli antigravity-cli'], old: ['gone', true, 'copilot-cli codex-cli opencode-cli antigravity-cli'],
+        docs: ['team', true, 'claude-cli copilot-cli codex-cli antigravity-cli'], sheet: ['team', true, 'claude-cli copilot-cli codex-cli antigravity-cli'], picks: ['team', true, 'claude-cli copilot-cli codex-cli opencode-cli antigravity-cli'],
+        journal: ['team', true, 'claude-cli copilot-cli codex-cli pi-cli antigravity-cli'] });
       assert.deepEqual(record.tools, ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli']);
     });
 
@@ -441,6 +444,57 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
     });
   });
 }
+
+/**
+ * alpha-1-parts brought to this version (start), then its records rewritten as `next` wrote them, which v0.7.0-alpha.5 was cut
+ * from: knowing five tools, no sixth in any list and no `knows`; then Antigravity there (a chosen folder's tool is there by its
+ * folder). `excepts`: each plugin's `except`, and each item's linked to one (pdf and lookup, let go as his own, follow the
+ * library's rule for a tool joining), as the records hold them now; `saved`, as they held them before; `linked`, those items.
+ */
+async function fiveToolsThenAntigravity(box: Box) {
+  start(box, 'on', 1);
+  const records = ['plugins.json', 'skills.json', 'mcp.json', 'agents.json'];
+  const plugins = (await readJson(join(box.store, 'plugins.json'))).plugins.map((entry: PluginEntry) => entry.id);
+  const excepts = async () => Promise.all(records.map(async name => { const json = await readJson(join(box.store, name));
+    return name === 'plugins.json' ? json.plugins.map((entry: PluginEntry) => [entry.plugin, entry.except])
+      : Object.entries<LibraryItem>(json.items).filter(([, item]) => plugins.includes(item.source)).map(([key, item]) => [key, item.except]); }));
+  const saved = await excepts(), linked: string[] = saved.slice(1).flat().map(([key]: [string]) => key);
+  const five = (value: unknown): unknown => (Array.isArray(value) ? value.filter(each => each !== 'antigravity-cli').map(five)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'knows').map(([key, each]) => [key, five(each)])) : value);
+  for (const name of records) await writeFile(join(box.store, name), `${JSON.stringify(five(await readJson(join(box.store, name))), null, 2)}\n`);
+  await mkdir(join(box.home, '.gemini/config'), { recursive: true });
+  return { excepts, saved, linked };
+}
+
+// A home `next` made knew five tools: its records name only those in an `except`. When Antigravity turns up, what they keep out
+// of some tool they knew is kept out of it too (pluginrecord.ts bringForward), as the same selections saved now would be.
+test('Records that knew five tools: when Antigravity turns up, a plugin kept out of some, and its items, stay out of it', async () => {
+  const box = await placeParts(true);
+  try {
+    const { excepts, saved, linked } = await fiveToolsThenAntigravity(box);
+    const was = await filesIn(box.home), after = start(box, 'on', 1)[0];
+    const there = changedInTools(was, after.files).filter(path => path.startsWith('.gemini/config/skills/')).map(path => path.split('/')[3]);
+    const servers = Object.keys((await readJson(join(box.home, '.gemini/config/mcp_config.json')))?.mcpServers ?? {});
+    assert.deepEqual([[...there, ...servers].filter(key => linked.includes(key)), await excepts()], [[], saved]);
+  } finally { await rm(box.base, { recursive: true, force: true }); }
+});
+
+// The case arrivals.ts exists for: such a home, as the last release left it (its settings keep no tools for it), opened with
+// Antigravity there and Automatic sync on, its pass run as main.ts runs it. Antigravity has arrived: each item the pass put there
+// is counted and has its own History entry, Copied to Antigravity, and no item of a plugin kept out of some tool is among them.
+test('Records that knew five tools, opened with Antigravity there: it has arrived, each copy counted and in History, no kept-out plugin’s item among them', async () => {
+  const box = await placeParts(true);
+  try {
+    const { linked } = await fiveToolsThenAntigravity(box);
+    const context = { ...appContext(box.home, box.appData), reads: new Map() }, managed = await managedNow(context, await context.read());
+    const before = await seenBefore(undefined, context, managed), told = (await readHistory(context)).length;
+    const seen = observe(before, managed, true, (await homePass(context, managed, true)).synced);
+    const copied = (await readHistory(context)).slice(told).filter(event => event.cause === 'in-line' && event.only === 'antigravity-cli').map(event => libraryEntry(event)!.key).sort();
+    const there = [...await readdir(join(box.home, '.gemini/config/skills')), ...Object.keys((await readJson(join(box.home, '.gemini/config/mcp_config.json')))?.mcpServers ?? {})].sort();
+    assert.ok(there.length > 0, 'the pass put items there');
+    assert.deepEqual([seen.arrived, copied, copied.filter(key => linked.includes(key))], [[{ tool: 'antigravity-cli', copied: there.length }], there, []]);
+  } finally { await rm(box.base, { recursive: true, force: true }); }
+});
 
 // Pi left out at the upgrade and managed again later: the move decides it as the record knew it, so nothing he removed there
 // comes back and nothing he edited there is written over; memo's agent, which Pi never had, doesn't go there; and a skill journal's
