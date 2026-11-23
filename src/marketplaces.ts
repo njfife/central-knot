@@ -13,7 +13,7 @@ import * as engine from './plugins.ts';
 import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts';
 import { itemTools, itemsBack, itemsView, lookAtKinds, readPlugin, runItems, withItemsOf, type ItemsAsk, type ItemState, type KindLooks } from './pluginlibrary.ts';
 import { recordedIds } from './sourcestore.ts';
-import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
+import { holds, pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import { waysFrom } from './reload.ts';
 import type { ItemKind } from './library.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice, YourName } from './types.ts';
@@ -21,10 +21,10 @@ import { harnessIds } from './harnesses.ts';
 import { errorCode, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
-import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, recordUnread, toolNow, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
+import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, partWords, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, recordUnread, toolNow, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { readLink } from './sourcelink.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
-import { leftOutSentence, pageNames, toPluginsLabel } from './words.ts';
+import { leftOutSentence, pageNames, toPluginsLabel, toolName } from './words.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
 export const viaLabel = (app: DesktopApp, answered = app.carriedVersion) => `${app.name}’s ${app.carries}${answered ? ` ${shortBuild(answered)}` : ''}`;
@@ -824,6 +824,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function take(source: string, plugin: string, item: Pick<YourName, 'kind' | 'key'>, tool: HarnessId, home: unknown): Promise<PluginTurnResult> {
     const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, done: [] };
+    if (!holds(tool, item.kind)) return { stopped: `${toolName(tool)} holds no ${partWords[item.kind][1]}, so the plugin’s ${item.key} can’t go there. Nothing was changed.`, done: [] };
     const share = host.share?.(), entry = entryOf((await readPluginRecord(String(home))).record, source, plugin);
     if (!share || !entry) return { stopped: 'It has no entry in the plugins record here, so nothing was changed.', done: [] };
     const op = { source, marketName: entry.marketName, plugin, action: 'install-items' as const };

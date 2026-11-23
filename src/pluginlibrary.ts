@@ -181,12 +181,14 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   const looks = await lookAtKinds(context, tools);
   const madeOut = (tool: HarnessId) => (item: LibraryItem, kind: ItemKind) => item.except.includes(tool) && made.has(`${kind}:${item.name}`);
   const why = (tool: HarnessId) => files.problem ?? `Nothing of ${entry.plugin} is on in ${toolNames[tool]}. ${notInWhy(tool, entry.plugin, outsIn(tool, lines, after, madeOut(tool), heldByShared(looks, tool))).join(' ')}`;
-  // A take that can't land says why, and nothing changed. What is on in each tool is counted as the box counts it (onThere).
-  const refused = sourced.find(({ said }) => said.held)?.said, his = sourced.filter(({ said }) => said.answer === 'differs').length;
+  // A take that can't land says why, and nothing changed. What is on in each tool, and of how many, is counted as the box counts it
+  // (onThere, and the view's `of`: the kinds the tool holds).
+  const refused = sourced.find(({ said }) => said.held)?.said, his = sourced.filter(({ said }) => said.answer === 'differs');
+  const of = (tool: HarnessId) => [...after, ...alike, ...his].filter(({ kind }) => holds(tool, kind)).length;
   const on = (tool: HarnessId) => onThere(looks, [...after, ...(!('outOf' in ask) && entry.on && !entry.except.includes(tool) ? alike : [])], tool);
   const ticks = await movedTicks(context, entry, before, after, moved, folder);
   const done = named.map((tool): PluginDone => ({ ...op, tool, report: refused ? { tool, outcome: 'held', message: `${refused.name}: ${refused.held}`, runs: [], changed: false }
-    : reportIn(tool, ask, before, after, results, why(tool), !!files.problem, on(tool), after.length + alike.length + his, ticks) }));
+    : reportIn(tool, ask, before, after, results, why(tool), !!files.problem, on(tool), of(tool), ticks) }));
   return { ...ran(done, results), ...(undo.length ? { back: undo } : {}) };
 }
 /**
@@ -356,13 +358,16 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
     const held = outsIn(tool, [], linked, ownIn(tool), heldByShared(looks, tool)).filter(({ out }) => out === 'own' || out === 'shared');
     return held.length ? [[tool, notInWhy(tool, entry.plugin, held)] as const] : [];
   }));
-  // Each name of his under each tool's box the plugin is wanted in, whatever else is so: the same as his, or Use the plugin's but
-  // where its take can't land there (librarypass.ts takeHeld: his through the shared folder, say).
+  // Each name of his of a kind the tool holds (presence.ts holds) under each tool's box the plugin is wanted in, whatever else is
+  // so: the same as his, or Use the plugin's but where its take can't land there (librarypass.ts takeHeld: his through the shared folder, say).
   const yours: Partial<Record<HarnessId, YourName[]>> = {};
-  for (const tool of his.length ? wanted : []) yours[tool] = await Promise.all(his.map(async ({ line: { kind, key, name, state }, item }): Promise<YourName> => {
-    const plugins = reads?.find(each => each.kind === kind)?.names.get(key), held = plugins && 'content' in plugins ? await takeHeld(look(kind), item, tool, plugins.content) : undefined;
-    return { kind, key, name, ...(state === 'alike' ? { same: true as const } : held ? { held: { why: held.why, ...(held.throughShared ? { shared: true as const } : {}) } } : {}) };
-  }));
+  for (const tool of wanted) {
+    const there = his.filter(({ line }) => holds(tool, line.kind));
+    if (there.length) yours[tool] = await Promise.all(there.map(async ({ line: { kind, key, name, state }, item }): Promise<YourName> => {
+      const plugins = reads?.find(each => each.kind === kind)?.names.get(key), held = plugins && 'content' in plugins ? await takeHeld(look(kind), item, tool, plugins.content) : undefined;
+      return { kind, key, name, ...(state === 'alike' ? { same: true as const } : held ? { held: { why: held.why, ...(held.throughShared ? { shared: true as const } : {}) } } : {}) };
+    }));
+  }
   const of = Object.fromEntries(itemTools(tools).map(tool => [tool, [...linked, ...his.map(({ line }) => line)].filter(({ kind }) => holds(tool, kind)).length]));
   return { lines, on, of, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(due ? { due: true as const } : {}), ...(problem ? { problem } : {}),
     ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(Object.keys(heldOut).length ? { heldOut } : {}), ...(Object.keys(yours).length ? { yours } : {}) };

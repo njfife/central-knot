@@ -226,6 +226,36 @@ test('A plugin whose one item is an agent offers Antigravity, which takes no age
   } finally { await box.cleanup(); }
 });
 
+/** kit holding one skill, notes, and one agent, helper, in a home with Claude Code and Antigravity, which holds no agents. */
+async function skillAndAgent() {
+  const box = await kitHome({ tools: ['claude-cli', 'antigravity-cli'] });
+  for (const path of ['skills/review', 'extra', '.mcp.json']) await rm(join(box.kit, path), { recursive: true, force: true });
+  await put(join(box.kit, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'kit' }));
+  return box;
+}
+
+test('kit of one skill and one agent ticked for Antigravity: the result counts what Antigravity holds, as its box does', async () => {
+  const box = await skillAndAgent();
+  try {
+    const ticked = await box.turn('let-in', 'antigravity-cli');
+    assert.deepEqual([ticked.done.filter(step => step.tool === 'antigravity-cli').map(step => step.report.message), itemsOnWords(await box.view(), 'kit', 'antigravity-cli')],
+      [['1 of its 1 items is on in Antigravity.'], '1 of its 1 items is on']);
+  } finally { await box.cleanup(); }
+});
+
+test('His agent helper beside the plugin’s of other content: under Antigravity, which holds no agents, Use the plugin’s is neither offered nor taken', async () => {
+  const box = await skillAndAgent();
+  try {
+    await put(join(box.home, '.claude/agents/helper.md'), '---\nname: helper\ndescription: His.\n---\nHis own.\n');
+    await applyAgents(box.share, box.tools, [{ key: 'helper', on: true, except: [] }]);
+    await box.turn('let-in', 'antigravity-cli');
+    const his = (await box.library()).agent.helper!;
+    assert.equal((await box.view()).items!.kit!.yours, undefined);
+    const took = await box.markets.take(box.root, 'kit', { kind: 'agent', key: 'helper' }, 'antigravity-cli', box.home);
+    assert.deepEqual([took.stopped, took.done, (await box.library()).agent.helper], ['Antigravity holds no agents, so the plugin’s helper can’t go there. Nothing was changed.', [], his]);
+  } finally { await box.cleanup(); }
+});
+
 test('Arriving On writes over nothing: Pi’s own skill review keeps Pi out of the plugin’s item; the person’s library item notes of the same content is never linked, and the plugin’s Off leaves it On', async () => {
   const box = await kitHome();
   try {
