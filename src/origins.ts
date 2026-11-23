@@ -4,7 +4,7 @@
 // gets it through a plugin); a Library source, by the link the row's view resolves (types.ts LibraryFacts fromSource; never the
 // item's stored source id, which a removed source leaves behind), one that source dropped too; and plugins, each
 // by its link (sourcelink.ts pluginLink): a plugin's own row, a tool that gets the item through a plugin (LibraryFacts plugin),
-// an item linked to a plugin in Pi or OpenCode. Those two are what folds a plugin's item onto a row (pluginrows.ts onOwnRow).
+// an item linked to a plugin in Pi, OpenCode or Antigravity. Those two are what folds a plugin's item onto a row (pluginrows.ts onOwnRow).
 // Never from version history: an item edited away from its plugin, which the pass let go, is the person's own.
 import type { PageKind } from './app.ts';
 import { kindSource } from './itemrow.ts';

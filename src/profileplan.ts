@@ -143,9 +143,9 @@ export function leftOutWords(counts: Record<ItemKind, number>): string {
 // ---------- A plugin's items ----------
 
 /**
- * One tool's copy of a plugin's item as a switch to a profile meets it. `on`: on there now (pluginswitch.ts onNow; in Pi and
- * OpenCode its library item's On). `way`:
- * - `switch`: the item's own switch there (pluginswitch.ts ownSwitch; in Pi and OpenCode its library item's On and Off);
+ * One tool's copy of a plugin's item as a switch to a profile meets it. `on`: on there now (pluginswitch.ts onNow; in Pi,
+ * OpenCode and Antigravity its library item's On). `way`:
+ * - `switch`: the item's own switch there (pluginswitch.ts ownSwitch; in Pi, OpenCode and Antigravity its library item's On and Off);
  * - `whole`: in Claude Code, its whole plugin's switch there (takenWhole): a skill's always, an MCP server's or agent's while
  *   the plugin is off (its own switch is set before the plugin comes on: wholeRuns);
  * - `stays`: the tool has none for one item of its kind (an agent in Copilot CLI), so the copy is left as its plugin has it and
@@ -216,8 +216,8 @@ function keyedAsBefore(home: PluginHome, kind: ItemKind, item: LibraryItem, entr
 }
 
 /**
- * Every plugin's item a tool has now, one per pluginItemKey whichever way each tool has it: installed whole, then placed in Pi or
- * OpenCode, a library item linked to a plugin the home records, in each of those managed tools it isn't kept out of (Off too:
+ * Every plugin's item a tool has now, one per pluginItemKey whichever way each tool has it: installed whole, then placed in Pi,
+ * OpenCode or Antigravity, a library item linked to a plugin the home records, in each of those managed tools it isn't kept out of (Off too:
  * its On brings it back there; `plugin-off` while the plugin is Off on Plugins, whose Off turned the item Off:
  * pluginlibrary.ts runItems). A tool whose copy of a plugin couldn't be read has an `unread` copy of each of that plugin's items
  * another tool has, of the kinds it loads (pluginstatus.ts loadsKind); an item only that copy has isn't known, so isn't listed.

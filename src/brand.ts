@@ -8,13 +8,14 @@ const glyphs: Record<string, string> = {
   'codex-cli': '<path d="m7.5 9.5 3 2.5-3 2.5"/><path d="M12.5 15h4"/>',
   'pi-cli': '<path d="M7.5 9h9"/><path d="M10.5 9v7"/><path d="M14 9v5.5c0 .9.5 1.5 1.5 1.5"/>',
   'opencode-cli': '<rect width="7" height="8" x="8.5" y="8" rx="1"/>',
+  'antigravity-cli': '<path d="M12 16.5v-9"/><path d="m8.5 11 3.5-3.5 3.5 3.5"/>',
 };
 
 /** A tool's mark (its id, as the tables pass it), or its first two letters when it has none. */
 export function brandMark(tool: string, size = 16): Element {
   const holder = document.createElement('template');
   const brand = (brands as Record<string, { color: string; path: string } | undefined>)[tool];
-  // Codex, Pi and OpenCode have no mark of their own here: each a drawn glyph in a rounded square (a terminal prompt, a π, an O), the same
+  // Codex, Pi, OpenCode and Antigravity have no mark of their own here: each a drawn glyph in a rounded square (a terminal prompt, a π, an O, an arrow up), the same
   // size and weight as the others at any size, not letters squeezed into a tile.
   const drawn = !brand && glyphs[tool];
   if (drawn) {

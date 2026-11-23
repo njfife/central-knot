@@ -135,7 +135,7 @@ export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: 
  * main runs it ("Installing…"), then what main returned. On its page, every step whole, a failure starting with its tool (the
  * problems band has each whole too). On the list's row (`onRow`), what fits the row's one line: what it did and where, past one
  * tool counted ("Installed in 3 tools", "Installed in 2 tools, not in Codex", "Not installed in Codex"); each tool's reason and
- * the items put in Pi and OpenCode are in the band above and on its page. It stays until the list's news ends
+ * the items put in Pi, OpenCode and Antigravity are in the band above and on its page. It stays until the list's news ends
  * (pluginstate.ts endListNews).
  */
 export function clickWords(click: PluginClick, onRow = false): { text: string; failed: boolean } {

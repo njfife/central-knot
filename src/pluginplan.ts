@@ -12,11 +12,11 @@ import { andList, byToolOrder, toolNames as names } from './words.ts';
  * Install, update or uninstall a plugin, turn one of its skills (ENB-06: skill-off, skill-on) or one of its MCP servers or
  * agents (part-off, part-on) off or back on, or turn the whole plugin off or back on in the tool's own settings (plugin-off,
  * plugin-on), in one tool. The Plugins page's clicks run update and a skill's switch; install and remove come from a plugin's
- * switch and an Undo. The four items actions (isItems) are a plugin's items in Pi and OpenCode (pluginlibrary.ts).
+ * switch and an Undo. The four items actions (isItems) are a plugin's items in Pi, OpenCode and Antigravity (pluginlibrary.ts).
  */
 export type PluginAction = 'install' | 'update' | 'remove' | 'skill-off' | 'skill-on' | 'part-off' | 'part-on' | 'plugin-off' | 'plugin-on'
   | 'install-items' | 'remove-items' | 'update-items' | 'items-back';
-/** A run on a plugin's items in Pi and OpenCode (pluginlibrary.ts), which an Undo reverses by their states (items-back), never by an opposite step. */
+/** A run on a plugin's items in Pi, OpenCode and Antigravity (pluginlibrary.ts), which an Undo reverses by their states (items-back), never by an opposite step. */
 export const isItems = (action: PluginAction) => action === 'install-items' || action === 'remove-items' || action === 'update-items' || action === 'items-back';
 /** One tool's change for one plugin from one marketplace. */
 export interface PluginOp {
@@ -173,7 +173,7 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const [off, on] = part ? ['part-off', 'part-on'] as const : ['skill-off', 'skill-on'] as const;
     const onWith = undo ? [] : mine.filter(entry => heldWith(entry).length);
-    // A plugin's items in Pi and OpenCode (pluginlibrary.ts): what each tool has of them now, said apart from installs.
+    // A plugin's items in Pi, OpenCode and Antigravity (pluginlibrary.ts): what each tool has of them now, said apart from installs.
     const itemRuns = (outcome: ActionReport['outcome'], changed: boolean) => mine.filter(entry => isItems(entry.action) && entry.report.outcome === outcome && !!entry.report.changed === changed)
       .sort((first, second) => byToolOrder(first.tool, second.tool));
     const items = (outcome: ActionReport['outcome'], changed: boolean) => itemRuns(outcome, changed).map(entry => names[entry.tool]);

@@ -17,7 +17,7 @@
 //   running Claude Code saves it under that lock and keeps what another write put there.
 // - Merge of a source's version (merge.ts mergeServer); what at a link is a server is atlink.ts serversAt.
 // - a tool's own switch for a server (mcpswitch.ts) is read at each look for its mark (`switchedOff`) and never written by a
-//   pass. Where it lives inside the entry (Codex, Pi, OpenCode) it is that tool's own field, so it comes back with the entry.
+//   pass. Where it lives inside the entry (Codex, Pi, OpenCode, Antigravity) it is that tool's own field, so it comes back with the entry.
 //   One write follows a pass: a Claude Code deny an earlier build's profiles migration kept is cleared once the server is wanted
 //   there (releaseKeptDenies).
 // Around the pass: applyServers and restoreServer run it (the page's clicks);
@@ -116,7 +116,7 @@ async function readDisk(context: ShareContext, managed: HarnessId[], library: Ki
 }
 
 /**
- * Why a tool can't be given the server (mcp.ts cannotHold: SSE in Codex, Pi and OpenCode, no command, no URL), as this pass's
+ * Why a tool can't be given the server (mcp.ts cannotHold: SSE in Codex, Pi, OpenCode and Antigravity, no command, no URL), as this pass's
  * clicks left it: its current version (Make current may have just changed it), or a found server's copy.
  */
 const cannotTake = (disk: ServerDisk, item: Wanted, tool: HarnessId) => {
@@ -176,7 +176,7 @@ export const serverKind: Kind<NeutralServer, McpEntry, ServerDisk> = {
 async function writeServer(context: ShareContext, item: LibraryItem, tool: HarnessId, here: McpEntry | undefined, server: NeutralServer) {
   context.fault?.('before-rename');
   const kept = here ? undefined : await keptOwn(context, item, tool);
-  const stopped = await editEntry(context, tool, here?.name ?? kept?.name ?? item.name, here?.hash, server, kept?.extras, kept?.place);
+  const stopped = await editEntry(context, tool, here?.name ?? kept?.name ?? item.name, here?.hash, server, kept?.extras, kept?.place, kept?.urlKey);
   return stopped && { stopped: stopped.stopped };
 }
 

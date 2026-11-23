@@ -4,8 +4,9 @@
 //                                `except` (the tools it is kept out of); per home: `tools`, the managed tools that
 //                                are not new here (the first read puts every managed tool there but one an install waited
 //                                for; the automatic updates add a new tool after their first check for it; a tool managed
-//                                again leaves it). Nothing else: what each tool has (installed or not, its version, its own
-//                                switches, what its copy holds) is read at each look.
+//                                again leaves it), and `knows`, the tools it was written knowing (bringForward). Nothing
+//                                else: what each tool has (installed or not, its version, its own switches, what its copy
+//                                holds) is read at each look.
 //
 // THE TABLE (owedTo), per managed tool, from the plugin's entry and what that tool has now (ToolNow). "Wanted" is On and not
 // kept out of the tool. Rows, first match:
@@ -23,8 +24,8 @@
 // or managed again): `background`; but not while some tool has the plugin off by its own switch (`offElsewhere`: one turned
 // off somewhere is not wanted everywhere, read from the tools at each look). Nothing else is: an uninstall runs only at the
 // plugin's own click (its switch, a tool's box unticked), and an install in a tool already on `tools` (one that failed, one
-// removed there by hand) waits for its box to be ticked on the plugin's page. "Has it" is installed whole, or (in Pi and
-// OpenCode, which have no plugin installer) some item linked to the plugin wanted in that tool (`items`). In Pi and OpenCode a
+// removed there by hand) waits for its box to be ticked on the plugin's page. "Has it" is installed whole, or (in Pi, OpenCode
+// and Antigravity, which have no plugin installer) some item linked to the plugin wanted in that tool (`items`). In Pi, OpenCode and Antigravity a
 // plugin whose parts from before the library wait to be moved has none and can't go in (rows 7 and 6: pluginstatus.ts toolNow,
 // waitsToMove), so nothing is owed there until partsmigrate.ts has moved them. An item's own `except` decides where it is; the
 // entry's only seeds a new item's (pluginlibrary.ts), and a click on one tool changes that tool in each item's `except` alone. A
@@ -41,7 +42,7 @@
 //   Off or no entry, ticked   → On, `except` by the first read's rule (firstEntry), the ticked tool counted as having it.
 //   No entry, unticked        → the first read's rule, then as On, unticked.
 //   Off, unticked             → the entry as it is (`except` changes only while On): that tool's copy is taken out (row 9 or 10).
-// In Pi and OpenCode a tick turns On only what it brings into that tool: an item that comes On is kept out of every other tool
+// In Pi, OpenCode and Antigravity a tick turns On only what it brings into that tool: an item that comes On is kept out of every other tool
 // it wasn't in (pluginlibrary.ts clickOn). A copy that can't be taken out here has its box off (pluginstatus.ts boxOf).
 // Who reads what: marketplaces.ts gathers what the tools have (pluginstatus.ts toolNow) and carries out a click (turn, undoTurn); the
 // automatic updates carry out the background's installs (pluginupdates.ts); the pages and pluginstatus.ts say the answer.
@@ -50,7 +51,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { harnessIds } from './harnesses.ts';
 import { sameSource } from './plugins.ts';
-import { NOTHING_CHANGED, errorCode, storeDirectory, writeDurably } from './share.ts';
+import { NOTHING_CHANGED, errorCode, libraryGate, storeDirectory, writeDurably, type ShareContext } from './share.ts';
+import type { Kind, Seen } from './librarypass.ts';
 import type { HarnessId, PluginTurn } from './types.ts';
 import { onlyAllowed } from './values.ts';
 // "Wanted" means what it means for a library item (On, and not kept out of the tool): one rule, library.ts's.
@@ -72,12 +74,14 @@ export interface PluginEntry {
 export interface PluginRecord {
   /** The managed tools that are not new here (the header says who adds and takes away); one not here is owed each On plugin's install by the automatic updates (`background`). */
   tools: HarnessId[];
+  /** The tools it was written knowing; one written before this field knew five (KNEW_FIVE). bringForward adds the others. */
+  knows: HarnessId[];
   plugins: PluginEntry[];
 }
 
 /** What one managed tool has of a plugin now, and how it could take it in or out (marketplaces.ts toolsNow reads it). */
 export interface ToolNow {
-  /** Installed whole, some item linked to it wanted there (Pi, OpenCode), none, or its record can't be read now. */
+  /** Installed whole, some item linked to it wanted there (Pi, OpenCode, Antigravity), none, or its record can't be read now. */
   has: 'whole' | 'items' | 'none' | 'unknown';
   /** How it would go in: the tool's own installer, as library items, or why it can't (pluginstatus.ts says it). */
   route: 'whole' | 'items' | { cannot: string };
@@ -134,7 +138,7 @@ export function clickRuns(what: PluginTurn, owed: Owed): Owed['act'] {
 export const clickHeld = (what: PluginTurn, owed: Owed) => (owed.held && owed.wanted === (clickGoes(what) === 'in') ? owed.held : undefined);
 
 /** A plugin of the home's record by its marketplace (one address however it is spelt) and name. */
-export const entryOf = (record: PluginRecord | undefined, source: string, plugin: string) =>
+export const entryOf = (record: Pick<PluginRecord, 'plugins'> | undefined, source: string, plugin: string) =>
   record?.plugins.find(entry => entry.plugin === plugin && sameSource(entry.source, source));
 
 /** A new entry for a plugin, On everywhere or Off. */
@@ -163,10 +167,10 @@ export interface WaitedBefore { tool: HarnessId; source: string; plugin: string 
 export function firstRecord(managed: HarnessId[], holdings: Holding[], waited: WaitedBefore[]): PluginRecord {
   const plugins: PluginEntry[] = [];
   for (const held of holdings) {
-    if (!managed.includes(held.tool) || entryOf({ tools: [], plugins }, held.source, held.plugin)) continue;
+    if (!managed.includes(held.tool) || entryOf({ plugins }, held.source, held.plugin)) continue;
     plugins.push(firstEntry(managed, holdings, waited, held));
   }
-  return { tools: managed.filter(tool => !waited.some(wait => wait.tool === tool)), plugins };
+  return { tools: managed.filter(tool => !waited.some(wait => wait.tool === tool)), knows: [...harnessIds], plugins };
 }
 
 /**
@@ -181,6 +185,36 @@ export function firstEntry(managed: HarnessId[], holdings: Holding[], waited: Wa
   return { ...newEntry(held.source, held.marketName, held.plugin, true), except };
 }
 
+// ---------- A record that knew fewer tools ----------
+
+/** The tools every record written before `knows` knew. */
+const KNEW_FIVE: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
+/**
+ * An `except` from a record that knew only `knows`: what keeps something out of some tool it knew (`keeps`: its own list, or for
+ * an item its plugin's entry) keeps it out of every tool it didn't, as the same selection saved now would; kept out of none, it
+ * stays wanted everywhere. The plugins' entries are brought forward so as they are read (readPluginRecord).
+ */
+export const keptOutOfNew = (except: HarnessId[], knows: readonly HarnessId[], keeps = except.length > 0) =>
+  (keeps ? [...except, ...harnessIds.filter(tool => !knows.includes(tool) && !except.includes(tool))] : except);
+
+/**
+ * A record that knew fewer tools brought forward, once, by the pass before it writes (homepass.ts): each item linked to a plugin
+ * (in `kinds`' records, as this module is below them) is kept out where keptOutOfNew says; then the record is saved knowing every
+ * tool, last, so a pass stopped before that does the same again.
+ */
+export async function bringForward(context: ShareContext, kinds: readonly Pick<Kind<unknown, Seen>, 'open' | 'save'>[]) {
+  const { record } = await readPluginRecord(context.home), gate = await libraryGate(context);
+  if (!record || harnessIds.every(tool => record.knows.includes(tool)) || 'refused' in gate || !gate.record) return;
+  const keeps = new Map(record.plugins.map(entry => [entry.id, entry.except.length > 0]));
+  for (const kind of kinds) {
+    const { library, problem } = await kind.open(context, true), before = JSON.stringify(library);
+    if (problem) return;
+    for (const item of Object.values(library.items)) if (item.source && keeps.has(item.source)) item.except = keptOutOfNew(item.except, record.knows, keeps.get(item.source) || item.except.length > 0);
+    if (JSON.stringify(library) !== before) await kind.save(context.home, library);
+  }
+  await savePluginRecord(context.home, { ...record, knows: [...harnessIds] });
+}
+
 // ---------- The file ----------
 
 const FORMAT_VERSION = 1;
@@ -192,19 +226,24 @@ const isEntry = (value: unknown): value is PluginEntry => {
     && typeof entry.on === 'boolean' && Array.isArray(entry.except) && onlyAllowed(entry.except, harnessIds).length === entry.except.length;
 };
 
-/** The home's record: none (`record` undefined) when there is no file yet. One that can't be read, is damaged or newer is a `problem` that stops every write. */
+/**
+ * The home's record: none (`record` undefined) when there is no file yet. One that can't be read, is damaged or newer is a `problem`
+ * that stops every write. One that knew fewer tools than this build has its entries brought forward as read (keptOutOfNew).
+ */
 export async function readPluginRecord(home: string): Promise<{ record?: PluginRecord; problem?: string }> {
   let text: string;
   try { text = await readFile(recordPath(home), 'utf8'); }
   catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The plugins record could not be read. ${NOTHING_CHANGED}` }; }
   try {
-    const read = JSON.parse(text) as { formatVersion?: number; tools?: unknown; plugins?: unknown[] } | null;
+    const read = JSON.parse(text) as { formatVersion?: number; tools?: unknown; knows?: unknown; plugins?: unknown[] } | null;
     if ((read?.formatVersion ?? 0) > FORMAT_VERSION) return { problem: `The plugins record was written by a newer Central Knot. ${NOTHING_CHANGED}` };
-    const tools = onlyAllowed(read?.tools, harnessIds);
-    if (read?.formatVersion === FORMAT_VERSION && Array.isArray(read.tools) && tools.length === read.tools.length && Array.isArray(read.plugins) && read.plugins.every(isEntry)) return { record: { tools, plugins: read.plugins } };
+    const tools = onlyAllowed(read?.tools, harnessIds), knows = read?.knows === undefined ? KNEW_FIVE : onlyAllowed(read.knows, harnessIds);
+    if (read?.formatVersion === FORMAT_VERSION && Array.isArray(read.tools) && tools.length === read.tools.length && Array.isArray(read.plugins) && read.plugins.every(isEntry)) {
+      return { record: { tools, knows, plugins: read.plugins.map(entry => ({ ...entry, except: keptOutOfNew(entry.except, knows) })) } };
+    }
   } catch { /* said below */ }
   return { problem: `The plugins record is damaged. ${NOTHING_CHANGED}` };
 }
 
 export const savePluginRecord = (home: string, record: PluginRecord) =>
-  writeDurably(recordPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, tools: record.tools, plugins: record.plugins }, null, 2)}\n`);
+  writeDurably(recordPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, tools: record.tools, knows: record.knows, plugins: record.plugins }, null, 2)}\n`);

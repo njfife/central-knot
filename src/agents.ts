@@ -167,7 +167,7 @@ export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
   store: (context, item, hash, agent) => storeVersion(context, item.key, hash, agent),
   readVersion,
   hashOf: agentHash,
-  recover: (context, tool) => recoverParked(agentsFolder(context, tool)),
+  recover: (context, tool) => recoverParked(agentsFolder(context, tool as AgentTool)),
   read: readDisk,
   contentOf: entry => entry.agent,
   // A harness's own part is its whole file: a version writes only the name, description and prompt into it.

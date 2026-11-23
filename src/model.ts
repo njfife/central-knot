@@ -7,7 +7,7 @@
 import type { HarnessId, HistoryDays, HomeView, OtherBuild, Snapshot, SyncNotice } from './types.ts';
 import { rowNames } from './words.ts';
 
-const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc' };
+const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc', 'antigravity-cli': 'Ag' };
 export { toolName } from './words.ts';
 export const toolMonogram = (tool: HarnessId) => monograms[tool];
 export const fullToolName = (snapshot: Snapshot) => `${snapshot.harnessName} ${snapshot.surface}`;

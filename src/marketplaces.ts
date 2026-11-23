@@ -13,7 +13,7 @@ import * as engine from './plugins.ts';
 import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts';
 import { itemTools, itemsBack, itemsView, lookAtKinds, readPlugin, runItems, withItemsOf, type ItemsAsk, type ItemState, type KindLooks } from './pluginlibrary.ts';
 import { recordedIds } from './sourcestore.ts';
-import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
+import { holds, pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import { waysFrom } from './reload.ts';
 import type { ItemKind } from './library.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice, YourName } from './types.ts';
@@ -21,10 +21,10 @@ import { harnessIds } from './harnesses.ts';
 import { errorCode, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
-import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, recordUnread, toolNow, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
+import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, partWords, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, recordUnread, toolNow, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { readLink } from './sourcelink.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
-import { leftOutSentence, pageNames, toPluginsLabel } from './words.ts';
+import { leftOutSentence, pageNames, toPluginsLabel, toolName } from './words.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
 export const viaLabel = (app: DesktopApp, answered = app.carriedVersion) => `${app.name}’s ${app.carries}${answered ? ` ${shortBuild(answered)}` : ''}`;
@@ -48,8 +48,8 @@ export interface MarketplaceHost {
   pickFolder(): Promise<string | undefined>;
   openExternal(url: string): Promise<void>;
   /**
-   * The skills, MCP and agents engines' context for the home on screen, for a plugin's items in Pi and OpenCode (pluginlibrary.ts)
-   * and the record of parts from before the library (partsmigrate.ts). Without it, Pi and OpenCode are no columns.
+   * The skills, MCP and agents engines' context for the home on screen, for a plugin's items in Pi, OpenCode and Antigravity (pluginlibrary.ts)
+   * and the record of parts from before the library (partsmigrate.ts). Without it, Pi, OpenCode and Antigravity are no columns.
    */
   share?(): ShareContext;
   /** Why the move of parts from before the library waits, as the last pass gave it (main.ts pass); none when it doesn't. */
@@ -379,7 +379,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * Each listed plugin with items (pluginlibrary.ts withItemsOf), read from its marketplace's copy as the table reads it
-   * (itemsView): its page's "Its items", and what Pi and OpenCode have of it (pluginstatus.ts toolNow). A plugin that is On with
+   * (itemsView): its page's "Its items", and what Pi, OpenCode and Antigravity have of it (pluginstatus.ts toolNow). A plugin that is On with
    * nothing linked is read too, and listed only where none of it can be on in a tool it is wanted in (itemsView `notIn`) or a
    * name it has is his (`yours`), so its page says why. A plugin whose parts wait to be moved (pluginstatus.ts waitsToMove) is not read: it has no Its items, so
    * Update and Update all bring it nothing. The home is looked at once for them all (pluginlibrary.ts lookAtKinds), when the first is read.
@@ -389,7 +389,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const asked = [...read, ...entries.filter(entry => entry.on && !read.includes(entry) && itemTools(tools).some(tool => !entry.except.includes(tool)))];
     let looks: KindLooks | undefined;
     for (const market of marketplaces) for (const plugin of market.plugins) {
-      const entry = entryOf({ tools: [], plugins: asked }, market.source, plugin.name);
+      const entry = entryOf({ plugins: asked }, market.source, plugin.name);
       if (!entry || waitsToMove(market, plugin.name)) continue;
       const at: Awaited<ReturnType<typeof itemFiles>> = plugin.gone ? { commitAt: '', problem: MARKET_UNREAD } : await itemFiles(ctx, market.source, plugin.name);
       const reads = at.files && await readPlugin(at.files, entry, at.commitAt, recorded, []);
@@ -399,7 +399,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     }
   }
 
-  /** The page's tools: Pi and OpenCode take no plugins, only their items (pluginlibrary.ts), so each is a column only where those can go in. */
+  /** The page's tools: Pi, OpenCode and Antigravity take no plugins, only their items (pluginlibrary.ts), so each is a column only where those can go in. */
   const columns = (tools: HarnessId[]) => tools.filter(tool => takesPlugins(tool) || !!host.share);
 
   /** Every marketplace: added here, or already added in a tool. `fresh`: every Git source fetched again. */
@@ -783,7 +783,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // A copy turned off in a tool's own settings comes back off: its whole-plugin switch is turned off again after the install.
     const offBefore = (each: HarnessId) => { const state = entry.states[plugin]?.[each]; return state?.state === 'installed' && !!state.off; };
     const back = reverse(ran.done).flatMap(op => (op.action === 'install' && offBefore(op.tool) ? [op, { ...op, action: 'plugin-off' as const }] : [op]));
-    // Pi and OpenCode: its items (pluginlibrary.ts).
+    // Pi, OpenCode and Antigravity: its items (pluginlibrary.ts).
     // An untick that leaves the plugin Off takes its items there as Off does: each item's `except` stays for its next On.
     const items = itemsIn.length && !ran.stopped ? await turnItems(entry.source, marketName, after, what === 'keep-out' && !after.on ? 'off' : what, itemsIn) : undefined;
     if (items?.back) back.push({ source: entry.source, marketName, plugin, tool: itemsIn[0]!, action: 'items-back', items: items.back });
@@ -824,6 +824,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function take(source: string, plugin: string, item: Pick<YourName, 'kind' | 'key'>, tool: HarnessId, home: unknown): Promise<PluginTurnResult> {
     const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, done: [] };
+    if (!holds(tool, item.kind)) return { stopped: `${toolName(tool)} holds no ${partWords[item.kind][1]}, so the plugin’s ${item.key} can’t go there. Nothing was changed.`, done: [] };
     const share = host.share?.(), entry = entryOf((await readPluginRecord(String(home))).record, source, plugin);
     if (!share || !entry) return { stopped: 'It has no entry in the plugins record here, so nothing was changed.', done: [] };
     const op = { source, marketName: entry.marketName, plugin, action: 'install-items' as const };

@@ -781,7 +781,7 @@ export type PluginHold = { why: string; anotherWay?: true };
  * it, with why: its record of its plugins can't be read now, the plugin is off or kept out of it, or it isn't installed there.
  * Each kind asks it before its own reasons (skills.ts, agents.ts and servers.ts readDisk), the can't-take answer through
  * Disk.refuses too, so a copy of that name the tool has stays as it is. Read once per pass or view; undefined for an item
- * linked to no recorded plugin, and in Pi and OpenCode, where a plugin's item is the library's like any other.
+ * linked to no recorded plugin, and in Pi, OpenCode and Antigravity, where a plugin's item is the library's like any other.
  */
 export async function pluginHolds(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[]): Promise<(item: { source?: string }, tool: HarnessId) => PluginHold | undefined> {
   const entries = (await readPluginRecord(home.home)).record?.plugins ?? [];
@@ -1153,9 +1153,10 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
   // Codex on Windows finds its home from the system, not HOME or USERPROFILE (seen with ChatGPT desktop's Codex 0.165), so
   // it is named outright. CODEX_HOME at the default root is what Codex reads anyway. CLAUDE_CONFIG_DIR is never set
   // this way, because it also moves .claude.json.
-  if (override) env[harnesses[tool].configEnv] = override;
+  const variable = harnesses[tool].configEnv;
+  if (override && variable) env[variable] = override;
   else if (tool === 'codex-cli') env.CODEX_HOME = join(context.home, harnesses[tool].defaultConfig);
-  else delete env[harnesses[tool].configEnv];
+  else if (variable) delete env[variable];
   const result = await run(binary, args, { env, cwd: context.home, timeoutMs: context.timeoutMs ?? 180_000 });
   const after = await Promise.all(files.map(readOrNull));
   const changed = files.map((path, index) => ({ path, before: before[index], after: after[index] })).filter(entry => entry.before !== entry.after);
