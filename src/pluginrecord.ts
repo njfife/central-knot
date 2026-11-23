@@ -192,18 +192,19 @@ const isEntry = (value: unknown): value is PluginEntry => {
     && typeof entry.on === 'boolean' && Array.isArray(entry.except) && onlyAllowed(entry.except, harnessIds).length === entry.except.length;
 };
 
-/** The home's record: none (`record` undefined) when there is no file yet. One that can't be read, is damaged or newer is a `problem` that stops every write. */
+/** The home's record: none (`record` undefined) when there is no file yet. One that can't be read, is damaged or newer is a `problem` that stops writes and holds its plugins' items. */
 export async function readPluginRecord(home: string): Promise<{ record?: PluginRecord; problem?: string }> {
+  const held = `${NOTHING_CHANGED} Its plugins’ items are held as they are until then. Sync takes them up again by itself once the record is back.`;
   let text: string;
   try { text = await readFile(recordPath(home), 'utf8'); }
-  catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The plugins record could not be read. ${NOTHING_CHANGED}` }; }
+  catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The plugins record could not be read. ${held}` }; }
   try {
     const read = JSON.parse(text) as { formatVersion?: number; tools?: unknown; plugins?: unknown[] } | null;
-    if ((read?.formatVersion ?? 0) > FORMAT_VERSION) return { problem: `The plugins record was written by a newer Central Knot. ${NOTHING_CHANGED}` };
+    if ((read?.formatVersion ?? 0) > FORMAT_VERSION) return { problem: `The plugins record was written by a newer Central Knot. ${held}` };
     const tools = onlyAllowed(read?.tools, harnessIds);
     if (read?.formatVersion === FORMAT_VERSION && Array.isArray(read.tools) && tools.length === read.tools.length && Array.isArray(read.plugins) && read.plugins.every(isEntry)) return { record: { tools, plugins: read.plugins } };
   } catch { /* said below */ }
-  return { problem: `The plugins record is damaged. ${NOTHING_CHANGED}` };
+  return { problem: `The plugins record is damaged. ${held}` };
 }
 
 export const savePluginRecord = (home: string, record: PluginRecord) =>

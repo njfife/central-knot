@@ -78,7 +78,7 @@ import { hideParts } from './partsmigrate.ts';
 import type { ThroughWhichPlugin } from './plugins.ts';
 import { pluginLink } from './sourcelink.ts';
 import { destinationReloads, reloadStep } from './reload.ts';
-import { recordedIds, type Recorded } from './sourcestore.ts';
+import { pluginsRecordHold, recordedIds, type Recorded } from './sourcestore.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, JoinCounts, MergeDone, PassResult, SyncNotice, TakenInNotice } from './types.ts';
 import { byToolOrder, notManagedHere, toolName } from './words.ts';
@@ -275,6 +275,8 @@ export interface Look<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   givingWay: Map<string, Plan['keep']>;
   /** How long a copy must stay missing before it counts as deleted by hand, the clock it is measured on, and whether a copy is inside it now. */
   settle?: { clock: number; ms: number; settling: boolean };
+  /** Sources and plugins recorded now, with any plugins.json problem that holds plugin items (sourcestore.ts pluginsRecordHold). */
+  recorded: Recorded;
 }
 type AnyLook = Look<unknown, Seen, Disk<Seen>>;
 
@@ -286,9 +288,9 @@ type AnyLook = Look<unknown, Seen, Disk<Seen>>;
 async function lookAt<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, managed: HarnessId[], library: KindLibrary, settle?: Look<C, E, D>['settle'], kept?: Disk<Seen>,
 ): Promise<Look<C, E, D>> {
-  const disk = kept ? kept as D : await kind.read(context, managed, library);
+  const [disk, recorded] = await Promise.all([kept ? Promise.resolve(kept as D) : kind.read(context, managed, library), recordedIds(context.home)]);
   if (!kept) await hideParts(context.home, kind.kind, managed, disk.unseen);
-  return { kind, context, managed, library, disk, foldersNow: {}, givingWay: new Map(), settle };
+  return { kind, context, managed, library, disk, foldersNow: {}, givingWay: new Map(), settle, recorded };
 }
 
 /** Each kind's read that its pass left standing (runPass `untouched`), as read: what hideParts noted on it, not its guards (ShareContext kept). */
@@ -366,7 +368,7 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
     const path = look.kind.folder(look.context, tool), was = look.library.folders[tool];
     const here = look.kind.folderSeen ? await look.kind.folderSeen(look.context, tool) : await folderAt(path);
     // What was applied there, and what it had through the shared folder (library.ts THE SHARED FOLDER), is no longer known.
-    const forget = (which: LibraryItem[]) => { for (const item of which) { delete item.applied[tool]; delete item.throughShared?.[tool]; } };
+    const forget = (which: LibraryItem[]) => { for (const item of which) { if (pluginsRecordHold(item, look.recorded)) continue; delete item.applied[tool]; delete item.throughShared?.[tool]; } };
     const where = `${toolName(tool)}’s ${look.kind.words.folder(tool)}`;
     const backWithoutFolder = !was && Object.values(look.library.items).some(item => item.applied[tool] !== undefined);
     if (!here) {
@@ -427,6 +429,7 @@ export const sharedFileAt = (path: string) => stat(path).then(() => sharedFileSe
 async function cameBack(look: AnyLook, tool: HarnessId, shelf?: Shelf<unknown>) {
   const givingWay: { item: LibraryItem; version: Version; content: unknown }[] = [];
   for (const item of Object.values(look.library.items)) {
+    if (pluginsRecordHold(item, look.recorded)) continue;
     delete item.throughShared?.[tool];
     const here = look.disk.byKey.get(item.key)?.[tool], unseen = unseenIn(look.disk, tool, item.key);
     const copy: HarnessCopy = unseen ? { is: 'unseen', why: unseen } : here ? { is: 'present', hash: here.hash, at: here.at } : { is: 'absent' };
@@ -444,8 +447,9 @@ async function cameBack(look: AnyLook, tool: HarnessId, shelf?: Shelf<unknown>) 
 
 /**
  * H for each managed harness (library.ts HarnessCopy): the one place that says what a harness holds of an item, read by a
- * pass and by the page. `unseen`, so that nothing happens there: a copy that can't be read for sure, a folder away inside
- * the settle window, and a copy missing for less than the settle window (an editor's save moves the file away for a moment).
+ * pass and by the page. `unseen`, so that nothing happens there: a plugin's item while plugins.json has a problem
+ * (sourcestore.ts pluginsRecordHold), a copy that can't be read for sure, a folder away inside the settle window, and a copy
+ * missing for less than the settle window (an editor's save moves the file away for a moment).
  * `held`: a harness the item should be in that can't be given a copy (Disk.held, or its folder is locked), or has it another
  * way (Disk.held). Absent where it had it only through the shared folder: lost there (Disk.lostShared), or unseen.
  */
@@ -469,6 +473,8 @@ function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | 
   return copy;
 }
 function copyRead(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | undefined): HarnessCopy {
+  const recordHold = pluginsRecordHold(item, look.recorded);
+  if (recordHold) return { is: 'unseen', why: recordHold };
   const unseen = unseenIn(look.disk, tool, item.key);
   if (unseen) return { is: 'unseen', why: unseen };
   const wanted = wantedIn(item, tool), kindHeld = wanted ? look.disk.held(item, tool) : undefined;
@@ -662,7 +668,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
   const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [], followed: new Map() };
   await deletionsTold(pass);
-  await letGo(pass, await recordedIds(context.home));
+  await letGo(pass, pass.recorded);
   for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
   const sourceScope = options.source ? await fromSourceStep(pass, options.source) : undefined;
   for (const asked of clicks) await click(pass, asked);
@@ -995,7 +1001,7 @@ async function untell(pass: Pass, told: Told, held: HarnessId[]) {
  * pendingEdits). A History entry names its item by key (an MCP server's entries from before the library: its name as written).
  */
 export async function itemsNow<C, E extends Seen, D extends Disk<E>>(kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[]) {
-  const { look, problem } = await lookFor(kind, context, tools), recorded = (await recordedIds(context.home)).ids;
+  const { look, problem } = await lookFor(kind, context, tools), recorded = look.recorded.ids;
   const of = (entry: HistoryEvent) => {
     const item = look.library.items[itemKey(entry.key.slice(kind.historyPrefix.length))];
     const linked = linkedSource(item, recorded) ? { linked: true as const } : {};
@@ -1061,6 +1067,9 @@ async function click(pass: Pass, asked: Change) {
   const refuse: Refuse = (message, more = {}) => { pass.results.push({ item: name, outcome: 'held', unchanged: true, message, ...more }); };
   // A plugin's click on its item is taken only while the item is linked to that plugin: one let go is the person's own.
   if (asked.forPlugin && known?.source !== asked.forPlugin) return;
+  const heldTarget = item ?? (asked.deleted === false ? known : undefined);
+  const recordHold = heldTarget && pluginsRecordHold(heldTarget, pass.recorded);
+  if (recordHold) return refuse(recordHold);
   const stale = asked.seenOn !== undefined && !!item?.on !== asked.seenOn;
   if (stale) return refuse(`${name} changed since the page was read. Nothing was changed; read again.`);
   // An Undo that gives a harness its own copy back waits, as Add does, while that copy is held back (library.ts THE SHARED FOLDER).
@@ -1257,6 +1266,7 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
   const origin: Origin = { how: 'source', link: read.link }, link = read.link;
   for (const [key, answer] of answers) {
     const item = pass.library.items[key], entry = read.names.get(key);
+    if (item && !item.deleted && pluginsRecordHold(item, pass.recorded)) continue;
     if (answer !== 'nothing' && answer !== 'same') pass.sourced.set(key, { name: entry && 'name' in entry ? entry.name : item?.name ?? key, answer });
     // Merge asked, and the table left it waiting: a tool's copy still holds a change (library.ts MERGE).
     if (answer === 'wait' && read.merge?.has(key)) pass.sourced.get(key)!.merge = 'unsettled';
@@ -1390,6 +1400,8 @@ async function keepMine(pass: Pass, item: LibraryItem, there: { hash: string; co
  */
 async function pull(pass: Pass, key: string, brought: Pulled<unknown>) {
   const known = pass.library.items[key], live = known && !known.deleted ? known : undefined;
+  const recordHold = live && pluginsRecordHold(live, pass.recorded);
+  if (recordHold) { pass.results.push({ item: live.name, outcome: 'held', unchanged: true, message: recordHold }); return; }
   if ('removed' in brought) {
     if (live) { live.deleted = { at: now() }; pass.asked.set(key, { kind: 'deleted', cause: 'pulled', fill: 'removed' }); }
     return;

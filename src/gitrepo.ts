@@ -22,7 +22,7 @@ import { agentHash, agentText, fromMarkdown, readAgents, safeName, type AgentEnt
 import { agentsForRepo, agentsView, applyAgents } from './agents.ts';
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
-import { wantedIn } from './library.ts';
+import { wantedIn, type LibraryItem } from './library.ts';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { applySkills, skillsForRepo, skillsView } from './skills.ts';
 import { fromJson, jsonEntry, serverHash, type NeutralServer } from './mcp.ts';
@@ -32,7 +32,7 @@ import { PRODUCT } from './values.ts';
 import { leftOutSentence, pageNames } from './words.ts';
 import { copyTree, errorCode, exists, itemKey, libraryGate, managedNow, notCopied, sha256 as sha, plainError, readTree, removeTree, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext, type Tree } from './share.ts';
 import { undoBase } from './instructions.ts';
-import { recordedIds, sourceAt } from './sourcestore.ts';
+import { pluginsRecordHold, recordedIds, sourceAt } from './sourcestore.ts';
 import type { ApplyResult, BaseUndo, DestinationResult, HarnessId, HistoryEvent, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, Snapshot } from './types.ts';
 
 /** The base instructions (instructions.ts repoBase): read for Push, applied on Pull. Without it, instructions/ is left alone. */
@@ -328,9 +328,13 @@ async function writeSkills(context: ShareContext, dir: string, tools: HarnessId[
 /**
  * Whether Push leaves an item out: one linked to a plugin (library.ts A PLUGIN), which each machine gets from the plugin there;
  * pushed, it would arrive elsewhere unlinked and On, and Claude Code there would load it twice beside the installed plugin.
- * Pull is unchanged. The one place Push decides it, for each kind's writer.
+ * While plugins.json has a problem, `pluginsRecordHold` leaves plugin items out here too (and librarypass.ts `pull` holds them).
+ * The one place Push decides it, for each kind's writer.
  */
-const pluginItems = async (home: string) => { const ids = new Set((await recordedIds(home)).plugins.map(entry => entry.id)); return (item: { source?: string }) => !!item.source && ids.has(item.source); };
+const pluginItems = async (home: string) => {
+  const recorded = await recordedIds(home), ids = new Set(recorded.plugins.map(entry => entry.id));
+  return (item: Pick<LibraryItem, 'source' | 'versions'>) => (!!item.source && ids.has(item.source)) || !!pluginsRecordHold(item, recorded);
+};
 
 /** What a writer reports: the Managed items here that can't go in the repo, and the keys of items here that aren't Managed. */
 interface Written { unsent: Unsent; unmanaged: Set<string> }
@@ -709,7 +713,7 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const done = await applyAgents(context, tools, [], { only, pulled: new Map([[key, { name: change.name, agent, claudeFile: text }]]) });
   const here = (await agentsView(context, tools)).library[key];
   // Only where Claude Code has the agent (it is On and not kept out there): a copy it holds otherwise is not Central Knot's.
-  if (done.stopped || !tools.includes('claude-cli') || !here || !wantedIn(here, 'claude-cli')) return outcome(done);
+  if (done.stopped || done.results.some(result => result.outcome === 'held' && !result.harness) || !tools.includes('claude-cli') || !here || !wantedIn(here, 'claude-cli')) return outcome(done);
   return [...outcome(done), ...await pullClaudeSettings(context, change, agentHash(agent), text, wrote)];
 }
 

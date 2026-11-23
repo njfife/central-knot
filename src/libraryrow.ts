@@ -408,18 +408,19 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   if (deletedBy) return `On · its copy was deleted in ${deletedIn(deletedBy, row.plan?.sharedWay)}, so it turns off when sync runs. Central Knot keeps it.`;
   // A harness holding the current version that only waits for an edit made elsewhere has it on.
   const waitsForEdit = (tool: string) => row.hashes?.[tool] === item!.hash;
-  const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot');
+  const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot'), unseen = where('unseen');
   const switched = tools.filter(tool => row.switchedOff?.includes(tool) && !out.includes(tool));
   const another = where('another-way').filter(tool => wantedIn(item!, tool as HarnessId));
   // A tool whose own switch has it off doesn't load it: it is no tool it is on in (the parts below say it).
   const onIn = tools.filter(tool => !row.switchedOff?.includes(tool) && (['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool))));
   const edit = row.plan?.takeIn;
-  const parts = [`On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}`,
+  const parts = [onIn.length ? `On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}` : 'On',
     edit ? `${toolName(edit)}’s edit becomes the current version when sync runs` : '',
     gets.length ? `${named(gets, tools)} ${gets.length === 1 ? 'gets' : 'get'} it when sync runs` : '',
     cannot.length ? `${andList(cannot.map(toolName))} can’t take it (see below)` : '',
     another.length ? `${andList(another.map(toolName))} ${another.length === 1 ? 'has' : 'have'} it another way` : '',
     out.length ? `kept out of ${named(out, tools)}` : '',
+    unseen.length && !onIn.length && !gets.length && !cannot.length && !another.length && !out.length ? 'left as it is (see below)' : '',
     // A harness's own switch that turns it off there: it has the item and doesn't load it, as the tag says.
     switched.length ? `switched off in ${andList(switched.map(toolName))}` : ''];
   return `${parts.filter(Boolean).join(' · ')}${ownSaid ? `.${ownSaid}` : ''}`;

@@ -424,3 +424,10 @@ test('What waits for the next pass (waitsForSync: the Overview card’s changes 
   // The last waits as a hand deletion alone: it turns Off at the next pass, with no copy left to remove.
   assert.deepEqual([row({}, {}, onlyInCodex).plan?.turnedOffBy, row({}, {}, onlyInCodex).plan?.remove], ['codex-cli', []]);
 });
+
+test('An On item unseen in every tool says so instead of an empty "On in "', () => {
+  const why = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. Sync takes them up again by itself once the record is back.';
+  const unseen = Object.fromEntries(tools.map(tool => [tool, why]));
+  assert.equal(statusLine(row({}, { unseen }, item()), item(), tools), 'On · left as it is (see below)');
+  assert.equal(lineIn({}, item(), 'claude-cli', 'Claude Code', { unseen }), why);
+});
