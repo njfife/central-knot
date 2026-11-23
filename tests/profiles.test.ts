@@ -895,8 +895,8 @@ test('docs turned off by hand after a switch turned it on: the Undo leaves it an
   } finally { await box.cleanup(); }
 });
 
-test('Where Claude Code doesn’t turn docs on (its command fails), the agent switch held off for it is put back, and History keeps nothing of it', async () => {
-  const { box, made, switched } = await wholeHome({ enabled: false, parts: true });
+test('Where Claude Code doesn’t turn docs on (its command fails), every part switch made for it is put back, the server’s deny as well as the agent’s rule, and History keeps nothing of it', async () => {
+  const { box, made } = await wholeHome({ enabled: false, parts: true, denied: ['s'] });
   try {
     const work = await made('Work', [aId, sId]), before = await text(box, '.claude/settings.json'), now = await sideNow(box);
     await rm(join(box.base, 'bin/claude'));
@@ -904,6 +904,64 @@ test('Where Claude Code doesn’t turn docs on (its command fails), the agent sw
     assert.deepEqual([done.results.map(result => [result.harness, result.outcome]), done.left, await text(box, '.claude/settings.json')], [[['claude-cli', 'failed']], ['a', 's'], before]);
     assert.deepEqual([done.profile?.plugins, done.profile?.wholeSteps], [[], undefined]);
   } finally { await box.cleanup(); }
+});
+
+test('Where a part’s own switch can’t be written, docs is not turned on in Claude Code with a part the profile leaves out', async () => {
+  const { box, made, settings } = await wholeHome({ enabled: false, parts: true });
+  try {
+    // A `permissions` that is not an object: the agent's rule can't be written into it.
+    await writeFile(join(box.home, '.claude/settings.json'), `${JSON.stringify({ ...(await settings()), permissions: 'odd' }, null, 2)}\n`);
+    const done = await switchProfile(box.context, box.tools, await made('Work', [aId]), (await sideNow(box)).side);
+    assert.deepEqual([done.results.map(result => result.outcome), (await settings()).enabledPlugins], [['failed'], { 'docs@team': false }]);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin a profile leaves out goes off in Claude Code even when none of its items changes: said first, not in use, switched, and undone', async () => {
+  const { box, made, preview, switched, settings } = await wholeHome({ skills: [], parts: true, denied: ['s'], notes: true });
+  try {
+    await writeFile(join(box.home, '.claude/settings.json'), `${JSON.stringify({ ...(await settings()), permissions: { deny: ['Agent(docs:g)'] } }, null, 2)}\n`);
+    const quiet = await made('Quiet', ['skill:notes']), before = await text(box, '.claude/settings.json');
+    assert.deepEqual([await preview(quiet), await (await sideNow(box)).inUse()], ['Switching turns 1 plugin off in Claude Code', []]);
+    const done = await switched(quiet);
+    assert.deepEqual([(await settings()).enabledPlugins, done.said, await (await sideNow(box)).inUse()], [{ 'docs@team': false }, ' docs was turned off in Claude Code, with everything it brings there.', ['Quiet']]);
+    await undoSwitch(box.context, box.tools, done.event!, (await sideNow(box)).side);
+    assert.equal(JSON.parse((await text(box, '.claude/settings.json'))!).enabledPlugins['docs@team'], JSON.parse(before!).enabledPlugins['docs@team']);
+  } finally { await box.cleanup(); }
+});
+
+test('Each plugin a switch turns on or off whole in Claude Code is counted, one sentence per direction, one-skill and skill-less ones too', () => {
+  const kit = (plugin: string, items: InstalledPlugin['items'], off = false): InstalledPlugin => ({ tool: 'claude-cli', plugin, marketName: 'team-tools', listed: true, items, ...(off ? { off } : {}) });
+  const server = { kind: 'mcp' as const, name: 's', description: '' }, three = ['brainstorm', 'outline', 'write'].map(skill);
+  const on = docsHome([kit('writing-kit', three), kit('solo', [skill('single')]), kit('tracker', [server])], [], [['skill', 'notes', true]]);
+  assert.equal(switchPreview(profile('Mine', ['skill:notes']), homeItems(on), pluginLive(on)), 'Switching turns 5 items off. Turns 3 plugins off in Claude Code');
+  const off = docsHome([kit('writing-kit', three, true), kit('solo', [skill('single')]), kit('tracker', [server], true)], [], [['skill', 'notes', true]]);
+  assert.equal(switchPreview(profile('Write', ['skill:notes', 'plugin:skill:writing-kit@team-tools/write']), homeItems(off), pluginLive(off)), 'Switching turns 1 item on and 1 off. Turns 1 plugin on in Claude Code. Turns 1 plugin off in Claude Code');
+});
+
+test('The result names the copy of a plugin from the marketplace each step was for, where two marketplaces bring one of that name', () => {
+  const copy = (marketName: string, names: string[], off = false): InstalledPlugin => ({ tool: 'claude-cli', plugin: 'review-kit', marketName, listed: true, items: names.map(skill), ...(off ? { off } : {}) });
+  const home = { pluginItems: [copy('team-a', ['read-a', 'scan-a']), copy('team-b', ['read-b', 'scan-b'], true)] } as unknown as PluginHome;
+  const op = (marketName: string, action: 'plugin-on' | 'plugin-off') => ({ source: '', marketName, plugin: 'review-kit', tool: 'claude-cli' as const, action });
+  const entry = { plugins: [{ id: 'plugin:skill:review-kit@team-a/read-a', name: 'read-a', tool: 'claude-cli' as const, on: true }, { id: 'plugin:skill:review-kit@team-b/read-b', name: 'read-b', tool: 'claude-cli' as const, on: false }],
+    wholeSteps: [op('team-a', 'plugin-on'), op('team-b', 'plugin-off')] };
+  assert.equal(wholeSaid(entry, home), ' read-a is on in Claude Code. Its whole plugin review-kit was turned on there, with its other skill, scan-a. read-b is off in Claude Code. Its whole plugin review-kit was turned off there, with its other skill, scan-b.');
+});
+
+test('A skill that comes on in Claude Code with its plugin is said to be on there after the switch, not to have stayed on, and History lists its copy', async () => {
+  const { box, made } = await pluginHome();
+  try {
+    await writeFile(join(box.home, '.claude/settings.json'), `${JSON.stringify({ extraKnownMarketplaces: { team: { source: { source: 'directory', path: '/m' } } }, enabledPlugins: { 'docs@team': false } }, null, 2)}\n`);
+    const switched = await switchProfile(box.context, box.tools, await made('One', [pdfId2]), (await sideNow(box)).side);
+    assert.equal(`${turnsWords(entryTurns(switched.profile!), 'did')}${stillLoadAfter(switched.profile!, (await sideNow(box)).view)}`, '1 item turned on and 2 turned off; 1 is on in Claude Code, through its plugin');
+    assert.ok(switched.profile?.plugins?.some(copy => copy.id === sheetId2 && copy.tool === 'claude-cli' && copy.on), 'spreadsheet’s copy brought on in Claude Code is in History’s list');
+  } finally { await box.cleanup(); }
+});
+
+test('In use, the skills on in Claude Code with a ticked one are counted apart, and a skill on there only so reads "Off · on in Claude Code" where another tool has it off', () => {
+  const claudeOnly = docsHome([docsIn('claude-cli')]), pdf = profile('Pdf', [pdfId]);
+  assert.equal(switchPreview(pdf, homeItems(claudeOnly), pluginLive(claudeOnly)), 'In use · 1 item on, 1 more on in Claude Code with its plugin');
+  const both = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { skillsOff: ['spreadsheet'] })]);
+  assert.deepEqual([inUse([pdf], homeItems(both), pluginLive(both)), pluginRowState(pdf, pluginLive(both).find(item => item.id === sheetId)!)], [[pdf], 'Off · on in Claude Code']);
 });
 
 test('Nothing is done in Claude Code for a plugin only in Codex; an unreadable Claude Code copy is held, and nothing is written there', () => {
