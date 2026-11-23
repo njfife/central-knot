@@ -14,6 +14,7 @@ import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts
 import { itemTools, itemsBack, itemsView, lookAtKinds, readPlugin, runItems, withItemsOf, type ItemsAsk, type ItemState, type KindLooks } from './pluginlibrary.ts';
 import { recordedIds } from './sourcestore.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
+import { waysFrom } from './reload.ts';
 import type { ItemKind } from './library.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice, YourName } from './types.ts';
 import { harnessIds } from './harnesses.ts';
@@ -136,12 +137,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   const cliVersion = async (binary: string | undefined) => (binary ? (await probeVersion(binary)).version : undefined);
   /** A tool's build: its CLI's, else the one discovery read for this home (ChatGPT desktop's own Codex, which isn't a CLI here). */
   const buildOf = async (ctx: engine.PluginContext, tool: HarnessId, snapshots: Snapshot[]) => (await cliVersion(ctx.binaries[tool])) ?? snapshots.find(snapshot => snapshot.harness === tool)?.probe.version;
-  /** A context for one request. `clis`: look for the tools' CLIs (only a request that runs or reports on them needs them). */
-  const context = async ({ clis = false } = {}): Promise<engine.PluginContext> => {
+  /** A context for one request. `clis`: look for the tools' CLIs; `ways`: read how each tool was found for reload advice. */
+  const context = async ({ clis = false, ways = false } = {}): Promise<engine.PluginContext> => {
     const open = host.home();
     if (!open) throw new Error('No home is open.');
     const routes = clis ? await use.findClis() : { binaries: {}, apps: {} };
-    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: routes.binaries, apps: routes.apps, overrides: open.overrides };
+    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: routes.binaries, apps: routes.apps, ...(ways ? { ways: waysFrom((await host.read()).snapshots) } : {}), overrides: open.overrides };
   };
 
   /**
@@ -589,7 +590,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function install(source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown, run = use.install): Promise<PluginActionResult> {
     const stopped = await guard(home, tools);
     if (stopped) return { stopped, reports: [] };
-    const ctx: engine.PluginContext = { ...(await context({ clis: true })), checked: new Map() };
+    const ctx: engine.PluginContext = { ...(await context({ clis: true, ways: true })), checked: new Map() };
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     if (!catalog?.plugins.some(item => item.name === plugin)) return { reports: failedFor(tools, 'It is no longer in the marketplace as last read. Refresh the marketplace.') };
     if (catalog.name !== marketName) return { reports: failedFor(tools, `Its marketplace is now named “${catalog.name}”, not “${marketName}”. Refresh, then choose it again.`) };
@@ -842,7 +843,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function setSkill(source: string, marketName: string, plugin: string, skill: string, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, reports: [] };
-    const ctx = await context({ clis: true });
+    const ctx = await context({ clis: true, ways: true });
     // Its marketplace entry says where its skills are, so the installed copy is read as the page reads the marketplace's
     // (none to read where the tool lists no marketplace of that name now).
     const catalog = source ? (await catalogFor(ctx, source, { counts: false })).catalog : undefined;
@@ -853,14 +854,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function setPart(source: string, marketName: string, plugin: string, part: PartRef, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, reports: [] };
-    return { reports: withoutFileBytes([await use.setPart(await context(), marketName, plugin, part, tool, on, source)]) };
+    return { reports: withoutFileBytes([await use.setPart(await context({ ways: true }), marketName, plugin, part, tool, on, source)]) };
   }
 
   /** One tool's own switch for a whole installed plugin. `marketName` and `source` as for uninstall. */
   async function setWhole(source: string, marketName: string, plugin: string, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, reports: [] };
-    const ctx = await context({ clis: true });
+    const ctx = await context({ clis: true, ways: true });
     return { reports: withoutFileBytes([await use.setWhole(ctx, marketName, plugin, tool, on, source)]) };
   }
 

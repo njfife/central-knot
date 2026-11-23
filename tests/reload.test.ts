@@ -15,9 +15,9 @@ import { homePass, syncOnceReport, takenInReloads } from '../src/homepass.ts';
 import { pluginFiles } from '../src/catalogdetail.ts';
 import { runItems } from '../src/pluginlibrary.ts';
 import { newEntry } from '../src/pluginrecord.ts';
-import { setWhole, type PluginContext } from '../src/plugins.ts';
+import { install, parseCatalog, setPart, setWhole, update, type PluginContext } from '../src/plugins.ts';
 import { NO_PLUGINS, saveProfile, switchProfile, type PluginSide } from '../src/profiles.ts';
-import { destinationReloads, hasReloadAdvice, pluginReloads, reloadAdvice, reloadLine, reloadTable, reloadsFor, rowReload, settleReloads } from '../src/reload.ts';
+import { destinationReloads, hasReloadAdvice, pluginReloads, reloadAdvice, reloadStep, reloadTable, reloadsFor, rowReload, settleReloads, toolWay, waysFrom } from '../src/reload.ts';
 import { applyServers, restoreServer } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, restoreSkill, takeOver } from '../src/skills.ts';
@@ -71,23 +71,24 @@ test('Worked example 2 and 5: an MCP server added to all five gives exact senten
     const pass = await applyServers(box.context, box.tools, [{ key: 'docs', on: true, except: [] }]);
     const writes = settleReloads(pass.reloads);
     const advice = reloadAdvice(writes);
-    assert.equal(advice.text, 'Restart Claude Code (claude --continue keeps the chat). In Codex, type /new or restart it. In Pi, type /reload. Restart OpenCode.');
+    assert.equal(advice.text, 'Restart Claude Code (claude --continue keeps the chat). In Codex, type /new, or restart it (codex resume --last keeps the chat). In Pi, type /reload. Restart OpenCode (opencode --continue keeps the chat).');
     assert.deepEqual(advice.items, [
       { tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.' },
-      { tool: 'codex-cli', text: 'In Codex, type /new or restart it.', command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session, or restart Codex.' },
+      { tool: 'codex-cli', text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).', command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session.',
+        more: [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' }] },
       { tool: 'pi-cli', text: 'In Pi, type /reload.', command: '/reload', chip: 'Pi: /reload', title: 'Type this in your Pi session.' },
-      { tool: 'opencode-cli', text: 'Restart OpenCode.', chip: 'OpenCode: restart', title: 'Restart OpenCode.' },
+      { tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.' },
     ]);
     assert.equal(pass.results.find(entry => entry.harness === 'claude-cli')?.message, 'Added. Restart Claude Code (claude --continue keeps the chat).');
     assert.equal(pass.results.find(entry => entry.harness === 'copilot-cli')?.message, 'Added.');
-    assert.equal(pass.results.find(entry => entry.harness === 'codex-cli')?.message, 'Added. In Codex, type /new or restart it.');
+    assert.equal(pass.results.find(entry => entry.harness === 'codex-cli')?.message, 'Added. In Codex, type /new, or restart it (codex resume --last keeps the chat).');
     assert.equal(pass.results.find(entry => entry.harness === 'pi-cli')?.message, 'Added. In Pi, type /reload.');
-    assert.equal(pass.results.find(entry => entry.harness === 'opencode-cli')?.message, 'Added. Restart OpenCode.');
+    assert.equal(pass.results.find(entry => entry.harness === 'opencode-cli')?.message, 'Added. Restart OpenCode (opencode --continue keeps the chat).');
     assert.equal(rowReload(writes, 'mcp', 'docs', 'claude-cli'), 'Restart Claude Code (claude --continue keeps the chat).');
     assert.equal(rowReload(writes, 'mcp', 'docs', 'copilot-cli'), '');
-    assert.equal(rowReload(writes, 'mcp', 'docs', 'codex-cli'), 'In Codex, type /new or restart it.');
+    assert.equal(rowReload(writes, 'mcp', 'docs', 'codex-cli'), 'In Codex, type /new, or restart it (codex resume --last keeps the chat).');
     assert.equal(rowReload(writes, 'mcp', 'docs', 'pi-cli'), 'In Pi, type /reload.');
-    assert.equal(rowReload(writes, 'mcp', 'docs', 'opencode-cli'), 'Restart OpenCode.');
+    assert.equal(rowReload(writes, 'mcp', 'docs', 'opencode-cli'), 'Restart OpenCode (opencode --continue keeps the chat).');
     assert.equal(rowReload(writes, 'mcp', 'other', 'claude-cli'), '');
     assert.equal(rowReload(undefined, 'mcp', 'docs', 'claude-cli'), '');
   } finally { await box.cleanup(); }
@@ -130,8 +131,8 @@ test('Item 1: final state decides — On then Off and combined Undo say nothing;
       { source: 'local/team', marketName: 'team', plugin: 'kit', action: 'remove-items' });
     const settledPlugin = settleReloads(pluginReloads([...piOn.done, ...ocOn.done, ...piOff.done]));
     assert.deepEqual(reloadAdvice(settledPlugin), {
-      text: 'Restart OpenCode.',
-      items: [{ tool: 'opencode-cli', text: 'Restart OpenCode.', chip: 'OpenCode: restart', title: 'Restart OpenCode.' }],
+      text: 'Restart OpenCode (opencode --continue keeps the chat).',
+      items: [{ tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.' }],
     });
   } finally { await box.cleanup(); }
 });
@@ -165,11 +166,14 @@ node -e 'const fs = require("fs"), p = process.env.HOME + "/.claude/settings.jso
       text: 'Restart Claude Code (claude --continue keeps the chat).',
       items: [{ tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.' }],
     });
-    // When the MCP server inside the plugin is denied in Claude Code's settings, enabling the whole plugin omits it -> silence.
+    // When the MCP server inside the plugin is denied in Claude Code's settings, enabling the whole plugin leaves only its skill -> /reload-plugins.
     await put(settingsPath, JSON.stringify({ enabledPlugins: { 'kit@team': false }, deniedMcpServers: [{ serverName: 'plugin:kit:issues' }] }));
     const reportDenied = await setWhole(pctx, 'team', 'kit', 'claude-cli', true, join(box.base, 'market'));
     assert.equal(reportDenied.changed, true);
-    assert.deepEqual(reloadAdvice(settleReloads(pluginReloads([{ ...done[0]!, report: reportDenied }]))), { text: '', items: [] });
+    assert.deepEqual(reloadAdvice(settleReloads(pluginReloads([{ ...done[0]!, report: reportDenied }]))), {
+      text: 'In Claude Code, type /reload-plugins.',
+      items: [{ tool: 'claude-cli', text: 'In Claude Code, type /reload-plugins.', command: '/reload-plugins', chip: 'Claude Code: /reload-plugins', title: 'Type this in your Claude Code session.' }],
+    });
   } finally { await box.cleanup(); }
 });
 
@@ -308,7 +312,7 @@ test('Worked example 6 and Pi agent rule: an agent written to both Claude Code a
       text: 'In Pi, type /reload.',
       items: [{ tool: 'pi-cli', text: 'In Pi, type /reload.', command: '/reload', chip: 'Pi: /reload', title: 'Type this in your Pi session.' }],
     });
-    assert.equal(reloadLine('pi-cli', 'agent'), reloadLine('pi-cli', 'skill'));
+    assert.equal(reloadStep('pi-cli', 'agent').text, reloadStep('pi-cli', 'skill').text);
   } finally { await box.cleanup(); }
 });
 
@@ -326,7 +330,7 @@ test('Profile switch: skill and MCP server into Codex while Copilot CLI is held 
     const switched = await switchProfile(box.context, box.tools, saved.id!, NO_PLUGINS);
     await chmod(join(box.home, '.copilot/skills'), 0o755);
     const advice = reloadAdvice(settleReloads(switched.reloads));
-    assert.equal(advice.text, 'Restart Claude Code (claude --continue keeps the chat). In Codex, type /new or restart it.');
+    assert.equal(advice.text, 'Restart Claude Code (claude --continue keeps the chat). In Codex, type /new, or restart it (codex resume --last keeps the chat).');
     assert.deepEqual(advice.items.map(item => [item.tool, item.chip, item.command]), [
       ['claude-cli', 'Claude Code: claude --continue', 'claude --continue'],
       ['codex-cli', 'Codex: /new', '/new'],
@@ -345,13 +349,14 @@ test('Item 7: every cell’s exact chip, title, command, tool order, ranking, an
     on('codex-cli', 'skill'), on('codex-cli', 'mcp'), on('copilot-cli', 'mcp'), on('copilot-cli', 'skill'),
     on('claude-cli', 'skill'), on('claude-cli', 'mcp'),
   ]);
-  assert.equal(allFive.text, 'Restart Claude Code (claude --continue keeps the chat). In Copilot CLI, type /skills reload. In Codex, type /new or restart it. In Pi, type /reload. Restart OpenCode.');
+  assert.equal(allFive.text, 'Restart Claude Code (claude --continue keeps the chat). In Copilot CLI, type /skills reload. In Codex, type /new, or restart it (codex resume --last keeps the chat). In Pi, type /reload. Restart OpenCode (opencode --continue keeps the chat).');
   assert.deepEqual(allFive.items, [
     { tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.' },
     { tool: 'copilot-cli', text: 'In Copilot CLI, type /skills reload.', command: '/skills reload', chip: 'Copilot CLI: /skills reload', title: 'Type this in your Copilot CLI session.' },
-    { tool: 'codex-cli', text: 'In Codex, type /new or restart it.', command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session, or restart Codex.' },
+    { tool: 'codex-cli', text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).', command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session.',
+      more: [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' }] },
     { tool: 'pi-cli', text: 'In Pi, type /reload.', command: '/reload', chip: 'Pi: /reload', title: 'Type this in your Pi session.' },
-    { tool: 'opencode-cli', text: 'Restart OpenCode.', chip: 'OpenCode: restart', title: 'Restart OpenCode.' },
+    { tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.' },
   ]);
   // Plain-word agent chips and Codex skill alone (no chip, still a Show all line).
   assert.deepEqual(reloadAdvice([on('copilot-cli', 'agent'), on('codex-cli', 'agent'), on('opencode-cli', 'agent')]).items, [
@@ -366,9 +371,9 @@ test('Item 7: every cell’s exact chip, title, command, tool order, ranking, an
   // Silence for Claude skill/agent and Copilot MCP -> hasReloadAdvice is false.
   assert.equal(hasReloadAdvice([on('claude-cli', 'skill'), on('claude-cli', 'agent'), on('copilot-cli', 'mcp')]), false);
   assert.equal(hasReloadAdvice([on('codex-cli', 'skill')]), true);
-  assert.equal(reloadTable['claude-cli'].skill.text, '');
-  assert.equal(reloadTable['claude-cli'].agent.text, '');
-  assert.equal(reloadTable['copilot-cli'].mcp.text, '');
+  assert.equal(reloadTable['claude-cli'].skill.cli.text, '');
+  assert.equal(reloadTable['claude-cli'].agent.cli.text, '');
+  assert.equal(reloadTable['copilot-cli'].mcp.cli.text, '');
   // Copilot skill + agent -> new session outranks /skills reload.
   assert.deepEqual(reloadAdvice([on('copilot-cli', 'skill'), on('copilot-cli', 'agent')]), {
     text: 'In Copilot CLI, start a new session.',
@@ -534,4 +539,402 @@ test('Short list 3: History giving Pi its own differing copy back while Pi keeps
     assert.equal(piResult?.switchedOff, true, 'giveBackCopy marks switchedOff when tool switch keeps it off');
     assert.deepEqual(reloadAdvice(settleReloads(undone.reloads)), { text: '', items: [] }, 'switched-off give-back advises nothing');
   } finally { await box.cleanup(); }
+});
+
+test('Desktop app only and CLI plus desktop app tailor reload words to what is found across all five tools', () => {
+  // toolWay / waysFrom maps discovery snapshots to cli, app, or both.
+  assert.equal(toolWay(undefined), 'cli');
+  assert.equal(toolWay({ detection: 'Installed' }), 'cli');
+  assert.equal(toolWay({ detection: 'Config found but app not detected' }), 'cli');
+  assert.equal(toolWay({ detection: 'App only', app: { name: 'Claude desktop', carries: 'Code tab' } }), 'app');
+  assert.equal(toolWay({ detection: 'Installed', app: { name: 'Claude desktop', carries: 'Code tab' } }), 'both');
+  const ways = waysFrom([
+    { harness: 'claude-cli', detection: 'App only', app: { name: 'Claude desktop', carries: 'Code tab' } },
+    { harness: 'copilot-cli', detection: 'App only', app: { name: 'GitHub Copilot app', carries: 'Copilot runtime' } },
+    { harness: 'codex-cli', detection: 'App only', app: { name: 'ChatGPT desktop', carries: 'Codex' } },
+    { harness: 'pi-cli', detection: 'App only', app: { name: 'pi-gui (third-party)', carries: 'Pi' } },
+    { harness: 'opencode-cli', detection: 'App only', app: { name: 'OpenCode desktop', carries: 'OpenCode' } },
+  ]);
+  // Worked example 1: Claude desktop only, MCP server -> restart Claude desktop, no claude --continue.
+  const claudeApp = reloadAdvice([{ tool: 'claude-cli', kind: 'mcp', key: 'docs', on: true }], ways);
+  assert.deepEqual(claudeApp, {
+    text: 'Restart Claude desktop.',
+    items: [{ tool: 'claude-cli', text: 'Restart Claude desktop.', chip: 'Claude desktop: restart', title: 'Restart Claude desktop.' }],
+  });
+  assert.equal(rowReload([{ tool: 'claude-cli', kind: 'mcp', key: 'docs', on: true }], 'mcp', 'docs', 'claude-cli', undefined, ways), 'Restart Claude desktop.');
+  // Worked example 2: both CLI and Claude desktop -> names both ways once, claude --continue + desktop restart chip.
+  const claudeBoth = reloadAdvice([{ tool: 'claude-cli', kind: 'mcp', key: 'docs', on: true }], { 'claude-cli': 'both' });
+  assert.deepEqual(claudeBoth, {
+    text: 'Restart Claude Code (claude --continue keeps the chat) or Claude desktop.',
+    items: [{
+      tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat) or Claude desktop.',
+      command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.',
+      more: [{ chip: 'Claude desktop: restart', title: 'Restart Claude desktop.' }],
+    }],
+  });
+  // ChatGPT desktop only: MCP restarts the app with no /new or codex resume --last; agent starts a new session.
+  const codexApp = reloadAdvice([{ tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true }], ways);
+  assert.equal(codexApp.text, 'Restart the ChatGPT desktop app.');
+  assert.equal(codexApp.items[0]?.command, undefined);
+  assert.equal(reloadAdvice([{ tool: 'codex-cli', kind: 'agent', key: 'rev', on: true }], ways).text, 'In ChatGPT desktop, start a new session.');
+  assert.equal(reloadAdvice([{ tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true }], { 'codex-cli': 'both' }).text,
+    'In Codex, type /new, or restart it (codex resume --last keeps the chat); restart the ChatGPT desktop app if it is open.');
+  // GitHub Copilot app only: skill uses /skills reload, MCP and agent restart the app (hasReloadAdvice true for app MCP).
+  assert.equal(reloadAdvice([{ tool: 'copilot-cli', kind: 'skill', key: 'notes', on: true }], ways).text, 'In the GitHub Copilot app, type /skills reload.');
+  assert.equal(hasReloadAdvice([{ tool: 'copilot-cli', kind: 'mcp', key: 'docs', on: true }], ways), true);
+  assert.equal(reloadAdvice([{ tool: 'copilot-cli', kind: 'mcp', key: 'docs', on: true }], ways).text, 'Restart the GitHub Copilot app.');
+  assert.equal(reloadAdvice([{ tool: 'copilot-cli', kind: 'mcp', key: 'docs', on: true }], { 'copilot-cli': 'both' }).text,
+    'Restart the GitHub Copilot app if it is open.');
+  assert.equal(reloadAdvice([{ tool: 'copilot-cli', kind: 'agent', key: 'rev', on: true }], { 'copilot-cli': 'both' }).text,
+    'In Copilot CLI, start a new session, or restart the GitHub Copilot app.');
+  // pi-gui and OpenCode desktop (unmeasured apps): plain restart, no terminal command; both names CLI command + app restart.
+  assert.equal(reloadAdvice([{ tool: 'pi-cli', kind: 'skill', key: 'notes', on: true }], ways).text, 'Restart pi-gui.');
+  assert.equal(reloadAdvice([{ tool: 'pi-cli', kind: 'skill', key: 'notes', on: true }], { 'pi-cli': 'both' }).text, 'In Pi, type /reload, or restart pi-gui.');
+  assert.equal(reloadAdvice([{ tool: 'opencode-cli', kind: 'skill', key: 'notes', on: true }], ways).text, 'Restart OpenCode desktop.');
+  assert.equal(reloadAdvice([{ tool: 'opencode-cli', kind: 'skill', key: 'notes', on: true }], { 'opencode-cli': 'both' }).text,
+    'Restart OpenCode (opencode --continue keeps the chat) or OpenCode desktop.');
+});
+
+test('Plugin engine messages ask the one reload table for CLI, desktop app only, and turning off', async () => {
+  const box = await tempHome(['claude-cli', 'codex-cli']);
+  try {
+    const claudeCache = join(box.home, '.claude/plugins/cache/team/kit/1.0.0');
+    await put(join(claudeCache, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'kit', version: '1.0.0' }));
+    await put(join(claudeCache, '.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['issues'] } } }));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      plugins: { 'kit@team': [{ scope: 'user', installPath: claudeCache, version: '1.0.0' }] },
+    }));
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({
+      team: { source: { source: 'directory', path: join(box.base, 'market') } },
+    }));
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ deniedMcpServers: [{ serverName: 'plugin:kit:issues' }] }));
+    const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: {} };
+    const onCli = await setPart(pctx, 'team', 'kit', { kind: 'mcp', name: 'issues' }, 'claude-cli', true, join(box.base, 'market'));
+    assert.equal(onCli.outcome, 'part-on');
+    assert.equal(onCli.message, 'Turned on in Claude Code. Restart Claude Code (claude --continue keeps the chat).');
+    // Turning off adds no reload words.
+    const off = await setPart(pctx, 'team', 'kit', { kind: 'mcp', name: 'issues' }, 'claude-cli', false, join(box.base, 'market'));
+    assert.equal(off.message, 'Turned off in Claude Code.');
+    // With only Claude desktop found, the same plugin MCP switch tells the person to restart Claude desktop.
+    const appCtx: PluginContext = { ...pctx, ways: { 'claude-cli': 'app' } };
+    const onApp = await setPart(appCtx, 'team', 'kit', { kind: 'mcp', name: 'issues' }, 'claude-cli', true, join(box.base, 'market'));
+    assert.equal(onApp.message, 'Turned on in Claude Code. Restart Claude desktop.');
+    // Library pass destination message also honours ShareContext.ways.
+    await put(join(box.home, '.claude.json'), JSON.stringify({ mcpServers: { docs: { command: 'npx', args: ['docs'] } } }));
+    await applyServers(box.context, ['claude-cli'], [{ key: 'docs', on: true, except: [] }]);
+    await applyServers(box.context, ['claude-cli'], [{ key: 'docs', on: false, except: [] }]);
+    const appPass = await applyServers({ ...box.context, ways: { 'claude-cli': 'app' } }, ['claude-cli'], [{ key: 'docs', on: true, except: [] }]);
+    assert.equal(appPass.results.find(entry => entry.harness === 'claude-cli')?.message, 'Added. Restart Claude desktop.');
+  } finally { await box.cleanup(); }
+});
+
+test('OpenCode skill and MCP restart line offers opencode --continue to copy', () => {
+  const skill = reloadAdvice([{ tool: 'opencode-cli', kind: 'skill', key: 'notes', on: true }]);
+  assert.equal(skill.text, 'Restart OpenCode (opencode --continue keeps the chat).');
+  assert.equal(skill.items[0]?.command, 'opencode --continue');
+  assert.equal(skill.items[0]?.chip, 'OpenCode: opencode --continue');
+});
+
+test('A plugin skill or agent turned on in Claude Code advises /reload-plugins while standalone stays silent and MCP still outranks it', () => {
+  assert.deepEqual(reloadAdvice([{ tool: 'claude-cli', kind: 'skill', key: 'notes', on: true }]), { text: '', items: [] });
+  assert.deepEqual(reloadAdvice([{ tool: 'claude-cli', kind: 'agent', key: 'rev', on: true }]), { text: '', items: [] });
+  const pluginSkill = reloadAdvice([{ tool: 'claude-cli', kind: 'skill', key: 'triage', on: true, plugin: 'kit@team' }]);
+  assert.equal(pluginSkill.text, 'In Claude Code, type /reload-plugins.');
+  assert.equal(pluginSkill.items[0]?.command, '/reload-plugins');
+  assert.equal(pluginSkill.items[0]?.chip, 'Claude Code: /reload-plugins');
+  assert.equal(reloadStep('claude-cli', 'skill', 'app', true).text, 'In Claude desktop’s Code tab, type /reload-plugins or start a new session.');
+  assert.equal(reloadStep('claude-cli', 'skill', 'both', true).text, 'In Claude Code or Claude desktop’s Code tab, type /reload-plugins.');
+  assert.equal(reloadStep('claude-cli', 'agent', 'cli', true).command, '/reload-plugins');
+  // Worked example 6: run of three items across two tools names each tool once with its strongest step.
+  const run = reloadAdvice([
+    { tool: 'claude-cli', kind: 'skill', key: 'triage', on: true, plugin: 'kit@team' },
+    { tool: 'claude-cli', kind: 'mcp', key: 'docs', on: true },
+    { tool: 'codex-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'codex-cli', kind: 'agent', key: 'rev', on: true },
+    { tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true },
+  ]);
+  assert.deepEqual(run.items.map(item => [item.tool, item.command]), [['claude-cli', 'claude --continue'], ['codex-cli', '/new']]);
+});
+
+test('Codex MCP advises /new or restarting with codex resume --last to copy', () => {
+  const mcp = reloadAdvice([{ tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true }]);
+  assert.equal(mcp.text, 'In Codex, type /new, or restart it (codex resume --last keeps the chat).');
+  assert.equal(mcp.items[0]?.command, '/new');
+  assert.deepEqual(mcp.items[0]?.more, [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' }]);
+});
+
+test('Whole plugin install and switch advise plugin-level reload per tool and way in while keeping stronger MCP advice', async () => {
+  const box = await tempHome(['claude-cli', 'copilot-cli', 'codex-cli']);
+  try {
+    const market = join(box.base, 'market');
+    await put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({
+      name: 'team', plugins: [
+        { name: 'skills-kit', source: './plugins/skills-kit', version: '1.0.0' },
+        { name: 'mcp-kit', source: './plugins/mcp-kit', version: '1.0.0' },
+      ],
+    }));
+    await put(join(market, 'plugins/skills-kit/.claude-plugin/plugin.json'), '{"name":"skills-kit","version":"1.0.0"}');
+    await put(join(market, 'plugins/skills-kit/skills/triage/SKILL.md'), skillText('triage'));
+    await put(join(market, 'plugins/mcp-kit/.claude-plugin/plugin.json'), '{"name":"mcp-kit","version":"1.0.0"}');
+    await put(join(market, 'plugins/mcp-kit/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['issues'] } } }));
+    const copilotSkills = join(box.home, '.copilot/cache/team/skills-kit');
+    const copilotMcp = join(box.home, '.copilot/cache/team/mcp-kit');
+    await put(join(copilotSkills, 'skills/triage/SKILL.md'), skillText('triage'));
+    await put(join(copilotMcp, '.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['issues'] } } }));
+    const copilotCfg = join(box.home, '.copilot/config.json');
+    await put(copilotCfg, JSON.stringify({ installedPlugins: [
+      { name: 'skills-kit', marketplace: 'team', cache_path: copilotSkills, version: '1.0.0', enabled: false },
+      { name: 'mcp-kit', marketplace: 'team', cache_path: copilotMcp, version: '1.0.0', enabled: false },
+    ] }));
+    const fakeCopilot = join(box.base, 'copilot');
+    await put(fakeCopilot, `#!/bin/sh
+node -e 'const fs = require("fs"), p = process.env.HOME + "/.copilot/config.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); const name = process.argv[3].split("@")[0]; for (const e of d.installedPlugins) if (e.name === name) e.enabled = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
+`);
+    await chmod(fakeCopilot, 0o755);
+    const copilotWays: ['cli' | 'app' | 'both', string][] = [
+      ['cli', 'In Copilot CLI, start a new session.'],
+      ['app', 'Restart the GitHub Copilot app.'],
+      ['both', 'In Copilot CLI, start a new session, or restart the GitHub Copilot app.'],
+    ];
+    for (const [way, expected] of copilotWays) {
+      for (const name of ['skills-kit', 'mcp-kit']) {
+        await put(copilotCfg, JSON.stringify({ installedPlugins: [
+          { name: 'skills-kit', marketplace: 'team', cache_path: copilotSkills, version: '1.0.0', enabled: false },
+          { name: 'mcp-kit', marketplace: 'team', cache_path: copilotMcp, version: '1.0.0', enabled: false },
+        ] }));
+        const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'copilot-cli': fakeCopilot }, ways: { 'copilot-cli': way } };
+        const rep = await setWhole(pctx, 'team', name, 'copilot-cli', true, market);
+        assert.equal(rep.message, `Turned on in Copilot CLI. ${expected}`, `copilot ${name} ${way}`);
+      }
+    }
+    // Codex whole plugin: skills-only asks for a new session (cli) / restart ChatGPT desktop (app) / both; MCP plugin keeps stronger MCP line.
+    await put(join(box.home, '.codex/plugins/cache/team/skills-kit/1.0.0/skills/triage/SKILL.md'), skillText('triage'));
+    await put(join(box.home, '.codex/plugins/cache/team/mcp-kit/1.0.0/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['issues'] } } }));
+    const codexWays: ['cli' | 'app' | 'both', string, string][] = [
+      ['cli', 'In Codex, start a new session.', 'In Codex, type /new, or restart it (codex resume --last keeps the chat).'],
+      ['app', 'Restart the ChatGPT desktop app.', 'Restart the ChatGPT desktop app.'],
+      ['both', 'In Codex, start a new session; restart the ChatGPT desktop app if it is open.', 'In Codex, type /new, or restart it (codex resume --last keeps the chat); restart the ChatGPT desktop app if it is open.'],
+    ];
+    for (const [way, forSkills, forMcp] of codexWays) {
+      await put(join(box.home, '.codex/config.toml'), '[plugins."skills-kit@team"]\nenabled = false\n\n[plugins."mcp-kit@team"]\nenabled = false\n');
+      const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: {}, ways: { 'codex-cli': way } };
+      assert.equal((await setWhole(pctx, 'team', 'skills-kit', 'codex-cli', true, market)).message, `Turned on in Codex. ${forSkills}`, `codex skills ${way}`);
+      assert.equal((await setWhole(pctx, 'team', 'mcp-kit', 'codex-cli', true, market)).message, `Turned on in Codex. ${forMcp}`, `codex mcp ${way}`);
+    }
+    // Claude Code whole plugin across all three ways: skills-only asks /reload-plugins; MCP plugin keeps stronger restart line.
+    const claudeSkills = join(box.home, '.claude/plugins/cache/team/skills-kit/1.0.0');
+    const claudeMcp = join(box.home, '.claude/plugins/cache/team/mcp-kit/1.0.0');
+    await put(join(claudeSkills, '.claude-plugin/plugin.json'), '{"name":"skills-kit","version":"1.0.0"}');
+    await put(join(claudeSkills, 'skills/triage/SKILL.md'), skillText('triage'));
+    await put(join(claudeMcp, '.claude-plugin/plugin.json'), '{"name":"mcp-kit","version":"1.0.0"}');
+    await put(join(claudeMcp, '.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['issues'] } } }));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: {
+      'skills-kit@team': [{ scope: 'user', installPath: claudeSkills, version: '1.0.0' }],
+      'mcp-kit@team': [{ scope: 'user', installPath: claudeMcp, version: '1.0.0' }],
+    } }));
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: market } } }));
+    const fakeClaude = join(box.base, 'claude');
+    await put(fakeClaude, `#!/bin/sh
+node -e 'const fs = require("fs"), p = process.env.HOME + "/.claude/settings.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.enabledPlugins[process.argv[3]] = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
+`);
+    await chmod(fakeClaude, 0o755);
+    const claudeWays: ['cli' | 'app' | 'both', string, string][] = [
+      ['cli', 'In Claude Code, type /reload-plugins.', 'Restart Claude Code (claude --continue keeps the chat).'],
+      ['app', 'In Claude desktop’s Code tab, type /reload-plugins or start a new session.', 'Restart Claude desktop.'],
+      ['both', 'In Claude Code or Claude desktop’s Code tab, type /reload-plugins.', 'Restart Claude Code (claude --continue keeps the chat) or Claude desktop.'],
+    ];
+    for (const [way, forSkills, forMcp] of claudeWays) {
+      await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'skills-kit@team': false, 'mcp-kit@team': false } }));
+      const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': fakeClaude }, ways: { 'claude-cli': way } };
+      assert.equal((await setWhole(pctx, 'team', 'skills-kit', 'claude-cli', true, market)).message, `Turned on in Claude Code. ${forSkills}`, `claude skills ${way}`);
+      assert.equal((await setWhole(pctx, 'team', 'mcp-kit', 'claude-cli', true, market)).message, `Turned on in Claude Code. ${forMcp}`, `claude mcp ${way}`);
+    }
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin bringing only commands or hooks still says reload words when installed', async () => {
+  const box = await tempHome(['claude-cli', 'copilot-cli']);
+  try {
+    const market = join(box.base, 'market');
+    await put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({
+      name: 'team', plugins: [
+        { name: 'cmd-only', source: './plugins/cmd-only', version: '1.0.0' },
+        { name: 'hook-only', source: './plugins/hook-only', version: '1.0.0' },
+      ],
+    }));
+    await put(join(market, 'plugins/cmd-only/.claude-plugin/plugin.json'), '{"name":"cmd-only","version":"1.0.0"}');
+    await put(join(market, 'plugins/cmd-only/commands/check.md'), '---\ndescription: Check.\n---\nRun check.\n');
+    await put(join(market, 'plugins/hook-only/.claude-plugin/plugin.json'), '{"name":"hook-only","version":"1.0.0"}');
+    await put(join(market, 'plugins/hook-only/hooks/hooks.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo ok' }] }] } }));
+    const claudeCache = join(box.home, '.claude/plugins/cache/team/cmd-only/1.0.0');
+    await put(join(claudeCache, '.claude-plugin/plugin.json'), '{"name":"cmd-only","version":"1.0.0"}');
+    await put(join(claudeCache, 'commands/check.md'), '---\ndescription: Check.\n---\nRun check.\n');
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: market } } }));
+    const fakeClaude = join(box.base, 'claude');
+    await put(fakeClaude, `#!/bin/sh
+echo '${JSON.stringify({ plugins: { 'cmd-only@team': [{ scope: 'user', installPath: claudeCache, version: '1.0.0' }] } })}' > "$HOME/.claude/plugins/installed_plugins.json"
+`);
+    await chmod(fakeClaude, 0o755);
+    const catalog = await parseCatalog(market, market, 'folder');
+    const claudeCtx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': fakeClaude }, ways: { 'claude-cli': 'cli' } };
+    const claudeInstall = await install(claudeCtx, catalog, 'cmd-only', 'claude-cli');
+    assert.equal(claudeInstall.message, 'Installed, loaded live from the marketplace folder. In Claude Code, type /reload-plugins.');
+    assert.ok((claudeInstall.reloads?.length ?? 0) > 0);
+    const copilotCache = join(box.home, '.copilot/cache/team/hook-only');
+    await put(join(copilotCache, 'hooks/hooks.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo ok' }] }] } }));
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { team: { source: { source: 'directory', path: market } } } }));
+    const fakeCopilot = join(box.base, 'copilot');
+    await put(fakeCopilot, `#!/bin/sh
+echo '${JSON.stringify({ installedPlugins: [{ name: 'hook-only', marketplace: 'team', cache_path: copilotCache, version: '1.0.0', enabled: true }] })}' > "$HOME/.copilot/config.json"
+`);
+    await chmod(fakeCopilot, 0o755);
+    const copilotCtx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'copilot-cli': fakeCopilot }, ways: { 'copilot-cli': 'cli' } };
+    const copilotInstall = await install(copilotCtx, catalog, 'hook-only', 'copilot-cli');
+    assert.equal(copilotInstall.message, 'Installed. In Copilot CLI, start a new session.');
+    assert.ok((copilotInstall.reloads?.length ?? 0) > 0);
+  } finally { await box.cleanup(); }
+});
+
+test('Plugin reload wording reads the way in only from context.ways, never misreading apps plus carried binary as both', async () => {
+  const box = await tempHome(['claude-cli']);
+  try {
+    const cache = join(box.home, '.claude/plugins/cache/team/kit/1.0.0');
+    await put(join(cache, '.claude-plugin/plugin.json'), '{"name":"kit","version":"1.0.0"}');
+    await put(join(cache, '.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['issues'] } } }));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      plugins: { 'kit@team': [{ scope: 'user', installPath: cache, version: '1.0.0' }] },
+    }));
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: join(box.base, 'market') } } }));
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ deniedMcpServers: [{ serverName: 'plugin:kit:issues' }] }));
+    // When findClis falls back to an app's carried binary, both binaries and apps are set; without context.ways, withNext must not infer 'both'.
+    const carriedOnly: PluginContext = {
+      home: box.home, dataDir: join(box.base, 'data'),
+      binaries: { 'claude-cli': '/Applications/Claude.app/carried/claude' },
+      apps: { 'claude-cli': { name: 'Claude desktop', carries: 'Code tab' } },
+    };
+    const report = await setPart(carriedOnly, 'team', 'kit', { kind: 'mcp', name: 'issues' }, 'claude-cli', true, join(box.base, 'market'));
+    assert.equal(report.message, 'Turned on in Claude Code. Restart Claude Code (claude --continue keeps the chat).');
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot found both ways with a skill and an MCP server in one run keeps both /skills reload and the desktop app restart', () => {
+  const combined = reloadAdvice([
+    { tool: 'copilot-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'copilot-cli', kind: 'mcp', key: 'docs', on: true },
+  ], { 'copilot-cli': 'both' });
+  assert.deepEqual(combined, {
+    text: 'In Copilot CLI, type /skills reload, or restart the GitHub Copilot app.',
+    items: [{
+      tool: 'copilot-cli',
+      text: 'In Copilot CLI, type /skills reload, or restart the GitHub Copilot app.',
+      command: '/skills reload',
+      chip: 'Copilot CLI: /skills reload',
+      title: 'Type this in your Copilot CLI session.',
+      more: [{ chip: 'GitHub Copilot app: restart', title: 'Restart the GitHub Copilot app.' }],
+    }],
+  });
+  // Adding an agent in the same run still chooses the stronger rank-5 step covering both ways.
+  const withAgent = reloadAdvice([
+    { tool: 'copilot-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'copilot-cli', kind: 'mcp', key: 'docs', on: true },
+    { tool: 'copilot-cli', kind: 'agent', key: 'rev', on: true },
+  ], { 'copilot-cli': 'both' });
+  assert.equal(withAgent.text, 'In Copilot CLI, start a new session, or restart the GitHub Copilot app.');
+});
+
+test('A plugin updated while turned off emits no reload changes so no reload chip is shown', async () => {
+  const box = await tempHome(['claude-cli']);
+  try {
+    const market = join(box.base, 'market');
+    await put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'kit', source: './plugins/kit', version: '2.0.0' }] }));
+    await put(join(market, 'plugins/kit/.claude-plugin/plugin.json'), '{"name":"kit","version":"2.0.0"}');
+    await put(join(market, 'plugins/kit/skills/triage/SKILL.md'), skillText('triage', 'v2'));
+    const oldCopy = join(box.home, '.claude/plugins/cache/team/kit/1.0.0');
+    const newCopy = join(box.home, '.claude/plugins/cache/team/kit/2.0.0');
+    await put(join(oldCopy, '.claude-plugin/plugin.json'), '{"name":"kit","version":"1.0.0"}');
+    await put(join(oldCopy, 'skills/triage/SKILL.md'), skillText('triage', 'v1'));
+    await put(join(newCopy, '.claude-plugin/plugin.json'), '{"name":"kit","version":"2.0.0"}');
+    await put(join(newCopy, 'skills/triage/SKILL.md'), skillText('triage', 'v2'));
+    const record = join(box.home, '.claude/plugins/installed_plugins.json');
+    await put(record, JSON.stringify({ plugins: { 'kit@team': [{ scope: 'user', installPath: oldCopy, version: '1.0.0' }] } }));
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'kit@team': false } }));
+    const fakeClaude = join(box.base, 'claude');
+    await put(fakeClaude, `#!/bin/sh
+echo '${JSON.stringify({ plugins: { 'kit@team': [{ scope: 'user', installPath: newCopy, version: '2.0.0' }] } })}' > "${record}"
+`);
+    await chmod(fakeClaude, 0o755);
+    const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': fakeClaude }, ways: { 'claude-cli': 'cli' } };
+    const report = await update(pctx, await parseCatalog(market, market, 'folder'), 'kit', 'claude-cli');
+    assert.equal(report.changed, true);
+    assert.equal(report.message, 'Updated to 2.0.0. It is still off in Claude Code.');
+    assert.deepEqual(report.reloads, []);
+    assert.deepEqual(reloadAdvice(settleReloads(pluginReloads([{ source: market, marketName: 'team', plugin: 'kit', tool: 'claude-cli', action: 'update', report }]))), { text: '', items: [] });
+  } finally { await box.cleanup(); }
+});
+
+test('A whole plugin turned off advises its tool’s plugin row while single-item Off stays silent', async () => {
+  const box = await tempHome(['claude-cli', 'copilot-cli', 'codex-cli']);
+  try {
+    const market = join(box.base, 'market');
+    const claudeCopy = join(box.home, '.claude/plugins/cache/team/kit/1.0.0');
+    const copilotCopy = join(box.home, '.copilot/cache/team/kit');
+    await put(join(claudeCopy, '.claude-plugin/plugin.json'), '{"name":"kit","version":"1.0.0"}');
+    await put(join(claudeCopy, 'skills/triage/SKILL.md'), skillText('triage'));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: { 'kit@team': [{ scope: 'user', installPath: claudeCopy, version: '1.0.0' }] } }));
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: market } } }));
+    await put(join(copilotCopy, 'skills/triage/SKILL.md'), skillText('triage'));
+    await put(join(box.home, '.codex/plugins/cache/team/kit/1.0.0/skills/triage/SKILL.md'), skillText('triage'));
+    const fakeClaude = join(box.base, 'claude'), fakeCopilot = join(box.base, 'copilot');
+    await put(fakeClaude, `#!/bin/sh
+node -e 'const fs = require("fs"), p = process.env.HOME + "/.claude/settings.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.enabledPlugins[process.argv[3]] = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
+`);
+    await put(fakeCopilot, `#!/bin/sh
+node -e 'const fs = require("fs"), p = process.env.HOME + "/.copilot/config.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.installedPlugins[0].enabled = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
+`);
+    await chmod(fakeClaude, 0o755);
+    await chmod(fakeCopilot, 0o755);
+    const cases: ['claude-cli' | 'copilot-cli' | 'codex-cli', 'cli' | 'app' | 'both', string][] = [
+      ['claude-cli', 'cli', 'Turned off in Claude Code. In Claude Code, type /reload-plugins.'],
+      ['claude-cli', 'app', 'Turned off in Claude Code. In Claude desktop’s Code tab, type /reload-plugins or start a new session.'],
+      ['claude-cli', 'both', 'Turned off in Claude Code. In Claude Code or Claude desktop’s Code tab, type /reload-plugins.'],
+      ['copilot-cli', 'cli', 'Turned off in Copilot CLI. In Copilot CLI, start a new session.'],
+      ['copilot-cli', 'app', 'Turned off in Copilot CLI. Restart the GitHub Copilot app.'],
+      ['copilot-cli', 'both', 'Turned off in Copilot CLI. In Copilot CLI, start a new session, or restart the GitHub Copilot app.'],
+      ['codex-cli', 'cli', 'Turned off in Codex. In Codex, start a new session.'],
+      ['codex-cli', 'app', 'Turned off in Codex. Restart the ChatGPT desktop app.'],
+      ['codex-cli', 'both', 'Turned off in Codex. In Codex, start a new session; restart the ChatGPT desktop app if it is open.'],
+    ];
+    for (const [tool, way, expected] of cases) {
+      await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'kit@team': true } }));
+      await put(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'kit', marketplace: 'team', cache_path: copilotCopy, version: '1.0.0', enabled: true }] }));
+      await put(join(box.home, '.codex/config.toml'), '[plugins."kit@team"]\nenabled = true\n');
+      const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': fakeClaude, 'copilot-cli': fakeCopilot }, ways: { [tool]: way } };
+      const rep = await setWhole(pctx, 'team', 'kit', tool, false, market);
+      assert.equal(rep.message, expected, `${tool} ${way}`);
+      assert.deepEqual(settleReloads(rep.reloads ?? []), [], `${tool} ${way}: Off still settles to no header reload chip`);
+    }
+  } finally { await box.cleanup(); }
+});
+
+test('Opened plugin skill row agrees with the header after a whole plugin turns on in Copilot CLI and Codex', () => {
+  const copilotWhole = [
+    { tool: 'copilot-cli' as const, kind: 'skill' as const, key: 'triage', on: true, plugin: 'kit@team' },
+    { tool: 'copilot-cli' as const, kind: 'plugin' as const, on: true, plugin: 'kit@team' },
+  ];
+  for (const way of ['cli', 'app', 'both'] as const) {
+    const ways = { 'copilot-cli': way };
+    assert.equal(rowReload(copilotWhole, 'skill', 'triage', 'copilot-cli', 'kit@team', ways), reloadAdvice(copilotWhole, ways).text, `copilot ${way}`);
+  }
+  const codexWhole = [
+    { tool: 'codex-cli' as const, kind: 'skill' as const, key: 'triage', on: true, plugin: 'kit@team' },
+    { tool: 'codex-cli' as const, kind: 'plugin' as const, on: true, plugin: 'kit@team' },
+  ];
+  for (const way of ['cli', 'app', 'both'] as const) {
+    const ways = { 'codex-cli': way };
+    assert.equal(rowReload(codexWhole, 'skill', 'triage', 'codex-cli', 'kit@team', ways), reloadAdvice(codexWhole, ways).text, `codex ${way}`);
+  }
+  // Untouched/disabled skill in the same plugin and standalone skill of the same key stay silent; single-skill switch keeps /skills reload.
+  assert.equal(rowReload(copilotWhole, 'skill', 'other', 'copilot-cli', 'kit@team'), '');
+  assert.equal(rowReload(copilotWhole, 'skill', 'triage', 'copilot-cli'), '');
+  assert.equal(rowReload([copilotWhole[0]!], 'skill', 'triage', 'copilot-cli', 'kit@team'), 'In Copilot CLI, type /skills reload.');
 });

@@ -15,7 +15,7 @@
 //   which also says why), so a click on one lands on a disabled control and is dropped, never run twice. A switch is off under
 //   busy too.
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
-import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, saidInStatusBar, state as app, tell, type Outcome } from './app.ts';
+import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, saidInStatusBar, state as app, tell, toolWays, type Outcome } from './app.ts';
 import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
@@ -490,7 +490,7 @@ export function lastLines(): ResultLine[] {
 /** Reload advice for the Plugins page's current run, settled chronologically so a later removal cancels an earlier write. */
 export const runReloads = (): ReloadAdvice => {
   const ran = market.clicks.filter(click => click.ran);
-  return reloadAdvice(settleReloads(pluginReloads(market.lastRun && ran.length ? ran.flatMap(click => click.ran!.done) : market.lastRun?.done ?? [])));
+  return reloadAdvice(settleReloads(pluginReloads(market.lastRun && ran.length ? ran.flatMap(click => click.ran!.done) : market.lastRun?.done ?? [])), toolWays());
 };
 
 /** The Undo of a plugin's switch (or "Undo the rest" after it): its entry put back, then its steps run, in main. */
