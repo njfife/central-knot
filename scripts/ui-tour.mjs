@@ -1198,11 +1198,16 @@ if (wanted('plugin-skills')) {
   // The switches' result goes by itself 8 s after the clicks, its Undo with it (app.ts FADE_MS), but stays while the pointer
   // is on it. The pictures between the clicks and Undo take longer than that, so for each of them the pointer rests on its words.
   const onResult = () => middleOf('#plugins-result .toolbar-result-text');
+  // A resize moves the result from under the pointer, so the pointer is put back on it at once. Twice: at 2560×1440, larger than
+  // a laptop's screen, the first move after a resize lands elsewhere (measured on a 1728×1117 Mac), and the result then went
+  // whenever its 8 s came round in that moment.
+  const restOnResult = async () => { for (let move = 0; move < 2; move++) { await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...(await onResult()) }); await wait(60); } };
+  const sizeHeld = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false }); await restOnResult(); await a.settle(); };
   const at860 = async (name, caption, held = false) => {
-    await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+    if (held) await sizeHeld(860, 560); else { await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle(); }
     await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
     await shot(a, name, caption, held ? await onResult() : undefined);
-    await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
+    if (held) await sizeHeld(1280, 800); else { await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle(); }
   };
   await a.click('#nav-plugins');
   if (await a.has('#plugin-back')) await a.click('#plugin-back');
@@ -1222,11 +1227,11 @@ if (wanted('plugin-skills')) {
   await at860('skill-off-860-skills', 'The same at 860×560, scrolled to the skills.', true);
   await a.theme('light'); await shot(a, 'skill-off-light', 'The same, in the light appearance.', await onResult()); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
-    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false }); await a.settle();
+    await sizeHeld(width, height);
     await shot(a, `skill-off-${width}`, `The same page at ${width}×${height}.`, await onResult());
-    await a.theme('light'); await shot(a, `skill-off-${width}-light`, `The same at ${width}×${height}, light.`, await onResult()); await a.theme('dark');
+    await restOnResult(); await a.theme('light'); await shot(a, `skill-off-${width}-light`, `The same at ${width}×${height}, light.`, await onResult()); await a.theme('dark');
   }
-  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await sizeHeld(1280, 800);
   await flip('#plugins-undo');
   await shot(a, 'skill-undone', 'Clicked Undo: pdf-reader is on again in Copilot CLI, the last click’s tool; Codex’s click came before, so it is still off there.');
   await flip('#pskill-0-document-tools-pdf-reader-codex-cli');
