@@ -1295,7 +1295,7 @@ test('Plugin runReloads settles tick Pi, tick OpenCode, untick Pi in one run to 
   await main.answer(step('pi-cli', true));
   await main.answer(step('opencode-cli', true));
   await main.answer(step('pi-cli', false));
-  assert.deepEqual(runReloads().items.map(item => [item.tool, item.chip]), [['opencode-cli', 'OpenCode: restart']]);
+  assert.deepEqual(runReloads().items.map(item => [item.tool, item.chip]), [['opencode-cli', 'OpenCode: opencode --continue']]);
 });
 
 test('Resume with empty click.changes preserves confirmed writes from its pass for reload advice (Short list 1b)', async t => {

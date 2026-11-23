@@ -35,7 +35,7 @@ import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { stillLoadAfter, turnsWords, undoOffered, wholeSaid } from './profileplan.ts';
-import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, type ReloadChange } from './reload.ts';
+import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, waysFrom, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
@@ -229,8 +229,10 @@ export function tell(outcome: Outcome | undefined, otherwise = ''): void {
   fadeLater();
 }
 
+/** How each tool in the open home was found (CLI, desktop app, or both), for reload advice (reload.ts). */
+export const toolWays = () => waysFrom(state.home?.snapshots);
 /** A result as the status bar and screen readers say it: its sentence, reload advice, then its reasons. */
-const spoken = (outcome: Outcome) => [outcome.text, outcome.reloads ? reloadAdvice(outcome.reloads).text : '', ...(outcome.reasons ?? []).map(reason => (typeof reason === 'string' ? reason : reason.join('')))].filter(Boolean).join(' ');
+const spoken = (outcome: Outcome) => [outcome.text, outcome.reloads ? reloadAdvice(outcome.reloads, toolWays()).text : '', ...(outcome.reasons ?? []).map(reason => (typeof reason === 'string' ? reason : reason.join('')))].filter(Boolean).join(' ');
 /** One click's own result: where it left something undone it says so first, before its name can take the header's room. */
 export const notDoneFirst = (outcome: Outcome): Outcome => (outcome.warn ? { ...outcome, text: `Didn’t go through in every tool: ${outcome.text}` } : outcome);
 
@@ -1276,7 +1278,7 @@ export interface Outcome {
 /** Settles chronological reload changes and attaches them only when at least one tool needs a reload action (reload.ts). */
 export function withReloads(outcome: Omit<Outcome, 'reloads'>, changes: readonly ReloadChange[]): Outcome {
   const reloads = settleReloads(changes);
-  return hasReloadAdvice(reloads) ? { ...outcome, reloads } : outcome;
+  return hasReloadAdvice(reloads, toolWays()) ? { ...outcome, reloads } : outcome;
 }
 /** The one door for every writing route's result: settles its required reload changes and tells the page. */
 export const tellWritten = (outcome: Omit<Outcome, 'reloads'>, changes: readonly ReloadChange[]): void => tell(withReloads(outcome, changes));

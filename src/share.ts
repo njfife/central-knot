@@ -36,6 +36,7 @@ import { mcpFile } from './mcp.ts';
 import { managedTools } from './presence.ts';
 import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 import type { KeptReads } from './librarypass.ts';
+import type { ToolWays } from './reload.ts';
 
 /** sync.json's format (SyncRecord); format 1 is read until the skills migration (skillstore.ts) writes format 2. */
 export const FORMAT_VERSION = 2;
@@ -70,6 +71,8 @@ export interface ShareContext {
    */
   resumeFirst?: { reason?: string };
   overrides?: Partial<Record<HarnessId, string>>;
+  /** How each tool was found here (CLI, desktop app, or both), for reload advice (reload.ts). */
+  ways?: ToolWays;
   /** Reads shared within one pass or one view (what each tool has through its plugins): set only on a context made for that one use. */
   reads?: Map<string, Promise<unknown>>;
   /** Each kind's read its pass of the whole home left standing, for the view made right after, whose look takes it (librarypass.ts KeptReads, lookFor): main.ts pass and syncAndView only. */

@@ -6678,13 +6678,16 @@ esac
   await done();
   same('On installs it in Claude Code with its own command and puts its items in Pi', [calls(), installed(), inPi(), await marks(), await switchIs('#pswitch-0-issue-tracker')],
     [['plugin marketplace add ' + market, 'plugin install issue-tracker@ck-test-market --scope user'], true, [true, true], ['installed', 'items'], 'true']);
-  // With his pattern in Pi's list, Row 1 carries what the switch did (no reload sentence), Row 2 carries Pi's chip at 48px.
+  // With his pattern in Pi's list, Row 1 carries what the switch did (no reload sentence), Row 2 carries Claude Code's /reload-plugins and Pi's /reload chips at 48px.
   const pluginRow1 = await a.text('#plugins-result .toolbar-result-text') ?? '';
-  check('the result says what the switch did on Row 1 without reload text, Pi chip on Row 2, Undo and header 48px',
+  check('the result says what the switch did on Row 1 without reload text, Claude Code /reload-plugins and Pi /reload chips on Row 2, Undo and header 48px',
     /issue-tracker: installed in Claude Code; its items put in Pi; \+skills\/triage\/SKILL\.md added to Pi’s skills list \(settings\.json\), where a pattern keeps skills out\./.test(pluginRow1)
-    && !/In Pi, type \/reload\./.test(pluginRow1) && await a.exists('#plugins-undo')
-    && await a.run(`(() => { const b = document.querySelector('#outcome-copy-pi-cli'); return !!b && b.textContent?.trim() === 'Pi: /reload' && b.dataset.copy === '/reload' && b.title === 'Type this in your Pi session.' && document.querySelector('#header').offsetHeight === 48; })()`),
+    && !/In Pi, type \/reload\.|\/reload-plugins/.test(pluginRow1) && await a.exists('#plugins-undo')
+    && await a.run(`(() => { const c = document.querySelector('#outcome-copy-claude-cli'), b = document.querySelector('#outcome-copy-pi-cli'); return !!c && c.textContent?.trim() === 'Claude Code: /reload-plugins' && c.dataset.copy === '/reload-plugins' && c.title === 'Type this in your Claude Code session.' && !!b && b.textContent?.trim() === 'Pi: /reload' && b.dataset.copy === '/reload' && b.title === 'Type this in your Pi session.' && document.querySelector('#header').offsetHeight === 48; })()`),
     await a.text('#header'));
+  await a.run(`(() => { window.__copied = []; Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: text => { window.__copied.push(text); return Promise.resolve(); } }); })()`);
+  await a.click('#outcome-copy-claude-cli');
+  same('Example 4: clicking Claude Code plugin skill chip copies /reload-plugins', await a.run(`window.__copied`), ['/reload-plugins']);
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
   if (shots) {
     const pShots = async (name, size, railMode) => {
@@ -6696,6 +6699,10 @@ esac
     await pShots('reload-plugins-860', SMALLEST);
     await pShots('reload-plugins-1316-open', [1316, 819], false);
     await pShots('reload-plugins-1316-rail', [1316, 819], true);
+    await sizeTo(a, ...SMALLEST);
+    await a.click('#problems-show-all');
+    await pShots('reload-plugins-860-whole', SMALLEST);
+    await a.click('#problems-show-all');
     await sizeTo(a, 1316, 819);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
     await a.click('#problems-show-all');
@@ -10935,7 +10942,7 @@ async function libraryFlow() {
   const visibleChips = () => r.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].filter(e => !e.hidden).map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
   const allChips = () => r.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
   const moreChip = () => r.run(`(m => m && !m.hidden ? m.textContent?.trim() : null)(document.querySelector('#outcome-reload-more'))`);
-  const wholeLines = () => r.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text')?.textContent?.trim(), button: row.querySelector('button[data-copy]')?.textContent?.trim() ?? null, copy: row.querySelector('button[data-copy]')?.dataset.copy ?? null }))`);
+  const wholeLines = () => r.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text')?.textContent?.trim(), buttons: [...row.querySelectorAll('button[data-copy]')].map(b => [b.textContent?.trim(), b.dataset.copy]) }))`);
   const headerHeight = () => r.run(`document.querySelector('#header').offsetHeight`);
   const row1Text = () => r.text('#header [data-outcome] .band-text');
   const rShots = async (name, size, railMode) => {
@@ -10976,7 +10983,7 @@ async function libraryFlow() {
   ], [48, [], true]);
   await r.click('#problems-show-all');
   same('Codex skill under Show all shows conditional sentence with no button', await wholeLines(), [
-    { text: 'Codex picks it up at the next turn; if not, start a new chat.', button: null, copy: null },
+    { text: 'Codex picks it up at the next turn; if not, start a new chat.', buttons: [] },
   ]);
   await r.click('#problems-show-all');
   // Item 1: skill turned On then Off in one run (clickInRun keeps the run open), then combined Undo -> no reload advice or chips.
@@ -10992,30 +10999,33 @@ async function libraryFlow() {
   await r.click('#outcome-undo');
   await done(r);
   same('Item 1: combined Undo of On then Off returns to Off with no reload chips or advice', [await allChips(), await r.run(`document.querySelector('#problems-show-all')?.hasAttribute('data-has-advice') ?? false`)], [[], false]);
-  // Example 2 & 5: MCP server written to all five -> 4 chips in tool order, nothing for Copilot CLI; opened row matches result and clears on dismiss.
+  // Example 2 & 5: MCP server written to all five -> 5 chips (Codex has /new + codex resume --last) in tool order, nothing for Copilot CLI; opened row matches result and clears on dismiss.
   await r.click(`#${rowPart('add', 'mcp', 'docs')}`);
   await done(r);
   await r.click(`#${rowPart('switch', 'mcp', 'docs')}`);
   await done(r);
   await r.click(`#${rowPart('switch', 'mcp', 'docs')}`);
   await done(r);
-  same('Example 2: MCP server written to all five shows four chips in tool order (no Copilot CLI) at 48px', [
+  same('Example 2: MCP server written to all five shows chips in tool order (no Copilot CLI; Codex /new + codex resume --last; OpenCode opencode --continue) at 48px', [
     /reload|restart|new session/i.test(await row1Text() ?? ''), await headerHeight(), await allChips(),
   ], [false, 48, [
     { text: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.', copy: 'claude --continue' },
-    { text: 'Codex: /new', title: 'Type this in your Codex session, or restart Codex.', copy: '/new' },
+    { text: 'Codex: /new', title: 'Type this in your Codex session.', copy: '/new' },
+    { text: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.', copy: 'codex resume --last' },
     { text: 'Pi: /reload', title: 'Type this in your Pi session.', copy: '/reload' },
-    { text: 'OpenCode: restart', title: 'Restart OpenCode.', copy: null },
+    { text: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.', copy: 'opencode --continue' },
   ]]);
+  await r.click('#outcome-copy-codex-cli-1');
+  same('Worked example 5: clicking Codex resume chip copies codex resume --last', await r.run(`window.__copied.at(-1)`), 'codex resume --last');
   await r.click(`#${rowPart('open', 'mcp', 'docs')}`);
   const rowLines = () => r.run(`Object.fromEntries([...document.querySelectorAll('.details-tool')].map(row => [row.querySelector('.details-tool-label strong')?.textContent?.trim(), row.querySelector('.details-tool-line')?.textContent ?? '']))`);
   const openedWithResult = await rowLines();
   same('Example 5: opened row lines match the result for each tool, nothing for Copilot CLI', [
     openedWithResult['Claude Code']?.includes('Restart Claude Code (claude --continue keeps the chat).'),
     /reload|restart|new session/i.test(openedWithResult['Copilot CLI'] ?? ''),
-    openedWithResult['Codex']?.includes('In Codex, type /new or restart it.'),
+    openedWithResult['Codex']?.includes('In Codex, type /new, or restart it (codex resume --last keeps the chat).'),
     openedWithResult['Pi']?.includes('In Pi, type /reload.'),
-    openedWithResult['OpenCode']?.includes('Restart OpenCode.'),
+    openedWithResult['OpenCode']?.includes('Restart OpenCode (opencode --continue keeps the chat).'),
   ], [true, false, true, true, true]);
   await rShots('reload-opened-row-1316-open', [1316, 819], false);
   await rShots('reload-opened-row-1316-rail', [1316, 819], true);
@@ -11049,15 +11059,15 @@ async function libraryFlow() {
     await rShots(label, size, railMode);
     await r.click('#problems-show-all');
     same(`two-chip Show all at ${label} lists Copilot CLI, Codex conditional and Pi in order`, [await r.run(CUT_OFF), await wholeLines()], [[], [
-      { text: 'In Copilot CLI, type /skills reload.', button: 'Copilot CLI: /skills reload', copy: '/skills reload' },
-      { text: 'Codex picks it up at the next turn; if not, start a new chat.', button: null, copy: null },
-      { text: 'In Pi, type /reload.', button: 'Pi: /reload', copy: '/reload' },
+      { text: 'In Copilot CLI, type /skills reload.', buttons: [['Copilot CLI: /skills reload', '/skills reload']] },
+      { text: 'Codex picks it up at the next turn; if not, start a new chat.', buttons: [] },
+      { text: 'In Pi, type /reload.', buttons: [['Pi: /reload', '/reload']] },
     ]]);
     await rShots(`${label}-whole`, size, railMode);
     await r.click('#problems-show-all');
   }
   await fullSize(r);
-  // Five-chip result (skill + MCP server across all five tools) folded (+N more when overflowing) & Show all at 860×528 and 1316×819 (open & rail).
+  // Five-tool result (skill + MCP server across all five tools) folded (+N more when overflowing) & Show all at 860×528 and 1316×819 (open & rail).
   await r.click(`#${rowPart('add', 'skills', 'four-skill')}`);
   await done(r);
   await r.click(`#${rowPart('switch', 'skills', 'four-skill')}`);
@@ -11066,13 +11076,14 @@ async function libraryFlow() {
   await r.clickInRun(`#${rowPart('switch', 'skills', 'four-skill')}`);
   await r.clickInRun(`#${rowPart('switch', 'mcp', 'docs')}`);
   await done(r);
-  same('five-chip result in tool order: four buttons + OpenCode plain chip + Undo', [await copyIds(), await copyCmds(), await allChips(), await r.exists('#outcome-undo')], [
-    ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'], ['claude --continue', '/skills reload', '/new', '/reload'], [
+  same('five-tool result in tool order: six copy chips (Codex has /new + codex resume --last; OpenCode has opencode --continue) + Undo', [await copyIds(), await copyCmds(), await allChips(), await r.exists('#outcome-undo')], [
+    ['claude-cli', 'copilot-cli', 'codex-cli', 'codex-cli-1', 'pi-cli', 'opencode-cli'], ['claude --continue', '/skills reload', '/new', 'codex resume --last', '/reload', 'opencode --continue'], [
       { text: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.', copy: 'claude --continue' },
       { text: 'Copilot CLI: /skills reload', title: 'Type this in your Copilot CLI session.', copy: '/skills reload' },
-      { text: 'Codex: /new', title: 'Type this in your Codex session, or restart Codex.', copy: '/new' },
+      { text: 'Codex: /new', title: 'Type this in your Codex session.', copy: '/new' },
+      { text: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.', copy: 'codex resume --last' },
       { text: 'Pi: /reload', title: 'Type this in your Pi session.', copy: '/reload' },
-      { text: 'OpenCode: restart', title: 'Restart OpenCode.', copy: null },
+      { text: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.', copy: 'opencode --continue' },
     ], true,
   ]);
   for (const [label, size, railMode] of [['reload-five-chip-860', SMALLEST, undefined], ['reload-five-chip-1316-open', [1316, 819], false], ['reload-five-chip-1316-rail', [1316, 819], true]]) {
@@ -11080,22 +11091,22 @@ async function libraryFlow() {
     if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
     same(`five-chip folded stays 48px without clipping at ${label}`, [await r.run(CUT_OFF), await headerHeight()], [[], 48]);
     const more = await moreChip();
-    if (label === 'reload-five-chip-860') check('five-chip at 860×528 folds overflow into +N more', /^\+[1-5] more$/.test(more ?? ''), more);
+    if (label === 'reload-five-chip-860') check('five-chip at 860×528 folds overflow into +N more', /^\+[1-6] more$/.test(more ?? ''), more);
     await rShots(label, size, railMode);
     await r.click(more ? '#outcome-reload-more' : '#problems-show-all');
-    same(`five-chip Show all at ${label} shows all five tool lines and four buttons`, [await r.run(CUT_OFF), await wholeLines()], [[], [
-      { text: 'Restart Claude Code (claude --continue keeps the chat).', button: 'Claude Code: claude --continue', copy: 'claude --continue' },
-      { text: 'In Copilot CLI, type /skills reload.', button: 'Copilot CLI: /skills reload', copy: '/skills reload' },
-      { text: 'In Codex, type /new or restart it.', button: 'Codex: /new', copy: '/new' },
-      { text: 'In Pi, type /reload.', button: 'Pi: /reload', copy: '/reload' },
-      { text: 'Restart OpenCode.', button: null, copy: null },
+    same(`five-chip Show all at ${label} shows all five tool lines and six copy buttons`, [await r.run(CUT_OFF), await wholeLines()], [[], [
+      { text: 'Restart Claude Code (claude --continue keeps the chat).', buttons: [['Claude Code: claude --continue', 'claude --continue']] },
+      { text: 'In Copilot CLI, type /skills reload.', buttons: [['Copilot CLI: /skills reload', '/skills reload']] },
+      { text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).', buttons: [['Codex: /new', '/new'], ['codex resume --last', 'codex resume --last']] },
+      { text: 'In Pi, type /reload.', buttons: [['Pi: /reload', '/reload']] },
+      { text: 'Restart OpenCode (opencode --continue keeps the chat).', buttons: [['OpenCode: opencode --continue', 'opencode --continue']] },
     ]]);
     await rShots(`${label}-whole`, size, railMode);
     await r.click('#problems-show-all');
   }
   await fullSize(r);
-  // Five-chip result WITH a problem line: turning pi-only Off with .claude/skills read-only fails to remove it in Claude Code (problem line),
-  // while four-skill (On) and docs MCP (On) write to all five tools -> 5 chips + problem line on Row 2 at 48px!
+  // Five-tool result WITH a problem line: turning pi-only Off with .claude/skills read-only fails to remove it in Claude Code (problem line),
+  // while four-skill (On) and docs MCP (On) write to all five tools -> chips + problem line on Row 2 at 48px!
   await r.clickInRun(`#${rowPart('switch', 'skills', 'four-skill')}`);
   await r.clickInRun(`#${rowPart('switch', 'mcp', 'docs')}`);
   await done(r);
@@ -11110,7 +11121,7 @@ async function libraryFlow() {
       await sizeTo(r, ...size);
       if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
       same(`five-chip + problem line keeps header 48px without clipping at ${label}`, [
-        await r.run(CUT_OFF), await headerHeight(), await r.exists('#header .result-row2'), /^\+[1-5] more$/.test(await moreChip() ?? ''),
+        await r.run(CUT_OFF), await headerHeight(), await r.exists('#header .result-row2'), /^\+[1-6] more$/.test(await moreChip() ?? ''),
       ], [[], 48, true, true]);
       await rShots(label, size, railMode);
     }
@@ -11126,6 +11137,170 @@ async function libraryFlow() {
   await fullSize(r);
   same('no page errors, reload words', r.pageErrors, []);
   await r.quit();
+
+  // Worked example 3: OpenCode skill turned on (without Claude Code sharing .claude/skills) offers opencode --continue to copy.
+  const RO = { home: join(scratch, 'reload-oc-home'), data: join(scratch, 'reload-oc-data') };
+  mkdirSync(join(RO.home, '.config/opencode/skills'), { recursive: true });
+  writeFileSync(join(RO.home, '.config/opencode/opencode.json'), '{}\n');
+  skill(join(RO.home, '.config/opencode/skills'), 'oc-only');
+  mkdirSync(RO.data, { recursive: true });
+  writeFileSync(join(RO.data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: RO.home }, closeExplained: true }));
+  const oc = await launch(RO.data, [], R.tools);
+  await oc.click('#nav-overview');
+  await oc.click('#setup-no');
+  await openKind(oc, 'skills');
+  await oc.click(`#${rowPart('add', 'skills', 'oc-only')}`);
+  await done(oc);
+  await oc.click(`#${rowPart('switch', 'skills', 'oc-only')}`);
+  await done(oc);
+  await oc.click(`#${rowPart('switch', 'skills', 'oc-only')}`);
+  await done(oc);
+  same('Worked example 3: OpenCode skill advises restart with opencode --continue chip at 48px', [
+    await oc.run(`document.querySelector('#header').offsetHeight`),
+    await oc.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`),
+  ], [48, [{ text: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.', copy: 'opencode --continue' }]]);
+  await oc.run(`(() => { window.__copied = []; Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: text => { window.__copied.push(text); return Promise.resolve(); } }); })()`);
+  await oc.click('#outcome-copy-opencode-cli');
+  same('Worked example 3: clicking OpenCode chip copies opencode --continue', await oc.run(`window.__copied`), ['opencode --continue']);
+  same('no page errors, OpenCode reload skill', oc.pageErrors, []);
+  await oc.quit();
+
+  // Worked examples 1 & 2 (real-home detection): Claude desktop alone, then Claude CLI + Claude desktop together.
+  if (canWriteRealHome) {
+    const RA = { home: join(scratch, 'reload-app-home'), data: join(scratch, 'reload-app-data') };
+    mkdirSync(join(RA.home, 'Applications/Claude.app/Contents'), { recursive: true });
+    writeFileSync(join(RA.home, 'Applications/Claude.app/Contents/Info.plist'), '<?xml version="1.0"?>\n<plist><dict><key>CFBundleShortVersionString</key><string>4.16336.0</string></dict></plist>\n');
+    writeFileSync(join(RA.home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { command: 'npx', args: ['docs'] } } }, null, 2)}\n`);
+    mkdirSync(RA.data, { recursive: true });
+    writeFileSync(join(RA.data, 'app-settings.json'), JSON.stringify({ closeExplained: true }));
+    const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
+    const a = await launch(RA.data, flag('--electron') ? ['--as-released'] : [], RA.home, onlyHere);
+    const aShots = async (name, size, railMode) => {
+      if (!shots) return;
+      await sizeTo(a, ...size);
+      if (railMode !== undefined && await a.run(`document.body.classList.contains('rail')`) !== railMode) await a.click('#sidebar-toggle');
+      for (const look of ['light', 'dark']) { await theme(a, look); await a.shot(`${name}-${look}`); }
+      await theme(a, 'light');
+    };
+    const aChips = () => a.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
+    const aMore = () => a.run(`(m => m && !m.hidden ? m.textContent?.trim() : null)(document.querySelector('#outcome-reload-more'))`);
+    const aWhole = () => a.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text')?.textContent?.trim(), buttons: [...row.querySelectorAll('button[data-copy]')].map(b => [b.textContent?.trim(), b.dataset.copy]) }))`);
+    const aHeight = () => a.run(`document.querySelector('#header').offsetHeight`);
+    await a.click('#nav-overview');
+    await a.click('#setup-no');
+    await openKind(a, 'mcp');
+    await a.click(`#${rowPart('add', 'mcp', 'docs')}`);
+    await done(a);
+    await a.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+    await done(a);
+    await a.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+    await done(a);
+    same('Worked example 1: Claude desktop only says to restart Claude desktop and offers no claude --continue', [
+      await aHeight(), await aChips(), await a.exists('#outcome-copy-claude-cli'),
+    ], [48, [{ text: 'Claude desktop: restart', title: 'Restart Claude desktop.', copy: null }], false]);
+    await a.click(`#${rowPart('open', 'mcp', 'docs')}`);
+    check('Worked example 1: opened row says Restart Claude desktop without claude --continue',
+      (await a.text('.details-tool-line') ?? '').includes('Restart Claude desktop.') && !(await a.text('.details-tool-line') ?? '').includes('claude --continue'), await a.text('.details-tool-line'));
+    for (const [label, size, railMode] of [['reload-ex1-app-860', SMALLEST, undefined], ['reload-ex1-app-1316-open', [1316, 819], false], ['reload-ex1-app-1316-rail', [1316, 819], true]]) {
+      await sizeTo(a, ...size);
+      if (railMode !== undefined && await a.run(`document.body.classList.contains('rail')`) !== railMode) await a.click('#sidebar-toggle');
+      same(`Worked example 1 fits at ${label} with 48px header`, [await a.run(CUT_OFF), await aHeight(), await aMore()], [[], 48, null]);
+      await aShots(label, size, railMode);
+    }
+    await a.click('#problems-show-all');
+    same('Worked example 1 Show all says Restart Claude desktop with no copy button', await aWhole(), [{ text: 'Restart Claude desktop.', buttons: [] }]);
+    await a.click('#problems-show-all');
+    await fullSize(a);
+    await a.click(`#${rowPart('open', 'mcp', 'docs')}`);
+    // Worked example 2: install claude CLI beside Claude desktop, refresh, turn docs Off then On -> names both ways once and fits 860 wide.
+    mkdirSync(join(RA.home, '.local/bin'), { recursive: true });
+    writeFileSync(join(RA.home, '.local/bin/claude'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.329 (Claude Code)" && exit 0\nexit 9\n', { mode: 0o755 });
+    await a.click('#header-refresh');
+    await a.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+    await done(a);
+    await a.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+    await done(a);
+    same('Worked example 2: both CLI and Claude desktop show claude --continue and Claude desktop: restart chips at 48px', [
+      await aHeight(), await aChips(),
+    ], [48, [
+      { text: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.', copy: 'claude --continue' },
+      { text: 'Claude desktop: restart', title: 'Restart Claude desktop.', copy: null },
+    ]]);
+    for (const [label, size, railMode] of [['reload-ex2-both-860', SMALLEST, undefined], ['reload-ex2-both-1316-open', [1316, 819], false], ['reload-ex2-both-1316-rail', [1316, 819], true]]) {
+      await sizeTo(a, ...size);
+      if (railMode !== undefined && await a.run(`document.body.classList.contains('rail')`) !== railMode) await a.click('#sidebar-toggle');
+      same(`Worked example 2 fits header’s two lines at ${label} with both chips visible`, [await a.run(CUT_OFF), await aHeight(), await aMore()], [[], 48, null]);
+      await aShots(label, size, railMode);
+      await a.click('#problems-show-all');
+      same(`Worked example 2 Show all at ${label} names both ways once with one claude --continue button`, [await a.run(CUT_OFF), await aWhole()], [[], [
+        { text: 'Restart Claude Code (claude --continue keeps the chat) or Claude desktop.', buttons: [['Claude Code: claude --continue', 'claude --continue']] },
+      ]]);
+      await aShots(`${label}-whole`, size, railMode);
+      await a.click('#problems-show-all');
+    }
+    await fullSize(a);
+    same('no page errors, reload app/both', a.pageErrors, []);
+    await a.quit();
+
+    // Copilot found both ways (CLI + GitHub Copilot app), a skill and an MCP server turned on in one run -> keeps both /skills reload and desktop app restart in 48px at 860 wide.
+    const RC = { home: join(scratch, 'reload-copilot-both-home'), data: join(scratch, 'reload-copilot-both-data') };
+    mkdirSync(join(RC.home, 'Applications/GitHub Copilot.app/Contents'), { recursive: true });
+    writeFileSync(join(RC.home, 'Applications/GitHub Copilot.app/Contents/Info.plist'), '<?xml version="1.0"?>\n<plist><dict><key>CFBundleShortVersionString</key><string>1.2.0</string></dict></plist>\n');
+    mkdirSync(join(RC.home, '.local/bin'), { recursive: true });
+    writeFileSync(join(RC.home, '.local/bin/copilot'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.114" && exit 0\nexit 9\n', { mode: 0o755 });
+    skill(join(RC.home, '.copilot/skills'), 'cop-skill');
+    writeFileSync(join(RC.home, '.copilot/mcp-config.json'), `${JSON.stringify({ mcpServers: { 'cop-docs': { command: 'npx', args: ['docs'] } } }, null, 2)}\n`);
+    mkdirSync(RC.data, { recursive: true });
+    writeFileSync(join(RC.data, 'app-settings.json'), JSON.stringify({ closeExplained: true }));
+    const c = await launch(RC.data, flag('--electron') ? ['--as-released'] : [], RC.home, onlyHere);
+    const cShots = async (name, size, railMode) => {
+      if (!shots) return;
+      await sizeTo(c, ...size);
+      if (railMode !== undefined && await c.run(`document.body.classList.contains('rail')`) !== railMode) await c.click('#sidebar-toggle');
+      for (const look of ['light', 'dark']) { await theme(c, look); await c.shot(`${name}-${look}`); }
+      await theme(c, 'light');
+    };
+    const cChips = () => c.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
+    const cMore = () => c.run(`(m => m && !m.hidden ? m.textContent?.trim() : null)(document.querySelector('#outcome-reload-more'))`);
+    const cWhole = () => c.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text')?.textContent?.trim(), buttons: [...row.querySelectorAll('button[data-copy]')].map(b => [b.textContent?.trim(), b.dataset.copy]) }))`);
+    const cHeight = () => c.run(`document.querySelector('#header').offsetHeight`);
+    await c.click('#nav-overview');
+    await c.click('#setup-no');
+    await openKind(c, 'all');
+    await c.click(`#${rowPart('add', 'skills', 'cop-skill')}`);
+    await done(c);
+    await c.click(`#${rowPart('add', 'mcp', 'cop-docs')}`);
+    await done(c);
+    await c.click(`#${rowPart('switch', 'skills', 'cop-skill')}`);
+    await done(c);
+    await c.click(`#${rowPart('switch', 'mcp', 'cop-docs')}`);
+    await done(c);
+    await c.click('#outcome-dismiss');
+    await c.clickInRun(`#${rowPart('switch', 'skills', 'cop-skill')}`);
+    await c.clickInRun(`#${rowPart('switch', 'mcp', 'cop-docs')}`);
+    await done(c);
+    same('Copilot found both ways with skill + MCP in one run keeps /skills reload and GitHub Copilot app restart chips at 48px', [
+      await cHeight(), await cChips(),
+    ], [48, [
+      { text: 'Copilot CLI: /skills reload', title: 'Type this in your Copilot CLI session.', copy: '/skills reload' },
+      { text: 'GitHub Copilot app: restart', title: 'Restart the GitHub Copilot app.', copy: null },
+    ]]);
+    for (const [label, size, railMode] of [['reload-copilot-both-860', SMALLEST, undefined], ['reload-copilot-both-1316-open', [1316, 819], false], ['reload-copilot-both-1316-rail', [1316, 819], true]]) {
+      await sizeTo(c, ...size);
+      if (railMode !== undefined && await c.run(`document.body.classList.contains('rail')`) !== railMode) await c.click('#sidebar-toggle');
+      same(`Copilot both skill+MCP fits header’s two lines at ${label} with both chips visible`, [await c.run(CUT_OFF), await cHeight(), await cMore()], [[], 48, null]);
+      await cShots(label, size, railMode);
+      await c.click('#problems-show-all');
+      same(`Copilot both skill+MCP Show all at ${label} shows one Copilot line with both steps and /skills reload button`, [await c.run(CUT_OFF), await cWhole()], [[], [
+        { text: 'In Copilot CLI, type /skills reload, or restart the GitHub Copilot app.', buttons: [['Copilot CLI: /skills reload', '/skills reload']] },
+      ]]);
+      await cShots(`${label}-whole`, size, railMode);
+      await c.click('#problems-show-all');
+    }
+    await fullSize(c);
+    same('no page errors, Copilot both reload', c.pageErrors, []);
+    await c.quit();
+  } else console.log('Real-home writes disabled: skipping Claude desktop app-only/both reload checks.');
   }
 
   // ---------- Queued Add whose copies differ on disk, and Undo after refused / double clicks ----------
