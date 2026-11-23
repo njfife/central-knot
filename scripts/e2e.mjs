@@ -6130,6 +6130,11 @@ async function draftFlow() {
   const claude0 = '# Style\nBe brief.\n\n# Claude\nUse the Task tool.\nDropped by the draft.\n', codex0 = 'Be brief.\nRun codex review before pushing.\n';
   writeFileSync(claudeMd, claude0);
   writeFileSync(agentsMd, codex0);
+  // One History entry (a tool's Manage switch, which has no Undo): its age is what the window's focus brings up to date.
+  const historyAt = new Date().toISOString();
+  mkdirSync(join(home, '.central-knot'), { recursive: true });
+  writeFileSync(join(home, '.central-knot/history.json'), JSON.stringify({ events: [{ id: 'managed-codex', at: historyAt, key: 'tool:codex-cli', item: 'Codex',
+    kind: 'managing', managing: { tool: 'codex-cli', on: true }, losers: [], orderProved: true }] }));
   mkdirSync(join(realHome, '.local/bin'), { recursive: true });
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
@@ -6354,6 +6359,19 @@ async function draftFlow() {
   await a.press('Escape');
   if (await a.exists('#ins-discard-codex-cli')) await a.click('#ins-discard-codex-cli');
   for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
+  // With no editor's text area focused, coming back to the window draws it again, and the words of time come up to date: History's
+  // row drawn "just now", the clock the page reads moved on 61 minutes, then the window's focus.
+  await a.run(`(window.ckRealNow = Date.now, window.ckShift = Date.parse(${JSON.stringify(historyAt)}) - Date.now(), Date.now = () => window.ckRealNow() + window.ckShift, true)`);
+  await a.click('#nav-history');
+  await untilThere('.history-when');
+  const drawnAt = await says('.history-when');
+  await a.run(`(window.ckShift += 61 * 60000, true)`);
+  await focusBack();
+  same('on History, the clock moved on 61 minutes and the window given the focus: its row no longer says “just now”',
+    [drawnAt, (await says('.history-when')) !== 'just now'], ['just now', true]);
+  await a.run(`(Date.now = window.ckRealNow, true)`);
+  await a.click('#nav-instructions');
+  await until(async () => (await says(codexText)) === codex0.trimEnd());
 
   await a.shot('draft-entry');
   // Earlier versions' relative age ("just now" → "1 min ago" at 30 s: editparts.ts ago) advances with the clock across the checks below.
