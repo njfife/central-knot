@@ -16,7 +16,7 @@ import { managedTools, presentTools } from '../src/presence.ts';
 import { reloadAdvice } from '../src/reload.ts';
 import { applyServers, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
-import { applySkills, skillsView } from '../src/skills.ts';
+import { applySkills, clearSwitch, restoreSkill, skillsView } from '../src/skills.ts';
 import { isDisabled, readSwitchFile } from '../src/skillswitch.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -114,6 +114,21 @@ test('A skill turned on reaches ~/.gemini/config/skills whole; Off takes that fo
     await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
     assert.deepEqual([await readFile(config(box.home, 'skills/notes/scripts/run.sh'), 'utf8'), await readFile(config(box.home, 'skills.json'), 'utf8')], ['echo notes\n', his]);
     assert.equal((await applySkills(box.context, tools, [])).writes, 0, 'settled');
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of Let Antigravity load it puts back the entries it took out, as he wrote them, and keeps one he added since', async () => {
+  const box = await sandbox();
+  try {
+    const exclude = async () => JSON.parse(await readFile(config(box.home, 'skills.json'), 'utf8')).exclude;
+    await skill(box.home, `${CONFIG}/skills`, 'notes');
+    await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
+    await writeFile(config(box.home, 'skills.json'), JSON.stringify({ exclude: ['config/skills/notes', 'alpha', 'notes'] }));
+    const cleared = await clearSwitch(box.context, tools, 'notes', 'antigravity-cli');
+    assert.deepEqual(await exclude(), ['alpha']);
+    await writeFile(config(box.home, 'skills.json'), JSON.stringify({ exclude: ['alpha', 'beta'] }));
+    await restoreSkill(box.context, tools, cleared.made![0]);
+    assert.deepEqual(await exclude(), ['alpha', 'beta', 'config/skills/notes', 'notes']);
   } finally { await box.cleanup(); }
 });
 

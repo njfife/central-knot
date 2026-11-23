@@ -350,7 +350,7 @@ export interface SwitchTarget { folder: string; name: string; /** Absolute path 
  * One switch a 'switched' History event changed: which way, and for a skill the entry it named and a Claude Code override it
  * replaced ("name-only"). An MCP server's switch goes by the server's name (the event's item), so it has no `target`.
  */
-export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: SwitchTarget; before?: string; /** Pi: what this Enable changed in its list (skillswitch.ts PiEdit: his exact `-` taken out, a `+` added), which its Undo takes back exactly. */ listEdit?: { added: string[]; removed: string[] } }
+export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: SwitchTarget; before?: string; /** Pi and Antigravity: what this Enable changed in its list (skillswitch.ts ListEdit: Pi's exact `-` taken out, a `+` added; Antigravity's entries taken out), which its Undo takes back exactly. */ listEdit?: { added: string[]; removed: string[] } }
 
 /**
  * What is true of the open home as a whole, which every page reads: the tools Central Knot manages, where each keeps its

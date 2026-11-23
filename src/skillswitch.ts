@@ -68,10 +68,11 @@ export function isDisabled(context: ShareContext, file: SwitchFile, target: Swit
  * Turns one tool's copy of a skill off or on, then reads the file back to confirm. Writes only over the text it read (a save
  * made meanwhile is never overwritten) and only when something changes. `restore`: what the switch held before the change this
  * one undoes: Claude Code's override before a Disable (say "name-only"), put back by Enable instead of no override (without
- * it, Enable puts back the value kept for that folder); what an Enable changed in Pi's list (`edit`), which its Undo takes back.
+ * it, Enable puts back the value kept for that folder); what an Enable changed in Pi's or Antigravity's list (`edit`), which its
+ * Undo takes back: Antigravity's entries it took out go back as they were.
  * Returns whether it changed, and those earlier values. Throws an error whose message says why (see switchFailure).
  */
-export async function setDisabled(context: ShareContext, tool: HarnessId, target: SwitchTarget, disabled: boolean, restore?: string | PiEdit): Promise<{ changed: boolean; previous?: string; edit?: PiEdit }> {
+export async function setDisabled(context: ShareContext, tool: HarnessId, target: SwitchTarget, disabled: boolean, restore?: string | ListEdit): Promise<{ changed: boolean; previous?: string; edit?: ListEdit }> {
   const file = await readSwitchFile(context, tool);
   if (file.problem || !file.parsed) throw failure(problemText(file.problem!));
   const now = stateIn(context, tool, file.parsed, target);
@@ -82,9 +83,11 @@ export async function setDisabled(context: ShareContext, tool: HarnessId, target
     return { changed: true, edit: next.edit };
   }
   if (tool === 'claude-cli' && !disabled) restore ??= (await readKeptOverrides(context))[target.folder];
-  await writeConfirmed(context, file, target, withSwitch(context, file, target, disabled, restore as string | undefined), disabled);
+  const back = typeof restore === 'object' ? restore.removed : undefined;
+  await writeConfirmed(context, file, target, withSwitch(context, file, target, disabled, restore as string | undefined, back), disabled);
   if (tool === 'claude-cli') await keepOverrides(context, { [target.folder]: disabled ? now.previous : undefined });
-  return { changed: true, previous: now.previous };
+  const removed = tool === 'antigravity-cli' && !disabled ? list((file.parsed as { json: Record<string, unknown> }).json.exclude).filter(entry => antigravityExcludes(entry, target.skillFile)) as string[] : [];
+  return { changed: true, previous: now.previous, ...(removed.length ? { edit: { added: [], removed } } : {}) };
 }
 
 /** Writes a switch file's new text over the text it read, then reads it back: it must say the copy is `disabled` or not, as asked. */
@@ -240,10 +243,10 @@ function piOff(skills: string[], copy: PiCopy, home: string): boolean {
   if (exact('-')) return true;
   return !exact('+') && skills.some(entry => entry[0] === '!' && copy.named.some(name => minimatch(name, piPath(entry, home))));
 }
-/** What one write changed in Pi's list: the entries it added, and those it took out. */
-export type PiEdit = { added: string[]; removed: string[] };
+/** What one write changed in a switch list (Pi's skills list, Antigravity's exclude): the entries it added, and those it took out. */
+export type ListEdit = { added: string[]; removed: string[] };
 /** An edit of Pi's list in words, each entry as it stands there (`why`: said after each): for a result, History and a notice. */
-export const piListWords = (edit: PiEdit, why = '') =>
+export const piListWords = (edit: ListEdit, why = '') =>
   [...edit.added.map(entry => `${entry} added to`), ...edit.removed.map(entry => `${entry} taken out of`)].map(said => `${said} Pi’s skills list (settings.json)${why}.`).join(' ');
 /**
  * Pi's list with this copy let in (`load`) or kept out, and the edit that is (`edit`). His entries are his: Central Knot adds and
@@ -252,7 +255,7 @@ export const piListWords = (edit: PiEdit, why = '') =>
  * load it (`'switch'`) takes out his exact `-` for the copy too, since a `-` wins over any `+`; its Undo takes back that edit
  * exactly (`undo`): what the click added goes, what it took out comes back.
  */
-function piSwitched(skills: string[], copy: PiCopy, home: string, load: boolean, by: 'pass' | 'switch', undo?: PiEdit): { skills: string[]; edit: PiEdit } {
+function piSwitched(skills: string[], copy: PiCopy, home: string, load: boolean, by: 'pass' | 'switch', undo?: ListEdit): { skills: string[]; edit: ListEdit } {
   const minus = (entry: string) => entry[0] === '-' && copy.exact.has(piPath(entry, home));
   const changed = (next: string[]) => ({ skills: next, edit: { added: next.filter(entry => !skills.includes(entry)), removed: skills.filter(entry => !next.includes(entry)) } });
   if (by === 'pass' && skills.some(minus)) return changed(skills);
@@ -297,8 +300,11 @@ function stateIn(context: ShareContext, tool: HarnessId, parsed: ParsedSwitches,
   return { disabled: skills.some(entry => typeof entry !== 'string') || piOff(skills as string[], piCopy(context, target), context.home) };
 }
 
-/** The file's text with this copy turned off or on, for every tool but Pi (whose list is piSwitched's). Only the switch changes. */
-function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarget, disabled: boolean, restore?: string): string {
+/**
+ * The file's text with this copy turned off or on, for every tool but Pi (whose list is piSwitched's). Only the switch changes.
+ * `back`: the entries an Antigravity Enable took out, which its Undo puts back (else the folder's name).
+ */
+function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarget, disabled: boolean, restore?: string, back: unknown[] = [target.folder]): string {
   if (file.tool === 'codex-cli') return codexWithSwitch(context, file.text, target, disabled);
   // A leading byte-order mark (some Windows editors add one) is kept, and set aside while editing.
   const bom = file.text.startsWith('\uFEFF') ? '\uFEFF' : '';
@@ -317,7 +323,7 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
   }
   if (file.tool === 'antigravity-cli') {
     const others = list(json.exclude).filter(entry => !antigravityExcludes(entry, target.skillFile));
-    return bom + putList('exclude', disabled ? [...others, target.folder] : others);
+    return bom + putList('exclude', disabled ? [...others, ...back] : others);
   }
   // OpenCode. Already as asked: not a byte changes.
   if ((openCodeAction(openCodeRules(json), target.name) === 'deny') === disabled) return file.text;
