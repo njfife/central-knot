@@ -760,7 +760,7 @@ test('His case: his server maps meets the plugin’s maps of other content in Pi
     const ticked = await box.turn('let-in', 'pi-cli');
     // Doing nothing: the plugin on, his maps untouched in every tool, the reason a state beside its action.
     assert.deepEqual([await box.toolFiles(), (await box.maps()).source, (await box.view()).items!.kit!.yours], [before, undefined, { 'pi-cli': [{ kind: 'mcp', key: 'maps', name: 'maps' }] }]);
-    assert.deepEqual([(await box.view()).items!.kit!.on, (await box.view()).items!.kit!.of], [{ 'pi-cli': 0, 'opencode-cli': 0 }, 1], 'its items for Pi: maps, not on there');
+    assert.deepEqual([(await box.view()).items!.kit!.on, (await box.view()).items!.kit!.of], [{ 'pi-cli': 0, 'opencode-cli': 0 }, { 'pi-cli': 1, 'opencode-cli': 1 }], 'its items for Pi: maps, not on there');
     assert.deepEqual([ticked.done.map(step => step.report.message), (await box.view()).switches!.kit!.tools['pi-cli']!.held],
       [['Nothing of kit is on in Pi. maps: you keep your own MCP server by that name, not the plugin’s.'], 'maps: you keep your own MCP server by that name, not the plugin’s.']);
     const took = await box.take('mcp', 'maps');
@@ -804,7 +804,7 @@ test('The plugin’s maps the same as his: nothing changes, no link, no write, n
     await box.update();
     const items = (await box.view()).items!.kit!;
     assert.deepEqual([await box.toolFiles(), await mine(), await box.taken()], [before, his, []], 'his, as he had it, in every tool');
-    assert.deepEqual([items.yours, items.on['pi-cli'], items.of, (await box.view()).switches!.kit!.tools['pi-cli']!.has], [{ 'pi-cli': [{ kind: 'mcp', key: 'maps', name: 'maps', same: true }] }, 1, 1, 'items']);
+    assert.deepEqual([items.yours, items.on['pi-cli'], items.of['pi-cli'], (await box.view()).switches!.kit!.tools['pi-cli']!.has], [{ 'pi-cli': [{ kind: 'mcp', key: 'maps', name: 'maps', same: true }] }, 1, 1, 'items']);
     const { yourSaid } = await import('../src/pluginstatus.ts');
     assert.equal(yourSaid(items.yours!['pi-cli']![0]!, 'pi-cli'), 'maps is the same as yours, so yours stays.');
     await box.turn('off');
